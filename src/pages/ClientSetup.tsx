@@ -42,7 +42,6 @@ export default function ClientSetup() {
 
   const [form, setForm] = useState({
     name: "",
-    sprout_customer_id: "",
     social_keywords: [] as string[],
     content_pillars: [...DEFAULT_PILLARS] as ContentPillar[],
     primary_platforms: ["Instagram", "TikTok", "Facebook", "LinkedIn"],
@@ -52,6 +51,7 @@ export default function ClientSetup() {
     brief_text: "",
     brief_file_id: "",
   });
+  const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
   const [newKeyword, setNewKeyword] = useState("");
   const [newPillarName, setNewPillarName] = useState("");
 
@@ -83,7 +83,6 @@ export default function ClientSetup() {
       }
       setForm({
         name: client.name || "",
-        sprout_customer_id: client.sprout_customer_id || "",
         social_keywords: client.social_keywords || [],
         content_pillars: pillars,
         primary_platforms: client.primary_platforms || ["Instagram", "TikTok", "Facebook", "LinkedIn"],
@@ -100,8 +99,10 @@ export default function ClientSetup() {
     mutationFn: async () => {
       const payload = {
         ...form,
+        sprout_customer_id: "1676448",
         content_pillars: form.content_pillars as any,
       };
+      let clientId: string;
       if (isNew) {
         const { data, error } = await supabase
           .from("clients")
@@ -109,18 +110,38 @@ export default function ClientSetup() {
           .select()
           .single();
         if (error) throw error;
-        return data;
+        clientId = data.id;
       } else {
         const { error } = await supabase
           .from("clients")
           .update(payload as any)
           .eq("id", id!);
         if (error) throw error;
-        return { id };
+        clientId = id!;
       }
+
+      // Save selected Sprout profiles
+      if (selectedSproutProfiles.length > 0) {
+        // Remove old profiles
+        await supabase.from("sprout_profiles").delete().eq("client_id", clientId);
+        // Insert selected
+        const inserts = selectedSproutProfiles.map((p) => ({
+          client_id: clientId,
+          sprout_profile_id: p.id,
+          profile_name: p.name,
+          native_name: p.native_name,
+          network_type: p.network_type,
+          native_link: p.native_link,
+        }));
+        const { error: profileError } = await supabase.from("sprout_profiles").insert(inserts);
+        if (profileError) throw profileError;
+      }
+
+      return { id: clientId };
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["sprout-profiles"] });
       toast({ title: "Saved", description: "Client configuration saved successfully." });
       if (isNew) navigate(`/clients/${data.id}/setup`, { replace: true });
     },
@@ -241,18 +262,15 @@ export default function ClientSetup() {
           <TabsContent value="sprout" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Sprout Social Connection</CardTitle>
-                <CardDescription>Connect to Sprout Social to pull performance data</CardDescription>
+                <CardTitle className="text-base">Sprout Social Profiles</CardTitle>
+                <CardDescription>Select the Sprout Social profiles that belong to this client</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Sprout Customer ID</Label>
-                  <Input value={form.sprout_customer_id} onChange={(e) => setForm((f) => ({ ...f, sprout_customer_id: e.target.value }))} placeholder="e.g., 1676448" />
-                  <p className="text-xs text-muted-foreground">Find this in your Sprout Social admin settings</p>
-                </div>
-                {!isNew && form.sprout_customer_id && (
-                  <SproutProfileManager clientId={id!} sproutCustomerId={form.sprout_customer_id} />
-                )}
+              <CardContent>
+                <SproutProfileSelector
+                  clientId={isNew ? undefined : id}
+                  selectedProfiles={selectedSproutProfiles}
+                  onSelectionChange={setSelectedSproutProfiles}
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -341,107 +359,150 @@ export default function ClientSetup() {
   );
 }
 
-function SproutProfileManager({ clientId, sproutCustomerId }: { clientId: string; sproutCustomerId: string }) {
+function SproutProfileSelector({
+  clientId,
+  selectedProfiles,
+  onSelectionChange,
+}: {
+  clientId?: string;
+  selectedProfiles: any[];
+  onSelectionChange: (profiles: any[]) => void;
+}) {
   const [fetching, setFetching] = useState(false);
-  const [availableProfiles, setAvailableProfiles] = useState<any[]>([]);
+  const [allProfiles, setAllProfiles] = useState<any[]>([]);
   const [grouped, setGrouped] = useState<Record<string, any[]>>({});
+  const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
-  const queryClient = useQueryClient();
 
+  // Load already-assigned profiles for existing clients
   const { data: assignedProfiles } = useQuery({
     queryKey: ["sprout-profiles", clientId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("sprout_profiles")
         .select("*")
-        .eq("client_id", clientId)
+        .eq("client_id", clientId!)
         .eq("is_active", true);
       if (error) throw error;
       return data;
     },
+    enabled: !!clientId,
   });
+
+  // Auto-fetch profiles on mount
+  useEffect(() => {
+    fetchProfiles();
+  }, []);
+
+  // Pre-select assigned profiles once both data sources are ready
+  useEffect(() => {
+    if (assignedProfiles && allProfiles.length > 0 && selectedProfiles.length === 0) {
+      const preSelected = allProfiles.filter((p) =>
+        assignedProfiles.some((a) => a.sprout_profile_id === p.id)
+      );
+      if (preSelected.length > 0) onSelectionChange(preSelected);
+    }
+  }, [assignedProfiles, allProfiles]);
 
   const fetchProfiles = async () => {
     setFetching(true);
     try {
       const { data, error } = await supabase.functions.invoke("sprout-profiles", {
-        body: { sprout_customer_id: sproutCustomerId },
+        body: {},
       });
       if (error) throw error;
-      setAvailableProfiles(data.profiles || []);
+      setAllProfiles(data.profiles || []);
       setGrouped(data.grouped_by_network || {});
     } catch (err: any) {
-      toast({ title: "Error fetching profiles", description: err.message, variant: "destructive" });
+      toast({ title: "Error fetching Sprout profiles", description: err.message, variant: "destructive" });
     } finally {
       setFetching(false);
     }
   };
 
-  const toggleProfile = async (profile: any) => {
-    const isAssigned = assignedProfiles?.some((p) => p.sprout_profile_id === profile.id);
-    try {
-      if (isAssigned) {
-        await supabase.from("sprout_profiles").delete().eq("client_id", clientId).eq("sprout_profile_id", profile.id);
-      } else {
-        await supabase.from("sprout_profiles").insert({
-          client_id: clientId,
-          sprout_profile_id: profile.id,
-          profile_name: profile.name,
-          native_name: profile.native_name,
-          network_type: profile.network_type,
-          native_link: profile.native_link,
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: ["sprout-profiles", clientId] });
-    } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+  const toggleProfile = (profile: any) => {
+    const isSelected = selectedProfiles.some((p) => p.id === profile.id);
+    if (isSelected) {
+      onSelectionChange(selectedProfiles.filter((p) => p.id !== profile.id));
+    } else {
+      onSelectionChange([...selectedProfiles, profile]);
     }
   };
 
+  const filteredGrouped = Object.fromEntries(
+    Object.entries(grouped)
+      .map(([network, profiles]) => [
+        network,
+        profiles.filter(
+          (p: any) =>
+            !searchTerm ||
+            (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (p.native_name || "").toLowerCase().includes(searchTerm.toLowerCase())
+        ),
+      ])
+      .filter(([, profiles]) => (profiles as any[]).length > 0)
+  );
+
+  if (fetching) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading Sprout Social profiles...
+      </div>
+    );
+  }
+
+  if (allProfiles.length === 0) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">Could not load profiles.</p>
+        <Button variant="outline" size="sm" onClick={fetchProfiles}>
+          <RefreshCw className="h-4 w-4 mr-2" /> Retry
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      <Button variant="outline" onClick={fetchProfiles} disabled={fetching}>
-        {fetching ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-        {availableProfiles.length > 0 ? "Refresh Profiles" : "Fetch Available Profiles"}
-      </Button>
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {selectedProfiles.length} profile{selectedProfiles.length !== 1 ? "s" : ""} selected
+        </p>
+        <Button variant="ghost" size="sm" onClick={fetchProfiles}>
+          <RefreshCw className="h-4 w-4 mr-1" /> Refresh
+        </Button>
+      </div>
 
-      {assignedProfiles && assignedProfiles.length > 0 && !availableProfiles.length && (
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Assigned Profiles ({assignedProfiles.length})</Label>
-          <div className="space-y-1">
-            {assignedProfiles.map((p) => (
-              <div key={p.id} className="flex items-center justify-between p-2 rounded bg-muted text-sm">
-                <span>{p.native_name || p.profile_name} — <span className="text-muted-foreground">{p.network_type}</span></span>
-                <Button variant="ghost" size="sm" onClick={() => toggleProfile({ id: p.sprout_profile_id })}>
-                  <X className="h-3 w-3" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <Input
+        placeholder="Search profiles..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+      />
 
-      {Object.entries(grouped).map(([network, profiles]) => (
-        <div key={network} className="space-y-2">
-          <Label className="text-sm font-medium">{network}</Label>
-          <div className="space-y-1">
-            {profiles.map((profile: any) => {
-              const isAssigned = assignedProfiles?.some((p) => p.sprout_profile_id === profile.id);
-              return (
-                <div key={profile.id} className="flex items-center gap-3 p-2 rounded bg-muted">
-                  <Checkbox checked={isAssigned} onCheckedChange={() => toggleProfile(profile)} />
-                  <div className="flex-1 text-sm">
-                    <span className="font-medium">{profile.native_name || profile.name}</span>
-                    {profile.native_link && (
-                      <a href={profile.native_link} target="_blank" rel="noopener" className="ml-2 text-xs text-accent hover:underline">View</a>
-                    )}
+      <div className="max-h-80 overflow-y-auto space-y-4 pr-1">
+        {Object.entries(filteredGrouped).map(([network, profiles]) => (
+          <div key={network} className="space-y-2">
+            <Label className="text-sm font-medium">{network}</Label>
+            <div className="space-y-1">
+              {(profiles as any[]).map((profile: any) => {
+                const isSelected = selectedProfiles.some((p) => p.id === profile.id);
+                return (
+                  <div key={profile.id} className="flex items-center gap-3 p-2 rounded-md border bg-card hover:bg-accent/50 transition-colors">
+                    <Checkbox checked={isSelected} onCheckedChange={() => toggleProfile(profile)} />
+                    <div className="flex-1 text-sm">
+                      <span className="font-medium">{profile.native_name || profile.name}</span>
+                      {profile.name && profile.native_name && profile.name !== profile.native_name && (
+                        <span className="text-muted-foreground ml-1">({profile.name})</span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
