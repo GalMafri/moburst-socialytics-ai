@@ -2,7 +2,7 @@ import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,8 +17,13 @@ import {
   Share2,
   MousePointerClick,
   Video,
+  Calendar,
+  Clock,
+  Lightbulb,
+  Copy,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { useState } from "react";
 
 export default function ReportView() {
   const { id, reportId } = useParams();
@@ -50,17 +55,16 @@ export default function ReportView() {
       </AppLayout>
     );
 
-  // FIX: Handle case where report_data might be an array (from n8n allIncomingItems)
   const rawRd = report.report_data as any;
   const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
   const clientName = (report as any).clients?.name || "Client";
 
-  // FIX: Safely access nested data with fallbacks for both old and new data shapes
   const sproutPerformance = rd?.sprout_performance || {};
   const monthComparison = sproutPerformance?.month_comparison || {};
   const aiAnalysis = rd?.ai_analysis || {};
   const tiktokTrends = rd?.tiktok_trends || {};
   const instagramTrends = rd?.instagram_trends || {};
+  const contentCalendar = rd?.content_calendar || aiAnalysis?.content_calendar || [];
 
   return (
     <AppLayout title={`Report: ${clientName}`}>
@@ -100,6 +104,43 @@ export default function ReportView() {
               </CardHeader>
               <CardContent>
                 <PerformanceChart comparison={monthComparison} />
+              </CardContent>
+            </Card>
+          </section>
+        )}
+
+        {/* Performance Insights */}
+        {aiAnalysis?.sprout_performance_analysis?.key_insights?.length > 0 && (
+          <section>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Lightbulb className="h-4 w-4" /> Performance Insights
+                </CardTitle>
+                {aiAnalysis.sprout_performance_analysis.month_over_month_summary && (
+                  <CardDescription className="text-sm mt-1">
+                    {aiAnalysis.sprout_performance_analysis.month_over_month_summary}
+                  </CardDescription>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <ol className="list-decimal list-inside space-y-2 text-sm">
+                  {aiAnalysis.sprout_performance_analysis.key_insights.map((insight: string, i: number) => (
+                    <li key={i}>{insight}</li>
+                  ))}
+                </ol>
+                {aiAnalysis.sprout_performance_analysis.top_performing_content?.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">Top Performing Content Types</p>
+                    <div className="flex flex-wrap gap-2">
+                      {aiAnalysis.sprout_performance_analysis.top_performing_content.map((c: string, i: number) => (
+                        <Badge key={i} variant="secondary">
+                          {c}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </section>
@@ -204,6 +245,11 @@ export default function ReportView() {
                               <strong>CTA:</strong> {rec.cta}
                             </div>
                           </div>
+                          {rec.visual_direction && (
+                            <p className="text-xs text-muted-foreground">
+                              <strong>Visual:</strong> {rec.visual_direction}
+                            </p>
+                          )}
                           {rec.why_this && (
                             <p className="text-xs text-muted-foreground bg-muted p-2 rounded">{rec.why_this}</p>
                           )}
@@ -213,6 +259,37 @@ export default function ReportView() {
                 </TabsContent>
               ))}
             </Tabs>
+          </section>
+        )}
+
+        {/* Content Calendar */}
+        {contentCalendar.length > 0 && (
+          <section className="space-y-3">
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <Calendar className="h-5 w-5" /> Weekly Content Calendar
+            </h3>
+            <div className="space-y-6">
+              {contentCalendar.map((day: any, dayIdx: number) => (
+                <Card key={dayIdx}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <span className="bg-primary text-primary-foreground rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold">
+                        {dayIdx + 1}
+                      </span>
+                      {day.day}
+                      {day.date_label && (
+                        <span className="text-xs text-muted-foreground font-normal">({day.date_label})</span>
+                      )}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {(day.posts || []).map((post: any, postIdx: number) => (
+                      <CalendarPostCard key={postIdx} post={post} />
+                    ))}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </section>
         )}
 
@@ -234,6 +311,65 @@ export default function ReportView() {
         )}
       </div>
     </AppLayout>
+  );
+}
+
+function CalendarPostCard({ post }: { post: any }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    const fullText =
+      post.copy + (post.hashtags?.length ? "\n\n" + post.hashtags.map((h: string) => `#${h}`).join(" ") : "");
+    navigator.clipboard.writeText(fullText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="border rounded-lg p-4 space-y-3 bg-muted/30">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">{post.platform}</Badge>
+          <Badge variant="outline">{post.format}</Badge>
+          {post.pillar && <Badge className="bg-accent text-accent-foreground text-xs">{post.pillar}</Badge>}
+        </div>
+        <div className="flex items-center gap-2">
+          {post.posting_time && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <Clock className="h-3 w-3" /> {post.posting_time}
+            </span>
+          )}
+          <Button variant="ghost" size="sm" onClick={handleCopy} className="h-7 px-2">
+            <Copy className="h-3.5 w-3.5 mr-1" />
+            {copied ? "Copied!" : "Copy"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Full post copy */}
+      <div className="bg-background rounded-md p-3 border">
+        <p className="text-sm whitespace-pre-line">{post.copy}</p>
+        {post.hashtags?.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t">
+            {post.hashtags.map((h: string) => (
+              <span key={h} className="text-xs text-accent">
+                #{h}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Visual direction */}
+      {post.visual_direction && (
+        <p className="text-xs text-muted-foreground">
+          <strong>Visual direction:</strong> {post.visual_direction}
+        </p>
+      )}
+
+      {/* Rationale */}
+      {post.rationale && <p className="text-xs text-muted-foreground bg-muted p-2 rounded">{post.rationale}</p>}
+    </div>
   );
 }
 
@@ -359,7 +495,6 @@ function TrendsSection({
 }) {
   if (!analysis && !posts?.length) return null;
 
-  // Filter out placeholder/empty items from n8n
   const validPosts = (posts || []).filter((p: any) => !p._empty && p.url);
 
   return (
@@ -403,12 +538,25 @@ function TrendsSection({
                 </ul>
               </div>
             )}
+            {analysis.opportunities_for_client?.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Opportunities for Your Brand</p>
+                <ol className="list-decimal list-inside text-sm space-y-1">
+                  {analysis.opportunities_for_client.map((o: string, i: number) => (
+                    <li key={i}>{o}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
             {analysis.key_takeaways?.length > 0 && (
-              <ol className="list-decimal list-inside text-sm space-y-1">
-                {analysis.key_takeaways.map((t: string, i: number) => (
-                  <li key={i}>{t}</li>
-                ))}
-              </ol>
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Key Takeaways</p>
+                <ol className="list-decimal list-inside text-sm space-y-1">
+                  {analysis.key_takeaways.map((t: string, i: number) => (
+                    <li key={i}>{t}</li>
+                  ))}
+                </ol>
+              </div>
             )}
           </CardContent>
         </Card>
