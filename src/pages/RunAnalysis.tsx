@@ -40,7 +40,11 @@ export default function RunAnalysis() {
   const { data: profiles } = useQuery({
     queryKey: ["sprout-profiles", id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("sprout_profiles").select("*").eq("client_id", id!).eq("is_active", true);
+      const { data, error } = await supabase
+        .from("sprout_profiles")
+        .select("*")
+        .eq("client_id", id!)
+        .eq("is_active", true);
       if (error) throw error;
       return data;
     },
@@ -95,15 +99,16 @@ export default function RunAnalysis() {
       // Build payload
       const payload = {
         client_name: client!.name,
-        sprout_customer_id: "1676448",
+        sprout_customer_id: client!.sprout_customer_id || "1676448",
         profile_ids: profiles?.map((p) => p.sprout_profile_id) || [],
-        profiles: profiles?.map((p) => ({
-          id: p.sprout_profile_id,
-          name: p.profile_name,
-          native_name: p.native_name,
-          network: p.network_type,
-          url: p.native_link,
-        })) || [],
+        profiles:
+          profiles?.map((p) => ({
+            id: p.sprout_profile_id,
+            name: p.profile_name,
+            native_name: p.native_name,
+            network: p.network_type,
+            url: p.native_link,
+          })) || [],
         social_keywords: client!.social_keywords || [],
         content_pillars: client!.content_pillars || [],
         primary_platforms: (client!.primary_platforms || []).join(","),
@@ -131,7 +136,19 @@ export default function RunAnalysis() {
 
       if (!response.ok) throw new Error(`Webhook returned ${response.status}`);
 
-      const result = await response.json();
+      const rawResult = await response.json();
+
+      // FIX: n8n "Respond to Webhook" with allIncomingItems may return an array
+      // Unwrap to get the actual report object
+      let result: any;
+      if (Array.isArray(rawResult)) {
+        // n8n returns [{...}] — take first item
+        result = rawResult[0] || {};
+      } else if (rawResult && typeof rawResult === "object") {
+        result = rawResult;
+      } else {
+        result = {};
+      }
 
       // Update report
       await supabase
@@ -158,7 +175,12 @@ export default function RunAnalysis() {
     }
   };
 
-  if (!client) return <AppLayout title="Run Analysis"><div className="animate-pulse text-muted-foreground">Loading...</div></AppLayout>;
+  if (!client)
+    return (
+      <AppLayout title="Run Analysis">
+        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      </AppLayout>
+    );
 
   return (
     <AppLayout title={`Analyze: ${client.name}`}>
@@ -170,10 +192,18 @@ export default function RunAnalysis() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="text-muted-foreground">Platforms:</span> {client.primary_platforms?.join(", ")}</div>
-              <div><span className="text-muted-foreground">Geo:</span> {client.geo}</div>
-              <div><span className="text-muted-foreground">Keywords:</span> {client.social_keywords?.length || 0}</div>
-              <div><span className="text-muted-foreground">Profiles:</span> {profiles?.length || 0}</div>
+              <div>
+                <span className="text-muted-foreground">Platforms:</span> {client.primary_platforms?.join(", ")}
+              </div>
+              <div>
+                <span className="text-muted-foreground">Geo:</span> {client.geo}
+              </div>
+              <div>
+                <span className="text-muted-foreground">Keywords:</span> {client.social_keywords?.length || 0}
+              </div>
+              <div>
+                <span className="text-muted-foreground">Profiles:</span> {profiles?.length || 0}
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -201,9 +231,7 @@ export default function RunAnalysis() {
                     ) : (
                       <Clock className="h-5 w-5 text-muted-foreground/40 shrink-0" />
                     )}
-                    <span className={i <= currentStep ? "text-foreground" : "text-muted-foreground/40"}>
-                      {step}
-                    </span>
+                    <span className={i <= currentStep ? "text-foreground" : "text-muted-foreground/40"}>{step}</span>
                   </div>
                 ))}
               </div>
@@ -223,7 +251,13 @@ export default function RunAnalysis() {
                   <span className="font-medium">Analysis failed</span>
                 </div>
                 <p className="text-sm text-muted-foreground">{error}</p>
-                <Button variant="outline" onClick={() => { setError(null); setCurrentStep(-1); }}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setError(null);
+                    setCurrentStep(-1);
+                  }}
+                >
                   <RefreshCw className="h-4 w-4 mr-2" /> Try Again
                 </Button>
               </div>
@@ -246,14 +280,16 @@ export default function RunAnalysis() {
                     onClick={() => r.status === "completed" && navigate(`/clients/${id}/reports/${r.id}`)}
                   >
                     <div className="flex items-center gap-3">
-                      <Badge variant={r.status === "completed" ? "default" : r.status === "running" ? "secondary" : "destructive"}>
+                      <Badge
+                        variant={
+                          r.status === "completed" ? "default" : r.status === "running" ? "secondary" : "destructive"
+                        }
+                      >
                         {r.status}
                       </Badge>
                       <span className="text-sm">{new Date(r.created_at).toLocaleString()}</span>
                     </div>
-                    {r.duration_minutes && (
-                      <span className="text-xs text-muted-foreground">{r.duration_minutes}m</span>
-                    )}
+                    {r.duration_minutes && <span className="text-xs text-muted-foreground">{r.duration_minutes}m</span>}
                   </div>
                 ))}
               </div>
