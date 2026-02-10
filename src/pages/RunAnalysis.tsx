@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Play, Loader2, CheckCircle2, XCircle, Clock, RefreshCw } from "lucide-react";
 
 const STEPS = [
@@ -26,6 +26,9 @@ export default function RunAnalysis() {
   const [running, setRunning] = useState(false);
   const [currentStep, setCurrentStep] = useState(-1);
   const [error, setError] = useState<string | null>(null);
+  const [reportId, setReportId] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -66,6 +69,47 @@ export default function RunAnalysis() {
     enabled: !!id,
   });
 
+  // Cleanup intervals on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (stepRef.current) clearInterval(stepRef.current);
+    };
+  }, []);
+
+  const pollForCompletion = useCallback(
+    (rId: string) => {
+      pollRef.current = setInterval(async () => {
+        try {
+          const { data, error: fetchErr } = await supabase
+            .from("reports")
+            .select("status, report_data, gamma_url")
+            .eq("id", rId)
+            .maybeSingle();
+
+          if (fetchErr) return;
+
+          if (data?.status === "completed") {
+            if (pollRef.current) clearInterval(pollRef.current);
+            if (stepRef.current) clearInterval(stepRef.current);
+            setCurrentStep(STEPS.length);
+            setRunning(false);
+            toast({ title: "Analysis complete!", description: "Your report is ready." });
+            setTimeout(() => navigate(`/clients/${id}/reports/${rId}`), 1500);
+          } else if (data?.status === "failed") {
+            if (pollRef.current) clearInterval(pollRef.current);
+            if (stepRef.current) clearInterval(stepRef.current);
+            setRunning(false);
+            setError("Analysis failed on the server. Check n8n execution logs.");
+          }
+        } catch {
+          // Polling error, will retry on next interval
+        }
+      }, 10000); // Poll every 10 seconds
+    },
+    [id, navigate, toast],
+  );
+
   const runAnalysis = async () => {
     setRunning(true);
     setError(null);
@@ -96,8 +140,11 @@ export default function RunAnalysis() {
         .single();
       if (reportErr) throw reportErr;
 
-      // Build payload
+      setReportId(report.id);
+
+      // Build payload — include report_id so n8n can write back to Supabase
       const payload = {
+        report_id: report.id,
         client_name: client!.name,
         sprout_customer_id: client!.sprout_customer_id || "1676448",
         profile_ids: profiles?.map((p) => p.sprout_profile_id) || [],
@@ -120,58 +167,30 @@ export default function RunAnalysis() {
       };
 
       // Animate steps
-      const stepInterval = setInterval(() => {
+      stepRef.current = setInterval(() => {
         setCurrentStep((prev) => (prev < STEPS.length - 1 ? prev + 1 : prev));
       }, 15000);
 
-      // Call n8n webhook
+      // Fire webhook — don't wait for the full workflow to finish
+      // n8n will respond immediately, then process and write results to Supabase
       const response = await fetch(setting.value, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(300000),
       });
 
-      clearInterval(stepInterval);
-
-      if (!response.ok) throw new Error(`Webhook returned ${response.status}`);
-
-      const rawResult = await response.json();
-
-      // FIX: n8n "Respond to Webhook" with allIncomingItems may return an array
-      // Unwrap to get the actual report object
-      let result: any;
-      if (Array.isArray(rawResult)) {
-        // n8n returns [{...}] — take first item
-        result = rawResult[0] || {};
-      } else if (rawResult && typeof rawResult === "object") {
-        result = rawResult;
-      } else {
-        result = {};
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(`Webhook returned ${response.status}${errorText ? ": " + errorText.slice(0, 200) : ""}`);
       }
 
-      // Update report
-      await supabase
-        .from("reports")
-        .update({
-          report_data: result as any,
-          status: "completed",
-          gamma_url: result.gamma_url || null,
-          duration_minutes: result.duration_minutes || null,
-          date_range_start: result.report_period?.current_month?.start || null,
-          date_range_end: result.report_period?.current_month?.end || null,
-        })
-        .eq("id", report.id);
-
-      setCurrentStep(STEPS.length);
-      toast({ title: "Analysis complete!", description: "Your report is ready." });
-
-      setTimeout(() => navigate(`/clients/${id}/reports/${report.id}`), 1500);
+      // Start polling Supabase for completion
+      pollForCompletion(report.id);
     } catch (err: any) {
+      if (stepRef.current) clearInterval(stepRef.current);
+      setRunning(false);
       setError(err.message);
       toast({ title: "Analysis failed", description: err.message, variant: "destructive" });
-    } finally {
-      setRunning(false);
     }
   };
 
@@ -256,6 +275,7 @@ export default function RunAnalysis() {
                   onClick={() => {
                     setError(null);
                     setCurrentStep(-1);
+                    setReportId(null);
                   }}
                 >
                   <RefreshCw className="h-4 w-4 mr-2" /> Try Again
