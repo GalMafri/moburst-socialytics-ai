@@ -19,7 +19,18 @@ import { Save, Plus, X, RefreshCw, Loader2 } from "lucide-react";
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 const GEOS = ["US", "UK", "EU", "Global", "LATAM", "APAC"];
 const LANGUAGES = ["en", "es", "fr", "de", "pt", "ja", "ko", "ar", "zh"];
-const DEFAULT_PILLARS = ["Thought Leadership", "Product Education", "Client Wins", "Industry Trends", "Team Culture"];
+interface ContentPillar {
+  name: string;
+  description: string;
+}
+
+const DEFAULT_PILLARS: ContentPillar[] = [
+  { name: "Thought Leadership", description: "" },
+  { name: "Product Education", description: "" },
+  { name: "Client Wins", description: "" },
+  { name: "Industry Trends", description: "" },
+  { name: "Team Culture", description: "" },
+];
 
 export default function ClientSetup() {
   const { id } = useParams();
@@ -33,8 +44,7 @@ export default function ClientSetup() {
     name: "",
     sprout_customer_id: "",
     social_keywords: [] as string[],
-    trends_keywords: "",
-    content_pillars: [...DEFAULT_PILLARS],
+    content_pillars: [...DEFAULT_PILLARS] as ContentPillar[],
     primary_platforms: ["Instagram", "TikTok", "Facebook", "LinkedIn"],
     geo: "US",
     language: "en",
@@ -43,7 +53,7 @@ export default function ClientSetup() {
     brief_file_id: "",
   });
   const [newKeyword, setNewKeyword] = useState("");
-  const [newPillar, setNewPillar] = useState("");
+  const [newPillarName, setNewPillarName] = useState("");
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -61,12 +71,21 @@ export default function ClientSetup() {
 
   useEffect(() => {
     if (client) {
+      // Parse pillars - handle both old string[] format and new object[] format
+      let pillars: ContentPillar[] = [...DEFAULT_PILLARS];
+      if (client.content_pillars) {
+        const raw = client.content_pillars as any;
+        if (Array.isArray(raw)) {
+          pillars = raw.map((p: any) =>
+            typeof p === "string" ? { name: p, description: "" } : { name: p.name || "", description: p.description || "" }
+          );
+        }
+      }
       setForm({
         name: client.name || "",
         sprout_customer_id: client.sprout_customer_id || "",
         social_keywords: client.social_keywords || [],
-        trends_keywords: client.trends_keywords || "",
-        content_pillars: client.content_pillars || [...DEFAULT_PILLARS],
+        content_pillars: pillars,
         primary_platforms: client.primary_platforms || ["Instagram", "TikTok", "Facebook", "LinkedIn"],
         geo: client.geo || "US",
         language: client.language || "en",
@@ -79,10 +98,14 @@ export default function ClientSetup() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const payload = {
+        ...form,
+        content_pillars: form.content_pillars as any,
+      };
       if (isNew) {
         const { data, error } = await supabase
           .from("clients")
-          .insert({ ...form, created_by: user!.id })
+          .insert({ ...payload, created_by: user!.id } as any)
           .select()
           .single();
         if (error) throw error;
@@ -90,7 +113,7 @@ export default function ClientSetup() {
       } else {
         const { error } = await supabase
           .from("clients")
-          .update(form)
+          .update(payload as any)
           .eq("id", id!);
         if (error) throw error;
         return { id };
@@ -123,10 +146,21 @@ export default function ClientSetup() {
   };
 
   const addPillar = () => {
-    if (newPillar.trim() && !form.content_pillars.includes(newPillar.trim())) {
-      setForm((f) => ({ ...f, content_pillars: [...f.content_pillars, newPillar.trim()] }));
-      setNewPillar("");
+    if (newPillarName.trim() && !form.content_pillars.some((p) => p.name === newPillarName.trim())) {
+      setForm((f) => ({ ...f, content_pillars: [...f.content_pillars, { name: newPillarName.trim(), description: "" }] }));
+      setNewPillarName("");
     }
+  };
+
+  const updatePillarDescription = (index: number, description: string) => {
+    setForm((f) => ({
+      ...f,
+      content_pillars: f.content_pillars.map((p, i) => (i === index ? { ...p, description } : p)),
+    }));
+  };
+
+  const removePillar = (index: number) => {
+    setForm((f) => ({ ...f, content_pillars: f.content_pillars.filter((_, i) => i !== index) }));
   };
 
   return (
@@ -229,18 +263,30 @@ export default function ClientSetup() {
                 <CardTitle className="text-base">Content Strategy</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label>Content Pillars</Label>
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {form.content_pillars.map((p) => (
-                      <Badge key={p} variant="secondary" className="gap-1">
-                        {p}
-                        <X className="h-3 w-3 cursor-pointer" onClick={() => setForm((f) => ({ ...f, content_pillars: f.content_pillars.filter((x) => x !== p) }))} />
-                      </Badge>
+                  <p className="text-xs text-muted-foreground">Define your content pillars with descriptions to guide content strategy</p>
+                  <div className="space-y-3">
+                    {form.content_pillars.map((pillar, index) => (
+                      <div key={index} className="p-3 rounded-md border bg-card space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-sm">{pillar.name}</span>
+                          <Button variant="ghost" size="sm" onClick={() => removePillar(index)}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                        <Textarea
+                          value={pillar.description}
+                          onChange={(e) => updatePillarDescription(index, e.target.value)}
+                          placeholder={`Describe what "${pillar.name}" content looks like — topics, tone, examples...`}
+                          rows={2}
+                          className="text-sm"
+                        />
+                      </div>
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <Input value={newPillar} onChange={(e) => setNewPillar(e.target.value)} placeholder="Add a content pillar" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPillar())} />
+                    <Input value={newPillarName} onChange={(e) => setNewPillarName(e.target.value)} placeholder="Add a content pillar" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPillar())} />
                     <Button variant="outline" size="sm" onClick={addPillar}><Plus className="h-4 w-4" /></Button>
                   </div>
                 </div>
@@ -260,12 +306,6 @@ export default function ClientSetup() {
                     <Input value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)} placeholder="Add keyword phrase" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())} />
                     <Button variant="outline" size="sm" onClick={addKeyword}><Plus className="h-4 w-4" /></Button>
                   </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Google Trends Keywords</Label>
-                  <Input value={form.trends_keywords} onChange={(e) => setForm((f) => ({ ...f, trends_keywords: e.target.value }))} placeholder="AI content strategy, performance marketing" />
-                  <p className="text-xs text-muted-foreground">Comma-separated terms for Google Trends search</p>
                 </div>
               </CardContent>
             </Card>

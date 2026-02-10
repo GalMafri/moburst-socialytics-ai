@@ -72,7 +72,7 @@ export type Database = {
           brand_notes: string | null
           brief_file_id: string | null
           brief_text: string | null
-          content_pillars: string[] | null
+          content_pillars: Json | null
           created_at: string | null
           created_by: string | null
           geo: string | null
@@ -90,7 +90,7 @@ export type Database = {
           brand_notes?: string | null
           brief_file_id?: string | null
           brief_text?: string | null
-          content_pillars?: string[] | null
+          content_pillars?: Json | null
           created_at?: string | null
           created_by?: string | null
           geo?: string | null
@@ -108,7 +108,7 @@ export type Database = {
           brand_notes?: string | null
           brief_file_id?: string | null
           brief_text?: string | null
-          content_pillars?: string[] | null
+          content_pillars?: Json | null
           created_at?: string | null
           created_by?: string | null
           geo?: string | null
