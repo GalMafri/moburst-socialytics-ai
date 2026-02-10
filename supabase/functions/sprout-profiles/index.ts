@@ -70,6 +70,7 @@ serve(async (req) => {
       twitter: "Twitter/X",
       facebook: "Facebook",
       instagram: "Instagram",
+      fb_instagram_account: "Instagram",
       linkedin: "LinkedIn",
       tiktok: "TikTok",
       youtube: "YouTube",
@@ -94,11 +95,20 @@ serve(async (req) => {
       grouped[network].push(profile);
     }
 
+    // Group by client name (brand) — each brand has multiple platform profiles
+    const groupedByClient: Record<string, typeof profiles> = {};
+    for (const profile of profiles) {
+      const clientName = profile.name || "Unknown";
+      if (!groupedByClient[clientName]) groupedByClient[clientName] = [];
+      groupedByClient[clientName].push(profile);
+    }
+
     return new Response(
       JSON.stringify({
         total_profiles: profiles.length,
         profiles,
         grouped_by_network: grouped,
+        grouped_by_client: groupedByClient,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

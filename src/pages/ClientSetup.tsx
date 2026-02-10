@@ -370,11 +370,10 @@ function SproutProfileSelector({
 }) {
   const [fetching, setFetching] = useState(false);
   const [allProfiles, setAllProfiles] = useState<any[]>([]);
-  const [grouped, setGrouped] = useState<Record<string, any[]>>({});
+  const [groupedByClient, setGroupedByClient] = useState<Record<string, any[]>>({});
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
 
-  // Load already-assigned profiles for existing clients
   const { data: assignedProfiles } = useQuery({
     queryKey: ["sprout-profiles", clientId],
     queryFn: async () => {
@@ -389,12 +388,10 @@ function SproutProfileSelector({
     enabled: !!clientId,
   });
 
-  // Auto-fetch profiles on mount
   useEffect(() => {
     fetchProfiles();
   }, []);
 
-  // Pre-select assigned profiles once both data sources are ready
   useEffect(() => {
     if (assignedProfiles && allProfiles.length > 0 && selectedProfiles.length === 0) {
       const preSelected = allProfiles.filter((p) =>
@@ -412,11 +409,21 @@ function SproutProfileSelector({
       });
       if (error) throw error;
       setAllProfiles(data.profiles || []);
-      setGrouped(data.grouped_by_network || {});
+      setGroupedByClient(data.grouped_by_client || {});
     } catch (err: any) {
       toast({ title: "Error fetching Sprout profiles", description: err.message, variant: "destructive" });
     } finally {
       setFetching(false);
+    }
+  };
+
+  const toggleClientProfiles = (clientName: string, profiles: any[]) => {
+    const allSelected = profiles.every((p) => selectedProfiles.some((s) => s.id === p.id));
+    if (allSelected) {
+      onSelectionChange(selectedProfiles.filter((s) => !profiles.some((p) => p.id === s.id)));
+    } else {
+      const newProfiles = profiles.filter((p) => !selectedProfiles.some((s) => s.id === p.id));
+      onSelectionChange([...selectedProfiles, ...newProfiles]);
     }
   };
 
@@ -429,19 +436,22 @@ function SproutProfileSelector({
     }
   };
 
-  const filteredGrouped = Object.fromEntries(
-    Object.entries(grouped)
-      .map(([network, profiles]) => [
-        network,
-        profiles.filter(
-          (p: any) =>
-            !searchTerm ||
-            (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (p.native_name || "").toLowerCase().includes(searchTerm.toLowerCase())
-        ),
-      ])
-      .filter(([, profiles]) => (profiles as any[]).length > 0)
-  );
+  const platformIcon: Record<string, string> = {
+    Facebook: "📘",
+    Instagram: "📸",
+    TikTok: "🎵",
+    "Twitter/X": "𝕏",
+    LinkedIn: "💼",
+    YouTube: "▶️",
+    Pinterest: "📌",
+    Threads: "🧵",
+  };
+
+  const filteredClients = Object.entries(groupedByClient)
+    .filter(([clientName]) =>
+      !searchTerm || clientName.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort(([a], [b]) => a.localeCompare(b));
 
   if (fetching) {
     return (
@@ -467,7 +477,8 @@ function SproutProfileSelector({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          {selectedProfiles.length} profile{selectedProfiles.length !== 1 ? "s" : ""} selected
+          {selectedProfiles.length} profile{selectedProfiles.length !== 1 ? "s" : ""} selected across{" "}
+          {new Set(selectedProfiles.map((p) => p.name)).size} client{new Set(selectedProfiles.map((p) => p.name)).size !== 1 ? "s" : ""}
         </p>
         <Button variant="ghost" size="sm" onClick={fetchProfiles}>
           <RefreshCw className="h-4 w-4 mr-1" /> Refresh
@@ -475,33 +486,52 @@ function SproutProfileSelector({
       </div>
 
       <Input
-        placeholder="Search profiles..."
+        placeholder="Search by client name..."
         value={searchTerm}
         onChange={(e) => setSearchTerm(e.target.value)}
       />
 
-      <div className="max-h-80 overflow-y-auto space-y-4 pr-1">
-        {Object.entries(filteredGrouped).map(([network, profiles]) => (
-          <div key={network} className="space-y-2">
-            <Label className="text-sm font-medium">{network}</Label>
-            <div className="space-y-1">
-              {(profiles as any[]).map((profile: any) => {
-                const isSelected = selectedProfiles.some((p) => p.id === profile.id);
-                return (
-                  <div key={profile.id} className="flex items-center gap-3 p-2 rounded-md border bg-card hover:bg-accent/50 transition-colors">
-                    <Checkbox checked={isSelected} onCheckedChange={() => toggleProfile(profile)} />
-                    <div className="flex-1 text-sm">
-                      <span className="font-medium">{profile.native_name || profile.name}</span>
-                      {profile.name && profile.native_name && profile.name !== profile.native_name && (
-                        <span className="text-muted-foreground ml-1">({profile.name})</span>
-                      )}
-                    </div>
+      <div className="max-h-96 overflow-y-auto space-y-2 pr-1">
+        {filteredClients.map(([clientName, profiles]) => {
+          const allSelected = profiles.every((p: any) => selectedProfiles.some((s) => s.id === p.id));
+          const someSelected = profiles.some((p: any) => selectedProfiles.some((s) => s.id === p.id));
+
+          return (
+            <div key={clientName} className="rounded-lg border bg-card overflow-hidden">
+              <div
+                className="flex items-center gap-3 p-3 cursor-pointer hover:bg-accent/30 transition-colors"
+                onClick={() => toggleClientProfiles(clientName, profiles)}
+              >
+                <Checkbox
+                  checked={allSelected}
+                  className={someSelected && !allSelected ? "opacity-60" : ""}
+                  onCheckedChange={() => toggleClientProfiles(clientName, profiles)}
+                />
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium text-sm">{clientName}</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {profiles.map((p: any) => {
+                      const isSelected = selectedProfiles.some((s) => s.id === p.id);
+                      return (
+                        <Badge
+                          key={p.id}
+                          variant={isSelected ? "default" : "outline"}
+                          className="text-xs cursor-pointer gap-1"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleProfile(p);
+                          }}
+                        >
+                          {platformIcon[p.network_display] || "🌐"} {p.network_display}
+                        </Badge>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
