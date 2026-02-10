@@ -6,7 +6,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ExternalLink, TrendingUp, TrendingDown, Minus, Eye, Heart, MessageCircle, Share2, MousePointerClick, Video } from "lucide-react";
+import {
+  ExternalLink,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Eye,
+  Heart,
+  MessageCircle,
+  Share2,
+  MousePointerClick,
+  Video,
+} from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 export default function ReportView() {
@@ -26,11 +37,30 @@ export default function ReportView() {
     enabled: !!reportId,
   });
 
-  if (isLoading) return <AppLayout title="Report"><div className="animate-pulse text-muted-foreground">Loading report...</div></AppLayout>;
-  if (!report) return <AppLayout title="Report"><p className="text-muted-foreground">Report not found.</p></AppLayout>;
+  if (isLoading)
+    return (
+      <AppLayout title="Report">
+        <div className="animate-pulse text-muted-foreground">Loading report...</div>
+      </AppLayout>
+    );
+  if (!report)
+    return (
+      <AppLayout title="Report">
+        <p className="text-muted-foreground">Report not found.</p>
+      </AppLayout>
+    );
 
-  const rd = report.report_data as any;
+  // FIX: Handle case where report_data might be an array (from n8n allIncomingItems)
+  const rawRd = report.report_data as any;
+  const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
   const clientName = (report as any).clients?.name || "Client";
+
+  // FIX: Safely access nested data with fallbacks for both old and new data shapes
+  const sproutPerformance = rd?.sprout_performance || {};
+  const monthComparison = sproutPerformance?.month_comparison || {};
+  const aiAnalysis = rd?.ai_analysis || {};
+  const tiktokTrends = rd?.tiktok_trends || {};
+  const instagramTrends = rd?.instagram_trends || {};
 
   return (
     <AppLayout title={`Report: ${clientName}`}>
@@ -47,36 +77,40 @@ export default function ReportView() {
             </div>
             <div className="flex gap-2">
               {(report.gamma_url || rd?.gamma_url) && (
-                <Button variant="outline" size="sm" onClick={() => window.open(report.gamma_url || rd?.gamma_url, "_blank")}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(report.gamma_url || rd?.gamma_url, "_blank")}
+                >
                   <ExternalLink className="h-4 w-4 mr-1" /> Gamma Presentation
                 </Button>
               )}
             </div>
           </div>
 
-          {rd?.sprout_performance?.month_comparison?.changes && (
-            <MetricsCards changes={rd.sprout_performance.month_comparison.changes} />
-          )}
+          {monthComparison?.changes && <MetricsCards changes={monthComparison.changes} />}
         </section>
 
         {/* Performance Chart */}
-        {rd?.sprout_performance?.month_comparison && (
+        {monthComparison?.current_month && (
           <section>
             <Card>
-              <CardHeader><CardTitle className="text-base">Month-over-Month Performance</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="text-base">Month-over-Month Performance</CardTitle>
+              </CardHeader>
               <CardContent>
-                <PerformanceChart comparison={rd.sprout_performance.month_comparison} />
+                <PerformanceChart comparison={monthComparison} />
               </CardContent>
             </Card>
           </section>
         )}
 
         {/* Top Posts */}
-        {rd?.sprout_performance?.top_posts?.length > 0 && (
+        {sproutPerformance?.top_posts?.length > 0 && (
           <section className="space-y-3">
             <h3 className="text-lg font-semibold">Top Performing Posts</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {rd.sprout_performance.top_posts.slice(0, 6).map((post: any, i: number) => (
+              {sproutPerformance.top_posts.slice(0, 6).map((post: any, i: number) => (
                 <PostCard key={i} post={post} />
               ))}
             </div>
@@ -84,24 +118,32 @@ export default function ReportView() {
         )}
 
         {/* Pillar Analysis */}
-        {rd?.ai_analysis?.sprout_performance_analysis?.pillar_alignment && (
+        {aiAnalysis?.sprout_performance_analysis?.pillar_alignment && (
           <section>
             <Card>
-              <CardHeader><CardTitle className="text-base">Content Pillar Alignment</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="text-base">Content Pillar Alignment</CardTitle>
+              </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex flex-wrap gap-2">
-                  {rd.ai_analysis.sprout_performance_analysis.pillar_alignment.well_represented?.map((p: string) => (
-                    <Badge key={p} className="bg-success text-success-foreground">{p}</Badge>
+                  {aiAnalysis.sprout_performance_analysis.pillar_alignment.well_represented?.map((p: string) => (
+                    <Badge key={p} className="bg-success text-success-foreground">
+                      {p}
+                    </Badge>
                   ))}
-                  {rd.ai_analysis.sprout_performance_analysis.pillar_alignment.underrepresented?.map((p: string) => (
-                    <Badge key={p} variant="destructive">{p}</Badge>
+                  {aiAnalysis.sprout_performance_analysis.pillar_alignment.underrepresented?.map((p: string) => (
+                    <Badge key={p} variant="destructive">
+                      {p}
+                    </Badge>
                   ))}
                 </div>
-                {rd.ai_analysis.sprout_performance_analysis.pillar_alignment.recommendations && (
+                {aiAnalysis.sprout_performance_analysis.pillar_alignment.recommendations && (
                   <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
-                    {rd.ai_analysis.sprout_performance_analysis.pillar_alignment.recommendations.map((r: string, i: number) => (
-                      <li key={i}>{r}</li>
-                    ))}
+                    {aiAnalysis.sprout_performance_analysis.pillar_alignment.recommendations.map(
+                      (r: string, i: number) => (
+                        <li key={i}>{r}</li>
+                      ),
+                    )}
                   </ol>
                 )}
               </CardContent>
@@ -110,23 +152,35 @@ export default function ReportView() {
         )}
 
         {/* Trends */}
-        <TrendsSection title="TikTok Trends" analysis={rd?.ai_analysis?.tiktok_trends_analysis} posts={rd?.tiktok_trends?.posts} platform="tiktok" />
-        <TrendsSection title="Instagram Trends" analysis={rd?.ai_analysis?.instagram_trends_analysis} posts={rd?.instagram_trends?.posts} platform="instagram" />
+        <TrendsSection
+          title="TikTok Trends"
+          analysis={aiAnalysis?.tiktok_trends_analysis}
+          posts={tiktokTrends?.posts}
+          platform="tiktok"
+        />
+        <TrendsSection
+          title="Instagram Trends"
+          analysis={aiAnalysis?.instagram_trends_analysis}
+          posts={instagramTrends?.posts}
+          platform="instagram"
+        />
 
         {/* Content Recommendations */}
-        {rd?.ai_analysis?.content_recommendations?.length > 0 && (
+        {aiAnalysis?.content_recommendations?.length > 0 && (
           <section className="space-y-3">
             <h3 className="text-lg font-semibold">Content Recommendations</h3>
             <Tabs defaultValue="all">
               <TabsList>
                 <TabsTrigger value="all">All</TabsTrigger>
                 {["Instagram", "TikTok", "LinkedIn", "Facebook"].map((p) => (
-                  <TabsTrigger key={p} value={p}>{p}</TabsTrigger>
+                  <TabsTrigger key={p} value={p}>
+                    {p}
+                  </TabsTrigger>
                 ))}
               </TabsList>
               {["all", "Instagram", "TikTok", "LinkedIn", "Facebook"].map((tab) => (
                 <TabsContent key={tab} value={tab} className="space-y-4 mt-4">
-                  {rd.ai_analysis.content_recommendations
+                  {aiAnalysis.content_recommendations
                     .filter((r: any) => tab === "all" || r.platform === tab)
                     .map((rec: any, i: number) => (
                       <Card key={i}>
@@ -134,15 +188,25 @@ export default function ReportView() {
                           <div className="flex items-center gap-2">
                             <Badge variant="secondary">{rec.platform}</Badge>
                             <Badge variant="outline">{rec.format}</Badge>
-                            {rec.addresses_pillar && <Badge className="bg-accent text-accent-foreground text-xs">{rec.addresses_pillar}</Badge>}
+                            {rec.addresses_pillar && (
+                              <Badge className="bg-accent text-accent-foreground text-xs">{rec.addresses_pillar}</Badge>
+                            )}
                           </div>
-                          <blockquote className="border-l-2 border-accent pl-3 italic text-sm font-medium">{rec.hook}</blockquote>
+                          <blockquote className="border-l-2 border-accent pl-3 italic text-sm font-medium">
+                            {rec.hook}
+                          </blockquote>
                           <p className="text-sm">{rec.concept}</p>
                           <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                            <div><strong>Caption angle:</strong> {rec.caption_angle}</div>
-                            <div><strong>CTA:</strong> {rec.cta}</div>
+                            <div>
+                              <strong>Caption angle:</strong> {rec.caption_angle}
+                            </div>
+                            <div>
+                              <strong>CTA:</strong> {rec.cta}
+                            </div>
                           </div>
-                          {rec.why_this && <p className="text-xs text-muted-foreground bg-muted p-2 rounded">💡 {rec.why_this}</p>}
+                          {rec.why_this && (
+                            <p className="text-xs text-muted-foreground bg-muted p-2 rounded">{rec.why_this}</p>
+                          )}
                         </CardContent>
                       </Card>
                     ))}
@@ -155,7 +219,9 @@ export default function ReportView() {
         {/* Data Sources */}
         {rd?.data_counts && (
           <Card>
-            <CardHeader><CardTitle className="text-base">Data Sources</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Data Sources</CardTitle>
+            </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
                 <span>{rd.data_counts.sprout_top_posts ?? 0} Sprout posts</span>
@@ -196,8 +262,15 @@ function MetricsCards({ changes }: { changes: Record<string, any> }) {
               </div>
               <p className="text-lg font-bold">{(d.current ?? 0).toLocaleString()}</p>
               <div className={`flex items-center gap-1 text-xs font-medium ${color}`}>
-                {pct > 0 ? <TrendingUp className="h-3 w-3" /> : pct < 0 ? <TrendingDown className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
-                {pct > 0 ? "+" : ""}{pct}%
+                {pct > 0 ? (
+                  <TrendingUp className="h-3 w-3" />
+                ) : pct < 0 ? (
+                  <TrendingDown className="h-3 w-3" />
+                ) : (
+                  <Minus className="h-3 w-3" />
+                )}
+                {pct > 0 ? "+" : ""}
+                {pct}%
               </div>
             </CardContent>
           </Card>
@@ -235,17 +308,36 @@ function PostCard({ post }: { post: any }) {
       <CardContent className="pt-4 space-y-2">
         <div className="flex items-center justify-between">
           <Badge variant="secondary">{post.network_type || post.platform}</Badge>
-          <span className="text-xs text-muted-foreground">{post.posted_at && new Date(post.posted_at).toLocaleDateString()}</span>
+          <span className="text-xs text-muted-foreground">
+            {post.posted_at && new Date(post.posted_at).toLocaleDateString()}
+          </span>
         </div>
-        <p className="text-sm line-clamp-3">{post.text}</p>
+        <p className="text-sm line-clamp-3">{post.text || post.content}</p>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{(post.impressions ?? 0).toLocaleString()}</span>
-          <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{(post.reactions ?? post.likes ?? 0).toLocaleString()}</span>
-          <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{(post.comments ?? 0).toLocaleString()}</span>
-          <span className="flex items-center gap-1"><Share2 className="h-3 w-3" />{(post.shares ?? 0).toLocaleString()}</span>
+          <span className="flex items-center gap-1">
+            <Eye className="h-3 w-3" />
+            {(post.impressions ?? 0).toLocaleString()}
+          </span>
+          <span className="flex items-center gap-1">
+            <Heart className="h-3 w-3" />
+            {(post.reactions ?? post.likes ?? 0).toLocaleString()}
+          </span>
+          <span className="flex items-center gap-1">
+            <MessageCircle className="h-3 w-3" />
+            {(post.comments ?? 0).toLocaleString()}
+          </span>
+          <span className="flex items-center gap-1">
+            <Share2 className="h-3 w-3" />
+            {(post.shares ?? 0).toLocaleString()}
+          </span>
         </div>
-        {post.permalink && (
-          <a href={post.permalink} target="_blank" rel="noopener" className="text-xs text-accent hover:underline flex items-center gap-1">
+        {(post.permalink || post.url) && (
+          <a
+            href={post.permalink || post.url}
+            target="_blank"
+            rel="noopener"
+            className="text-xs text-accent hover:underline flex items-center gap-1"
+          >
             View Original <ExternalLink className="h-3 w-3" />
           </a>
         )}
@@ -254,8 +346,21 @@ function PostCard({ post }: { post: any }) {
   );
 }
 
-function TrendsSection({ title, analysis, posts, platform }: { title: string; analysis: any; posts: any[]; platform: string }) {
+function TrendsSection({
+  title,
+  analysis,
+  posts,
+  platform,
+}: {
+  title: string;
+  analysis: any;
+  posts: any[];
+  platform: string;
+}) {
   if (!analysis && !posts?.length) return null;
+
+  // Filter out placeholder/empty items from n8n
+  const validPosts = (posts || []).filter((p: any) => !p._empty && p.url);
 
   return (
     <section className="space-y-3">
@@ -267,30 +372,50 @@ function TrendsSection({ title, analysis, posts, platform }: { title: string; an
             {analysis.top_themes?.length > 0 && (
               <div className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">Top Themes</p>
-                <div className="flex flex-wrap gap-2">{analysis.top_themes.map((t: string) => <Badge key={t} variant="secondary">{t}</Badge>)}</div>
+                <div className="flex flex-wrap gap-2">
+                  {analysis.top_themes.map((t: string) => (
+                    <Badge key={t} variant="secondary">
+                      {t}
+                    </Badge>
+                  ))}
+                </div>
               </div>
             )}
             {analysis.top_hashtags?.length > 0 && (
               <div className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">Trending Hashtags</p>
-                <div className="flex flex-wrap gap-2">{analysis.top_hashtags.map((h: string) => <Badge key={h} variant="outline">#{h}</Badge>)}</div>
+                <div className="flex flex-wrap gap-2">
+                  {analysis.top_hashtags.map((h: string) => (
+                    <Badge key={h} variant="outline">
+                      #{h}
+                    </Badge>
+                  ))}
+                </div>
               </div>
             )}
             {analysis.successful_formats?.length > 0 && (
               <div className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">Successful Formats</p>
-                <ul className="list-disc list-inside text-sm text-muted-foreground">{analysis.successful_formats.map((f: string, i: number) => <li key={i}>{f}</li>)}</ul>
+                <ul className="list-disc list-inside text-sm text-muted-foreground">
+                  {analysis.successful_formats.map((f: string, i: number) => (
+                    <li key={i}>{f}</li>
+                  ))}
+                </ul>
               </div>
             )}
             {analysis.key_takeaways?.length > 0 && (
-              <ol className="list-decimal list-inside text-sm space-y-1">{analysis.key_takeaways.map((t: string, i: number) => <li key={i}>{t}</li>)}</ol>
+              <ol className="list-decimal list-inside text-sm space-y-1">
+                {analysis.key_takeaways.map((t: string, i: number) => (
+                  <li key={i}>{t}</li>
+                ))}
+              </ol>
             )}
           </CardContent>
         </Card>
       )}
-      {posts?.length > 0 && (
+      {validPosts.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {posts.slice(0, 4).map((post: any, i: number) => (
+          {validPosts.slice(0, 4).map((post: any, i: number) => (
             <Card key={i}>
               <CardContent className="pt-4 space-y-2">
                 <div className="flex items-center justify-between">
@@ -299,15 +424,26 @@ function TrendsSection({ title, analysis, posts, platform }: { title: string; an
                 </div>
                 <p className="text-sm line-clamp-3">{post.caption}</p>
                 {post.hashtags?.length > 0 && (
-                  <div className="flex flex-wrap gap-1">{post.hashtags.slice(0, 5).map((h: string) => <Badge key={h} variant="outline" className="text-xs">#{h}</Badge>)}</div>
+                  <div className="flex flex-wrap gap-1">
+                    {post.hashtags.slice(0, 5).map((h: string) => (
+                      <Badge key={h} variant="outline" className="text-xs">
+                        #{h}
+                      </Badge>
+                    ))}
+                  </div>
                 )}
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  {post.views != null && <span>{(post.views).toLocaleString()} views</span>}
+                  {post.views != null && <span>{post.views.toLocaleString()} views</span>}
                   <span>{(post.likes ?? 0).toLocaleString()} likes</span>
                   <span>{(post.comments ?? 0).toLocaleString()} comments</span>
                 </div>
                 {post.url && (
-                  <a href={post.url} target="_blank" rel="noopener" className="text-xs text-accent hover:underline flex items-center gap-1">
+                  <a
+                    href={post.url}
+                    target="_blank"
+                    rel="noopener"
+                    className="text-xs text-accent hover:underline flex items-center gap-1"
+                  >
                     Watch <ExternalLink className="h-3 w-3" />
                   </a>
                 )}
