@@ -95,7 +95,7 @@ export default function RunAnalysis() {
       // Build payload
       const payload = {
         client_name: client!.name,
-        sprout_customer_id: client!.sprout_customer_id,
+        sprout_customer_id: "1676448",
         profile_ids: profiles?.map((p) => p.sprout_profile_id) || [],
         profiles: profiles?.map((p) => ({
           id: p.sprout_profile_id,
@@ -105,7 +105,6 @@ export default function RunAnalysis() {
           url: p.native_link,
         })) || [],
         social_keywords: client!.social_keywords || [],
-        trends_keywords: client!.trends_keywords || "",
         content_pillars: client!.content_pillars || [],
         primary_platforms: (client!.primary_platforms || []).join(","),
         geo: client!.geo || "US",
