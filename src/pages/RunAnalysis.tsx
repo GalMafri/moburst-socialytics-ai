@@ -18,6 +18,9 @@ const STEPS = [
   "Generating presentation...",
 ];
 
+// Max time to wait for report completion (10 minutes)
+const MAX_POLL_DURATION_MS = 10 * 60 * 1000;
+
 export default function RunAnalysis() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -29,6 +32,8 @@ export default function RunAnalysis() {
   const [reportId, setReportId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollStartRef = useRef<number>(0);
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -54,7 +59,7 @@ export default function RunAnalysis() {
     enabled: !!id,
   });
 
-  const { data: pastReports } = useQuery({
+  const { data: pastReports, refetch: refetchReports } = useQuery({
     queryKey: ["reports", id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -74,40 +79,72 @@ export default function RunAnalysis() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (stepRef.current) clearInterval(stepRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
+  }, []);
+
+  const stopAllTimers = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (stepRef.current) {
+      clearInterval(stepRef.current);
+      stepRef.current = null;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
   }, []);
 
   const pollForCompletion = useCallback(
     (rId: string) => {
+      pollStartRef.current = Date.now();
+
       pollRef.current = setInterval(async () => {
         try {
+          // Check if we've exceeded max poll duration
+          if (Date.now() - pollStartRef.current > MAX_POLL_DURATION_MS) {
+            stopAllTimers();
+            setRunning(false);
+            setError(
+              "Analysis is taking longer than expected. The workflow may still be running — check n8n execution logs. You can also check the report in Recent Analyses below once it completes.",
+            );
+            refetchReports();
+            return;
+          }
+
           const { data, error: fetchErr } = await supabase
             .from("reports")
             .select("status, report_data, gamma_url")
             .eq("id", rId)
             .maybeSingle();
 
-          if (fetchErr) return;
+          if (fetchErr) {
+            console.error("Poll error:", fetchErr);
+            return; // Will retry on next interval
+          }
 
           if (data?.status === "completed") {
-            if (pollRef.current) clearInterval(pollRef.current);
-            if (stepRef.current) clearInterval(stepRef.current);
+            stopAllTimers();
             setCurrentStep(STEPS.length);
             setRunning(false);
             toast({ title: "Analysis complete!", description: "Your report is ready." });
+            refetchReports();
             setTimeout(() => navigate(`/clients/${id}/reports/${rId}`), 1500);
           } else if (data?.status === "failed") {
-            if (pollRef.current) clearInterval(pollRef.current);
-            if (stepRef.current) clearInterval(stepRef.current);
+            stopAllTimers();
             setRunning(false);
             setError("Analysis failed on the server. Check n8n execution logs.");
+            refetchReports();
           }
         } catch {
           // Polling error, will retry on next interval
         }
-      }, 10000); // Poll every 10 seconds
+      }, 8000); // Poll every 8 seconds
     },
-    [id, navigate, toast],
+    [id, navigate, toast, stopAllTimers, refetchReports],
   );
 
   const runAnalysis = async () => {
@@ -166,6 +203,10 @@ export default function RunAnalysis() {
         brief_file_id: client!.brief_file_id || "",
       };
 
+      console.log("Sending webhook payload:", JSON.stringify(payload, null, 2));
+      console.log("Report ID:", report.id);
+      console.log("Profile IDs:", payload.profile_ids);
+
       // Animate steps
       stepRef.current = setInterval(() => {
         setCurrentStep((prev) => (prev < STEPS.length - 1 ? prev + 1 : prev));
@@ -187,7 +228,7 @@ export default function RunAnalysis() {
       // Start polling Supabase for completion
       pollForCompletion(report.id);
     } catch (err: any) {
-      if (stepRef.current) clearInterval(stepRef.current);
+      stopAllTimers();
       setRunning(false);
       setError(err.message);
       toast({ title: "Analysis failed", description: err.message, variant: "destructive" });
@@ -224,6 +265,11 @@ export default function RunAnalysis() {
                 <span className="text-muted-foreground">Profiles:</span> {profiles?.length || 0}
               </div>
             </div>
+            {profiles && profiles.length === 0 && (
+              <p className="text-xs text-destructive font-medium">
+                ⚠️ No Sprout profiles assigned! Add profiles in Client Setup before running analysis.
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -232,10 +278,10 @@ export default function RunAnalysis() {
           <CardContent className="pt-6 text-center space-y-6">
             {!running && !error && currentStep < 0 && (
               <>
-                <Button size="lg" onClick={runAnalysis} className="gap-2">
+                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!profiles || profiles.length === 0}>
                   <Play className="h-5 w-5" /> Run Full Analysis
                 </Button>
-                <p className="text-xs text-muted-foreground">This typically takes 2-5 minutes</p>
+                <p className="text-xs text-muted-foreground">This typically takes 3-7 minutes</p>
               </>
             )}
 
@@ -253,6 +299,9 @@ export default function RunAnalysis() {
                     <span className={i <= currentStep ? "text-foreground" : "text-muted-foreground/40"}>{step}</span>
                   </div>
                 ))}
+                <p className="text-xs text-muted-foreground mt-2">
+                  Polling for results... {reportId ? `(Report: ${reportId.slice(0, 8)}...)` : ""}
+                </p>
               </div>
             )}
 
@@ -267,7 +316,7 @@ export default function RunAnalysis() {
               <div className="space-y-4">
                 <div className="flex items-center gap-2 justify-center text-destructive">
                   <XCircle className="h-6 w-6" />
-                  <span className="font-medium">Analysis failed</span>
+                  <span className="font-medium">Analysis issue</span>
                 </div>
                 <p className="text-sm text-muted-foreground">{error}</p>
                 <Button
