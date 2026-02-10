@@ -370,7 +370,6 @@ function SproutProfileSelector({
 }) {
   const [fetching, setFetching] = useState(false);
   const [allProfiles, setAllProfiles] = useState<any[]>([]);
-  const [groupedByClient, setGroupedByClient] = useState<Record<string, any[]>>({});
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
 
@@ -409,21 +408,10 @@ function SproutProfileSelector({
       });
       if (error) throw error;
       setAllProfiles(data.profiles || []);
-      setGroupedByClient(data.grouped_by_client || {});
     } catch (err: any) {
       toast({ title: "Error fetching Sprout profiles", description: err.message, variant: "destructive" });
     } finally {
       setFetching(false);
-    }
-  };
-
-  const toggleClientProfiles = (clientName: string, profiles: any[]) => {
-    const allSelected = profiles.every((p) => selectedProfiles.some((s) => s.id === p.id));
-    if (allSelected) {
-      onSelectionChange(selectedProfiles.filter((s) => !profiles.some((p) => p.id === s.id)));
-    } else {
-      const newProfiles = profiles.filter((p) => !selectedProfiles.some((s) => s.id === p.id));
-      onSelectionChange([...selectedProfiles, ...newProfiles]);
     }
   };
 
@@ -447,11 +435,13 @@ function SproutProfileSelector({
     Threads: "🧵",
   };
 
-  const filteredClients = Object.entries(groupedByClient)
-    .filter(([clientName]) =>
-      !searchTerm || clientName.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredProfiles = allProfiles
+    .filter((p) =>
+      !searchTerm ||
+      (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.native_name || "").toLowerCase().includes(searchTerm.toLowerCase())
     )
-    .sort(([a], [b]) => a.localeCompare(b));
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
   if (fetching) {
     return (
@@ -477,8 +467,7 @@ function SproutProfileSelector({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          {selectedProfiles.length} profile{selectedProfiles.length !== 1 ? "s" : ""} selected across{" "}
-          {new Set(selectedProfiles.map((p) => p.name)).size} client{new Set(selectedProfiles.map((p) => p.name)).size !== 1 ? "s" : ""}
+          {selectedProfiles.length} of {allProfiles.length} profiles selected
         </p>
         <Button variant="ghost" size="sm" onClick={fetchProfiles}>
           <RefreshCw className="h-4 w-4 mr-1" /> Refresh
@@ -486,49 +475,32 @@ function SproutProfileSelector({
       </div>
 
       <Input
-        placeholder="Search by client name..."
+        placeholder="Search by name..."
         value={searchTerm}
         onChange={(e) => setSearchTerm(e.target.value)}
       />
 
-      <div className="max-h-96 overflow-y-auto space-y-2 pr-1">
-        {filteredClients.map(([clientName, profiles]) => {
-          const allSelected = profiles.every((p: any) => selectedProfiles.some((s) => s.id === p.id));
-          const someSelected = profiles.some((p: any) => selectedProfiles.some((s) => s.id === p.id));
-
+      <div className="max-h-96 overflow-y-auto space-y-1.5 pr-1">
+        {filteredProfiles.map((profile) => {
+          const isSelected = selectedProfiles.some((p) => p.id === profile.id);
           return (
-            <div key={clientName} className="rounded-lg border bg-card overflow-hidden">
-              <div
-                className="flex items-center gap-3 p-3 cursor-pointer hover:bg-accent/30 transition-colors"
-                onClick={() => toggleClientProfiles(clientName, profiles)}
-              >
-                <Checkbox
-                  checked={allSelected}
-                  className={someSelected && !allSelected ? "opacity-60" : ""}
-                  onCheckedChange={() => toggleClientProfiles(clientName, profiles)}
-                />
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium text-sm">{clientName}</span>
-                  <div className="flex flex-wrap gap-1.5 mt-1">
-                    {profiles.map((p: any) => {
-                      const isSelected = selectedProfiles.some((s) => s.id === p.id);
-                      return (
-                        <Badge
-                          key={p.id}
-                          variant={isSelected ? "default" : "outline"}
-                          className="text-xs cursor-pointer gap-1"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleProfile(p);
-                          }}
-                        >
-                          {platformIcon[p.network_display] || "🌐"} {p.network_display}
-                        </Badge>
-                      );
-                    })}
-                  </div>
-                </div>
+            <div
+              key={profile.id}
+              className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                isSelected ? "bg-primary/10 border-primary/30" : "bg-card hover:bg-accent/30"
+              }`}
+              onClick={() => toggleProfile(profile)}
+            >
+              <Checkbox checked={isSelected} onCheckedChange={() => toggleProfile(profile)} />
+              <div className="flex-1 min-w-0">
+                <span className="font-medium text-sm">{profile.name}</span>
+                {profile.native_name && (
+                  <span className="text-muted-foreground text-xs ml-1.5">@{profile.native_name}</span>
+                )}
               </div>
+              <Badge variant={isSelected ? "default" : "secondary"} className="text-xs shrink-0 gap-1">
+                {platformIcon[profile.network_display] || "🌐"} {profile.network_display}
+              </Badge>
             </div>
           );
         })}
