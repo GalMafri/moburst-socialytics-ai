@@ -14,16 +14,265 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      app_settings: {
+        Row: {
+          id: string
+          key: string
+          updated_at: string | null
+          value: string
+        }
+        Insert: {
+          id?: string
+          key: string
+          updated_at?: string | null
+          value: string
+        }
+        Update: {
+          id?: string
+          key?: string
+          updated_at?: string | null
+          value?: string
+        }
+        Relationships: []
+      }
+      client_users: {
+        Row: {
+          client_id: string
+          created_at: string | null
+          id: string
+          role: string | null
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string | null
+          id?: string
+          role?: string | null
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string | null
+          id?: string
+          role?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_users_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clients: {
+        Row: {
+          brand_notes: string | null
+          brief_file_id: string | null
+          brief_text: string | null
+          content_pillars: string[] | null
+          created_at: string | null
+          created_by: string | null
+          geo: string | null
+          id: string
+          language: string | null
+          logo_url: string | null
+          name: string
+          primary_platforms: string[] | null
+          social_keywords: string[] | null
+          sprout_customer_id: string | null
+          trends_keywords: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          brand_notes?: string | null
+          brief_file_id?: string | null
+          brief_text?: string | null
+          content_pillars?: string[] | null
+          created_at?: string | null
+          created_by?: string | null
+          geo?: string | null
+          id?: string
+          language?: string | null
+          logo_url?: string | null
+          name: string
+          primary_platforms?: string[] | null
+          social_keywords?: string[] | null
+          sprout_customer_id?: string | null
+          trends_keywords?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          brand_notes?: string | null
+          brief_file_id?: string | null
+          brief_text?: string | null
+          content_pillars?: string[] | null
+          created_at?: string | null
+          created_by?: string | null
+          geo?: string | null
+          id?: string
+          language?: string | null
+          logo_url?: string | null
+          name?: string
+          primary_platforms?: string[] | null
+          social_keywords?: string[] | null
+          sprout_customer_id?: string | null
+          trends_keywords?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string | null
+          display_name: string | null
+          id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string | null
+          display_name?: string | null
+          id?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string | null
+          display_name?: string | null
+          id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      reports: {
+        Row: {
+          client_id: string
+          created_at: string | null
+          created_by: string | null
+          date_range_end: string | null
+          date_range_start: string | null
+          duration_minutes: number | null
+          gamma_url: string | null
+          id: string
+          report_data: Json
+          report_type: string | null
+          status: string | null
+        }
+        Insert: {
+          client_id: string
+          created_at?: string | null
+          created_by?: string | null
+          date_range_end?: string | null
+          date_range_start?: string | null
+          duration_minutes?: number | null
+          gamma_url?: string | null
+          id?: string
+          report_data?: Json
+          report_type?: string | null
+          status?: string | null
+        }
+        Update: {
+          client_id?: string
+          created_at?: string | null
+          created_by?: string | null
+          date_range_end?: string | null
+          date_range_start?: string | null
+          duration_minutes?: number | null
+          gamma_url?: string | null
+          id?: string
+          report_data?: Json
+          report_type?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reports_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sprout_profiles: {
+        Row: {
+          assigned_at: string | null
+          client_id: string
+          id: string
+          is_active: boolean | null
+          native_link: string | null
+          native_name: string | null
+          network_type: string
+          profile_name: string | null
+          sprout_profile_id: number
+        }
+        Insert: {
+          assigned_at?: string | null
+          client_id: string
+          id?: string
+          is_active?: boolean | null
+          native_link?: string | null
+          native_name?: string | null
+          network_type: string
+          profile_name?: string | null
+          sprout_profile_id: number
+        }
+        Update: {
+          assigned_at?: string | null
+          client_id?: string
+          id?: string
+          is_active?: boolean | null
+          native_link?: string | null
+          native_name?: string | null
+          network_type?: string
+          profile_name?: string | null
+          sprout_profile_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sprout_profiles_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_admin: { Args: never; Returns: boolean }
+      is_client_member: { Args: { _client_id: string }; Returns: boolean }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +399,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const
