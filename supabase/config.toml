@@ -2,3 +2,6 @@ project_id = "rwouwxqggjjacbpbhqsn"
 
 [functions.sprout-profiles]
 verify_jwt = false
+
+[functions.update-report]
+verify_jwt = false
