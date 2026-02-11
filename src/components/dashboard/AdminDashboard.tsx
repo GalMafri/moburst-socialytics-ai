@@ -99,13 +99,12 @@ export function AdminDashboard() {
                     <span className="text-xs text-muted-foreground">{reportCount} reports</span>
                     <Button
                       size="sm"
-                      variant="outline"
                       onClick={(e) => {
                         e.stopPropagation();
                         navigate(`/clients/${client.id}/analyze`);
                       }}
                     >
-                      <Play className="h-3 w-3 mr-1" /> Analyze
+                      <Play className="h-3 w-3 mr-1" /> Run Report
                     </Button>
                   </div>
                 </CardContent>

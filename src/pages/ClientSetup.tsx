@@ -14,7 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
-import { Save, Plus, X, RefreshCw, Loader2 } from "lucide-react";
+import { Save, Plus, X, RefreshCw, Loader2, Play } from "lucide-react";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 const GEOS = ["US", "UK", "EU", "Global", "LATAM", "APAC"];
@@ -192,10 +192,17 @@ export default function ClientSetup() {
             <h2 className="text-xl font-bold">{isNew ? "Create New Client" : "Client Configuration"}</h2>
             <p className="text-sm text-muted-foreground">Configure client details and social media settings</p>
           </div>
-          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name}>
-            {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-            Save
-          </Button>
+          <div className="flex items-center gap-2">
+            {!isNew && (
+              <Button onClick={() => navigate(`/clients/${id}/analyze`)}>
+                <Play className="h-4 w-4 mr-2" /> Run Report
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name}>
+              {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+              Save
+            </Button>
+          </div>
         </div>
 
         <Tabs defaultValue="info">
