@@ -26,6 +26,7 @@ import {
   Sparkles,
   Target,
 } from "lucide-react";
+import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { useState } from "react";
 
@@ -321,14 +322,17 @@ function ContentRecommendations({ recommendations }: { recommendations: any[] })
             All
           </Badge>
           {platforms.map((p) => (
-            <Badge
+            <span
               key={p}
-              variant={platformFilter === p ? "default" : "outline"}
-              className="cursor-pointer text-xs"
+              className="cursor-pointer"
               onClick={() => setPlatformFilter(p)}
             >
-              {p}
-            </Badge>
+              <PlatformBadge
+                platform={p}
+                className={platformFilter === p ? "ring-1 ring-offset-1 ring-current" : "opacity-70 hover:opacity-100"}
+                size="sm"
+              />
+            </span>
           ))}
         </div>
       </div>
@@ -337,7 +341,7 @@ function ContentRecommendations({ recommendations }: { recommendations: any[] })
           <Card key={i}>
             <CardContent className="pt-5 space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
-                <Badge variant="secondary">{rec.platform}</Badge>
+                <PlatformBadge platform={rec.platform} size="sm" />
                 <Badge variant="outline">{rec.format}</Badge>
                 {rec.addresses_pillar && (
                   <Badge className="bg-accent text-accent-foreground text-xs">{rec.addresses_pillar}</Badge>
@@ -393,7 +397,7 @@ function CalendarPostCard({ post }: { post: any }) {
     <div className="border rounded-lg p-4 space-y-3 bg-muted/20">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Badge variant="secondary">{post.platform}</Badge>
+          <PlatformBadge platform={post.platform} size="sm" />
           <Badge variant="outline">{post.format}</Badge>
           {post.pillar && <Badge className="bg-accent text-accent-foreground text-xs">{post.pillar}</Badge>}
         </div>
@@ -501,7 +505,7 @@ function PostCard({ post }: { post: any }) {
     <Card>
       <CardContent className="pt-5 space-y-2.5">
         <div className="flex items-center justify-between">
-          <Badge variant="secondary">{post.network_type || post.platform}</Badge>
+          <PlatformBadge platform={post.network_type || post.platform} size="sm" />
           <span className="text-xs text-muted-foreground">
             {post.posted_at && new Date(post.posted_at).toLocaleDateString()}
           </span>
@@ -545,7 +549,10 @@ function TrendsSection({
 
   return (
     <div className="space-y-4">
-      <h3 className="text-base font-semibold">{title}</h3>
+      <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: getPlatformColor(platform) }}>
+        <PlatformIcon platform={platform} className="h-5 w-5" />
+        {title}
+      </h3>
       {analysis && (
         <Card>
           <CardContent className="pt-5 space-y-5">

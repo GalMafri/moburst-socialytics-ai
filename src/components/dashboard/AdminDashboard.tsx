@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Plus, Search, Play, Calendar } from "lucide-react";
+import { PlatformBadge } from "@/lib/platform-config";
 import { useState } from "react";
 
 export function AdminDashboard() {
@@ -92,7 +93,7 @@ export function AdminDashboard() {
                   </div>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     {client.primary_platforms?.slice(0, 3).map((p: string) => (
-                      <Badge key={p} variant="secondary" className="text-xs">{p}</Badge>
+                      <PlatformBadge key={p} platform={p} size="sm" />
                     ))}
                   </div>
                   <div className="flex items-center justify-between pt-2">
