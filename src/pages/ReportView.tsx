@@ -92,7 +92,7 @@ export default function ReportView() {
   return (
     <AppLayout title={`Report: ${clientName}`}>
       <div className="max-w-6xl mx-auto space-y-6" ref={reportContentRef}>
-        {/* Gamma Deck Banner */}
+        {/* Presentation Deck Banner */}
         <Card className={gammaUrl ? "border-primary/30 bg-primary/5" : "border-dashed"}>
           <CardContent className="py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -100,7 +100,7 @@ export default function ReportView() {
                 <ExternalLink className={`h-5 w-5 ${gammaUrl ? "text-primary" : "text-muted-foreground"}`} />
               </div>
               <div>
-                <p className="text-sm font-medium">{gammaUrl ? "Gamma Presentation Deck" : "Gamma Deck"}</p>
+                <p className="text-sm font-medium">{gammaUrl ? "Interactive Presentation" : "Presentation Deck"}</p>
                 <p className="text-xs text-muted-foreground">
                   {gammaUrl ? "View the full interactive presentation" : "This feature will be added soon — stay tuned!"}
                 </p>
@@ -108,7 +108,7 @@ export default function ReportView() {
             </div>
             {gammaUrl ? (
               <Button onClick={() => window.open(gammaUrl, "_blank")}>
-                <ExternalLink className="h-4 w-4 mr-2" /> Open Gamma Deck
+                <ExternalLink className="h-4 w-4 mr-2" /> Open Presentation
               </Button>
             ) : (
               <Badge variant="outline">Pending</Badge>

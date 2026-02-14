@@ -125,7 +125,7 @@ export function ReportActions({ report, onDeleted }: ReportActionsProps) {
               <Input type="date" value={dateEnd} onChange={(e) => setDateEnd(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Gamma URL</Label>
+              <Label>Presentation URL</Label>
               <Input value={gammaUrl} onChange={(e) => setGammaUrl(e.target.value)} placeholder="https://..." />
             </div>
           </div>
