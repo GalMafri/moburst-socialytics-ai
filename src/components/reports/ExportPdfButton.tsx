@@ -17,121 +17,201 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
     setExporting(true);
 
     try {
-      const html2canvas = (await import("html2canvas")).default;
-      const { jsPDF } = await import("jspdf");
+      // Use the browser's native print functionality for the best layout
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        throw new Error("Pop-up blocked. Please allow pop-ups and try again.");
+      }
 
-      // Clone the content to avoid modifying the live DOM
-      const clone = contentRef.current.cloneNode(true) as HTMLElement;
+      // Get all stylesheets from the current page
+      const styleSheets = Array.from(document.styleSheets);
+      let cssText = "";
 
-      // Apply print-friendly styles to the clone
-      clone.style.width = "1100px";
-      clone.style.padding = "40px";
-      clone.style.background = "#ffffff";
-      clone.style.color = "#1a1a1a";
-      clone.style.position = "absolute";
-      clone.style.left = "-9999px";
-      clone.style.top = "0";
-      clone.style.fontFamily = "Inter, system-ui, sans-serif";
-
-      // Fix all text colors for PDF readability
-      clone.querySelectorAll("*").forEach((el) => {
-        const htmlEl = el as HTMLElement;
-        const computed = window.getComputedStyle(htmlEl);
-
-        // Ensure text is dark on white background
-        if (computed.color === "rgba(0, 0, 0, 0)" || computed.color === "transparent") {
-          htmlEl.style.color = "#1a1a1a";
+      for (const sheet of styleSheets) {
+        try {
+          const rules = Array.from(sheet.cssRules || []);
+          cssText += rules.map((r) => r.cssText).join("\n");
+        } catch {
+          // Cross-origin stylesheet, try to link it instead
+          if (sheet.href) {
+            cssText += `@import url("${sheet.href}");\n`;
+          }
         }
+      }
 
-        // Fix card backgrounds
-        if (htmlEl.classList.contains("border") || htmlEl.tagName === "SECTION") {
-          htmlEl.style.borderColor = "#e5e7eb";
-        }
+      // Clone content
+      const content = contentRef.current.cloneNode(true) as HTMLElement;
 
-        // Ensure spacing between sections
-        if (htmlEl.classList.contains("space-y-6") || htmlEl.classList.contains("space-y-8")) {
-          htmlEl.style.display = "flex";
-          htmlEl.style.flexDirection = "column";
-          htmlEl.style.gap = "24px";
-        }
-
-        if (htmlEl.classList.contains("space-y-4")) {
-          htmlEl.style.display = "flex";
-          htmlEl.style.flexDirection = "column";
-          htmlEl.style.gap = "16px";
-        }
-
-        if (htmlEl.classList.contains("space-y-3")) {
-          htmlEl.style.display = "flex";
-          htmlEl.style.flexDirection = "column";
-          htmlEl.style.gap = "12px";
-        }
-
-        // Fix grid layouts
-        if (htmlEl.classList.contains("grid")) {
-          htmlEl.style.display = "grid";
-          htmlEl.style.gap = "16px";
-        }
-
-        // Ensure badges are visible
-        if (htmlEl.getAttribute("data-slot") === "badge" || htmlEl.classList.contains("badge")) {
-          htmlEl.style.display = "inline-flex";
-          htmlEl.style.padding = "2px 8px";
-          htmlEl.style.borderRadius = "4px";
-          htmlEl.style.fontSize = "12px";
-        }
-      });
-
-      // Remove interactive elements not relevant for PDF
-      clone.querySelectorAll("button").forEach((btn) => {
+      // Remove interactive buttons (Export PDF, edit/delete menus)
+      content.querySelectorAll("button").forEach((btn) => {
         const text = btn.textContent?.toLowerCase() || "";
-        if (text.includes("export") || text.includes("edit") || text.includes("delete") || text.includes("copy")) {
+        if (
+          text.includes("export") ||
+          text.includes("copy") ||
+          text.includes("pending")
+        ) {
           btn.remove();
         }
       });
 
-      // Remove dropdown menus
-      clone.querySelectorAll("[data-radix-popper-content-wrapper]").forEach((el) => el.remove());
-
-      document.body.appendChild(clone);
-
-      // Wait for layout
-      await new Promise((r) => setTimeout(r, 500));
-
-      const canvas = await html2canvas(clone, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: "#ffffff",
-        width: 1100,
-        windowWidth: 1100,
+      // Remove the three-dot menu buttons
+      content.querySelectorAll('[data-slot="dropdown-menu"]').forEach((el) => el.remove());
+      content.querySelectorAll("button").forEach((btn) => {
+        if (btn.querySelector("svg") && !btn.textContent?.trim()) {
+          btn.remove();
+        }
       });
 
-      document.body.removeChild(clone);
+      // Remove the Gamma banner for PDF (it's just a placeholder)
+      const cards = content.querySelectorAll(".border-dashed");
+      cards.forEach((card) => card.remove());
 
-      const imgData = canvas.toDataURL("image/png");
-      const imgWidth = 210; // A4 width in mm
-      const pageHeight = 297; // A4 height in mm
-      const margin = 5; // small margin in mm
-      const contentWidth = imgWidth - margin * 2;
-      const imgHeight = (canvas.height * contentWidth) / canvas.width;
+      const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${filename}</title>
+  <style>
+    ${cssText}
 
-      const pdf = new jsPDF("p", "mm", "a4");
-      let heightLeft = imgHeight;
-      let position = margin;
+    /* Print overrides */
+    :root {
+      --background: 0 0% 100%;
+      --foreground: 0 0% 3.9%;
+      --card: 0 0% 100%;
+      --card-foreground: 0 0% 3.9%;
+      --muted: 0 0% 96.1%;
+      --muted-foreground: 0 0% 45.1%;
+      --border: 0 0% 89.8%;
+      --primary: 0 0% 9%;
+      --primary-foreground: 0 0% 98%;
+      --secondary: 0 0% 96.1%;
+      --secondary-foreground: 0 0% 9%;
+      --accent: 0 0% 96.1%;
+      --accent-foreground: 0 0% 9%;
+      --destructive: 0 84.2% 60.2%;
+      --success: 142 76% 36%;
+      --warning: 38 92% 50%;
+    }
 
-      pdf.addImage(imgData, "PNG", margin, position, contentWidth, imgHeight);
-      heightLeft -= (pageHeight - margin * 2);
+    * {
+      color-scheme: light !important;
+    }
 
-      while (heightLeft > 0) {
-        position = -(pageHeight - margin * 2) * (Math.ceil((imgHeight - heightLeft) / (pageHeight - margin * 2))) + margin;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", margin, position, contentWidth, imgHeight);
-        heightLeft -= (pageHeight - margin * 2);
-      }
+    body {
+      background: white !important;
+      color: hsl(0 0% 3.9%) !important;
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+      padding: 20px 40px;
+      max-width: 1100px;
+      margin: 0 auto;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
 
-      pdf.save(`${filename}.pdf`);
-      toast({ title: "PDF exported successfully" });
+    /* Ensure cards have visible borders */
+    [data-slot="card"], .rounded-lg.border {
+      border: 1px solid hsl(0 0% 89.8%) !important;
+      background: white !important;
+      break-inside: avoid;
+      margin-bottom: 12px;
+    }
+
+    /* Grid layouts */
+    .grid {
+      gap: 12px !important;
+    }
+
+    /* Space between sections */
+    .space-y-6 > * + * { margin-top: 24px !important; }
+    .space-y-8 > * + * { margin-top: 32px !important; }
+    .space-y-4 > * + * { margin-top: 16px !important; }
+    .space-y-3 > * + * { margin-top: 12px !important; }
+
+    /* Fix text colors */
+    .text-muted-foreground {
+      color: hsl(0 0% 45.1%) !important;
+    }
+
+    .text-foreground {
+      color: hsl(0 0% 3.9%) !important;
+    }
+
+    .text-destructive {
+      color: hsl(0 84.2% 60.2%) !important;
+    }
+
+    .text-success {
+      color: hsl(142 76% 36%) !important;
+    }
+
+    .text-warning {
+      color: hsl(38 92% 50%) !important;
+    }
+
+    /* Badge styling */
+    [data-slot="badge"] {
+      display: inline-flex !important;
+      border: 1px solid hsl(0 0% 89.8%) !important;
+      padding: 2px 8px !important;
+      border-radius: 6px !important;
+      font-size: 12px !important;
+      background: hsl(0 0% 96.1%) !important;
+      color: hsl(0 0% 9%) !important;
+    }
+
+    /* Recharts fix */
+    .recharts-wrapper {
+      break-inside: avoid;
+    }
+
+    /* Hide tab triggers in print - show content inline */
+    [role="tablist"] {
+      display: none !important;
+    }
+
+    [role="tabpanel"][data-state="inactive"] {
+      display: block !important;
+    }
+
+    [role="tabpanel"] {
+      display: block !important;
+    }
+
+    /* Page break control */
+    h2, h3 {
+      break-after: avoid;
+    }
+
+    .animate-pulse {
+      animation: none !important;
+    }
+
+    @media print {
+      body { padding: 0; }
+      @page { margin: 15mm; }
+    }
+  </style>
+</head>
+<body>
+  ${content.outerHTML}
+</body>
+</html>`;
+
+      printWindow.document.write(html);
+      printWindow.document.close();
+
+      // Wait for content and styles to load, then trigger print
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+          // Close after a delay to allow print dialog
+          setTimeout(() => printWindow.close(), 1000);
+        }, 500);
+      };
+
+      toast({ title: "PDF export ready", description: "Use the print dialog to save as PDF" });
     } catch (err: any) {
       toast({ title: "Export failed", description: err.message, variant: "destructive" });
     } finally {
