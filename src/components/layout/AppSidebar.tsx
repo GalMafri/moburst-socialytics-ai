@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/sidebar";
 import { BarChart3, Home, Users, FileText, Settings, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export function AppSidebar() {
   const navigate = useNavigate();
@@ -68,6 +69,7 @@ export function AppSidebar() {
         <div className="text-xs text-sidebar-foreground/60 truncate px-2">
           {user?.email}
         </div>
+        <ThemeToggle />
         <Button
           variant="ghost"
           size="sm"

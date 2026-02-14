@@ -513,13 +513,21 @@ function PerformanceChart({ comparison }: { comparison: any }) {
   return (
     <ResponsiveContainer width="100%" height={300}>
       <BarChart data={chartData}>
-        <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-        <XAxis dataKey="name" className="text-xs" />
-        <YAxis className="text-xs" />
-        <Tooltip />
-        <Legend />
-        <Bar dataKey="Current" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="Previous" fill="hsl(var(--muted))" radius={[4, 4, 0, 0]} />
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+        <XAxis dataKey="name" className="text-xs" tick={{ fill: "hsl(var(--muted-foreground))" }} />
+        <YAxis className="text-xs" tick={{ fill: "hsl(var(--muted-foreground))" }} />
+        <Tooltip
+          contentStyle={{
+            backgroundColor: "hsl(var(--card))",
+            borderColor: "hsl(var(--border))",
+            color: "hsl(var(--card-foreground))",
+            borderRadius: "var(--radius)",
+          }}
+          labelStyle={{ color: "hsl(var(--card-foreground))" }}
+        />
+        <Legend wrapperStyle={{ color: "hsl(var(--foreground))" }} />
+        <Bar dataKey="Current" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="Previous" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
