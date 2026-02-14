@@ -68,7 +68,7 @@ export default function AllReports() {
                             <ExternalLink className="h-3.5 w-3.5" /> Gamma
                           </Button>
                         ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <span className="text-xs text-muted-foreground">Coming soon</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right flex items-center justify-end gap-1">
