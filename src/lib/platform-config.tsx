@@ -130,7 +130,8 @@ export function PlatformBadge({
   className?: string;
   size?: "default" | "sm";
 }) {
-  const color = getPlatformColor(platform);
+  const isDark = typeof window !== "undefined" && document.documentElement.classList.contains("dark");
+  const color = getPlatformColor(platform, isDark);
   const textSize = size === "sm" ? "text-xs" : "text-xs";
   const iconSize = size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5";
 
