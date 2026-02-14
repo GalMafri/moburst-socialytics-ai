@@ -16,49 +16,50 @@
     --popover: 0 0% 100%;
     --popover-foreground: 220 20% 12%;
 
-    /* #3BD4FF darkened for light-mode contrast */
-    --primary: 193 90% 40%;
-    --primary-foreground: 0 0% 100%;
+    /* #3BD4FF — the actual brand cyan, dark text for readability */
+    --primary: 193 100% 62%;
+    --primary-foreground: 220 25% 10%;
 
-    /* #BEE545 darkened for light-mode contrast */
-    --secondary: 75 60% 42%;
-    --secondary-foreground: 0 0% 100%;
+    /* #BEE545 — brand lime, dark text */
+    --secondary: 75 75% 58%;
+    --secondary-foreground: 220 25% 10%;
 
     --muted: 210 15% 94%;
     --muted-foreground: 220 10% 42%;
 
-    --accent: 193 30% 93%;
+    --accent: 193 20% 93%;
     --accent-foreground: 220 20% 12%;
 
-    /* #FF6671 darkened for light-mode contrast */
-    --destructive: 356 85% 52%;
-    --destructive-foreground: 0 0% 100%;
+    /* #FF6671 — brand coral */
+    --destructive: 356 100% 70%;
+    --destructive-foreground: 220 25% 10%;
 
     /* #BEE545-based */
-    --success: 75 60% 38%;
+    --success: 75 60% 42%;
     --success-foreground: 0 0% 100%;
 
-    /* #FEE33E darkened for light-mode contrast */
-    --warning: 52 90% 42%;
-    --warning-foreground: 0 0% 100%;
+    /* #FEE33E — brand yellow, dark text */
+    --warning: 52 99% 62%;
+    --warning-foreground: 220 25% 10%;
 
     /* #3BD4FF */
-    --info: 193 90% 40%;
-    --info-foreground: 0 0% 100%;
+    --info: 193 100% 62%;
+    --info-foreground: 220 25% 10%;
 
     --border: 220 13% 88%;
     --input: 220 13% 88%;
-    --ring: 193 90% 40%;
+    --ring: 193 100% 62%;
 
     --radius: 0.5rem;
 
+    /* Dark sidebar with high-contrast text */
     --sidebar-background: 220 25% 10%;
-    --sidebar-foreground: 210 15% 90%;
+    --sidebar-foreground: 0 0% 100%;
     --sidebar-primary: 193 100% 62%;
-    --sidebar-primary-foreground: 220 20% 10%;
+    --sidebar-primary-foreground: 220 25% 10%;
     --sidebar-accent: 220 20% 18%;
-    --sidebar-accent-foreground: 210 15% 90%;
-    --sidebar-border: 220 15% 20%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 220 15% 22%;
     --sidebar-ring: 193 100% 62%;
 
     /* Vibrant brand colors for charts */
@@ -95,11 +96,11 @@
     --popover: 220 18% 12%;
     --popover-foreground: 210 15% 92%;
 
-    /* #3BD4FF original — vibrant on dark bg */
+    /* #3BD4FF — vibrant on dark, dark text for contrast */
     --primary: 193 100% 62%;
     --primary-foreground: 220 25% 8%;
 
-    /* #BEE545 original */
+    /* #BEE545 */
     --secondary: 75 75% 55%;
     --secondary-foreground: 220 25% 8%;
 
@@ -109,7 +110,7 @@
     --accent: 220 15% 18%;
     --accent-foreground: 210 15% 92%;
 
-    /* #FF6671 original */
+    /* #FF6671 */
     --destructive: 356 100% 70%;
     --destructive-foreground: 220 25% 8%;
 
@@ -117,7 +118,7 @@
     --success: 75 65% 50%;
     --success-foreground: 220 25% 8%;
 
-    /* #FEE33E original */
+    /* #FEE33E */
     --warning: 52 99% 62%;
     --warning-foreground: 220 25% 8%;
 
@@ -130,11 +131,11 @@
     --ring: 193 100% 62%;
 
     --sidebar-background: 220 28% 6%;
-    --sidebar-foreground: 210 15% 88%;
+    --sidebar-foreground: 0 0% 95%;
     --sidebar-primary: 193 100% 62%;
     --sidebar-primary-foreground: 220 25% 8%;
     --sidebar-accent: 220 18% 15%;
-    --sidebar-accent-foreground: 210 15% 88%;
+    --sidebar-accent-foreground: 0 0% 95%;
     --sidebar-border: 220 12% 18%;
     --sidebar-ring: 193 100% 62%;
 

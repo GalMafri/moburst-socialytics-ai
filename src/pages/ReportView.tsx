@@ -510,26 +510,57 @@ function PerformanceChart({ comparison }: { comparison: any }) {
     Previous: comparison.previous_month?.[key] ?? 0,
   }));
 
+  const allValues = chartData.flatMap((d) => [d.Current, d.Previous]).filter(Boolean);
+  const maxVal = Math.max(...allValues, 1);
+  const minNonZero = Math.min(...allValues.filter((v) => v > 0), maxVal);
+  const hasHugeRange = maxVal / minNonZero > 100;
+
+  const formatYAxis = (value: number) => {
+    if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+    if (value >= 1000) return `${(value / 1000).toFixed(0)}K`;
+    return value.toString();
+  };
+
   return (
-    <ResponsiveContainer width="100%" height={300}>
-      <BarChart data={chartData}>
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-        <XAxis dataKey="name" className="text-xs" tick={{ fill: "hsl(var(--muted-foreground))" }} />
-        <YAxis className="text-xs" tick={{ fill: "hsl(var(--muted-foreground))" }} />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: "hsl(var(--card))",
-            borderColor: "hsl(var(--border))",
-            color: "hsl(var(--card-foreground))",
-            borderRadius: "var(--radius)",
-          }}
-          labelStyle={{ color: "hsl(var(--card-foreground))" }}
-        />
-        <Legend wrapperStyle={{ color: "hsl(var(--foreground))" }} />
-        <Bar dataKey="Current" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="Previous" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
+    <div className="space-y-2">
+      {hasHugeRange && (
+        <p className="text-xs text-muted-foreground italic">
+          Logarithmic scale used due to large value differences across metrics.
+        </p>
+      )}
+      <ResponsiveContainer width="100%" height={320}>
+        <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+          <XAxis
+            dataKey="name"
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+            angle={-20}
+            textAnchor="end"
+            height={50}
+          />
+          <YAxis
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+            tickFormatter={formatYAxis}
+            scale={hasHugeRange ? "log" : "auto"}
+            domain={hasHugeRange ? [1, "auto"] : [0, "auto"]}
+            allowDataOverflow
+          />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "hsl(var(--card))",
+              borderColor: "hsl(var(--border))",
+              color: "hsl(var(--card-foreground))",
+              borderRadius: "var(--radius)",
+            }}
+            labelStyle={{ color: "hsl(var(--card-foreground))" }}
+            formatter={(value: number) => [value.toLocaleString(), undefined]}
+          />
+          <Legend wrapperStyle={{ color: "hsl(var(--foreground))" }} />
+          <Bar dataKey="Current" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} minPointSize={3} />
+          <Bar dataKey="Previous" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} minPointSize={3} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
