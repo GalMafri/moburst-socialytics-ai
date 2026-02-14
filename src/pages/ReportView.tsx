@@ -100,9 +100,9 @@ export default function ReportView() {
                 <ExternalLink className={`h-5 w-5 ${gammaUrl ? "text-primary" : "text-muted-foreground"}`} />
               </div>
               <div>
-                <p className="text-sm font-medium">{gammaUrl ? "Gamma Presentation Deck" : "Gamma Deck Not Available"}</p>
+                <p className="text-sm font-medium">{gammaUrl ? "Gamma Presentation Deck" : "Gamma Deck"}</p>
                 <p className="text-xs text-muted-foreground">
-                  {gammaUrl ? "View the full interactive presentation" : "The Gamma link will appear here once the n8n workflow generates it"}
+                  {gammaUrl ? "View the full interactive presentation" : "This feature will be added soon — stay tuned!"}
                 </p>
               </div>
             </div>
