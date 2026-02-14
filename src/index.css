@@ -6,6 +6,7 @@
 
 @layer base {
   :root {
+    /* Moburst Brand: #3BD4FF, #BEE545, #FEE33E, #FF6671 */
     --background: 210 20% 98%;
     --foreground: 220 20% 12%;
 
@@ -15,57 +16,61 @@
     --popover: 0 0% 100%;
     --popover-foreground: 220 20% 12%;
 
-    --primary: 193 85% 38%;
+    /* #3BD4FF darkened for light-mode contrast */
+    --primary: 193 90% 40%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 75 55% 48%;
+    /* #BEE545 darkened for light-mode contrast */
+    --secondary: 75 60% 42%;
     --secondary-foreground: 0 0% 100%;
 
     --muted: 210 15% 94%;
     --muted-foreground: 220 10% 42%;
 
-    --accent: 210 15% 94%;
+    --accent: 193 30% 93%;
     --accent-foreground: 220 20% 12%;
 
-    --destructive: 0 65% 48%;
+    /* #FF6671 darkened for light-mode contrast */
+    --destructive: 356 85% 52%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 142 60% 32%;
+    /* #BEE545-based */
+    --success: 75 60% 38%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 38 82% 42%;
+    /* #FEE33E darkened for light-mode contrast */
+    --warning: 52 90% 42%;
     --warning-foreground: 0 0% 100%;
 
-    --info: 193 85% 38%;
+    /* #3BD4FF */
+    --info: 193 90% 40%;
     --info-foreground: 0 0% 100%;
 
     --border: 220 13% 88%;
     --input: 220 13% 88%;
-    --ring: 193 85% 38%;
+    --ring: 193 90% 40%;
 
     --radius: 0.5rem;
 
     --sidebar-background: 220 25% 10%;
     --sidebar-foreground: 210 15% 90%;
-    --sidebar-primary: 193 85% 38%;
-    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-primary: 193 100% 62%;
+    --sidebar-primary-foreground: 220 20% 10%;
     --sidebar-accent: 220 20% 18%;
     --sidebar-accent-foreground: 210 15% 90%;
     --sidebar-border: 220 15% 20%;
-    --sidebar-ring: 193 85% 38%;
+    --sidebar-ring: 193 100% 62%;
 
-    --chart-1: 193 85% 38%;
-    --chart-2: 75 55% 48%;
-    --chart-3: 356 70% 55%;
-    --chart-4: 38 82% 50%;
+    /* Vibrant brand colors for charts */
+    --chart-1: 193 100% 62%;   /* #3BD4FF */
+    --chart-2: 75 75% 58%;     /* #BEE545 */
+    --chart-3: 52 99% 62%;     /* #FEE33E */
+    --chart-4: 356 100% 70%;   /* #FF6671 */
     --chart-5: 264 40% 55%;
 
     --font-sans: "Open Sans", ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
-
     --sidebar: 220 25% 10%;
-
     --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
-
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
     --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
@@ -90,11 +95,13 @@
     --popover: 220 18% 12%;
     --popover-foreground: 210 15% 92%;
 
-    --primary: 193 80% 50%;
-    --primary-foreground: 220 20% 8%;
+    /* #3BD4FF original — vibrant on dark bg */
+    --primary: 193 100% 62%;
+    --primary-foreground: 220 25% 8%;
 
-    --secondary: 75 50% 45%;
-    --secondary-foreground: 0 0% 100%;
+    /* #BEE545 original */
+    --secondary: 75 75% 55%;
+    --secondary-foreground: 220 25% 8%;
 
     --muted: 220 15% 18%;
     --muted-foreground: 220 10% 60%;
@@ -102,35 +109,40 @@
     --accent: 220 15% 18%;
     --accent-foreground: 210 15% 92%;
 
-    --destructive: 0 55% 55%;
-    --destructive-foreground: 0 0% 100%;
+    /* #FF6671 original */
+    --destructive: 356 100% 70%;
+    --destructive-foreground: 220 25% 8%;
 
-    --success: 142 50% 42%;
-    --success-foreground: 0 0% 100%;
+    /* #BEE545-based */
+    --success: 75 65% 50%;
+    --success-foreground: 220 25% 8%;
 
-    --warning: 38 75% 52%;
-    --warning-foreground: 0 0% 100%;
+    /* #FEE33E original */
+    --warning: 52 99% 62%;
+    --warning-foreground: 220 25% 8%;
 
-    --info: 193 80% 50%;
-    --info-foreground: 220 20% 8%;
+    /* #3BD4FF */
+    --info: 193 100% 62%;
+    --info-foreground: 220 25% 8%;
 
     --border: 220 12% 22%;
     --input: 220 12% 22%;
-    --ring: 193 80% 50%;
+    --ring: 193 100% 62%;
 
     --sidebar-background: 220 28% 6%;
     --sidebar-foreground: 210 15% 88%;
-    --sidebar-primary: 193 80% 50%;
-    --sidebar-primary-foreground: 220 20% 8%;
+    --sidebar-primary: 193 100% 62%;
+    --sidebar-primary-foreground: 220 25% 8%;
     --sidebar-accent: 220 18% 15%;
     --sidebar-accent-foreground: 210 15% 88%;
     --sidebar-border: 220 12% 18%;
-    --sidebar-ring: 193 80% 50%;
+    --sidebar-ring: 193 100% 62%;
 
-    --chart-1: 193 80% 50%;
-    --chart-2: 75 50% 50%;
-    --chart-3: 356 65% 60%;
-    --chart-4: 38 75% 55%;
+    /* Brand colors for charts — all vibrant on dark */
+    --chart-1: 193 100% 62%;   /* #3BD4FF */
+    --chart-2: 75 75% 58%;     /* #BEE545 */
+    --chart-3: 52 99% 62%;     /* #FEE33E */
+    --chart-4: 356 100% 70%;   /* #FF6671 */
     --chart-5: 264 40% 60%;
 
     --sidebar: 220 28% 6%;
