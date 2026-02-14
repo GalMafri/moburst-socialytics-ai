@@ -141,6 +141,7 @@ export default function ClientSetup() {
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["client", isNew ? data.id : id] });
       queryClient.invalidateQueries({ queryKey: ["sprout-profiles"] });
       toast({ title: "Saved", description: "Client configuration saved successfully." });
       if (isNew) navigate(`/clients/${data.id}/setup`, { replace: true });
