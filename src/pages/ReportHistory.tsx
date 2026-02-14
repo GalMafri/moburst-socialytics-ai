@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Eye, Loader2 } from "lucide-react";
+import { Eye, Loader2, ExternalLink } from "lucide-react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { ReportActions } from "@/components/reports/ReportActions";
 
@@ -57,6 +57,7 @@ export default function ReportHistory() {
                     <TableHead>Status</TableHead>
                     <TableHead>Period</TableHead>
                     <TableHead>Duration</TableHead>
+                    <TableHead>Gamma</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -83,6 +84,15 @@ export default function ReportHistory() {
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {r.duration_minutes ? `${r.duration_minutes}m` : "—"}
+                        </TableCell>
+                        <TableCell>
+                          {r.gamma_url ? (
+                            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
+                              <ExternalLink className="h-3.5 w-3.5" /> Gamma
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Coming soon</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-right flex items-center justify-end gap-1">
                           {r.status === "completed" && (
