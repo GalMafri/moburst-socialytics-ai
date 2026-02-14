@@ -29,9 +29,11 @@ import {
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { useState } from "react";
+import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 
 export default function ReportView() {
   const { id, reportId } = useParams();
+  useRealtimeReports(id);
 
   const { data: report, isLoading } = useQuery({
     queryKey: ["report", reportId],
@@ -532,7 +534,7 @@ function PostCard({ post }: { post: any }) {
   );
 }
 
-/* ─── Trends Section ─── */
+/* ─── Trends Section (Redesigned) ─── */
 function TrendsSection({
   title,
   analysis,
@@ -546,116 +548,208 @@ function TrendsSection({
 }) {
   if (!analysis && !posts?.length) return null;
   const validPosts = (posts || []).filter((p: any) => !p._empty && p.url);
+  const platformColor = getPlatformColor(platform);
 
   return (
-    <div className="space-y-4">
-      <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: getPlatformColor(platform) }}>
-        <PlatformIcon platform={platform} className="h-5 w-5" />
-        {title}
-      </h3>
-      {analysis && (
-        <Card>
-          <CardContent className="pt-5 space-y-5">
-            {analysis.overview && <p className="text-sm leading-relaxed">{analysis.overview}</p>}
+    <div className="space-y-6">
+      {/* Platform Header */}
+      <div className="flex items-center gap-3 pb-2 border-b">
+        <div
+          className="h-10 w-10 rounded-lg flex items-center justify-center"
+          style={{ backgroundColor: `${platformColor}15` }}
+        >
+          <PlatformIcon platform={platform} className="h-5 w-5" />
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold">{title}</h3>
+          {analysis?.overview && (
+            <p className="text-sm text-muted-foreground line-clamp-1">{analysis.overview}</p>
+          )}
+        </div>
+      </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {analysis.top_themes?.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">Top Themes</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {analysis.top_themes.map((t: string) => (
-                      <Badge key={t} variant="secondary">{t}</Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {analysis.top_hashtags?.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">Trending Hashtags</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {analysis.top_hashtags.map((h: string) => (
-                      <Badge key={h} variant="outline">#{h}</Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {analysis.successful_formats?.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">Successful Formats</p>
-                <ul className="space-y-1">
-                  {analysis.successful_formats.map((f: string, i: number) => (
-                    <li key={i} className="text-sm leading-relaxed text-muted-foreground">• {f}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {analysis.opportunities_for_client?.length > 0 && (
-              <div className="space-y-2 pt-3 border-t">
-                <p className="text-xs font-medium text-muted-foreground">Opportunities for Your Brand</p>
-                <ul className="space-y-2">
-                  {analysis.opportunities_for_client.map((o: string, i: number) => (
-                    <li key={i} className="flex gap-3 text-sm leading-relaxed">
-                      <span className="flex-shrink-0 h-5 w-5 rounded-full bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center mt-0.5">
-                        {i + 1}
-                      </span>
-                      <span>{o}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {analysis.key_takeaways?.length > 0 && (
-              <div className="space-y-2 pt-3 border-t">
-                <p className="text-xs font-medium text-muted-foreground">Key Takeaways</p>
-                <ul className="space-y-2">
-                  {analysis.key_takeaways.map((t: string, i: number) => (
-                    <li key={i} className="flex gap-3 text-sm leading-relaxed">
-                      <span className="flex-shrink-0 h-5 w-5 rounded-full bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center mt-0.5">
-                        {i + 1}
-                      </span>
-                      <span>{t}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+      {/* Overview */}
+      {analysis?.overview && (
+        <Card className="border-l-4" style={{ borderLeftColor: platformColor }}>
+          <CardContent className="pt-5">
+            <p className="text-sm leading-relaxed">{analysis.overview}</p>
           </CardContent>
         </Card>
       )}
-      {validPosts.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {validPosts.slice(0, 4).map((post: any, i: number) => (
-            <Card key={i}>
-              <CardContent className="pt-5 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">@{post.author}</span>
-                  <Badge variant="outline">Score: {(post.engagement_score ?? 0).toLocaleString()}</Badge>
+
+      {/* Themes & Hashtags Row */}
+      {(analysis?.top_themes?.length > 0 || analysis?.top_hashtags?.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {analysis.top_themes?.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4" /> Top Themes
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap gap-2">
+                  {analysis.top_themes.map((t: string, i: number) => (
+                    <Badge
+                      key={t}
+                      variant="secondary"
+                      className="px-3 py-1 text-sm"
+                    >
+                      <span className="mr-1.5 text-xs font-bold text-muted-foreground">{i + 1}</span>
+                      {t}
+                    </Badge>
+                  ))}
                 </div>
-                <p className="text-sm leading-relaxed line-clamp-3">{post.caption}</p>
-                {post.hashtags?.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {post.hashtags.slice(0, 5).map((h: string) => (
-                      <Badge key={h} variant="outline" className="text-xs">#{h}</Badge>
-                    ))}
-                  </div>
-                )}
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  {post.views != null && <span>{post.views.toLocaleString()} views</span>}
-                  <span>{(post.likes ?? 0).toLocaleString()} likes</span>
-                  <span>{(post.comments ?? 0).toLocaleString()} comments</span>
-                </div>
-                {post.url && (
-                  <a href={post.url} target="_blank" rel="noopener" className="text-xs text-primary hover:underline flex items-center gap-1">
-                    Watch <ExternalLink className="h-3 w-3" />
-                  </a>
-                )}
               </CardContent>
             </Card>
-          ))}
+          )}
+          {analysis.top_hashtags?.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="text-base">#</span> Trending Hashtags
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap gap-2">
+                  {analysis.top_hashtags.map((h: string) => (
+                    <Badge key={h} variant="outline" className="px-3 py-1 text-sm font-mono">
+                      #{h}
+                    </Badge>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* Successful Formats */}
+      {analysis?.successful_formats?.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Sparkles className="h-4 w-4" /> What's Working
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {analysis.successful_formats.map((f: string, i: number) => (
+                <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                  <span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center mt-0.5">
+                    {i + 1}
+                  </span>
+                  <p className="text-sm leading-relaxed">{f}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Opportunities */}
+      {analysis?.opportunities_for_client?.length > 0 && (
+        <Card className="bg-primary/5 border-primary/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Target className="h-4 w-4 text-primary" /> Opportunities for Your Brand
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {analysis.opportunities_for_client.map((o: string, i: number) => (
+                <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-background border">
+                  <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center mt-0.5">
+                    {i + 1}
+                  </span>
+                  <p className="text-sm leading-relaxed pt-1">{o}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Key Takeaways */}
+      {analysis?.key_takeaways?.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Lightbulb className="h-4 w-4 text-warning" /> Key Takeaways
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {analysis.key_takeaways.map((t: string, i: number) => (
+                <div key={i} className="flex items-start gap-3 p-2">
+                  <span className="flex-shrink-0 mt-0.5 text-warning">✦</span>
+                  <p className="text-sm leading-relaxed">{t}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Trending Posts Grid */}
+      {validPosts.length > 0 && (
+        <div className="space-y-4">
+          <h4 className="text-sm font-medium text-muted-foreground">Trending Posts</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {validPosts.slice(0, 6).map((post: any, i: number) => (
+              <Card key={i} className="overflow-hidden">
+                <CardContent className="pt-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold"
+                        style={{ backgroundColor: `${platformColor}15`, color: platformColor }}
+                      >
+                        {(post.author || "?")[0]?.toUpperCase()}
+                      </div>
+                      <span className="text-sm font-medium">@{post.author}</span>
+                    </div>
+                    {post.engagement_score != null && (
+                      <Badge variant="secondary" className="text-xs">
+                        Score: {post.engagement_score.toLocaleString()}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm leading-relaxed line-clamp-3">{post.caption}</p>
+                  {post.hashtags?.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {post.hashtags.slice(0, 5).map((h: string) => (
+                        <span key={h} className="text-xs text-primary font-mono">#{h}</span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground pt-2 border-t">
+                    {post.views != null && (
+                      <span className="flex items-center gap-1">
+                        <Eye className="h-3 w-3" /> {post.views.toLocaleString()}
+                      </span>
+                    )}
+                    <span className="flex items-center gap-1">
+                      <Heart className="h-3 w-3" /> {(post.likes ?? 0).toLocaleString()}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <MessageCircle className="h-3 w-3" /> {(post.comments ?? 0).toLocaleString()}
+                    </span>
+                    {post.url && (
+                      <a
+                        href={post.url}
+                        target="_blank"
+                        rel="noopener"
+                        className="ml-auto text-primary hover:underline flex items-center gap-1"
+                      >
+                        View <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       )}
     </div>

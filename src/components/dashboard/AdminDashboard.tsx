@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,11 +7,23 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Plus, Search, Play, Calendar } from "lucide-react";
 import { PlatformBadge } from "@/lib/platform-config";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export function AdminDashboard() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+
+  // Realtime: listen for any report changes to refresh dashboard
+  useEffect(() => {
+    const channel = supabase
+      .channel("admin-reports")
+      .on("postgres_changes", { event: "*", schema: "public", table: "reports" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["clients"] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
 
   const { data: clients, isLoading } = useQuery({
     queryKey: ["clients"],

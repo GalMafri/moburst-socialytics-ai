@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Play, Loader2, CheckCircle2, XCircle, Clock, RefreshCw } from "lucide-react";
+import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 
 const STEPS = [
   "Fetching Sprout Social performance data...",
@@ -34,6 +35,9 @@ export default function RunAnalysis() {
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollStartRef = useRef<number>(0);
+
+  // Subscribe to realtime report updates
+  useRealtimeReports(id);
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -67,7 +71,7 @@ export default function RunAnalysis() {
         .select("*")
         .eq("client_id", id!)
         .order("created_at", { ascending: false })
-        .limit(5);
+        .limit(10);
       if (error) throw error;
       return data;
     },
@@ -97,6 +101,23 @@ export default function RunAnalysis() {
       timeoutRef.current = null;
     }
   }, []);
+
+  // Watch for the active report to complete via realtime-triggered refetch
+  useEffect(() => {
+    if (!reportId || !running || !pastReports) return;
+    const activeReport = pastReports.find((r: any) => r.id === reportId);
+    if (activeReport?.status === "completed") {
+      stopAllTimers();
+      setCurrentStep(STEPS.length);
+      setRunning(false);
+      toast({ title: "Analysis complete!", description: "Your report is ready." });
+      setTimeout(() => navigate(`/clients/${id}/reports/${reportId}`), 1500);
+    } else if (activeReport?.status === "failed") {
+      stopAllTimers();
+      setRunning(false);
+      setError("Analysis failed on the server. Check workflow logs.");
+    }
+  }, [pastReports, reportId, running, id, navigate, toast, stopAllTimers]);
 
   const pollForCompletion = useCallback(
     (rId: string) => {

@@ -6,10 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Eye } from "lucide-react";
+import { Eye, Loader2 } from "lucide-react";
+import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 
 export default function ReportHistory() {
   const { id } = useParams();
+  useRealtimeReports(id);
   const navigate = useNavigate();
 
   const { data: client } = useQuery({
@@ -60,12 +62,16 @@ export default function ReportHistory() {
                 <TableBody>
                   {reports.map((r: any) => {
                     const rd = r.report_data as any;
-                    const impChange = rd?.metrics_summary?.impressions_change;
+                    const isRunning = r.status === "running";
                     return (
-                      <TableRow key={r.id}>
+                      <TableRow key={r.id} className={isRunning ? "animate-pulse" : ""}>
                         <TableCell className="text-sm">{new Date(r.created_at).toLocaleDateString()}</TableCell>
                         <TableCell>
-                          <Badge variant={r.status === "completed" ? "default" : r.status === "running" ? "secondary" : "destructive"}>
+                          <Badge
+                            variant={r.status === "completed" ? "default" : r.status === "running" ? "secondary" : "destructive"}
+                            className="gap-1"
+                          >
+                            {isRunning && <Loader2 className="h-3 w-3 animate-spin" />}
                             {r.status}
                           </Badge>
                         </TableCell>
