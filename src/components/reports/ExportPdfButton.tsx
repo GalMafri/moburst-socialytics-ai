@@ -62,7 +62,7 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
         }
       });
 
-      // Remove the Gamma banner for PDF (it's just a placeholder)
+      // Remove the presentation banner for PDF (it's just a placeholder)
       const cards = content.querySelectorAll(".border-dashed");
       cards.forEach((card) => card.remove());
 

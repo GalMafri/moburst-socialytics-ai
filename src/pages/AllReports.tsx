@@ -45,7 +45,7 @@ export default function AllReports() {
                     <TableHead>Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Period</TableHead>
-                    <TableHead>Gamma</TableHead>
+                    <TableHead>Presentation</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -65,7 +65,7 @@ export default function AllReports() {
                       <TableCell>
                         {r.gamma_url ? (
                           <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
-                            <ExternalLink className="h-3.5 w-3.5" /> Gamma
+                            <ExternalLink className="h-3.5 w-3.5" /> View
                           </Button>
                         ) : (
                           <span className="text-xs text-muted-foreground">Coming soon</span>
