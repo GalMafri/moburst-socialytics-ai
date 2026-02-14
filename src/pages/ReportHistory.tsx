@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Eye, Loader2 } from "lucide-react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
+import { ReportActions } from "@/components/reports/ReportActions";
 
 export default function ReportHistory() {
   const { id } = useParams();
@@ -83,12 +84,13 @@ export default function ReportHistory() {
                         <TableCell className="text-sm text-muted-foreground">
                           {r.duration_minutes ? `${r.duration_minutes}m` : "—"}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right flex items-center justify-end gap-1">
                           {r.status === "completed" && (
                             <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}>
                               <Eye className="h-4 w-4 mr-1" /> View
                             </Button>
                           )}
+                          <ReportActions report={r} />
                         </TableCell>
                       </TableRow>
                     );

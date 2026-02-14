@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Eye } from "lucide-react";
+import { Eye, ExternalLink } from "lucide-react";
+import { ReportActions } from "@/components/reports/ReportActions";
 
 export default function AllReports() {
   const navigate = useNavigate();
@@ -44,6 +45,7 @@ export default function AllReports() {
                     <TableHead>Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Period</TableHead>
+                    <TableHead>Gamma</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -60,12 +62,20 @@ export default function AllReports() {
                       <TableCell className="text-sm text-muted-foreground">
                         {r.date_range_start && r.date_range_end ? `${r.date_range_start} — ${r.date_range_end}` : "—"}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell>
+                        {r.gamma_url && (
+                          <Button size="sm" variant="ghost" onClick={() => window.open(r.gamma_url, "_blank")}>
+                            <ExternalLink className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right flex items-center justify-end gap-1">
                         {r.status === "completed" && (
                           <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.clients?.id}/reports/${r.id}`)}>
                             <Eye className="h-4 w-4 mr-1" /> View
                           </Button>
                         )}
+                        <ReportActions report={r} />
                       </TableCell>
                     </TableRow>
                   ))}

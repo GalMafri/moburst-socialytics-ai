@@ -28,11 +28,14 @@ import {
 } from "lucide-react";
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
+import { ReportActions } from "@/components/reports/ReportActions";
+import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 
 export default function ReportView() {
   const { id, reportId } = useParams();
+  const reportContentRef = useRef<HTMLDivElement>(null);
   useRealtimeReports(id);
 
   const { data: report, isLoading } = useQuery({
@@ -86,7 +89,7 @@ export default function ReportView() {
 
   return (
     <AppLayout title={`Report: ${clientName}`}>
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6" ref={reportContentRef}>
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
@@ -96,15 +99,19 @@ export default function ReportView() {
               {" · "}Generated {new Date(report.created_at).toLocaleDateString()}
             </p>
           </div>
-          {(report.gamma_url || rd?.gamma_url) && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.open(report.gamma_url || rd?.gamma_url, "_blank")}
-            >
-              <ExternalLink className="h-4 w-4 mr-1.5" /> Gamma Deck
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            <ExportPdfButton contentRef={reportContentRef} filename={`${clientName}-report-${new Date(report.created_at).toISOString().slice(0, 10)}`} />
+            {(report.gamma_url || rd?.gamma_url) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(report.gamma_url || rd?.gamma_url, "_blank")}
+              >
+                <ExternalLink className="h-4 w-4 mr-1.5" /> Gamma Deck
+              </Button>
+            )}
+            <ReportActions report={report} />
+          </div>
         </div>
 
         <Tabs defaultValue="overview" className="space-y-6">
