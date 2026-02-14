@@ -63,10 +63,12 @@ export default function AllReports() {
                         {r.date_range_start && r.date_range_end ? `${r.date_range_start} — ${r.date_range_end}` : "—"}
                       </TableCell>
                       <TableCell>
-                        {r.gamma_url && (
-                          <Button size="sm" variant="ghost" onClick={() => window.open(r.gamma_url, "_blank")}>
-                            <ExternalLink className="h-4 w-4" />
+                        {r.gamma_url ? (
+                          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
+                            <ExternalLink className="h-3.5 w-3.5" /> Gamma
                           </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right flex items-center justify-end gap-1">
