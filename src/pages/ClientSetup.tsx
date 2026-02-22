@@ -246,11 +246,11 @@ export default function ClientSetup() {
                   <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g., Acme Corp" />
                 </div>
                 <div className="space-y-2">
-                  <Label>Brand Notes</Label>
-                  <Textarea value={form.brand_notes} onChange={(e) => setForm((f) => ({ ...f, brand_notes: e.target.value }))} placeholder="Brand voice, positioning, key messaging..." rows={3} />
-                </div>
-                <div className="space-y-2">
                   <Label>Primary Platforms</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Select platforms the client wants to create content for. These don't need to match their existing Sprout Social profiles — 
+                    you can include platforms they want to expand into. The AI will generate recommendations and calendar posts for these platforms.
+                  </p>
                   <div className="flex flex-wrap gap-2">
                     {PLATFORMS.map((p) => (
                       <Badge
@@ -338,9 +338,19 @@ export default function ClientSetup() {
                   </div>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <Label>Social Keywords</Label>
-                  <p className="text-xs text-muted-foreground">Multi-word phrases for TikTok/Instagram trend search. e.g., "AI content strategy", "performance marketing tips"</p>
+                  <p className="text-xs text-muted-foreground">
+                    Enter keyword phrases used to search TikTok and Instagram for relevant trends. 
+                    Add each phrase individually by typing it and pressing Enter or clicking +.
+                  </p>
+                  <div className="bg-muted/50 p-3 rounded-md text-xs text-muted-foreground space-y-1">
+                    <p className="font-medium text-foreground">How to add keywords:</p>
+                    <p>1. Type a single keyword phrase (e.g., "AI content strategy")</p>
+                    <p>2. Press <kbd className="px-1.5 py-0.5 rounded border bg-background text-foreground">Enter</kbd> or click the <strong>+</strong> button</p>
+                    <p>3. Do NOT use commas to separate multiple keywords — add them one at a time</p>
+                    <p>4. Multi-word phrases work great: "performance marketing tips", "social media automation"</p>
+                  </div>
                   <div className="flex flex-wrap gap-2 mb-2">
                     {form.social_keywords.map((k) => (
                       <Badge key={k} variant="outline" className="gap-1">
@@ -350,8 +360,32 @@ export default function ClientSetup() {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <Input value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)} placeholder="Add keyword phrase" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())} />
-                    <Button variant="outline" size="sm" onClick={addKeyword}><Plus className="h-4 w-4" /></Button>
+                    <Input
+                      value={newKeyword}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val.includes(",")) {
+                          toast({
+                            title: "One keyword at a time",
+                            description: "Please add keywords individually without commas. Press Enter after each one.",
+                            variant: "destructive",
+                          });
+                          setNewKeyword(val.replace(/,/g, ""));
+                          return;
+                        }
+                        setNewKeyword(val);
+                      }}
+                      placeholder="Type a keyword phrase and press Enter"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addKeyword();
+                        }
+                      }}
+                    />
+                    <Button variant="outline" size="sm" onClick={addKeyword}>
+                      <Plus className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
               </CardContent>
@@ -376,8 +410,19 @@ export default function ClientSetup() {
                 </div>
                 <div className="space-y-2">
                   <Label>Google Doc ID (optional)</Label>
-                  <Input value={form.brief_file_id} onChange={(e) => setForm((f) => ({ ...f, brief_file_id: e.target.value }))} placeholder="Google Drive file ID" />
-                  <p className="text-xs text-muted-foreground">If provided, the analysis will use the Google Doc content instead of the text above</p>
+                  <Input
+                    value={form.brief_file_id}
+                    onChange={(e) => setForm((f) => ({ ...f, brief_file_id: e.target.value }))}
+                    placeholder="e.g., 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+                  />
+                  <div className="bg-muted/50 p-3 rounded-md text-xs text-muted-foreground space-y-1">
+                    <p className="font-medium text-foreground">How to find your Google Doc ID:</p>
+                    <p>1. Open the Google Doc in your browser</p>
+                    <p>2. Look at the URL: <span className="font-mono text-foreground">https://docs.google.com/document/d/<strong>YOUR_FILE_ID</strong>/edit</span></p>
+                    <p>3. Copy the long string between <span className="font-mono">/d/</span> and <span className="font-mono">/edit</span></p>
+                    <p>4. Example: from <span className="font-mono break-all">https://docs.google.com/document/d/1BxiMVs0XRA5nFMdKvBdBZjg/edit</span>, the ID is <span className="font-mono font-medium text-foreground">1BxiMVs0XRA5nFMdKvBdBZjg</span></p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">If provided, the analysis will use the Google Doc content as the client brief instead of the text above</p>
                 </div>
               </CardContent>
             </Card>
