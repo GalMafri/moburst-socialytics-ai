@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 
 // Official brand colors for social platforms
 export const PLATFORM_COLORS: Record<string, string> = {
@@ -130,9 +130,20 @@ export function PlatformBadge({
   className?: string;
   size?: "default" | "sm";
 }) {
-  const isDark = typeof window !== "undefined" && document.documentElement.classList.contains("dark");
+  const [isDark, setIsDark] = useState(
+    typeof window !== "undefined" && document.documentElement.classList.contains("dark")
+  );
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark(document.documentElement.classList.contains("dark"));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
   const color = getPlatformColor(platform, isDark);
-  const textSize = size === "sm" ? "text-xs" : "text-xs";
+  const textSize = size === "sm" ? "text-xs" : "text-sm";
   const iconSize = size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5";
 
   return (
