@@ -31,7 +31,8 @@ export function AdminDashboard() {
       const { data, error } = await supabase
         .from("clients")
         .select("*, reports(id, status, created_at)")
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .order("created_at", { referencedTable: "reports", ascending: false });
       if (error) throw error;
       return data;
     },
