@@ -304,6 +304,13 @@ export default function ReportView() {
                 </div>
               </div>
             )}
+            {/* Visual Prompts */}
+            {(aiAnalysis?.content_recommendations?.length > 0 || contentCalendar.length > 0) && (
+              <VisualPrompts
+                recommendations={aiAnalysis?.content_recommendations || []}
+                calendar={contentCalendar}
+              />
+            )}
           </TabsContent>
 
           {/* ── TRENDS TAB ── */}
@@ -399,6 +406,101 @@ function ContentRecommendations({ recommendations }: { recommendations: any[] })
                   💡 {rec.why_this}
                 </div>
               )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Visual Prompts Section ─── */
+function VisualPrompts({ recommendations, calendar }: { recommendations: any[]; calendar: any[] }) {
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const handleCopy = (prompt: string, id: string) => {
+    navigator.clipboard.writeText(prompt);
+    setCopied(id);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const allPrompts: { source: string; platform: string; format: string; prompt: string; id: string }[] = [];
+
+  recommendations.forEach((rec: any, i: number) => {
+    if (rec.ai_visual_prompt) {
+      allPrompts.push({
+        source: 'Recommendation',
+        platform: rec.platform,
+        format: rec.format,
+        prompt: rec.ai_visual_prompt,
+        id: `rec-${i}`,
+      });
+    } else if (rec.visual_direction) {
+      allPrompts.push({
+        source: 'Recommendation',
+        platform: rec.platform,
+        format: rec.format,
+        prompt: `Create a ${rec.format?.toLowerCase() || 'social media'} visual for ${rec.platform}: ${rec.visual_direction}. Style: professional, on-brand, high quality. Aspect ratio: ${rec.platform === 'Instagram' ? '1:1 or 4:5' : rec.platform === 'TikTok' ? '9:16 vertical' : rec.platform === 'LinkedIn' ? '1.91:1 landscape' : '16:9'}.`,
+        id: `rec-${i}`,
+      });
+    }
+  });
+
+  (calendar || []).forEach((day: any, dayIdx: number) => {
+    (day.posts || []).forEach((post: any, postIdx: number) => {
+      if (post.ai_visual_prompt) {
+        allPrompts.push({
+          source: `${day.day} - Calendar`,
+          platform: post.platform,
+          format: post.format,
+          prompt: post.ai_visual_prompt,
+          id: `cal-${dayIdx}-${postIdx}`,
+        });
+      } else if (post.visual_direction) {
+        allPrompts.push({
+          source: `${day.day} - Calendar`,
+          platform: post.platform,
+          format: post.format,
+          prompt: `Create a ${post.format?.toLowerCase() || 'social media'} visual for ${post.platform}: ${post.visual_direction}. Style: professional, on-brand. Aspect ratio: ${post.platform === 'Instagram' ? '1:1 or 4:5' : post.platform === 'TikTok' ? '9:16 vertical' : post.platform === 'LinkedIn' ? '1.91:1 landscape' : '16:9'}.`,
+          id: `cal-${dayIdx}-${postIdx}`,
+        });
+      }
+    });
+  });
+
+  if (allPrompts.length === 0) return null;
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-base font-semibold flex items-center gap-2">
+        <Sparkles className="h-4 w-4" /> AI Visual Prompts
+      </h3>
+      <p className="text-sm text-muted-foreground">
+        Copy these prompts directly into Midjourney, DALL-E, Canva AI, or any AI image generator to create on-brand visuals for each content piece.
+      </p>
+      <div className="space-y-3">
+        {allPrompts.map((item) => (
+          <Card key={item.id}>
+            <CardContent className="pt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <PlatformBadge platform={item.platform} size="sm" />
+                  <Badge variant="outline">{item.format}</Badge>
+                  <Badge variant="secondary" className="text-xs">{item.source}</Badge>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleCopy(item.prompt, item.id)}
+                  className="h-7 px-2 shrink-0"
+                >
+                  <Copy className="h-3.5 w-3.5 mr-1" />
+                  {copied === item.id ? "Copied!" : "Copy Prompt"}
+                </Button>
+              </div>
+              <div className="bg-muted/50 p-3 rounded-md text-sm leading-relaxed font-mono">
+                {item.prompt}
+              </div>
             </CardContent>
           </Card>
         ))}
