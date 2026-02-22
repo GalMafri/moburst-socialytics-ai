@@ -17,44 +17,64 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
     setExporting(true);
 
     try {
-      // Use the browser's native print functionality for the best layout
       const printWindow = window.open("", "_blank");
       if (!printWindow) {
         throw new Error("Pop-up blocked. Please allow pop-ups and try again.");
       }
 
-      // Get all stylesheets from the current page
+      // Get all stylesheets
       const styleSheets = Array.from(document.styleSheets);
       let cssText = "";
-
       for (const sheet of styleSheets) {
         try {
           const rules = Array.from(sheet.cssRules || []);
           cssText += rules.map((r) => r.cssText).join("\n");
         } catch {
-          // Cross-origin stylesheet, try to link it instead
-          if (sheet.href) {
-            cssText += `@import url("${sheet.href}");\n`;
-          }
+          if (sheet.href) cssText += `@import url("${sheet.href}");\n`;
         }
       }
 
-      // Clone content
+      // CRITICAL FIX: Before cloning, temporarily activate ALL tab panels
+      // Find all TabsContent containers inside the ref and make them visible
+      const tabPanels = contentRef.current.querySelectorAll('[role="tabpanel"]');
+      const originalStates: { el: Element; state: string | null; display: string }[] = [];
+
+      tabPanels.forEach((panel) => {
+        originalStates.push({
+          el: panel,
+          state: panel.getAttribute("data-state"),
+          display: (panel as HTMLElement).style.display,
+        });
+        panel.setAttribute("data-state", "active");
+        (panel as HTMLElement).style.display = "block";
+      });
+
+      // Also handle hidden attribute that Radix uses
+      const hiddenPanels = contentRef.current.querySelectorAll("[hidden]");
+      const originalHidden: Element[] = [];
+      hiddenPanels.forEach((el) => {
+        originalHidden.push(el);
+        el.removeAttribute("hidden");
+      });
+
+      // Clone content with all tabs now visible
       const content = contentRef.current.cloneNode(true) as HTMLElement;
 
-      // Remove interactive buttons (Export PDF, edit/delete menus)
+      // Restore original state immediately
+      originalStates.forEach(({ el, state, display }) => {
+        if (state !== null) el.setAttribute("data-state", state);
+        (el as HTMLElement).style.display = display;
+      });
+      originalHidden.forEach((el) => el.setAttribute("hidden", ""));
+
+      // Remove interactive buttons
       content.querySelectorAll("button").forEach((btn) => {
         const text = btn.textContent?.toLowerCase() || "";
-        if (
-          text.includes("export") ||
-          text.includes("copy") ||
-          text.includes("pending")
-        ) {
+        if (text.includes("export") || text.includes("copy") || text.includes("pending")) {
           btn.remove();
         }
       });
 
-      // Remove the three-dot menu buttons
       content.querySelectorAll('[data-slot="dropdown-menu"]').forEach((el) => el.remove());
       content.querySelectorAll("button").forEach((btn) => {
         if (btn.querySelector("svg") && !btn.textContent?.trim()) {
@@ -62,7 +82,7 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
         }
       });
 
-      // Remove the presentation banner for PDF (it's just a placeholder)
+      // Remove presentation banner placeholder
       const cards = content.querySelectorAll(".border-dashed");
       cards.forEach((card) => card.remove());
 
@@ -95,9 +115,7 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       --warning: 38 92% 50%;
     }
 
-    * {
-      color-scheme: light !important;
-    }
+    * { color-scheme: light !important; }
 
     body {
       background: white !important;
@@ -110,7 +128,6 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       print-color-adjust: exact;
     }
 
-    /* Ensure cards have visible borders */
     [data-slot="card"], .rounded-lg.border {
       border: 1px solid hsl(0 0% 89.8%) !important;
       background: white !important;
@@ -118,39 +135,18 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       margin-bottom: 12px;
     }
 
-    /* Grid layouts */
-    .grid {
-      gap: 12px !important;
-    }
-
-    /* Space between sections */
+    .grid { gap: 12px !important; }
     .space-y-6 > * + * { margin-top: 24px !important; }
     .space-y-8 > * + * { margin-top: 32px !important; }
     .space-y-4 > * + * { margin-top: 16px !important; }
     .space-y-3 > * + * { margin-top: 12px !important; }
 
-    /* Fix text colors */
-    .text-muted-foreground {
-      color: hsl(0 0% 45.1%) !important;
-    }
+    .text-muted-foreground { color: hsl(0 0% 45.1%) !important; }
+    .text-foreground { color: hsl(0 0% 3.9%) !important; }
+    .text-destructive { color: hsl(0 84.2% 60.2%) !important; }
+    .text-success { color: hsl(142 76% 36%) !important; }
+    .text-warning { color: hsl(38 92% 50%) !important; }
 
-    .text-foreground {
-      color: hsl(0 0% 3.9%) !important;
-    }
-
-    .text-destructive {
-      color: hsl(0 84.2% 60.2%) !important;
-    }
-
-    .text-success {
-      color: hsl(142 76% 36%) !important;
-    }
-
-    .text-warning {
-      color: hsl(38 92% 50%) !important;
-    }
-
-    /* Badge styling */
     [data-slot="badge"] {
       display: inline-flex !important;
       border: 1px solid hsl(0 0% 89.8%) !important;
@@ -161,32 +157,32 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       color: hsl(0 0% 9%) !important;
     }
 
-    /* Recharts fix */
-    .recharts-wrapper {
-      break-inside: avoid;
-    }
+    .recharts-wrapper { break-inside: avoid; }
 
-    /* Hide tab triggers in print - show content inline */
-    [role="tablist"] {
-      display: none !important;
+    /* CRITICAL: Hide tab navigation, show ALL tab content */
+    [role="tablist"] { display: none !important; }
+    [role="tabpanel"] {
+      display: block !important;
+      opacity: 1 !important;
+      position: static !important;
+      pointer-events: auto !important;
     }
-
     [role="tabpanel"][data-state="inactive"] {
       display: block !important;
     }
-
-    [role="tabpanel"] {
+    [role="tabpanel"][hidden] {
       display: block !important;
     }
 
-    /* Page break control */
-    h2, h3 {
-      break-after: avoid;
+    /* Section separators for merged tab content */
+    [role="tabpanel"] + [role="tabpanel"] {
+      border-top: 2px solid hsl(0 0% 89.8%);
+      padding-top: 24px;
+      margin-top: 24px;
     }
 
-    .animate-pulse {
-      animation: none !important;
-    }
+    h2, h3 { break-after: avoid; }
+    .animate-pulse { animation: none !important; }
 
     @media print {
       body { padding: 0; }
@@ -202,11 +198,9 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       printWindow.document.write(html);
       printWindow.document.close();
 
-      // Wait for content and styles to load, then trigger print
       printWindow.onload = () => {
         setTimeout(() => {
           printWindow.print();
-          // Close after a delay to allow print dialog
           setTimeout(() => printWindow.close(), 1000);
         }, 500);
       };
