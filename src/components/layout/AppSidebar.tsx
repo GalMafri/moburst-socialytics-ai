@@ -12,7 +12,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { BarChart3, Home, Users, FileText, Settings, LogOut } from "lucide-react";
+import { BarChart3, Home, Users, FileText, Settings, LogOut, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -24,6 +24,7 @@ export function AppSidebar() {
   const navItems = [
     { icon: Home, label: "Dashboard", href: "/" },
     { icon: FileText, label: "Reports", href: "/reports", adminOnly: false },
+    { icon: TrendingUp, label: "Analytics", href: "/analytics", adminOnly: false },
     ...(isAdmin ? [{ icon: Settings, label: "Settings", href: "/settings", adminOnly: true }] : []),
   ];
 
@@ -52,7 +53,7 @@ export function AppSidebar() {
               {navItems.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
-                    isActive={location.pathname === item.href}
+                    isActive={item.href === "/" ? location.pathname === "/" : location.pathname.startsWith(item.href)}
                     onClick={() => navigate(item.href)}
                   >
                     <item.icon className="h-4 w-4" />
