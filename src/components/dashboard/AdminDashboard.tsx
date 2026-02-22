@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, Play, Calendar } from "lucide-react";
+import { Plus, Search, Play, Calendar, BarChart3 } from "lucide-react";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useState, useEffect } from "react";
 
@@ -110,15 +110,27 @@ export function AdminDashboard() {
                   </div>
                   <div className="flex items-center justify-between pt-2">
                     <span className="text-xs text-muted-foreground">{reportCount} reports</span>
-                    <Button
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/clients/${client.id}/analyze`);
-                      }}
-                    >
-                      <Play className="h-3 w-3 mr-1" /> Run Report
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/clients/${client.id}/analytics`);
+                        }}
+                      >
+                        <BarChart3 className="h-3 w-3 mr-1" /> Analytics
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/clients/${client.id}/analyze`);
+                        }}
+                      >
+                        <Play className="h-3 w-3 mr-1" /> Run Report
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
