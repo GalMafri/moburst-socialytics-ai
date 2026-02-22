@@ -151,6 +151,56 @@ export type Database = {
         }
         Relationships: []
       }
+      report_schedules: {
+        Row: {
+          analysis_date_range_days: number | null
+          client_id: string
+          created_at: string | null
+          created_by: string | null
+          frequency: string
+          id: string
+          is_active: boolean | null
+          last_run_at: string | null
+          next_run_at: string | null
+          trends_date_range_days: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          analysis_date_range_days?: number | null
+          client_id: string
+          created_at?: string | null
+          created_by?: string | null
+          frequency?: string
+          id?: string
+          is_active?: boolean | null
+          last_run_at?: string | null
+          next_run_at?: string | null
+          trends_date_range_days?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          analysis_date_range_days?: number | null
+          client_id?: string
+          created_at?: string | null
+          created_by?: string | null
+          frequency?: string
+          id?: string
+          is_active?: boolean | null
+          last_run_at?: string | null
+          next_run_at?: string | null
+          trends_date_range_days?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_schedules_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reports: {
         Row: {
           client_id: string

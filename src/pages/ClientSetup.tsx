@@ -50,6 +50,10 @@ export default function ClientSetup() {
     brand_notes: "",
     brief_text: "",
     brief_file_id: "",
+    schedule_frequency: "monthly",
+    schedule_active: true,
+    trends_date_range: 30,
+    analysis_date_range: 30,
   });
   const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
   const [newKeyword, setNewKeyword] = useState("");
@@ -91,14 +95,19 @@ export default function ClientSetup() {
         brand_notes: client.brand_notes || "",
         brief_text: client.brief_text || "",
         brief_file_id: client.brief_file_id || "",
+        schedule_frequency: "monthly",
+        schedule_active: true,
+        trends_date_range: 30,
+        analysis_date_range: 30,
       });
     }
   }, [client]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const { schedule_frequency, schedule_active, trends_date_range, analysis_date_range, ...clientFields } = form;
       const payload = {
-        ...form,
+        ...clientFields,
         sprout_customer_id: "1676448",
         content_pillars: form.content_pillars as any,
       };
@@ -120,11 +129,22 @@ export default function ClientSetup() {
         clientId = id!;
       }
 
+      // Upsert report schedule
+      const { error: schedError } = await supabase
+        .from("report_schedules")
+        .upsert({
+          client_id: clientId,
+          frequency: schedule_frequency,
+          is_active: schedule_active,
+          trends_date_range_days: trends_date_range,
+          analysis_date_range_days: analysis_date_range,
+          created_by: user!.id,
+        } as any, { onConflict: "client_id" });
+      if (schedError) console.warn("Schedule save error:", schedError.message);
+
       // Save selected Sprout profiles
       if (selectedSproutProfiles.length > 0) {
-        // Remove old profiles
         await supabase.from("sprout_profiles").delete().eq("client_id", clientId);
-        // Insert selected
         const inserts = selectedSproutProfiles.map((p) => ({
           client_id: clientId,
           sprout_profile_id: p.id,
@@ -207,11 +227,12 @@ export default function ClientSetup() {
         </div>
 
         <Tabs defaultValue="info">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="info">Client Info</TabsTrigger>
             <TabsTrigger value="sprout">Sprout Social</TabsTrigger>
             <TabsTrigger value="strategy">Content Strategy</TabsTrigger>
             <TabsTrigger value="brief">Brief</TabsTrigger>
+            <TabsTrigger value="schedule">Schedule</TabsTrigger>
           </TabsList>
 
           <TabsContent value="info" className="space-y-4 mt-4">
@@ -358,6 +379,66 @@ export default function ClientSetup() {
                   <Input value={form.brief_file_id} onChange={(e) => setForm((f) => ({ ...f, brief_file_id: e.target.value }))} placeholder="Google Drive file ID" />
                   <p className="text-xs text-muted-foreground">If provided, the analysis will use the Google Doc content instead of the text above</p>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+          <TabsContent value="schedule" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Report Schedule</CardTitle>
+                <CardDescription>Set up automatic report generation on a recurring basis. Monthly is the default.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Frequency</Label>
+                  <Select
+                    value={form.schedule_frequency || "monthly"}
+                    onValueChange={(v) => setForm((f) => ({ ...f, schedule_frequency: v }))}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="bi-weekly">Bi-Weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly (Default)</SelectItem>
+                      <SelectItem value="quarterly">Quarterly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Trends Date Range (days)</Label>
+                    <Input
+                      type="number"
+                      value={form.trends_date_range || 30}
+                      onChange={(e) => setForm((f) => ({ ...f, trends_date_range: parseInt(e.target.value) || 30 }))}
+                      min={7}
+                      max={90}
+                    />
+                    <p className="text-xs text-muted-foreground">How far back to look for TikTok/IG trends</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Analysis Date Range (days)</Label>
+                    <Input
+                      type="number"
+                      value={form.analysis_date_range || 30}
+                      onChange={(e) => setForm((f) => ({ ...f, analysis_date_range: parseInt(e.target.value) || 30 }))}
+                      min={7}
+                      max={90}
+                    />
+                    <p className="text-xs text-muted-foreground">Sprout Social performance analysis window</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 pt-2">
+                  <Checkbox
+                    checked={form.schedule_active !== false}
+                    onCheckedChange={(v) => setForm((f) => ({ ...f, schedule_active: !!v }))}
+                  />
+                  <Label className="font-normal">Enable automatic scheduled reports</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Note: Scheduled reports require an n8n cron trigger or external scheduler to poll for pending schedules.
+                  Save the client configuration first, then set up a cron workflow in n8n that checks for clients with active schedules.
+                </p>
               </CardContent>
             </Card>
           </TabsContent>
