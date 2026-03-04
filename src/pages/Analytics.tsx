@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useMemo, useState } from "react";
-import { ArrowLeft, TrendingUp, TrendingDown, Users, Heart, Eye, BarChart3, Lightbulb } from "lucide-react";
+import { ArrowLeft, TrendingUp, TrendingDown, Users, Heart, Eye, BarChart3, Lightbulb, MousePointerClick, Play } from "lucide-react";
 import {
   LineChart,
   Line,
@@ -62,39 +62,84 @@ export default function Analytics() {
     return reports.filter((r: any) => new Date(r.created_at) >= cutoff);
   }, [reports, range]);
 
+  // Helper: extract totals from sprout_performance with flexible key lookup
+  function extractTotals(sp: any): {
+    impressions: number;
+    reactions: number;
+    link_clicks: number;
+    comments: number;
+    shares: number;
+    video_views: number;
+  } {
+    // Try multiple possible locations for totals
+    const totals = sp?.overall_totals || sp?.totals || sp?.summary || {};
+    const parseNum = (v: any): number => {
+      if (!v) return 0;
+      const n = typeof v === "string" ? parseFloat(v.replace(/,/g, "")) : Number(v);
+      return isNaN(n) ? 0 : n;
+    };
+    return {
+      impressions: parseNum(totals.impressions || totals.reach || totals.views),
+      reactions: parseNum(totals.reactions || totals.likes || totals.engagements || totals.total_engagements),
+      link_clicks: parseNum(totals.link_clicks || totals.clicks),
+      comments: parseNum(totals.comments),
+      shares: parseNum(totals.shares || totals.retweets),
+      video_views: parseNum(totals.video_views),
+    };
+  }
+
+  // Extract month-over-month comparison from sprout_performance
+  function extractComparison(sp: any) {
+    const mc = sp?.month_comparison;
+    if (!mc) return null;
+    return {
+      current: mc.current_month || {},
+      previous: mc.previous_month || {},
+      changes: mc.changes || {},
+    };
+  }
+
   // Extract time-series metrics from report_data.sprout_performance
   const chartData = useMemo(() => {
     return filtered.map((r: any) => {
       const sp = r.report_data?.sprout_performance || {};
-      const totals = sp.totals || sp.summary || {};
+      const totals = extractTotals(sp);
+      const totalEngagements = totals.reactions + totals.link_clicks + totals.comments + totals.shares;
+      const engRate = totals.impressions > 0 ? (totalEngagements / totals.impressions) * 100 : 0;
       return {
         date: new Date(r.created_at).toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
         }),
         fullDate: r.created_at,
-        followers: totals.followers || totals.net_follower_growth || 0,
-        impressions: totals.impressions || 0,
-        engagements: totals.engagements || totals.total_engagements || 0,
-        engagement_rate: parseFloat((totals.engagement_rate || totals.avg_engagement_rate || 0).toString()),
-        posts: totals.posts_sent || totals.total_posts || 0,
+        impressions: totals.impressions,
+        reactions: totals.reactions,
+        link_clicks: totals.link_clicks,
+        comments: totals.comments,
+        video_views: totals.video_views,
+        engagements: totalEngagements,
+        engagement_rate: Math.round(engRate * 100) / 100,
       };
     });
   }, [filtered]);
 
-  // Platform breakdown from latest report
+  // Latest report comparison data
   const latestReport = filtered.length > 0 ? filtered[filtered.length - 1] : null;
+  const comparison = useMemo(() => {
+    if (!latestReport) return null;
+    const sp = (latestReport as any).report_data?.sprout_performance || {};
+    return extractComparison(sp);
+  }, [latestReport]);
+
+  // Platform breakdown from latest report
   const platformData = useMemo(() => {
     if (!latestReport) return [];
     const sp = (latestReport as any).report_data?.sprout_performance || {};
-    const byProfile = sp.by_profile || sp.profiles || [];
-    if (!Array.isArray(byProfile)) return [];
-    return byProfile.map((p: any) => ({
-      name: p.profile_name || p.name || "Unknown",
+    const profiles = sp.profiles || sp.by_profile || [];
+    if (!Array.isArray(profiles)) return [];
+    return profiles.map((p: any) => ({
+      name: p.name || p.profile_name || "Unknown",
       network: p.network || p.network_type || "",
-      impressions: p.impressions || 0,
-      engagements: p.engagements || p.total_engagements || 0,
-      followers: p.followers || p.net_follower_growth || 0,
     }));
   }, [latestReport]);
 
@@ -184,7 +229,7 @@ export default function Analytics() {
         ) : (
           <>
             {/* Summary cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <SummaryCard
                 icon={<Eye className="h-4 w-4" />}
                 label="Total Impressions"
@@ -192,13 +237,18 @@ export default function Analytics() {
               />
               <SummaryCard
                 icon={<Heart className="h-4 w-4" />}
-                label="Total Engagements"
-                value={chartData.reduce((s, d) => s + d.engagements, 0).toLocaleString()}
+                label="Reactions"
+                value={chartData.reduce((s, d) => s + d.reactions, 0).toLocaleString()}
               />
               <SummaryCard
-                icon={<Users className="h-4 w-4" />}
-                label="Follower Growth"
-                value={chartData.reduce((s, d) => s + d.followers, 0).toLocaleString()}
+                icon={<MousePointerClick className="h-4 w-4" />}
+                label="Link Clicks"
+                value={chartData.reduce((s, d) => s + d.link_clicks, 0).toLocaleString()}
+              />
+              <SummaryCard
+                icon={<Play className="h-4 w-4" />}
+                label="Video Views"
+                value={chartData.reduce((s, d) => s + d.video_views, 0).toLocaleString()}
               />
               <SummaryCard
                 icon={<BarChart3 className="h-4 w-4" />}
@@ -207,7 +257,37 @@ export default function Analytics() {
               />
             </div>
 
-            {/* Engagement + Impressions over time */}
+            {/* Month-over-month comparison from latest report */}
+            {comparison && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Month-over-Month Comparison <span className="font-normal text-muted-foreground text-sm">(latest report)</span></CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {Object.entries(comparison.changes).map(([key, val]: [string, any]) => {
+                      const pct = val?.percent || 0;
+                      const isUp = pct > 0;
+                      const isDown = pct < 0;
+                      const label = key.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+                      return (
+                        <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-muted">
+                          <div className="flex-1">
+                            <div className="text-xs text-muted-foreground">{label}</div>
+                            <div className="text-lg font-semibold">{(val?.current || 0).toLocaleString()}</div>
+                          </div>
+                          <Badge variant={isUp ? "default" : isDown ? "destructive" : "secondary"} className="text-xs">
+                            {isUp ? "+" : ""}{pct}%
+                          </Badge>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Impressions + Engagements over time */}
             {chartData.length > 1 && (
               <Card>
                 <CardHeader>
@@ -216,29 +296,17 @@ export default function Analytics() {
                 <CardContent>
                   <div className="h-72">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 89.8%)" />
+                      <BarChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                         <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                         <YAxis tick={{ fontSize: 12 }} />
                         <Tooltip />
                         <Legend />
-                        <Line
-                          type="monotone"
-                          dataKey="impressions"
-                          stroke="hsl(221 83% 53%)"
-                          strokeWidth={2}
-                          dot={{ r: 3 }}
-                          name="Impressions"
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="engagements"
-                          stroke="hsl(142 76% 36%)"
-                          strokeWidth={2}
-                          dot={{ r: 3 }}
-                          name="Engagements"
-                        />
-                      </LineChart>
+                        <Bar dataKey="impressions" fill="hsl(221 83% 53%)" name="Impressions" />
+                        <Bar dataKey="reactions" fill="hsl(142 76% 36%)" name="Reactions" />
+                        <Bar dataKey="link_clicks" fill="hsl(38 92% 50%)" name="Link Clicks" />
+                        <Bar dataKey="video_views" fill="hsl(280 70% 55%)" name="Video Views" />
+                      </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </CardContent>
@@ -255,7 +323,7 @@ export default function Analytics() {
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 89.8%)" />
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                         <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                         <YAxis tick={{ fontSize: 12 }} unit="%" />
                         <Tooltip formatter={(v: number) => `${v.toFixed(2)}%`} />
@@ -274,28 +342,22 @@ export default function Analytics() {
               </Card>
             )}
 
-            {/* Platform breakdown from latest report */}
+            {/* Connected profiles from latest report */}
             {platformData.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    Platform Breakdown{" "}
+                    Connected Profiles{" "}
                     <span className="font-normal text-muted-foreground text-sm">(latest report)</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={platformData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 89.8%)" />
-                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                        <YAxis tick={{ fontSize: 12 }} />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="impressions" fill="hsl(221 83% 53%)" name="Impressions" />
-                        <Bar dataKey="engagements" fill="hsl(142 76% 36%)" name="Engagements" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                  <div className="flex flex-wrap gap-2">
+                    {platformData.map((p, i) => (
+                      <Badge key={i} variant="outline" className="text-sm py-1.5 px-3">
+                        {p.network ? `${p.network}: ` : ""}{p.name}
+                      </Badge>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
