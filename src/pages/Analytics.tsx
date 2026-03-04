@@ -6,7 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useMemo, useState } from "react";
-import { ArrowLeft, TrendingUp, TrendingDown, Users, Heart, Eye, BarChart3, Lightbulb, MousePointerClick, Play } from "lucide-react";
+import { ArrowLeft, Eye, Heart, BarChart3, MousePointerClick, Play } from "lucide-react";
+import { TrendInsightsSection } from "@/components/analytics/TrendInsightsSection";
+import { ConnectedProfiles } from "@/components/analytics/ConnectedProfiles";
+import { AIDeepInsights } from "@/components/analytics/AIDeepInsights";
 import {
   LineChart,
   Line,
@@ -143,58 +146,6 @@ export default function Analytics() {
     }));
   }, [latestReport]);
 
-  // Auto-generated insights
-  const insights = useMemo(() => {
-    if (chartData.length < 2) return [];
-    const result: { text: string; type: "up" | "down" | "neutral" }[] = [];
-    const first = chartData[0];
-    const last = chartData[chartData.length - 1];
-
-    if (last.engagements > first.engagements) {
-      const pct =
-        first.engagements > 0 ? Math.round(((last.engagements - first.engagements) / first.engagements) * 100) : 0;
-      result.push({
-        text: `Engagements grew ${pct}% over this period (${first.engagements.toLocaleString()} → ${last.engagements.toLocaleString()})`,
-        type: "up",
-      });
-    } else if (last.engagements < first.engagements) {
-      const pct =
-        first.engagements > 0 ? Math.round(((first.engagements - last.engagements) / first.engagements) * 100) : 0;
-      result.push({
-        text: `Engagements dropped ${pct}% over this period`,
-        type: "down",
-      });
-    }
-
-    if (last.impressions > first.impressions) {
-      const pct =
-        first.impressions > 0 ? Math.round(((last.impressions - first.impressions) / first.impressions) * 100) : 0;
-      result.push({
-        text: `Impressions increased ${pct}% (${first.impressions.toLocaleString()} → ${last.impressions.toLocaleString()})`,
-        type: "up",
-      });
-    } else if (last.impressions < first.impressions) {
-      result.push({ text: `Impressions decreased over this period`, type: "down" });
-    }
-
-    if (last.engagement_rate > first.engagement_rate) {
-      result.push({
-        text: `Engagement rate improved from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
-        type: "up",
-      });
-    }
-
-    // Best performing report
-    const bestEng = chartData.reduce((best, d) => (d.engagements > best.engagements ? d : best));
-    if (bestEng.engagements > 0) {
-      result.push({
-        text: `Peak engagement was ${bestEng.engagements.toLocaleString()} on ${bestEng.date}`,
-        type: "neutral",
-      });
-    }
-
-    return result;
-  }, [chartData]);
 
   const title = client ? `Analytics: ${client.name}` : "Analytics";
 
@@ -342,76 +293,46 @@ export default function Analytics() {
               </Card>
             )}
 
-            {/* Connected profiles from latest report */}
-            {platformData.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Connected Profiles{" "}
-                    <span className="font-normal text-muted-foreground text-sm">(latest report)</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap gap-2">
-                    {platformData.map((p, i) => (
-                      <Badge key={i} variant="outline" className="text-sm py-1.5 px-3">
-                        {p.network ? `${p.network}: ` : ""}{p.name}
-                      </Badge>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+            {/* Connected profiles */}
+            <ConnectedProfiles profiles={platformData} />
 
-            {/* Auto-generated insights */}
-            {insights.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Lightbulb className="h-4 w-4" /> Auto-Generated Insights
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {insights.map((ins, i) => (
-                      <div key={i} className="flex items-start gap-3 text-sm">
-                        {ins.type === "up" ? (
-                          <TrendingUp className="h-4 w-4 text-success shrink-0 mt-0.5" />
-                        ) : ins.type === "down" ? (
-                          <TrendingDown className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-                        ) : (
-                          <BarChart3 className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                        )}
-                        <span>{ins.text}</span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+            {/* AI-powered cumulative insights */}
+            <AIDeepInsights reports={filtered} chartData={chartData} />
+
+            {/* Trend analysis (TikTok + Instagram) */}
+            <TrendInsightsSection reports={filtered} />
 
             {/* Recent reports table */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Report History</CardTitle>
+                <CardTitle className="text-base">Report History ({filtered.length} reports)</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {filtered.map((r: any) => (
-                    <div
-                      key={r.id}
-                      className="flex items-center justify-between p-3 rounded-md bg-muted cursor-pointer hover:bg-muted/80"
-                      onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Badge variant="default">{r.status}</Badge>
-                        <span className="text-sm">{new Date(r.created_at).toLocaleString()}</span>
+                  {filtered.map((r: any) => {
+                    const sp = r.report_data?.sprout_performance;
+                    const totals = sp?.overall_totals || {};
+                    return (
+                      <div
+                        key={r.id}
+                        className="flex items-center justify-between p-3 rounded-md bg-muted cursor-pointer hover:bg-muted/80"
+                        onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Badge variant="default">{r.status}</Badge>
+                          <span className="text-sm">{new Date(r.created_at).toLocaleString()}</span>
+                          {totals.impressions > 0 && (
+                            <span className="text-xs text-muted-foreground">
+                              {Number(totals.impressions).toLocaleString()} impr
+                            </span>
+                          )}
+                        </div>
+                        {r.duration_minutes && (
+                          <span className="text-xs text-muted-foreground">{r.duration_minutes}m</span>
+                        )}
                       </div>
-                      {r.duration_minutes && (
-                        <span className="text-xs text-muted-foreground">{r.duration_minutes}m</span>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
