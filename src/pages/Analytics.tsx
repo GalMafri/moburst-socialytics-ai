@@ -18,6 +18,9 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  Lightbulb,
+  Info,
+  Sparkles,
 } from "lucide-react";
 import { TrendInsightsSection } from "@/components/analytics/TrendInsightsSection";
 import { ConnectedProfiles } from "@/components/analytics/ConnectedProfiles";
@@ -166,6 +169,36 @@ export default function Analytics() {
     }));
   }, [latestRd]);
 
+  // Extract AI summary from latest report for "Key Takeaway" card
+  const latestAISummary = useMemo(() => {
+    if (!latestRd) return null;
+    const ai = latestRd.ai_analysis || {};
+    // Try multiple paths where the AI summary might live
+    const summary =
+      ai.sprout_performance_analysis?.month_over_month_summary ||
+      ai.sprout_performance_analysis?.overall_summary ||
+      ai.executive_summary ||
+      ai.summary ||
+      null;
+    if (!summary || (typeof summary === "string" && summary.trim().length === 0)) return null;
+    return typeof summary === "string" ? summary : JSON.stringify(summary);
+  }, [latestRd]);
+
+  // Extract top-performing content insight
+  const topContentInsight = useMemo(() => {
+    if (!latestRd) return null;
+    const ai = latestRd.ai_analysis || {};
+    const topContent = ai.sprout_performance_analysis?.top_performing_content || ai.top_content_summary || null;
+    if (!topContent) return null;
+    if (typeof topContent === "string") return topContent;
+    if (Array.isArray(topContent) && topContent.length > 0) {
+      // If it's an array of posts, summarize the first one
+      const first = topContent[0];
+      return first.insight || first.summary || first.description || null;
+    }
+    return null;
+  }, [latestRd]);
+
   const title = client ? `Analytics: ${client.name}` : "Analytics";
 
   // Format large numbers for display
@@ -173,6 +206,13 @@ export default function Analytics() {
     if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
     if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
     return v.toLocaleString();
+  };
+
+  // Format numbers embedded in text strings (e.g., "5000 impressions" → "5,000 impressions")
+  const formatNumbersInText = (text: string): string => {
+    return text.replace(/\b(\d{4,})\b/g, (match) => {
+      return Number(match).toLocaleString();
+    });
   };
 
   return (
@@ -192,6 +232,15 @@ export default function Analytics() {
           </div>
         </div>
 
+        {/* Guidance text */}
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 border border-border/50">
+          <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+          <p className="text-sm text-muted-foreground">
+            Track your social media performance over time. Each report generates a snapshot of your metrics — the more
+            reports you run, the richer your trend data becomes.
+          </p>
+        </div>
+
         {isLoading ? (
           <div className="animate-pulse text-muted-foreground">Loading analytics...</div>
         ) : filtered.length === 0 ? (
@@ -199,8 +248,12 @@ export default function Analytics() {
             <div className="space-y-3">
               <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto" />
               <h3 className="font-semibold">No completed reports yet</h3>
-              <p className="text-sm text-muted-foreground">Run at least one analysis to see analytics data here.</p>
-              <Button onClick={() => navigate(`/clients/${id}/analyze`)}>Run Analysis</Button>
+              <p className="text-sm text-muted-foreground">
+                Run your first analysis to start tracking performance trends.
+              </p>
+              <Button onClick={() => navigate(`/clients/${id}/analyze`)} className="gap-2">
+                <Play className="h-4 w-4" /> Run First Analysis
+              </Button>
             </div>
           </Card>
         ) : (
@@ -208,8 +261,15 @@ export default function Analytics() {
             {/* Summary cards — latest report metrics */}
             {latestTotals ? (
               <div>
-                <p className="text-xs text-muted-foreground mb-2">
-                  Latest Report — {latestReport && new Date((latestReport as any).created_at).toLocaleDateString()}
+                <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
+                  <BarChart3 className="h-3 w-3" />
+                  Latest Report Metrics —{" "}
+                  {latestReport &&
+                    new Date((latestReport as any).created_at).toLocaleDateString("en-US", {
+                      month: "long",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
                 </p>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                   <SummaryCard
@@ -260,6 +320,55 @@ export default function Analytics() {
               </div>
             )}
 
+            {/* Key Takeaway — AI summary from latest report */}
+            {latestAISummary && (
+              <Card className="border-primary/20 bg-primary/5">
+                <CardContent className="pt-5 pb-4 px-5">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-full bg-primary/10 p-2 shrink-0">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-semibold">Key Takeaway</h4>
+                      <p className="text-sm text-muted-foreground leading-relaxed">
+                        {formatNumbersInText(latestAISummary)}
+                      </p>
+                      {topContentInsight && (
+                        <p className="text-xs text-muted-foreground/80 pt-1 border-t border-border/50 mt-2">
+                          <Lightbulb className="h-3 w-3 inline mr-1" />
+                          {formatNumbersInText(topContentInsight)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Single report CTA — encourage running more analyses */}
+            {filtered.length === 1 && (
+              <Card className="border-dashed">
+                <CardContent className="pt-5 pb-4 px-5 text-center space-y-2">
+                  <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                    <TrendingUp className="h-4 w-4" />
+                    <span className="text-sm font-medium">Want to see trends over time?</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    You have 1 report. Run more analyses to unlock trend charts, engagement rate tracking, and richer
+                    insights.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate(`/clients/${id}/analyze`)}
+                    className="gap-2 mt-1"
+                  >
+                    <Play className="h-3.5 w-3.5" /> Run Another Analysis
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Month-over-month comparison from latest report */}
             {comparison && Object.keys(comparison.changes).length > 0 && (
               <Card>
@@ -271,7 +380,7 @@ export default function Analytics() {
                 <CardContent>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {Object.entries(comparison.changes).map(([key, val]: [string, any]) => {
-                      const pct = val?.percent || 0;
+                      const pct = typeof val?.percent === "number" ? val.percent : 0;
                       const isUp = pct > 0;
                       const isDown = pct < 0;
                       const label = key.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
@@ -281,15 +390,25 @@ export default function Analytics() {
                         <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-muted">
                           <div className="flex-1">
                             <div className="text-xs text-muted-foreground">{label}</div>
-                            <div className="text-lg font-semibold">{current.toLocaleString()}</div>
+                            <div className="text-lg font-semibold">{fmtVal(current)}</div>
                             {previous > 0 && (
-                              <div className="text-xs text-muted-foreground">prev: {previous.toLocaleString()}</div>
+                              <div className="text-xs text-muted-foreground">prev: {fmtVal(previous)}</div>
                             )}
                           </div>
-                          <Badge variant={isUp ? "default" : isDown ? "destructive" : "secondary"} className="text-xs">
-                            {isUp ? "+" : ""}
-                            {pct}%
-                          </Badge>
+                          <div className="text-right">
+                            <Badge
+                              variant={isUp ? "default" : isDown ? "destructive" : "secondary"}
+                              className="text-xs"
+                            >
+                              {isUp ? (
+                                <TrendingUp className="h-3 w-3 mr-1 inline" />
+                              ) : isDown ? (
+                                <TrendingDown className="h-3 w-3 mr-1 inline" />
+                              ) : null}
+                              {isUp ? "+" : ""}
+                              {pct}%
+                            </Badge>
+                          </div>
                         </div>
                       );
                     })}
@@ -304,8 +423,15 @@ export default function Analytics() {
                 <CardHeader>
                   <CardTitle className="text-base">
                     Performance Over Time
-                    <span className="font-normal text-muted-foreground text-sm ml-2">({filtered.length} reports)</span>
+                    <span className="font-normal text-muted-foreground text-sm ml-2">
+                      ({filtered.length} report{filtered.length !== 1 ? "s" : ""})
+                    </span>
                   </CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    {chartData.length === 1
+                      ? "Showing your latest snapshot. Run more analyses to see trend lines."
+                      : "Each data point represents one analysis run. Hover over points for exact values."}
+                  </p>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {/* Impressions chart (separate — it dominates if combined) */}
@@ -469,22 +595,45 @@ export default function Analytics() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Engagement Rate Trend</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    (Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.
+                  </p>
                 </CardHeader>
                 <CardContent>
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={chartData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                        <YAxis tick={{ fontSize: 12 }} unit="%" />
-                        <Tooltip formatter={(v: any) => [`${Number(v).toFixed(2)}%`, "Eng. Rate"]} />
+                        <XAxis
+                          dataKey="date"
+                          tick={{ fontSize: 12 }}
+                          label={{
+                            value: "Report Date",
+                            position: "insideBottom",
+                            offset: -5,
+                            fontSize: 11,
+                            fill: "hsl(var(--muted-foreground))",
+                          }}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 12 }}
+                          unit="%"
+                          label={{
+                            value: "Eng. Rate %",
+                            angle: -90,
+                            position: "insideLeft",
+                            fontSize: 11,
+                            fill: "hsl(var(--muted-foreground))",
+                          }}
+                        />
+                        <Tooltip formatter={(v: any) => [`${Number(v).toFixed(2)}%`, "Engagement Rate"]} />
                         <Line
                           type="monotone"
                           dataKey="engagement_rate"
                           stroke="hsl(38 92% 50%)"
                           strokeWidth={2}
                           dot={{ r: 3 }}
-                          name="Eng. Rate"
+                          name="Engagement Rate"
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -505,20 +654,25 @@ export default function Analytics() {
             {/* Recent reports table */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Report History ({filtered.length} reports)</CardTitle>
+                <CardTitle className="text-base">Report History</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  {filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to
+                  view full details.
+                </p>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {filtered.map((r: any) => {
+                  {[...filtered].reverse().map((r: any) => {
                     const rawRd = r.report_data;
                     const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
                     const sp = rd?.sprout_performance;
                     const totals = extractTotals(sp);
                     const hasMetrics = totals.impressions > 0 || totals.reactions > 0;
+                    const totalEng = totals.reactions + totals.comments + totals.shares;
                     return (
                       <div
                         key={r.id}
-                        className="flex items-center justify-between p-3 rounded-md bg-muted cursor-pointer hover:bg-muted/80"
+                        className="flex items-center justify-between p-3 rounded-md bg-muted cursor-pointer hover:bg-muted/80 transition-colors"
                         onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}
                       >
                         <div className="flex items-center gap-3">
@@ -526,8 +680,7 @@ export default function Analytics() {
                           <span className="text-sm">{new Date(r.created_at).toLocaleString()}</span>
                           {hasMetrics && (
                             <span className="text-xs text-muted-foreground">
-                              {totals.impressions.toLocaleString()} impr ·{" "}
-                              {(totals.reactions + totals.comments + totals.shares).toLocaleString()} eng
+                              {fmtVal(totals.impressions)} impr · {fmtVal(totalEng)} eng
                             </span>
                           )}
                         </div>
