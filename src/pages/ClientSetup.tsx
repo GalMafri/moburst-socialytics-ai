@@ -14,11 +14,43 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
-import { Save, Plus, X, RefreshCw, Loader2, Play } from "lucide-react";
+import { Save, Plus, X, RefreshCw, Loader2, Play, Info } from "lucide-react";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
-const GEOS = ["US", "UK", "EU", "Global", "LATAM", "APAC"];
-const LANGUAGES = ["en", "es", "fr", "de", "pt", "ja", "ko", "ar", "zh"];
+
+const GEOS = [
+  { value: "US", label: "United States" },
+  { value: "UK", label: "United Kingdom" },
+  { value: "EU", label: "Europe" },
+  { value: "LATAM", label: "Latin America" },
+  { value: "APAC", label: "Asia-Pacific" },
+  { value: "MENA", label: "Middle East & North Africa" },
+  { value: "IL", label: "Israel" },
+  { value: "DE", label: "Germany" },
+  { value: "FR", label: "France" },
+  { value: "BR", label: "Brazil" },
+  { value: "JP", label: "Japan" },
+  { value: "KR", label: "South Korea" },
+  { value: "Global", label: "Global (All Regions)" },
+];
+
+const LANGUAGES = [
+  { value: "en", label: "English" },
+  { value: "es", label: "Spanish (Español)" },
+  { value: "fr", label: "French (Français)" },
+  { value: "de", label: "German (Deutsch)" },
+  { value: "pt", label: "Portuguese (Português)" },
+  { value: "ja", label: "Japanese (日本語)" },
+  { value: "ko", label: "Korean (한국어)" },
+  { value: "ar", label: "Arabic (العربية)" },
+  { value: "zh", label: "Chinese (中文)" },
+  { value: "he", label: "Hebrew (עברית)" },
+  { value: "it", label: "Italian (Italiano)" },
+  { value: "ru", label: "Russian (Русский)" },
+  { value: "hi", label: "Hindi (हिन्दी)" },
+  { value: "th", label: "Thai (ไทย)" },
+];
+
 interface ContentPillar {
   name: string;
   description: string;
@@ -50,10 +82,6 @@ export default function ClientSetup() {
     brand_notes: "",
     brief_text: "",
     brief_file_id: "",
-    schedule_frequency: "monthly",
-    schedule_active: true,
-    trends_date_range: 30,
-    analysis_date_range: 30,
   });
   const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
   const [newKeyword, setNewKeyword] = useState("");
@@ -62,11 +90,7 @@ export default function ClientSetup() {
   const { data: client } = useQuery({
     queryKey: ["client", id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("clients")
-        .select("*")
-        .eq("id", id!)
-        .maybeSingle();
+      const { data, error } = await supabase.from("clients").select("*").eq("id", id!).maybeSingle();
       if (error) throw error;
       return data;
     },
@@ -81,7 +105,9 @@ export default function ClientSetup() {
         const raw = client.content_pillars as any;
         if (Array.isArray(raw)) {
           pillars = raw.map((p: any) =>
-            typeof p === "string" ? { name: p, description: "" } : { name: p.name || "", description: p.description || "" }
+            typeof p === "string"
+              ? { name: p, description: "" }
+              : { name: p.name || "", description: p.description || "" },
           );
         }
       }
@@ -95,19 +121,14 @@ export default function ClientSetup() {
         brand_notes: client.brand_notes || "",
         brief_text: client.brief_text || "",
         brief_file_id: client.brief_file_id || "",
-        schedule_frequency: "monthly",
-        schedule_active: true,
-        trends_date_range: 30,
-        analysis_date_range: 30,
       });
     }
   }, [client]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const { schedule_frequency, schedule_active, trends_date_range, analysis_date_range, ...clientFields } = form;
       const payload = {
-        ...clientFields,
+        ...form,
         sprout_customer_id: "1676448",
         content_pillars: form.content_pillars as any,
       };
@@ -129,22 +150,11 @@ export default function ClientSetup() {
         clientId = id!;
       }
 
-      // Upsert report schedule
-      const { error: schedError } = await supabase
-        .from("report_schedules")
-        .upsert({
-          client_id: clientId,
-          frequency: schedule_frequency,
-          is_active: schedule_active,
-          trends_date_range_days: trends_date_range,
-          analysis_date_range_days: analysis_date_range,
-          created_by: user!.id,
-        } as any, { onConflict: "client_id" });
-      if (schedError) console.warn("Schedule save error:", schedError.message);
-
       // Save selected Sprout profiles
       if (selectedSproutProfiles.length > 0) {
+        // Remove old profiles
         await supabase.from("sprout_profiles").delete().eq("client_id", clientId);
+        // Insert selected
         const inserts = selectedSproutProfiles.map((p) => ({
           client_id: clientId,
           sprout_profile_id: p.id,
@@ -181,15 +191,32 @@ export default function ClientSetup() {
   };
 
   const addKeyword = () => {
-    if (newKeyword.trim() && !form.social_keywords.includes(newKeyword.trim())) {
-      setForm((f) => ({ ...f, social_keywords: [...f.social_keywords, newKeyword.trim()] }));
+    const trimmed = newKeyword.trim();
+    if (!trimmed) return;
+
+    // Validate: warn about commas
+    if (trimmed.includes(",")) {
+      toast({
+        title: "Use separate entries instead of commas",
+        description:
+          'Each keyword phrase should be added individually. e.g., add "AI content strategy" and "performance marketing tips" as two separate keywords.',
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!form.social_keywords.includes(trimmed)) {
+      setForm((f) => ({ ...f, social_keywords: [...f.social_keywords, trimmed] }));
       setNewKeyword("");
     }
   };
 
   const addPillar = () => {
     if (newPillarName.trim() && !form.content_pillars.some((p) => p.name === newPillarName.trim())) {
-      setForm((f) => ({ ...f, content_pillars: [...f.content_pillars, { name: newPillarName.trim(), description: "" }] }));
+      setForm((f) => ({
+        ...f,
+        content_pillars: [...f.content_pillars, { name: newPillarName.trim(), description: "" }],
+      }));
       setNewPillarName("");
     }
   };
@@ -219,20 +246,27 @@ export default function ClientSetup() {
                 <Play className="h-4 w-4 mr-2" /> Run Report
               </Button>
             )}
-            <Button variant="outline" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name}>
-              {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+            <Button
+              variant="outline"
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending || !form.name}
+            >
+              {saveMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4 mr-2" />
+              )}
               Save
             </Button>
           </div>
         </div>
 
         <Tabs defaultValue="info">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="info">Client Info</TabsTrigger>
             <TabsTrigger value="sprout">Sprout Social</TabsTrigger>
             <TabsTrigger value="strategy">Content Strategy</TabsTrigger>
             <TabsTrigger value="brief">Brief</TabsTrigger>
-            <TabsTrigger value="schedule">Schedule</TabsTrigger>
           </TabsList>
 
           <TabsContent value="info" className="space-y-4 mt-4">
@@ -243,13 +277,17 @@ export default function ClientSetup() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Client Name *</Label>
-                  <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g., Acme Corp" />
+                  <Input
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g., Acme Corp"
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Primary Platforms</Label>
                   <p className="text-xs text-muted-foreground">
-                    Select platforms the client wants to create content for. These don't need to match their existing Sprout Social profiles — 
-                    you can include platforms they want to expand into. The AI will generate recommendations and calendar posts for these platforms.
+                    Select ALL platforms the client is active on or wants to grow on. This determines which platforms
+                    receive content recommendations and calendar posts.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {PLATFORMS.map((p) => (
@@ -268,20 +306,35 @@ export default function ClientSetup() {
                   <div className="space-y-2">
                     <Label>Geographic Focus</Label>
                     <Select value={form.geo} onValueChange={(v) => setForm((f) => ({ ...f, geo: v }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
-                        {GEOS.map((g) => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                        {GEOS.map((g) => (
+                          <SelectItem key={g.value} value={g.value}>
+                            {g.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Language</Label>
+                    <Label>Content Language</Label>
                     <Select value={form.language} onValueChange={(v) => setForm((f) => ({ ...f, language: v }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
-                        {LANGUAGES.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                        {LANGUAGES.map((l) => (
+                          <SelectItem key={l.value} value={l.value}>
+                            {l.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+                    <p className="text-xs text-muted-foreground">
+                      All AI-generated copy, captions, and hashtags will be written in this language.
+                    </p>
                   </div>
                 </div>
               </CardContent>
@@ -312,7 +365,9 @@ export default function ClientSetup() {
               <CardContent className="space-y-6">
                 <div className="space-y-3">
                   <Label>Content Pillars</Label>
-                  <p className="text-xs text-muted-foreground">Define your content pillars with descriptions to guide content strategy</p>
+                  <p className="text-xs text-muted-foreground">
+                    Define your content pillars with descriptions to guide content strategy
+                  </p>
                   <div className="space-y-3">
                     {form.content_pillars.map((pillar, index) => (
                       <div key={index} className="p-3 rounded-md border bg-card space-y-2">
@@ -333,29 +388,36 @@ export default function ClientSetup() {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <Input value={newPillarName} onChange={(e) => setNewPillarName(e.target.value)} placeholder="Add a content pillar" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPillar())} />
-                    <Button variant="outline" size="sm" onClick={addPillar}><Plus className="h-4 w-4" /></Button>
+                    <Input
+                      value={newPillarName}
+                      onChange={(e) => setNewPillarName(e.target.value)}
+                      placeholder="Add a content pillar"
+                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPillar())}
+                    />
+                    <Button variant="outline" size="sm" onClick={addPillar}>
+                      <Plus className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-2">
                   <Label>Social Keywords</Label>
                   <p className="text-xs text-muted-foreground">
-                    Enter keyword phrases used to search TikTok and Instagram for relevant trends. 
-                    Add each phrase individually by typing it and pressing Enter or clicking +.
+                    Add multi-word phrases used for TikTok/Instagram trend search. Enter one phrase at a time — do not
+                    use commas.
+                    <br />
+                    Examples: "AI content strategy", "performance marketing tips", "social media automation"
                   </p>
-                  <div className="bg-muted/50 p-3 rounded-md text-xs text-muted-foreground space-y-1">
-                    <p className="font-medium text-foreground">How to add keywords:</p>
-                    <p>1. Type a single keyword phrase (e.g., "AI content strategy")</p>
-                    <p>2. Press <kbd className="px-1.5 py-0.5 rounded border bg-background text-foreground">Enter</kbd> or click the <strong>+</strong> button</p>
-                    <p>3. Do NOT use commas to separate multiple keywords — add them one at a time</p>
-                    <p>4. Multi-word phrases work great: "performance marketing tips", "social media automation"</p>
-                  </div>
                   <div className="flex flex-wrap gap-2 mb-2">
                     {form.social_keywords.map((k) => (
                       <Badge key={k} variant="outline" className="gap-1">
                         {k}
-                        <X className="h-3 w-3 cursor-pointer" onClick={() => setForm((f) => ({ ...f, social_keywords: f.social_keywords.filter((x) => x !== k) }))} />
+                        <X
+                          className="h-3 w-3 cursor-pointer"
+                          onClick={() =>
+                            setForm((f) => ({ ...f, social_keywords: f.social_keywords.filter((x) => x !== k) }))
+                          }
+                        />
                       </Badge>
                     ))}
                   </div>
@@ -366,22 +428,14 @@ export default function ClientSetup() {
                         const val = e.target.value;
                         if (val.includes(",")) {
                           toast({
-                            title: "One keyword at a time",
-                            description: "Please add keywords individually without commas. Press Enter after each one.",
-                            variant: "destructive",
+                            title: "No commas needed",
+                            description: "Press Enter or click + to add each keyword phrase separately.",
                           });
-                          setNewKeyword(val.replace(/,/g, ""));
-                          return;
                         }
                         setNewKeyword(val);
                       }}
-                      placeholder="Type a keyword phrase and press Enter"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addKeyword();
-                        }
-                      }}
+                      placeholder="Add keyword phrase (press Enter)"
+                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())}
                     />
                     <Button variant="outline" size="sm" onClick={addKeyword}>
                       <Plus className="h-4 w-4" />
@@ -396,9 +450,20 @@ export default function ClientSetup() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Client Brief</CardTitle>
-                <CardDescription>Brand voice, target audience, campaign objectives, and content restrictions</CardDescription>
+                <CardDescription>
+                  Brand voice, target audience, campaign objectives, and content restrictions
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Brand Notes</Label>
+                  <Textarea
+                    value={form.brand_notes}
+                    onChange={(e) => setForm((f) => ({ ...f, brand_notes: e.target.value }))}
+                    placeholder="Brand voice, positioning, key messaging..."
+                    rows={3}
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label>Brief Text</Label>
                   <Textarea
@@ -413,77 +478,26 @@ export default function ClientSetup() {
                   <Input
                     value={form.brief_file_id}
                     onChange={(e) => setForm((f) => ({ ...f, brief_file_id: e.target.value }))}
-                    placeholder="e.g., 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+                    placeholder="e.g., 1BxiMVs0XRA5nFMdKvBdBZjgmUii3ObRy2CmEkTzOQ5s"
                   />
-                  <div className="bg-muted/50 p-3 rounded-md text-xs text-muted-foreground space-y-1">
-                    <p className="font-medium text-foreground">How to find your Google Doc ID:</p>
-                    <p>1. Open the Google Doc in your browser</p>
-                    <p>2. Look at the URL: <span className="font-mono text-foreground">https://docs.google.com/document/d/<strong>YOUR_FILE_ID</strong>/edit</span></p>
-                    <p>3. Copy the long string between <span className="font-mono">/d/</span> and <span className="font-mono">/edit</span></p>
-                    <p>4. Example: from <span className="font-mono break-all">https://docs.google.com/document/d/1BxiMVs0XRA5nFMdKvBdBZjg/edit</span>, the ID is <span className="font-mono font-medium text-foreground">1BxiMVs0XRA5nFMdKvBdBZjg</span></p>
-                  </div>
-                  <p className="text-xs text-muted-foreground">If provided, the analysis will use the Google Doc content as the client brief instead of the text above</p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-          <TabsContent value="schedule" className="space-y-4 mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Report Schedule</CardTitle>
-                <CardDescription>Set up automatic report generation on a recurring basis. Monthly is the default.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Frequency</Label>
-                  <Select
-                    value={form.schedule_frequency || "monthly"}
-                    onValueChange={(v) => setForm((f) => ({ ...f, schedule_frequency: v }))}
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="weekly">Weekly</SelectItem>
-                      <SelectItem value="bi-weekly">Bi-Weekly</SelectItem>
-                      <SelectItem value="monthly">Monthly (Default)</SelectItem>
-                      <SelectItem value="quarterly">Quarterly</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Trends Date Range (days)</Label>
-                    <Input
-                      type="number"
-                      value={form.trends_date_range || 30}
-                      onChange={(e) => setForm((f) => ({ ...f, trends_date_range: parseInt(e.target.value) || 30 }))}
-                      min={7}
-                      max={90}
-                    />
-                    <p className="text-xs text-muted-foreground">How far back to look for TikTok/IG trends</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Analysis Date Range (days)</Label>
-                    <Input
-                      type="number"
-                      value={form.analysis_date_range || 30}
-                      onChange={(e) => setForm((f) => ({ ...f, analysis_date_range: parseInt(e.target.value) || 30 }))}
-                      min={7}
-                      max={90}
-                    />
-                    <p className="text-xs text-muted-foreground">Sprout Social performance analysis window</p>
+                  <div className="bg-muted/50 rounded-md p-3 text-xs text-muted-foreground space-y-1.5">
+                    <p className="font-medium text-foreground flex items-center gap-1">
+                      <Info className="h-3 w-3" /> How to find your Google Doc ID:
+                    </p>
+                    <ol className="list-decimal pl-4 space-y-1">
+                      <li>Open your brief document in Google Docs</li>
+                      <li>Look at the URL in your browser's address bar</li>
+                      <li>
+                        The ID is the long string between <code className="bg-background px-1 rounded">/d/</code> and{" "}
+                        <code className="bg-background px-1 rounded">/edit</code>
+                      </li>
+                      <li>
+                        Example: docs.google.com/document/d/<strong>1BxiMVs0XRA5nF...</strong>/edit
+                      </li>
+                    </ol>
+                    <p>If provided, the AI analysis will use this Google Doc instead of the brief text above.</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 pt-2">
-                  <Checkbox
-                    checked={form.schedule_active !== false}
-                    onCheckedChange={(v) => setForm((f) => ({ ...f, schedule_active: !!v }))}
-                  />
-                  <Label className="font-normal">Enable automatic scheduled reports</Label>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Note: Scheduled reports require an n8n cron trigger or external scheduler to poll for pending schedules.
-                  Save the client configuration first, then set up a cron workflow in n8n that checks for clients with active schedules.
-                </p>
               </CardContent>
             </Card>
           </TabsContent>
@@ -527,9 +541,7 @@ function SproutProfileSelector({
 
   useEffect(() => {
     if (assignedProfiles && allProfiles.length > 0 && selectedProfiles.length === 0) {
-      const preSelected = allProfiles.filter((p) =>
-        assignedProfiles.some((a) => a.sprout_profile_id === p.id)
-      );
+      const preSelected = allProfiles.filter((p) => assignedProfiles.some((a) => a.sprout_profile_id === p.id));
       if (preSelected.length > 0) onSelectionChange(preSelected);
     }
   }, [assignedProfiles, allProfiles]);
@@ -570,10 +582,11 @@ function SproutProfileSelector({
   };
 
   const filteredProfiles = allProfiles
-    .filter((p) =>
-      !searchTerm ||
-      (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (p.native_name || "").toLowerCase().includes(searchTerm.toLowerCase())
+    .filter(
+      (p) =>
+        !searchTerm ||
+        (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (p.native_name || "").toLowerCase().includes(searchTerm.toLowerCase()),
     )
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
@@ -608,11 +621,7 @@ function SproutProfileSelector({
         </Button>
       </div>
 
-      <Input
-        placeholder="Search by name..."
-        value={searchTerm}
-        onChange={(e) => setSearchTerm(e.target.value)}
-      />
+      <Input placeholder="Search by name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
 
       <div className="max-h-96 overflow-y-auto space-y-1.5 pr-1">
         {filteredProfiles.map((profile) => {

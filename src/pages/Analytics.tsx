@@ -56,11 +56,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import { useState, useMemo } from "react";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 // ─── Types ───
 type ParsedReport = {
@@ -82,10 +78,7 @@ export default function Analytics() {
   const { data: clients } = useQuery({
     queryKey: ["clients-list"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("clients")
-        .select("id, name")
-        .order("name");
+      const { data, error } = await supabase.from("clients").select("id, name").order("name");
       if (error) throw error;
       return data;
     },
@@ -114,7 +107,14 @@ export default function Analytics() {
     if (!reports) return [];
     return reports.map((r) => {
       const rd = Array.isArray(r.report_data) ? (r.report_data as any)[0] : (r.report_data as any);
-      return { id: r.id, created_at: r.created_at!, date_range_start: r.date_range_start, date_range_end: r.date_range_end, rd, selected: true };
+      return {
+        id: r.id,
+        created_at: r.created_at!,
+        date_range_start: r.date_range_start,
+        date_range_end: r.date_range_end,
+        rd,
+        selected: true,
+      };
     });
   }, [reports]);
 
@@ -148,18 +148,24 @@ export default function Analytics() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Analytics</h1>
-            <p className="text-sm text-muted-foreground">
-              Cross-report insights and trend analysis
-            </p>
+            <p className="text-sm text-muted-foreground">Cross-report insights and trend analysis</p>
           </div>
           <div className="flex items-center gap-3">
-            <Select value={clientId} onValueChange={(v) => { setSelectedClientId(v); setReportFilter(null); }}>
+            <Select
+              value={clientId}
+              onValueChange={(v) => {
+                setSelectedClientId(v);
+                setReportFilter(null);
+              }}
+            >
               <SelectTrigger className="w-[240px]">
                 <SelectValue placeholder="Select client" />
               </SelectTrigger>
               <SelectContent>
                 {clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -184,20 +190,31 @@ export default function Analytics() {
                   <div className="flex flex-wrap gap-3">
                     {allParsed.map((r) => {
                       const checked = !reportFilter || reportFilter.has(r.id);
-                      const label = r.date_range_start && r.date_range_end
-                        ? `${new Date(r.date_range_start).toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date(r.date_range_end).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}`
-                        : new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+                      const label =
+                        r.date_range_start && r.date_range_end
+                          ? `${new Date(r.date_range_start).toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date(r.date_range_end).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}`
+                          : new Date(r.created_at).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "2-digit",
+                            });
                       return (
                         <label key={r.id} className="flex items-center gap-2 cursor-pointer text-sm">
                           <Checkbox checked={checked} onCheckedChange={() => toggleReport(r.id)} />
-                          <span className={checked ? "text-foreground" : "text-muted-foreground line-through"}>{label}</span>
+                          <span className={checked ? "text-foreground" : "text-muted-foreground line-through"}>
+                            {label}
+                          </span>
                         </label>
                       );
                     })}
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <Button variant="ghost" size="sm" onClick={() => setReportFilter(null)}>Select All</Button>
-                    <Button variant="ghost" size="sm" onClick={() => setReportFilter(new Set())}>Clear All</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setReportFilter(null)}>
+                      Select All
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setReportFilter(new Set())}>
+                      Clear All
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -215,9 +232,7 @@ export default function Analytics() {
                 : "No reports selected. Use the filter above to include reports."}
             </p>
             {clientId && allParsed.length === 0 && (
-              <Button onClick={() => navigate(`/clients/${clientId}/analyze`)}>
-                Run first analysis
-              </Button>
+              <Button onClick={() => navigate(`/clients/${clientId}/analyze`)}>Run first analysis</Button>
             )}
           </Card>
         ) : (
@@ -229,11 +244,21 @@ export default function Analytics() {
               <TabsTrigger value="content">Content</TabsTrigger>
               <TabsTrigger value="insights">Insights</TabsTrigger>
             </TabsList>
-            <TabsContent value="overview"><OverviewTab reports={parsedReports} clientName={clientName} /></TabsContent>
-            <TabsContent value="performance"><PerformanceTab reports={parsedReports} /></TabsContent>
-            <TabsContent value="trends"><TrendsTab reports={parsedReports} /></TabsContent>
-            <TabsContent value="content"><ContentStrategyTab reports={parsedReports} /></TabsContent>
-            <TabsContent value="insights"><AIInsightsTab reports={parsedReports} /></TabsContent>
+            <TabsContent value="overview">
+              <OverviewTab reports={parsedReports} clientName={clientName} />
+            </TabsContent>
+            <TabsContent value="performance">
+              <PerformanceTab reports={parsedReports} />
+            </TabsContent>
+            <TabsContent value="trends">
+              <TrendsTab reports={parsedReports} />
+            </TabsContent>
+            <TabsContent value="content">
+              <ContentStrategyTab reports={parsedReports} />
+            </TabsContent>
+            <TabsContent value="insights">
+              <AIInsightsTab reports={parsedReports} />
+            </TabsContent>
           </Tabs>
         )}
       </div>
@@ -249,8 +274,22 @@ function formatNum(value: number) {
 }
 
 function ChangeIndicator({ value, suffix = "%" }: { value: number; suffix?: string }) {
-  if (value > 0) return <span className="text-emerald-500 flex items-center gap-0.5 text-xs font-medium"><ArrowUpRight className="h-3 w-3" />{value.toFixed(1)}{suffix}</span>;
-  if (value < 0) return <span className="text-destructive flex items-center gap-0.5 text-xs font-medium"><ArrowDownRight className="h-3 w-3" />{Math.abs(value).toFixed(1)}{suffix}</span>;
+  if (value > 0)
+    return (
+      <span className="text-emerald-500 flex items-center gap-0.5 text-xs font-medium">
+        <ArrowUpRight className="h-3 w-3" />
+        {value.toFixed(1)}
+        {suffix}
+      </span>
+    );
+  if (value < 0)
+    return (
+      <span className="text-destructive flex items-center gap-0.5 text-xs font-medium">
+        <ArrowDownRight className="h-3 w-3" />
+        {Math.abs(value).toFixed(1)}
+        {suffix}
+      </span>
+    );
   return <span className="text-muted-foreground text-xs">0{suffix}</span>;
 }
 
@@ -277,7 +316,7 @@ function getMetrics(r: ParsedReport) {
 
 function computeEngagementRate(m: any) {
   if (!m.impressions || m.impressions === 0) return 0;
-  return ((m.reactions || 0) + (m.comments || 0) + (m.shares || 0)) / m.impressions * 100;
+  return (((m.reactions || 0) + (m.comments || 0) + (m.shares || 0)) / m.impressions) * 100;
 }
 
 /** Compute linear regression slope for a series of numbers */
@@ -309,7 +348,10 @@ function OverviewTab({ reports, clientName }: { reports: ParsedReport[]; clientN
     const keys = ["impressions", "reactions", "link_clicks", "video_views", "comments", "shares"];
     const totals: Record<string, number> = {};
     const series: Record<string, number[]> = {};
-    keys.forEach((k) => { totals[k] = 0; series[k] = []; });
+    keys.forEach((k) => {
+      totals[k] = 0;
+      series[k] = [];
+    });
 
     reports.forEach((r) => {
       const { current } = getMetrics(r);
@@ -378,7 +420,10 @@ function OverviewTab({ reports, clientName }: { reports: ParsedReport[]; clientN
                 <div className="flex items-center justify-between">
                   <ChangeIndicator value={latestChanges[m.key]?.percent || 0} />
                   {reports.length > 1 && (
-                    <Badge variant={dir === "up" ? "default" : dir === "down" ? "destructive" : "secondary"} className="text-[10px] px-1.5 py-0">
+                    <Badge
+                      variant={dir === "up" ? "default" : dir === "down" ? "destructive" : "secondary"}
+                      className="text-[10px] px-1.5 py-0"
+                    >
                       {dir === "up" ? "↑ trending" : dir === "down" ? "↓ trending" : "— flat"}
                     </Badge>
                   )}
@@ -403,10 +448,33 @@ function OverviewTab({ reports, clientName }: { reports: ParsedReport[]; clientN
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                   <YAxis tickFormatter={formatNum} stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", color: "hsl(var(--card-foreground))" }} formatter={(v: number) => [formatNum(v), undefined]} />
+                  <Tooltip
+                    contentStyle={{
+                      background: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      color: "hsl(var(--card-foreground))",
+                    }}
+                    formatter={(v: number) => [formatNum(v), undefined]}
+                  />
                   <Legend />
-                  <Area type="monotone" dataKey="impressions" name="Impressions" stroke={CHART_COLORS[0]} fill={CHART_COLORS[0]} fillOpacity={0.1} strokeWidth={2} />
-                  <Area type="monotone" dataKey="reactions" name="Reactions" stroke={CHART_COLORS[1]} fill={CHART_COLORS[1]} fillOpacity={0.1} strokeWidth={2} />
+                  <Area
+                    type="monotone"
+                    dataKey="impressions"
+                    name="Impressions"
+                    stroke={CHART_COLORS[0]}
+                    fill={CHART_COLORS[0]}
+                    fillOpacity={0.1}
+                    strokeWidth={2}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="reactions"
+                    name="Reactions"
+                    stroke={CHART_COLORS[1]}
+                    fill={CHART_COLORS[1]}
+                    fillOpacity={0.1}
+                    strokeWidth={2}
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             </CardContent>
@@ -424,10 +492,33 @@ function OverviewTab({ reports, clientName }: { reports: ParsedReport[]; clientN
                 <LineChart data={timeline}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis tickFormatter={(v: number) => `${v.toFixed(1)}%`} stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", color: "hsl(var(--card-foreground))" }} formatter={(v: number) => [`${v.toFixed(2)}%`, undefined]} />
-                  <ReferenceLine y={avgEngRate} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" label={{ value: "avg", position: "right", fill: "hsl(var(--muted-foreground))", fontSize: 10 }} />
-                  <Line type="monotone" dataKey="engRate" name="Engagement Rate" stroke={CHART_COLORS[2]} strokeWidth={2} dot={{ r: 4 }} />
+                  <YAxis
+                    tickFormatter={(v: number) => `${v.toFixed(1)}%`}
+                    stroke="hsl(var(--muted-foreground))"
+                    fontSize={12}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      color: "hsl(var(--card-foreground))",
+                    }}
+                    formatter={(v: number) => [`${v.toFixed(2)}%`, undefined]}
+                  />
+                  <ReferenceLine
+                    y={avgEngRate}
+                    stroke="hsl(var(--muted-foreground))"
+                    strokeDasharray="3 3"
+                    label={{ value: "avg", position: "right", fill: "hsl(var(--muted-foreground))", fontSize: 10 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="engRate"
+                    name="Engagement Rate"
+                    stroke={CHART_COLORS[2]}
+                    strokeWidth={2}
+                    dot={{ r: 4 }}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </CardContent>
@@ -446,13 +537,18 @@ function DataDrivenInsights({ reports }: { reports: ParsedReport[] }) {
   const insights = useMemo(() => {
     const result: { text: string; type: "positive" | "negative" | "neutral" }[] = [];
     if (reports.length < 2) {
-      result.push({ text: "Add more reports to unlock cross-report trend analysis and trajectory insights.", type: "neutral" });
+      result.push({
+        text: "Add more reports to unlock cross-report trend analysis and trajectory insights.",
+        type: "neutral",
+      });
       return result;
     }
 
     const metricKeys = ["impressions", "reactions", "link_clicks", "video_views", "comments", "shares"];
     const series: Record<string, number[]> = {};
-    metricKeys.forEach((k) => { series[k] = []; });
+    metricKeys.forEach((k) => {
+      series[k] = [];
+    });
     reports.forEach((r) => {
       const { current } = getMetrics(r);
       metricKeys.forEach((k) => series[k].push(current[k] || 0));
@@ -469,16 +565,28 @@ function DataDrivenInsights({ reports }: { reports: ParsedReport[] }) {
       const label = k.replace(/_/g, " ");
 
       if (pctSlope > 15) {
-        result.push({ text: `${label} are growing strongly (+${pctSlope.toFixed(0)}% per period) — momentum is building.`, type: "positive" });
+        result.push({
+          text: `${label} are growing strongly (+${pctSlope.toFixed(0)}% per period) — momentum is building.`,
+          type: "positive",
+        });
       } else if (pctSlope < -15) {
-        result.push({ text: `${label} are declining (${pctSlope.toFixed(0)}% per period). Review distribution and content strategy.`, type: "negative" });
+        result.push({
+          text: `${label} are declining (${pctSlope.toFixed(0)}% per period). Review distribution and content strategy.`,
+          type: "negative",
+        });
       }
 
       // Compare latest to average
       if (latest > avg * 1.3 && vals.length >= 3) {
-        result.push({ text: `Latest ${label} (${formatNum(latest)}) are ${((latest / avg - 1) * 100).toFixed(0)}% above the historical average — a standout period.`, type: "positive" });
+        result.push({
+          text: `Latest ${label} (${formatNum(latest)}) are ${((latest / avg - 1) * 100).toFixed(0)}% above the historical average — a standout period.`,
+          type: "positive",
+        });
       } else if (latest < avg * 0.7 && vals.length >= 3) {
-        result.push({ text: `Latest ${label} (${formatNum(latest)}) are ${((1 - latest / avg) * 100).toFixed(0)}% below the historical average.`, type: "negative" });
+        result.push({
+          text: `Latest ${label} (${formatNum(latest)}) are ${((1 - latest / avg) * 100).toFixed(0)}% below the historical average.`,
+          type: "negative",
+        });
       }
     });
 
@@ -492,9 +600,15 @@ function DataDrivenInsights({ reports }: { reports: ParsedReport[] }) {
     if (avgEng > 0) {
       const engPct = (engSlope / avgEng) * 100;
       if (engPct > 10) {
-        result.push({ text: `Engagement rate is improving (+${engPct.toFixed(0)}% per period at ${engRates[engRates.length - 1].toFixed(2)}%) — content quality is resonating.`, type: "positive" });
+        result.push({
+          text: `Engagement rate is improving (+${engPct.toFixed(0)}% per period at ${engRates[engRates.length - 1].toFixed(2)}%) — content quality is resonating.`,
+          type: "positive",
+        });
       } else if (engPct < -10) {
-        result.push({ text: `Engagement rate is declining (${engPct.toFixed(0)}% per period). Impressions may be growing faster than interactions — consider more engaging CTAs.`, type: "negative" });
+        result.push({
+          text: `Engagement rate is declining (${engPct.toFixed(0)}% per period). Impressions may be growing faster than interactions — consider more engaging CTAs.`,
+          type: "negative",
+        });
       }
     }
 
@@ -511,19 +625,33 @@ function DataDrivenInsights({ reports }: { reports: ParsedReport[] }) {
     Object.values(hashtagsByReport).forEach((s) => s.forEach((h) => allHashtags.add(h)));
     const recurring = [...allHashtags].filter((h) => {
       let count = 0;
-      Object.values(hashtagsByReport).forEach((s) => { if (s.has(h)) count++; });
+      Object.values(hashtagsByReport).forEach((s) => {
+        if (s.has(h)) count++;
+      });
       return count >= Math.ceil(reports.length * 0.5);
     });
     if (recurring.length > 0) {
-      result.push({ text: `${recurring.length} hashtag${recurring.length > 1 ? "s" : ""} appear in 50%+ of reports (${recurring.slice(0, 5).map(h => `#${h}`).join(", ")}${recurring.length > 5 ? "…" : ""}) — these are your consistent trend anchors.`, type: "neutral" });
+      result.push({
+        text: `${recurring.length} hashtag${recurring.length > 1 ? "s" : ""} appear in 50%+ of reports (${recurring
+          .slice(0, 5)
+          .map((h) => `#${h}`)
+          .join(", ")}${recurring.length > 5 ? "…" : ""}) — these are your consistent trend anchors.`,
+        type: "neutral",
+      });
     }
 
     // Theme evolution
     const latestThemes = reports[reports.length - 1].rd?.ai_analysis?.tiktok_trends_analysis?.top_themes || [];
-    const prevThemes = reports.length >= 2 ? (reports[reports.length - 2].rd?.ai_analysis?.tiktok_trends_analysis?.top_themes || []) : [];
-    const newThemes = latestThemes.filter((t: string) => !prevThemes.some((p: string) => p.toLowerCase() === t.toLowerCase()));
+    const prevThemes =
+      reports.length >= 2 ? reports[reports.length - 2].rd?.ai_analysis?.tiktok_trends_analysis?.top_themes || [] : [];
+    const newThemes = latestThemes.filter(
+      (t: string) => !prevThemes.some((p: string) => p.toLowerCase() === t.toLowerCase()),
+    );
     if (newThemes.length > 0 && prevThemes.length > 0) {
-      result.push({ text: `${newThemes.length} new TikTok theme${newThemes.length > 1 ? "s" : ""} emerged since last report — the trend landscape is shifting.`, type: "neutral" });
+      result.push({
+        text: `${newThemes.length} new TikTok theme${newThemes.length > 1 ? "s" : ""} emerged since last report — the trend landscape is shifting.`,
+        type: "neutral",
+      });
     }
 
     return result.slice(0, 8);
@@ -537,13 +665,23 @@ function DataDrivenInsights({ reports }: { reports: ParsedReport[] }) {
         <CardTitle className="text-base flex items-center gap-2">
           <Brain className="h-4 w-4" /> Data-Driven Insights
         </CardTitle>
-        <CardDescription>Automatically computed from {reports.length} report{reports.length !== 1 ? "s" : ""}</CardDescription>
+        <CardDescription>
+          Automatically computed from {reports.length} report{reports.length !== 1 ? "s" : ""}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2.5">
         {insights.map((ins, i) => (
           <div key={i} className="flex items-start gap-3 text-sm">
-            <span className={`shrink-0 mt-0.5 ${ins.type === "positive" ? "text-emerald-500" : ins.type === "negative" ? "text-destructive" : "text-muted-foreground"}`}>
-              {ins.type === "positive" ? <TrendingUp className="h-4 w-4" /> : ins.type === "negative" ? <TrendingDown className="h-4 w-4" /> : <Minus className="h-4 w-4" />}
+            <span
+              className={`shrink-0 mt-0.5 ${ins.type === "positive" ? "text-emerald-500" : ins.type === "negative" ? "text-destructive" : "text-muted-foreground"}`}
+            >
+              {ins.type === "positive" ? (
+                <TrendingUp className="h-4 w-4" />
+              ) : ins.type === "negative" ? (
+                <TrendingDown className="h-4 w-4" />
+              ) : (
+                <Minus className="h-4 w-4" />
+              )}
             </span>
             <span className="text-foreground">{ins.text}</span>
           </div>
@@ -601,7 +739,9 @@ function PerformanceTab({ reports }: { reports: ParsedReport[] }) {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Performance Metrics Over Time</CardTitle>
-          <CardDescription>Absolute values across {reports.length} selected report{reports.length !== 1 ? "s" : ""}</CardDescription>
+          <CardDescription>
+            Absolute values across {reports.length} selected report{reports.length !== 1 ? "s" : ""}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={350}>
@@ -609,12 +749,47 @@ function PerformanceTab({ reports }: { reports: ParsedReport[] }) {
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
               <YAxis tickFormatter={formatNum} stroke="hsl(var(--muted-foreground))" fontSize={12} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", color: "hsl(var(--card-foreground))" }} formatter={(v: number) => [v.toLocaleString(), undefined]} />
+              <Tooltip
+                contentStyle={{
+                  background: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--border))",
+                  color: "hsl(var(--card-foreground))",
+                }}
+                formatter={(v: number) => [v.toLocaleString(), undefined]}
+              />
               <Legend />
-              <Line type="monotone" dataKey="impressions" name="Impressions" stroke={CHART_COLORS[0]} strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="reactions" name="Reactions" stroke={CHART_COLORS[1]} strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="link_clicks" name="Link Clicks" stroke={CHART_COLORS[2]} strokeWidth={2} dot={{ r: 3 }} />
-              <Line type="monotone" dataKey="video_views" name="Video Views" stroke={CHART_COLORS[3]} strokeWidth={2} dot={{ r: 3 }} />
+              <Line
+                type="monotone"
+                dataKey="impressions"
+                name="Impressions"
+                stroke={CHART_COLORS[0]}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="reactions"
+                name="Reactions"
+                stroke={CHART_COLORS[1]}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="link_clicks"
+                name="Link Clicks"
+                stroke={CHART_COLORS[2]}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="video_views"
+                name="Video Views"
+                stroke={CHART_COLORS[3]}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+              />
             </LineChart>
           </ResponsiveContainer>
         </CardContent>
@@ -632,7 +807,14 @@ function PerformanceTab({ reports }: { reports: ParsedReport[] }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                 <YAxis tickFormatter={(v: number) => `${v}%`} stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", color: "hsl(var(--card-foreground))" }} formatter={(v: number) => [`${v}%`, undefined]} />
+                <Tooltip
+                  contentStyle={{
+                    background: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    color: "hsl(var(--card-foreground))",
+                  }}
+                  formatter={(v: number) => [`${v}%`, undefined]}
+                />
                 <Legend />
                 <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" />
                 <Bar dataKey="impressions_pct" name="Impressions" fill={CHART_COLORS[0]} />
@@ -679,12 +861,17 @@ function PerformanceTab({ reports }: { reports: ParsedReport[] }) {
             <CardDescription>AI-identified top content across all selected reports</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {allTopContent.slice(-10).reverse().map((item, i) => (
-              <div key={i} className="flex items-start gap-3 text-sm">
-                <Badge variant="secondary" className="mt-0.5 shrink-0 text-xs">{item.reportDate}</Badge>
-                <span className="text-foreground">{item.item}</span>
-              </div>
-            ))}
+            {allTopContent
+              .slice(-10)
+              .reverse()
+              .map((item, i) => (
+                <div key={i} className="flex items-start gap-3 text-sm">
+                  <Badge variant="secondary" className="mt-0.5 shrink-0 text-xs">
+                    {item.reportDate}
+                  </Badge>
+                  <span className="text-foreground">{item.item}</span>
+                </div>
+              ))}
           </CardContent>
         </Card>
       )}
@@ -701,12 +888,14 @@ function TrendsTab({ reports }: { reports: ParsedReport[] }) {
       date: reportLabel(r),
       tiktok_count: tiktok.filter((p: any) => !p._empty).length,
       ig_count: instagram.filter((p: any) => !p._empty).length,
-      avg_tiktok: tiktok.length > 0
-        ? Math.round(tiktok.reduce((s: number, p: any) => s + (p.engagement_score || 0), 0) / tiktok.length)
-        : 0,
-      avg_ig: instagram.length > 0
-        ? Math.round(instagram.reduce((s: number, p: any) => s + (p.engagement_score || 0), 0) / instagram.length)
-        : 0,
+      avg_tiktok:
+        tiktok.length > 0
+          ? Math.round(tiktok.reduce((s: number, p: any) => s + (p.engagement_score || 0), 0) / tiktok.length)
+          : 0,
+      avg_ig:
+        instagram.length > 0
+          ? Math.round(instagram.reduce((s: number, p: any) => s + (p.engagement_score || 0), 0) / instagram.length)
+          : 0,
     };
   });
 
@@ -727,7 +916,12 @@ function TrendsTab({ reports }: { reports: ParsedReport[] }) {
     return Object.entries(counts)
       .sort((a, b) => b[1].reports.size - a[1].reports.size || b[1].total - a[1].total)
       .slice(0, 25)
-      .map(([tag, d]) => ({ tag, total: d.total, reportCount: d.reports.size, consistency: (d.reports.size / reports.length * 100).toFixed(0) }));
+      .map(([tag, d]) => ({
+        tag,
+        total: d.total,
+        reportCount: d.reports.size,
+        consistency: ((d.reports.size / reports.length) * 100).toFixed(0),
+      }));
   }, [reports]);
 
   // Theme evolution across reports
@@ -770,7 +964,7 @@ function TrendsTab({ reports }: { reports: ParsedReport[] }) {
 
   // Deduplicate similar opportunities and keep most recent
   const deduplicatedOpps = useMemo(() => {
-    const seen = new Map<string, typeof allOpportunities[0]>();
+    const seen = new Map<string, (typeof allOpportunities)[0]>();
     // Process newest first so newest stays
     [...allOpportunities].reverse().forEach((o) => {
       const key = o.text.toLowerCase().slice(0, 60);
@@ -793,7 +987,13 @@ function TrendsTab({ reports }: { reports: ParsedReport[] }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", color: "hsl(var(--card-foreground))" }} />
+                <Tooltip
+                  contentStyle={{
+                    background: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    color: "hsl(var(--card-foreground))",
+                  }}
+                />
                 <Legend />
                 <Bar dataKey="tiktok_count" name="TikTok" fill={CHART_COLORS[0]} />
                 <Bar dataKey="ig_count" name="Instagram" fill={CHART_COLORS[2]} />
@@ -812,10 +1012,31 @@ function TrendsTab({ reports }: { reports: ParsedReport[] }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                 <YAxis tickFormatter={formatNum} stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", color: "hsl(var(--card-foreground))" }} formatter={(v: number) => [formatNum(v), undefined]} />
+                <Tooltip
+                  contentStyle={{
+                    background: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border))",
+                    color: "hsl(var(--card-foreground))",
+                  }}
+                  formatter={(v: number) => [formatNum(v), undefined]}
+                />
                 <Legend />
-                <Line type="monotone" dataKey="avg_tiktok" name="TikTok" stroke={CHART_COLORS[0]} strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="avg_ig" name="Instagram" stroke={CHART_COLORS[2]} strokeWidth={2} dot={{ r: 3 }} />
+                <Line
+                  type="monotone"
+                  dataKey="avg_tiktok"
+                  name="TikTok"
+                  stroke={CHART_COLORS[0]}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="avg_ig"
+                  name="Instagram"
+                  stroke={CHART_COLORS[2]}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -829,7 +1050,9 @@ function TrendsTab({ reports }: { reports: ParsedReport[] }) {
             <CardTitle className="text-base flex items-center gap-2">
               <Hash className="h-4 w-4" /> Hashtag Analysis (All Reports)
             </CardTitle>
-            <CardDescription>Sorted by report consistency — hashtags appearing across multiple reports are your trend anchors</CardDescription>
+            <CardDescription>
+              Sorted by report consistency — hashtags appearing across multiple reports are your trend anchors
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -838,7 +1061,10 @@ function TrendsTab({ reports }: { reports: ParsedReport[] }) {
                   <span className="text-sm text-foreground font-medium">#{h.tag}</span>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">×{h.total}</span>
-                    <Badge variant={Number(h.consistency) >= 50 ? "default" : "outline"} className="text-[10px] px-1.5 py-0">
+                    <Badge
+                      variant={Number(h.consistency) >= 50 ? "default" : "outline"}
+                      className="text-[10px] px-1.5 py-0"
+                    >
                       {h.consistency}% of reports
                     </Badge>
                   </div>
@@ -872,7 +1098,9 @@ function TrendsTab({ reports }: { reports: ParsedReport[] }) {
                 <div className="flex items-center gap-2">
                   <PlatformBadge platform={data.platform} size="sm" />
                   {data.count >= Math.ceil(reports.length * 0.5) && (
-                    <Badge variant="default" className="text-[10px] px-1.5 py-0">persistent</Badge>
+                    <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                      persistent
+                    </Badge>
                   )}
                 </div>
               </div>
@@ -922,9 +1150,15 @@ function ContentStrategyTab({ reports }: { reports: ParsedReport[] }) {
     });
   });
 
-  const pillarData = Object.entries(pillarCounts).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }));
-  const formatData = Object.entries(formatCounts).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }));
-  const platformData = Object.entries(platformCounts).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }));
+  const pillarData = Object.entries(pillarCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, value]) => ({ name, value }));
+  const formatData = Object.entries(formatCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, value]) => ({ name, value }));
+  const platformData = Object.entries(platformCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, value]) => ({ name, value }));
 
   // Pillar alignment evolution
   const pillarAlignmentHistory = useMemo(() => {
@@ -950,9 +1184,11 @@ function ContentStrategyTab({ reports }: { reports: ParsedReport[] }) {
     reports.forEach((r) => {
       const label = reportLabel(r);
       (r.rd?.ai_analysis?.tiktok_trends_analysis?.successful_formats || []).forEach((f: string) =>
-        formats.push({ format: f, date: label, platform: "TikTok" }));
+        formats.push({ format: f, date: label, platform: "TikTok" }),
+      );
       (r.rd?.ai_analysis?.instagram_trends_analysis?.successful_formats || []).forEach((f: string) =>
-        formats.push({ format: f, date: label, platform: "Instagram" }));
+        formats.push({ format: f, date: label, platform: "Instagram" }),
+      );
     });
     return formats;
   }, [reports]);
@@ -963,14 +1199,27 @@ function ContentStrategyTab({ reports }: { reports: ParsedReport[] }) {
         {pillarData.length > 0 && (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2"><Layers className="h-4 w-4" /> Pillar Coverage</CardTitle>
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Layers className="h-4 w-4" /> Pillar Coverage
+              </CardTitle>
               <CardDescription className="text-xs">Across all recommendations</CardDescription>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
-                  <Pie data={pillarData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                    {pillarData.map((_, i) => (<Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />))}
+                  <Pie
+                    data={pillarData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={70}
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    {pillarData.map((_, i) => (
+                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                    ))}
                   </Pie>
                   <Tooltip />
                 </PieChart>
@@ -980,7 +1229,9 @@ function ContentStrategyTab({ reports }: { reports: ParsedReport[] }) {
         )}
         {formatData.length > 0 && (
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Format Distribution</CardTitle></CardHeader>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Format Distribution</CardTitle>
+            </CardHeader>
             <CardContent>
               <div className="space-y-2">
                 {formatData.map((f) => (
@@ -995,7 +1246,9 @@ function ContentStrategyTab({ reports }: { reports: ParsedReport[] }) {
         )}
         {platformData.length > 0 && (
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Platform Distribution</CardTitle></CardHeader>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Platform Distribution</CardTitle>
+            </CardHeader>
             <CardContent>
               <div className="space-y-2">
                 {platformData.map((p) => (
@@ -1014,7 +1267,9 @@ function ContentStrategyTab({ reports }: { reports: ParsedReport[] }) {
       {pillarAlignmentHistory.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><Target className="h-4 w-4" /> Pillar Alignment History</CardTitle>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Target className="h-4 w-4" /> Pillar Alignment History
+            </CardTitle>
             <CardDescription>How pillar coverage has evolved across reports</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1023,10 +1278,14 @@ function ContentStrategyTab({ reports }: { reports: ParsedReport[] }) {
                 <p className="text-xs font-medium text-primary mb-2">{entry.date}</p>
                 <div className="flex gap-2 flex-wrap">
                   {entry.alignment.well_represented?.map((p: string) => (
-                    <Badge key={p} variant="default" className="text-xs">✓ {p}</Badge>
+                    <Badge key={p} variant="default" className="text-xs">
+                      ✓ {p}
+                    </Badge>
                   ))}
                   {entry.alignment.underrepresented?.map((p: string) => (
-                    <Badge key={p} variant="destructive" className="text-xs">⚠ {p}</Badge>
+                    <Badge key={p} variant="destructive" className="text-xs">
+                      ⚠ {p}
+                    </Badge>
                   ))}
                 </div>
                 {i < pillarAlignmentHistory.length - 1 && <Separator className="mt-3" />}
@@ -1043,12 +1302,17 @@ function ContentStrategyTab({ reports }: { reports: ParsedReport[] }) {
             <CardTitle className="text-base">Strategy Recommendations (All Reports)</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {allRecs.slice(-8).reverse().map((r, i) => (
-              <div key={i} className="flex items-start gap-3 text-sm">
-                <Badge variant="secondary" className="mt-0.5 shrink-0 text-xs">{r.date}</Badge>
-                <span className="text-foreground">{r.rec}</span>
-              </div>
-            ))}
+            {allRecs
+              .slice(-8)
+              .reverse()
+              .map((r, i) => (
+                <div key={i} className="flex items-start gap-3 text-sm">
+                  <Badge variant="secondary" className="mt-0.5 shrink-0 text-xs">
+                    {r.date}
+                  </Badge>
+                  <span className="text-foreground">{r.rec}</span>
+                </div>
+              ))}
           </CardContent>
         </Card>
       )}
@@ -1057,17 +1321,22 @@ function ContentStrategyTab({ reports }: { reports: ParsedReport[] }) {
       {successfulFormats.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><Sparkles className="h-4 w-4" /> Proven Content Formats</CardTitle>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Sparkles className="h-4 w-4" /> Proven Content Formats
+            </CardTitle>
             <CardDescription>Successful formats identified across all reports</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            {successfulFormats.slice(-10).reverse().map((f, i) => (
-              <div key={i} className="flex items-start gap-3 text-sm">
-                <PlatformBadge platform={f.platform} size="sm" />
-                <span className="text-foreground">{f.format}</span>
-                <span className="text-xs text-muted-foreground ml-auto">{f.date}</span>
-              </div>
-            ))}
+            {successfulFormats
+              .slice(-10)
+              .reverse()
+              .map((f, i) => (
+                <div key={i} className="flex items-start gap-3 text-sm">
+                  <PlatformBadge platform={f.platform} size="sm" />
+                  <span className="text-foreground">{f.format}</span>
+                  <span className="text-xs text-muted-foreground ml-auto">{f.date}</span>
+                </div>
+              ))}
           </CardContent>
         </Card>
       )}
@@ -1108,8 +1377,13 @@ function AIInsightsTab({ reports }: { reports: ParsedReport[] }) {
     if (momSummaries.length < 2) return null;
     const summaries = momSummaries.map((s) => s.summary);
     // Extract directional signals
-    const upSignals = summaries.filter((s: string) => s && (s.includes("increase") || s.includes("grew") || s.includes("improved") || s.includes("up"))).length;
-    const downSignals = summaries.filter((s: string) => s && (s.includes("decrease") || s.includes("declined") || s.includes("drop") || s.includes("down"))).length;
+    const upSignals = summaries.filter(
+      (s: string) => s && (s.includes("increase") || s.includes("grew") || s.includes("improved") || s.includes("up")),
+    ).length;
+    const downSignals = summaries.filter(
+      (s: string) =>
+        s && (s.includes("decrease") || s.includes("declined") || s.includes("drop") || s.includes("down")),
+    ).length;
     const trend = upSignals > downSignals ? "improving" : downSignals > upSignals ? "declining" : "mixed";
     return {
       trend,
@@ -1134,11 +1408,25 @@ function AIInsightsTab({ reports }: { reports: ParsedReport[] }) {
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-4 text-sm">
-              <Badge variant={synthesized.trend === "improving" ? "default" : synthesized.trend === "declining" ? "destructive" : "secondary"} className="text-xs">
-                {synthesized.trend === "improving" ? "↑ Improving" : synthesized.trend === "declining" ? "↓ Declining" : "↔ Mixed"}
+              <Badge
+                variant={
+                  synthesized.trend === "improving"
+                    ? "default"
+                    : synthesized.trend === "declining"
+                      ? "destructive"
+                      : "secondary"
+                }
+                className="text-xs"
+              >
+                {synthesized.trend === "improving"
+                  ? "↑ Improving"
+                  : synthesized.trend === "declining"
+                    ? "↓ Declining"
+                    : "↔ Mixed"}
               </Badge>
               <span className="text-foreground">
-                Across {synthesized.totalPeriods} reporting periods: {synthesized.upSignals} positive signals, {synthesized.downSignals} negative signals.
+                Across {synthesized.totalPeriods} reporting periods: {synthesized.upSignals} positive signals,{" "}
+                {synthesized.downSignals} negative signals.
               </span>
             </div>
           </CardContent>
@@ -1174,19 +1462,23 @@ function AIInsightsTab({ reports }: { reports: ParsedReport[] }) {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {allKeyInsights.slice(-4).reverse().map((report, ri) => (
-              <div key={ri}>
-                <p className="text-xs font-medium text-primary mb-2">{report.date}</p>
-                <ul className="space-y-1.5">
-                  {report.insights.slice(0, 5).map((insight: string, i: number) => (
-                    <li key={i} className="text-sm text-foreground flex gap-2">
-                      <span className="text-primary shrink-0">•</span>{insight}
-                    </li>
-                  ))}
-                </ul>
-                {ri < Math.min(allKeyInsights.length, 4) - 1 && <Separator className="mt-3" />}
-              </div>
-            ))}
+            {allKeyInsights
+              .slice(-4)
+              .reverse()
+              .map((report, ri) => (
+                <div key={ri}>
+                  <p className="text-xs font-medium text-primary mb-2">{report.date}</p>
+                  <ul className="space-y-1.5">
+                    {report.insights.slice(0, 5).map((insight: string, i: number) => (
+                      <li key={i} className="text-sm text-foreground flex gap-2">
+                        <span className="text-primary shrink-0">•</span>
+                        {insight}
+                      </li>
+                    ))}
+                  </ul>
+                  {ri < Math.min(allKeyInsights.length, 4) - 1 && <Separator className="mt-3" />}
+                </div>
+              ))}
           </CardContent>
         </Card>
       )}
@@ -1200,19 +1492,23 @@ function AIInsightsTab({ reports }: { reports: ParsedReport[] }) {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {allTakeaways.slice(-6).reverse().map((group, gi) => (
-              <div key={gi}>
-                <p className="text-xs font-medium text-primary mb-2">{group.source}</p>
-                <ul className="space-y-1.5">
-                  {group.takeaways.slice(0, 4).map((t: string, i: number) => (
-                    <li key={i} className="text-sm text-foreground flex gap-2">
-                      <span className="text-emerald-500 shrink-0">→</span>{t}
-                    </li>
-                  ))}
-                </ul>
-                {gi < Math.min(allTakeaways.length, 6) - 1 && <Separator className="mt-3" />}
-              </div>
-            ))}
+            {allTakeaways
+              .slice(-6)
+              .reverse()
+              .map((group, gi) => (
+                <div key={gi}>
+                  <p className="text-xs font-medium text-primary mb-2">{group.source}</p>
+                  <ul className="space-y-1.5">
+                    {group.takeaways.slice(0, 4).map((t: string, i: number) => (
+                      <li key={i} className="text-sm text-foreground flex gap-2">
+                        <span className="text-emerald-500 shrink-0">→</span>
+                        {t}
+                      </li>
+                    ))}
+                  </ul>
+                  {gi < Math.min(allTakeaways.length, 6) - 1 && <Separator className="mt-3" />}
+                </div>
+              ))}
           </CardContent>
         </Card>
       )}

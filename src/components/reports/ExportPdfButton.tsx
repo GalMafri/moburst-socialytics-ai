@@ -22,50 +22,51 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
         throw new Error("Pop-up blocked. Please allow pop-ups and try again.");
       }
 
-      // Get all stylesheets
+      // ── Capture ALL tab content before cloning ──
+      // Radix UI Tabs unmount inactive tab panels from the DOM entirely,
+      // so we programmatically click each tab, wait for render, and
+      // capture the panel HTML. Then restore the original active tab.
+      const tabsList = contentRef.current.querySelector('[role="tablist"]');
+      const tabs = tabsList ? (Array.from(tabsList.querySelectorAll('[role="tab"]')) as HTMLElement[]) : [];
+      const originalActiveTab = tabs.find((t) => t.getAttribute("data-state") === "active");
+
+      const capturedPanels: { label: string; html: string }[] = [];
+
+      for (const tab of tabs) {
+        tab.click();
+        await new Promise((r) => setTimeout(r, 200)); // wait for Radix render
+        const panel = contentRef.current.querySelector('[role="tabpanel"][data-state="active"]');
+        if (panel) {
+          capturedPanels.push({
+            label: tab.textContent?.trim() || "",
+            html: panel.innerHTML,
+          });
+        }
+      }
+
+      // Restore original tab
+      if (originalActiveTab) {
+        originalActiveTab.click();
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      // ── Collect stylesheets ──
       const styleSheets = Array.from(document.styleSheets);
       let cssText = "";
+
       for (const sheet of styleSheets) {
         try {
           const rules = Array.from(sheet.cssRules || []);
           cssText += rules.map((r) => r.cssText).join("\n");
         } catch {
-          if (sheet.href) cssText += `@import url("${sheet.href}");\n`;
+          if (sheet.href) {
+            cssText += `@import url("${sheet.href}");\n`;
+          }
         }
       }
 
-      // CRITICAL FIX: Before cloning, temporarily activate ALL tab panels
-      // Find all TabsContent containers inside the ref and make them visible
-      const tabPanels = contentRef.current.querySelectorAll('[role="tabpanel"]');
-      const originalStates: { el: Element; state: string | null; display: string }[] = [];
-
-      tabPanels.forEach((panel) => {
-        originalStates.push({
-          el: panel,
-          state: panel.getAttribute("data-state"),
-          display: (panel as HTMLElement).style.display,
-        });
-        panel.setAttribute("data-state", "active");
-        (panel as HTMLElement).style.display = "block";
-      });
-
-      // Also handle hidden attribute that Radix uses
-      const hiddenPanels = contentRef.current.querySelectorAll("[hidden]");
-      const originalHidden: Element[] = [];
-      hiddenPanels.forEach((el) => {
-        originalHidden.push(el);
-        el.removeAttribute("hidden");
-      });
-
-      // Clone content with all tabs now visible
+      // ── Clone and clean content ──
       const content = contentRef.current.cloneNode(true) as HTMLElement;
-
-      // Restore original state immediately
-      originalStates.forEach(({ el, state, display }) => {
-        if (state !== null) el.setAttribute("data-state", state);
-        (el as HTMLElement).style.display = display;
-      });
-      originalHidden.forEach((el) => el.setAttribute("hidden", ""));
 
       // Remove interactive buttons
       content.querySelectorAll("button").forEach((btn) => {
@@ -75,6 +76,7 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
         }
       });
 
+      // Remove dropdown menus and icon-only buttons
       content.querySelectorAll('[data-slot="dropdown-menu"]').forEach((el) => el.remove());
       content.querySelectorAll("button").forEach((btn) => {
         if (btn.querySelector("svg") && !btn.textContent?.trim()) {
@@ -82,10 +84,36 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
         }
       });
 
-      // Remove presentation banner placeholder
-      const cards = content.querySelectorAll(".border-dashed");
-      cards.forEach((card) => card.remove());
+      // Remove the presentation placeholder banner
+      content.querySelectorAll(".border-dashed").forEach((card) => card.remove());
 
+      // ── Replace tab section with all captured panels ──
+      if (capturedPanels.length > 0) {
+        const clonedTabsList = content.querySelector('[role="tablist"]');
+        const clonedPanels = content.querySelectorAll('[role="tabpanel"]');
+        const panelParent = clonedPanels[0]?.parentElement;
+
+        // Remove the cloned tablist and any single active panel
+        if (clonedTabsList) clonedTabsList.remove();
+        clonedPanels.forEach((p) => p.remove());
+
+        // Insert ALL captured panels stacked vertically with section headers
+        if (panelParent) {
+          for (const panel of capturedPanels) {
+            const section = document.createElement("div");
+            section.className = "pdf-tab-section";
+            section.innerHTML = `
+              <h2 style="font-size:1.25rem;font-weight:700;margin:32px 0 16px;padding-bottom:8px;border-bottom:2px solid hsl(0 0% 89.8%);">
+                ${panel.label}
+              </h2>
+              <div>${panel.html}</div>
+            `;
+            panelParent.appendChild(section);
+          }
+        }
+      }
+
+      // ── Build print document ──
       const html = `
 <!DOCTYPE html>
 <html>
@@ -115,7 +143,9 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       --warning: 38 92% 50%;
     }
 
-    * { color-scheme: light !important; }
+    * {
+      color-scheme: light !important;
+    }
 
     body {
       background: white !important;
@@ -128,6 +158,7 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       print-color-adjust: exact;
     }
 
+    /* Ensure cards have visible borders */
     [data-slot="card"], .rounded-lg.border {
       border: 1px solid hsl(0 0% 89.8%) !important;
       background: white !important;
@@ -135,18 +166,39 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       margin-bottom: 12px;
     }
 
-    .grid { gap: 12px !important; }
+    /* Grid layouts */
+    .grid {
+      gap: 12px !important;
+    }
+
+    /* Space between sections */
     .space-y-6 > * + * { margin-top: 24px !important; }
     .space-y-8 > * + * { margin-top: 32px !important; }
     .space-y-4 > * + * { margin-top: 16px !important; }
     .space-y-3 > * + * { margin-top: 12px !important; }
 
-    .text-muted-foreground { color: hsl(0 0% 45.1%) !important; }
-    .text-foreground { color: hsl(0 0% 3.9%) !important; }
-    .text-destructive { color: hsl(0 84.2% 60.2%) !important; }
-    .text-success { color: hsl(142 76% 36%) !important; }
-    .text-warning { color: hsl(38 92% 50%) !important; }
+    /* Fix text colors */
+    .text-muted-foreground {
+      color: hsl(0 0% 45.1%) !important;
+    }
 
+    .text-foreground {
+      color: hsl(0 0% 3.9%) !important;
+    }
+
+    .text-destructive {
+      color: hsl(0 84.2% 60.2%) !important;
+    }
+
+    .text-success {
+      color: hsl(142 76% 36%) !important;
+    }
+
+    .text-warning {
+      color: hsl(38 92% 50%) !important;
+    }
+
+    /* Badge styling */
     [data-slot="badge"] {
       display: inline-flex !important;
       border: 1px solid hsl(0 0% 89.8%) !important;
@@ -157,32 +209,29 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       color: hsl(0 0% 9%) !important;
     }
 
-    .recharts-wrapper { break-inside: avoid; }
-
-    /* CRITICAL: Hide tab navigation, show ALL tab content */
-    [role="tablist"] { display: none !important; }
-    [role="tabpanel"] {
-      display: block !important;
-      opacity: 1 !important;
-      position: static !important;
-      pointer-events: auto !important;
-    }
-    [role="tabpanel"][data-state="inactive"] {
-      display: block !important;
-    }
-    [role="tabpanel"][hidden] {
-      display: block !important;
+    /* Recharts fix */
+    .recharts-wrapper {
+      break-inside: avoid;
     }
 
-    /* Section separators for merged tab content */
-    [role="tabpanel"] + [role="tabpanel"] {
-      border-top: 2px solid hsl(0 0% 89.8%);
-      padding-top: 24px;
-      margin-top: 24px;
+    /* Hide any leftover tablist elements */
+    [role="tablist"] {
+      display: none !important;
     }
 
-    h2, h3 { break-after: avoid; }
-    .animate-pulse { animation: none !important; }
+    /* Tab section dividers */
+    .pdf-tab-section {
+      break-inside: avoid;
+    }
+
+    /* Page break control */
+    h2, h3 {
+      break-after: avoid;
+    }
+
+    .animate-pulse {
+      animation: none !important;
+    }
 
     @media print {
       body { padding: 0; }
@@ -198,6 +247,7 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       printWindow.document.write(html);
       printWindow.document.close();
 
+      // Wait for content and styles to load, then trigger print
       printWindow.onload = () => {
         setTimeout(() => {
           printWindow.print();

@@ -22,7 +22,9 @@ export function AdminDashboard() {
         queryClient.invalidateQueries({ queryKey: ["clients"] });
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [queryClient]);
 
   const { data: clients, isLoading } = useQuery({
@@ -31,16 +33,13 @@ export function AdminDashboard() {
       const { data, error } = await supabase
         .from("clients")
         .select("*, reports(id, status, created_at)")
-        .order("created_at", { ascending: false })
-        .order("created_at", { referencedTable: "reports", ascending: false });
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },
   });
 
-  const filtered = clients?.filter((c: any) =>
-    c.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = clients?.filter((c: any) => c.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="space-y-6">
@@ -92,9 +91,7 @@ export function AdminDashboard() {
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base">{client.name}</CardTitle>
-                    {client.logo_url && (
-                      <img src={client.logo_url} alt="" className="h-8 w-8 rounded object-cover" />
-                    )}
+                    {client.logo_url && <img src={client.logo_url} alt="" className="h-8 w-8 rounded object-cover" />}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -111,7 +108,7 @@ export function AdminDashboard() {
                   </div>
                   <div className="flex items-center justify-between pt-2">
                     <span className="text-xs text-muted-foreground">{reportCount} reports</span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex gap-1.5">
                       <Button
                         size="sm"
                         variant="outline"

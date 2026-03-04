@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ThemeProvider } from "next-themes";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import ClientSetup from "./pages/ClientSetup";
@@ -26,23 +25,20 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <ErrorBoundary>
-            <AuthProvider>
-              <Routes>
-                <Route path="/auth" element={<Auth />} />
-                <Route path="/" element={<Index />} />
-                <Route path="/clients/:id/setup" element={<ClientSetup />} />
-                <Route path="/clients/:id/analyze" element={<RunAnalysis />} />
-                <Route path="/clients/:id/reports/:reportId" element={<ReportView />} />
-                <Route path="/clients/:id/reports" element={<ReportHistory />} />
-                <Route path="/clients/:id/analytics" element={<Analytics />} />
-                <Route path="/analytics" element={<Analytics />} />
-                <Route path="/reports" element={<AllReports />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </AuthProvider>
-          </ErrorBoundary>
+          <AuthProvider>
+            <Routes>
+              <Route path="/auth" element={<Auth />} />
+              <Route path="/" element={<Index />} />
+              <Route path="/clients/:id/setup" element={<ClientSetup />} />
+              <Route path="/clients/:id/analyze" element={<RunAnalysis />} />
+              <Route path="/clients/:id/reports/:reportId" element={<ReportView />} />
+              <Route path="/clients/:id/reports" element={<ReportHistory />} />
+              <Route path="/clients/:id/analytics" element={<Analytics />} />
+              <Route path="/reports" element={<AllReports />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>
