@@ -74,8 +74,8 @@ export default function Analytics() {
     shares: number;
     video_views: number;
   } {
-    // Try multiple possible locations for totals
-    const totals = sp?.overall_totals || sp?.totals || sp?.summary || {};
+    // Try multiple possible locations for totals — including month_comparison.current_month
+    const totals = sp?.overall_totals || sp?.totals || sp?.summary || sp?.month_comparison?.current_month || {};
     const parseNum = (v: any): number => {
       if (!v) return 0;
       const n = typeof v === "string" ? parseFloat(v.replace(/,/g, "")) : Number(v);
@@ -146,7 +146,6 @@ export default function Analytics() {
     }));
   }, [latestReport]);
 
-
   const title = client ? `Analytics: ${client.name}` : "Analytics";
 
   return (
@@ -212,7 +211,10 @@ export default function Analytics() {
             {comparison && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Month-over-Month Comparison <span className="font-normal text-muted-foreground text-sm">(latest report)</span></CardTitle>
+                  <CardTitle className="text-base">
+                    Month-over-Month Comparison{" "}
+                    <span className="font-normal text-muted-foreground text-sm">(latest report)</span>
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -228,7 +230,8 @@ export default function Analytics() {
                             <div className="text-lg font-semibold">{(val?.current || 0).toLocaleString()}</div>
                           </div>
                           <Badge variant={isUp ? "default" : isDown ? "destructive" : "secondary"} className="text-xs">
-                            {isUp ? "+" : ""}{pct}%
+                            {isUp ? "+" : ""}
+                            {pct}%
                           </Badge>
                         </div>
                       );

@@ -200,6 +200,29 @@ export default function RunAnalysis() {
 
       setReportId(report.id);
 
+      // Parse brand voice preset from brand_notes ([VOICE:preset] prefix)
+      let brandNotes = client!.brand_notes || "";
+      let brandVoice = "";
+      const voiceMatch = brandNotes.match(/^\[VOICE:(.+?)]\n?/);
+      if (voiceMatch) {
+        brandVoice = voiceMatch[1];
+        brandNotes = brandNotes.slice(voiceMatch[0].length);
+      }
+
+      // Parse comma-separated geo/language to arrays
+      const geoArr = client!.geo
+        ? client!.geo
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+        : ["US"];
+      const langArr = client!.language
+        ? client!.language
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+        : ["en"];
+
       // Build payload — include report_id so n8n can write back to Supabase
       const payload = {
         report_id: report.id,
@@ -217,9 +240,10 @@ export default function RunAnalysis() {
         social_keywords: client!.social_keywords || [],
         content_pillars: client!.content_pillars || [],
         primary_platforms: (client!.primary_platforms || []).join(","),
-        geo: client!.geo || "US",
-        language: client!.language || "en",
-        brand_notes: client!.brand_notes || "",
+        geo: geoArr,
+        languages: langArr,
+        brand_voice: brandVoice,
+        brand_notes: brandNotes,
         brief_text: client!.brief_text || "",
         brief_file_id: client!.brief_file_id || "",
       };
@@ -277,7 +301,10 @@ export default function RunAnalysis() {
                 <span className="text-muted-foreground">Platforms:</span> {client.primary_platforms?.join(", ")}
               </div>
               <div>
-                <span className="text-muted-foreground">Geo:</span> {client.geo}
+                <span className="text-muted-foreground">Regions:</span> {client.geo || "US"}
+              </div>
+              <div>
+                <span className="text-muted-foreground">Languages:</span> {client.language || "en"}
               </div>
               <div>
                 <span className="text-muted-foreground">Keywords:</span> {client.social_keywords?.length || 0}

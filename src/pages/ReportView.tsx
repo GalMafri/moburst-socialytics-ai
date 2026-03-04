@@ -27,7 +27,17 @@ import {
   Target,
 } from "lucide-react";
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useState, useRef } from "react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { ReportActions } from "@/components/reports/ReportActions";
@@ -83,7 +93,12 @@ export default function ReportView() {
   if (aiAnalysis?.content_recommendations?.length > 0 || contentCalendar.length > 0) {
     tabs.push({ value: "content", label: "Content Ideas", icon: <Sparkles className="h-4 w-4" /> });
   }
-  if (aiAnalysis?.tiktok_trends_analysis || tiktokTrends?.posts?.length || aiAnalysis?.instagram_trends_analysis || instagramTrends?.posts?.length) {
+  if (
+    aiAnalysis?.tiktok_trends_analysis ||
+    tiktokTrends?.posts?.length ||
+    aiAnalysis?.instagram_trends_analysis ||
+    instagramTrends?.posts?.length
+  ) {
     tabs.push({ value: "trends", label: "Trends", icon: <TrendingUp className="h-4 w-4" /> });
   }
 
@@ -96,13 +111,17 @@ export default function ReportView() {
         <Card className={gammaUrl ? "border-primary/30 bg-primary/5" : "border-dashed"}>
           <CardContent className="py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${gammaUrl ? "bg-primary/10" : "bg-muted"}`}>
+              <div
+                className={`h-10 w-10 rounded-lg flex items-center justify-center ${gammaUrl ? "bg-primary/10" : "bg-muted"}`}
+              >
                 <ExternalLink className={`h-5 w-5 ${gammaUrl ? "text-primary" : "text-muted-foreground"}`} />
               </div>
               <div>
                 <p className="text-sm font-medium">{gammaUrl ? "Interactive Presentation" : "Presentation Deck"}</p>
                 <p className="text-xs text-muted-foreground">
-                  {gammaUrl ? "View the full interactive presentation" : "This feature will be added soon — stay tuned!"}
+                  {gammaUrl
+                    ? "View the full interactive presentation"
+                    : "This feature will be added soon — stay tuned!"}
                 </p>
               </div>
             </div>
@@ -126,7 +145,10 @@ export default function ReportView() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <ExportPdfButton contentRef={reportContentRef} filename={`${clientName}-report-${new Date(report.created_at).toISOString().slice(0, 10)}`} />
+            <ExportPdfButton
+              contentRef={reportContentRef}
+              filename={`${clientName}-report-${new Date(report.created_at).toISOString().slice(0, 10)}`}
+            />
             <ReportActions report={report} />
           </div>
         </div>
@@ -143,13 +165,17 @@ export default function ReportView() {
           {/* ── OVERVIEW TAB ── */}
           <TabsContent value="overview" className="space-y-8">
             {/* Metrics */}
-            {monthComparison?.changes && <MetricsCards changes={monthComparison.changes} />}
+            {monthComparison?.changes && (
+              <MetricsCards changes={monthComparison.changes} previousMonth={monthComparison.previous_month} />
+            )}
 
             {/* Chart */}
             {monthComparison?.current_month && (
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Month-over-Month Performance</CardTitle>
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Month-over-Month Performance
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <PerformanceChart comparison={monthComparison} />
@@ -166,7 +192,7 @@ export default function ReportView() {
                   </CardTitle>
                   {aiAnalysis.sprout_performance_analysis.month_over_month_summary && (
                     <CardDescription className="leading-relaxed">
-                      {aiAnalysis.sprout_performance_analysis.month_over_month_summary}
+                      {formatNumbersInText(aiAnalysis.sprout_performance_analysis.month_over_month_summary)}
                     </CardDescription>
                   )}
                 </CardHeader>
@@ -177,7 +203,7 @@ export default function ReportView() {
                         <span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center">
                           {i + 1}
                         </span>
-                        <span>{insight}</span>
+                        <span>{formatNumbersInText(insight)}</span>
                       </li>
                     ))}
                   </ul>
@@ -186,7 +212,9 @@ export default function ReportView() {
                       <p className="text-xs font-medium text-muted-foreground mb-2">Top Performing Content Types</p>
                       <div className="flex flex-wrap gap-2">
                         {aiAnalysis.sprout_performance_analysis.top_performing_content.map((c: string, i: number) => (
-                          <Badge key={i} variant="secondary">{c}</Badge>
+                          <Badge key={i} variant="secondary">
+                            {c}
+                          </Badge>
                         ))}
                       </div>
                     </div>
@@ -195,17 +223,47 @@ export default function ReportView() {
               </Card>
             )}
 
-            {/* Top Posts */}
-            {sproutPerformance?.top_posts?.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-base font-semibold">Top Performing Posts</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {sproutPerformance.top_posts.slice(0, 4).map((post: any, i: number) => (
-                    <PostCard key={i} post={post} />
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Top Posts by Impressions & Engagement */}
+            {sproutPerformance?.top_posts?.length > 0 &&
+              (() => {
+                const posts = [...sproutPerformance.top_posts];
+                const byImpressions = [...posts]
+                  .sort((a: any, b: any) => (b.impressions ?? 0) - (a.impressions ?? 0))
+                  .slice(0, 4);
+                const byEngagement = [...posts]
+                  .sort(
+                    (a: any, b: any) =>
+                      (b.reactions ?? b.likes ?? 0) +
+                      (b.comments ?? 0) +
+                      (b.shares ?? 0) -
+                      ((a.reactions ?? a.likes ?? 0) + (a.comments ?? 0) + (a.shares ?? 0)),
+                  )
+                  .slice(0, 4);
+                return (
+                  <div className="space-y-6">
+                    <div className="space-y-4">
+                      <h3 className="text-base font-semibold flex items-center gap-2">
+                        <Eye className="h-4 w-4 text-muted-foreground" /> Top Posts by Impressions
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {byImpressions.map((post: any, i: number) => (
+                          <PostCard key={`imp-${i}`} post={post} />
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <h3 className="text-base font-semibold flex items-center gap-2">
+                        <Heart className="h-4 w-4 text-muted-foreground" /> Top Posts by Engagement
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {byEngagement.map((post: any, i: number) => (
+                          <PostCard key={`eng-${i}`} post={post} />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
             {/* Pillar Alignment */}
             {aiAnalysis?.sprout_performance_analysis?.pillar_alignment && (
@@ -222,7 +280,9 @@ export default function ReportView() {
                         <p className="text-xs font-medium text-muted-foreground">✅ Well Represented</p>
                         <div className="flex flex-wrap gap-1.5">
                           {aiAnalysis.sprout_performance_analysis.pillar_alignment.well_represented.map((p: string) => (
-                            <Badge key={p} variant="secondary">{p}</Badge>
+                            <Badge key={p} variant="secondary">
+                              {p}
+                            </Badge>
                           ))}
                         </div>
                       </div>
@@ -232,7 +292,9 @@ export default function ReportView() {
                         <p className="text-xs font-medium text-muted-foreground">⚠️ Needs Attention</p>
                         <div className="flex flex-wrap gap-1.5">
                           {aiAnalysis.sprout_performance_analysis.pillar_alignment.underrepresented.map((p: string) => (
-                            <Badge key={p} variant="outline">{p}</Badge>
+                            <Badge key={p} variant="outline">
+                              {p}
+                            </Badge>
                           ))}
                         </div>
                       </div>
@@ -242,9 +304,13 @@ export default function ReportView() {
                     <div className="pt-3 border-t">
                       <p className="text-xs font-medium text-muted-foreground mb-2">Recommendations</p>
                       <ul className="space-y-1.5">
-                        {aiAnalysis.sprout_performance_analysis.pillar_alignment.recommendations.map((r: string, i: number) => (
-                          <li key={i} className="text-sm leading-relaxed text-muted-foreground">• {r}</li>
-                        ))}
+                        {aiAnalysis.sprout_performance_analysis.pillar_alignment.recommendations.map(
+                          (r: string, i: number) => (
+                            <li key={i} className="text-sm leading-relaxed text-muted-foreground">
+                              • {r}
+                            </li>
+                          ),
+                        )}
                       </ul>
                     </div>
                   )}
@@ -306,10 +372,7 @@ export default function ReportView() {
             )}
             {/* Visual Prompts */}
             {(aiAnalysis?.content_recommendations?.length > 0 || contentCalendar.length > 0) && (
-              <VisualPrompts
-                recommendations={aiAnalysis?.content_recommendations || []}
-                calendar={contentCalendar}
-              />
+              <VisualPrompts recommendations={aiAnalysis?.content_recommendations || []} calendar={contentCalendar} />
             )}
           </TabsContent>
 
@@ -338,7 +401,8 @@ export default function ReportView() {
 function ContentRecommendations({ recommendations }: { recommendations: any[] }) {
   const [platformFilter, setPlatformFilter] = useState("all");
   const platforms = [...new Set(recommendations.map((r: any) => r.platform).filter(Boolean))];
-  const filtered = platformFilter === "all" ? recommendations : recommendations.filter((r: any) => r.platform === platformFilter);
+  const filtered =
+    platformFilter === "all" ? recommendations : recommendations.filter((r: any) => r.platform === platformFilter);
 
   return (
     <div className="space-y-4">
@@ -355,11 +419,7 @@ function ContentRecommendations({ recommendations }: { recommendations: any[] })
             All
           </Badge>
           {platforms.map((p) => (
-            <span
-              key={p}
-              className="cursor-pointer"
-              onClick={() => setPlatformFilter(p)}
-            >
+            <span key={p} className="cursor-pointer" onClick={() => setPlatformFilter(p)}>
               <PlatformBadge
                 platform={p}
                 className={platformFilter === p ? "ring-1 ring-offset-1 ring-current" : "opacity-70 hover:opacity-100"}
@@ -387,18 +447,21 @@ function ContentRecommendations({ recommendations }: { recommendations: any[] })
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-muted-foreground">
                 {rec.caption_angle && (
                   <div>
-                    <span className="font-medium text-foreground">Caption angle: </span>{rec.caption_angle}
+                    <span className="font-medium text-foreground">Caption angle: </span>
+                    {rec.caption_angle}
                   </div>
                 )}
                 {rec.cta && (
                   <div>
-                    <span className="font-medium text-foreground">CTA: </span>{rec.cta}
+                    <span className="font-medium text-foreground">CTA: </span>
+                    {rec.cta}
                   </div>
                 )}
               </div>
               {rec.visual_direction && (
                 <p className="text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">Visual: </span>{rec.visual_direction}
+                  <span className="font-medium text-foreground">Visual: </span>
+                  {rec.visual_direction}
                 </p>
               )}
               {rec.why_this && (
@@ -429,7 +492,7 @@ function VisualPrompts({ recommendations, calendar }: { recommendations: any[]; 
   recommendations.forEach((rec: any, i: number) => {
     if (rec.ai_visual_prompt) {
       allPrompts.push({
-        source: 'Recommendation',
+        source: "Recommendation",
         platform: rec.platform,
         format: rec.format,
         prompt: rec.ai_visual_prompt,
@@ -437,10 +500,10 @@ function VisualPrompts({ recommendations, calendar }: { recommendations: any[]; 
       });
     } else if (rec.visual_direction) {
       allPrompts.push({
-        source: 'Recommendation',
+        source: "Recommendation",
         platform: rec.platform,
         format: rec.format,
-        prompt: `Create a ${rec.format?.toLowerCase() || 'social media'} visual for ${rec.platform}: ${rec.visual_direction}. Style: professional, on-brand, high quality. Aspect ratio: ${rec.platform === 'Instagram' ? '1:1 or 4:5' : rec.platform === 'TikTok' ? '9:16 vertical' : rec.platform === 'LinkedIn' ? '1.91:1 landscape' : '16:9'}.`,
+        prompt: `Create a ${rec.format?.toLowerCase() || "social media"} visual for ${rec.platform}: ${rec.visual_direction}. Style: professional, on-brand, high quality. Aspect ratio: ${rec.platform === "Instagram" ? "1:1 or 4:5" : rec.platform === "TikTok" ? "9:16 vertical" : rec.platform === "LinkedIn" ? "1.91:1 landscape" : "16:9"}.`,
         id: `rec-${i}`,
       });
     }
@@ -461,7 +524,7 @@ function VisualPrompts({ recommendations, calendar }: { recommendations: any[]; 
           source: `${day.day} - Calendar`,
           platform: post.platform,
           format: post.format,
-          prompt: `Create a ${post.format?.toLowerCase() || 'social media'} visual for ${post.platform}: ${post.visual_direction}. Style: professional, on-brand. Aspect ratio: ${post.platform === 'Instagram' ? '1:1 or 4:5' : post.platform === 'TikTok' ? '9:16 vertical' : post.platform === 'LinkedIn' ? '1.91:1 landscape' : '16:9'}.`,
+          prompt: `Create a ${post.format?.toLowerCase() || "social media"} visual for ${post.platform}: ${post.visual_direction}. Style: professional, on-brand. Aspect ratio: ${post.platform === "Instagram" ? "1:1 or 4:5" : post.platform === "TikTok" ? "9:16 vertical" : post.platform === "LinkedIn" ? "1.91:1 landscape" : "16:9"}.`,
           id: `cal-${dayIdx}-${postIdx}`,
         });
       }
@@ -476,7 +539,8 @@ function VisualPrompts({ recommendations, calendar }: { recommendations: any[]; 
         <Sparkles className="h-4 w-4" /> AI Visual Prompts
       </h3>
       <p className="text-sm text-muted-foreground">
-        Copy these prompts directly into Midjourney, DALL-E, Canva AI, or any AI image generator to create on-brand visuals for each content piece.
+        Copy these prompts directly into Midjourney, DALL-E, Canva AI, or any AI image generator to create on-brand
+        visuals for each content piece.
       </p>
       <div className="space-y-3">
         {allPrompts.map((item) => (
@@ -486,7 +550,9 @@ function VisualPrompts({ recommendations, calendar }: { recommendations: any[]; 
                 <div className="flex items-center gap-2 flex-wrap">
                   <PlatformBadge platform={item.platform} size="sm" />
                   <Badge variant="outline">{item.format}</Badge>
-                  <Badge variant="secondary" className="text-xs">{item.source}</Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    {item.source}
+                  </Badge>
                 </div>
                 <Button
                   variant="ghost"
@@ -498,9 +564,7 @@ function VisualPrompts({ recommendations, calendar }: { recommendations: any[]; 
                   {copied === item.id ? "Copied!" : "Copy Prompt"}
                 </Button>
               </div>
-              <div className="bg-muted/50 p-3 rounded-md text-sm leading-relaxed font-mono">
-                {item.prompt}
-              </div>
+              <div className="bg-muted/50 p-3 rounded-md text-sm leading-relaxed font-mono">{item.prompt}</div>
             </CardContent>
           </Card>
         ))}
@@ -547,7 +611,9 @@ function CalendarPostCard({ post }: { post: any }) {
         {post.hashtags?.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-3 pt-2 border-t">
             {post.hashtags.map((h: string) => (
-              <span key={h} className="text-xs text-primary">#{h}</span>
+              <span key={h} className="text-xs text-primary">
+                #{h}
+              </span>
             ))}
           </div>
         )}
@@ -555,7 +621,8 @@ function CalendarPostCard({ post }: { post: any }) {
 
       {post.visual_direction && (
         <p className="text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">Visual: </span>{post.visual_direction}
+          <span className="font-medium text-foreground">Visual: </span>
+          {post.visual_direction}
         </p>
       )}
       {post.rationale && (
@@ -568,7 +635,13 @@ function CalendarPostCard({ post }: { post: any }) {
 }
 
 /* ─── Metrics Cards ─── */
-function MetricsCards({ changes }: { changes: Record<string, any> }) {
+function MetricsCards({
+  changes,
+  previousMonth,
+}: {
+  changes: Record<string, any>;
+  previousMonth?: Record<string, any>;
+}) {
   const metrics = [
     { key: "impressions", label: "Impressions", icon: Eye },
     { key: "reactions", label: "Reactions", icon: Heart },
@@ -585,6 +658,7 @@ function MetricsCards({ changes }: { changes: Record<string, any> }) {
         if (!d) return null;
         const pct = d.percent ?? 0;
         const color = pct > 10 ? "text-success" : pct < -10 ? "text-destructive" : "text-warning";
+        const prevValue = previousMonth?.[key];
         return (
           <Card key={key}>
             <CardContent className="pt-4 pb-3 px-4 space-y-1.5">
@@ -592,9 +666,17 @@ function MetricsCards({ changes }: { changes: Record<string, any> }) {
                 <Icon className="h-3.5 w-3.5" /> {label}
               </div>
               <p className="text-xl font-bold tracking-tight">{(d.current ?? 0).toLocaleString()}</p>
+              {prevValue != null && <p className="text-xs text-muted-foreground">prev: {prevValue.toLocaleString()}</p>}
               <div className={`flex items-center gap-1 text-xs font-medium ${color}`}>
-                {pct > 0 ? <TrendingUp className="h-3 w-3" /> : pct < 0 ? <TrendingDown className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
-                {pct > 0 ? "+" : ""}{pct}%
+                {pct > 0 ? (
+                  <TrendingUp className="h-3 w-3" />
+                ) : pct < 0 ? (
+                  <TrendingDown className="h-3 w-3" />
+                ) : (
+                  <Minus className="h-3 w-3" />
+                )}
+                {pct > 0 ? "+" : ""}
+                {pct}%
               </div>
             </CardContent>
           </Card>
@@ -604,64 +686,56 @@ function MetricsCards({ changes }: { changes: Record<string, any> }) {
   );
 }
 
-/* ─── Performance Chart ─── */
+/* ─── Performance Chart (per-metric mini bars) ─── */
 function PerformanceChart({ comparison }: { comparison: any }) {
-  const chartData = Object.keys(comparison.current_month || {}).map((key) => ({
-    name: key.replace(/_/g, " "),
-    Current: comparison.current_month[key],
-    Previous: comparison.previous_month?.[key] ?? 0,
-  }));
+  const metrics = Object.keys(comparison.current_month || {}).map((key) => {
+    const current = comparison.current_month[key] ?? 0;
+    const previous = comparison.previous_month?.[key] ?? 0;
+    const max = Math.max(current, previous, 1);
+    return { key, label: key.replace(/_/g, " "), current, previous, max };
+  });
 
-  const allValues = chartData.flatMap((d) => [d.Current, d.Previous]).filter(Boolean);
-  const maxVal = Math.max(...allValues, 1);
-  const minNonZero = Math.min(...allValues.filter((v) => v > 0), maxVal);
-  const hasHugeRange = maxVal / minNonZero > 100;
-
-  const formatYAxis = (value: number) => {
-    if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
-    if (value >= 1000) return `${(value / 1000).toFixed(0)}K`;
-    return value.toString();
+  const fmtVal = (v: number) => {
+    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+    return v.toLocaleString();
   };
 
   return (
-    <div className="space-y-2">
-      {hasHugeRange && (
-        <p className="text-xs text-muted-foreground italic">
-          Logarithmic scale used due to large value differences across metrics.
-        </p>
-      )}
-      <ResponsiveContainer width="100%" height={320}>
-        <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-          <XAxis
-            dataKey="name"
-            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
-            angle={-20}
-            textAnchor="end"
-            height={50}
-          />
-          <YAxis
-            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
-            tickFormatter={formatYAxis}
-            scale={hasHugeRange ? "log" : "auto"}
-            domain={hasHugeRange ? [1, "auto"] : [0, "auto"]}
-            allowDataOverflow
-          />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: "hsl(var(--card))",
-              borderColor: "hsl(var(--border))",
-              color: "hsl(var(--card-foreground))",
-              borderRadius: "var(--radius)",
-            }}
-            labelStyle={{ color: "hsl(var(--card-foreground))" }}
-            formatter={(value: number) => [value.toLocaleString(), undefined]}
-          />
-          <Legend wrapperStyle={{ color: "hsl(var(--foreground))" }} />
-          <Bar dataKey="Current" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} minPointSize={3} />
-          <Bar dataKey="Previous" fill="hsl(var(--chart-4))" radius={[4, 4, 0, 0]} minPointSize={3} />
-        </BarChart>
-      </ResponsiveContainer>
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      {metrics.map(({ key, label, current, previous, max }) => (
+        <div key={key} className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground capitalize">{label}</p>
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-5 rounded bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded bg-[hsl(var(--chart-1))]"
+                  style={{ width: `${Math.max((current / max) * 100, 2)}%` }}
+                />
+              </div>
+              <span className="text-xs font-semibold w-14 text-right">{fmtVal(current)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-3.5 rounded bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded bg-[hsl(var(--chart-4))] opacity-60"
+                  style={{ width: `${Math.max((previous / max) * 100, 2)}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-muted-foreground w-14 text-right">{fmtVal(previous)}</span>
+            </div>
+          </div>
+        </div>
+      ))}
+      <div className="col-span-full flex items-center gap-4 text-xs text-muted-foreground pt-1">
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-[hsl(var(--chart-1))]" /> Current Month
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm bg-[hsl(var(--chart-4))] opacity-60" /> Previous Month
+        </span>
+      </div>
     </div>
   );
 }
@@ -679,10 +753,22 @@ function PostCard({ post }: { post: any }) {
         </div>
         <p className="text-sm leading-relaxed line-clamp-3">{post.text || post.content}</p>
         <div className="flex items-center gap-4 text-xs text-muted-foreground pt-1">
-          <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{(post.impressions ?? 0).toLocaleString()}</span>
-          <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{(post.reactions ?? post.likes ?? 0).toLocaleString()}</span>
-          <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{(post.comments ?? 0).toLocaleString()}</span>
-          <span className="flex items-center gap-1"><Share2 className="h-3 w-3" />{(post.shares ?? 0).toLocaleString()}</span>
+          <span className="flex items-center gap-1">
+            <Eye className="h-3 w-3" />
+            {(post.impressions ?? 0).toLocaleString()}
+          </span>
+          <span className="flex items-center gap-1">
+            <Heart className="h-3 w-3" />
+            {(post.reactions ?? post.likes ?? 0).toLocaleString()}
+          </span>
+          <span className="flex items-center gap-1">
+            <MessageCircle className="h-3 w-3" />
+            {(post.comments ?? 0).toLocaleString()}
+          </span>
+          <span className="flex items-center gap-1">
+            <Share2 className="h-3 w-3" />
+            {(post.shares ?? 0).toLocaleString()}
+          </span>
         </div>
         {(post.permalink || post.url) && (
           <a
@@ -697,6 +783,31 @@ function PostCard({ post }: { post: any }) {
       </CardContent>
     </Card>
   );
+}
+
+/* ─── Score + Formatting Helpers ─── */
+function getScoreLabel(score: number, platform: string): { label: string; color: string } {
+  if (platform === "tiktok") {
+    if (score > 100000) return { label: "Viral", color: "text-success" };
+    if (score > 50000) return { label: "High", color: "text-primary" };
+    if (score > 10000) return { label: "Medium", color: "text-warning" };
+    return { label: "Emerging", color: "text-muted-foreground" };
+  }
+  if (score > 10000) return { label: "Viral", color: "text-success" };
+  if (score > 5000) return { label: "High", color: "text-primary" };
+  if (score > 1000) return { label: "Medium", color: "text-warning" };
+  return { label: "Emerging", color: "text-muted-foreground" };
+}
+
+function getScoreExplanation(platform: string): string {
+  if (platform === "tiktok") {
+    return "Score = likes + (comments \u00d7 2) + (shares \u00d7 3) + (views \u00f7 1,000)";
+  }
+  return "Score = likes + (comments \u00d7 2) + (views \u00f7 1,000)";
+}
+
+function formatNumbersInText(text: string): string {
+  return text.replace(/(?<![,.\d])(\d{4,})(?![,.\d])/g, (match) => Number(match).toLocaleString());
 }
 
 /* ─── Trends Section (Redesigned) ─── */
@@ -727,9 +838,7 @@ function TrendsSection({
         </div>
         <div>
           <h3 className="text-lg font-semibold">{title}</h3>
-          {analysis?.overview && (
-            <p className="text-sm text-muted-foreground line-clamp-1">{analysis.overview}</p>
-          )}
+          {analysis?.overview && <p className="text-sm text-muted-foreground line-clamp-1">{analysis.overview}</p>}
         </div>
       </div>
 
@@ -755,11 +864,7 @@ function TrendsSection({
               <CardContent>
                 <div className="flex flex-wrap gap-2">
                   {analysis.top_themes.map((t: string, i: number) => (
-                    <Badge
-                      key={t}
-                      variant="secondary"
-                      className="px-3 py-1 text-sm"
-                    >
+                    <Badge key={t} variant="secondary" className="px-3 py-1 text-sm">
                       <span className="mr-1.5 text-xs font-bold text-muted-foreground">{i + 1}</span>
                       {t}
                     </Badge>
@@ -874,17 +979,35 @@ function TrendsSection({
                       </div>
                       <span className="text-sm font-medium">@{post.author}</span>
                     </div>
-                    {post.engagement_score != null && (
-                      <Badge variant="secondary" className="text-xs">
-                        Score: {post.engagement_score.toLocaleString()}
-                      </Badge>
-                    )}
+                    {post.engagement_score != null &&
+                      (() => {
+                        const sl = getScoreLabel(post.engagement_score, platform);
+                        return (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge variant="secondary" className="text-xs cursor-help">
+                                Score: {post.engagement_score.toLocaleString()}{" "}
+                                <span className={`ml-1 ${sl.color}`}>{sl.label}</span>
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-xs text-xs">
+                              <p className="font-medium mb-1">{getScoreExplanation(platform)}</p>
+                              <p className="text-muted-foreground">
+                                Scores are platform-relative. {platform === "tiktok" ? "TikTok" : "Instagram"}{" "}
+                                thresholds differ due to typical engagement volumes.
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      })()}
                   </div>
                   <p className="text-sm leading-relaxed line-clamp-3">{post.caption}</p>
                   {post.hashtags?.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
                       {post.hashtags.slice(0, 5).map((h: string) => (
-                        <span key={h} className="text-xs text-primary font-mono">#{h}</span>
+                        <span key={h} className="text-xs text-primary font-mono">
+                          #{h}
+                        </span>
                       ))}
                     </div>
                   )}

@@ -51,6 +51,14 @@ const LANGUAGES = [
   { value: "th", label: "Thai (ไทย)" },
 ];
 
+const BRAND_VOICE_PRESETS = [
+  "Professional / Corporate",
+  "Conversational / Friendly",
+  "Bold / Punchy",
+  "Authoritative / Expert",
+  "Playful / Casual",
+];
+
 interface ContentPillar {
   name: string;
   description: string;
@@ -77,9 +85,10 @@ export default function ClientSetup() {
     social_keywords: [] as string[],
     content_pillars: [...DEFAULT_PILLARS] as ContentPillar[],
     primary_platforms: ["Instagram", "TikTok", "Facebook", "LinkedIn"],
-    geo: "US",
-    language: "en",
+    geo: ["US"] as string[],
+    language: ["en"] as string[],
     brand_notes: "",
+    brand_voice_preset: "",
     brief_text: "",
     brief_file_id: "",
   });
@@ -111,24 +120,70 @@ export default function ClientSetup() {
           );
         }
       }
+      // Parse [VOICE:preset] prefix from brand_notes
+      let brandNotes = client.brand_notes || "";
+      let voicePreset = "";
+      const voiceMatch = brandNotes.match(/^\[VOICE:(.+?)]\n?/);
+      if (voiceMatch) {
+        voicePreset = voiceMatch[1];
+        brandNotes = brandNotes.slice(voiceMatch[0].length);
+      }
+
+      // Parse comma-separated geo/language to arrays
+      const geoArr = client.geo
+        ? client.geo
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+        : ["US"];
+      const langArr = client.language
+        ? client.language
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+        : ["en"];
+
       setForm({
         name: client.name || "",
         social_keywords: client.social_keywords || [],
         content_pillars: pillars,
         primary_platforms: client.primary_platforms || ["Instagram", "TikTok", "Facebook", "LinkedIn"],
-        geo: client.geo || "US",
-        language: client.language || "en",
-        brand_notes: client.brand_notes || "",
+        geo: geoArr,
+        language: langArr,
+        brand_notes: brandNotes,
+        brand_voice_preset: voicePreset,
         brief_text: client.brief_text || "",
         brief_file_id: client.brief_file_id || "",
       });
     }
   }, [client]);
 
+  const toggleGeo = (value: string) => {
+    setForm((f) => ({
+      ...f,
+      geo: f.geo.includes(value) ? f.geo.filter((g) => g !== value) : [...f.geo, value],
+    }));
+  };
+
+  const toggleLanguage = (value: string) => {
+    setForm((f) => ({
+      ...f,
+      language: f.language.includes(value) ? f.language.filter((l) => l !== value) : [...f.language, value],
+    }));
+  };
+
   const saveMutation = useMutation({
     mutationFn: async () => {
+      // Serialize brand voice preset into brand_notes
+      const serializedBrandNotes = form.brand_voice_preset
+        ? `[VOICE:${form.brand_voice_preset}]\n${form.brand_notes}`
+        : form.brand_notes;
+      const { brand_voice_preset, ...formWithoutPreset } = form;
       const payload = {
-        ...form,
+        ...formWithoutPreset,
+        brand_notes: serializedBrandNotes,
+        geo: form.geo.join(","),
+        language: form.language.join(","),
         sprout_customer_id: "1676448",
         content_pillars: form.content_pillars as any,
       };
@@ -302,40 +357,39 @@ export default function ClientSetup() {
                     ))}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Geographic Focus</Label>
-                    <Select value={form.geo} onValueChange={(v) => setForm((f) => ({ ...f, geo: v }))}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {GEOS.map((g) => (
-                          <SelectItem key={g.value} value={g.value}>
-                            {g.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                <div className="space-y-2">
+                  <Label>Geographic Focus (select multiple)</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {GEOS.map((g) => (
+                      <Badge
+                        key={g.value}
+                        variant={form.geo.includes(g.value) ? "default" : "outline"}
+                        className="cursor-pointer"
+                        onClick={() => toggleGeo(g.value)}
+                      >
+                        {g.label}
+                      </Badge>
+                    ))}
                   </div>
-                  <div className="space-y-2">
-                    <Label>Content Language</Label>
-                    <Select value={form.language} onValueChange={(v) => setForm((f) => ({ ...f, language: v }))}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LANGUAGES.map((l) => (
-                          <SelectItem key={l.value} value={l.value}>
-                            {l.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      All AI-generated copy, captions, and hashtags will be written in this language.
-                    </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Content Languages (select multiple)</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {LANGUAGES.map((l) => (
+                      <Badge
+                        key={l.value}
+                        variant={form.language.includes(l.value) ? "default" : "outline"}
+                        className="cursor-pointer"
+                        onClick={() => toggleLanguage(l.value)}
+                      >
+                        {l.label}
+                      </Badge>
+                    ))}
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    AI-generated copy will target these languages. Trends will include posts matching any selected
+                    language.
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -455,6 +509,29 @@ export default function ClientSetup() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Brand Voice Preset</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Select a tone that best matches this client's brand voice.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {BRAND_VOICE_PRESETS.map((preset) => (
+                      <Badge
+                        key={preset}
+                        variant={form.brand_voice_preset === preset ? "default" : "outline"}
+                        className="cursor-pointer"
+                        onClick={() =>
+                          setForm((f) => ({
+                            ...f,
+                            brand_voice_preset: f.brand_voice_preset === preset ? "" : preset,
+                          }))
+                        }
+                      >
+                        {preset}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
                 <div className="space-y-2">
                   <Label>Brand Notes</Label>
                   <Textarea
