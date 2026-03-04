@@ -6,22 +6,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useMemo, useState } from "react";
-import { ArrowLeft, Eye, Heart, BarChart3, MousePointerClick, Play } from "lucide-react";
+import {
+  ArrowLeft,
+  Eye,
+  Heart,
+  BarChart3,
+  MousePointerClick,
+  Play,
+  MessageCircle,
+  Share2,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+} from "lucide-react";
 import { TrendInsightsSection } from "@/components/analytics/TrendInsightsSection";
 import { ConnectedProfiles } from "@/components/analytics/ConnectedProfiles";
 import { AIDeepInsights } from "@/components/analytics/AIDeepInsights";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  Legend,
-} from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 type TimeRange = "7d" | "30d" | "90d" | "all";
 
@@ -105,7 +106,9 @@ export default function Analytics() {
   // Extract time-series metrics from report_data.sprout_performance
   const chartData = useMemo(() => {
     return filtered.map((r: any) => {
-      const sp = r.report_data?.sprout_performance || {};
+      const rawRd = r.report_data;
+      const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
+      const sp = rd?.sprout_performance || {};
       const totals = extractTotals(sp);
       const totalEngagements = totals.reactions + totals.link_clicks + totals.comments + totals.shares;
       const engRate = totals.impressions > 0 ? (totalEngagements / totals.impressions) * 100 : 0;
@@ -119,6 +122,7 @@ export default function Analytics() {
         reactions: totals.reactions,
         link_clicks: totals.link_clicks,
         comments: totals.comments,
+        shares: totals.shares,
         video_views: totals.video_views,
         engagements: totalEngagements,
         engagement_rate: Math.round(engRate * 100) / 100,
@@ -126,27 +130,50 @@ export default function Analytics() {
     });
   }, [filtered]);
 
-  // Latest report comparison data
+  // Latest report data (unwrap array if needed)
   const latestReport = filtered.length > 0 ? filtered[filtered.length - 1] : null;
-  const comparison = useMemo(() => {
+  const latestRd = useMemo(() => {
     if (!latestReport) return null;
-    const sp = (latestReport as any).report_data?.sprout_performance || {};
-    return extractComparison(sp);
+    const rawRd = (latestReport as any).report_data;
+    return Array.isArray(rawRd) ? rawRd[0] : rawRd;
   }, [latestReport]);
 
-  // Platform breakdown from latest report
+  // Latest report comparison data
+  const comparison = useMemo(() => {
+    if (!latestRd) return null;
+    const sp = latestRd.sprout_performance || {};
+    return extractComparison(sp);
+  }, [latestRd]);
+
+  // Latest report totals (for summary cards)
+  const latestTotals = useMemo(() => {
+    if (!latestRd) return null;
+    const sp = latestRd.sprout_performance || {};
+    const t = extractTotals(sp);
+    const hasData = t.impressions > 0 || t.reactions > 0 || t.link_clicks > 0 || t.video_views > 0;
+    return hasData ? t : null;
+  }, [latestRd]);
+
+  // Platform profiles from latest report
   const platformData = useMemo(() => {
-    if (!latestReport) return [];
-    const sp = (latestReport as any).report_data?.sprout_performance || {};
+    if (!latestRd) return [];
+    const sp = latestRd.sprout_performance || {};
     const profiles = sp.profiles || sp.by_profile || [];
     if (!Array.isArray(profiles)) return [];
     return profiles.map((p: any) => ({
-      name: p.name || p.profile_name || "Unknown",
+      name: p.name || p.native_name || p.profile_name || "Unknown",
       network: p.network || p.network_type || "",
     }));
-  }, [latestReport]);
+  }, [latestRd]);
 
   const title = client ? `Analytics: ${client.name}` : "Analytics";
+
+  // Format large numbers for display
+  const fmtVal = (v: number) => {
+    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+    return v.toLocaleString();
+  };
 
   return (
     <AppLayout title={title}>
@@ -178,42 +205,67 @@ export default function Analytics() {
           </Card>
         ) : (
           <>
-            {/* Summary cards */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <SummaryCard
-                icon={<Eye className="h-4 w-4" />}
-                label="Total Impressions"
-                value={chartData.reduce((s, d) => s + d.impressions, 0).toLocaleString()}
-              />
-              <SummaryCard
-                icon={<Heart className="h-4 w-4" />}
-                label="Reactions"
-                value={chartData.reduce((s, d) => s + d.reactions, 0).toLocaleString()}
-              />
-              <SummaryCard
-                icon={<MousePointerClick className="h-4 w-4" />}
-                label="Link Clicks"
-                value={chartData.reduce((s, d) => s + d.link_clicks, 0).toLocaleString()}
-              />
-              <SummaryCard
-                icon={<Play className="h-4 w-4" />}
-                label="Video Views"
-                value={chartData.reduce((s, d) => s + d.video_views, 0).toLocaleString()}
-              />
-              <SummaryCard
-                icon={<BarChart3 className="h-4 w-4" />}
-                label="Reports Analyzed"
-                value={filtered.length.toString()}
-              />
-            </div>
+            {/* Summary cards — latest report metrics */}
+            {latestTotals ? (
+              <div>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Latest Report — {latestReport && new Date((latestReport as any).created_at).toLocaleDateString()}
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <SummaryCard
+                    icon={<Eye className="h-3.5 w-3.5" />}
+                    label="Impressions"
+                    value={fmtVal(latestTotals.impressions)}
+                    change={comparison?.changes?.impressions?.percent}
+                  />
+                  <SummaryCard
+                    icon={<Heart className="h-3.5 w-3.5" />}
+                    label="Reactions"
+                    value={fmtVal(latestTotals.reactions)}
+                    change={comparison?.changes?.reactions?.percent}
+                  />
+                  <SummaryCard
+                    icon={<MousePointerClick className="h-3.5 w-3.5" />}
+                    label="Link Clicks"
+                    value={fmtVal(latestTotals.link_clicks)}
+                    change={comparison?.changes?.link_clicks?.percent}
+                  />
+                  <SummaryCard
+                    icon={<Play className="h-3.5 w-3.5" />}
+                    label="Video Views"
+                    value={fmtVal(latestTotals.video_views)}
+                    change={comparison?.changes?.video_views?.percent}
+                  />
+                  <SummaryCard
+                    icon={<MessageCircle className="h-3.5 w-3.5" />}
+                    label="Comments"
+                    value={fmtVal(latestTotals.comments)}
+                    change={comparison?.changes?.comments?.percent}
+                  />
+                  <SummaryCard
+                    icon={<Share2 className="h-3.5 w-3.5" />}
+                    label="Shares"
+                    value={fmtVal(latestTotals.shares)}
+                    change={comparison?.changes?.shares?.percent}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <SummaryCard
+                  icon={<BarChart3 className="h-3.5 w-3.5" />}
+                  label="Reports Analyzed"
+                  value={filtered.length.toString()}
+                />
+              </div>
+            )}
 
             {/* Month-over-month comparison from latest report */}
-            {comparison && (
+            {comparison && Object.keys(comparison.changes).length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    Month-over-Month Comparison{" "}
-                    <span className="font-normal text-muted-foreground text-sm">(latest report)</span>
+                    Month-over-Month <span className="font-normal text-muted-foreground text-sm">(latest report)</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -223,11 +275,16 @@ export default function Analytics() {
                       const isUp = pct > 0;
                       const isDown = pct < 0;
                       const label = key.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+                      const current = val?.current ?? 0;
+                      const previous = val?.previous ?? comparison.previous?.[key] ?? 0;
                       return (
                         <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-muted">
                           <div className="flex-1">
                             <div className="text-xs text-muted-foreground">{label}</div>
-                            <div className="text-lg font-semibold">{(val?.current || 0).toLocaleString()}</div>
+                            <div className="text-lg font-semibold">{current.toLocaleString()}</div>
+                            {previous > 0 && (
+                              <div className="text-xs text-muted-foreground">prev: {previous.toLocaleString()}</div>
+                            )}
                           </div>
                           <Badge variant={isUp ? "default" : isDown ? "destructive" : "secondary"} className="text-xs">
                             {isUp ? "+" : ""}
@@ -241,28 +298,168 @@ export default function Analytics() {
               </Card>
             )}
 
-            {/* Impressions + Engagements over time */}
-            {chartData.length > 1 && (
+            {/* Performance Over Time — Per-metric line charts */}
+            {chartData.length >= 1 && chartData.some((d) => d.impressions > 0 || d.reactions > 0) && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Performance Over Time</CardTitle>
+                  <CardTitle className="text-base">
+                    Performance Over Time
+                    <span className="font-normal text-muted-foreground text-sm ml-2">({filtered.length} reports)</span>
+                  </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="h-72">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                        <YAxis tick={{ fontSize: 12 }} />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="impressions" fill="hsl(221 83% 53%)" name="Impressions" />
-                        <Bar dataKey="reactions" fill="hsl(142 76% 36%)" name="Reactions" />
-                        <Bar dataKey="link_clicks" fill="hsl(38 92% 50%)" name="Link Clicks" />
-                        <Bar dataKey="video_views" fill="hsl(280 70% 55%)" name="Video Views" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                <CardContent className="space-y-6">
+                  {/* Impressions chart (separate — it dominates if combined) */}
+                  {chartData.some((d) => d.impressions > 0) && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <Eye className="h-3 w-3" /> Impressions
+                      </p>
+                      {chartData.length === 1 ? (
+                        <MetricBarSingle
+                          label="Impressions"
+                          value={chartData[0].impressions}
+                          fmtVal={fmtVal}
+                          color="hsl(221 83% 53%)"
+                        />
+                      ) : (
+                        <div className="h-48">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={chartData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
+                              <Tooltip formatter={(v: any) => [Number(v).toLocaleString(), "Impressions"]} />
+                              <Line
+                                type="monotone"
+                                dataKey="impressions"
+                                stroke="hsl(221 83% 53%)"
+                                strokeWidth={2}
+                                dot={{ r: 3 }}
+                                name="Impressions"
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Engagement metrics (all on same scale) */}
+                  {chartData.some((d) => d.reactions > 0 || d.link_clicks > 0 || d.comments > 0) && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <Heart className="h-3 w-3" /> Engagement Metrics
+                      </p>
+                      {chartData.length === 1 ? (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <MetricBarSingle
+                            label="Reactions"
+                            value={chartData[0].reactions}
+                            fmtVal={fmtVal}
+                            color="hsl(142 76% 36%)"
+                          />
+                          <MetricBarSingle
+                            label="Link Clicks"
+                            value={chartData[0].link_clicks}
+                            fmtVal={fmtVal}
+                            color="hsl(38 92% 50%)"
+                          />
+                          <MetricBarSingle
+                            label="Comments"
+                            value={chartData[0].comments}
+                            fmtVal={fmtVal}
+                            color="hsl(280 70% 55%)"
+                          />
+                          <MetricBarSingle
+                            label="Shares"
+                            value={chartData[0].shares}
+                            fmtVal={fmtVal}
+                            color="hsl(340 65% 50%)"
+                          />
+                        </div>
+                      ) : (
+                        <div className="h-48">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={chartData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
+                              <Tooltip formatter={(v: any, name: any) => [Number(v).toLocaleString(), name]} />
+                              <Legend />
+                              <Line
+                                type="monotone"
+                                dataKey="reactions"
+                                stroke="hsl(142 76% 36%)"
+                                strokeWidth={2}
+                                dot={{ r: 2 }}
+                                name="Reactions"
+                              />
+                              <Line
+                                type="monotone"
+                                dataKey="link_clicks"
+                                stroke="hsl(38 92% 50%)"
+                                strokeWidth={2}
+                                dot={{ r: 2 }}
+                                name="Link Clicks"
+                              />
+                              <Line
+                                type="monotone"
+                                dataKey="comments"
+                                stroke="hsl(280 70% 55%)"
+                                strokeWidth={2}
+                                dot={{ r: 2 }}
+                                name="Comments"
+                              />
+                              <Line
+                                type="monotone"
+                                dataKey="shares"
+                                stroke="hsl(340 65% 50%)"
+                                strokeWidth={2}
+                                dot={{ r: 2 }}
+                                name="Shares"
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Video Views (separate if significant) */}
+                  {chartData.some((d) => d.video_views > 0) && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <Play className="h-3 w-3" /> Video Views
+                      </p>
+                      {chartData.length === 1 ? (
+                        <MetricBarSingle
+                          label="Video Views"
+                          value={chartData[0].video_views}
+                          fmtVal={fmtVal}
+                          color="hsl(280 70% 55%)"
+                        />
+                      ) : (
+                        <div className="h-40">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={chartData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
+                              <Tooltip formatter={(v: any) => [Number(v).toLocaleString(), "Video Views"]} />
+                              <Line
+                                type="monotone"
+                                dataKey="video_views"
+                                stroke="hsl(280 70% 55%)"
+                                strokeWidth={2}
+                                dot={{ r: 3 }}
+                                name="Video Views"
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -280,7 +477,7 @@ export default function Analytics() {
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                         <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                         <YAxis tick={{ fontSize: 12 }} unit="%" />
-                        <Tooltip formatter={(v: number) => `${v.toFixed(2)}%`} />
+                        <Tooltip formatter={(v: any) => [`${Number(v).toFixed(2)}%`, "Eng. Rate"]} />
                         <Line
                           type="monotone"
                           dataKey="engagement_rate"
@@ -313,8 +510,11 @@ export default function Analytics() {
               <CardContent>
                 <div className="space-y-2">
                   {filtered.map((r: any) => {
-                    const sp = r.report_data?.sprout_performance;
-                    const totals = sp?.overall_totals || {};
+                    const rawRd = r.report_data;
+                    const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
+                    const sp = rd?.sprout_performance;
+                    const totals = extractTotals(sp);
+                    const hasMetrics = totals.impressions > 0 || totals.reactions > 0;
                     return (
                       <div
                         key={r.id}
@@ -324,9 +524,10 @@ export default function Analytics() {
                         <div className="flex items-center gap-3">
                           <Badge variant="default">{r.status}</Badge>
                           <span className="text-sm">{new Date(r.created_at).toLocaleString()}</span>
-                          {totals.impressions > 0 && (
+                          {hasMetrics && (
                             <span className="text-xs text-muted-foreground">
-                              {Number(totals.impressions).toLocaleString()} impr
+                              {totals.impressions.toLocaleString()} impr ·{" "}
+                              {(totals.reactions + totals.comments + totals.shares).toLocaleString()} eng
                             </span>
                           )}
                         </div>
@@ -346,16 +547,63 @@ export default function Analytics() {
   );
 }
 
-function SummaryCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+/* ─── Summary Card with optional MoM change ─── */
+function SummaryCard({
+  icon,
+  label,
+  value,
+  change,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  change?: number;
+}) {
   return (
     <Card>
-      <CardContent className="pt-5">
-        <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
+      <CardContent className="pt-4 pb-3 px-4 space-y-1">
+        <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
           {icon}
           {label}
         </div>
-        <div className="text-2xl font-bold">{value}</div>
+        <div className="text-xl font-bold">{value}</div>
+        {change != null && change !== 0 && (
+          <div
+            className={`flex items-center gap-1 text-xs font-medium ${change > 0 ? "text-green-600" : "text-destructive"}`}
+          >
+            {change > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+            {change > 0 ? "+" : ""}
+            {change}% MoM
+          </div>
+        )}
+        {change != null && change === 0 && (
+          <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            <Minus className="h-3 w-3" /> 0% MoM
+          </div>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+/* ─── Single-value metric bar (for when there's only 1 report) ─── */
+function MetricBarSingle({
+  label,
+  value,
+  fmtVal,
+  color,
+}: {
+  label: string;
+  value: number;
+  fmtVal: (v: number) => string;
+  color: string;
+}) {
+  return (
+    <div className="p-3 rounded-lg bg-muted/50 space-y-1.5">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-lg font-bold" style={{ color }}>
+        {fmtVal(value)}
+      </p>
+    </div>
   );
 }
