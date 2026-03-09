@@ -21,18 +21,23 @@ import {
   Lightbulb,
   Info,
   Sparkles,
+  Globe,
+  Languages,
 } from "lucide-react";
 import { TrendInsightsSection } from "@/components/analytics/TrendInsightsSection";
 import { ConnectedProfiles } from "@/components/analytics/ConnectedProfiles";
 import { AIDeepInsights } from "@/components/analytics/AIDeepInsights";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 type TimeRange = "7d" | "30d" | "90d" | "all";
+type AnalyticsView = "performance" | "trends";
 
 export default function Analytics() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [range, setRange] = useState<TimeRange>("30d");
+  const [view, setView] = useState<AnalyticsView>("performance");
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -87,7 +92,7 @@ export default function Analytics() {
     };
     return {
       impressions: parseNum(totals.impressions || totals.reach || totals.views),
-      reactions: parseNum(totals.reactions || totals.likes || totals.engagements || totals.total_engagements),
+      reactions: parseNum(totals.reactions || totals.likes),
       link_clicks: parseNum(totals.link_clicks || totals.clicks),
       comments: parseNum(totals.comments),
       shares: parseNum(totals.shares || totals.retweets),
@@ -235,10 +240,26 @@ export default function Analytics() {
         {/* Guidance text */}
         <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 border border-border/50">
           <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-          <p className="text-sm text-muted-foreground">
-            Track your social media performance over time. Each report generates a snapshot of your metrics — the more
-            reports you run, the richer your trend data becomes.
-          </p>
+          <div className="space-y-1">
+            <p className="text-sm text-muted-foreground">
+              Track your social media performance over time. Each report generates a snapshot of your metrics — the more
+              reports you run, the richer your trend data becomes.
+            </p>
+            {client && (client.geo || client.language) && (
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                {client.geo && (
+                  <span className="flex items-center gap-1">
+                    <Globe className="h-3 w-3" /> {client.geo}
+                  </span>
+                )}
+                {client.language && (
+                  <span className="flex items-center gap-1">
+                    <Languages className="h-3 w-3" /> {client.language}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {isLoading ? (
@@ -258,398 +279,415 @@ export default function Analytics() {
           </Card>
         ) : (
           <>
-            {/* Summary cards — latest report metrics */}
-            {latestTotals ? (
-              <div>
-                <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <BarChart3 className="h-3 w-3" />
-                  Latest Report Metrics —{" "}
-                  {latestReport &&
-                    new Date((latestReport as any).created_at).toLocaleDateString("en-US", {
-                      month: "long",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                </p>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                  <SummaryCard
-                    icon={<Eye className="h-3.5 w-3.5" />}
-                    label="Impressions"
-                    value={fmtVal(latestTotals.impressions)}
-                    change={comparison?.changes?.impressions?.percent}
-                  />
-                  <SummaryCard
-                    icon={<Heart className="h-3.5 w-3.5" />}
-                    label="Reactions"
-                    value={fmtVal(latestTotals.reactions)}
-                    change={comparison?.changes?.reactions?.percent}
-                  />
-                  <SummaryCard
-                    icon={<MousePointerClick className="h-3.5 w-3.5" />}
-                    label="Link Clicks"
-                    value={fmtVal(latestTotals.link_clicks)}
-                    change={comparison?.changes?.link_clicks?.percent}
-                  />
-                  <SummaryCard
-                    icon={<Play className="h-3.5 w-3.5" />}
-                    label="Video Views"
-                    value={fmtVal(latestTotals.video_views)}
-                    change={comparison?.changes?.video_views?.percent}
-                  />
-                  <SummaryCard
-                    icon={<MessageCircle className="h-3.5 w-3.5" />}
-                    label="Comments"
-                    value={fmtVal(latestTotals.comments)}
-                    change={comparison?.changes?.comments?.percent}
-                  />
-                  <SummaryCard
-                    icon={<Share2 className="h-3.5 w-3.5" />}
-                    label="Shares"
-                    value={fmtVal(latestTotals.shares)}
-                    change={comparison?.changes?.shares?.percent}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <SummaryCard
-                  icon={<BarChart3 className="h-3.5 w-3.5" />}
-                  label="Reports Analyzed"
-                  value={filtered.length.toString()}
-                />
-              </div>
-            )}
+            {/* View segmentation */}
+            <Tabs value={view} onValueChange={(v) => setView(v as AnalyticsView)}>
+              <TabsList className="grid w-full grid-cols-2 max-w-xs">
+                <TabsTrigger value="performance" className="gap-1.5">
+                  <BarChart3 className="h-3.5 w-3.5" /> Performance
+                </TabsTrigger>
+                <TabsTrigger value="trends" className="gap-1.5">
+                  <TrendingUp className="h-3.5 w-3.5" /> Trends
+                </TabsTrigger>
+              </TabsList>
 
-            {/* Key Takeaway — AI summary from latest report */}
-            {latestAISummary && (
-              <Card className="border-primary/20 bg-primary/5">
-                <CardContent className="pt-5 pb-4 px-5">
-                  <div className="flex items-start gap-3">
-                    <div className="rounded-full bg-primary/10 p-2 shrink-0">
-                      <Sparkles className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="text-sm font-semibold">Key Takeaway</h4>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {formatNumbersInText(latestAISummary)}
-                      </p>
-                      {topContentInsight && (
-                        <p className="text-xs text-muted-foreground/80 pt-1 border-t border-border/50 mt-2">
-                          <Lightbulb className="h-3 w-3 inline mr-1" />
-                          {formatNumbersInText(topContentInsight)}
-                        </p>
-                      )}
+              <TabsContent value="performance" className="space-y-6 mt-4">
+                {/* Summary cards — latest report metrics */}
+                {latestTotals ? (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <BarChart3 className="h-3 w-3" />
+                      Latest Report Metrics —{" "}
+                      {latestReport &&
+                        new Date((latestReport as any).created_at).toLocaleDateString("en-US", {
+                          month: "long",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      <SummaryCard
+                        icon={<Eye className="h-3.5 w-3.5" />}
+                        label="Impressions"
+                        value={fmtVal(latestTotals.impressions)}
+                        change={comparison?.changes?.impressions?.percent}
+                      />
+                      <SummaryCard
+                        icon={<Heart className="h-3.5 w-3.5" />}
+                        label="Reactions"
+                        value={fmtVal(latestTotals.reactions)}
+                        change={comparison?.changes?.reactions?.percent}
+                      />
+                      <SummaryCard
+                        icon={<MousePointerClick className="h-3.5 w-3.5" />}
+                        label="Link Clicks"
+                        value={fmtVal(latestTotals.link_clicks)}
+                        change={comparison?.changes?.link_clicks?.percent}
+                      />
+                      <SummaryCard
+                        icon={<Play className="h-3.5 w-3.5" />}
+                        label="Video Views"
+                        value={fmtVal(latestTotals.video_views)}
+                        change={comparison?.changes?.video_views?.percent}
+                      />
+                      <SummaryCard
+                        icon={<MessageCircle className="h-3.5 w-3.5" />}
+                        label="Comments"
+                        value={fmtVal(latestTotals.comments)}
+                        change={comparison?.changes?.comments?.percent}
+                      />
+                      <SummaryCard
+                        icon={<Share2 className="h-3.5 w-3.5" />}
+                        label="Shares"
+                        value={fmtVal(latestTotals.shares)}
+                        change={comparison?.changes?.shares?.percent}
+                      />
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Single report CTA — encourage running more analyses */}
-            {filtered.length === 1 && (
-              <Card className="border-dashed">
-                <CardContent className="pt-5 pb-4 px-5 text-center space-y-2">
-                  <div className="flex items-center justify-center gap-2 text-muted-foreground">
-                    <TrendingUp className="h-4 w-4" />
-                    <span className="text-sm font-medium">Want to see trends over time?</span>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <SummaryCard
+                      icon={<BarChart3 className="h-3.5 w-3.5" />}
+                      label="Reports Analyzed"
+                      value={filtered.length.toString()}
+                    />
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    You have 1 report. Run more analyses to unlock trend charts, engagement rate tracking, and richer
-                    insights.
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigate(`/clients/${id}/analyze`)}
-                    className="gap-2 mt-1"
-                  >
-                    <Play className="h-3.5 w-3.5" /> Run Another Analysis
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
+                )}
 
-            {/* Month-over-month comparison from latest report */}
-            {comparison && Object.keys(comparison.changes).length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Month-over-Month <span className="font-normal text-muted-foreground text-sm">(latest report)</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {Object.entries(comparison.changes).map(([key, val]: [string, any]) => {
-                      const pct = typeof val?.percent === "number" ? val.percent : 0;
-                      const isUp = pct > 0;
-                      const isDown = pct < 0;
-                      const label = key.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
-                      const current = val?.current ?? 0;
-                      const previous = val?.previous ?? comparison.previous?.[key] ?? 0;
-                      return (
-                        <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-muted">
-                          <div className="flex-1">
-                            <div className="text-xs text-muted-foreground">{label}</div>
-                            <div className="text-lg font-semibold">{fmtVal(current)}</div>
-                            {previous > 0 && (
-                              <div className="text-xs text-muted-foreground">prev: {fmtVal(previous)}</div>
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <Badge
-                              variant={isUp ? "default" : isDown ? "destructive" : "secondary"}
-                              className="text-xs"
-                            >
-                              {isUp ? (
-                                <TrendingUp className="h-3 w-3 mr-1 inline" />
-                              ) : isDown ? (
-                                <TrendingDown className="h-3 w-3 mr-1 inline" />
-                              ) : null}
-                              {isUp ? "+" : ""}
-                              {pct}%
-                            </Badge>
-                          </div>
+                {/* Key Takeaway — AI summary from latest report */}
+                {latestAISummary && (
+                  <Card className="border-primary/20 bg-primary/5">
+                    <CardContent className="pt-5 pb-4 px-5">
+                      <div className="flex items-start gap-3">
+                        <div className="rounded-full bg-primary/10 p-2 shrink-0">
+                          <Sparkles className="h-4 w-4 text-primary" />
                         </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-semibold">Key Takeaway</h4>
+                          <p className="text-sm text-muted-foreground leading-relaxed">
+                            {formatNumbersInText(latestAISummary)}
+                          </p>
+                          {topContentInsight && (
+                            <p className="text-xs text-muted-foreground/80 pt-1 border-t border-border/50 mt-2">
+                              <Lightbulb className="h-3 w-3 inline mr-1" />
+                              {formatNumbersInText(topContentInsight)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
-            {/* Performance Over Time — Per-metric line charts */}
-            {chartData.length >= 1 && chartData.some((d) => d.impressions > 0 || d.reactions > 0) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Performance Over Time
-                    <span className="font-normal text-muted-foreground text-sm ml-2">
-                      ({filtered.length} report{filtered.length !== 1 ? "s" : ""})
-                    </span>
-                  </CardTitle>
-                  <p className="text-xs text-muted-foreground">
-                    {chartData.length === 1
-                      ? "Showing your latest snapshot. Run more analyses to see trend lines."
-                      : "Each data point represents one analysis run. Hover over points for exact values."}
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Impressions chart (separate — it dominates if combined) */}
-                  {chartData.some((d) => d.impressions > 0) && (
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
-                        <Eye className="h-3 w-3" /> Impressions
+                {/* Single report CTA — encourage running more analyses */}
+                {filtered.length === 1 && (
+                  <Card className="border-dashed">
+                    <CardContent className="pt-5 pb-4 px-5 text-center space-y-2">
+                      <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                        <TrendingUp className="h-4 w-4" />
+                        <span className="text-sm font-medium">Want to see trends over time?</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        You have 1 report. Run more analyses to unlock trend charts, engagement rate tracking, and
+                        richer insights.
                       </p>
-                      {chartData.length === 1 ? (
-                        <MetricBarSingle
-                          label="Impressions"
-                          value={chartData[0].impressions}
-                          fmtVal={fmtVal}
-                          color="hsl(221 83% 53%)"
-                        />
-                      ) : (
-                        <div className="h-48">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={chartData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
-                              <Tooltip formatter={(v: any) => [Number(v).toLocaleString(), "Impressions"]} />
-                              <Line
-                                type="monotone"
-                                dataKey="impressions"
-                                stroke="hsl(221 83% 53%)"
-                                strokeWidth={2}
-                                dot={{ r: 3 }}
-                                name="Impressions"
-                              />
-                            </LineChart>
-                          </ResponsiveContainer>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate(`/clients/${id}/analyze`)}
+                        className="gap-2 mt-1"
+                      >
+                        <Play className="h-3.5 w-3.5" /> Run Another Analysis
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Month-over-month comparison from latest report */}
+                {comparison && Object.keys(comparison.changes).length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">
+                        Month-over-Month{" "}
+                        <span className="font-normal text-muted-foreground text-sm">(latest report)</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {Object.entries(comparison.changes).map(([key, val]: [string, any]) => {
+                          const pct = typeof val?.percent === "number" ? val.percent : 0;
+                          const isUp = pct > 0;
+                          const isDown = pct < 0;
+                          const label = key.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+                          const current = val?.current ?? 0;
+                          const previous = val?.previous ?? comparison.previous?.[key] ?? 0;
+                          return (
+                            <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-muted">
+                              <div className="flex-1">
+                                <div className="text-xs text-muted-foreground">{label}</div>
+                                <div className="text-lg font-semibold">{fmtVal(current)}</div>
+                                {previous > 0 && (
+                                  <div className="text-xs text-muted-foreground">prev: {fmtVal(previous)}</div>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                <Badge
+                                  variant={isUp ? "default" : isDown ? "destructive" : "secondary"}
+                                  className="text-xs"
+                                >
+                                  {isUp ? (
+                                    <TrendingUp className="h-3 w-3 mr-1 inline" />
+                                  ) : isDown ? (
+                                    <TrendingDown className="h-3 w-3 mr-1 inline" />
+                                  ) : null}
+                                  {isUp ? "+" : ""}
+                                  {pct}%
+                                </Badge>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Performance Over Time — Per-metric line charts */}
+                {chartData.length >= 1 && chartData.some((d) => d.impressions > 0 || d.reactions > 0) && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">
+                        Performance Over Time
+                        <span className="font-normal text-muted-foreground text-sm ml-2">
+                          ({filtered.length} report{filtered.length !== 1 ? "s" : ""})
+                        </span>
+                      </CardTitle>
+                      <p className="text-xs text-muted-foreground">
+                        {chartData.length === 1
+                          ? "Showing your latest snapshot. Run more analyses to see trend lines."
+                          : "Each data point represents one analysis run. Hover over points for exact values."}
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {/* Impressions chart (separate — it dominates if combined) */}
+                      {chartData.some((d) => d.impressions > 0) && (
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                            <Eye className="h-3 w-3" /> Impressions
+                          </p>
+                          {chartData.length === 1 ? (
+                            <MetricBarSingle
+                              label="Impressions"
+                              value={chartData[0].impressions}
+                              fmtVal={fmtVal}
+                              color="hsl(221 83% 53%)"
+                            />
+                          ) : (
+                            <div className="h-48">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={chartData}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                                  <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
+                                  <Tooltip formatter={(v: any) => [Number(v).toLocaleString(), "Impressions"]} />
+                                  <Line
+                                    type="monotone"
+                                    dataKey="impressions"
+                                    stroke="hsl(221 83% 53%)"
+                                    strokeWidth={2}
+                                    dot={{ r: 3 }}
+                                    name="Impressions"
+                                  />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
                         </div>
                       )}
-                    </div>
-                  )}
 
-                  {/* Engagement metrics (all on same scale) */}
-                  {chartData.some((d) => d.reactions > 0 || d.link_clicks > 0 || d.comments > 0) && (
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
-                        <Heart className="h-3 w-3" /> Engagement Metrics
-                      </p>
-                      {chartData.length === 1 ? (
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          <MetricBarSingle
-                            label="Reactions"
-                            value={chartData[0].reactions}
-                            fmtVal={fmtVal}
-                            color="hsl(142 76% 36%)"
-                          />
-                          <MetricBarSingle
-                            label="Link Clicks"
-                            value={chartData[0].link_clicks}
-                            fmtVal={fmtVal}
-                            color="hsl(38 92% 50%)"
-                          />
-                          <MetricBarSingle
-                            label="Comments"
-                            value={chartData[0].comments}
-                            fmtVal={fmtVal}
-                            color="hsl(280 70% 55%)"
-                          />
-                          <MetricBarSingle
-                            label="Shares"
-                            value={chartData[0].shares}
-                            fmtVal={fmtVal}
-                            color="hsl(340 65% 50%)"
-                          />
-                        </div>
-                      ) : (
-                        <div className="h-48">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={chartData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
-                              <Tooltip formatter={(v: any, name: any) => [Number(v).toLocaleString(), name]} />
-                              <Legend />
-                              <Line
-                                type="monotone"
-                                dataKey="reactions"
-                                stroke="hsl(142 76% 36%)"
-                                strokeWidth={2}
-                                dot={{ r: 2 }}
-                                name="Reactions"
+                      {/* Engagement metrics (all on same scale) */}
+                      {chartData.some((d) => d.reactions > 0 || d.link_clicks > 0 || d.comments > 0) && (
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                            <Heart className="h-3 w-3" /> Engagement Metrics
+                          </p>
+                          {chartData.length === 1 ? (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                              <MetricBarSingle
+                                label="Reactions"
+                                value={chartData[0].reactions}
+                                fmtVal={fmtVal}
+                                color="hsl(142 76% 36%)"
                               />
-                              <Line
-                                type="monotone"
-                                dataKey="link_clicks"
-                                stroke="hsl(38 92% 50%)"
-                                strokeWidth={2}
-                                dot={{ r: 2 }}
-                                name="Link Clicks"
+                              <MetricBarSingle
+                                label="Link Clicks"
+                                value={chartData[0].link_clicks}
+                                fmtVal={fmtVal}
+                                color="hsl(38 92% 50%)"
                               />
-                              <Line
-                                type="monotone"
-                                dataKey="comments"
-                                stroke="hsl(280 70% 55%)"
-                                strokeWidth={2}
-                                dot={{ r: 2 }}
-                                name="Comments"
+                              <MetricBarSingle
+                                label="Comments"
+                                value={chartData[0].comments}
+                                fmtVal={fmtVal}
+                                color="hsl(280 70% 55%)"
                               />
-                              <Line
-                                type="monotone"
-                                dataKey="shares"
-                                stroke="hsl(340 65% 50%)"
-                                strokeWidth={2}
-                                dot={{ r: 2 }}
-                                name="Shares"
+                              <MetricBarSingle
+                                label="Shares"
+                                value={chartData[0].shares}
+                                fmtVal={fmtVal}
+                                color="hsl(340 65% 50%)"
                               />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Video Views (separate if significant) */}
-                  {chartData.some((d) => d.video_views > 0) && (
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
-                        <Play className="h-3 w-3" /> Video Views
-                      </p>
-                      {chartData.length === 1 ? (
-                        <MetricBarSingle
-                          label="Video Views"
-                          value={chartData[0].video_views}
-                          fmtVal={fmtVal}
-                          color="hsl(280 70% 55%)"
-                        />
-                      ) : (
-                        <div className="h-40">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={chartData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
-                              <Tooltip formatter={(v: any) => [Number(v).toLocaleString(), "Video Views"]} />
-                              <Line
-                                type="monotone"
-                                dataKey="video_views"
-                                stroke="hsl(280 70% 55%)"
-                                strokeWidth={2}
-                                dot={{ r: 3 }}
-                                name="Video Views"
-                              />
-                            </LineChart>
-                          </ResponsiveContainer>
+                            </div>
+                          ) : (
+                            <div className="h-48">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={chartData}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                                  <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
+                                  <Tooltip formatter={(v: any, name: any) => [Number(v).toLocaleString(), name]} />
+                                  <Legend />
+                                  <Line
+                                    type="monotone"
+                                    dataKey="reactions"
+                                    stroke="hsl(142 76% 36%)"
+                                    strokeWidth={2}
+                                    dot={{ r: 2 }}
+                                    name="Reactions"
+                                  />
+                                  <Line
+                                    type="monotone"
+                                    dataKey="link_clicks"
+                                    stroke="hsl(38 92% 50%)"
+                                    strokeWidth={2}
+                                    dot={{ r: 2 }}
+                                    name="Link Clicks"
+                                  />
+                                  <Line
+                                    type="monotone"
+                                    dataKey="comments"
+                                    stroke="hsl(280 70% 55%)"
+                                    strokeWidth={2}
+                                    dot={{ r: 2 }}
+                                    name="Comments"
+                                  />
+                                  <Line
+                                    type="monotone"
+                                    dataKey="shares"
+                                    stroke="hsl(340 65% 50%)"
+                                    strokeWidth={2}
+                                    dot={{ r: 2 }}
+                                    name="Shares"
+                                  />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
                         </div>
                       )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
 
-            {/* Engagement rate trend */}
-            {chartData.length > 1 && chartData.some((d) => d.engagement_rate > 0) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Engagement Rate Trend</CardTitle>
-                  <p className="text-xs text-muted-foreground">
-                    (Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.
-                  </p>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis
-                          dataKey="date"
-                          tick={{ fontSize: 12 }}
-                          label={{
-                            value: "Report Date",
-                            position: "insideBottom",
-                            offset: -5,
-                            fontSize: 11,
-                            fill: "hsl(var(--muted-foreground))",
-                          }}
-                        />
-                        <YAxis
-                          tick={{ fontSize: 12 }}
-                          unit="%"
-                          label={{
-                            value: "Eng. Rate %",
-                            angle: -90,
-                            position: "insideLeft",
-                            fontSize: 11,
-                            fill: "hsl(var(--muted-foreground))",
-                          }}
-                        />
-                        <Tooltip formatter={(v: any) => [`${Number(v).toFixed(2)}%`, "Engagement Rate"]} />
-                        <Line
-                          type="monotone"
-                          dataKey="engagement_rate"
-                          stroke="hsl(38 92% 50%)"
-                          strokeWidth={2}
-                          dot={{ r: 3 }}
-                          name="Engagement Rate"
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                      {/* Video Views (separate if significant) */}
+                      {chartData.some((d) => d.video_views > 0) && (
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                            <Play className="h-3 w-3" /> Video Views
+                          </p>
+                          {chartData.length === 1 ? (
+                            <MetricBarSingle
+                              label="Video Views"
+                              value={chartData[0].video_views}
+                              fmtVal={fmtVal}
+                              color="hsl(280 70% 55%)"
+                            />
+                          ) : (
+                            <div className="h-40">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={chartData}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                                  <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
+                                  <Tooltip formatter={(v: any) => [Number(v).toLocaleString(), "Video Views"]} />
+                                  <Line
+                                    type="monotone"
+                                    dataKey="video_views"
+                                    stroke="hsl(280 70% 55%)"
+                                    strokeWidth={2}
+                                    dot={{ r: 3 }}
+                                    name="Video Views"
+                                  />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
-            {/* Connected profiles */}
-            <ConnectedProfiles profiles={platformData} />
+                {/* Engagement rate trend */}
+                {chartData.length > 1 && chartData.some((d) => d.engagement_rate > 0) && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Engagement Rate Trend</CardTitle>
+                      <p className="text-xs text-muted-foreground">
+                        (Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="h-56">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                            <XAxis
+                              dataKey="date"
+                              tick={{ fontSize: 12 }}
+                              label={{
+                                value: "Report Date",
+                                position: "insideBottom",
+                                offset: -5,
+                                fontSize: 11,
+                                fill: "hsl(var(--muted-foreground))",
+                              }}
+                            />
+                            <YAxis
+                              tick={{ fontSize: 12 }}
+                              unit="%"
+                              label={{
+                                value: "Eng. Rate %",
+                                angle: -90,
+                                position: "insideLeft",
+                                fontSize: 11,
+                                fill: "hsl(var(--muted-foreground))",
+                              }}
+                            />
+                            <Tooltip formatter={(v: any) => [`${Number(v).toFixed(2)}%`, "Engagement Rate"]} />
+                            <Line
+                              type="monotone"
+                              dataKey="engagement_rate"
+                              stroke="hsl(38 92% 50%)"
+                              strokeWidth={2}
+                              dot={{ r: 3 }}
+                              name="Engagement Rate"
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
-            {/* AI-powered cumulative insights */}
-            <AIDeepInsights reports={filtered} chartData={chartData} />
+                {/* Connected profiles */}
+                <ConnectedProfiles profiles={platformData} />
 
-            {/* Trend analysis (TikTok + Instagram) */}
-            <TrendInsightsSection reports={filtered} />
+                {/* AI-powered cumulative insights */}
+                <AIDeepInsights reports={filtered} chartData={chartData} />
+              </TabsContent>
+
+              <TabsContent value="trends" className="space-y-6 mt-4">
+                {/* Trend analysis (TikTok + Instagram) */}
+                <TrendInsightsSection reports={filtered} />
+              </TabsContent>
+            </Tabs>
 
             {/* Recent reports table */}
             <Card>
@@ -668,7 +706,7 @@ export default function Analytics() {
                     const sp = rd?.sprout_performance;
                     const totals = extractTotals(sp);
                     const hasMetrics = totals.impressions > 0 || totals.reactions > 0;
-                    const totalEng = totals.reactions + totals.comments + totals.shares;
+                    const totalEng = totals.reactions + totals.link_clicks + totals.comments + totals.shares;
                     return (
                       <div
                         key={r.id}

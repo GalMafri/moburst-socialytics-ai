@@ -14,7 +14,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
-import { Save, Plus, X, RefreshCw, Loader2, Play, Info } from "lucide-react";
+import { Save, Plus, X, RefreshCw, Loader2, Play, Info, CalendarClock } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 
@@ -317,11 +318,12 @@ export default function ClientSetup() {
         </div>
 
         <Tabs defaultValue="info">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="info">Client Info</TabsTrigger>
             <TabsTrigger value="sprout">Sprout Social</TabsTrigger>
             <TabsTrigger value="strategy">Content Strategy</TabsTrigger>
             <TabsTrigger value="brief">Brief</TabsTrigger>
+            <TabsTrigger value="schedule">Schedule</TabsTrigger>
           </TabsList>
 
           <TabsContent value="info" className="space-y-4 mt-4">
@@ -578,9 +580,150 @@ export default function ClientSetup() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="schedule" className="space-y-4 mt-4">
+            {!isNew && id ? (
+              <ReportScheduleManager clientId={id} />
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  Save the client first to configure report scheduling.
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
         </Tabs>
       </div>
     </AppLayout>
+  );
+}
+
+function ReportScheduleManager({ clientId }: { clientId: string }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: schedule, isLoading } = useQuery({
+    queryKey: ["report-schedule", clientId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("report_schedules")
+        .select("*")
+        .eq("client_id", clientId)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const [frequency, setFrequency] = useState<string>("monthly");
+  const [isActive, setIsActive] = useState(false);
+
+  useEffect(() => {
+    if (schedule) {
+      setFrequency(schedule.frequency || "monthly");
+      setIsActive(schedule.is_active ?? false);
+    }
+  }, [schedule]);
+
+  const computeNextRun = (freq: string): string => {
+    const now = new Date();
+    if (freq === "weekly") {
+      const next = new Date(now);
+      next.setDate(now.getDate() + ((7 - now.getDay()) % 7) || 7);
+      next.setHours(9, 0, 0, 0);
+      return next.toISOString();
+    } else if (freq === "biweekly") {
+      const next = new Date(now);
+      next.setDate(now.getDate() + 14);
+      next.setHours(9, 0, 0, 0);
+      return next.toISOString();
+    } else {
+      // monthly - 1st of next month
+      const next = new Date(now.getFullYear(), now.getMonth() + 1, 1, 9, 0, 0);
+      return next.toISOString();
+    }
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        client_id: clientId,
+        frequency,
+        is_active: isActive,
+        next_run_at: isActive ? computeNextRun(frequency) : null,
+      };
+
+      if (schedule) {
+        const { error } = await supabase.from("report_schedules").update(payload).eq("id", schedule.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("report_schedules").insert(payload);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["report-schedule", clientId] });
+      toast({ title: "Schedule saved" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to save schedule", description: err.message, variant: "destructive" });
+    },
+  });
+
+  if (isLoading) return <div className="animate-pulse text-muted-foreground">Loading schedule...</div>;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <CalendarClock className="h-4 w-4" /> Report Schedule
+        </CardTitle>
+        <CardDescription>
+          Automatically run reports on a recurring schedule. The report will use the default date range (current month).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label>Enable Scheduled Reports</Label>
+            <p className="text-xs text-muted-foreground">Reports will run automatically at the configured frequency</p>
+          </div>
+          <Switch checked={isActive} onCheckedChange={setIsActive} />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Frequency</Label>
+          <Select value={frequency} onValueChange={setFrequency}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="weekly">Weekly</SelectItem>
+              <SelectItem value="biweekly">Bi-weekly</SelectItem>
+              <SelectItem value="monthly">Monthly (Recommended)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {schedule?.next_run_at && isActive && (
+          <div className="text-sm text-muted-foreground">
+            Next scheduled run:{" "}
+            <span className="font-medium text-foreground">{new Date(schedule.next_run_at).toLocaleDateString()}</span>
+          </div>
+        )}
+
+        {schedule?.last_run_at && (
+          <div className="text-sm text-muted-foreground">
+            Last run: {new Date(schedule.last_run_at).toLocaleDateString()}
+          </div>
+        )}
+
+        <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="gap-2">
+          {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          Save Schedule
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

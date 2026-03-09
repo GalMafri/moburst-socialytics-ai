@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Play, Loader2, CheckCircle2, XCircle, Clock, RefreshCw } from "lucide-react";
+import { Play, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, CalendarDays } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 
 const STEPS = [
@@ -31,6 +33,12 @@ export default function RunAnalysis() {
   const [currentStep, setCurrentStep] = useState(-1);
   const [error, setError] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
+  // Date range defaults: current month start -> today
+  const now = new Date();
+  const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+  const defaultEnd = now.toISOString().split("T")[0];
+  const [dateRangeStart, setDateRangeStart] = useState(defaultStart);
+  const [dateRangeEnd, setDateRangeEnd] = useState(defaultEnd);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -185,7 +193,7 @@ export default function RunAnalysis() {
         throw new Error("n8n webhook URL not configured. Go to Settings to set it up.");
       }
 
-      // Create report row
+      // Create report row with date ranges
       const { data: report, error: reportErr } = await supabase
         .from("reports")
         .insert({
@@ -193,6 +201,8 @@ export default function RunAnalysis() {
           status: "running",
           report_data: {},
           created_by: user!.id,
+          date_range_start: dateRangeStart || null,
+          date_range_end: dateRangeEnd || null,
         })
         .select()
         .single();
@@ -246,6 +256,8 @@ export default function RunAnalysis() {
         brand_notes: brandNotes,
         brief_text: client!.brief_text || "",
         brief_file_id: client!.brief_file_id || "",
+        date_range_start: dateRangeStart || "",
+        date_range_end: dateRangeEnd || "",
       };
 
       console.log("Sending webhook payload:", JSON.stringify(payload, null, 2));
@@ -315,9 +327,44 @@ export default function RunAnalysis() {
             </div>
             {profiles && profiles.length === 0 && (
               <p className="text-xs text-destructive font-medium">
-                ⚠️ No Sprout profiles assigned! Add profiles in Client Setup before running analysis.
+                No Sprout profiles assigned! Add profiles in Client Setup before running analysis.
               </p>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Date range selection */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarDays className="h-4 w-4" /> Report Date Range
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Start Date</Label>
+                <Input
+                  type="date"
+                  value={dateRangeStart}
+                  onChange={(e) => setDateRangeStart(e.target.value)}
+                  max={dateRangeEnd}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>End Date</Label>
+                <Input
+                  type="date"
+                  value={dateRangeEnd}
+                  onChange={(e) => setDateRangeEnd(e.target.value)}
+                  min={dateRangeStart}
+                  max={defaultEnd}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Defaults to current month. The previous month comparison period is calculated automatically.
+            </p>
           </CardContent>
         </Card>
 

@@ -25,6 +25,8 @@ import {
   BarChart3,
   Sparkles,
   Target,
+  Globe,
+  Languages,
 } from "lucide-react";
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import {
@@ -42,6 +44,7 @@ import { useState, useRef } from "react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
+import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
 
 export default function ReportView() {
   const { id, reportId } = useParams();
@@ -143,6 +146,22 @@ export default function ReportView() {
               {rd?.report_period?.current_month?.start} — {rd?.report_period?.current_month?.end}
               {" · "}Generated {new Date(report.created_at).toLocaleDateString()}
             </p>
+            {(rd?.context?.languages?.length > 0 || rd?.context?.geo?.length > 0) && (
+              <div className="flex items-center gap-2 mt-1">
+                {rd?.context?.geo?.length > 0 && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Globe className="h-3 w-3" />
+                    {(Array.isArray(rd.context.geo) ? rd.context.geo : [rd.context.geo]).join(", ")}
+                  </span>
+                )}
+                {rd?.context?.languages?.length > 0 && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Languages className="h-3 w-3" />
+                    {(Array.isArray(rd.context.languages) ? rd.context.languages : [rd.context.languages]).join(", ")}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <ExportPdfButton
@@ -591,6 +610,11 @@ function CalendarPostCard({ post }: { post: any }) {
         <div className="flex items-center gap-2">
           <PlatformBadge platform={post.platform} size="sm" />
           <Badge variant="outline">{post.format}</Badge>
+          {post.language && (
+            <Badge variant="secondary" className="text-xs uppercase">
+              {post.language}
+            </Badge>
+          )}
           {post.pillar && <Badge className="bg-accent text-accent-foreground text-xs">{post.pillar}</Badge>}
         </div>
         <div className="flex items-center gap-2">
@@ -599,6 +623,7 @@ function CalendarPostCard({ post }: { post: any }) {
               <Clock className="h-3 w-3" /> {post.posting_time}
             </span>
           )}
+          <CreatePostDesignButton post={post} />
           <Button variant="ghost" size="sm" onClick={handleCopy} className="h-7 px-2">
             <Copy className="h-3.5 w-3.5 mr-1" />
             {copied ? "Copied!" : "Copy"}

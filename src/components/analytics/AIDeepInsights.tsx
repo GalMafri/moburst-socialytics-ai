@@ -26,18 +26,24 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       const first = chartData[0];
       const last = chartData[chartData.length - 1];
 
-      // Impressions trend
-      if (first.impressions > 0 && last.impressions > 0) {
+      // Impressions trend (require minimum threshold to avoid misleading percentages)
+      if (first.impressions >= 10 && last.impressions > 0) {
         const pct = Math.round(((last.impressions - first.impressions) / first.impressions) * 100);
         if (pct > 0) {
-          result.push({ text: `Impressions grew ${pct}% across reports (${first.impressions.toLocaleString()} → ${last.impressions.toLocaleString()})`, type: "up" });
+          result.push({
+            text: `Impressions grew ${pct}% across reports (${first.impressions.toLocaleString()} → ${last.impressions.toLocaleString()})`,
+            type: "up",
+          });
         } else if (pct < 0) {
-          result.push({ text: `Impressions declined ${Math.abs(pct)}% across reports (${first.impressions.toLocaleString()} → ${last.impressions.toLocaleString()})`, type: "down" });
+          result.push({
+            text: `Impressions declined ${Math.abs(pct)}% across reports (${first.impressions.toLocaleString()} → ${last.impressions.toLocaleString()})`,
+            type: "down",
+          });
         }
       }
 
       // Engagement trend
-      if (first.engagements > 0 && last.engagements > 0) {
+      if (first.engagements >= 5 && last.engagements > 0) {
         const pct = Math.round(((last.engagements - first.engagements) / first.engagements) * 100);
         if (pct > 0) {
           result.push({ text: `Total engagements grew ${pct}% over this period`, type: "up" });
@@ -48,27 +54,39 @@ export function AIDeepInsights({ reports, chartData }: Props) {
 
       // Engagement rate
       if (last.engagement_rate > first.engagement_rate) {
-        result.push({ text: `Engagement rate improved from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`, type: "up" });
+        result.push({
+          text: `Engagement rate improved from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
+          type: "up",
+        });
       } else if (last.engagement_rate < first.engagement_rate && first.engagement_rate > 0) {
-        result.push({ text: `Engagement rate decreased from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`, type: "down" });
+        result.push({
+          text: `Engagement rate decreased from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
+          type: "down",
+        });
       }
     }
 
     // Peak performance
     const bestImpr = chartData.reduce((best, d) => (d.impressions > best.impressions ? d : best));
     if (bestImpr.impressions > 0) {
-      result.push({ text: `Peak impressions: ${bestImpr.impressions.toLocaleString()} on ${bestImpr.date}`, type: "neutral" });
+      result.push({
+        text: `Peak impressions: ${bestImpr.impressions.toLocaleString()} on ${bestImpr.date}`,
+        type: "neutral",
+      });
     }
 
     const bestEng = chartData.reduce((best, d) => (d.engagements > best.engagements ? d : best));
     if (bestEng.engagements > 0) {
-      result.push({ text: `Peak engagement: ${bestEng.engagements.toLocaleString()} on ${bestEng.date}`, type: "neutral" });
+      result.push({
+        text: `Peak engagement: ${bestEng.engagements.toLocaleString()} on ${bestEng.date}`,
+        type: "neutral",
+      });
     }
 
     // Cumulative totals
     const totalImpr = chartData.reduce((s, d) => s + d.impressions, 0);
     const totalEng = chartData.reduce((s, d) => s + d.engagements, 0);
-    const avgEngRate = totalImpr > 0 ? ((totalEng / totalImpr) * 100) : 0;
+    const avgEngRate = totalImpr > 0 ? (totalEng / totalImpr) * 100 : 0;
     if (avgEngRate > 0) {
       result.push({ text: `Average engagement rate across all reports: ${avgEngRate.toFixed(2)}%`, type: "neutral" });
     }
@@ -84,7 +102,10 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       }
     }
     if (totalCalendarDays > 0) {
-      result.push({ text: `${totalCalendarDays} content calendar days and ${totalRecs} recommendations generated across ${reports.length} reports`, type: "neutral" });
+      result.push({
+        text: `${totalCalendarDays} content calendar days and ${totalRecs} recommendations generated across ${reports.length} reports`,
+        type: "neutral",
+      });
     }
 
     // Trend coverage
@@ -111,7 +132,9 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           <Lightbulb className="h-4 w-4" /> AI-Powered Insights
-          <Badge variant="secondary" className="text-xs ml-auto">Cumulative Analysis</Badge>
+          <Badge variant="secondary" className="text-xs ml-auto">
+            Cumulative Analysis
+          </Badge>
         </CardTitle>
       </CardHeader>
       <CardContent>
