@@ -5,13 +5,16 @@ import { Loader2, Paintbrush, Download, Copy, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
-interface BrandIdentity {
+export interface BrandIdentity {
   primary_color?: string;
   secondary_color?: string;
   accent_color?: string;
   font_family?: string;
   visual_style?: string;
   logo_description?: string;
+  tone_of_voice?: string;
+  design_elements?: string;
+  background_style?: string;
 }
 
 interface CreatePostDesignButtonProps {
@@ -55,7 +58,10 @@ export function CreatePostDesignButton({ post, brandIdentity }: CreatePostDesign
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        const detail = typeof data === "object" && data?.error ? data.error : error.message;
+        throw new Error(detail);
+      }
       if (data?.error) throw new Error(data.error);
 
       setImageUrl(data.image_url);
@@ -84,6 +90,12 @@ export function CreatePostDesignButton({ post, brandIdentity }: CreatePostDesign
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const brandColors = [
+    brandIdentity?.primary_color,
+    brandIdentity?.secondary_color,
+    brandIdentity?.accent_color,
+  ].filter(Boolean);
+
   return (
     <>
       <Button variant="outline" size="sm" onClick={handleOpen}>
@@ -98,19 +110,22 @@ export function CreatePostDesignButton({ post, brandIdentity }: CreatePostDesign
 
           <div className="space-y-4">
             {/* Brand context indicator */}
-            {brandIdentity?.primary_color && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>Brand colors:</span>
-                {[brandIdentity.primary_color, brandIdentity.secondary_color, brandIdentity.accent_color]
-                  .filter(Boolean)
-                  .map((color, i) => (
+            {brandColors.length > 0 && (
+              <div className="flex items-center gap-3 text-xs text-muted-foreground rounded-lg bg-muted/50 px-3 py-2">
+                <span className="font-medium">Brand:</span>
+                <div className="flex items-center gap-1.5">
+                  {brandColors.map((color, i) => (
                     <div
                       key={i}
-                      className="h-4 w-4 rounded-full border"
+                      className="h-5 w-5 rounded-full border shadow-sm"
                       style={{ backgroundColor: color }}
                       title={color}
                     />
                   ))}
+                </div>
+                {brandIdentity?.visual_style && (
+                  <span className="text-muted-foreground ml-1">· {brandIdentity.visual_style}</span>
+                )}
               </div>
             )}
 
@@ -130,7 +145,8 @@ export function CreatePostDesignButton({ post, brandIdentity }: CreatePostDesign
             {loading && (
               <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-                <p className="text-sm text-muted-foreground">Generating on-brand image...</p>
+                <p className="text-sm text-muted-foreground">Generating on-brand design...</p>
+                <p className="text-xs text-muted-foreground mt-1">This may take 15-30 seconds</p>
               </div>
             )}
 
@@ -142,14 +158,18 @@ export function CreatePostDesignButton({ post, brandIdentity }: CreatePostDesign
                   <p className="text-xs text-muted-foreground italic">Refined prompt: {revisedPrompt}</p>
                 )}
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => {
-                    const link = document.createElement("a");
-                    link.href = imageUrl!;
-                    link.download = `post-design-${post.platform || "image"}.png`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                  }}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const link = document.createElement("a");
+                      link.href = imageUrl!;
+                      link.download = `post-design-${post.platform || "image"}.png`;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                  >
                     <Download className="h-4 w-4 mr-1" /> Download
                   </Button>
                   <Button variant="outline" size="sm" onClick={generateImage}>

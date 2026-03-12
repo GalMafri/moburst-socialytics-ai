@@ -10,11 +10,8 @@ const corsHeaders = {
 function getImageSize(platform?: string, format?: string): string {
   if (!platform) return "1024x1024";
   const p = (platform + " " + (format || "")).toLowerCase();
-  // Vertical: Stories, Reels, TikTok
   if (p.includes("story") || p.includes("reel") || p.includes("tiktok")) return "1024x1536";
-  // Landscape: LinkedIn articles, Facebook link posts
   if (p.includes("linkedin") || p.includes("article")) return "1536x1024";
-  // Square: Instagram feed, Facebook, default
   return "1024x1024";
 }
 
@@ -33,9 +30,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get OpenAI API key from app_settings or env
+    // Get OpenAI API key
     let openaiKey = Deno.env.get("OPENAI_API_KEY");
-
     if (!openaiKey) {
       const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
       const { data: setting } = await supabase
@@ -47,34 +43,17 @@ Deno.serve(async (req) => {
     }
 
     if (!openaiKey) {
-      return new Response(
-        JSON.stringify({
-          error: "OpenAI API key not configured. Add OPENAI_API_KEY to your environment or app_settings.",
-        }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "OpenAI API key not configured." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Build enhanced prompt with brand context
-    let enhancedPrompt = prompt;
-    if (brand_context) {
-      const parts: string[] = [];
-      if (brand_context.primary_color) parts.push(`primary brand color: ${brand_context.primary_color}`);
-      if (brand_context.secondary_color) parts.push(`secondary color: ${brand_context.secondary_color}`);
-      if (brand_context.accent_color) parts.push(`accent color: ${brand_context.accent_color}`);
-      if (brand_context.visual_style) parts.push(`visual style: ${brand_context.visual_style}`);
-      if (brand_context.font_family) parts.push(`typography style inspired by: ${brand_context.font_family}`);
-      if (brand_context.logo_description) parts.push(`brand mark: ${brand_context.logo_description}`);
-
-      if (parts.length > 0) {
-        const brandPrefix = `BRAND GUIDELINES - Use these exact brand colors and style throughout the design: ${parts.join(", ")}. `;
-        enhancedPrompt = brandPrefix + prompt;
-      }
-    }
-
+    // Build the complete design prompt
     const imageSize = getImageSize(platform, format);
+    const enhancedPrompt = buildDesignPrompt(prompt, platform, format, imageSize, brand_context);
 
-    // Call OpenAI GPT Image (gpt-image-1) generation
+    // Call OpenAI GPT Image (gpt-image-1)
     const response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: {
@@ -100,8 +79,6 @@ Deno.serve(async (req) => {
 
     const result = await response.json();
     const imageData = result.data?.[0];
-
-    // gpt-image-1 may return url or b64_json depending on configuration
     const imageUrl = imageData?.url || (imageData?.b64_json ? `data:image/png;base64,${imageData.b64_json}` : null);
     const revisedPrompt = imageData?.revised_prompt;
 
@@ -122,3 +99,87 @@ Deno.serve(async (req) => {
     });
   }
 });
+
+/**
+ * Build a comprehensive design prompt that produces on-brand, well-composed images.
+ * Solves: cut-off elements, uninspired designs, off-brand colors.
+ */
+function buildDesignPrompt(
+  basePrompt: string,
+  platform?: string,
+  format?: string,
+  imageSize?: string,
+  brand?: any,
+): string {
+  const sections: string[] = [];
+
+  // ── 1. Composition & framing rules (fixes cut-off issue) ──
+  sections.push(`IMAGE COMPOSITION RULES:
+- All elements must be fully contained within the frame with generous safe margins (at least 10% padding from all edges)
+- NEVER cut off text, objects, people, or any visual element at the edges
+- Use clean, balanced composition with clear visual hierarchy
+- The image should work as a standalone social media post — no bleed, no cropping needed
+- Leave breathing room around all elements`);
+
+  // ── 2. Platform-specific guidance ──
+  const p = (platform || "").toLowerCase();
+  const f = (format || "").toLowerCase();
+  if (p.includes("instagram") || p.includes("tiktok")) {
+    sections.push(`PLATFORM: ${platform} ${format || ""}
+- Design for mobile-first viewing (thumb-stopping visual)
+- Bold, high-contrast visuals that stand out in a feed
+- If vertical format, stack elements vertically with the hook/headline at the top third`);
+  } else if (p.includes("linkedin")) {
+    sections.push(`PLATFORM: LinkedIn
+- Professional, polished aesthetic
+- Clean layout with sophisticated color usage
+- Corporate-friendly but still visually engaging`);
+  } else if (p.includes("facebook")) {
+    sections.push(`PLATFORM: Facebook
+- Shareable, scroll-stopping design
+- Clear visual with easy-to-read text if any`);
+  }
+
+  // ── 3. Brand identity (the core of on-brand design) ──
+  if (brand) {
+    const brandParts: string[] = [];
+
+    if (brand.primary_color)
+      brandParts.push(`Primary brand color: ${brand.primary_color} — use this as the DOMINANT color in the design`);
+    if (brand.secondary_color)
+      brandParts.push(
+        `Secondary brand color: ${brand.secondary_color} — use for supporting elements, backgrounds, or accents`,
+      );
+    if (brand.accent_color)
+      brandParts.push(`Accent color: ${brand.accent_color} — use sparingly for highlights, CTAs, or emphasis`);
+    if (brand.font_family)
+      brandParts.push(`Typography style: inspired by ${brand.font_family} — match this typographic feel`);
+    if (brand.visual_style) brandParts.push(`Overall visual style: ${brand.visual_style}`);
+    if (brand.tone_of_voice)
+      brandParts.push(`Brand tone: ${brand.tone_of_voice} — the visual mood should reflect this`);
+    if (brand.design_elements) brandParts.push(`Design patterns to incorporate: ${brand.design_elements}`);
+    if (brand.background_style) brandParts.push(`Background approach: ${brand.background_style}`);
+    if (brand.logo_description)
+      brandParts.push(
+        `Brand mark reference: ${brand.logo_description} (do NOT include the actual logo, but match its design language)`,
+      );
+
+    if (brandParts.length > 0) {
+      sections.push(`BRAND IDENTITY — The design MUST feel like it belongs to this brand:
+${brandParts.join("\n")}`);
+    }
+  }
+
+  // ── 4. Design quality directives ──
+  sections.push(`DESIGN QUALITY:
+- Create a polished, professional social media graphic — not a stock photo
+- Use intentional color blocking and visual hierarchy
+- If the concept involves text/headlines, make them bold, readable, and well-positioned
+- The overall feel should be that of a professionally designed social media post by a top creative agency
+- Avoid generic clip-art aesthetics — aim for modern, editorial-quality design`);
+
+  // ── 5. The actual content prompt ──
+  sections.push(`CONTENT DIRECTION:\n${basePrompt}`);
+
+  return sections.join("\n\n");
+}

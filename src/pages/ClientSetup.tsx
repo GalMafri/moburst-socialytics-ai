@@ -402,8 +402,10 @@ export default function ClientSetup() {
                 </div>
 
                 {form.brand_identity && (
-                  <div className="space-y-3 rounded-lg border p-4 bg-muted/30">
+                  <div className="space-y-4 rounded-lg border p-4 bg-muted/30">
                     <Label className="text-sm font-semibold">Brand Identity</Label>
+
+                    {/* Colors */}
                     <div className="grid grid-cols-3 gap-3">
                       {(["primary_color", "secondary_color", "accent_color"] as const).map((key) => (
                         <div key={key} className="space-y-1">
@@ -428,6 +430,8 @@ export default function ClientSetup() {
                         </div>
                       ))}
                     </div>
+
+                    {/* Font + Visual Style */}
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <Label className="text-xs">Font Family</Label>
@@ -457,6 +461,70 @@ export default function ClientSetup() {
                           className="h-8 text-sm"
                         />
                       </div>
+                    </div>
+
+                    {/* Tone of Voice + Background Style */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Tone of Voice</Label>
+                        <Input
+                          value={form.brand_identity?.tone_of_voice || ""}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              brand_identity: { ...f.brand_identity, tone_of_voice: e.target.value },
+                            }))
+                          }
+                          placeholder="Warm, approachable, health-conscious"
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Background Style</Label>
+                        <Input
+                          value={form.brand_identity?.background_style || ""}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              brand_identity: { ...f.brand_identity, background_style: e.target.value },
+                            }))
+                          }
+                          placeholder="Soft gradients, lifestyle photography"
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Design Elements */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Design Elements</Label>
+                      <Input
+                        value={form.brand_identity?.design_elements || ""}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            brand_identity: { ...f.brand_identity, design_elements: e.target.value },
+                          }))
+                        }
+                        placeholder="Rounded shapes, lifestyle photography, organic textures"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+
+                    {/* Logo Description */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Logo Description</Label>
+                      <Input
+                        value={form.brand_identity?.logo_description || ""}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            brand_identity: { ...f.brand_identity, logo_description: e.target.value },
+                          }))
+                        }
+                        placeholder="Rounded wordmark in green with leaf icon"
+                        className="h-8 text-sm"
+                      />
                     </div>
                   </div>
                 )}
