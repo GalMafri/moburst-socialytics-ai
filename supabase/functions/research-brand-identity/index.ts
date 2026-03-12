@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
     }
     const baseUrl = new URL(normalizedUrl).origin;
 
-    // ── 1. Fetch the website HTML ──
+    // ── 1. Fetch the website HTML (direct fetch with Firecrawl fallback) ──
     let html: string;
     try {
       const resp = await fetch(normalizedUrl, {
@@ -38,7 +38,36 @@ Deno.serve(async (req) => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       html = await resp.text();
     } catch (fetchErr: any) {
-      return jsonResponse({ error: `Failed to fetch website: ${fetchErr.message}` }, 400);
+      console.log(`Direct fetch failed (${fetchErr.message}), trying Firecrawl fallback...`);
+      // Fallback to Firecrawl for SSL/certificate issues
+      const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
+      if (!firecrawlKey) {
+        return jsonResponse({ error: `Failed to fetch website: ${fetchErr.message}. Firecrawl fallback not configured.` }, 400);
+      }
+      try {
+        const fcResp = await fetch("https://api.firecrawl.dev/v1/scrape", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${firecrawlKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            url: normalizedUrl,
+            formats: ["html"],
+            waitFor: 5000,
+          }),
+        });
+        if (!fcResp.ok) {
+          const fcErr = await fcResp.text().catch(() => "");
+          throw new Error(`Firecrawl ${fcResp.status}: ${fcErr}`);
+        }
+        const fcData = await fcResp.json();
+        html = fcData.data?.html || fcData.html || "";
+        if (!html) throw new Error("Firecrawl returned empty HTML");
+        console.log("Successfully fetched via Firecrawl fallback");
+      } catch (fcFetchErr: any) {
+        return jsonResponse({ error: `Failed to fetch website: ${fcFetchErr.message}` }, 400);
+      }
     }
 
     // ── 2. Extract image URLs (logo, OG image, apple-touch-icon) ──
