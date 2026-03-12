@@ -6,22 +6,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const FETCH_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Accept": "text/html,text/css,*/*",
-};
-
-// Generic / non-brand colors to filter out
-const GENERIC_HEX = new Set([
-  "#fff", "#ffffff", "#000", "#000000", "#333", "#333333",
-  "#666", "#666666", "#999", "#999999", "#ccc", "#cccccc",
-  "#ddd", "#dddddd", "#eee", "#eeeeee", "#f5f5f5", "#fafafa",
-  "#f8f8f8", "#e5e5e5", "#d4d4d4", "#a3a3a3", "#737373",
-  "#525252", "#404040", "#262626", "#171717", "#0a0a0a",
-  "#f9fafb", "#f3f4f6", "#e5e7eb", "#d1d5db", "#9ca3af",
-  "#6b7280", "#4b5563", "#374151", "#1f2937", "#111827",
-  "#0000ff", "#ff0000", "#00ff00", "#transparent",
-]);
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -32,10 +18,7 @@ Deno.serve(async (req) => {
     const { website_url, client_name } = await req.json();
 
     if (!website_url) {
-      return new Response(
-        JSON.stringify({ error: "website_url is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "website_url is required" }, 400);
     }
 
     // Normalize URL
@@ -45,59 +28,35 @@ Deno.serve(async (req) => {
     }
     const baseUrl = new URL(normalizedUrl).origin;
 
-    // 1. Fetch the website HTML
+    // ── 1. Fetch the website HTML ──
     let html: string;
     try {
-      const siteResponse = await fetch(normalizedUrl, {
-        headers: FETCH_HEADERS,
+      const resp = await fetch(normalizedUrl, {
+        headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" },
         redirect: "follow",
       });
-      if (!siteResponse.ok) {
-        throw new Error(`HTTP ${siteResponse.status}`);
-      }
-      html = await siteResponse.text();
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      html = await resp.text();
     } catch (fetchErr: any) {
-      return new Response(
-        JSON.stringify({ error: `Failed to fetch website: ${fetchErr.message}` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: `Failed to fetch website: ${fetchErr.message}` }, 400);
     }
 
-    // 2. Fetch external stylesheets (up to 5, concurrently)
-    const cssLinkRegex = /<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/gi;
-    const cssUrls: string[] = [];
-    let linkMatch;
-    while ((linkMatch = cssLinkRegex.exec(html)) !== null && cssUrls.length < 5) {
-      let href = linkMatch[1];
-      if (href.startsWith("//")) href = "https:" + href;
-      else if (href.startsWith("/")) href = baseUrl + href;
-      else if (!href.startsWith("http")) href = baseUrl + "/" + href;
-      cssUrls.push(href);
-    }
+    // ── 2. Extract image URLs (logo, OG image, apple-touch-icon) ──
+    const imageUrls = extractImageUrls(html, baseUrl);
 
-    const externalCss = await Promise.all(
-      cssUrls.map(async (url) => {
-        try {
-          const resp = await fetch(url, { headers: FETCH_HEADERS, redirect: "follow" });
-          if (!resp.ok) return "";
-          const text = await resp.text();
-          return text.slice(0, 50000); // cap per file
-        } catch {
-          return "";
-        }
-      })
-    );
-    const allCss = externalCss.join("\n");
+    // ── 3. Fetch external CSS (up to 4 files) for font/color signals ──
+    const cssText = await fetchExternalCss(html, baseUrl);
+    const signals = extractTextSignals(html, cssText);
 
-    // 3. Extract brand signals from HTML + external CSS
-    const signals = extractBrandSignals(html, allCss, baseUrl);
+    // ── 4. Fetch images as base64 for GPT-4o Vision ──
+    const visionImages = await fetchImagesAsBase64(imageUrls);
 
-    // 4. Get OpenAI API key
+    // ── 5. Get OpenAI API key ──
     let openaiKey = Deno.env.get("OPENAI_API_KEY");
     if (!openaiKey) {
       const supabase = createClient(
         Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
       );
       const { data: setting } = await supabase
         .from("app_settings")
@@ -106,250 +65,319 @@ Deno.serve(async (req) => {
         .maybeSingle();
       openaiKey = setting?.value;
     }
-
     if (!openaiKey) {
-      return new Response(
-        JSON.stringify({ error: "OpenAI API key not configured. Add OPENAI_API_KEY to your environment or app_settings." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "OpenAI API key not configured." }, 400);
     }
 
-    // 5. Use GPT-4o to analyze extracted signals
-    const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${openaiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "system",
-            content: `You are a senior brand identity analyst specializing in extracting precise brand colors from websites. Your task is to identify the ACTUAL brand colors used in a company's visual identity — NOT generic UI colors.
+    // ── 6. Call GPT-4o Vision with images + text signals ──
+    const messages: any[] = [
+      {
+        role: "system",
+        content: `You are an elite brand identity analyst. You will receive images from a brand's website (logo, OG image, icons) along with CSS/meta data. Your job is to extract the PRECISE brand identity.
 
-RULES:
-- Primary color = the dominant brand color used in the logo, buttons, headers, and CTAs
-- Secondary color = the second most prominent brand color, often used for backgrounds, accents, or secondary buttons
-- Accent color = a complementary or highlight color used sparingly for emphasis
-- NEVER return generic grays (#333, #666, #999), pure black (#000), or pure white (#fff) as brand colors
-- NEVER return Tailwind/Bootstrap default colors unless they ARE the actual brand colors
-- Look at CSS custom properties (--primary, --brand-*, --accent) as the strongest signals
-- Look at button backgrounds, link colors, header backgrounds, and gradient colors
-- Font family should be the primary display/heading font, not system fallbacks
+CRITICAL RULES:
+- Colors MUST be exact hex codes from the actual brand assets — look at the logo and images carefully
+- Primary color = the single most dominant color in the logo/brand mark
+- Secondary color = the second brand color visible in the logo, website header, or CTA buttons
+- Accent color = highlight/complementary color used for emphasis
+- NEVER guess generic colors. If you can see the logo, extract colors FROM the logo pixels
+- For tone_of_voice, analyze the meta description, page title, and visual feel
+- For design_elements, describe the actual visual patterns you see (gradients, shapes, photo style, etc.)
 
-Return ONLY valid JSON:
+Return ONLY valid JSON with this exact structure:
 {
   "primary_color": "#hex",
   "secondary_color": "#hex",
   "accent_color": "#hex",
-  "font_family": "Primary Font Name",
-  "visual_style": "brief 5-10 word style description (e.g. 'Clean modern minimalist with warm earth tones')",
-  "logo_description": "brief description of the brand mark/logo style"
-}`
-          },
-          {
-            role: "user",
-            content: `Analyze the brand identity for "${client_name || "this company"}" from their website (${normalizedUrl}).
+  "font_family": "Primary Brand Font Name",
+  "visual_style": "5-15 word description of overall design aesthetic",
+  "logo_description": "brief description of the logo/brand mark you can see",
+  "tone_of_voice": "3-8 word description of the brand's communication style (e.g. 'Warm, approachable, health-conscious')",
+  "design_elements": "key visual patterns: gradients, shapes, photography style, textures, etc.",
+  "background_style": "preferred background approach (e.g. 'soft gradients', 'solid colors', 'lifestyle photography', 'clean white')"
+}`,
+      },
+      {
+        role: "user",
+        content: [] as any[],
+      },
+    ];
 
-=== CSS CUSTOM PROPERTIES (strongest brand signals) ===
+    // Add text prompt
+    messages[1].content.push({
+      type: "text",
+      text: `Analyze the brand identity for "${client_name || "this company"}" — website: ${normalizedUrl}
+
+=== CSS CUSTOM PROPERTIES ===
 ${signals.cssVars || "none found"}
 
-=== BUTTON & CTA COLORS ===
-${signals.buttonColors || "none found"}
-
-=== LINK & ACCENT COLORS ===
-${signals.linkColors || "none found"}
-
-=== GRADIENT COLORS ===
-${signals.gradients || "none found"}
-
-=== ALL UNIQUE BRAND-CANDIDATE COLORS (non-generic) ===
-${signals.brandCandidateColors || "none found"}
-
-=== META THEME COLOR ===
-${signals.themeColor || "not found"}
+=== PROMINENT COLORS FROM CSS (non-generic, by frequency) ===
+${signals.topColors || "none found"}
 
 === FONT REFERENCES ===
-${signals.fonts || "not found"}
+${signals.fonts || "none found"}
 
-=== PAGE META ===
+=== META ===
 Title: ${signals.pageTitle || "not found"}
 Description: ${signals.metaDescription || "not found"}
-Favicon: ${signals.logoUrl || "not found"}
-OG Image: ${signals.ogImage || "not found"}`
-          }
-        ],
-        temperature: 0.2,
-        max_tokens: 500,
+Theme color: ${signals.themeColor || "not found"}
+
+Look at the attached images carefully to identify the EXACT brand colors from the logo and visual assets.`,
+    });
+
+    // Add images
+    for (const img of visionImages) {
+      messages[1].content.push({
+        type: "image_url",
+        image_url: { url: img.dataUrl, detail: "high" },
+      });
+      messages[1].content.push({
+        type: "text",
+        text: `[Above image: ${img.label}]`,
+      });
+    }
+
+    if (visionImages.length === 0) {
+      messages[1].content.push({
+        type: "text",
+        text: "[No images could be fetched — rely on CSS data and page meta to infer brand colors]",
+      });
+    }
+
+    const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openaiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages,
+        temperature: 0.15,
+        max_tokens: 600,
       }),
     });
 
     if (!gptResponse.ok) {
       const errorBody = await gptResponse.text().catch(() => "");
-      return new Response(
-        JSON.stringify({ error: `OpenAI API error: ${gptResponse.status}`, details: errorBody }),
-        { status: gptResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: `OpenAI API error: ${gptResponse.status}`, details: errorBody }, 502);
     }
 
     const gptResult = await gptResponse.json();
     const content = gptResult.choices?.[0]?.message?.content || "";
 
-    // 6. Parse the JSON response
+    // ── 7. Parse JSON response ──
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return new Response(
-        JSON.stringify({ error: "Could not parse brand identity from AI response", raw: content }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Could not parse brand identity from AI response", raw: content }, 500);
     }
 
     let brandIdentity;
     try {
       brandIdentity = JSON.parse(jsonMatch[0]);
     } catch {
-      return new Response(
-        JSON.stringify({ error: "Invalid JSON in AI response", raw: content }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Invalid JSON in AI response", raw: content }, 500);
     }
 
-    return new Response(
-      JSON.stringify({ brand_identity: brandIdentity }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ brand_identity: brandIdentity });
   } catch (err: any) {
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: err.message }, 500);
   }
 });
 
-/** Check if a hex color is generic (grayscale, pure black/white, common defaults) */
-function isGenericColor(hex: string): boolean {
-  const h = hex.toLowerCase().replace(/\s/g, "");
-  if (GENERIC_HEX.has(h)) return true;
-  // Expand 3-char hex to 6-char
-  let full = h;
-  if (/^#[0-9a-f]{3}$/i.test(h)) {
-    full = `#${h[1]}${h[1]}${h[2]}${h[2]}${h[3]}${h[3]}`;
-  }
-  if (GENERIC_HEX.has(full)) return true;
-  // Check if grayscale (r ≈ g ≈ b)
-  const match = full.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  if (match) {
-    const r = parseInt(match[1], 16);
-    const g = parseInt(match[2], 16);
-    const b = parseInt(match[3], 16);
-    const spread = Math.max(r, g, b) - Math.min(r, g, b);
-    if (spread < 15) return true; // near-grayscale
-  }
-  return false;
+// ────────────────────── Helpers ──────────────────────
+
+function jsonResponse(body: any, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }
 
-/** Extract brand-relevant signals from HTML + external CSS */
-function extractBrandSignals(html: string, externalCss: string, baseUrl: string) {
-  const combined = html + "\n" + externalCss;
+/** Extract logo, OG image, apple-touch-icon, and favicon URLs from HTML */
+function extractImageUrls(html: string, baseUrl: string): { url: string; label: string }[] {
+  const results: { url: string; label: string }[] = [];
 
-  // --- CSS Custom Properties (strongest brand signal) ---
-  const cssVarRegex = /--[\w-]*(color|brand|primary|secondary|accent|theme|main|cta|btn|link|highlight|heading)[\w-]*\s*:\s*([^;}\n]+)/gi;
+  // Look for logo in common patterns: img with "logo" in src, alt, or class
+  const logoImgMatch =
+    html.match(/<img[^>]*(?:class=["'][^"']*logo[^"']*["']|alt=["'][^"']*logo[^"']*["'])[^>]*src=["']([^"']+)["']/i) ||
+    html.match(/<img[^>]*src=["']([^"']*logo[^"']+)["']/i);
+  if (logoImgMatch) {
+    results.push({ url: resolveUrl(logoImgMatch[1], baseUrl), label: "Logo image from page" });
+  }
+
+  // SVG logo in header/nav
+  const headerLogoSvg = html.match(/<(?:header|nav)[^>]*>[\s\S]{0,3000}<img[^>]*src=["']([^"']+\.svg[^"']*)["']/i);
+  if (headerLogoSvg) {
+    const svgUrl = resolveUrl(headerLogoSvg[1], baseUrl);
+    if (!results.some((r) => r.url === svgUrl)) {
+      results.push({ url: svgUrl, label: "Header/nav logo SVG" });
+    }
+  }
+
+  // Apple touch icon (usually high-res logo)
+  const appleTouchMatch = html.match(/<link[^>]*rel=["']apple-touch-icon["'][^>]*href=["']([^"']+)["']/i);
+  if (appleTouchMatch) results.push({ url: resolveUrl(appleTouchMatch[1], baseUrl), label: "Apple touch icon (brand logo)" });
+
+  // Favicon
+  const faviconMatch = html.match(/<link[^>]*rel=["'](?:icon|shortcut icon)["'][^>]*href=["']([^"']+)["']/i);
+  if (faviconMatch) results.push({ url: resolveUrl(faviconMatch[1], baseUrl), label: "Favicon" });
+
+  // OG image
+  const ogMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+  if (ogMatch) results.push({ url: resolveUrl(ogMatch[1], baseUrl), label: "OG image (social share preview)" });
+
+  // Twitter card image
+  const twitterMatch = html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i);
+  if (twitterMatch && twitterMatch[1] !== ogMatch?.[1]) {
+    results.push({ url: resolveUrl(twitterMatch[1], baseUrl), label: "Twitter card image" });
+  }
+
+  return results.slice(0, 5);
+}
+
+function resolveUrl(href: string, baseUrl: string): string {
+  if (href.startsWith("//")) return "https:" + href;
+  if (href.startsWith("/")) return baseUrl + href;
+  if (href.startsWith("http")) return href;
+  return baseUrl + "/" + href;
+}
+
+/** Fetch up to 4 external CSS files and return combined text */
+async function fetchExternalCss(html: string, baseUrl: string): Promise<string> {
+  const cssLinkRegex = /<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/gi;
+  const urls: string[] = [];
+  let m;
+  while ((m = cssLinkRegex.exec(html)) !== null && urls.length < 4) {
+    urls.push(resolveUrl(m[1], baseUrl));
+  }
+  const results = await Promise.all(
+    urls.map(async (url) => {
+      try {
+        const resp = await fetch(url, { headers: { "User-Agent": BROWSER_UA }, redirect: "follow" });
+        if (!resp.ok) return "";
+        return (await resp.text()).slice(0, 40000);
+      } catch {
+        return "";
+      }
+    }),
+  );
+  return results.join("\n");
+}
+
+/** Fetch images and convert to base64 data URLs for GPT-4o Vision */
+async function fetchImagesAsBase64(images: { url: string; label: string }[]): Promise<{ dataUrl: string; label: string }[]> {
+  const results: { dataUrl: string; label: string }[] = [];
+
+  for (const img of images) {
+    if (results.length >= 3) break;
+    try {
+      const resp = await fetch(img.url, { headers: { "User-Agent": BROWSER_UA }, redirect: "follow" });
+      if (!resp.ok) continue;
+
+      const contentType = resp.headers.get("content-type") || "image/png";
+
+      // Handle SVGs
+      if (contentType.includes("svg")) {
+        const svgText = await resp.text();
+        if (svgText.length > 50000) continue;
+        const b64 = btoa(unescape(encodeURIComponent(svgText)));
+        results.push({ dataUrl: `data:image/svg+xml;base64,${b64}`, label: img.label });
+        continue;
+      }
+
+      // Raster images
+      const buffer = await resp.arrayBuffer();
+      if (buffer.byteLength > 5_000_000 || buffer.byteLength < 100) continue;
+
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const b64 = btoa(binary);
+      const mime = contentType.split(";")[0].trim();
+      results.push({ dataUrl: `data:${mime};base64,${b64}`, label: img.label });
+    } catch {
+      // skip
+    }
+  }
+  return results;
+}
+
+/** Extract text-based signals from HTML + CSS */
+function extractTextSignals(html: string, css: string) {
+  const combined = html + "\n" + css;
+
+  // CSS custom properties
+  const cssVarRegex = /--[\w-]*(color|brand|primary|secondary|accent|theme|main|cta|btn|highlight)[\w-]*\s*:\s*([^;}\n]+)/gi;
   const cssVars: string[] = [];
-  let varMatch;
-  while ((varMatch = cssVarRegex.exec(combined)) !== null && cssVars.length < 30) {
-    cssVars.push(`${varMatch[0].trim()}`);
+  let vm;
+  while ((vm = cssVarRegex.exec(combined)) !== null && cssVars.length < 25) {
+    cssVars.push(vm[0].trim());
   }
 
-  // --- Button / CTA colors ---
-  const buttonColorRegex = /(?:\.btn|\.button|\.cta|button|\.primary-btn|\.hero-btn|a\.btn)[^{}]*\{[^}]*(?:background(?:-color)?\s*:\s*([^;}\n]+)|color\s*:\s*([^;}\n]+))/gi;
-  const buttonColors: string[] = [];
-  let btnMatch;
-  while ((btnMatch = buttonColorRegex.exec(combined)) !== null && buttonColors.length < 15) {
-    const val = (btnMatch[1] || btnMatch[2] || "").trim();
-    if (val && val !== "inherit" && val !== "transparent" && val !== "currentColor") {
-      buttonColors.push(val);
-    }
-  }
-
-  // --- Link colors ---
-  const linkColorRegex = /(?:^|\s)a(?:\s|,|\{|:)[^{}]*\{[^}]*color\s*:\s*([^;}\n]+)/gim;
-  const linkColors: string[] = [];
-  let linkMatch;
-  while ((linkMatch = linkColorRegex.exec(combined)) !== null && linkColors.length < 10) {
-    const val = linkMatch[1].trim();
-    if (val && val !== "inherit" && val !== "transparent" && val !== "currentColor") {
-      linkColors.push(val);
-    }
-  }
-
-  // --- Gradients ---
-  const gradientMatches = combined.match(/(?:linear|radial)-gradient\([^)]+\)/gi) || [];
-
-  // --- All hex colors, filtered to non-generic ---
+  // Non-generic hex colors by frequency
   const allHex = combined.match(/#[0-9a-fA-F]{3,8}\b/g) || [];
-  const hexCounts = new Map<string, number>();
+  const counts = new Map<string, number>();
   for (const h of allHex) {
     const lower = h.toLowerCase();
     if (!isGenericColor(lower)) {
-      hexCounts.set(lower, (hexCounts.get(lower) || 0) + 1);
+      counts.set(lower, (counts.get(lower) || 0) + 1);
     }
   }
-  // Sort by frequency — most used colors are more likely brand colors
-  const sortedHex = [...hexCounts.entries()]
+  const topColors = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 25)
-    .map(([color, count]) => `${color} (used ${count}x)`);
+    .slice(0, 20)
+    .map(([c, n]) => `${c} (${n}x)`);
 
-  // --- Meta theme-color ---
-  const themeColorMatch = html.match(
-    /<meta[^>]*name=["']theme-color["'][^>]*content=["']([^"']+)["']/i
-  );
-
-  // --- Font references ---
-  const googleFontMatch = combined.match(/fonts\.googleapis\.com\/css2?\?family=([^"'&\s)]+)/gi) || [];
-  const fontFaceMatches = combined.match(/font-family\s*:\s*["']?([^;}"'\n,]+)/gi) || [];
-  const cleanedFonts = fontFaceMatches
+  // Fonts
+  const googleFonts = combined.match(/fonts\.googleapis\.com\/css2?\?family=([^"'&\s)]+)/gi) || [];
+  const fontFamilies = combined.match(/font-family\s*:\s*["']?([^;}"'\n,]+)/gi) || [];
+  const cleaned = fontFamilies
     .map((f) => f.replace(/font-family\s*:\s*/i, "").replace(/["']/g, "").trim())
-    .filter((f) => !/(sans-serif|serif|monospace|system-ui|inherit|initial|-apple-system|BlinkMacSystemFont|Segoe UI|Arial|Helvetica|Times)/i.test(f));
-  const uniqueFonts = [...new Set([
-    ...googleFontMatch.map((f) => decodeURIComponent(f.replace(/.*family=/, "").replace(/[+:].*/g, " ").trim())),
-    ...cleanedFonts.slice(0, 10),
-  ])];
+    .filter((f) => !/(sans-serif|serif|monospace|system-ui|inherit|initial|-apple|BlinkMac|Segoe|Arial|Helvetica|Times|Roboto\s*,)/i.test(f));
+  const uniqueFonts = [
+    ...new Set([
+      ...googleFonts.map((f) => decodeURIComponent(f.replace(/.*family=/, "").replace(/[+:].*/g, " ").trim())),
+      ...cleaned.slice(0, 8),
+    ]),
+  ];
 
-  // --- Favicon ---
-  const faviconMatch = html.match(
-    /<link[^>]*rel=["'](?:icon|shortcut icon|apple-touch-icon)["'][^>]*href=["']([^"']+)["']/i
-  );
-  let faviconUrl = faviconMatch?.[1] || null;
-  if (faviconUrl && !faviconUrl.startsWith("http")) {
-    faviconUrl = faviconUrl.startsWith("/") ? baseUrl + faviconUrl : baseUrl + "/" + faviconUrl;
-  }
-
-  // --- OG image ---
-  const ogImageMatch = html.match(
-    /<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i
-  );
-
-  // --- Page title ---
-  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-
-  // --- Meta description ---
-  const descMatch = html.match(
-    /<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i
-  );
+  const themeColor = html.match(/<meta[^>]*name=["']theme-color["'][^>]*content=["']([^"']+)["']/i)?.[1] || null;
+  const pageTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim() || null;
+  const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i)?.[1] || null;
 
   return {
-    cssVars: cssVars.join("\n").slice(0, 2000) || null,
-    buttonColors: buttonColors.join(", ").slice(0, 500) || null,
-    linkColors: linkColors.join(", ").slice(0, 300) || null,
-    gradients: gradientMatches.slice(0, 5).join("\n").slice(0, 500) || null,
-    brandCandidateColors: sortedHex.join(", ").slice(0, 1000) || null,
-    themeColor: themeColorMatch?.[1] || null,
-    fonts: uniqueFonts.join(", ").slice(0, 500) || null,
-    logoUrl: faviconUrl,
-    ogImage: ogImageMatch?.[1] || null,
-    pageTitle: titleMatch?.[1]?.trim() || null,
-    metaDescription: descMatch?.[1] || null,
+    cssVars: cssVars.join("\n").slice(0, 1500) || null,
+    topColors: topColors.join(", ").slice(0, 800) || null,
+    fonts: uniqueFonts.join(", ").slice(0, 400) || null,
+    themeColor,
+    pageTitle,
+    metaDescription: metaDesc,
   };
+}
+
+const GENERIC_HEX = new Set([
+  "#fff", "#ffffff", "#000", "#000000", "#333", "#333333",
+  "#666", "#666666", "#999", "#999999", "#ccc", "#cccccc",
+  "#ddd", "#dddddd", "#eee", "#eeeeee", "#f5f5f5", "#fafafa",
+  "#f8f8f8", "#e5e5e5", "#d4d4d4", "#a3a3a3", "#737373",
+  "#525252", "#404040", "#262626", "#171717", "#0a0a0a",
+  "#f9fafb", "#f3f4f6", "#e5e7eb", "#d1d5db", "#9ca3af",
+  "#6b7280", "#4b5563", "#374151", "#1f2937", "#111827",
+]);
+
+function isGenericColor(hex: string): boolean {
+  const h = hex.toLowerCase().replace(/\s/g, "");
+  if (GENERIC_HEX.has(h)) return true;
+  let full = h;
+  if (/^#[0-9a-f]{3}$/i.test(h)) full = `#${h[1]}${h[1]}${h[2]}${h[2]}${h[3]}${h[3]}`;
+  if (GENERIC_HEX.has(full)) return true;
+  const match = full.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (match) {
+    const [r, g, b] = [parseInt(match[1], 16), parseInt(match[2], 16), parseInt(match[3], 16)];
+    if (Math.max(r, g, b) - Math.min(r, g, b) < 15) return true;
+  }
+  return false;
 }
