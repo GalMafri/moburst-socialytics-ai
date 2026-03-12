@@ -117,50 +117,63 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "OpenAI API key not configured." }, 400);
     }
 
-    // ── 8. Build GPT prompt with structured colors as GROUND TRUTH ──
-    const structuredColorSummary =
-      finalStructured.length > 0
-        ? finalStructured.map((c) => `${c.hex} — source: ${c.source} (confidence: ${c.confidence})`).join("\n")
-        : "No structured colors found — you will need to analyze the images carefully.";
+    // ── 8. Build GPT prompt — adaptive based on available data ──
+    const hasStructured = finalStructured.length > 0;
+    const hasHighConfidence = finalStructured.some((c) => c.confidence === "high");
+    const hasImages = visionImages.length > 0;
+    const hasAnyData = hasStructured || hasImages || textSignals.themeColor || textSignals.pageTitle;
 
-    const hasHighConfidenceColors = finalStructured.some((c) => c.confidence === "high");
+    const structuredColorSummary = hasStructured
+      ? finalStructured.map((c) => `${c.hex} — source: ${c.source} (confidence: ${c.confidence})`).join("\n")
+      : "None found";
+
+    // Build color instructions based on what data is available
+    let colorInstructions: string;
+    if (hasHighConfidence) {
+      colorInstructions = `High-confidence colors were extracted from the site's source code (SVG logos, CSS variables, meta tags).
+These are EXACT hex values — use them as your primary source for primary_color, secondary_color, and accent_color.
+Pick from the structured color list below. Only deviate if an image clearly contradicts the code data.`;
+    } else if (hasStructured) {
+      colorInstructions = `Some colors were found in the site's CSS/meta data (medium confidence).
+Use these as strong hints for the brand colors. Pick the most likely brand colors from the list below.`;
+    } else if (hasImages) {
+      colorInstructions = `No colors were found in the source code, but images are available.
+Analyze the images to identify the brand's primary, secondary, and accent colors.
+Look at logo colors, header colors, and prominent UI elements in the images.`;
+    } else {
+      colorInstructions = `Limited data is available. Make your BEST GUESS based on the company name, page title, and meta description.
+Choose plausible, professional brand colors. Avoid generic choices.
+This is a best-effort analysis — the user will review and correct the results.`;
+    }
 
     const messages: any[] = [
       {
         role: "system",
-        content: `You are an elite brand identity analyst. You will receive STRUCTURED COLOR DATA extracted directly from the brand's website code (SVG logos, CSS custom properties, meta tags) plus optional images for qualitative analysis.
+        content: `You are a brand identity analyst. Analyze the provided data and return a brand identity profile.
 
-CRITICAL COLOR RULES:
-${
-  hasHighConfidenceColors
-    ? `- High-confidence colors were found in the site's source code. USE THESE AS YOUR PRIMARY SOURCE.
-- The structured colors below are EXACT hex values from the actual code — they are NOT approximations.
-- Pick primary/secondary/accent from the structured color list whenever possible.
-- Only deviate from the structured list if the image clearly shows different brand colors.`
-    : `- No high-confidence structured colors were found. Use the images and CSS frequency data to determine colors.
-- Be conservative — if unsure, use the most prominent non-generic colors from the CSS data.`
-}
+COLOR SELECTION GUIDANCE:
+${colorInstructions}
 
-- primary_color = the most prominent brand color (logo, header, main CTA buttons)
-- secondary_color = supporting brand color
-- accent_color = highlight/emphasis color
-- NEVER return generic greys, pure black, or pure white as a brand color
-- If you truly cannot determine a color, use the closest match from the structured data
+FIELD DEFINITIONS:
+- primary_color: the brand's main/dominant color (hex)
+- secondary_color: supporting brand color (hex)
+- accent_color: highlight/emphasis color (hex)
+- font_family: the brand's primary typeface
+- visual_style: 5-15 word description of the design aesthetic
+- logo_description: brief description of the logo/brand mark
+- tone_of_voice: 3-8 word description of brand communication style
+- design_elements: key visual patterns (gradients, shapes, textures, etc.)
+- background_style: preferred background approach for social media
 
-For non-color fields, analyze the overall visual feel and content.
+MANDATORY RULES:
+- You MUST always return valid JSON — never refuse or explain why you can't.
+- You MUST fill in ALL fields with your best assessment, even if data is limited.
+- For colors, ALWAYS return hex codes (e.g. "#2563eb"), never "unknown" or empty strings.
+- Avoid generic greys (#666, #999) and pure black/white as brand colors.
+- If unsure about a text field, provide a reasonable default based on the company name and industry.
 
-Return ONLY valid JSON:
-{
-  "primary_color": "#hex",
-  "secondary_color": "#hex",
-  "accent_color": "#hex",
-  "font_family": "Primary Brand Font Name",
-  "visual_style": "5-15 word description of design aesthetic",
-  "logo_description": "brief description of what the logo looks like",
-  "tone_of_voice": "3-8 word brand communication style",
-  "design_elements": "key visual patterns: gradients, shapes, textures, etc.",
-  "background_style": "preferred background approach"
-}`,
+Return ONLY a JSON object with this exact structure (no markdown, no explanation, no preamble):
+{"primary_color":"#hex","secondary_color":"#hex","accent_color":"#hex","font_family":"Font Name","visual_style":"description","logo_description":"description","tone_of_voice":"description","design_elements":"description","background_style":"description"}`,
       },
       {
         role: "user",
@@ -168,26 +181,39 @@ Return ONLY valid JSON:
       },
     ];
 
-    // Text prompt with structured data
+    // Text prompt with all available data
+    const dataAvailability = [
+      hasStructured ? `${finalStructured.length} colors from source code` : null,
+      hasImages ? `${visionImages.length} image(s)` : null,
+      textSignals.pageTitle ? "page title" : null,
+      textSignals.metaDescription ? "meta description" : null,
+      textSignals.themeColor ? "theme-color meta" : null,
+      textSignals.fonts ? "font references" : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
     messages[1].content.push({
       type: "text",
-      text: `Analyze brand identity for "${client_name || "this company"}" — ${normalizedUrl}
+      text: `Brand identity analysis for "${client_name || "this company"}" — ${normalizedUrl}
 
-=== STRUCTURED COLORS (extracted from source code — high accuracy) ===
+Available data: ${dataAvailability || "minimal (company name and URL only)"}
+
+=== STRUCTURED COLORS FROM SOURCE CODE ===
 ${structuredColorSummary}
 
 === FONT REFERENCES ===
 ${textSignals.fonts || "none found"}
 
-=== META ===
+=== PAGE META ===
 Title: ${textSignals.pageTitle || "not found"}
 Description: ${textSignals.metaDescription || "not found"}
 Theme color: ${textSignals.themeColor || "not found"}
 
-Use the structured colors above as your PRIMARY source for brand colors. The images below are for qualitative analysis (style, tone, design elements).`,
+Return the JSON brand identity object now.`,
     });
 
-    // Add raster images for qualitative analysis
+    // Add raster images
     for (const img of visionImages) {
       messages[1].content.push({
         type: "image_url",
@@ -199,13 +225,6 @@ Use the structured colors above as your PRIMARY source for brand colors. The ima
       });
     }
 
-    if (visionImages.length === 0) {
-      messages[1].content.push({
-        type: "text",
-        text: "[No raster images available — base your qualitative analysis on the meta/title/description above]",
-      });
-    }
-
     const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -213,10 +232,10 @@ Use the structured colors above as your PRIMARY source for brand colors. The ima
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages,
         temperature: 0.1,
-        max_tokens: 600,
+        max_tokens: 800,
       }),
     });
 
@@ -228,17 +247,36 @@ Use the structured colors above as your PRIMARY source for brand colors. The ima
     const gptResult = await gptResponse.json();
     const content = gptResult.choices?.[0]?.message?.content || "";
 
-    // ── 9. Parse JSON response ──
+    // ── 9. Parse JSON response — with fallback ──
     const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return jsonResponse({ error: "Could not parse brand identity from AI response", raw: content }, 500);
+    let brandIdentity;
+
+    if (jsonMatch) {
+      try {
+        brandIdentity = JSON.parse(jsonMatch[0]);
+      } catch {
+        // JSON parsing failed — fall through to fallback
+        debug.push("GPT returned invalid JSON, using fallback");
+      }
+    } else {
+      debug.push("GPT refused to return JSON, using fallback from structured data");
     }
 
-    let brandIdentity;
-    try {
-      brandIdentity = JSON.parse(jsonMatch[0]);
-    } catch {
-      return jsonResponse({ error: "Invalid JSON in AI response", raw: content }, 500);
+    // Fallback: build identity from whatever structured data we have
+    if (!brandIdentity) {
+      const colors = finalStructured.map((c) => c.hex);
+      brandIdentity = {
+        primary_color: colors[0] || textSignals.themeColor || "#2563eb",
+        secondary_color: colors[1] || "#1e40af",
+        accent_color: colors[2] || "#f59e0b",
+        font_family: textSignals.fonts?.split(",")[0]?.trim() || "Sans-serif",
+        visual_style: "Modern, professional web design",
+        logo_description: "Could not be determined — add manually",
+        tone_of_voice: "Professional, informative",
+        design_elements: "Clean layouts, standard web design patterns",
+        background_style: "Clean white or light backgrounds",
+      };
+      debug.push(`Fallback identity built with ${colors.length} structured color(s)`);
     }
 
     return jsonResponse({
