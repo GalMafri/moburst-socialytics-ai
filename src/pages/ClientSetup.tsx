@@ -367,9 +367,12 @@ export default function ClientSetup() {
                         setResearchingBrand(true);
                         try {
                           const { data, error } = await supabase.functions.invoke("research-brand-identity", {
-                            body: { website_url: form.website_url, client_name: form.name },
+                            body: { website_url: form.website_url.trim(), client_name: form.name },
                           });
-                          if (error) throw error;
+                          if (error) {
+                            const detail = typeof data === "object" && data?.error ? data.error : error.message;
+                            throw new Error(detail);
+                          }
                           if (data?.error) throw new Error(data.error);
                           setForm((f) => ({ ...f, brand_identity: data.brand_identity }));
                           toast({
