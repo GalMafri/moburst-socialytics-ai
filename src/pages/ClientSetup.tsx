@@ -98,6 +98,7 @@ export default function ClientSetup() {
   });
   const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
   const [researchingBrand, setResearchingBrand] = useState(false);
+  const [brandDebug, setBrandDebug] = useState<any>(null);
   const [newKeyword, setNewKeyword] = useState("");
   const [newPillarName, setNewPillarName] = useState("");
 
@@ -375,9 +376,12 @@ export default function ClientSetup() {
                           }
                           if (data?.error) throw new Error(data.error);
                           setForm((f) => ({ ...f, brand_identity: data.brand_identity }));
+                          setBrandDebug(data._debug || null);
+                          const colorCount = data._debug?.structured_colors_found || 0;
+                          const imgCount = data._debug?.raster_images_sent || 0;
                           toast({
                             title: "Brand identity extracted",
-                            description: "Review and edit the results below.",
+                            description: `Found ${colorCount} color(s) from source code, ${imgCount} image(s) analyzed. Review and edit below.`,
                           });
                         } catch (err: any) {
                           toast({ title: "Brand research failed", description: err.message, variant: "destructive" });
@@ -526,6 +530,37 @@ export default function ClientSetup() {
                         className="h-8 text-sm"
                       />
                     </div>
+
+                    {/* Debug: Color Sources */}
+                    {brandDebug?.structured_colors && brandDebug.structured_colors.length > 0 && (
+                      <details className="text-xs">
+                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                          Source code colors found ({brandDebug.structured_colors.length}) — click to expand
+                        </summary>
+                        <div className="mt-2 space-y-1 rounded bg-muted p-2">
+                          {brandDebug.structured_colors.map((c: any, i: number) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <div className="h-4 w-4 rounded border shrink-0" style={{ backgroundColor: c.hex }} />
+                              <span className="font-mono">{c.hex}</span>
+                              <span className="text-muted-foreground">— {c.source}</span>
+                              <Badge
+                                variant={c.confidence === "high" ? "default" : "outline"}
+                                className="text-[10px] h-4"
+                              >
+                                {c.confidence}
+                              </Badge>
+                            </div>
+                          ))}
+                          {brandDebug.log && (
+                            <div className="mt-2 pt-2 border-t text-[10px] text-muted-foreground space-y-0.5">
+                              {brandDebug.log.map((l: string, i: number) => (
+                                <div key={i}>{l}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    )}
                   </div>
                 )}
 
