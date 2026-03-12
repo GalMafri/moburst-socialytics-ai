@@ -21,10 +21,15 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Prepend https:// if protocol is missing
+    const fullWebsiteUrl = website_url.startsWith('http://') || website_url.startsWith('https://')
+      ? website_url
+      : `https://${website_url}`;
+
     // 1. Fetch the website HTML
     let html: string;
     try {
-      const siteResponse = await fetch(website_url, {
+      const siteResponse = await fetch(fullWebsiteUrl, {
         headers: { "User-Agent": "Mozilla/5.0 (compatible; Socialytics-BrandResearch/1.0)" },
         redirect: "follow",
       });
