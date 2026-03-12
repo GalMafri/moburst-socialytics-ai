@@ -161,14 +161,14 @@ Look at the attached images carefully to identify the EXACT brand colors from th
       });
     }
 
-    const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    const gptResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${openaiKey}`,
+        Authorization: `Bearer ${lovableApiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o",
+        model: "google/gemini-2.5-flash",
         messages,
         temperature: 0.15,
         max_tokens: 600,
@@ -177,7 +177,13 @@ Look at the attached images carefully to identify the EXACT brand colors from th
 
     if (!gptResponse.ok) {
       const errorBody = await gptResponse.text().catch(() => "");
-      return jsonResponse({ error: `OpenAI API error: ${gptResponse.status}`, details: errorBody }, 502);
+      if (gptResponse.status === 429) {
+        return jsonResponse({ error: "Rate limit exceeded, please try again later." }, 429);
+      }
+      if (gptResponse.status === 402) {
+        return jsonResponse({ error: "Payment required, please add credits." }, 402);
+      }
+      return jsonResponse({ error: `AI gateway error: ${gptResponse.status}`, details: errorBody }, 502);
     }
 
     const gptResult = await gptResponse.json();
