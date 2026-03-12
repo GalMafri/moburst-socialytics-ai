@@ -14,3 +14,15 @@ verify_jwt = false
 
 [functions.trigger-scheduled-reports]
 verify_jwt = false
+
+[functions.firecrawl-scrape]
+verify_jwt = false
+
+[functions.firecrawl-search]
+verify_jwt = false
+
+[functions.firecrawl-map]
+verify_jwt = false
+
+[functions.firecrawl-crawl]
+verify_jwt = false
