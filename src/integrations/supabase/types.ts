@@ -70,6 +70,7 @@ export type Database = {
       clients: {
         Row: {
           brand_book_text: string | null
+          brand_identity: Json | null
           brand_notes: string | null
           brief_file_id: string | null
           brief_text: string | null
@@ -86,9 +87,11 @@ export type Database = {
           sprout_customer_id: string | null
           trends_keywords: string | null
           updated_at: string | null
+          website_url: string | null
         }
         Insert: {
           brand_book_text?: string | null
+          brand_identity?: Json | null
           brand_notes?: string | null
           brief_file_id?: string | null
           brief_text?: string | null
@@ -105,9 +108,11 @@ export type Database = {
           sprout_customer_id?: string | null
           trends_keywords?: string | null
           updated_at?: string | null
+          website_url?: string | null
         }
         Update: {
           brand_book_text?: string | null
+          brand_identity?: Json | null
           brand_notes?: string | null
           brief_file_id?: string | null
           brief_text?: string | null
@@ -124,6 +129,7 @@ export type Database = {
           sprout_customer_id?: string | null
           trends_keywords?: string | null
           updated_at?: string | null
+          website_url?: string | null
         }
         Relationships: []
       }
