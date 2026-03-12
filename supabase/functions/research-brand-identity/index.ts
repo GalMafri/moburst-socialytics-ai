@@ -26,22 +26,42 @@ Deno.serve(async (req) => {
       ? website_url
       : `https://${website_url}`;
 
-    // 1. Fetch the website HTML
+    // 1. Fetch the website HTML (try HTTPS first, fall back to HTTP)
     let html: string;
+    const fetchOptions = {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; Socialytics-BrandResearch/1.0)" },
+      redirect: "follow" as const,
+    };
+
     try {
-      const siteResponse = await fetch(fullWebsiteUrl, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; Socialytics-BrandResearch/1.0)" },
-        redirect: "follow",
-      });
+      const siteResponse = await fetch(fullWebsiteUrl, fetchOptions);
       if (!siteResponse.ok) {
         throw new Error(`HTTP ${siteResponse.status}`);
       }
       html = await siteResponse.text();
-    } catch (fetchErr: any) {
-      return new Response(
-        JSON.stringify({ error: `Failed to fetch website: ${fetchErr.message}` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    } catch (httpsErr: any) {
+      // If HTTPS failed (e.g. certificate issue), try HTTP fallback
+      if (fullWebsiteUrl.startsWith("https://")) {
+        const httpUrl = fullWebsiteUrl.replace("https://", "http://");
+        console.log(`HTTPS failed (${httpsErr.message}), trying HTTP fallback: ${httpUrl}`);
+        try {
+          const fallbackResponse = await fetch(httpUrl, fetchOptions);
+          if (!fallbackResponse.ok) {
+            throw new Error(`HTTP ${fallbackResponse.status}`);
+          }
+          html = await fallbackResponse.text();
+        } catch (httpErr: any) {
+          return new Response(
+            JSON.stringify({ error: `Failed to fetch website via both HTTPS and HTTP. The site may be down or blocking requests.` }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      } else {
+        return new Response(
+          JSON.stringify({ error: `Failed to fetch website: ${httpsErr.message}` }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // 2. Extract brand signals from HTML
