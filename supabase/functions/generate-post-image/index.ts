@@ -144,8 +144,8 @@ function jsonResp(body: any, status = 200) {
 }
 
 /**
- * Build a strict, no-hallucination design prompt.
- * Key principle: use brand colors as a palette, NEVER generate logos or brand text.
+ * Build a design prompt that prioritizes creative direction over restrictions.
+ * The prompt leads with WHAT to create, then adds brand context and constraints.
  */
 function buildDesignPrompt(
   basePrompt: string,
@@ -156,79 +156,60 @@ function buildDesignPrompt(
 ): string {
   const sections: string[] = [];
 
-  // ── 1. Strict rules — prevent hallucination ──
-  sections.push(`STRICT RULES (MUST follow):
-- DO NOT generate any logos, brand marks, wordmarks, monograms, or brand names anywhere in the image
-- DO NOT invent or hallucinate any company name, product name, or brand text
-- DO NOT include any text that looks like a logo or brand identity
-- If the design includes text, only use the exact headline/copy provided in the content direction below
-- This is a BACKGROUND/VISUAL ASSET for a social media post — the client will overlay their own logo and branding afterwards
-- Focus on creating a beautiful, on-brand visual composition using ONLY the color palette provided`);
+  // ── 1. LEAD with the creative direction (MOST IMPORTANT) ──
+  sections.push(`Generate a professional social media graphic based on this creative direction:
+
+${basePrompt}
+
+This must be a COMPLETE, ready-to-post social media image — NOT an abstract background or placeholder.
+If the direction mentions photos of people, create realistic photographic content.
+If the direction mentions text/headlines/copy overlays, include that exact text beautifully typeset in the image.
+The image should look like it was designed by a professional social media designer using tools like Canva or Adobe.`);
 
   // ── 2. Image format ──
-  sections.push(`IMAGE FORMAT:
-- Aspect ratio: ${aspect?.ratio || "1:1"} (${aspect?.orientation || "square"})
-- All elements must be fully contained within the frame with generous safe margins
-- Leave at least 15% padding from all edges — nothing should be cut off
-- Clean, balanced composition with clear visual hierarchy`);
+  sections.push(`FORMAT: ${aspect?.ratio || "1:1"} ${aspect?.orientation || "square"} image.
+Keep all important elements within safe margins (15% from edges). Clean, balanced composition.`);
 
-  // ── 3. Brand color palette (exact hex values only) ──
-  if (brand) {
-    const colorLines: string[] = [];
-    if (brand.primary_color)
-      colorLines.push(`PRIMARY: ${brand.primary_color} — use as the dominant color (30-40% of the design)`);
-    if (brand.secondary_color)
-      colorLines.push(`SECONDARY: ${brand.secondary_color} — use for backgrounds or large areas (20-30%)`);
-    if (brand.accent_color)
-      colorLines.push(`ACCENT: ${brand.accent_color} — use sparingly for highlights and emphasis (10-15%)`);
-
-    if (colorLines.length > 0) {
-      sections.push(`COLOR PALETTE (use ONLY these exact brand colors + white/near-black for contrast):
-${colorLines.join("\n")}
-- You may also use white (#FFFFFF), off-white (#F5F5F5), and near-black (#1A1A1A) as neutral support colors
-- DO NOT use any other colors outside this palette`);
-    }
-
-    // Style direction
-    const styleParts: string[] = [];
-    if (brand.visual_style) styleParts.push(`Visual style: ${brand.visual_style}`);
-    if (brand.tone_of_voice) styleParts.push(`Mood/tone: ${brand.tone_of_voice}`);
-    if (brand.design_elements) styleParts.push(`Design elements: ${brand.design_elements}`);
-    if (brand.background_style) styleParts.push(`Background approach: ${brand.background_style}`);
-    if (brand.font_family) styleParts.push(`If text is needed, use a style similar to: ${brand.font_family}`);
-
-    if (styleParts.length > 0) {
-      sections.push(`BRAND STYLE DIRECTION:
-${styleParts.join("\n")}`);
-    }
-  }
-
-  // ── 4. Platform guidance ──
+  // ── 3. Platform context (brief) ──
   const p = (platform || "").toLowerCase();
   if (p.includes("instagram") || p.includes("tiktok")) {
-    sections.push(`PLATFORM CONTEXT: ${platform} ${format || ""}
-- Design for mobile-first viewing — bold, thumb-stopping visual
-- High contrast between foreground and background elements`);
+    sections.push(`PLATFORM: ${platform} ${format || ""} — mobile-first, bold, scroll-stopping. High contrast.`);
   } else if (p.includes("linkedin")) {
-    sections.push(`PLATFORM CONTEXT: LinkedIn
-- Professional, polished, corporate-friendly aesthetic`);
+    sections.push(`PLATFORM: LinkedIn — professional, polished, corporate-friendly.`);
   } else if (p.includes("facebook")) {
-    sections.push(`PLATFORM CONTEXT: Facebook
-- Shareable, attention-grabbing, clear visual`);
+    sections.push(`PLATFORM: Facebook — shareable, attention-grabbing.`);
   } else if (p.includes("youtube")) {
-    sections.push(`PLATFORM CONTEXT: YouTube
-- Bold, cinematic feel, high visual impact`);
+    sections.push(`PLATFORM: YouTube — bold, cinematic, high impact.`);
   }
 
-  // ── 5. Quality ──
-  sections.push(`DESIGN QUALITY:
-- Professional social media graphic quality — polished, modern, editorial
-- Strong visual hierarchy and intentional use of space
-- The output should look like it was created by a professional graphic designer
-- Avoid generic stock imagery aesthetics — be specific and intentional with every element`);
+  // ── 4. Brand colors — guide, not restrict ──
+  if (brand) {
+    const colorLines: string[] = [];
+    if (brand.primary_color) colorLines.push(`Primary: ${brand.primary_color}`);
+    if (brand.secondary_color) colorLines.push(`Secondary: ${brand.secondary_color}`);
+    if (brand.accent_color) colorLines.push(`Accent: ${brand.accent_color}`);
 
-  // ── 6. The actual creative direction ──
-  sections.push(`CREATIVE DIRECTION:\n${basePrompt}`);
+    if (colorLines.length > 0) {
+      sections.push(`BRAND COLORS — use these as the dominant palette:
+${colorLines.join(", ")}
+Incorporate these colors naturally into backgrounds, overlays, text, and design elements. White and dark neutrals are OK for contrast.`);
+    }
+
+    const styleParts: string[] = [];
+    if (brand.visual_style) styleParts.push(brand.visual_style);
+    if (brand.tone_of_voice) styleParts.push(`Tone: ${brand.tone_of_voice}`);
+    if (brand.font_family) styleParts.push(`Typography: ${brand.font_family}`);
+
+    if (styleParts.length > 0) {
+      sections.push(`BRAND STYLE: ${styleParts.join(". ")}`);
+    }
+  }
+
+  // ── 5. Constraints (short, at the end) ──
+  sections.push(`IMPORTANT CONSTRAINTS:
+- Do NOT include any company logos, brand wordmarks, or watermarks — the client adds those later
+- Do NOT invent company names or brand text — only use text from the creative direction above
+- Produce a polished, editorial-quality graphic — not stock photography, not abstract art, not clip art`);
 
   return sections.join("\n\n");
 }
