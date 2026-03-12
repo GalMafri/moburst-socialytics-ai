@@ -142,7 +142,14 @@ export function CreatePostDesignButton({ post, brandIdentity }: CreatePostDesign
                   <p className="text-xs text-muted-foreground italic">Refined prompt: {revisedPrompt}</p>
                 )}
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => window.open(imageUrl, "_blank")}>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    const link = document.createElement("a");
+                    link.href = imageUrl!;
+                    link.download = `post-design-${post.platform || "image"}.png`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}>
                     <Download className="h-4 w-4 mr-1" /> Download
                   </Button>
                   <Button variant="outline" size="sm" onClick={generateImage}>
