@@ -90,6 +90,7 @@ export default function ClientSetup() {
     language: ["en"] as string[],
     brand_notes: "",
     brand_voice_preset: "",
+    brand_book_text: "",
     brief_text: "",
     brief_file_id: "",
   });
@@ -153,6 +154,7 @@ export default function ClientSetup() {
         language: langArr,
         brand_notes: brandNotes,
         brand_voice_preset: voicePreset,
+        brand_book_text: client.brand_book_text || "",
         brief_text: client.brief_text || "",
         brief_file_id: client.brief_file_id || "",
       });
@@ -542,6 +544,19 @@ export default function ClientSetup() {
                     placeholder="Brand voice, positioning, key messaging..."
                     rows={3}
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label>Brand Book / Style Guide</Label>
+                  <Textarea
+                    value={form.brand_book_text}
+                    onChange={(e) => setForm((f) => ({ ...f, brand_book_text: e.target.value }))}
+                    placeholder="Paste brand book excerpts, style guide rules, visual identity guidelines, tone of voice rules..."
+                    rows={5}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Paste key excerpts from your brand book. These guidelines will be used by the AI when generating
+                    content recommendations and visual directions.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Brief Text</Label>

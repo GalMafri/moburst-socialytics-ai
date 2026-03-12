@@ -12,10 +12,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     // Find all active schedules that are due
     const { data: dueSchedules, error: fetchErr } = await supabase
@@ -27,10 +24,9 @@ Deno.serve(async (req) => {
     if (fetchErr) throw fetchErr;
 
     if (!dueSchedules || dueSchedules.length === 0) {
-      return new Response(
-        JSON.stringify({ message: "No schedules due", triggered: 0 }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ message: "No schedules due", triggered: 0 }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Get webhook URL
@@ -41,10 +37,10 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (!setting?.value) {
-      return new Response(
-        JSON.stringify({ error: "n8n webhook URL not configured" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "n8n webhook URL not configured" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const results = [];
@@ -63,9 +59,7 @@ Deno.serve(async (req) => {
 
         // Date range: current month
         const now = new Date();
-        const dateRangeStart = new Date(now.getFullYear(), now.getMonth(), 1)
-          .toISOString()
-          .split("T")[0];
+        const dateRangeStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
         const dateRangeEnd = now.toISOString().split("T")[0];
 
         // Create report row
@@ -93,10 +87,16 @@ Deno.serve(async (req) => {
         }
 
         const geoArr = client.geo
-          ? client.geo.split(",").map((s: string) => s.trim()).filter(Boolean)
+          ? client.geo
+              .split(",")
+              .map((s: string) => s.trim())
+              .filter(Boolean)
           : ["US"];
         const langArr = client.language
-          ? client.language.split(",").map((s: string) => s.trim()).filter(Boolean)
+          ? client.language
+              .split(",")
+              .map((s: string) => s.trim())
+              .filter(Boolean)
           : ["en"];
 
         // Build payload
@@ -114,12 +114,14 @@ Deno.serve(async (req) => {
               url: p.native_link,
             })) || [],
           social_keywords: client.social_keywords || [],
+          trends_keywords: client.trends_keywords || "",
           content_pillars: client.content_pillars || [],
           primary_platforms: (client.primary_platforms || []).join(","),
           geo: geoArr,
           languages: langArr,
           brand_voice: brandVoice,
           brand_notes: brandNotes,
+          brand_book_text: client.brand_book_text || "",
           brief_text: client.brief_text || "",
           brief_file_id: client.brief_file_id || "",
           date_range_start: dateRangeStart,
@@ -164,15 +166,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(
-      JSON.stringify({ triggered: results.length, results }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ triggered: results.length, results }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (err: any) {
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
 

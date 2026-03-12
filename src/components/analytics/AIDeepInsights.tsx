@@ -95,7 +95,9 @@ export function AIDeepInsights({ reports, chartData }: Props) {
     let totalCalendarDays = 0;
     let totalRecs = 0;
     for (const r of reports) {
-      const dc = r.report_data?.data_counts;
+      const rawRd = r.report_data;
+      const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
+      const dc = rd?.data_counts;
       if (dc) {
         totalCalendarDays += dc.content_calendar_days || 0;
         totalRecs += dc.total_recommendations || 0;
@@ -112,8 +114,10 @@ export function AIDeepInsights({ reports, chartData }: Props) {
     let tiktokReports = 0;
     let igReports = 0;
     for (const r of reports) {
-      if (r.report_data?.ai_analysis?.tiktok_trends_analysis) tiktokReports++;
-      if (r.report_data?.ai_analysis?.instagram_trends_analysis) igReports++;
+      const rawRd2 = r.report_data;
+      const rd2 = Array.isArray(rawRd2) ? rawRd2[0] : rawRd2;
+      if (rd2?.ai_analysis?.tiktok_trends_analysis) tiktokReports++;
+      if (rd2?.ai_analysis?.instagram_trends_analysis) igReports++;
     }
     if (tiktokReports > 0 || igReports > 0) {
       const parts = [];

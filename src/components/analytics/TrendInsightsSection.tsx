@@ -18,7 +18,10 @@ interface Props {
 }
 
 /** Aggregate trend data across multiple reports cumulatively */
-function aggregateTrends(reports: any[], key: "tiktok_trends_analysis" | "instagram_trends_analysis"): TrendData | null {
+function aggregateTrends(
+  reports: any[],
+  key: "tiktok_trends_analysis" | "instagram_trends_analysis",
+): TrendData | null {
   const allThemes: string[] = [];
   const allHashtags: string[] = [];
   const allTakeaways: string[] = [];
@@ -27,7 +30,9 @@ function aggregateTrends(reports: any[], key: "tiktok_trends_analysis" | "instag
   let latestOverview = "";
 
   for (const r of reports) {
-    const t = r.report_data?.ai_analysis?.[key];
+    const rawRd = r.report_data;
+    const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
+    const t = rd?.ai_analysis?.[key];
     if (!t) continue;
     if (t.overview) latestOverview = t.overview;
     if (Array.isArray(t.top_themes)) allThemes.push(...t.top_themes);
@@ -60,13 +65,7 @@ function aggregateTrends(reports: any[], key: "tiktok_trends_analysis" | "instag
   };
 }
 
-function PlatformTrendCard({
-  platform,
-  data,
-}: {
-  platform: "TikTok" | "Instagram";
-  data: TrendData;
-}) {
+function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram"; data: TrendData }) {
   const platformKey = platform.toLowerCase();
   const color = getPlatformColor(platformKey);
 
@@ -76,7 +75,9 @@ function PlatformTrendCard({
         <CardTitle className="text-base flex items-center gap-2">
           <PlatformIcon platform={platformKey} className="h-5 w-5" />
           <span style={{ color }}>{platform}</span> Trend Analysis
-          <Badge variant="secondary" className="text-xs ml-auto">Cumulative</Badge>
+          <Badge variant="secondary" className="text-xs ml-auto">
+            Cumulative
+          </Badge>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
