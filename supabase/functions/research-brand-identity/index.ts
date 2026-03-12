@@ -42,7 +42,10 @@ Deno.serve(async (req) => {
       // Fallback to Firecrawl for SSL/certificate issues
       const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
       if (!firecrawlKey) {
-        return jsonResponse({ error: `Failed to fetch website: ${fetchErr.message}. Firecrawl fallback not configured.` }, 400);
+        return jsonResponse(
+          { error: `Failed to fetch website: ${fetchErr.message}. Firecrawl fallback not configured.` },
+          400,
+        );
       }
       try {
         const fcResp = await fetch("https://api.firecrawl.dev/v1/scrape", {
@@ -80,10 +83,19 @@ Deno.serve(async (req) => {
     // ── 4. Fetch images as base64 for GPT-4o Vision ──
     const visionImages = await fetchImagesAsBase64(imageUrls);
 
-    // ── 5. Get Lovable AI API key ──
-    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!lovableApiKey) {
-      return jsonResponse({ error: "LOVABLE_API_KEY not configured." }, 400);
+    // ── 5. Get OpenAI API key ──
+    let openaiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!openaiKey) {
+      const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const { data: setting } = await supabase
+        .from("app_settings")
+        .select("value")
+        .eq("key", "openai_api_key")
+        .maybeSingle();
+      openaiKey = setting?.value;
+    }
+    if (!openaiKey) {
+      return jsonResponse({ error: "OpenAI API key not configured." }, 400);
     }
 
     // ── 6. Call GPT-4o Vision with images + text signals ──
@@ -161,14 +173,14 @@ Look at the attached images carefully to identify the EXACT brand colors from th
       });
     }
 
-    const gptResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
+        Authorization: `Bearer ${openaiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gpt-4o",
         messages,
         temperature: 0.15,
         max_tokens: 600,
@@ -177,13 +189,7 @@ Look at the attached images carefully to identify the EXACT brand colors from th
 
     if (!gptResponse.ok) {
       const errorBody = await gptResponse.text().catch(() => "");
-      if (gptResponse.status === 429) {
-        return jsonResponse({ error: "Rate limit exceeded, please try again later." }, 429);
-      }
-      if (gptResponse.status === 402) {
-        return jsonResponse({ error: "Payment required, please add credits." }, 402);
-      }
-      return jsonResponse({ error: `AI gateway error: ${gptResponse.status}`, details: errorBody }, 502);
+      return jsonResponse({ error: `OpenAI API error: ${gptResponse.status}`, details: errorBody }, 502);
     }
 
     const gptResult = await gptResponse.json();
@@ -240,7 +246,8 @@ function extractImageUrls(html: string, baseUrl: string): { url: string; label: 
 
   // Apple touch icon (usually high-res logo)
   const appleTouchMatch = html.match(/<link[^>]*rel=["']apple-touch-icon["'][^>]*href=["']([^"']+)["']/i);
-  if (appleTouchMatch) results.push({ url: resolveUrl(appleTouchMatch[1], baseUrl), label: "Apple touch icon (brand logo)" });
+  if (appleTouchMatch)
+    results.push({ url: resolveUrl(appleTouchMatch[1], baseUrl), label: "Apple touch icon (brand logo)" });
 
   // Favicon
   const faviconMatch = html.match(/<link[^>]*rel=["'](?:icon|shortcut icon)["'][^>]*href=["']([^"']+)["']/i);
@@ -289,7 +296,9 @@ async function fetchExternalCss(html: string, baseUrl: string): Promise<string> 
 }
 
 /** Fetch images and convert to base64 data URLs for GPT-4o Vision */
-async function fetchImagesAsBase64(images: { url: string; label: string }[]): Promise<{ dataUrl: string; label: string }[]> {
+async function fetchImagesAsBase64(
+  images: { url: string; label: string }[],
+): Promise<{ dataUrl: string; label: string }[]> {
   const results: { dataUrl: string; label: string }[] = [];
 
   for (const img of images) {
@@ -333,7 +342,8 @@ function extractTextSignals(html: string, css: string) {
   const combined = html + "\n" + css;
 
   // CSS custom properties
-  const cssVarRegex = /--[\w-]*(color|brand|primary|secondary|accent|theme|main|cta|btn|highlight)[\w-]*\s*:\s*([^;}\n]+)/gi;
+  const cssVarRegex =
+    /--[\w-]*(color|brand|primary|secondary|accent|theme|main|cta|btn|highlight)[\w-]*\s*:\s*([^;}\n]+)/gi;
   const cssVars: string[] = [];
   let vm;
   while ((vm = cssVarRegex.exec(combined)) !== null && cssVars.length < 25) {
@@ -358,11 +368,28 @@ function extractTextSignals(html: string, css: string) {
   const googleFonts = combined.match(/fonts\.googleapis\.com\/css2?\?family=([^"'&\s)]+)/gi) || [];
   const fontFamilies = combined.match(/font-family\s*:\s*["']?([^;}"'\n,]+)/gi) || [];
   const cleaned = fontFamilies
-    .map((f) => f.replace(/font-family\s*:\s*/i, "").replace(/["']/g, "").trim())
-    .filter((f) => !/(sans-serif|serif|monospace|system-ui|inherit|initial|-apple|BlinkMac|Segoe|Arial|Helvetica|Times|Roboto\s*,)/i.test(f));
+    .map((f) =>
+      f
+        .replace(/font-family\s*:\s*/i, "")
+        .replace(/["']/g, "")
+        .trim(),
+    )
+    .filter(
+      (f) =>
+        !/(sans-serif|serif|monospace|system-ui|inherit|initial|-apple|BlinkMac|Segoe|Arial|Helvetica|Times|Roboto\s*,)/i.test(
+          f,
+        ),
+    );
   const uniqueFonts = [
     ...new Set([
-      ...googleFonts.map((f) => decodeURIComponent(f.replace(/.*family=/, "").replace(/[+:].*/g, " ").trim())),
+      ...googleFonts.map((f) =>
+        decodeURIComponent(
+          f
+            .replace(/.*family=/, "")
+            .replace(/[+:].*/g, " ")
+            .trim(),
+        ),
+      ),
       ...cleaned.slice(0, 8),
     ]),
   ];
@@ -382,13 +409,44 @@ function extractTextSignals(html: string, css: string) {
 }
 
 const GENERIC_HEX = new Set([
-  "#fff", "#ffffff", "#000", "#000000", "#333", "#333333",
-  "#666", "#666666", "#999", "#999999", "#ccc", "#cccccc",
-  "#ddd", "#dddddd", "#eee", "#eeeeee", "#f5f5f5", "#fafafa",
-  "#f8f8f8", "#e5e5e5", "#d4d4d4", "#a3a3a3", "#737373",
-  "#525252", "#404040", "#262626", "#171717", "#0a0a0a",
-  "#f9fafb", "#f3f4f6", "#e5e7eb", "#d1d5db", "#9ca3af",
-  "#6b7280", "#4b5563", "#374151", "#1f2937", "#111827",
+  "#fff",
+  "#ffffff",
+  "#000",
+  "#000000",
+  "#333",
+  "#333333",
+  "#666",
+  "#666666",
+  "#999",
+  "#999999",
+  "#ccc",
+  "#cccccc",
+  "#ddd",
+  "#dddddd",
+  "#eee",
+  "#eeeeee",
+  "#f5f5f5",
+  "#fafafa",
+  "#f8f8f8",
+  "#e5e5e5",
+  "#d4d4d4",
+  "#a3a3a3",
+  "#737373",
+  "#525252",
+  "#404040",
+  "#262626",
+  "#171717",
+  "#0a0a0a",
+  "#f9fafb",
+  "#f3f4f6",
+  "#e5e7eb",
+  "#d1d5db",
+  "#9ca3af",
+  "#6b7280",
+  "#4b5563",
+  "#374151",
+  "#1f2937",
+  "#111827",
 ]);
 
 function isGenericColor(hex: string): boolean {
