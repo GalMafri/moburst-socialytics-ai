@@ -213,8 +213,12 @@ Theme color: ${textSignals.themeColor || "not found"}
 Return the JSON brand identity object now.`,
     });
 
-    // Add raster images
+    // Add raster images — final safety gate: verify no SVG data URLs
     for (const img of visionImages) {
+      if (img.dataUrl.toLowerCase().includes("image/svg")) {
+        debug.push(`BLOCKED SVG data URL at final gate: ${img.label}`);
+        continue;
+      }
       messages[1].content.push({
         type: "image_url",
         image_url: { url: img.dataUrl, detail: "high" },
@@ -241,7 +245,18 @@ Return the JSON brand identity object now.`,
 
     if (!gptResponse.ok) {
       const errorBody = await gptResponse.text().catch(() => "");
-      return jsonResponse({ error: `OpenAI API error: ${gptResponse.status}`, details: errorBody }, 502);
+      debug.push(`AI API error ${gptResponse.status}: ${errorBody.slice(0, 300)}`);
+      debug.push(
+        `Images sent: ${visionImages.length}, MIMEs: ${visionImages.map((i) => i.dataUrl.split(";")[0].replace("data:", "")).join(", ") || "none"}`,
+      );
+      return jsonResponse(
+        {
+          error: `AI gateway error: ${gptResponse.status}`,
+          details: errorBody,
+          _debug: { log: debug, images_sent: visionImages.length },
+        },
+        502,
+      );
     }
 
     const gptResult = await gptResponse.json();
@@ -544,7 +559,7 @@ function extractImageUrls(html: string, baseUrl: string): { url: string; label: 
   return results.slice(0, 5);
 }
 
-/** Fetch only RASTER images as base64 for GPT-4o Vision (skip SVGs) */
+/** Fetch only RASTER images as base64 for Vision (skip SVGs completely) */
 async function fetchRasterImagesAsBase64(
   images: { url: string; label: string; isSvg: boolean }[],
   debug: string[],
@@ -553,8 +568,16 @@ async function fetchRasterImagesAsBase64(
 
   for (const img of images) {
     if (results.length >= 3) break;
+
+    // Layer 1: Skip if flagged as SVG by URL extension
     if (img.isSvg) {
       debug.push(`Skipping SVG for Vision (parsed colors from source instead): ${img.label}`);
+      continue;
+    }
+
+    // Layer 2: Double-check URL for SVG extension (case-insensitive)
+    if (/\.svg(\?|$|#)/i.test(img.url)) {
+      debug.push(`Skipping SVG URL: ${img.label}`);
       continue;
     }
 
@@ -568,11 +591,29 @@ async function fetchRasterImagesAsBase64(
         continue;
       }
 
-      const contentType = resp.headers.get("content-type") || "";
+      const contentType = (resp.headers.get("content-type") || "").toLowerCase();
 
-      // Skip if server returned SVG despite non-SVG URL
-      if (contentType.includes("svg")) {
-        debug.push(`Skipped SVG content-type: ${img.label}`);
+      // Layer 3: Skip if content-type indicates SVG or XML (case-insensitive now)
+      if (contentType.includes("svg") || contentType.includes("xml")) {
+        debug.push(`Skipped SVG/XML content-type (${contentType}): ${img.label}`);
+        continue;
+      }
+
+      // Only allow known raster image MIME types
+      const allowedMimes = [
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/gif",
+        "image/webp",
+        "image/bmp",
+        "image/tiff",
+      ];
+      const mimeClean = contentType.split(";")[0].trim();
+      const isAllowedMime = allowedMimes.some((m) => mimeClean === m);
+
+      if (!isAllowedMime && mimeClean !== "") {
+        debug.push(`Skipped non-raster MIME (${mimeClean}): ${img.label}`);
         continue;
       }
 
@@ -586,15 +627,24 @@ async function fetchRasterImagesAsBase64(
         continue;
       }
 
+      // Layer 4: Check actual bytes for SVG/XML content signatures
       const bytes = new Uint8Array(buffer);
+      const header = new TextDecoder().decode(bytes.slice(0, 200)).toLowerCase();
+      if (header.includes("<svg") || header.includes("<?xml") || header.includes("<!doctype svg")) {
+        debug.push(`Skipped file with SVG/XML content signature: ${img.label}`);
+        continue;
+      }
+
       let binary = "";
       for (let i = 0; i < bytes.length; i++) {
         binary += String.fromCharCode(bytes[i]);
       }
       const b64 = btoa(binary);
-      const mime = contentType.split(";")[0].trim() || "image/png";
-      results.push({ dataUrl: `data:${mime};base64,${b64}`, label: img.label });
-      debug.push(`Fetched raster image (${(buffer.byteLength / 1024).toFixed(0)}KB): ${img.label}`);
+
+      // Use only safe raster MIME types — fallback to image/png
+      const safeMime = isAllowedMime ? mimeClean : "image/png";
+      results.push({ dataUrl: `data:${safeMime};base64,${b64}`, label: img.label });
+      debug.push(`Fetched raster image (${(buffer.byteLength / 1024).toFixed(0)}KB, ${safeMime}): ${img.label}`);
     } catch (err: any) {
       debug.push(`Image fetch error: ${img.label} — ${err.message}`);
     }
