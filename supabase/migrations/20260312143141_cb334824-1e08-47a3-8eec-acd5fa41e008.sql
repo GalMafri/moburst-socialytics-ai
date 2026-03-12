@@ -1,0 +1,2 @@
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS website_url TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS brand_identity JSONB;
