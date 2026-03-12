@@ -80,22 +80,10 @@ Deno.serve(async (req) => {
     // ── 4. Fetch images as base64 for GPT-4o Vision ──
     const visionImages = await fetchImagesAsBase64(imageUrls);
 
-    // ── 5. Get OpenAI API key ──
-    let openaiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!openaiKey) {
-      const supabase = createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-      );
-      const { data: setting } = await supabase
-        .from("app_settings")
-        .select("value")
-        .eq("key", "openai_api_key")
-        .maybeSingle();
-      openaiKey = setting?.value;
-    }
-    if (!openaiKey) {
-      return jsonResponse({ error: "OpenAI API key not configured." }, 400);
+    // ── 5. Get Lovable AI API key ──
+    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
+    if (!lovableApiKey) {
+      return jsonResponse({ error: "LOVABLE_API_KEY not configured." }, 400);
     }
 
     // ── 6. Call GPT-4o Vision with images + text signals ──
