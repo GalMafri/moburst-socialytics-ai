@@ -14,7 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
-import { Save, Plus, X, RefreshCw, Loader2, Play, Info, CalendarClock } from "lucide-react";
+import { Save, Plus, X, RefreshCw, Loader2, Play, Info, CalendarClock, Globe } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
@@ -83,6 +83,7 @@ export default function ClientSetup() {
 
   const [form, setForm] = useState({
     name: "",
+    website_url: "",
     social_keywords: [] as string[],
     content_pillars: [...DEFAULT_PILLARS] as ContentPillar[],
     primary_platforms: ["Instagram", "TikTok", "Facebook", "LinkedIn"],
@@ -91,10 +92,12 @@ export default function ClientSetup() {
     brand_notes: "",
     brand_voice_preset: "",
     brand_book_text: "",
+    brand_identity: null as any,
     brief_text: "",
     brief_file_id: "",
   });
   const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
+  const [researchingBrand, setResearchingBrand] = useState(false);
   const [newKeyword, setNewKeyword] = useState("");
   const [newPillarName, setNewPillarName] = useState("");
 
@@ -147,6 +150,7 @@ export default function ClientSetup() {
 
       setForm({
         name: client.name || "",
+        website_url: client.website_url || "",
         social_keywords: client.social_keywords || [],
         content_pillars: pillars,
         primary_platforms: client.primary_platforms || ["Instagram", "TikTok", "Facebook", "LinkedIn"],
@@ -155,6 +159,7 @@ export default function ClientSetup() {
         brand_notes: brandNotes,
         brand_voice_preset: voicePreset,
         brand_book_text: client.brand_book_text || "",
+        brand_identity: client.brand_identity || null,
         brief_text: client.brief_text || "",
         brief_file_id: client.brief_file_id || "",
       });
@@ -342,6 +347,117 @@ export default function ClientSetup() {
                     placeholder="e.g., Acme Corp"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>Website URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={form.website_url}
+                      onChange={(e) => setForm((f) => ({ ...f, website_url: e.target.value }))}
+                      placeholder="https://example.com"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        if (!form.website_url) {
+                          toast({ title: "Enter a website URL first", variant: "destructive" });
+                          return;
+                        }
+                        setResearchingBrand(true);
+                        try {
+                          const { data, error } = await supabase.functions.invoke("research-brand-identity", {
+                            body: { website_url: form.website_url, client_name: form.name },
+                          });
+                          if (error) throw error;
+                          if (data?.error) throw new Error(data.error);
+                          setForm((f) => ({ ...f, brand_identity: data.brand_identity }));
+                          toast({
+                            title: "Brand identity extracted",
+                            description: "Review and edit the results below.",
+                          });
+                        } catch (err: any) {
+                          toast({ title: "Brand research failed", description: err.message, variant: "destructive" });
+                        } finally {
+                          setResearchingBrand(false);
+                        }
+                      }}
+                      disabled={researchingBrand || !form.website_url}
+                      className="shrink-0"
+                    >
+                      {researchingBrand ? (
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      ) : (
+                        <Globe className="h-4 w-4 mr-1" />
+                      )}
+                      Research Brand
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Enter the client's website to automatically extract brand colors and visual style.
+                  </p>
+                </div>
+
+                {form.brand_identity && (
+                  <div className="space-y-3 rounded-lg border p-4 bg-muted/30">
+                    <Label className="text-sm font-semibold">Brand Identity</Label>
+                    <div className="grid grid-cols-3 gap-3">
+                      {(["primary_color", "secondary_color", "accent_color"] as const).map((key) => (
+                        <div key={key} className="space-y-1">
+                          <Label className="text-xs capitalize">{key.replace(/_/g, " ")}</Label>
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="h-8 w-8 rounded border shrink-0"
+                              style={{ backgroundColor: form.brand_identity?.[key] || "#ccc" }}
+                            />
+                            <Input
+                              value={form.brand_identity?.[key] || ""}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  brand_identity: { ...f.brand_identity, [key]: e.target.value },
+                                }))
+                              }
+                              placeholder="#000000"
+                              className="h-8 text-xs font-mono"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Font Family</Label>
+                        <Input
+                          value={form.brand_identity?.font_family || ""}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              brand_identity: { ...f.brand_identity, font_family: e.target.value },
+                            }))
+                          }
+                          placeholder="Inter, sans-serif"
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Visual Style</Label>
+                        <Input
+                          value={form.brand_identity?.visual_style || ""}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              brand_identity: { ...f.brand_identity, visual_style: e.target.value },
+                            }))
+                          }
+                          placeholder="Modern, clean, minimalist"
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label>Primary Platforms</Label>
                   <p className="text-xs text-muted-foreground">

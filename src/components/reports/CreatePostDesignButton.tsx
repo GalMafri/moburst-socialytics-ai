@@ -5,16 +5,27 @@ import { Loader2, Paintbrush, Download, Copy, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
+interface BrandIdentity {
+  primary_color?: string;
+  secondary_color?: string;
+  accent_color?: string;
+  font_family?: string;
+  visual_style?: string;
+  logo_description?: string;
+}
+
 interface CreatePostDesignButtonProps {
   post: {
     ai_visual_prompt?: string;
     visual_direction?: string;
     copy?: string;
     platform?: string;
+    format?: string;
   };
+  brandIdentity?: BrandIdentity | null;
 }
 
-export function CreatePostDesignButton({ post }: CreatePostDesignButtonProps) {
+export function CreatePostDesignButton({ post, brandIdentity }: CreatePostDesignButtonProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -36,7 +47,12 @@ export function CreatePostDesignButton({ post }: CreatePostDesignButtonProps) {
     setRevisedPrompt(null);
     try {
       const { data, error } = await supabase.functions.invoke("generate-post-image", {
-        body: { prompt },
+        body: {
+          prompt,
+          platform: post.platform,
+          format: post.format,
+          brand_context: brandIdentity || undefined,
+        },
       });
 
       if (error) throw error;
@@ -81,6 +97,23 @@ export function CreatePostDesignButton({ post }: CreatePostDesignButtonProps) {
           </DialogHeader>
 
           <div className="space-y-4">
+            {/* Brand context indicator */}
+            {brandIdentity?.primary_color && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Brand colors:</span>
+                {[brandIdentity.primary_color, brandIdentity.secondary_color, brandIdentity.accent_color]
+                  .filter(Boolean)
+                  .map((color, i) => (
+                    <div
+                      key={i}
+                      className="h-4 w-4 rounded-full border"
+                      style={{ backgroundColor: color }}
+                      title={color}
+                    />
+                  ))}
+              </div>
+            )}
+
             {/* Prompt display */}
             <div className="rounded-lg border bg-muted/50 p-4">
               <div className="flex items-center justify-between mb-2">
@@ -97,7 +130,7 @@ export function CreatePostDesignButton({ post }: CreatePostDesignButtonProps) {
             {loading && (
               <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-                <p className="text-sm text-muted-foreground">Generating image...</p>
+                <p className="text-sm text-muted-foreground">Generating on-brand image...</p>
               </div>
             )}
 
@@ -106,9 +139,7 @@ export function CreatePostDesignButton({ post }: CreatePostDesignButtonProps) {
               <div className="space-y-3">
                 <img src={imageUrl} alt="Generated post design" className="w-full rounded-lg border" />
                 {revisedPrompt && (
-                  <p className="text-xs text-muted-foreground italic">
-                    Refined prompt: {revisedPrompt}
-                  </p>
+                  <p className="text-xs text-muted-foreground italic">Refined prompt: {revisedPrompt}</p>
                 )}
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => window.open(imageUrl, "_blank")}>
