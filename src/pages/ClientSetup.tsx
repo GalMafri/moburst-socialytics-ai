@@ -200,7 +200,7 @@ export default function ClientSetup() {
       if (isNew) {
         const { data, error } = await supabase
           .from("clients")
-          .insert({ ...payload, created_by: user!.id } as any)
+          .insert({ ...payload, created_by: user!._id } as any)
           .select()
           .single();
         if (error) throw error;

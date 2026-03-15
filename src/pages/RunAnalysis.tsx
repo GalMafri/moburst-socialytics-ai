@@ -200,7 +200,7 @@ export default function RunAnalysis() {
           client_id: id!,
           status: "running",
           report_data: {},
-          created_by: user!.id,
+          created_by: user!._id,
           date_range_start: dateRangeStart || null,
           date_range_end: dateRangeEnd || null,
         })

@@ -7,7 +7,7 @@ import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/s
 import { Separator } from "@/components/ui/separator";
 
 export function AppLayout({ children, title }: { children: ReactNode; title?: string }) {
-  const { session, isLoading } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -17,7 +17,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title?: st
     );
   }
 
-  if (!session) return <Navigate to="/auth" replace />;
+  if (!isAuthenticated) return <Navigate to="/auth" replace />;
 
   return (
     <SidebarProvider>

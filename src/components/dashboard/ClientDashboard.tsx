@@ -11,12 +11,12 @@ export function ClientDashboard() {
   const { user } = useAuth();
 
   const { data: clientAccess } = useQuery({
-    queryKey: ["my-clients", user?.id],
+    queryKey: ["my-clients", user?._id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("client_users")
         .select("client_id, clients(id, name, logo_url)")
-        .eq("user_id", user!.id);
+        .eq("user_id", user!._id);
       if (error) throw error;
       return data;
     },
@@ -61,7 +61,10 @@ export function ClientDashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => latestReport && navigate(`/clients/${clientId}/reports/${latestReport.id}`)}>
+        <Card
+          className="cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => latestReport && navigate(`/clients/${clientId}/reports/${latestReport.id}`)}
+        >
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-accent" />
@@ -79,7 +82,10 @@ export function ClientDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/clients/${clientId}/reports`)}>
+        <Card
+          className="cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => navigate(`/clients/${clientId}/reports`)}
+        >
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <FileText className="h-4 w-4 text-accent" />

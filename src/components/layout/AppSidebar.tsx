@@ -12,14 +12,13 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { Home, Users, FileText, Settings, LogOut, TrendingUp } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Home, FileText, Settings, TrendingUp } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export function AppSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin, signOut, user } = useAuth();
+  const { isAdmin, user } = useAuth();
 
   const navItems = [
     { icon: Home, label: "Dashboard", href: "/" },
@@ -62,19 +61,13 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="p-4 space-y-2">
-        <div className="text-xs text-sidebar-foreground/60 truncate px-2">
-          {user?.email}
-        </div>
+        {user && (
+          <div className="px-2 space-y-0.5">
+            <div className="text-sm font-medium text-sidebar-foreground truncate">{user.name}</div>
+            <div className="text-xs text-sidebar-foreground/60 truncate">{user.email}</div>
+          </div>
+        )}
         <ThemeToggle />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground"
-          onClick={signOut}
-        >
-          <LogOut className="h-4 w-4 mr-2" />
-          Sign Out
-        </Button>
       </SidebarFooter>
     </Sidebar>
   );

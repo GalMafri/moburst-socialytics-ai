@@ -1,85 +1,94 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { Session, User } from "@supabase/supabase-js";
+import { initHubToken } from "@/utils/hubAuth";
+
+const HUB_API_URL = import.meta.env.VITE_HUB_BACKEND_URL || "https://tools-server.moburst.com";
+const IS_DEV = import.meta.env.DEV; // true in Lovable preview & local dev, false in production builds
+
+export interface HubUser {
+  _id: string;
+  name: string;
+  email: string;
+  role: string;
+  company: string;
+  isActive: boolean;
+  tools: Array<{ tool: { _id: string; name: string }; role: string }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Dev-only fallback user so you can still use the app in Lovable / localhost
+const DEV_USER: HubUser = {
+  _id: "dev-user-000000000000",
+  name: "Dev User",
+  email: "dev@localhost",
+  role: "admin",
+  company: "Dev",
+  isActive: true,
+  tools: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
 
 interface AuthContextType {
-  session: Session | null;
-  user: User | null;
+  user: HubUser | null;
   isAdmin: boolean;
   isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, displayName?: string) => Promise<void>;
-  signOut: () => Promise<void>;
+  isAuthenticated: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [user, setUser] = useState<HubUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          // Check admin role using setTimeout to avoid Supabase auth deadlock
-          setTimeout(async () => {
-            const { data } = await supabase
-              .from("user_roles")
-              .select("role")
-              .eq("user_id", session.user.id)
-              .eq("role", "admin")
-              .maybeSingle();
-            setIsAdmin(!!data);
-            setIsLoading(false);
-          }, 0);
-        } else {
-          setIsAdmin(false);
+    const token = initHubToken();
+
+    // ── Hub token present → authenticate via Hub API ──
+    if (token) {
+      fetch(`${HUB_API_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("Auth failed");
+          return res.json();
+        })
+        .then((hubUser: HubUser) => {
+          setUser(hubUser);
+        })
+        .catch((err) => {
+          console.error("Hub auth failed:", err);
+          // If Hub auth fails but we're in dev mode, fall back to dev user
+          if (IS_DEV) {
+            console.warn("Falling back to dev user");
+            setUser(DEV_USER);
+          } else {
+            setUser(null);
+          }
+        })
+        .finally(() => {
           setIsLoading(false);
-        }
-      }
-    );
+        });
+      return;
+    }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (!session) setIsLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    // ── No token ──
+    if (IS_DEV) {
+      // In development (Lovable / localhost): auto-login as dev user
+      console.warn("[Auth] No hubToken found — using dev user (dev mode only)");
+      setUser(DEV_USER);
+      setIsLoading(false);
+    } else {
+      // In production: require the Hub token
+      setIsLoading(false);
+    }
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  };
+  const isAdmin = user?.role === "admin";
+  const isAuthenticated = !!user;
 
-  const signUp = async (email: string, password: string, displayName?: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: window.location.origin,
-        data: { display_name: displayName },
-      },
-    });
-    if (error) throw error;
-  };
-
-  const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-  };
-
-  return (
-    <AuthContext.Provider value={{ session, user, isAdmin, isLoading, signIn, signUp, signOut }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ user, isAdmin, isLoading, isAuthenticated }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
