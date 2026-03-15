@@ -13,50 +13,61 @@ export default function Auth() {
   const { session, isLoading } = useAuth();
 
   if (isLoading) return null;
-  if (session) return <Navigate to="/" replace />;
+  if (session) return <Navigate to="/" />;
 
   return (
-    <div className="flex min-h-screen">
+    <div className="min-h-screen grid lg:grid-cols-2">
       {/* Left branding panel */}
-      <div className="hidden lg:flex lg:w-1/2 bg-primary flex-col justify-center items-center p-12">
-        <div className="max-w-md text-center space-y-8">
-          <div className="flex items-center justify-center gap-3 mb-8">
-            <div className="h-12 w-12 rounded-lg bg-accent flex items-center justify-center">
-              <BarChart3 className="h-7 w-7 text-accent-foreground" />
+      <div className="hidden lg:flex flex-col justify-between bg-sidebar p-8 text-sidebar-foreground">
+        <div className="flex-1 flex flex-col justify-center">
+          <div className="space-y-6 max-w-md">
+            <div className="flex items-center gap-3">
+              <img
+                src="/images/logo-dark.png"
+                alt="Socialytics by Moburst"
+                className="h-10 w-auto object-contain"
+              />
             </div>
-            <h1 className="text-3xl font-bold text-primary-foreground">Socialytics AI</h1>
-          </div>
-          <p className="text-lg text-primary-foreground/80">
-            Social media intelligence powered by AI. Analyze trends, track performance, and generate actionable content recommendations.
-          </p>
-          <div className="grid grid-cols-1 gap-4 mt-8">
-            {[
-              { icon: TrendingUp, title: "Trend Analysis", desc: "Track TikTok & Instagram trends in real-time" },
-              { icon: BarChart3, title: "Performance Analytics", desc: "Monitor cross-platform social media metrics" },
-              { icon: Zap, title: "AI Recommendations", desc: "Get AI-powered content strategy insights" },
-            ].map((f) => (
-              <div key={f.title} className="flex items-start gap-3 text-left p-3 rounded-lg bg-primary-foreground/10">
-                <f.icon className="h-5 w-5 text-accent mt-0.5 shrink-0" />
-                <div>
-                  <p className="font-medium text-primary-foreground text-sm">{f.title}</p>
-                  <p className="text-xs text-primary-foreground/60">{f.desc}</p>
+
+            <p className="text-lg text-sidebar-foreground/80">
+              Social media intelligence powered by AI. Analyze trends, track performance, and generate actionable content recommendations.
+            </p>
+
+            <div className="space-y-4 pt-4">
+              {[
+                { icon: TrendingUp, title: "Trend Analysis", desc: "Track TikTok & Instagram trends in real-time" },
+                { icon: BarChart3, title: "Performance Analytics", desc: "Monitor cross-platform social media metrics" },
+                { icon: Zap, title: "AI Recommendations", desc: "Get AI-powered content strategy insights" },
+              ].map((f) => (
+                <div key={f.title} className="flex items-start gap-3">
+                  <div className="mt-1 p-2 rounded-lg bg-sidebar-primary/10">
+                    <f.icon className="h-4 w-4 text-sidebar-primary" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sidebar-foreground">{f.title}</p>
+                    <p className="text-sm text-sidebar-foreground/60">{f.desc}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-          <p className="text-xs text-primary-foreground/40 mt-12">Powered by Moburst</p>
         </div>
+
+        <p className="text-xs text-sidebar-foreground/50">Powered by Moburst</p>
       </div>
 
       {/* Right auth panel */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-background">
-        <div className="w-full max-w-sm">
-          <div className="lg:hidden flex items-center justify-center gap-2 mb-8">
-            <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center">
-              <BarChart3 className="h-6 w-6 text-primary-foreground" />
-            </div>
-            <h1 className="text-2xl font-bold text-foreground">Socialytics AI</h1>
+      <div className="flex flex-col justify-center p-6 lg:p-12 bg-background">
+        <div className="w-full max-w-sm mx-auto space-y-6">
+          {/* Mobile logo */}
+          <div className="lg:hidden flex justify-center mb-8">
+            <img
+              src="/images/logo-light.png"
+              alt="Socialytics by Moburst"
+              className="h-8 w-auto object-contain"
+            />
           </div>
+
           <AuthForms />
         </div>
       </div>
@@ -92,7 +103,7 @@ function AuthForms() {
   };
 
   return (
-    <Tabs defaultValue="login">
+    <Tabs defaultValue="login" className="w-full">
       <TabsList className="grid w-full grid-cols-2">
         <TabsTrigger value="login">Sign In</TabsTrigger>
         <TabsTrigger value="signup">Sign Up</TabsTrigger>
@@ -107,13 +118,15 @@ function AuthForms() {
           <CardContent>
             <form onSubmit={(e) => handleSubmit(e, "login")} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="login-email">Email</Label>
-                <Input id="login-email" name="email" type="email" required />
+                <Label htmlFor="email">Email</Label>
+                <Input id="email" name="email" type="email" required />
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="login-password">Password</Label>
-                <Input id="login-password" name="password" type="password" required />
+                <Label htmlFor="password">Password</Label>
+                <Input id="password" name="password" type="password" required />
               </div>
+
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Signing in..." : "Sign In"}
               </Button>
@@ -131,17 +144,20 @@ function AuthForms() {
           <CardContent>
             <form onSubmit={(e) => handleSubmit(e, "signup")} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="signup-name">Display Name</Label>
-                <Input id="signup-name" name="displayName" required />
+                <Label htmlFor="displayName">Display Name</Label>
+                <Input id="displayName" name="displayName" required />
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="signup-email">Email</Label>
-                <Input id="signup-email" name="email" type="email" required />
+                <Label htmlFor="email">Email</Label>
+                <Input id="email" name="email" type="email" required />
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="signup-password">Password</Label>
-                <Input id="signup-password" name="password" type="password" required minLength={6} />
+                <Label htmlFor="password">Password</Label>
+                <Input id="password" name="password" type="password" required minLength={6} />
               </div>
+
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Creating account..." : "Create Account"}
               </Button>
