@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
