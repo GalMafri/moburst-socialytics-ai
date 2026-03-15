@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -26,6 +27,9 @@ export function AppLayout({ children, title }: { children: ReactNode; title?: st
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-5" />
           {title && <h1 className="text-lg font-semibold">{title}</h1>}
+          <div className="ml-auto">
+            <ThemeToggle />
+          </div>
         </header>
         <main className="flex-1 p-6">{children}</main>
       </SidebarInset>
