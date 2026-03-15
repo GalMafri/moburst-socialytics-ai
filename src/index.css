@@ -54,12 +54,12 @@
 
     /* Dark sidebar with high-contrast text */
     --sidebar-background: 220 25% 10%;
-    --sidebar-foreground: 0 0% 100%;
+    --sidebar-foreground: 210 20% 90%;
     --sidebar-primary: 193 100% 62%;
-    --sidebar-primary-foreground: 220 25% 10%;
-    --sidebar-accent: 220 20% 18%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 220 15% 22%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 20% 16%;
+    --sidebar-accent-foreground: 210 20% 95%;
+    --sidebar-border: 220 15% 18%;
     --sidebar-ring: 193 100% 62%;
 
     /* Vibrant brand colors for charts */
