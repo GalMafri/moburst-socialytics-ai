@@ -27,6 +27,9 @@ export function AppLayout({ children, title }: { children: ReactNode; title?: st
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-5" />
           {title && <h1 className="text-lg font-semibold">{title}</h1>}
+          <div className="ml-auto">
+            <ThemeToggle />
+          </div>
         </header>
         <main className="flex-1 p-6">{children}</main>
       </SidebarInset>
