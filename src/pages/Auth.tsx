@@ -80,7 +80,7 @@ function AuthForms() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent, mode: "login" | "signup") => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>, mode: "login" | "signup") => {
     e.preventDefault();
     setLoading(true);
     const form = new FormData(e.currentTarget);
