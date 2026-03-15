@@ -30,18 +30,13 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="p-4">
-        <div
-          className="flex items-center gap-2.5 cursor-pointer"
-          onClick={() => navigate("/")}
-        >
-          <div className="h-9 w-9 rounded-lg bg-sidebar-primary flex items-center justify-center">
-            <BarChart3 className="h-5 w-5 text-sidebar-primary-foreground" />
-          </div>
-          <div>
-            <span className="font-bold text-sm text-sidebar-foreground">Socialytics AI</span>
-            <p className="text-[10px] text-sidebar-foreground/50">by Moburst</p>
-          </div>
+      <SidebarHeader className="px-4 py-5">
+        <div className="cursor-pointer transition-opacity hover:opacity-80" onClick={() => navigate("/")}>
+          <img
+            src="/images/logo-dark.png"
+            alt="Socialytics by Moburst"
+            className="h-7 w-auto max-w-[180px] object-contain"
+          />
         </div>
       </SidebarHeader>
 
