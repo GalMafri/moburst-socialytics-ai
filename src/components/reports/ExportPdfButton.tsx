@@ -55,7 +55,21 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       // Remove the tab list itself
       if (tabsList) tabsList.remove();
 
-      // ── Build print document ──
+      // ── Collect stylesheets ──
+      const styleSheets = Array.from(document.styleSheets);
+      let cssText = "";
+
+      for (const sheet of styleSheets) {
+        try {
+          const rules = Array.from(sheet.cssRules || []);
+          cssText += rules.map((r) => r.cssText).join("\n");
+        } catch {
+          if (sheet.href) {
+            cssText += `@import url("${sheet.href}");\n`;
+          }
+        }
+      }
+
       const html = `
 <!DOCTYPE html>
 <html>
