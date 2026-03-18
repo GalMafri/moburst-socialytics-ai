@@ -22,33 +22,38 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
         throw new Error("Pop-up blocked. Please allow pop-ups and try again.");
       }
 
-      // ── Capture ALL tab content before cloning ──
-      // Radix UI Tabs unmount inactive tab panels from the DOM entirely,
-      // so we programmatically click each tab, wait for render, and
-      // capture the panel HTML. Then restore the original active tab.
-      const tabsList = contentRef.current.querySelector('[role="tablist"]');
-      const tabs = tabsList ? (Array.from(tabsList.querySelectorAll('[role="tab"]')) as HTMLElement[]) : [];
-      const originalActiveTab = tabs.find((t) => t.getAttribute("data-state") === "active");
+      // ── Clone and clean content ──
+      // All TabsContent panels use forceMount so they're always in the DOM.
+      const content = contentRef.current.cloneNode(true) as HTMLElement;
 
-      const capturedPanels: { label: string; html: string }[] = [];
+      // Show all tab panels (inactive ones are hidden via data-state)
+      content.querySelectorAll('[role="tabpanel"]').forEach((panel) => {
+        (panel as HTMLElement).style.display = "block";
+        (panel as HTMLElement).removeAttribute("hidden");
+        panel.setAttribute("data-state", "active");
+      });
 
-      for (const tab of tabs) {
-        tab.click();
-        await new Promise((r) => setTimeout(r, 200)); // wait for Radix render
-        const panel = contentRef.current.querySelector('[role="tabpanel"][data-state="active"]');
-        if (panel) {
-          capturedPanels.push({
-            label: tab.textContent?.trim() || "",
-            html: panel.innerHTML,
-          });
+      // Add section headers before each tab panel
+      const tabsList = content.querySelector('[role="tablist"]');
+      const tabLabels: string[] = [];
+      if (tabsList) {
+        tabsList.querySelectorAll('[role="tab"]').forEach((tab) => {
+          tabLabels.push(tab.textContent?.trim() || "");
+        });
+      }
+      const panels = content.querySelectorAll('[role="tabpanel"]');
+      panels.forEach((panel, i) => {
+        if (tabLabels[i]) {
+          const header = document.createElement("h2");
+          header.className = "pdf-tab-section-header";
+          header.style.cssText = "font-size:1.25rem;font-weight:700;margin:32px 0 16px;padding-bottom:8px;border-bottom:2px solid hsl(0 0% 89.8%);";
+          header.textContent = tabLabels[i];
+          panel.parentElement?.insertBefore(header, panel);
         }
-      }
+      });
 
-      // Restore original tab
-      if (originalActiveTab) {
-        originalActiveTab.click();
-        await new Promise((r) => setTimeout(r, 50));
-      }
+      // Remove the tab list itself
+      if (tabsList) tabsList.remove();
 
       // ── Collect stylesheets ──
       const styleSheets = Array.from(document.styleSheets);
@@ -65,55 +70,6 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
         }
       }
 
-      // ── Clone and clean content ──
-      const content = contentRef.current.cloneNode(true) as HTMLElement;
-
-      // Remove interactive buttons
-      content.querySelectorAll("button").forEach((btn) => {
-        const text = btn.textContent?.toLowerCase() || "";
-        if (text.includes("export") || text.includes("copy") || text.includes("pending")) {
-          btn.remove();
-        }
-      });
-
-      // Remove dropdown menus and icon-only buttons
-      content.querySelectorAll('[data-slot="dropdown-menu"]').forEach((el) => el.remove());
-      content.querySelectorAll("button").forEach((btn) => {
-        if (btn.querySelector("svg") && !btn.textContent?.trim()) {
-          btn.remove();
-        }
-      });
-
-      // Remove the presentation placeholder banner
-      content.querySelectorAll(".border-dashed").forEach((card) => card.remove());
-
-      // ── Replace tab section with all captured panels ──
-      if (capturedPanels.length > 0) {
-        const clonedTabsList = content.querySelector('[role="tablist"]');
-        const clonedPanels = content.querySelectorAll('[role="tabpanel"]');
-        const panelParent = clonedPanels[0]?.parentElement;
-
-        // Remove the cloned tablist and any single active panel
-        if (clonedTabsList) clonedTabsList.remove();
-        clonedPanels.forEach((p) => p.remove());
-
-        // Insert ALL captured panels stacked vertically with section headers
-        if (panelParent) {
-          for (const panel of capturedPanels) {
-            const section = document.createElement("div");
-            section.className = "pdf-tab-section";
-            section.innerHTML = `
-              <h2 style="font-size:1.25rem;font-weight:700;margin:32px 0 16px;padding-bottom:8px;border-bottom:2px solid hsl(0 0% 89.8%);">
-                ${panel.label}
-              </h2>
-              <div>${panel.html}</div>
-            `;
-            panelParent.appendChild(section);
-          }
-        }
-      }
-
-      // ── Build print document ──
       const html = `
 <!DOCTYPE html>
 <html>
