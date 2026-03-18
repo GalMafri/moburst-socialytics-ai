@@ -2,7 +2,10 @@ import { useState, useEffect, createContext, useContext, ReactNode } from "react
 import { initHubToken } from "@/utils/hubAuth";
 
 const HUB_API_URL = import.meta.env.VITE_HUB_BACKEND_URL || "https://tools-server.moburst.com";
-const IS_DEV = import.meta.env.DEV; // true in Lovable preview & local dev, false in production builds
+const IS_DEV =
+  import.meta.env.DEV ||
+  window.location.hostname.includes("lovableproject.com") ||
+  window.location.hostname.includes("lovable.app");
 
 export interface HubUser {
   _id: string;
