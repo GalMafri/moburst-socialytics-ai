@@ -393,7 +393,7 @@ export default function ReportView() {
           </TabsContent>
 
           {/* ── TRENDS TAB ── */}
-          <TabsContent value="trends" className="space-y-8">
+          <TabsContent value="trends" className="space-y-8" forceMount>
             <TrendsSection
               title="TikTok Trends"
               analysis={aiAnalysis?.tiktok_trends_analysis}
