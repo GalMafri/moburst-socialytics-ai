@@ -183,7 +183,7 @@ export default function ReportView() {
           </TabsList>
 
           {/* ── OVERVIEW TAB ── */}
-          <TabsContent value="overview" className="space-y-8">
+          <TabsContent value="overview" className="space-y-8" forceMount>
             {/* Metrics */}
             {monthComparison?.changes && (
               <MetricsCards changes={monthComparison.changes} previousMonth={monthComparison.previous_month} />
