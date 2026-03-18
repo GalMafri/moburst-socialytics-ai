@@ -354,7 +354,7 @@ export default function ReportView() {
           </TabsContent>
 
           {/* ── CONTENT IDEAS TAB ── */}
-          <TabsContent value="content" className="space-y-8">
+          <TabsContent value="content" className="space-y-8" forceMount>
             {/* Recommendations */}
             {aiAnalysis?.content_recommendations?.length > 0 && (
               <ContentRecommendations recommendations={aiAnalysis.content_recommendations} />
