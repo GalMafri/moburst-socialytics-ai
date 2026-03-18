@@ -194,7 +194,7 @@ export default function ReportView() {
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Month-over-Month Performance
+                    Period-over-Period Performance
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -656,10 +656,10 @@ function PerformanceChart({ comparison }: { comparison: any }) {
       ))}
       <div className="col-span-full flex items-center gap-4 text-xs text-muted-foreground pt-1">
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-[hsl(var(--chart-1))]" /> Current Month
+          <span className="h-2.5 w-2.5 rounded-sm bg-[hsl(var(--chart-1))]" /> Current Period
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-[hsl(var(--chart-4))] opacity-60" /> Previous Month
+          <span className="h-2.5 w-2.5 rounded-sm bg-[hsl(var(--chart-4))] opacity-60" /> Previous Period
         </span>
       </div>
     </div>

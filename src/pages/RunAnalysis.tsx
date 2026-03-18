@@ -8,15 +8,22 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Play, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, CalendarDays } from "lucide-react";
+import { Play, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, CalendarDays, TrendingUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 
-const STEPS = [
+const STEPS_FULL = [
   "Fetching Sprout Social performance data...",
   "Scraping TikTok trends...",
   "Scraping Instagram trends...",
+  "AI analyzing and synthesizing...",
+  "Generating presentation...",
+];
+
+const STEPS_NO_TRENDS = [
+  "Fetching Sprout Social performance data...",
   "AI analyzing and synthesizing...",
   "Generating presentation...",
 ];
@@ -39,6 +46,7 @@ export default function RunAnalysis() {
   const defaultEnd = now.toISOString().split("T")[0];
   const [dateRangeStart, setDateRangeStart] = useState(defaultStart);
   const [dateRangeEnd, setDateRangeEnd] = useState(defaultEnd);
+  const [skipTrends, setSkipTrends] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -109,6 +117,11 @@ export default function RunAnalysis() {
       timeoutRef.current = null;
     }
   }, []);
+
+  // Determine which steps to show based on skipTrends
+  const hasKeywords = (client?.social_keywords?.length || 0) > 0;
+  const effectiveSkipTrends = skipTrends || !hasKeywords;
+  const STEPS = effectiveSkipTrends ? STEPS_NO_TRENDS : STEPS_FULL;
 
   // Watch for the active report to complete via realtime-triggered refetch
   useEffect(() => {
@@ -260,6 +273,7 @@ export default function RunAnalysis() {
         brief_file_id: client!.brief_file_id || "",
         date_range_start: dateRangeStart || "",
         date_range_end: dateRangeEnd || "",
+        skip_trends: skipTrends,
       };
 
       console.log("Sending webhook payload:", JSON.stringify(payload, null, 2));
@@ -365,8 +379,44 @@ export default function RunAnalysis() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground mt-2">
-              Defaults to current month. The previous month comparison period is calculated automatically.
+              Defaults to current month. The comparison period is automatically calculated as the same number of days
+              immediately before the start date.
             </p>
+          </CardContent>
+        </Card>
+
+        {/* Trend Analysis Options */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="h-4 w-4" /> Trend Analysis
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>Include Trend Analysis</Label>
+                <p className="text-xs text-muted-foreground">
+                  Scrape TikTok and Instagram for trending content in your niche
+                </p>
+              </div>
+              <Switch
+                checked={!skipTrends}
+                onCheckedChange={(checked) => setSkipTrends(!checked)}
+                disabled={!hasKeywords}
+              />
+            </div>
+            {!hasKeywords && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                No social keywords configured for this client. Trend analysis requires keywords to be set in Client
+                Setup under "Content Strategy". The report will include performance analysis and content calendar only.
+              </p>
+            )}
+            {hasKeywords && skipTrends && (
+              <p className="text-xs text-muted-foreground">
+                Trend analysis will be skipped. The report will focus on performance metrics and content calendar only.
+              </p>
+            )}
           </CardContent>
         </Card>
 
