@@ -21,7 +21,7 @@ export interface HubUser {
 
 // Dev-only fallback user so you can still use the app in Lovable / localhost
 const DEV_USER: HubUser = {
-  _id: "dev-user-000000000000",
+  _id: "00000000-0000-0000-0000-000000000000",
   name: "Dev User",
   email: "dev@localhost",
   role: "admin",
