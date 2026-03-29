@@ -36,19 +36,37 @@ export function SchedulePostModal({
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState(false);
 
-  const { data: profiles } = useQuery({
-    queryKey: ["sprout-profiles", clientId],
+  // First try to get profiles assigned to this client
+  const { data: assignedProfiles } = useQuery({
+    queryKey: ["sprout-profiles-assigned", clientId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("sprout_profiles")
         .select("*")
-        .eq("client_id", clientId)
-        .neq("is_active", false);
+        .eq("client_id", clientId);
       if (error) throw error;
       return data;
     },
     enabled: open,
   });
+
+  // If no assigned profiles, fetch all available from Sprout Social API
+  const { data: allSproutProfiles } = useQuery({
+    queryKey: ["sprout-profiles-all"],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("sprout-profiles", {
+        body: { customer_id: "1676448" },
+      });
+      if (error) throw error;
+      return data?.profiles || data || [];
+    },
+    enabled: open && (!assignedProfiles || assignedProfiles.length === 0),
+  });
+
+  // Use assigned profiles if available, otherwise fall back to all Sprout profiles
+  const profiles = (assignedProfiles && assignedProfiles.length > 0)
+    ? assignedProfiles
+    : (allSproutProfiles || []);
 
   // Map content calendar platform names to Sprout network_type values
   const platformToNetworkTypes: Record<string, string[]> = {
@@ -66,9 +84,11 @@ export function SchedulePostModal({
   const postPlatform = (post?.platform || "").toLowerCase();
   const matchingNetworkTypes = platformToNetworkTypes[postPlatform] || [postPlatform];
 
-  const platformProfiles = (profiles || []).filter(
-    (p: any) => matchingNetworkTypes.includes((p.network_type || "").toLowerCase())
-  );
+  // For assigned profiles, match on network_type; for API profiles, also match on network_type
+  const platformProfiles = profiles.filter((p: any) => {
+    const networkType = (p.network_type || "").toLowerCase();
+    return matchingNetworkTypes.includes(networkType);
+  });
 
   useEffect(() => {
     if (open && post) {
@@ -117,14 +137,19 @@ export function SchedulePostModal({
     setScheduling(true);
     try {
       const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`);
-      const selectedProfile = profiles?.find((p: any) => p.id === selectedProfileId);
+      const selectedProfile = profiles?.find((p: any) =>
+        p.id === selectedProfileId || p.id?.toString() === selectedProfileId
+      );
+
+      // sprout_profile_id is either from DB (assigned) or directly from API (id field)
+      const sproutId = selectedProfile?.sprout_profile_id || selectedProfile?.id;
 
       const { data, error } = await supabase.functions.invoke("schedule-sprout-post", {
         body: {
           client_id: clientId,
           report_id: reportId,
           profile_id: selectedProfileId,
-          sprout_profile_id: selectedProfile?.sprout_profile_id,
+          sprout_profile_id: sproutId,
           platform: post.platform,
           scheduled_time: scheduledDateTime.toISOString(),
           post_content: postContent,
@@ -162,15 +187,15 @@ export function SchedulePostModal({
                 </SelectTrigger>
                 <SelectContent>
                   {platformProfiles.map((profile: any) => (
-                    <SelectItem key={profile.id} value={profile.id}>
-                      {profile.profile_name || profile.native_name} ({profile.network_type})
+                    <SelectItem key={profile.id?.toString()} value={profile.id?.toString()}>
+                      {profile.profile_name || profile.native_name || profile.name || "Profile"} ({profile.network_type})
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             ) : (
               <p className="text-sm text-muted-foreground">
-                No {post?.platform} profiles connected for this client.
+                No {post?.platform} profiles found. Make sure Sprout Social profiles are connected in the client setup.
               </p>
             )}
           </div>
