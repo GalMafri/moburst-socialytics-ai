@@ -186,7 +186,7 @@ export default function ReportView() {
           </TabsList>
 
           {/* ── OVERVIEW TAB ── */}
-          <TabsContent value="overview" className="space-y-8" forceMount>
+          <TabsContent value="overview" className="space-y-8">
             {/* Metrics */}
             {monthComparison?.changes && (
               <MetricsCards changes={monthComparison.changes} previousMonth={monthComparison.previous_month} />
@@ -357,7 +357,7 @@ export default function ReportView() {
           </TabsContent>
 
           {/* ── CONTENT IDEAS TAB ── */}
-          <TabsContent value="content" className="space-y-8" forceMount>
+          <TabsContent value="content" className="space-y-8">
             {/* Recommendations */}
             {aiAnalysis?.content_recommendations?.length > 0 && (
               <ContentRecommendations recommendations={aiAnalysis.content_recommendations} />
@@ -403,7 +403,7 @@ export default function ReportView() {
           </TabsContent>
 
           {/* ── TRENDS TAB ── */}
-          <TabsContent value="trends" className="space-y-8" forceMount>
+          <TabsContent value="trends" className="space-y-8">
             <TrendsSection
               title="TikTok Trends"
               analysis={aiAnalysis?.tiktok_trends_analysis}
