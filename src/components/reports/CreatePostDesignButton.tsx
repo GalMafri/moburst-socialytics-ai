@@ -90,9 +90,10 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
   };
 
   const handleOpen = () => {
-    if (!editablePrompt) {
-      setEditablePrompt(defaultPrompt);
-    }
+    // Always reset to prompt review mode — never auto-generate
+    setEditablePrompt(defaultPrompt);
+    setImageUrl(null);
+    setRevisedPrompt(null);
     setOpen(true);
   };
 

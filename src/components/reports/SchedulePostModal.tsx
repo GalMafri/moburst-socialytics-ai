@@ -50,8 +50,24 @@ export function SchedulePostModal({
     enabled: open,
   });
 
+  // Map content calendar platform names to Sprout network_type values
+  const platformToNetworkTypes: Record<string, string[]> = {
+    instagram: ["instagram", "fb_instagram_account"],
+    tiktok: ["tiktok"],
+    facebook: ["facebook"],
+    linkedin: ["linkedin"],
+    "twitter/x": ["twitter"],
+    twitter: ["twitter"],
+    youtube: ["youtube"],
+    pinterest: ["pinterest"],
+    threads: ["threads"],
+  };
+
+  const postPlatform = (post?.platform || "").toLowerCase();
+  const matchingNetworkTypes = platformToNetworkTypes[postPlatform] || [postPlatform];
+
   const platformProfiles = (profiles || []).filter(
-    (p: any) => p.network_type?.toLowerCase() === post?.platform?.toLowerCase()
+    (p: any) => matchingNetworkTypes.includes((p.network_type || "").toLowerCase())
   );
 
   useEffect(() => {
