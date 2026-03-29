@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -26,26 +27,60 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { data: fileData, error: downloadError } = await supabase.storage
-      .from(bucket)
-      .download(file_path);
-
-    if (downloadError || !fileData) {
-      throw new Error("Failed to download file: " + downloadError?.message);
-    }
-
-    const arrayBuffer = await fileData.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-    let binary = "";
-    for (let i = 0; i < uint8Array.length; i++) {
-      binary += String.fromCharCode(uint8Array[i]);
-    }
-    const base64 = btoa(binary);
-
     const ext = file_path.split(".").pop()?.toLowerCase();
     let mimeType = "image/png";
     if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
     else if (ext === "pdf") mimeType = "application/pdf";
+
+    // Get a public URL instead of downloading the file into memory
+    // This avoids the memory limit issue with large files
+    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(file_path);
+    const publicUrl = urlData?.publicUrl;
+
+    if (!publicUrl) {
+      throw new Error("Failed to get public URL for file");
+    }
+
+    // For images, use the URL directly with OpenAI Vision (no download needed)
+    // For PDFs, we need to download but use efficient base64 encoding
+    let imageContent: any;
+
+    if (mimeType === "application/pdf" || !publicUrl) {
+      // Download and convert to base64 using Deno's efficient encoder
+      const { data: fileData, error: downloadError } = await supabase.storage
+        .from(bucket)
+        .download(file_path);
+
+      if (downloadError || !fileData) {
+        throw new Error("Failed to download file: " + downloadError?.message);
+      }
+
+      // Check file size — reject files over 4MB to stay within compute limits
+      const arrayBuffer = await fileData.arrayBuffer();
+      if (arrayBuffer.byteLength > 4 * 1024 * 1024) {
+        throw new Error("File too large for processing. Please upload a file under 4MB, or use a PNG/JPG image instead of PDF.");
+      }
+
+      // Use Deno's native base64 encoder (much more memory-efficient)
+      const base64 = base64Encode(arrayBuffer);
+
+      imageContent = {
+        type: "image_url",
+        image_url: {
+          url: `data:${mimeType};base64,${base64}`,
+          detail: "low",
+        },
+      };
+    } else {
+      // For images, pass the public URL directly — OpenAI fetches it
+      imageContent = {
+        type: "image_url",
+        image_url: {
+          url: publicUrl,
+          detail: "high",
+        },
+      };
+    }
 
     let openaiKey = Deno.env.get("OPENAI_API_KEY");
     if (!openaiKey) {
@@ -88,13 +123,7 @@ MANDATORY RULES:
         role: "user",
         content: [
           { type: "text", text: userMessage },
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:${mimeType};base64,${base64}`,
-              detail: "high",
-            },
-          },
+          imageContent,
         ],
       },
     ];
