@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Video, Loader2, Download, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -12,30 +13,121 @@ interface CreatePostVideoButtonProps {
   brandIdentity?: any;
 }
 
+/** Platform-specific video specs and creative guidance */
+function getPlatformVideoSpec(platform?: string, format?: string) {
+  const p = (platform || "").toLowerCase();
+  const f = (format || "").toLowerCase();
+
+  if (p.includes("tiktok")) {
+    return {
+      aspect: "9:16 vertical",
+      duration: "5-8 seconds",
+      style: "Fast-paced, trend-driven, raw/authentic feel. Quick cuts, dynamic transitions. Hook in first 1 second. Mobile-first vertical framing with subject centered.",
+      label: "TikTok",
+    };
+  }
+  if (f.includes("reel") || (p.includes("instagram") && f.includes("video"))) {
+    return {
+      aspect: "9:16 vertical",
+      duration: "5-8 seconds",
+      style: "Polished but dynamic. Smooth transitions, cinematic color grading. Hook in first 1.5 seconds. Vertical framing, subject fills frame. Instagram-quality aesthetic.",
+      label: "Instagram Reel",
+    };
+  }
+  if (f.includes("story") || f.includes("stories")) {
+    return {
+      aspect: "9:16 vertical",
+      duration: "5 seconds",
+      style: "Quick, eye-catching, ephemeral feel. Single scene or 2-3 quick cuts. Bold motion, simple concept. Full-screen vertical with key content in center safe zone.",
+      label: "Story",
+    };
+  }
+  if (p.includes("linkedin")) {
+    return {
+      aspect: "16:9 horizontal",
+      duration: "6-8 seconds",
+      style: "Professional, clean, corporate-friendly. Subtle motion, smooth transitions. Business-appropriate pacing. Text-safe zones for captions. Horizontal widescreen framing.",
+      label: "LinkedIn Video",
+    };
+  }
+  if (p.includes("youtube")) {
+    return {
+      aspect: "16:9 horizontal",
+      duration: "6-8 seconds",
+      style: "Cinematic, high production value. Dynamic camera movement, dramatic lighting. YouTube thumbnail-worthy opening frame. Widescreen cinematic framing.",
+      label: "YouTube Short/Video",
+    };
+  }
+  if (p.includes("facebook")) {
+    return {
+      aspect: "1:1 square",
+      duration: "5-8 seconds",
+      style: "Scroll-stopping, shareable. Works with sound off — visual storytelling. Bold motion, clear subject. Square format optimized for feed.",
+      label: "Facebook Video",
+    };
+  }
+  return {
+    aspect: "9:16 vertical",
+    duration: "5-8 seconds",
+    style: "Dynamic, engaging, mobile-first. Smooth transitions, clear visual narrative.",
+    label: "Social Video",
+  };
+}
+
 export function CreatePostVideoButton({ post, brandIdentity }: CreatePostVideoButtonProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
 
-  const visualPrompt = post.ai_visual_prompt || post.visual_direction || "";
+  const spec = getPlatformVideoSpec(post.platform, post.format);
 
   const buildVideoPrompt = () => {
-    const parts: string[] = [];
-    parts.push(visualPrompt);
-    parts.push("\nCreate a short video (5-8 seconds) with smooth motion and transitions.");
-    parts.push(`Format: ${post.format || "short-form video"} for ${post.platform || "social media"}.`);
+    const visualDirection = post.ai_visual_prompt || post.visual_direction || "";
+    const postCopy = post.copy || "";
 
-    if (brandIdentity) {
-      const colors = [brandIdentity.primary_color, brandIdentity.secondary_color, brandIdentity.accent_color]
-        .filter(Boolean)
-        .join(", ");
-      if (colors) parts.push(`Brand colors: ${colors}`);
-      if (brandIdentity.visual_style) parts.push(`Visual style: ${brandIdentity.visual_style}`);
+    const sections: string[] = [];
+
+    // 1. Video-specific creative direction
+    sections.push(`Create a ${spec.duration} ${spec.aspect} video for ${spec.label}.`);
+
+    // 2. Scene description from the post's visual direction
+    if (visualDirection) {
+      sections.push(`SCENE: ${visualDirection}`);
     }
 
-    parts.push("No text overlays, logos, or watermarks. Clean, professional motion design.");
-    return parts.join("\n");
+    // 3. Post context for thematic alignment
+    if (postCopy) {
+      sections.push(`CONTEXT: This video accompanies this post: "${postCopy.slice(0, 150)}${postCopy.length > 150 ? '...' : ''}"`);
+    }
+
+    // 4. Platform-specific motion and style direction
+    sections.push(`MOTION & STYLE: ${spec.style}`);
+
+    // 5. Brand identity
+    if (brandIdentity) {
+      const brandParts: string[] = [];
+      const colors = [brandIdentity.primary_color, brandIdentity.secondary_color, brandIdentity.accent_color].filter(Boolean);
+      if (colors.length > 0) brandParts.push(`Color palette: ${colors.join(", ")}`);
+      if (brandIdentity.visual_style) brandParts.push(`Visual style: ${brandIdentity.visual_style}`);
+      if (brandIdentity.tone_of_voice) brandParts.push(`Tone: ${brandIdentity.tone_of_voice}`);
+      if (brandIdentity.design_elements) brandParts.push(`Design elements: ${brandIdentity.design_elements}`);
+      if (brandIdentity.background_style) brandParts.push(`Background: ${brandIdentity.background_style}`);
+
+      if (brandParts.length > 0) {
+        sections.push(`BRAND GUIDELINES:\n${brandParts.join("\n")}`);
+      }
+    }
+
+    // 6. Video-specific constraints
+    sections.push(`REQUIREMENTS:
+- Smooth, professional camera motion (slow pan, dolly, or gentle zoom)
+- No text overlays, watermarks, or logos
+- No jarring cuts — use smooth transitions
+- Photorealistic quality, cinematic lighting
+- Content must be appropriate for ${spec.label} audience`);
+
+    return sections.join("\n\n");
   };
 
   const handleOpen = () => {
@@ -73,6 +165,12 @@ export function CreatePostVideoButton({ post, brandIdentity }: CreatePostVideoBu
   const isVideoFormat = ["reel", "reels", "story", "stories", "tiktok", "video", "short"]
     .some((f) => (post.format || "").toLowerCase().includes(f));
 
+  const brandColors = [
+    brandIdentity?.primary_color,
+    brandIdentity?.secondary_color,
+    brandIdentity?.accent_color,
+  ].filter(Boolean);
+
   return (
     <>
       <Button
@@ -87,18 +185,37 @@ export function CreatePostVideoButton({ post, brandIdentity }: CreatePostVideoBu
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Video className="h-4 w-4" /> Generate Video
+              <Video className="h-4 w-4" /> Generate Video — {spec.label}
             </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
+            {/* Platform & format info */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="outline">{spec.aspect}</Badge>
+              <Badge variant="outline">{spec.duration}</Badge>
+              {brandColors.length > 0 && (
+                <div className="flex items-center gap-1 ml-auto">
+                  {brandColors.map((color, i) => (
+                    <div
+                      key={i}
+                      className="h-4 w-4 rounded-full border shadow-sm"
+                      style={{ backgroundColor: color }}
+                      title={color}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Editable prompt */}
             <div className="space-y-2">
-              <Label>Video Prompt</Label>
+              <Label>Video Prompt (edit before generating)</Label>
               <Textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                rows={6}
-                className="text-xs"
+                rows={8}
+                className="text-xs font-mono"
               />
             </div>
 
@@ -126,8 +243,9 @@ export function CreatePostVideoButton({ post, brandIdentity }: CreatePostVideoBu
               <div className="text-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-primary" />
                 <p className="text-sm text-muted-foreground">
-                  Generating video with Google Veo... This may take 30-120 seconds.
+                  Generating {spec.label} video with Google Veo...
                 </p>
+                <p className="text-xs text-muted-foreground mt-1">This may take 30-120 seconds</p>
               </div>
             )}
 

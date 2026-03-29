@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Loader2, Paintbrush, Download, Copy, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -37,24 +39,26 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [revisedPrompt, setRevisedPrompt] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editablePrompt, setEditablePrompt] = useState("");
   const { toast } = useToast();
 
-  const prompt =
+  const defaultPrompt =
     post.ai_visual_prompt ||
     (post.visual_direction
       ? `Create a social media post image for ${post.platform || "Instagram"}. Visual direction: ${post.visual_direction}. ${post.copy ? "Post context: " + post.copy.slice(0, 200) : ""}`
       : null);
 
-  if (!prompt) return null;
+  if (!defaultPrompt) return null;
 
   const generateImage = async () => {
+    const prompt = editablePrompt || defaultPrompt;
     setLoading(true);
     setImageUrl(null);
     setRevisedPrompt(null);
     try {
       const { data, error } = await supabase.functions.invoke("generate-post-image", {
         body: {
-          prompt,
+          prompt: editablePrompt || defaultPrompt,
           platform: post.platform,
           format: post.format,
           brand_context: brandIdentity || undefined,
@@ -86,14 +90,14 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
   };
 
   const handleOpen = () => {
-    setOpen(true);
-    if (!imageUrl && !loading) {
-      generateImage();
+    if (!editablePrompt) {
+      setEditablePrompt(defaultPrompt);
     }
+    setOpen(true);
   };
 
   const handleCopyPrompt = () => {
-    navigator.clipboard.writeText(prompt);
+    navigator.clipboard.writeText(editablePrompt || defaultPrompt);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -137,17 +141,29 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
               </div>
             )}
 
-            {/* Prompt display */}
-            <div className="rounded-lg border bg-muted/50 p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-muted-foreground">AI Visual Prompt</span>
+            {/* Editable prompt */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Visual Prompt (edit before generating)</Label>
                 <Button variant="ghost" size="sm" onClick={handleCopyPrompt}>
                   {copied ? <Check className="h-3 w-3 mr-1" /> : <Copy className="h-3 w-3 mr-1" />}
                   {copied ? "Copied" : "Copy"}
                 </Button>
               </div>
-              <p className="text-sm">{prompt}</p>
+              <Textarea
+                value={editablePrompt}
+                onChange={(e) => setEditablePrompt(e.target.value)}
+                rows={5}
+                className="text-sm"
+              />
             </div>
+
+            {/* Generate button */}
+            {!imageUrl && !loading && (
+              <Button onClick={generateImage} className="w-full">
+                <Paintbrush className="h-4 w-4 mr-2" /> Generate Design
+              </Button>
+            )}
 
             {/* Loading state */}
             {loading && (
