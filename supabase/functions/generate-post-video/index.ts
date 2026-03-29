@@ -17,6 +17,13 @@ function getAspectRatio(platform?: string, format?: string): string {
   return "9:16";
 }
 
+// Try multiple Veo model names in order of preference
+const VEO_MODELS = [
+  "veo-3.1-generate-preview",
+  "veo-3-generate-preview",
+  "veo-2.0-generate-001",
+];
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -52,107 +59,109 @@ serve(async (req) => {
 
     const aspectRatio = getAspectRatio(platform, format);
 
-    // Try Veo long-running operation endpoint
-    const veoEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:predictLongRunning?key=${geminiKey}`;
+    // Try each Veo model until one works
+    let operationName: string | null = null;
+    let lastError = "";
 
-    const response = await fetch(veoEndpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        instances: [{ prompt }],
-        parameters: {
-          aspectRatio,
-          durationSeconds: 8,
-          numberOfVideos: 1,
-        },
-      }),
-    });
+    for (const model of VEO_MODELS) {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Veo API error:", errorText);
+      console.log(`Trying Veo model: ${model}`);
 
-      // Fallback to Gemini Flash with video modality
-      const altEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiKey}`;
-
-      const altResponse = await fetch(altEndpoint, {
+      const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": geminiKey,
+        },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: `Generate a short video: ${prompt}` },
-              ],
-            },
-          ],
-          generationConfig: {
-            responseModalities: ["VIDEO"],
+          instances: [{ prompt }],
+          parameters: {
+            aspectRatio,
+            durationSeconds: "8",
+            resolution: "720p",
+            personGeneration: "allow_all",
           },
         }),
       });
 
-      if (!altResponse.ok) {
-        const altError = await altResponse.text();
-        throw new Error(`Video generation failed: ${altError}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.name) {
+          operationName = data.name;
+          console.log(`Veo operation started with model ${model}: ${operationName}`);
+          break;
+        }
+      } else {
+        lastError = await response.text();
+        console.error(`Veo model ${model} failed: ${lastError}`);
       }
+    }
 
-      const altData = await altResponse.json();
-      const videoPart = altData.candidates?.[0]?.content?.parts?.find(
-        (p: any) => p.inlineData?.mimeType?.startsWith("video/")
+    if (!operationName) {
+      throw new Error(
+        `Video generation failed. None of the Veo models are available for your API key. ` +
+        `Make sure your Gemini API key has access to Veo video generation models. ` +
+        `You can check availability at https://aistudio.google.com/models/veo-3. ` +
+        `Last error: ${lastError.slice(0, 200)}`
+      );
+    }
+
+    // Poll for completion (Veo is async — takes 30-120 seconds)
+    let attempts = 0;
+    const maxAttempts = 60; // 2 minutes at 2-second intervals
+
+    while (attempts < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      attempts++;
+
+      const pollResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/${operationName}`,
+        {
+          headers: { "x-goog-api-key": geminiKey },
+        }
       );
 
-      if (videoPart?.inlineData) {
-        const videoDataUrl = `data:${videoPart.inlineData.mimeType};base64,${videoPart.inlineData.data}`;
-        return new Response(JSON.stringify({ video_url: videoDataUrl }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      if (!pollResponse.ok) {
+        console.error(`Poll failed (attempt ${attempts}): ${pollResponse.status}`);
+        continue;
       }
 
-      throw new Error("No video generated from fallback model");
-    }
+      const pollData = await pollResponse.json();
 
-    // Handle long-running operation
-    const operationData = await response.json();
+      if (pollData.done) {
+        // Extract video URI from response
+        const videoUri =
+          pollData.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
+          pollData.response?.generatedSamples?.[0]?.video?.uri;
 
-    if (operationData.name) {
-      const operationName = operationData.name;
-      let attempts = 0;
-      const maxAttempts = 60;
+        if (videoUri) {
+          // The video URI requires the API key to access
+          const authenticatedUrl = videoUri.includes("?")
+            ? `${videoUri}&key=${geminiKey}`
+            : `${videoUri}?key=${geminiKey}`;
 
-      while (attempts < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        attempts++;
-
-        const pollResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${geminiKey}`
-        );
-        const pollData = await pollResponse.json();
-
-        if (pollData.done) {
-          const videoUri = pollData.response?.generatedSamples?.[0]?.video?.uri;
-          if (videoUri) {
-            return new Response(JSON.stringify({ video_url: videoUri }), {
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
-          }
-          throw new Error("Operation completed but no video URL found");
+          return new Response(
+            JSON.stringify({ video_url: authenticatedUrl }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
         }
+
+        // Check for errors in the completed operation
+        if (pollData.error) {
+          throw new Error(`Video generation error: ${JSON.stringify(pollData.error)}`);
+        }
+
+        throw new Error(
+          "Operation completed but no video URL found in response: " +
+          JSON.stringify(pollData.response || pollData).slice(0, 300)
+        );
       }
 
-      throw new Error("Video generation timed out");
+      console.log(`Polling attempt ${attempts}/${maxAttempts}...`);
     }
 
-    const videoUri = operationData.response?.generatedSamples?.[0]?.video?.uri ||
-      operationData.generatedSamples?.[0]?.video?.uri;
-
-    if (videoUri) {
-      return new Response(JSON.stringify({ video_url: videoUri }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    throw new Error("Unexpected response format from Veo API");
+    throw new Error("Video generation timed out after 3 minutes. Please try again.");
   } catch (error: any) {
     console.error("Error generating video:", error);
     return new Response(JSON.stringify({ error: error.message }), {
