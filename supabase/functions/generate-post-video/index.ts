@@ -78,7 +78,7 @@ serve(async (req) => {
           instances: [{ prompt }],
           parameters: {
             aspectRatio,
-            durationSeconds: "8",
+            durationSeconds: 8,
             resolution: "720p",
             personGeneration: "allow_all",
           },
