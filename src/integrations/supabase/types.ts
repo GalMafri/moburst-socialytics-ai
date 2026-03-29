@@ -69,7 +69,10 @@ export type Database = {
       }
       clients: {
         Row: {
+          archived_at: string | null
+          brand_book_file_path: string | null
           brand_book_text: string | null
+          brand_book_url: string | null
           brand_identity: Json | null
           brand_notes: string | null
           brief_file_id: string | null
@@ -77,6 +80,7 @@ export type Database = {
           content_pillars: Json | null
           created_at: string | null
           created_by: string | null
+          design_references: Json | null
           geo: string | null
           id: string
           language: string | null
@@ -85,17 +89,16 @@ export type Database = {
           primary_platforms: string[] | null
           social_keywords: string[] | null
           sprout_customer_id: string | null
+          timezone: string | null
           trends_keywords: string | null
           updated_at: string | null
           website_url: string | null
-          brand_book_url: string | null
-          brand_book_file_path: string | null
-          timezone: string | null
-          design_references: Json | null
-          archived_at: string | null
         }
         Insert: {
+          archived_at?: string | null
+          brand_book_file_path?: string | null
           brand_book_text?: string | null
+          brand_book_url?: string | null
           brand_identity?: Json | null
           brand_notes?: string | null
           brief_file_id?: string | null
@@ -103,6 +106,7 @@ export type Database = {
           content_pillars?: Json | null
           created_at?: string | null
           created_by?: string | null
+          design_references?: Json | null
           geo?: string | null
           id?: string
           language?: string | null
@@ -111,17 +115,16 @@ export type Database = {
           primary_platforms?: string[] | null
           social_keywords?: string[] | null
           sprout_customer_id?: string | null
+          timezone?: string | null
           trends_keywords?: string | null
           updated_at?: string | null
           website_url?: string | null
-          brand_book_url?: string | null
-          brand_book_file_path?: string | null
-          timezone?: string | null
-          design_references?: Json | null
-          archived_at?: string | null
         }
         Update: {
+          archived_at?: string | null
+          brand_book_file_path?: string | null
           brand_book_text?: string | null
+          brand_book_url?: string | null
           brand_identity?: Json | null
           brand_notes?: string | null
           brief_file_id?: string | null
@@ -129,6 +132,7 @@ export type Database = {
           content_pillars?: Json | null
           created_at?: string | null
           created_by?: string | null
+          design_references?: Json | null
           geo?: string | null
           id?: string
           language?: string | null
@@ -137,83 +141,12 @@ export type Database = {
           primary_platforms?: string[] | null
           social_keywords?: string[] | null
           sprout_customer_id?: string | null
+          timezone?: string | null
           trends_keywords?: string | null
           updated_at?: string | null
           website_url?: string | null
-          brand_book_url?: string | null
-          brand_book_file_path?: string | null
-          timezone?: string | null
-          design_references?: Json | null
-          archived_at?: string | null
         }
         Relationships: []
-      }
-      scheduled_posts: {
-        Row: {
-          id: string
-          client_id: string | null
-          report_id: string | null
-          sprout_post_id: string | null
-          profile_id: string | null
-          platform: string | null
-          scheduled_time: string | null
-          status: string | null
-          post_content: string | null
-          media_url: string | null
-          created_at: string | null
-          created_by: string | null
-        }
-        Insert: {
-          id?: string
-          client_id?: string | null
-          report_id?: string | null
-          sprout_post_id?: string | null
-          profile_id?: string | null
-          platform?: string | null
-          scheduled_time?: string | null
-          status?: string | null
-          post_content?: string | null
-          media_url?: string | null
-          created_at?: string | null
-          created_by?: string | null
-        }
-        Update: {
-          id?: string
-          client_id?: string | null
-          report_id?: string | null
-          sprout_post_id?: string | null
-          profile_id?: string | null
-          platform?: string | null
-          scheduled_time?: string | null
-          status?: string | null
-          post_content?: string | null
-          media_url?: string | null
-          created_at?: string | null
-          created_by?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "scheduled_posts_client_id_fkey"
-            columns: ["client_id"]
-            isOneToOne: false
-            referencedRelation: "clients"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "scheduled_posts_report_id_fkey"
-            columns: ["report_id"]
-            isOneToOne: false
-            referencedRelation: "reports"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "scheduled_posts_profile_id_fkey"
-            columns: ["profile_id"]
-            isOneToOne: false
-            referencedRelation: "sprout_profiles"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       profiles: {
         Row: {
@@ -338,6 +271,73 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scheduled_posts: {
+        Row: {
+          client_id: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          media_url: string | null
+          platform: string | null
+          post_content: string | null
+          profile_id: string | null
+          report_id: string | null
+          scheduled_time: string | null
+          sprout_post_id: string | null
+          status: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          media_url?: string | null
+          platform?: string | null
+          post_content?: string | null
+          profile_id?: string | null
+          report_id?: string | null
+          scheduled_time?: string | null
+          sprout_post_id?: string | null
+          status?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          media_url?: string | null
+          platform?: string | null
+          post_content?: string | null
+          profile_id?: string | null
+          report_id?: string | null
+          scheduled_time?: string | null
+          sprout_post_id?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_posts_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_posts_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "sprout_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_posts_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
             referencedColumns: ["id"]
           },
         ]
