@@ -26,3 +26,15 @@ verify_jwt = false
 
 [functions.firecrawl-crawl]
 verify_jwt = false
+
+[functions.extract-brand-from-file]
+verify_jwt = false
+
+[functions.delete-client]
+verify_jwt = false
+
+[functions.schedule-sprout-post]
+verify_jwt = false
+
+[functions.generate-post-video]
+verify_jwt = false
