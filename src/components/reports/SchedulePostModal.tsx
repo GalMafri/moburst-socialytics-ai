@@ -36,6 +36,13 @@ export function SchedulePostModal({
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState(false);
 
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!open) {
+      setSelectedProfileId("");
+    }
+  }, [open]);
+
   // First try to get profiles assigned to this client
   const { data: assignedProfiles } = useQuery({
     queryKey: ["sprout-profiles-assigned", clientId],
@@ -117,12 +124,15 @@ export function SchedulePostModal({
           setScheduledTime(`${hours.toString().padStart(2, "0")}:${mins}`);
         }
       }
-
-      if (platformProfiles.length > 0 && !selectedProfileId) {
-        setSelectedProfileId(platformProfiles[0].id);
-      }
     }
   }, [open, post, generatedImageUrl]);
+
+  // Auto-select first matching profile once profiles load (runs when profiles change)
+  useEffect(() => {
+    if (open && platformProfiles.length > 0 && !selectedProfileId) {
+      setSelectedProfileId(platformProfiles[0].id?.toString());
+    }
+  }, [open, platformProfiles, selectedProfileId]);
 
   const handleSchedule = async () => {
     if (!selectedProfileId) {

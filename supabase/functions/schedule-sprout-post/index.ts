@@ -7,7 +7,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const TOKEN_URL = "https://identity.sproutsocial.com/oauth2/aus1p11ihuZpMU5hO1d8/v1/token";
+// Use the same token URL as the working sprout-profiles function
+const TOKEN_URL = "https://identity.sproutsocial.com/oauth2/84e39c75-d770-45d9-90a9-7b79e3037d2c/v1/token";
 const SPROUT_API_BASE = "https://api.sproutsocial.com/v1";
 
 async function getSproutToken(): Promise<string> {
@@ -25,12 +26,18 @@ async function getSproutToken(): Promise<string> {
       grant_type: "client_credentials",
       client_id: clientId,
       client_secret: clientSecret,
+      scope: "organization_id",
     }),
   });
 
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to get Sprout Social token [${response.status}]: ${errorText}`);
+  }
+
   const data = await response.json();
   if (!data.access_token) {
-    throw new Error("Failed to get Sprout Social token");
+    throw new Error("Failed to get Sprout Social token: " + JSON.stringify(data));
   }
   return data.access_token;
 }
@@ -78,7 +85,8 @@ serve(async (req) => {
       send_time: scheduled_time,
     };
 
-    if (media_url && media_url.startsWith("data:image")) {
+    // Attach media if URL provided (supports both https:// and data:image URLs)
+    if (media_url) {
       try {
         const mediaResponse = await fetch(`${SPROUT_API_BASE}/${customerId}/media`, {
           method: "POST",
@@ -91,7 +99,14 @@ serve(async (req) => {
 
         if (mediaResponse.ok) {
           const mediaData = await mediaResponse.json();
-          publishPayload.media = [{ id: mediaData.id }];
+          const mediaId = mediaData.id || mediaData.data?.id;
+          if (mediaId) {
+            publishPayload.media = [{ id: mediaId }];
+            console.log("Media attached:", mediaId);
+          }
+        } else {
+          const errText = await mediaResponse.text();
+          console.error("Media upload failed, scheduling without media:", errText);
         }
       } catch (e) {
         console.error("Media upload failed, scheduling without media:", e);
