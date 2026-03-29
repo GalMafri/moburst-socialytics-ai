@@ -16,6 +16,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { Save, Plus, X, RefreshCw, Loader2, Play, Info, CalendarClock, Globe } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { BrandBookUpload } from "@/components/onboarding/BrandBookUpload";
+import { DesignReferencesUpload } from "@/components/onboarding/DesignReferencesUpload";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 
@@ -92,6 +94,10 @@ export default function ClientSetup() {
     brand_notes: "",
     brand_voice_preset: "",
     brand_book_text: "",
+    brand_book_url: "",
+    brand_book_file_path: "",
+    timezone: "UTC",
+    design_references: [] as string[],
     brand_identity: null as any,
     brief_text: "",
     brief_file_id: "",
@@ -160,6 +166,10 @@ export default function ClientSetup() {
         brand_notes: brandNotes,
         brand_voice_preset: voicePreset,
         brand_book_text: client.brand_book_text || "",
+        brand_book_url: (client as any).brand_book_url || "",
+        brand_book_file_path: (client as any).brand_book_file_path || "",
+        timezone: (client as any).timezone || "UTC",
+        design_references: ((client as any).design_references as string[]) || [],
         brand_identity: client.brand_identity || null,
         brief_text: client.brief_text || "",
         brief_file_id: client.brief_file_id || "",
@@ -187,7 +197,7 @@ export default function ClientSetup() {
       const serializedBrandNotes = form.brand_voice_preset
         ? `[VOICE:${form.brand_voice_preset}]\n${form.brand_notes}`
         : form.brand_notes;
-      const { brand_voice_preset, ...formWithoutPreset } = form;
+      const { brand_voice_preset, design_references, ...formWithoutPreset } = form;
       const payload = {
         ...formWithoutPreset,
         brand_notes: serializedBrandNotes,
@@ -195,6 +205,10 @@ export default function ClientSetup() {
         language: form.language.join(","),
         sprout_customer_id: "1676448",
         content_pillars: form.content_pillars as any,
+        brand_book_url: form.brand_book_url || null,
+        brand_book_file_path: form.brand_book_file_path || null,
+        timezone: form.timezone || "UTC",
+        design_references: design_references.length > 0 ? design_references : null,
       };
       let clientId: string;
       if (isNew) {
@@ -402,6 +416,35 @@ export default function ClientSetup() {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Enter the client's website to automatically extract brand colors and visual style.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Client Timezone</Label>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value={form.timezone}
+                    onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))}
+                  >
+                    <option value="UTC">UTC</option>
+                    <option value="America/New_York">Eastern Time (US)</option>
+                    <option value="America/Chicago">Central Time (US)</option>
+                    <option value="America/Denver">Mountain Time (US)</option>
+                    <option value="America/Los_Angeles">Pacific Time (US)</option>
+                    <option value="Europe/London">London (GMT/BST)</option>
+                    <option value="Europe/Paris">Central Europe (CET/CEST)</option>
+                    <option value="Europe/Berlin">Berlin (CET/CEST)</option>
+                    <option value="Asia/Jerusalem">Israel (IST/IDT)</option>
+                    <option value="Asia/Tokyo">Tokyo (JST)</option>
+                    <option value="Asia/Seoul">Seoul (KST)</option>
+                    <option value="Asia/Shanghai">Shanghai (CST)</option>
+                    <option value="America/Sao_Paulo">São Paulo (BRT)</option>
+                    <option value="Asia/Dubai">Dubai (GST)</option>
+                    <option value="Australia/Sydney">Sydney (AEST/AEDT)</option>
+                    <option value="Pacific/Auckland">Auckland (NZST/NZDT)</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Used for scheduling content calendar posting times.
                   </p>
                 </div>
 
@@ -767,19 +810,24 @@ export default function ClientSetup() {
                     rows={3}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Brand Book / Style Guide</Label>
-                  <Textarea
-                    value={form.brand_book_text}
-                    onChange={(e) => setForm((f) => ({ ...f, brand_book_text: e.target.value }))}
-                    placeholder="Paste brand book excerpts, style guide rules, visual identity guidelines, tone of voice rules..."
-                    rows={5}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Paste key excerpts from your brand book. These guidelines will be used by the AI when generating
-                    content recommendations and visual directions.
-                  </p>
-                </div>
+                <BrandBookUpload
+                  clientId={isNew ? undefined : id}
+                  clientName={form.name}
+                  brandBookUrl={form.brand_book_url}
+                  brandBookFilePath={form.brand_book_file_path}
+                  onBrandBookUrlChange={(url) => setForm((f) => ({ ...f, brand_book_url: url }))}
+                  onBrandBookFilePathChange={(path) => setForm((f) => ({ ...f, brand_book_file_path: path }))}
+                  onBrandIdentityExtracted={(identity) =>
+                    setForm((f) => ({ ...f, brand_identity: { ...f.brand_identity, ...identity } }))
+                  }
+                />
+
+                <DesignReferencesUpload
+                  clientId={isNew ? undefined : id}
+                  clientName={form.name}
+                  designReferences={form.design_references}
+                  onDesignReferencesChange={(refs) => setForm((f) => ({ ...f, design_references: refs }))}
+                />
                 <div className="space-y-2">
                   <Label>Brief Text</Label>
                   <Textarea

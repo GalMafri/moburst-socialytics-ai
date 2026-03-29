@@ -274,6 +274,7 @@ export default function RunAnalysis() {
         date_range_start: dateRangeStart || "",
         date_range_end: dateRangeEnd || "",
         skip_trends: skipTrends,
+        timezone: (client as any)?.timezone || "UTC",
       };
 
       console.log("Sending webhook payload:", JSON.stringify(payload, null, 2));

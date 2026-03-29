@@ -45,6 +45,9 @@ import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
+import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
+import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
+import { Send } from "lucide-react";
 
 export default function ReportView() {
   const { id, reportId } = useParams();
@@ -382,7 +385,14 @@ export default function ReportView() {
                       </CardHeader>
                       <CardContent className="space-y-3">
                         {(day.posts || []).map((post: any, postIdx: number) => (
-                          <CalendarPostCard key={postIdx} post={post} brandIdentity={brandIdentity} />
+                          <CalendarPostCard
+                            key={postIdx}
+                            post={post}
+                            brandIdentity={brandIdentity}
+                            clientId={id}
+                            reportId={reportId}
+                            clientTimezone={(report?.report_data as any)?.context?.timezone || "UTC"}
+                          />
                         ))}
                       </CardContent>
                     </Card>
@@ -494,8 +504,21 @@ function ContentRecommendations({ recommendations }: { recommendations: any[] })
 }
 
 /* ─── Calendar Post Card ─── */
-function CalendarPostCard({ post, brandIdentity }: { post: any; brandIdentity?: any }) {
+function CalendarPostCard({
+  post,
+  brandIdentity,
+  clientId,
+  reportId,
+  clientTimezone,
+}: {
+  post: any;
+  brandIdentity?: any;
+  clientId?: string;
+  reportId?: string;
+  clientTimezone?: string;
+}) {
   const [copied, setCopied] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
 
   const handleCopy = () => {
     const fullText =
@@ -525,6 +548,30 @@ function CalendarPostCard({ post, brandIdentity }: { post: any; brandIdentity?: 
             </span>
           )}
           <CreatePostDesignButton post={post} brandIdentity={brandIdentity} />
+          <CreatePostVideoButton post={post} brandIdentity={brandIdentity} />
+          {clientId && reportId && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setScheduleOpen(true);
+                }}
+              >
+                <Send className="h-3 w-3 mr-1" /> Schedule
+              </Button>
+              <SchedulePostModal
+                open={scheduleOpen}
+                onOpenChange={setScheduleOpen}
+                post={post}
+                clientId={clientId}
+                reportId={reportId}
+                clientTimezone={clientTimezone}
+              />
+            </>
+          )}
           <Button variant="ghost" size="sm" onClick={handleCopy} className="h-7 px-2">
             <Copy className="h-3.5 w-3.5 mr-1" />
             {copied ? "Copied!" : "Copy"}

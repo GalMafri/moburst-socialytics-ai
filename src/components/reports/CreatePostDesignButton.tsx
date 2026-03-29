@@ -26,9 +26,12 @@ interface CreatePostDesignButtonProps {
     format?: string;
   };
   brandIdentity?: BrandIdentity | null;
+  designReferences?: string[];
+  brandBookFilePath?: string;
+  onImageGenerated?: (url: string) => void;
 }
 
-export function CreatePostDesignButton({ post, brandIdentity }: CreatePostDesignButtonProps) {
+export function CreatePostDesignButton({ post, brandIdentity, designReferences, brandBookFilePath, onImageGenerated }: CreatePostDesignButtonProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -55,6 +58,8 @@ export function CreatePostDesignButton({ post, brandIdentity }: CreatePostDesign
           platform: post.platform,
           format: post.format,
           brand_context: brandIdentity || undefined,
+          design_references: designReferences || undefined,
+          brand_book_file_path: brandBookFilePath || undefined,
         },
       });
 
@@ -66,6 +71,9 @@ export function CreatePostDesignButton({ post, brandIdentity }: CreatePostDesign
 
       setImageUrl(data.image_url);
       setRevisedPrompt(data.revised_prompt || null);
+      if (data.image_url && onImageGenerated) {
+        onImageGenerated(data.image_url);
+      }
     } catch (err: any) {
       toast({
         title: "Image generation failed",

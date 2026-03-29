@@ -1,18 +1,71 @@
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, Play, Calendar, BarChart3 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Plus, Search, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2 } from "lucide-react";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 
 export function AdminDashboard() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+
+  const archiveMutation = useMutation({
+    mutationFn: async (clientId: string) => {
+      const { error } = await supabase
+        .from("clients")
+        .update({ archived_at: new Date().toISOString() } as any)
+        .eq("id", clientId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      toast.success("Client archived");
+    },
+    onError: (err: any) => toast.error("Failed to archive: " + err.message),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: async (clientId: string) => {
+      const { error } = await supabase
+        .from("clients")
+        .update({ archived_at: null } as any)
+        .eq("id", clientId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      toast.success("Client restored");
+    },
+    onError: (err: any) => toast.error("Failed to restore: " + err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (clientId: string) => {
+      const { data, error } = await supabase.functions.invoke("delete-client", {
+        body: { client_id: clientId },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      toast.success("Client permanently deleted");
+    },
+    onError: (err: any) => toast.error("Failed to delete: " + err.message),
+  });
 
   // Realtime: listen for any report changes to refresh dashboard
   useEffect(() => {
@@ -39,7 +92,11 @@ export function AdminDashboard() {
     },
   });
 
-  const filtered = clients?.filter((c: any) => c.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = clients?.filter((c: any) => {
+    const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase());
+    const isArchived = !!(c as any).archived_at;
+    return matchesSearch && (showArchived ? isArchived : !isArchived);
+  });
 
   return (
     <div className="space-y-6">
@@ -53,14 +110,24 @@ export function AdminDashboard() {
         </Button>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search clients..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
-        />
+      <div className="flex items-center gap-3">
+        <div className="relative max-w-sm flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search clients..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Button
+          variant={showArchived ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => setShowArchived(!showArchived)}
+        >
+          <Archive className="h-3 w-3 mr-1" />
+          {showArchived ? "Show Active" : "Show Archived"}
+        </Button>
       </div>
 
       {isLoading ? (
@@ -90,8 +157,46 @@ export function AdminDashboard() {
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">{client.name}</CardTitle>
-                    {client.logo_url && <img src={client.logo_url} alt="" className="h-8 w-8 rounded object-cover" />}
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="text-base">{client.name}</CardTitle>
+                      {(client as any).archived_at && (
+                        <Badge variant="secondary" className="text-xs">Archived</Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {client.logo_url && <img src={client.logo_url} alt="" className="h-8 w-8 rounded object-cover" />}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                          {(client as any).archived_at ? (
+                            <>
+                              <DropdownMenuItem onClick={() => restoreMutation.mutate(client.id)}>
+                                <RotateCcw className="h-4 w-4 mr-2" /> Restore
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onClick={() => {
+                                  const typed = prompt(`Type "${client.name}" to permanently delete this client:`);
+                                  if (typed === client.name) {
+                                    deleteMutation.mutate(client.id);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" /> Permanently Delete
+                              </DropdownMenuItem>
+                            </>
+                          ) : (
+                            <DropdownMenuItem onClick={() => archiveMutation.mutate(client.id)}>
+                              <Archive className="h-4 w-4 mr-2" /> Archive Client
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">

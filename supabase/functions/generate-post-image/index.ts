@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { prompt, platform, format, brand_context } = await req.json();
+    const { prompt, platform, format, brand_context, design_references, brand_book_file_path } = await req.json();
 
     if (!prompt) {
       return jsonResp({ error: "prompt is required" }, 400);
@@ -70,6 +70,40 @@ Deno.serve(async (req) => {
       brand_context,
     );
 
+    // ── Fetch design reference images for multimodal input ──
+    const contentParts: any[] = [];
+
+    if (design_references && Array.isArray(design_references) && design_references.length > 0) {
+      const storageClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+      contentParts.push({ text: "Here are existing brand design references. Match their visual style, layout patterns, and color usage:" });
+
+      for (const ref of design_references.slice(0, 3)) {
+        try {
+          const { data: fileData } = await storageClient.storage.from("design-references").download(ref);
+          if (fileData) {
+            const arrayBuffer = await fileData.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            let binary = "";
+            for (let i = 0; i < uint8Array.length; i++) {
+              binary += String.fromCharCode(uint8Array[i]);
+            }
+            const base64 = btoa(binary);
+            const ext = ref.split(".").pop()?.toLowerCase();
+            const mimeType = ext === "png" ? "image/png" : "image/jpeg";
+            contentParts.push({ inlineData: { mimeType, data: base64 } });
+          }
+        } catch (e) {
+          console.error("Failed to fetch design reference:", ref, e);
+        }
+      }
+
+      contentParts.push({ text: "Now create a new design based on this brief:" });
+    }
+
+    // Add the main design prompt
+    contentParts.push({ text: designPrompt });
+
     // ── Call Gemini 3.1 Flash Image (Nano Banana 2) ──
     const geminiModel = "gemini-3.1-flash-image-preview";
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
@@ -80,7 +114,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         contents: [
           {
-            parts: [{ text: designPrompt }],
+            parts: contentParts,
           },
         ],
         generationConfig: {
