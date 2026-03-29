@@ -43,7 +43,7 @@ export function SchedulePostModal({
         .from("sprout_profiles")
         .select("*")
         .eq("client_id", clientId)
-        .eq("is_active", true);
+        .neq("is_active", false);
       if (error) throw error;
       return data;
     },
