@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar, Clock, Send, Loader2, Image as ImageIcon } from "lucide-react";
+import { Calendar, Clock, Send, Loader2, Image as ImageIcon, AlertCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -19,6 +19,19 @@ interface SchedulePostModalProps {
   generatedImageUrl?: string | null;
   clientTimezone?: string;
 }
+
+// Map content calendar platform names to Sprout network_type values
+const platformToNetworkTypes: Record<string, string[]> = {
+  instagram: ["instagram", "fb_instagram_account"],
+  tiktok: ["tiktok"],
+  facebook: ["facebook"],
+  linkedin: ["linkedin"],
+  "twitter/x": ["twitter"],
+  twitter: ["twitter"],
+  youtube: ["youtube"],
+  pinterest: ["pinterest"],
+  threads: ["threads"],
+};
 
 export function SchedulePostModal({
   open,
@@ -43,60 +56,40 @@ export function SchedulePostModal({
     }
   }, [open]);
 
-  // First try to get profiles assigned to this client
-  const { data: assignedProfiles } = useQuery({
-    queryKey: ["sprout-profiles-assigned", clientId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("sprout_profiles")
-        .select("*")
-        .eq("client_id", clientId);
-      if (error) throw error;
-      return data;
-    },
-    enabled: open,
-  });
-
-  // If no assigned profiles, fetch all available from Sprout Social API
-  const { data: allSproutProfiles } = useQuery({
+  // Always fetch all Sprout profiles directly from the API when modal opens
+  const {
+    data: allSproutProfiles,
+    isLoading: loadingProfiles,
+    error: profilesError,
+  } = useQuery({
     queryKey: ["sprout-profiles-all"],
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke("sprout-profiles", {
         body: { customer_id: "1676448" },
       });
-      if (error) throw error;
-      return data?.profiles || data || [];
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      return (data?.profiles || []) as any[];
     },
-    enabled: open && (!assignedProfiles || assignedProfiles.length === 0),
+    enabled: open,
+    staleTime: 60_000, // cache for 1 minute
   });
 
-  // Use assigned profiles if available, otherwise fall back to all Sprout profiles
-  const profiles = (assignedProfiles && assignedProfiles.length > 0)
-    ? assignedProfiles
-    : (allSproutProfiles || []);
-
-  // Map content calendar platform names to Sprout network_type values
-  const platformToNetworkTypes: Record<string, string[]> = {
-    instagram: ["instagram", "fb_instagram_account"],
-    tiktok: ["tiktok"],
-    facebook: ["facebook"],
-    linkedin: ["linkedin"],
-    "twitter/x": ["twitter"],
-    twitter: ["twitter"],
-    youtube: ["youtube"],
-    pinterest: ["pinterest"],
-    threads: ["threads"],
-  };
+  const profiles = allSproutProfiles || [];
 
   const postPlatform = (post?.platform || "").toLowerCase();
   const matchingNetworkTypes = platformToNetworkTypes[postPlatform] || [postPlatform];
 
-  // For assigned profiles, match on network_type; for API profiles, also match on network_type
   const platformProfiles = profiles.filter((p: any) => {
     const networkType = (p.network_type || "").toLowerCase();
     return matchingNetworkTypes.includes(networkType);
   });
 
+  // Show all profiles as fallback if none match the platform
+  const displayProfiles = platformProfiles.length > 0 ? platformProfiles : profiles;
+  const noMatchWarning = platformProfiles.length === 0 && profiles.length > 0;
+
+  // Fill in form fields when modal opens
   useEffect(() => {
     if (open && post) {
       setPostContent(post.copy || "");
@@ -127,12 +120,12 @@ export function SchedulePostModal({
     }
   }, [open, post, generatedImageUrl]);
 
-  // Auto-select first matching profile once profiles load (runs when profiles change)
+  // Auto-select first matching profile once profiles load
   useEffect(() => {
-    if (open && platformProfiles.length > 0 && !selectedProfileId) {
-      setSelectedProfileId(platformProfiles[0].id?.toString());
+    if (open && displayProfiles.length > 0 && !selectedProfileId) {
+      setSelectedProfileId(displayProfiles[0].id?.toString());
     }
-  }, [open, platformProfiles, selectedProfileId]);
+  }, [open, displayProfiles, selectedProfileId]);
 
   const handleSchedule = async () => {
     if (!selectedProfileId) {
@@ -147,12 +140,14 @@ export function SchedulePostModal({
     setScheduling(true);
     try {
       const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`);
-      const selectedProfile = profiles?.find((p: any) =>
-        p.id === selectedProfileId || p.id?.toString() === selectedProfileId
+      const selectedProfile = profiles?.find(
+        (p: any) => p.id?.toString() === selectedProfileId
       );
 
-      // sprout_profile_id is either from DB (assigned) or directly from API (id field)
+      // For API profiles, `id` IS the Sprout customer_profile_id
       const sproutId = selectedProfile?.sprout_profile_id || selectedProfile?.id;
+
+      console.log("Scheduling post:", { sproutId, platform: post.platform, selectedProfile });
 
       const { data, error } = await supabase.functions.invoke("schedule-sprout-post", {
         body: {
@@ -167,12 +162,20 @@ export function SchedulePostModal({
         },
       });
 
-      if (error) throw error;
+      // Check both the invoke error AND the response body error
+      if (error) {
+        const detail = (data as any)?.error || error.message;
+        throw new Error(detail);
+      }
+      if ((data as any)?.error) {
+        throw new Error((data as any).error);
+      }
 
       toast.success("Post scheduled successfully!");
       onOpenChange(false);
     } catch (err: any) {
-      toast.error("Failed to schedule: " + err.message);
+      console.error("Schedule error:", err);
+      toast.error("Failed to schedule: " + err.message, { duration: 8000 });
     } finally {
       setScheduling(false);
     }
@@ -190,22 +193,45 @@ export function SchedulePostModal({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Profile</Label>
-            {platformProfiles.length > 0 ? (
-              <Select value={selectedProfileId} onValueChange={setSelectedProfileId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select profile" />
-                </SelectTrigger>
-                <SelectContent>
-                  {platformProfiles.map((profile: any) => (
-                    <SelectItem key={profile.id?.toString()} value={profile.id?.toString()}>
-                      {profile.profile_name || profile.native_name || profile.name || "Profile"} ({profile.network_type})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
+
+            {loadingProfiles && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading Sprout profiles...
+              </div>
+            )}
+
+            {profilesError && (
+              <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 rounded-md p-2">
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>Failed to load profiles: {(profilesError as Error).message}</span>
+              </div>
+            )}
+
+            {!loadingProfiles && !profilesError && displayProfiles.length > 0 && (
+              <>
+                {noMatchWarning && (
+                  <p className="text-xs text-amber-600 bg-amber-50 rounded-md px-2 py-1">
+                    No {post?.platform} profiles found — showing all {profiles.length} connected profiles.
+                  </p>
+                )}
+                <Select value={selectedProfileId} onValueChange={setSelectedProfileId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select profile" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {displayProfiles.map((profile: any) => (
+                      <SelectItem key={profile.id?.toString()} value={profile.id?.toString()}>
+                        {profile.profile_name || profile.native_name || profile.name || "Profile"} ({profile.network_type})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
+            )}
+
+            {!loadingProfiles && !profilesError && profiles.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                No {post?.platform} profiles found. Make sure Sprout Social profiles are connected in the client setup.
+                No Sprout Social profiles found. Make sure your Sprout Social account is connected and credentials are configured.
               </p>
             )}
           </div>
@@ -260,7 +286,10 @@ export function SchedulePostModal({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSchedule} disabled={scheduling || !selectedProfileId}>
+          <Button
+            onClick={handleSchedule}
+            disabled={scheduling || !selectedProfileId || loadingProfiles}
+          >
             {scheduling ? (
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
             ) : (
