@@ -1033,7 +1033,7 @@ function SproutProfileSelector({
         .from("sprout_profiles")
         .select("*")
         .eq("client_id", clientId!)
-        .eq("is_active", true);
+        .neq("is_active", false); // include rows where is_active is NULL or TRUE
       if (error) throw error;
       return data;
     },

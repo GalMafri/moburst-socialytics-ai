@@ -72,6 +72,7 @@ serve(async (req) => {
       instagram: "Instagram",
       fb_instagram_account: "Instagram",
       linkedin: "LinkedIn",
+      linkedin_company: "LinkedIn",
       tiktok: "TikTok",
       youtube: "YouTube",
       pinterest: "Pinterest",
