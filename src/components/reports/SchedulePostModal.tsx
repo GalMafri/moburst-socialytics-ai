@@ -21,7 +21,6 @@ interface SchedulePostModalProps {
   clientTimezone?: string;
 }
 
-// All Sprout network_type values that map to each content-calendar platform name
 const platformToNetworkTypes: Record<string, string[]> = {
   instagram: ["instagram", "fb_instagram_account"],
   tiktok: ["tiktok"],
@@ -53,30 +52,10 @@ export function SchedulePostModal({
   const postPlatform = (post?.platform || "").toLowerCase();
   const matchingNetworkTypes = platformToNetworkTypes[postPlatform] || [postPlatform];
 
-  // ── 1. Try DB-assigned profiles for this client (set in onboarding) ──────────
-  const { data: assignedProfiles, isLoading: loadingAssigned } = useQuery({
-    queryKey: ["sprout-profiles-assigned", clientId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("sprout_profiles")
-        .select("*")
-        .eq("client_id", clientId)
-        .neq("is_active", false);
-      if (error) throw error;
-      return (data || []) as any[];
-    },
-    enabled: open && !!clientId,
-  });
-
-  const assignedForPlatform = (assignedProfiles || []).filter((p: any) =>
-    matchingNetworkTypes.includes((p.network_type || "").toLowerCase())
-  );
-  const hasAssignedProfiles = !!assignedProfiles; // query has resolved (even if empty)
-  const useAssigned = assignedForPlatform.length > 0;
-
-  // ── 2. Fallback: fetch all Sprout profiles from API if none assigned ──────────
+  // ── Always fetch all Sprout API profiles when modal opens ───────────────────
+  // This is the reliable source; DB-assigned profiles are an enhancement on top.
   const {
-    data: allApiProfiles,
+    data: apiProfiles,
     isLoading: loadingApi,
     error: apiError,
   } = useQuery({
@@ -87,120 +66,111 @@ export function SchedulePostModal({
       });
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
-      // Normalize API shape to match DB shape so the rest of the code is uniform
-      return ((data?.profiles || []) as any[]).map((p: any) => ({
-        sprout_profile_id: p.id,           // customer_profile_id from API
-        profile_name: p.name,
-        native_name: p.native_name,
-        network_type: p.network_type,
-        native_link: p.native_link,
-        _from_api: true,
-      }));
+      return (data?.profiles || []) as any[];
     },
-    enabled: open && hasAssignedProfiles && !useAssigned,
+    enabled: open,
     staleTime: 60_000,
   });
 
-  const apiForPlatform = (allApiProfiles || []).filter((p: any) =>
+  // ── DB-assigned profiles: used only for auto-detection ──────────────────────
+  // Independent query — does NOT gate the API profiles query above.
+  const { data: dbProfiles } = useQuery({
+    queryKey: ["sprout-profiles-assigned", clientId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("sprout_profiles")
+        .select("*")
+        .eq("client_id", clientId)
+        .neq("is_active", false);
+      return (data || []) as any[];
+    },
+    enabled: open && !!clientId,
+  });
+
+  // ── Compute which profiles to show ─────────────────────────────────────────
+  // API profiles filtered to this platform
+  const apiForPlatform = (apiProfiles || []).filter((p: any) =>
     matchingNetworkTypes.includes((p.network_type || "").toLowerCase())
   );
 
-  // ── Resolved profile list ────────────────────────────────────────────────────
-  // Prefer assigned profiles; fall back to all-API profiles filtered by platform;
-  // last resort: all API profiles (any platform) so user can always pick something.
-  const platformProfiles = useAssigned
-    ? assignedForPlatform
+  // DB-assigned profiles matched to this platform (for auto-detection)
+  const assignedForPlatform = (dbProfiles || []).filter((p: any) =>
+    matchingNetworkTypes.includes((p.network_type || "").toLowerCase())
+  );
+
+  // If client has DB-assigned profiles for this platform, show only those.
+  // Otherwise show all API profiles for this platform (or all API if none match).
+  const hasDbAssigned = assignedForPlatform.length > 0;
+
+  const displayProfiles = hasDbAssigned
+    ? // Enrich DB records with full API profile data by matching sprout_profile_id
+      assignedForPlatform.map((dbP: any) => {
+        const apiMatch = (apiProfiles || []).find(
+          (ap: any) => String(ap.id) === String(dbP.sprout_profile_id)
+        );
+        return apiMatch ?? { ...dbP, id: dbP.sprout_profile_id };
+      })
     : apiForPlatform.length > 0
     ? apiForPlatform
-    : (allApiProfiles || []);
+    : (apiProfiles || []);
 
-  const noMatchWarning = !useAssigned && apiForPlatform.length === 0 && (allApiProfiles || []).length > 0;
-  const isLoading = loadingAssigned || (!useAssigned && hasAssignedProfiles && loadingApi);
-  const loadError = !useAssigned ? apiError : null;
+  const noMatchWarning = !hasDbAssigned && apiForPlatform.length === 0 && (apiProfiles || []).length > 0;
+  const autoSelected = hasDbAssigned && assignedForPlatform.length === 1;
 
-  // ── Auto-select single match ─────────────────────────────────────────────────
+  // ── Auto-select when exactly one profile matches ────────────────────────────
   useEffect(() => {
-    if (!open) {
-      setSelectedProfileId("");
-      return;
+    if (!open) { setSelectedProfileId(""); return; }
+    if (displayProfiles.length === 1) {
+      setSelectedProfileId(String(displayProfiles[0].id));
     }
-    if (platformProfiles.length === 1) {
-      setSelectedProfileId(String(platformProfiles[0].sprout_profile_id));
-    }
-  }, [open, platformProfiles.length]);
+  }, [open, displayProfiles.length]);
 
-  // ── Populate form fields ─────────────────────────────────────────────────────
+  // ── Populate form fields ────────────────────────────────────────────────────
   useEffect(() => {
     if (open && post) {
       setPostContent(post.copy || "");
       setMediaUrl(generatedImageUrl || null);
-
       if (post.date_label) {
         try {
           const d = new Date(post.date_label);
           if (!isNaN(d.getTime())) setScheduledDate(d.toISOString().split("T")[0]);
-        } catch {
-          setScheduledDate("");
-        }
+        } catch { setScheduledDate(""); }
       }
-
       if (post.posting_time) {
-        const timeMatch = post.posting_time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-        if (timeMatch) {
-          let hours = parseInt(timeMatch[1]);
-          const mins = timeMatch[2];
-          const ampm = timeMatch[3].toUpperCase();
-          if (ampm === "PM" && hours < 12) hours += 12;
-          if (ampm === "AM" && hours === 12) hours = 0;
-          setScheduledTime(`${hours.toString().padStart(2, "0")}:${mins}`);
+        const m = post.posting_time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+        if (m) {
+          let h = parseInt(m[1]);
+          const ampm = m[3].toUpperCase();
+          if (ampm === "PM" && h < 12) h += 12;
+          if (ampm === "AM" && h === 12) h = 0;
+          setScheduledTime(`${h.toString().padStart(2, "0")}:${m[2]}`);
         }
       }
     }
   }, [open, post, generatedImageUrl]);
 
-  const selectedProfile = platformProfiles.find(
-    (p: any) => String(p.sprout_profile_id) === selectedProfileId
-  );
-  const autoSelected = useAssigned && assignedForPlatform.length === 1;
+  const selectedProfile = displayProfiles.find((p: any) => String(p.id) === selectedProfileId);
 
-  // ── Schedule ─────────────────────────────────────────────────────────────────
+  // ── Schedule ────────────────────────────────────────────────────────────────
   const handleSchedule = async () => {
-    if (!selectedProfileId) {
-      toast.error("Please select a profile");
-      return;
-    }
-    if (!scheduledDate || !scheduledTime) {
-      toast.error("Please set date and time");
-      return;
-    }
-
+    if (!selectedProfileId) { toast.error("Please select a profile"); return; }
+    if (!scheduledDate || !scheduledTime) { toast.error("Please set date and time"); return; }
     setScheduling(true);
     try {
       const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`);
-      // Always send sprout_profile_id as a number (Sprout API requirement)
-      const sproutId = Number(selectedProfileId);
-
       const { data, error } = await supabase.functions.invoke("schedule-sprout-post", {
         body: {
           client_id: clientId,
           report_id: reportId,
-          sprout_profile_id: sproutId,
+          sprout_profile_id: Number(selectedProfileId),
           platform: post.platform,
           scheduled_time: scheduledDateTime.toISOString(),
           post_content: postContent,
           media_url: mediaUrl,
         },
       });
-
-      // Surface the actual Sprout API error from the response body
-      if (error) {
-        const detail = (data as any)?.error || error.message;
-        throw new Error(detail);
-      }
-      if ((data as any)?.error) {
-        throw new Error((data as any).error);
-      }
-
+      if (error) throw new Error((data as any)?.error || error.message);
+      if ((data as any)?.error) throw new Error((data as any).error);
       toast.success("Post scheduled successfully!");
       onOpenChange(false);
     } catch (err: any) {
@@ -211,7 +181,7 @@ export function SchedulePostModal({
     }
   };
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
@@ -222,28 +192,27 @@ export function SchedulePostModal({
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* ── Profile ── */}
           <div className="space-y-2">
             <Label>Sprout Profile</Label>
 
-            {isLoading && (
+            {loadingApi && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading profiles…
               </div>
             )}
 
-            {loadError && (
+            {apiError && (
               <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 rounded-md p-2">
                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                <span>Failed to load profiles: {(loadError as Error).message}</span>
+                <span>Failed to load profiles: {(apiError as Error).message}</span>
               </div>
             )}
 
-            {/* Auto-detected single assigned profile: show as read-only badge */}
-            {!isLoading && autoSelected && selectedProfile && (
+            {/* Auto-detected: single DB-assigned profile for this platform */}
+            {!loadingApi && autoSelected && selectedProfile && (
               <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
                 <span className="font-medium">
-                  {selectedProfile.profile_name || selectedProfile.native_name || "Profile"}
+                  {selectedProfile.name || selectedProfile.native_name || "Profile"}
                 </span>
                 <Badge variant="secondary" className="text-xs capitalize">
                   {selectedProfile.network_type}
@@ -252,19 +221,18 @@ export function SchedulePostModal({
               </div>
             )}
 
-            {/* Multiple profiles or fallback API profiles: show dropdown */}
-            {!isLoading && !autoSelected && platformProfiles.length > 0 && (
+            {/* Dropdown: multiple profiles or API fallback */}
+            {!loadingApi && !autoSelected && displayProfiles.length > 0 && (
               <>
                 {noMatchWarning && (
                   <p className="text-xs text-amber-600 bg-amber-50 rounded-md px-2 py-1">
-                    No {post?.platform} profiles configured for this client — showing all connected profiles.
-                    Assign the right ones in <strong>Client Setup → Sprout Social</strong>.
+                    No {post?.platform} profiles found — showing all connected profiles.
+                    Assign the correct one in <strong>Client Setup → Sprout Social</strong>.
                   </p>
                 )}
-                {!useAssigned && !noMatchWarning && (
+                {!hasDbAssigned && !noMatchWarning && (
                   <p className="text-xs text-amber-600 bg-amber-50 rounded-md px-2 py-1">
-                    Showing all connected {post?.platform} profiles. Assign specific ones in{" "}
-                    <strong>Client Setup → Sprout Social</strong> to enable auto-detection.
+                    Assign profiles in <strong>Client Setup → Sprout Social</strong> to enable auto-detection.
                   </p>
                 )}
                 <Select value={selectedProfileId} onValueChange={setSelectedProfileId}>
@@ -272,12 +240,9 @@ export function SchedulePostModal({
                     <SelectValue placeholder="Select profile" />
                   </SelectTrigger>
                   <SelectContent>
-                    {platformProfiles.map((profile: any) => (
-                      <SelectItem
-                        key={String(profile.sprout_profile_id)}
-                        value={String(profile.sprout_profile_id)}
-                      >
-                        {profile.profile_name || profile.native_name || "Profile"} ({profile.network_type})
+                    {displayProfiles.map((profile: any) => (
+                      <SelectItem key={String(profile.id)} value={String(profile.id)}>
+                        {profile.name || profile.native_name || "Profile"} ({profile.network_type})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -285,42 +250,33 @@ export function SchedulePostModal({
               </>
             )}
 
-            {!isLoading && !loadError && platformProfiles.length === 0 && hasAssignedProfiles && (
+            {!loadingApi && !apiError && displayProfiles.length === 0 && (
               <div className="flex items-start gap-2 text-sm text-amber-700 bg-amber-50 rounded-md p-2">
                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                <span>Could not load any Sprout Social profiles. Check your Sprout credentials in the edge function settings.</span>
+                <span>No Sprout Social profiles found. Check your credentials.</span>
               </div>
             )}
           </div>
 
-          {/* ── Date / Time ── */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label className="flex items-center gap-1">
-                <Calendar className="h-3 w-3" /> Date
-              </Label>
+              <Label className="flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</Label>
               <Input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label className="flex items-center gap-1">
-                <Clock className="h-3 w-3" /> Time ({clientTimezone})
-              </Label>
+              <Label className="flex items-center gap-1"><Clock className="h-3 w-3" /> Time ({clientTimezone})</Label>
               <Input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} />
             </div>
           </div>
 
-          {/* ── Post copy ── */}
           <div className="space-y-2">
             <Label>Post Copy</Label>
             <Textarea value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={4} />
           </div>
 
-          {/* ── Media preview ── */}
           {mediaUrl && (
             <div className="space-y-2">
-              <Label className="flex items-center gap-1">
-                <ImageIcon className="h-3 w-3" /> Attached Media
-              </Label>
+              <Label className="flex items-center gap-1"><ImageIcon className="h-3 w-3" /> Attached Media</Label>
               <img src={mediaUrl} alt="Post media" className="w-full max-h-48 object-contain rounded-md border" />
             </div>
           )}
@@ -328,7 +284,7 @@ export function SchedulePostModal({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleSchedule} disabled={scheduling || !selectedProfileId || isLoading}>
+          <Button onClick={handleSchedule} disabled={scheduling || !selectedProfileId || loadingApi}>
             {scheduling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
             Schedule Post
           </Button>
