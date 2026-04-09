@@ -522,7 +522,7 @@ function CalendarPostCard({
 
   const handleCopy = () => {
     const fullText =
-      post.copy + (post.hashtags?.length ? "\n\n" + post.hashtags.map((h: string) => `#${h}`).join(" ") : "");
+      post.copy + (post.hashtags?.length ? "\n\n" + post.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`).join(" ") : "");
     navigator.clipboard.writeText(fullText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -585,7 +585,7 @@ function CalendarPostCard({
           <div className="flex flex-wrap gap-1.5 mt-3 pt-2 border-t">
             {post.hashtags.map((h: string) => (
               <span key={h} className="text-xs text-primary">
-                #{h}
+                {h.startsWith('#') ? h : `#${h}`}
               </span>
             ))}
           </div>
@@ -857,7 +857,7 @@ function TrendsSection({
                 <div className="flex flex-wrap gap-2">
                   {analysis.top_hashtags.map((h: string) => (
                     <Badge key={h} variant="outline" className="px-3 py-1 text-sm font-mono">
-                      #{h}
+                      {h.startsWith('#') ? h : `#${h}`}
                     </Badge>
                   ))}
                 </div>
@@ -979,7 +979,7 @@ function TrendsSection({
                     <div className="flex flex-wrap gap-1.5">
                       {post.hashtags.slice(0, 5).map((h: string) => (
                         <span key={h} className="text-xs text-primary font-mono">
-                          #{h}
+                          {h.startsWith('#') ? h : `#${h}`}
                         </span>
                       ))}
                     </div>
