@@ -17,7 +17,7 @@ interface SchedulePostModalProps {
   post: any;
   clientId: string;
   reportId: string;
-  generatedImageUrl?: string | null;
+  generatedMediaUrls?: string[];
   clientTimezone?: string;
 }
 
@@ -39,14 +39,14 @@ export function SchedulePostModal({
   post,
   clientId,
   reportId,
-  generatedImageUrl,
+  generatedMediaUrls = [],
   clientTimezone = "UTC",
 }: SchedulePostModalProps) {
   const [selectedProfileId, setSelectedProfileId] = useState<string>("");
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
   const [postContent, setPostContent] = useState("");
-  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [mediaUrls, setMediaUrls] = useState<string[]>([]);
   const [scheduling, setScheduling] = useState(false);
 
   const postPlatform = (post?.platform || "").toLowerCase();
@@ -128,14 +128,18 @@ export function SchedulePostModal({
   // ── Populate form fields ────────────────────────────────────────────────────
   useEffect(() => {
     if (open && post) {
-      // Build full post content: copy + hashtags with proper spacing
+      // Build full post content: copy + hashtags (only if not already in copy)
       let content = (post.copy || "").trim();
       if (post.hashtags?.length) {
-        const tags = post.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`).join(" ");
-        content += "\n\n" + tags;
+        const tags = post.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`);
+        // Check if hashtags are already present in the copy to avoid duplication
+        const hasHashtagsInCopy = tags.some((tag: string) => content.includes(tag));
+        if (!hasHashtagsInCopy) {
+          content += "\n\n" + tags.join(" ");
+        }
       }
       setPostContent(content);
-      setMediaUrl(generatedImageUrl || null);
+      setMediaUrls(generatedMediaUrls.length > 0 ? generatedMediaUrls : []);
       if (post.date_label) {
         try {
           const d = new Date(post.date_label);
@@ -153,7 +157,7 @@ export function SchedulePostModal({
         }
       }
     }
-  }, [open, post, generatedImageUrl]);
+  }, [open, post, generatedMediaUrls]);
 
   const selectedProfile = displayProfiles.find((p: any) => String(p.id) === selectedProfileId);
 
@@ -172,7 +176,8 @@ export function SchedulePostModal({
           platform: post.platform,
           scheduled_time: scheduledDateTime.toISOString(),
           post_content: postContent,
-          media_url: mediaUrl,
+          media_urls: mediaUrls.length > 0 ? mediaUrls : undefined,
+          media_url: mediaUrls.length === 1 ? mediaUrls[0] : undefined,
         },
       });
       if (error) throw new Error((data as any)?.error || error.message);
@@ -280,10 +285,21 @@ export function SchedulePostModal({
             <Textarea value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={6} className="whitespace-pre-wrap" />
           </div>
 
-          {mediaUrl && (
+          {mediaUrls.length > 0 && (
             <div className="space-y-2">
-              <Label className="flex items-center gap-1"><ImageIcon className="h-3 w-3" /> Attached Media</Label>
-              <img src={mediaUrl} alt="Post media" className="w-full max-h-48 object-contain rounded-md border" />
+              <Label className="flex items-center gap-1">
+                <ImageIcon className="h-3 w-3" /> Attached Media ({mediaUrls.length} {mediaUrls.length === 1 ? "file" : "files"})
+              </Label>
+              <div className={mediaUrls.length > 1 ? "grid grid-cols-2 gap-2" : ""}>
+                {mediaUrls.map((url, i) => {
+                  const isVideo = url.includes("video") || url.includes("veo") || url.endsWith(".mp4") || url.includes("generativelanguage");
+                  return isVideo ? (
+                    <video key={i} src={url} controls className="w-full max-h-48 rounded-md border object-contain" />
+                  ) : (
+                    <img key={i} src={url} alt={`Media ${i + 1}`} className="w-full max-h-48 object-contain rounded-md border" />
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

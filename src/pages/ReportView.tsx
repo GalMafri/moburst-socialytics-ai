@@ -519,7 +519,7 @@ function CalendarPostCard({
 }) {
   const [copied, setCopied] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [generatedMediaUrl, setGeneratedMediaUrl] = useState<string | null>(null);
+  const [generatedMediaUrls, setGeneratedMediaUrls] = useState<string[]>([]);
 
   const handleCopy = () => {
     const fullText =
@@ -551,12 +551,12 @@ function CalendarPostCard({
           <CreatePostDesignButton
             post={post}
             brandIdentity={brandIdentity}
-            onImageGenerated={(url) => setGeneratedMediaUrl(url)}
+            onImagesGenerated={(urls) => setGeneratedMediaUrls(urls)}
           />
           <CreatePostVideoButton
             post={post}
             brandIdentity={brandIdentity}
-            onVideoGenerated={(url) => setGeneratedMediaUrl(url)}
+            onVideoGenerated={(url) => setGeneratedMediaUrls([url])}
           />
           {clientId && reportId && (
             <>
@@ -577,7 +577,7 @@ function CalendarPostCard({
                 post={post}
                 clientId={clientId}
                 reportId={reportId}
-                generatedImageUrl={generatedMediaUrl}
+                generatedMediaUrls={generatedMediaUrls}
                 clientTimezone={clientTimezone}
               />
             </>

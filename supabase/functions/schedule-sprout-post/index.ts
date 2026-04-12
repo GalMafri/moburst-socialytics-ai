@@ -57,7 +57,13 @@ serve(async (req) => {
       scheduled_time,
       post_content,
       media_url,
+      media_urls,
     } = await req.json();
+
+    // Normalize: support both single media_url and array media_urls
+    const allMediaUrls: string[] = media_urls?.length > 0
+      ? media_urls
+      : media_url ? [media_url] : [];
 
     if (!sprout_profile_id || !scheduled_time || !post_content) {
       return new Response(
@@ -85,31 +91,37 @@ serve(async (req) => {
       send_time: scheduled_time,
     };
 
-    // Attach media if URL provided (supports both https:// and data:image URLs)
-    if (media_url) {
-      try {
-        const mediaResponse = await fetch(`${SPROUT_API_BASE}/${customerId}/media`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ url: media_url }),
-        });
+    // Attach media if URLs provided (supports both https:// and data:image URLs)
+    if (allMediaUrls.length > 0) {
+      const uploadedMedia: { id: string }[] = [];
+      for (const url of allMediaUrls) {
+        try {
+          const mediaResponse = await fetch(`${SPROUT_API_BASE}/${customerId}/media`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ url }),
+          });
 
-        if (mediaResponse.ok) {
-          const mediaData = await mediaResponse.json();
-          const mediaId = mediaData.id || mediaData.data?.id;
-          if (mediaId) {
-            publishPayload.media = [{ id: mediaId }];
-            console.log("Media attached:", mediaId);
+          if (mediaResponse.ok) {
+            const mediaData = await mediaResponse.json();
+            const mediaId = mediaData.id || mediaData.data?.id;
+            if (mediaId) {
+              uploadedMedia.push({ id: mediaId });
+              console.log("Media attached:", mediaId);
+            }
+          } else {
+            const errText = await mediaResponse.text();
+            console.error("Media upload failed for one item, continuing:", errText);
           }
-        } else {
-          const errText = await mediaResponse.text();
-          console.error("Media upload failed, scheduling without media:", errText);
+        } catch (e) {
+          console.error("Media upload failed for one item, continuing:", e);
         }
-      } catch (e) {
-        console.error("Media upload failed, scheduling without media:", e);
+      }
+      if (uploadedMedia.length > 0) {
+        publishPayload.media = uploadedMedia;
       }
     }
 
@@ -137,7 +149,7 @@ serve(async (req) => {
       scheduled_time,
       status: "scheduled",
       post_content,
-      media_url: media_url ? "attached" : null,
+      media_url: allMediaUrls.length > 0 ? `${allMediaUrls.length} attached` : null,
     });
 
     if (insertError) {
