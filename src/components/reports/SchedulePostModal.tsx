@@ -292,7 +292,14 @@ export function SchedulePostModal({
               </Label>
               <div className={mediaUrls.length > 1 ? "grid grid-cols-2 gap-2" : ""}>
                 {mediaUrls.map((url, i) => {
-                  const isVideo = url.includes("video") || url.includes("veo") || url.endsWith(".mp4") || url.includes("generativelanguage");
+                  // Detect video by URL prefix/protocol — never match inside base64 data
+                  const isDataImage = url.startsWith("data:image/");
+                  const isVideo = !isDataImage && (
+                    url.startsWith("data:video/") ||
+                    url.endsWith(".mp4") ||
+                    url.endsWith(".webm") ||
+                    url.includes("generativelanguage.googleapis.com")
+                  );
                   return isVideo ? (
                     <video key={i} src={url} controls className="w-full max-h-48 rounded-md border object-contain" />
                   ) : (
