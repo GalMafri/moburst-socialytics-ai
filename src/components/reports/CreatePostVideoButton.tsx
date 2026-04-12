@@ -11,6 +11,7 @@ import { toast } from "sonner";
 interface CreatePostVideoButtonProps {
   post: any;
   brandIdentity?: any;
+  onVideoGenerated?: (url: string) => void;
 }
 
 /** Platform-specific video specs and creative guidance */
@@ -74,7 +75,7 @@ function getPlatformVideoSpec(platform?: string, format?: string) {
   };
 }
 
-export function CreatePostVideoButton({ post, brandIdentity }: CreatePostVideoButtonProps) {
+export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }: CreatePostVideoButtonProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -151,6 +152,7 @@ export function CreatePostVideoButton({ post, brandIdentity }: CreatePostVideoBu
       if (error) throw error;
       if (data?.video_url) {
         setVideoUrl(data.video_url);
+        if (onVideoGenerated) onVideoGenerated(data.video_url);
         toast.success("Video generated!");
       } else {
         toast.error("Video generation failed — no video returned");
