@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { Save, Plus, X, RefreshCw, Loader2, Play, Info, CalendarClock, Globe } from "lucide-react";
+import { Navigate } from "react-router-dom";
 import { Switch } from "@/components/ui/switch";
 import { BrandBookUpload } from "@/components/onboarding/BrandBookUpload";
 import { DesignReferencesUpload } from "@/components/onboarding/DesignReferencesUpload";
@@ -78,7 +79,7 @@ const DEFAULT_PILLARS: ContentPillar[] = [
 export default function ClientSetup() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, canManageClients } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const isNew = id === "new";
@@ -309,6 +310,8 @@ export default function ClientSetup() {
   const removePillar = (index: number) => {
     setForm((f) => ({ ...f, content_pillars: f.content_pillars.filter((_, i) => i !== index) }));
   };
+
+  if (!canManageClients) return <Navigate to="/" replace />;
 
   return (
     <AppLayout title={isNew ? "New Client" : `${form.name || "Client"} Setup`}>

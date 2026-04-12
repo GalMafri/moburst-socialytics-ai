@@ -15,10 +15,12 @@ import { Plus, Search, Play, Calendar, BarChart3, MoreVertical, Archive, RotateC
 import { PlatformBadge } from "@/lib/platform-config";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 
 export function AdminDashboard() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { canManageClients, canRunAnalysis, canDelete } = useAuth();
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
 
@@ -105,9 +107,11 @@ export function AdminDashboard() {
           <h2 className="text-2xl font-bold">Clients</h2>
           <p className="text-muted-foreground text-sm">{clients?.length ?? 0} clients configured</p>
         </div>
-        <Button onClick={() => navigate("/clients/new/setup")}>
-          <Plus className="h-4 w-4 mr-2" /> Add Client
-        </Button>
+        {canManageClients && (
+          <Button onClick={() => navigate("/clients/new/setup")}>
+            <Plus className="h-4 w-4 mr-2" /> Add Client
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
@@ -165,37 +169,39 @@ export function AdminDashboard() {
                     </div>
                     <div className="flex items-center gap-1">
                       {client.logo_url && <img src={client.logo_url} alt="" className="h-8 w-8 rounded object-cover" />}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                          {(client as any).archived_at ? (
-                            <>
-                              <DropdownMenuItem onClick={() => restoreMutation.mutate(client.id)}>
-                                <RotateCcw className="h-4 w-4 mr-2" /> Restore
+                      {canDelete && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                            {(client as any).archived_at ? (
+                              <>
+                                <DropdownMenuItem onClick={() => restoreMutation.mutate(client.id)}>
+                                  <RotateCcw className="h-4 w-4 mr-2" /> Restore
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-destructive"
+                                  onClick={() => {
+                                    const typed = prompt(`Type "${client.name}" to permanently delete this client:`);
+                                    if (typed === client.name) {
+                                      deleteMutation.mutate(client.id);
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" /> Permanently Delete
+                                </DropdownMenuItem>
+                              </>
+                            ) : (
+                              <DropdownMenuItem onClick={() => archiveMutation.mutate(client.id)}>
+                                <Archive className="h-4 w-4 mr-2" /> Archive Client
                               </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className="text-destructive"
-                                onClick={() => {
-                                  const typed = prompt(`Type "${client.name}" to permanently delete this client:`);
-                                  if (typed === client.name) {
-                                    deleteMutation.mutate(client.id);
-                                  }
-                                }}
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" /> Permanently Delete
-                              </DropdownMenuItem>
-                            </>
-                          ) : (
-                            <DropdownMenuItem onClick={() => archiveMutation.mutate(client.id)}>
-                              <Archive className="h-4 w-4 mr-2" /> Archive Client
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </div>
                   </div>
                 </CardHeader>
@@ -224,15 +230,17 @@ export function AdminDashboard() {
                       >
                         <BarChart3 className="h-3 w-3 mr-1" /> Analytics
                       </Button>
-                      <Button
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/clients/${client.id}/analyze`);
-                        }}
-                      >
-                        <Play className="h-3 w-3 mr-1" /> Run Report
-                      </Button>
+                      {canRunAnalysis && (
+                        <Button
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/clients/${client.id}/analyze`);
+                          }}
+                        >
+                          <Play className="h-3 w-3 mr-1" /> Run Report
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -246,11 +254,15 @@ export function AdminDashboard() {
             <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mx-auto">
               <Plus className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h3 className="font-semibold">Add your first client</h3>
-            <p className="text-sm text-muted-foreground">Get started by creating a client configuration</p>
-            <Button onClick={() => navigate("/clients/new/setup")}>
-              <Plus className="h-4 w-4 mr-2" /> Add Client
-            </Button>
+            <h3 className="font-semibold">{canManageClients ? "Add your first client" : "No clients yet"}</h3>
+            <p className="text-sm text-muted-foreground">
+              {canManageClients ? "Get started by creating a client configuration" : "No clients have been configured yet"}
+            </p>
+            {canManageClients && (
+              <Button onClick={() => navigate("/clients/new/setup")}>
+                <Plus className="h-4 w-4 mr-2" /> Add Client
+              </Button>
+            )}
           </div>
         </Card>
       )}

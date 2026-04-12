@@ -12,19 +12,43 @@ import { ReportActions } from "@/components/reports/ReportActions";
 
 export default function AllReports() {
   const navigate = useNavigate();
-  const { isAdmin, user } = useAuth();
+  const { isClient, user } = useAuth();
 
-  const { data: reports, isLoading } = useQuery({
-    queryKey: ["all-reports"],
+  // For client role, first get their assigned client IDs
+  const { data: clientAccess } = useQuery({
+    queryKey: ["my-clients", user?._id],
     queryFn: async () => {
       const { data, error } = await supabase
+        .from("client_users")
+        .select("client_id")
+        .eq("user_id", user!._id);
+      if (error) throw error;
+      return data?.map((c) => c.client_id) ?? [];
+    },
+    enabled: isClient && !!user,
+  });
+
+  const { data: reports, isLoading } = useQuery({
+    queryKey: ["all-reports", isClient ? clientAccess : "all"],
+    queryFn: async () => {
+      let query = supabase
         .from("reports")
         .select("*, clients(id, name)")
         .order("created_at", { ascending: false })
         .limit(50);
+
+      // Client role: filter to only their assigned clients
+      if (isClient && clientAccess && clientAccess.length > 0) {
+        query = query.in("client_id", clientAccess);
+      } else if (isClient) {
+        return [];
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data;
     },
+    enabled: !isClient || (isClient && clientAccess !== undefined),
   });
 
   return (

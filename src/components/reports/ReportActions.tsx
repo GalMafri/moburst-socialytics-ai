@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 interface ReportActionsProps {
   report: {
@@ -45,6 +46,7 @@ interface ReportActionsProps {
 export function ReportActions({ report, onDeleted }: ReportActionsProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { canDelete } = useAuth();
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -90,6 +92,8 @@ export function ReportActions({ report, onDeleted }: ReportActionsProps) {
     }
     setDeleteOpen(false);
   };
+
+  if (!canDelete) return null;
 
   return (
     <>
