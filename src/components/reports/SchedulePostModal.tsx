@@ -128,7 +128,13 @@ export function SchedulePostModal({
   // ── Populate form fields ────────────────────────────────────────────────────
   useEffect(() => {
     if (open && post) {
-      setPostContent(post.copy || "");
+      // Build full post content: copy + hashtags with proper spacing
+      let content = (post.copy || "").trim();
+      if (post.hashtags?.length) {
+        const tags = post.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`).join(" ");
+        content += "\n\n" + tags;
+      }
+      setPostContent(content);
       setMediaUrl(generatedImageUrl || null);
       if (post.date_label) {
         try {
@@ -270,8 +276,8 @@ export function SchedulePostModal({
           </div>
 
           <div className="space-y-2">
-            <Label>Post Copy</Label>
-            <Textarea value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={4} />
+            <Label>Post Copy (includes hashtags)</Label>
+            <Textarea value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={6} className="whitespace-pre-wrap" />
           </div>
 
           {mediaUrl && (
