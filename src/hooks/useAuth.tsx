@@ -24,7 +24,7 @@ const DEV_USER: HubUser = {
   _id: "00000000-0000-0000-0000-000000000000",
   name: "Dev User",
   email: "dev@localhost",
-  role: "admin",
+  role: "Admin",
   company: "Dev",
   isActive: true,
   tools: [],
@@ -32,9 +32,17 @@ const DEV_USER: HubUser = {
   updatedAt: new Date().toISOString(),
 };
 
+export type UserRole = "Admin" | "Moburst User" | "Client" | null;
+
 interface AuthContextType {
   user: HubUser | null;
+  userRole: UserRole;
   isAdmin: boolean;
+  isMoburstUser: boolean;
+  isClient: boolean;
+  canDelete: boolean;
+  canManageClients: boolean;
+  canRunAnalysis: boolean;
   isLoading: boolean;
   isAuthenticated: boolean;
 }
@@ -88,10 +96,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const isAdmin = user?.role === "admin";
+  const userRole: UserRole = user ? (user.role as UserRole) : null;
+  const isAdmin = userRole === "Admin";
+  const isMoburstUser = userRole === "Moburst User";
+  const isClient = userRole === "Client";
+  const canDelete = isAdmin;
+  const canManageClients = isAdmin || isMoburstUser;
+  const canRunAnalysis = isAdmin || isMoburstUser;
   const isAuthenticated = !!user;
 
-  return <AuthContext.Provider value={{ user, isAdmin, isLoading, isAuthenticated }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{
+      user, userRole,
+      isAdmin, isMoburstUser, isClient,
+      canDelete, canManageClients, canRunAnalysis,
+      isLoading, isAuthenticated,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {

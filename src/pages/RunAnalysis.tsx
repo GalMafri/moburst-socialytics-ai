@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
+import { Navigate } from "react-router-dom";
 
 const STEPS_FULL = [
   "Fetching Sprout Social performance data...",
@@ -34,7 +35,7 @@ const MAX_POLL_DURATION_MS = 10 * 60 * 1000;
 export default function RunAnalysis() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, canRunAnalysis } = useAuth();
   const { toast } = useToast();
   const [running, setRunning] = useState(false);
   const [currentStep, setCurrentStep] = useState(-1);
@@ -308,6 +309,8 @@ export default function RunAnalysis() {
       toast({ title: "Analysis failed", description: err.message, variant: "destructive" });
     }
   };
+
+  if (!canRunAnalysis) return <Navigate to="/" replace />;
 
   if (!client)
     return (

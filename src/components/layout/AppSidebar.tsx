@@ -22,9 +22,9 @@ export function AppSidebar() {
 
   const navItems = [
     { icon: Home, label: "Dashboard", href: "/" },
-    { icon: FileText, label: "Reports", href: "/reports", adminOnly: false },
-    { icon: TrendingUp, label: "Analytics", href: "/analytics", adminOnly: false },
-    ...(isAdmin ? [{ icon: Settings, label: "Settings", href: "/settings", adminOnly: true }] : []),
+    { icon: FileText, label: "Reports", href: "/reports" },
+    { icon: TrendingUp, label: "Analytics", href: "/analytics" },
+    ...(isAdmin ? [{ icon: Settings, label: "Settings", href: "/settings" }] : []),
   ];
 
   return (

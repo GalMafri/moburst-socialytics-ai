@@ -4,11 +4,11 @@ import { AdminDashboard } from "@/components/dashboard/AdminDashboard";
 import { ClientDashboard } from "@/components/dashboard/ClientDashboard";
 
 export default function Index() {
-  const { isAdmin } = useAuth();
+  const { isClient } = useAuth();
 
   return (
     <AppLayout title="Dashboard">
-      {isAdmin ? <AdminDashboard /> : <ClientDashboard />}
+      {isClient ? <ClientDashboard /> : <AdminDashboard />}
     </AppLayout>
   );
 }

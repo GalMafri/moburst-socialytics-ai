@@ -9,11 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Eye, Loader2, ExternalLink } from "lucide-react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { ReportActions } from "@/components/reports/ReportActions";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function ReportHistory() {
   const { id } = useParams();
   useRealtimeReports(id);
   const navigate = useNavigate();
+  const { canRunAnalysis } = useAuth();
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -110,9 +112,11 @@ export default function ReportHistory() {
             ) : (
               <div className="text-center py-8 text-muted-foreground">
                 <p>No reports yet</p>
-                <Button variant="outline" className="mt-3" onClick={() => navigate(`/clients/${id}/analyze`)}>
-                  Run your first analysis
-                </Button>
+                {canRunAnalysis && (
+                  <Button variant="outline" className="mt-3" onClick={() => navigate(`/clients/${id}/analyze`)}>
+                    Run your first analysis
+                  </Button>
+                )}
               </div>
             )}
           </CardContent>
