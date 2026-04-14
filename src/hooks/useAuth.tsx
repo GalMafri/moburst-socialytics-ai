@@ -7,6 +7,8 @@ const IS_DEV =
   window.location.hostname.includes("lovableproject.com") ||
   window.location.hostname.includes("lovable.app");
 
+const SOCIALYTICS_URL = "https://socialytics.moburst.com/";
+
 export interface HubUser {
   _id: string;
   name: string;
@@ -14,7 +16,7 @@ export interface HubUser {
   role: string;
   company: string;
   isActive: boolean;
-  tools: Array<{ tool: { _id: string; name: string }; role: string }>;
+  tools: Array<{ tool: { _id: string; name: string; url?: string }; role: string }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -24,15 +26,38 @@ const DEV_USER: HubUser = {
   _id: "00000000-0000-0000-0000-000000000000",
   name: "Dev User",
   email: "dev@localhost",
-  role: "Admin",
+  role: "admin",
   company: "Dev",
   isActive: true,
-  tools: [],
+  tools: [{ tool: { _id: "dev", name: "Socialytics", url: SOCIALYTICS_URL }, role: "Admin" }],
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
 
 export type UserRole = "Admin" | "Moburst User" | "Client" | null;
+
+/**
+ * Derive the user's Socialytics-specific role from the tools array.
+ * Falls back to the top-level `role` field mapped to the closest UserRole,
+ * and ultimately to null if nothing matches.
+ */
+function deriveSocialyticsRole(hubUser: HubUser): UserRole {
+  const socialyticsTool = hubUser.tools?.find(
+    (t) => t.tool?.url?.replace(/\/$/, "") === SOCIALYTICS_URL.replace(/\/$/, "")
+  );
+
+  const toolRole = socialyticsTool?.role;
+
+  if (toolRole === "Admin" || toolRole === "Moburst User" || toolRole === "Client") {
+    return toolRole;
+  }
+
+  // Fallback: map top-level role
+  if (hubUser.role === "admin") return "Admin";
+  if (hubUser.role === "user") return "Moburst User";
+
+  return null;
+}
 
 interface AuthContextType {
   user: HubUser | null;
@@ -56,7 +81,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const token = initHubToken();
 
-    // ── Hub token present → authenticate via Hub API ──
     if (token) {
       fetch(`${HUB_API_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -70,7 +94,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })
         .catch((err) => {
           console.error("Hub auth failed:", err);
-          // If Hub auth fails but we're in dev mode, fall back to dev user
           if (IS_DEV) {
             console.warn("Falling back to dev user");
             setUser(DEV_USER);
@@ -84,19 +107,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // ── No token ──
     if (IS_DEV) {
-      // In development (Lovable / localhost): auto-login as dev user
       console.warn("[Auth] No hubToken found — using dev user (dev mode only)");
       setUser(DEV_USER);
       setIsLoading(false);
     } else {
-      // In production: require the Hub token
       setIsLoading(false);
     }
   }, []);
 
-  const userRole: UserRole = user ? (user.role as UserRole) : null;
+  const userRole: UserRole = user ? deriveSocialyticsRole(user) : null;
   const isAdmin = userRole === "Admin";
   const isMoburstUser = userRole === "Moburst User";
   const isClient = userRole === "Client";
