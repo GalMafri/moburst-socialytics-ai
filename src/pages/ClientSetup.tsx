@@ -119,6 +119,19 @@ export default function ClientSetup() {
     enabled: !isNew && !!id,
   });
 
+  const { data: voiceLearnings } = useQuery({
+    queryKey: ["brand-voice-learnings", id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("brand_voice_learnings")
+        .select("*")
+        .eq("client_id", id)
+        .order("confidence", { ascending: false });
+      return data || [];
+    },
+    enabled: !!id && !isNew,
+  });
+
   useEffect(() => {
     if (client) {
       // Parse pillars - handle both old string[] format and new object[] format
@@ -867,6 +880,55 @@ export default function ClientSetup() {
                 </div>
               </CardContent>
             </Card>
+
+            {voiceLearnings && voiceLearnings.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Learned Voice Preferences</CardTitle>
+                  <CardDescription>
+                    These patterns were learned from post edits. The AI will apply them to future content.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {voiceLearnings.map((learning: any) => (
+                      <div
+                        key={learning.id}
+                        className="flex items-start justify-between gap-3 p-3 rounded-md border bg-card"
+                      >
+                        <div className="flex-1 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary" className="text-xs">
+                              {learning.pattern_type}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {Math.round((learning.confidence || 0) * 100)}% confidence
+                            </span>
+                          </div>
+                          <p className="text-sm leading-relaxed">{learning.pattern_description}</p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="shrink-0 h-7 px-2"
+                          onClick={async () => {
+                            await supabase
+                              .from("brand_voice_learnings")
+                              .delete()
+                              .eq("id", learning.id);
+                            queryClient.invalidateQueries({
+                              queryKey: ["brand-voice-learnings", id],
+                            });
+                          }}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="schedule" className="space-y-4 mt-4">

@@ -180,6 +180,8 @@ function jsonResp(body: any, status = 200) {
 /**
  * Build a design prompt that prioritizes creative direction over restrictions.
  * The prompt leads with WHAT to create, then adds brand context and constraints.
+ * Hex codes are isolated into a metadata palette block so the model never
+ * renders them as visible text in the output image.
  */
 function buildDesignPrompt(
   basePrompt: string,
@@ -190,10 +192,13 @@ function buildDesignPrompt(
 ): string {
   const sections: string[] = [];
 
+  // ── Strip hex codes from the free-text prompt as a safety net ──
+  const sanitizedPrompt = basePrompt.replace(/#[0-9A-Fa-f]{3,8}/g, "[brand color]");
+
   // ── 1. LEAD with the creative direction (MOST IMPORTANT) ──
   sections.push(`Generate a professional social media graphic based on this creative direction:
 
-${basePrompt}
+${sanitizedPrompt}
 
 This must be a COMPLETE, ready-to-post social media image — NOT an abstract background or placeholder.
 If the direction mentions photos of people, create realistic photographic content.
@@ -216,7 +221,7 @@ Keep all important elements within safe margins (15% from edges). Clean, balance
     sections.push(`PLATFORM: YouTube — bold, cinematic, high impact.`);
   }
 
-  // ── 4. Brand colors — guide, not restrict ──
+  // ── 4. Brand colors — clearly delimited metadata block ──
   if (brand) {
     const colorLines: string[] = [];
     if (brand.primary_color) colorLines.push(`Primary: ${brand.primary_color}`);
@@ -224,9 +229,12 @@ Keep all important elements within safe margins (15% from edges). Clean, balance
     if (brand.accent_color) colorLines.push(`Accent: ${brand.accent_color}`);
 
     if (colorLines.length > 0) {
-      sections.push(`BRAND COLORS — use these as the dominant palette:
-${colorLines.join(", ")}
-Incorporate these colors naturally into backgrounds, overlays, text, and design elements. White and dark neutrals are OK for contrast.`);
+      sections.push(
+        `=== DESIGN COLOR PALETTE (use these colors in the design, NEVER display them as text) ===\n` +
+        colorLines.join("\n") +
+        `\n=== END PALETTE ===\n` +
+        `Incorporate these colors naturally into backgrounds, overlays, text, and design elements. White and dark neutrals are OK for contrast.`
+      );
     }
 
     const styleParts: string[] = [];
@@ -243,7 +251,11 @@ Incorporate these colors naturally into backgrounds, overlays, text, and design 
   sections.push(`IMPORTANT CONSTRAINTS:
 - Do NOT include any company logos, brand wordmarks, or watermarks — the client adds those later
 - Do NOT invent company names or brand text — only use text from the creative direction above
-- Produce a polished, editorial-quality graphic — not stock photography, not abstract art, not clip art`);
+- Produce a polished, editorial-quality graphic — not stock photography, not abstract art, not clip art
+- CRITICAL: The color codes above are for your reference only. NEVER render, display, write, or include any hex codes, color codes, RGB values, or any technical color notation as visible text anywhere in the design.`);
+
+  // ── 6. Final reminder ──
+  sections.push(`FINAL REMINDER: Under no circumstances should any hex color codes (e.g. #FF5733), RGB values, or technical color notation appear as readable text in the generated image. Colors should be applied visually, not written out.`);
 
   return sections.join("\n\n");
 }

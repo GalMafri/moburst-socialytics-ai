@@ -83,8 +83,8 @@ export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }:
 
   const spec = getPlatformVideoSpec(post.platform, post.format);
 
-  const buildVideoPrompt = () => {
-    const visualDirection = post.ai_visual_prompt || post.visual_direction || "";
+  const buildVideoPrompt = (adaptedDirection?: string) => {
+    const visualDirection = adaptedDirection || post.ai_visual_prompt || post.visual_direction || "";
     const postCopy = post.copy || "";
 
     const sections: string[] = [];
@@ -109,7 +109,9 @@ export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }:
     if (brandIdentity) {
       const brandParts: string[] = [];
       const colors = [brandIdentity.primary_color, brandIdentity.secondary_color, brandIdentity.accent_color].filter(Boolean);
-      if (colors.length > 0) brandParts.push(`Color palette: ${colors.join(", ")}`);
+      if (colors.length > 0) {
+        brandParts.push(`Use this color palette in the video design (apply these colors, NEVER show them as text): ${colors.join(", ")}. IMPORTANT: Do not render any hex codes, color values, or technical notation as visible text in the video.`);
+      }
       if (brandIdentity.visual_style) brandParts.push(`Visual style: ${brandIdentity.visual_style}`);
       if (brandIdentity.tone_of_voice) brandParts.push(`Tone: ${brandIdentity.tone_of_voice}`);
       if (brandIdentity.design_elements) brandParts.push(`Design elements: ${brandIdentity.design_elements}`);
@@ -128,12 +130,42 @@ export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }:
 - Photorealistic quality, cinematic lighting
 - Content must be appropriate for ${spec.label} audience`);
 
+    // 7. Final hex-code guard
+    sections.push(`CRITICAL: No hex codes, color codes, or technical color notation should appear as visible text in any frame of this video.`);
+
     return sections.join("\n\n");
   };
 
-  const handleOpen = () => {
-    setPrompt(buildVideoPrompt());
+  const handleOpen = async () => {
     setOpen(true);
+
+    // Detect format mismatch: post recommended image/carousel but user is generating a video
+    let baseDirection = post.ai_visual_prompt || post.visual_direction || "";
+    const postFormat = (post.format || "").toLowerCase();
+    const isImageRecommendation =
+      postFormat.includes("image") ||
+      postFormat.includes("carousel") ||
+      postFormat.includes("static");
+    if (isImageRecommendation && baseDirection) {
+      try {
+        const { data: adapted } = await supabase.functions.invoke("adapt-creative-prompt", {
+          body: {
+            concept: post.concept || post.hook || post.copy || "",
+            visual_direction: baseDirection,
+            original_format: post.format,
+            target_format: "Video",
+            platform: post.platform,
+          },
+        });
+        if (adapted?.adapted_prompt) {
+          baseDirection = adapted.adapted_prompt;
+        }
+      } catch (e) {
+        // Silently fall through — use original prompt
+      }
+    }
+
+    setPrompt(buildVideoPrompt(isImageRecommendation ? baseDirection : undefined));
   };
 
   const generateVideo = async () => {

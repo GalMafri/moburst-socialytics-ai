@@ -4,9 +4,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus } from "lucide-react";
+import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { toast as sonnerToast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { DesignEditor } from "@/components/editor/DesignEditor";
 
 export interface BrandIdentity {
   primary_color?: string;
@@ -31,6 +33,7 @@ interface CreatePostDesignButtonProps {
   brandIdentity?: BrandIdentity | null;
   designReferences?: string[];
   brandBookFilePath?: string;
+  clientId?: string;
   onImagesGenerated?: (urls: string[]) => void;
 }
 
@@ -42,7 +45,7 @@ function isCarouselFormat(format?: string): boolean {
   return CAROUSEL_FORMATS.some((cf) => f.includes(cf));
 }
 
-export function CreatePostDesignButton({ post, brandIdentity, designReferences, brandBookFilePath, onImagesGenerated }: CreatePostDesignButtonProps) {
+export function CreatePostDesignButton({ post, brandIdentity, designReferences, brandBookFilePath, clientId, onImagesGenerated }: CreatePostDesignButtonProps) {
   const isCarousel = isCarouselFormat(post.format);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -52,6 +55,8 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
   const [editablePrompt, setEditablePrompt] = useState("");
   const [slideCount, setSlideCount] = useState(isCarousel ? 5 : 1);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [showEditor, setShowEditor] = useState(false);
+  const [editableImageUrl, setEditableImageUrl] = useState<string | null>(null);
   const { toast } = useToast();
 
   const defaultPrompt =
@@ -63,7 +68,7 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
   if (!defaultPrompt) return null;
 
   const generateImages = async () => {
-    const prompt = editablePrompt || defaultPrompt;
+    let designPrompt = editablePrompt || defaultPrompt;
     const count = isCarousel ? slideCount : 1;
     setLoading(true);
     setImageUrls([]);
@@ -73,11 +78,33 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
     const generated: string[] = [];
 
     try {
+      // Detect format mismatch: post recommended video/reel but user is generating an image
+      const postFormat = (post.format || "").toLowerCase();
+      const isVideoRecommendation = postFormat.includes("video") || postFormat.includes("reel");
+      if (isVideoRecommendation) {
+        try {
+          const { data: adapted } = await supabase.functions.invoke("adapt-creative-prompt", {
+            body: {
+              concept: post.copy || "",
+              visual_direction: designPrompt,
+              original_format: post.format,
+              target_format: "Image",
+              platform: post.platform,
+            },
+          });
+          if (adapted?.adapted_prompt) {
+            designPrompt = adapted.adapted_prompt;
+          }
+        } catch (e) {
+          // Silently fall through — use original prompt
+        }
+      }
+
       for (let i = 0; i < count; i++) {
         setCurrentSlide(i + 1);
         const slidePrompt = count > 1
-          ? `${prompt}\n\nThis is slide ${i + 1} of ${count} in a carousel post. ${i === 0 ? "This is the cover/hook slide — make it attention-grabbing." : `This is slide ${i + 1} — continue the visual story with a distinct but cohesive design.`} Maintain consistent brand colors and style across all slides.`
-          : prompt;
+          ? `${designPrompt}\n\nThis is slide ${i + 1} of ${count} in a carousel post. ${i === 0 ? "This is the cover/hook slide — make it attention-grabbing." : `This is slide ${i + 1} — continue the visual story with a distinct but cohesive design.`} Maintain consistent brand colors and style across all slides.`
+          : designPrompt;
 
         const { data, error } = await supabase.functions.invoke("generate-post-image", {
           body: {
@@ -97,7 +124,34 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
         if (data?.error) throw new Error(data.error);
 
         if (data.image_url) {
-          generated.push(data.image_url);
+          // Validate the generated image for visible hex codes
+          let finalImageUrl = data.image_url;
+          try {
+            const { data: validation } = await supabase.functions.invoke("validate-design-output", {
+              body: { image_data: data.image_url },
+            });
+            if (validation?.has_hex_codes) {
+              toast({ title: "Refining design..." });
+              const retryPrompt = slidePrompt + "\n\nCRITICAL: The previous generation contained visible hex color codes as text. Do NOT render any hex codes, color codes, RGB values, or technical color notation as readable text anywhere in the image. Colors should be applied visually only.";
+              const { data: retryData } = await supabase.functions.invoke("generate-post-image", {
+                body: {
+                  prompt: retryPrompt,
+                  platform: post.platform,
+                  format: post.format,
+                  brand_context: brandIdentity || undefined,
+                  design_references: designReferences || undefined,
+                  brand_book_file_path: brandBookFilePath || undefined,
+                },
+              });
+              if (retryData?.image_url) {
+                finalImageUrl = retryData.image_url;
+              }
+            }
+          } catch {
+            // Validation or retry failed — keep the original image
+          }
+
+          generated.push(finalImageUrl);
           setImageUrls([...generated]);
         }
         if (i === 0 && data.revised_prompt) {
@@ -283,7 +337,7 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
                 {revisedPrompt && (
                   <p className="text-xs text-muted-foreground italic">Refined prompt: {revisedPrompt}</p>
                 )}
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {imageUrls.map((url, i) => (
                     <Button
                       key={i}
@@ -302,6 +356,32 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
                       {imageUrls.length > 1 ? `Slide ${i + 1}` : "Download"}
                     </Button>
                   ))}
+                  {imageUrls.length === 1 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditableImageUrl(imageUrls[0]);
+                        setShowEditor(true);
+                      }}
+                    >
+                      <Pencil className="h-4 w-4 mr-1" /> Edit Design
+                    </Button>
+                  )}
+                  {imageUrls.length > 1 &&
+                    imageUrls.map((url, i) => (
+                      <Button
+                        key={`edit-${i}`}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setEditableImageUrl(url);
+                          setShowEditor(true);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4 mr-1" /> Edit {i + 1}
+                      </Button>
+                    ))}
                   <Button variant="outline" size="sm" onClick={generateImages}>
                     <Paintbrush className="h-4 w-4 mr-1" /> Regenerate
                   </Button>
@@ -311,6 +391,35 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
           </div>
         </DialogContent>
       </Dialog>
+
+      {showEditor && editableImageUrl && (
+        <DesignEditor
+          imageUrl={editableImageUrl}
+          brandIdentity={brandIdentity}
+          clientId={clientId || ""}
+          onSave={(dataUrl) => {
+            // Replace the edited image in the array
+            setImageUrls((prev) => {
+              const idx = prev.indexOf(editableImageUrl);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = dataUrl;
+                return next;
+              }
+              return prev;
+            });
+            setEditableImageUrl(dataUrl);
+            setShowEditor(false);
+            sonnerToast.success("Design saved!");
+            if (onImagesGenerated) {
+              onImagesGenerated(
+                imageUrls.map((u) => (u === editableImageUrl ? dataUrl : u))
+              );
+            }
+          }}
+          onClose={() => setShowEditor(false)}
+        />
+      )}
     </>
   );
 }

@@ -27,6 +27,9 @@ import {
   Target,
   Globe,
   Languages,
+  Pencil,
+  RefreshCw,
+  Loader2,
 } from "lucide-react";
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import {
@@ -40,13 +43,16 @@ import {
   Legend,
 } from "recharts";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Textarea } from "@/components/ui/textarea";
 import { useState, useRef } from "react";
+import { toast } from "sonner";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
 import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
+import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
 import { Send } from "lucide-react";
 
 export default function ReportView() {
@@ -92,6 +98,16 @@ export default function ReportView() {
   const tiktokTrends = rd?.tiktok_trends || {};
   const instagramTrends = rd?.instagram_trends || {};
   const contentCalendar = rd?.content_calendar || aiAnalysis?.content_calendar || [];
+
+  // Extract unique platforms from content recommendations and calendar
+  const availablePlatforms = [
+    ...new Set([
+      ...(aiAnalysis?.content_recommendations || []).map((r: any) => r.platform).filter(Boolean),
+      ...(contentCalendar || []).flatMap((day: any) =>
+        (day.posts || []).map((p: any) => p.platform).filter(Boolean)
+      ),
+    ]),
+  ] as string[];
 
   // Build available tabs
   const tabs: { value: string; label: string; icon: React.ReactNode }[] = [
@@ -358,6 +374,17 @@ export default function ReportView() {
 
           {/* ── CONTENT IDEAS TAB ── */}
           <TabsContent value="content" className="space-y-8">
+            {/* Ad Hoc Post Creation */}
+            {availablePlatforms.length > 0 && (
+              <div className="flex justify-end">
+                <CreateAdHocPost
+                  clientId={id!}
+                  platforms={availablePlatforms}
+                  brandIdentity={brandIdentity}
+                />
+              </div>
+            )}
+
             {/* Recommendations */}
             {aiAnalysis?.content_recommendations?.length > 0 && (
               <ContentRecommendations recommendations={aiAnalysis.content_recommendations} />
@@ -520,13 +547,117 @@ function CalendarPostCard({
   const [copied, setCopied] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [generatedMediaUrls, setGeneratedMediaUrls] = useState<string[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedCopy, setEditedCopy] = useState(post.caption_angle || post.concept || post.copy || "");
+  const [displayCopy, setDisplayCopy] = useState(post.copy || "");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   const handleCopy = () => {
     const fullText =
-      post.copy + (post.hashtags?.length ? "\n\n" + post.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`).join(" ") : "");
+      displayCopy + (post.hashtags?.length ? "\n\n" + post.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`).join(" ") : "");
     navigator.clipboard.writeText(fullText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!clientId || !editedCopy.trim()) return;
+    setIsSavingEdit(true);
+    try {
+      // Save original version (version 1)
+      await supabase.from("post_iterations").insert({
+        client_id: clientId,
+        report_id: reportId || null,
+        version: 1,
+        platform: post.platform || null,
+        post_copy: displayCopy,
+        hashtags: post.hashtags || null,
+        cta: post.CTA || post.cta || null,
+        concept: post.concept || null,
+        visual_direction: post.visual_direction || null,
+        format: post.format || null,
+        source: "calendar",
+      });
+
+      // Save edited version (version 2)
+      await supabase.from("post_iterations").insert({
+        client_id: clientId,
+        report_id: reportId || null,
+        version: 2,
+        platform: post.platform || null,
+        post_copy: editedCopy,
+        hashtags: post.hashtags || null,
+        cta: post.CTA || post.cta || null,
+        concept: post.concept || null,
+        visual_direction: post.visual_direction || null,
+        format: post.format || null,
+        source: "calendar",
+      });
+
+      // Call analyze-post-edits edge function
+      supabase.functions.invoke("analyze-post-edits", {
+        body: {
+          client_id: clientId,
+          original_copy: displayCopy,
+          edited_copy: editedCopy,
+        },
+      });
+
+      // Update local display
+      setDisplayCopy(editedCopy);
+      setIsEditing(false);
+      toast.success("Post updated and preferences saved");
+    } catch (err: any) {
+      toast.error("Failed to save edit: " + (err.message || "Unknown error"));
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    if (!clientId) return;
+    setIsRegenerating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("regenerate-post-copy", {
+        body: {
+          client_id: clientId,
+          platform: post.platform || null,
+          concept: post.concept || post.caption_angle || "",
+          pillar: post.pillar || null,
+          current_copy: displayCopy,
+          current_cta: post.CTA || post.cta || null,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const newCopy = data?.copy || data?.post_copy;
+      if (newCopy) {
+        // Save regenerated version to post_iterations
+        await supabase.from("post_iterations").insert({
+          client_id: clientId,
+          report_id: reportId || null,
+          version: 1,
+          platform: post.platform || null,
+          post_copy: newCopy,
+          hashtags: data?.hashtags || post.hashtags || null,
+          cta: data?.cta || post.CTA || post.cta || null,
+          concept: post.concept || null,
+          visual_direction: post.visual_direction || null,
+          format: post.format || null,
+          source: "regeneration",
+        });
+
+        setDisplayCopy(newCopy);
+        setEditedCopy(newCopy);
+        toast.success("Copy regenerated");
+      }
+    } catch (err: any) {
+      toast.error("Failed to regenerate: " + (err.message || "Unknown error"));
+    } finally {
+      setIsRegenerating(false);
+    }
   };
 
   return (
@@ -551,6 +682,7 @@ function CalendarPostCard({
           <CreatePostDesignButton
             post={post}
             brandIdentity={brandIdentity}
+            clientId={clientId}
             onImagesGenerated={(urls) => setGeneratedMediaUrls(urls)}
           />
           <CreatePostVideoButton
@@ -558,6 +690,36 @@ function CalendarPostCard({
             brandIdentity={brandIdentity}
             onVideoGenerated={(url) => setGeneratedMediaUrls([url])}
           />
+          {clientId && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => {
+                  setEditedCopy(displayCopy);
+                  setIsEditing(true);
+                }}
+                disabled={isEditing || isRegenerating}
+              >
+                <Pencil className="h-3.5 w-3.5 mr-1" /> Edit Copy
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2"
+                onClick={handleRegenerate}
+                disabled={isRegenerating || isEditing}
+              >
+                {isRegenerating ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                )}
+                {isRegenerating ? "Regenerating..." : "Regenerate"}
+              </Button>
+            </>
+          )}
           {clientId && reportId && (
             <>
               <Button
@@ -589,18 +751,53 @@ function CalendarPostCard({
         </div>
       </div>
 
-      <div className="bg-background rounded-md p-3 border">
-        <p className="text-sm leading-relaxed whitespace-pre-line">{post.copy}</p>
-        {post.hashtags?.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-3 pt-2 border-t">
-            {post.hashtags.map((h: string) => (
-              <span key={h} className="text-xs text-primary">
-                {h.startsWith('#') ? h : `#${h}`}
-              </span>
-            ))}
+      {isEditing ? (
+        <div className="space-y-2">
+          <Textarea
+            value={editedCopy}
+            onChange={(e) => setEditedCopy(e.target.value)}
+            rows={5}
+            className="text-sm"
+            placeholder="Edit post copy..."
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleSaveEdit}
+              disabled={isSavingEdit || !editedCopy.trim()}
+            >
+              {isSavingEdit ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+              ) : null}
+              Save
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setEditedCopy(displayCopy);
+                setIsEditing(false);
+              }}
+              disabled={isSavingEdit}
+            >
+              Cancel
+            </Button>
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="bg-background rounded-md p-3 border">
+          <p className="text-sm leading-relaxed whitespace-pre-line">{displayCopy}</p>
+          {post.hashtags?.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-3 pt-2 border-t">
+              {post.hashtags.map((h: string) => (
+                <span key={h} className="text-xs text-primary">
+                  {h.startsWith('#') ? h : `#${h}`}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {post.visual_direction && (
         <p className="text-sm text-muted-foreground">
