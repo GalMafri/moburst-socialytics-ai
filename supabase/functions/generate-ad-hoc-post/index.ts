@@ -41,23 +41,27 @@ Deno.serve(async (req) => {
     const brandIdentity =
       typeof client?.brand_identity === "object" ? client.brand_identity : {};
 
-    // Load voice learnings
-    const { data: voiceLearnings } = await supabase
-      .from("brand_voice_learnings")
-      .select("pattern_type, pattern_description, confidence")
-      .eq("client_id", client_id)
-      .order("confidence", { ascending: false })
-      .limit(10);
+    // Load voice learnings (non-blocking — table may not exist yet)
+    let voiceLearningsText = "No voice learnings yet.";
+    try {
+      const { data: voiceLearnings } = await supabase
+        .from("brand_voice_learnings")
+        .select("pattern_type, pattern_description, confidence")
+        .eq("client_id", client_id)
+        .order("confidence", { ascending: false })
+        .limit(10);
 
-    const voiceLearningsText =
-      voiceLearnings && voiceLearnings.length > 0
-        ? voiceLearnings
-            .map(
-              (v: any) =>
-                `- ${v.pattern_type}: ${v.pattern_description} (confidence: ${v.confidence})`,
-            )
-            .join("\n")
-        : "No voice learnings yet.";
+      if (voiceLearnings && voiceLearnings.length > 0) {
+        voiceLearningsText = voiceLearnings
+          .map(
+            (v: any) =>
+              `- ${v.pattern_type}: ${v.pattern_description} (confidence: ${v.confidence})`,
+          )
+          .join("\n");
+      }
+    } catch (e) {
+      console.error("Voice learnings query failed (table may not exist):", e);
+    }
 
     const prompt = `You are a social media strategist creating a single post for a brand.
 
@@ -102,7 +106,8 @@ Generate a complete post recommendation. Return ONLY this JSON:
     });
 
     if (!response.ok) {
-      throw new Error(`Claude API call failed: ${response.status}`);
+      const errBody = await response.text().catch(() => "");
+      throw new Error(`Claude API error ${response.status}: ${errBody.slice(0, 200)}`);
     }
 
     const result = await response.json();
