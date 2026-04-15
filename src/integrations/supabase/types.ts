@@ -35,6 +35,47 @@ export type Database = {
         }
         Relationships: []
       }
+      brand_voice_learnings: {
+        Row: {
+          client_id: string
+          confidence: number | null
+          created_at: string | null
+          id: string
+          pattern_description: string
+          pattern_type: string
+          source_iterations: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          client_id: string
+          confidence?: number | null
+          created_at?: string | null
+          id?: string
+          pattern_description: string
+          pattern_type: string
+          source_iterations?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          client_id?: string
+          confidence?: number | null
+          created_at?: string | null
+          id?: string
+          pattern_description?: string
+          pattern_type?: string
+          source_iterations?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brand_voice_learnings_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_users: {
         Row: {
           client_id: string
@@ -147,6 +188,126 @@ export type Database = {
           website_url?: string | null
         }
         Relationships: []
+      }
+      design_states: {
+        Row: {
+          canvas_json: Json
+          client_id: string
+          created_at: string | null
+          id: string
+          is_template: boolean | null
+          post_iteration_id: string | null
+          template_name: string | null
+          thumbnail_url: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          canvas_json: Json
+          client_id: string
+          created_at?: string | null
+          id?: string
+          is_template?: boolean | null
+          post_iteration_id?: string | null
+          template_name?: string | null
+          thumbnail_url?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          canvas_json?: Json
+          client_id?: string
+          created_at?: string | null
+          id?: string
+          is_template?: boolean | null
+          post_iteration_id?: string | null
+          template_name?: string | null
+          thumbnail_url?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_states_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "design_states_post_iteration_id_fkey"
+            columns: ["post_iteration_id"]
+            isOneToOne: false
+            referencedRelation: "post_iterations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_iterations: {
+        Row: {
+          client_id: string
+          concept: string | null
+          created_at: string | null
+          created_by: string | null
+          cta: string | null
+          format: string | null
+          hashtags: string[] | null
+          id: string
+          platform: string | null
+          post_copy: string | null
+          recommendation_index: number | null
+          report_id: string | null
+          source: string | null
+          version: number
+          visual_direction: string | null
+        }
+        Insert: {
+          client_id: string
+          concept?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          cta?: string | null
+          format?: string | null
+          hashtags?: string[] | null
+          id?: string
+          platform?: string | null
+          post_copy?: string | null
+          recommendation_index?: number | null
+          report_id?: string | null
+          source?: string | null
+          version?: number
+          visual_direction?: string | null
+        }
+        Update: {
+          client_id?: string
+          concept?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          cta?: string | null
+          format?: string | null
+          hashtags?: string[] | null
+          id?: string
+          platform?: string | null
+          post_copy?: string | null
+          recommendation_index?: number | null
+          report_id?: string | null
+          source?: string | null
+          version?: number
+          visual_direction?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_iterations_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_iterations_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
