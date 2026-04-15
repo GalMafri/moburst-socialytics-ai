@@ -257,8 +257,7 @@ export function DesignEditor({
           } as any,
           { onConflict: "client_id" }
         )
-        .then(() => {})
-        .catch(() => {});
+        .then(() => {}, () => {});
     }
   };
 
