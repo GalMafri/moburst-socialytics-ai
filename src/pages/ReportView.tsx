@@ -632,7 +632,8 @@ function CalendarPostCard({
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
-      const newCopy = data?.copy || data?.post_copy;
+      const postResult = data?.post || data;
+      const newCopy = postResult?.caption_angle || postResult?.copy || postResult?.post_copy;
       if (newCopy) {
         // Save regenerated version to post_iterations
         await supabase.from("post_iterations").insert({
@@ -641,8 +642,8 @@ function CalendarPostCard({
           version: 1,
           platform: post.platform || null,
           post_copy: newCopy,
-          hashtags: data?.hashtags || post.hashtags || null,
-          cta: data?.cta || post.CTA || post.cta || null,
+          hashtags: postResult?.hashtags || post.hashtags || null,
+          cta: postResult?.CTA || postResult?.cta || post.CTA || post.cta || null,
           concept: post.concept || null,
           visual_direction: post.visual_direction || null,
           format: post.format || null,
