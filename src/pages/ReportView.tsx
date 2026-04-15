@@ -548,8 +548,9 @@ function CalendarPostCard({
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [generatedMediaUrls, setGeneratedMediaUrls] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
-  const [editedCopy, setEditedCopy] = useState(post.caption_angle || post.concept || post.copy || "");
-  const [displayCopy, setDisplayCopy] = useState(post.copy || "");
+  const initialCopy = post.copy || post.caption_angle || post.concept || "";
+  const [editedCopy, setEditedCopy] = useState(initialCopy);
+  const [displayCopy, setDisplayCopy] = useState(initialCopy);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
 

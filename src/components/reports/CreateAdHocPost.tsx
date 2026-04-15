@@ -91,11 +91,17 @@ export function CreateAdHocPost({
       if (data?.post) {
         setGeneratedPost(data.post);
         // Save to post_iterations
+        const hashtags = Array.isArray(data.post.hashtags)
+          ? data.post.hashtags
+          : typeof data.post.hashtags === "string"
+            ? data.post.hashtags.split(/[\s,]+/).filter(Boolean)
+            : null;
         await supabase.from("post_iterations").insert({
           client_id: clientId,
           version: 1,
           platform: data.post.platform,
           post_copy: data.post.caption_angle,
+          hashtags,
           cta: data.post.CTA,
           concept: data.post.concept,
           visual_direction: data.post.visual_direction,
@@ -303,16 +309,19 @@ export function CreateAdHocPost({
                 <CreatePostDesignButton
                   post={{
                     visual_direction: generatedPost.visual_direction,
+                    ai_visual_prompt: generatedPost.visual_direction,
                     copy: generatedPost.caption_angle,
                     platform: generatedPost.platform,
                     format: generatedPost.format,
                   }}
                   brandIdentity={brandIdentity}
+                  clientId={clientId}
                 />
                 {isVideoFormat && (
                   <CreatePostVideoButton
                     post={{
                       visual_direction: generatedPost.visual_direction,
+                      ai_visual_prompt: generatedPost.visual_direction,
                       concept: generatedPost.concept,
                       copy: generatedPost.caption_angle,
                       platform: generatedPost.platform,
