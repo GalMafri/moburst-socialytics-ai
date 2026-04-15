@@ -623,7 +623,7 @@ function CalendarPostCard({
         body: {
           client_id: clientId,
           platform: post.platform || null,
-          concept: post.concept || post.caption_angle || "",
+          concept: post.concept || post.copy || post.caption_angle || post.rationale || displayCopy || "social media post",
           pillar: post.pillar || null,
           current_copy: displayCopy,
           current_cta: post.CTA || post.cta || null,

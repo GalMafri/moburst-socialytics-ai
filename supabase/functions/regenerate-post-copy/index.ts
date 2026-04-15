@@ -15,9 +15,10 @@ Deno.serve(async (req) => {
     const { client_id, platform, concept, pillar, current_copy, current_cta } =
       await req.json();
 
-    if (!client_id || !concept) {
+    const effectiveConcept = concept || current_copy || "";
+    if (!client_id || !effectiveConcept) {
       return jsonResp(
-        { error: "client_id and concept are required" },
+        { error: "client_id and either concept or current_copy are required" },
         400,
       );
     }
@@ -54,7 +55,7 @@ Deno.serve(async (req) => {
 
 PLATFORM: ${platform || "general"}
 CONTENT PILLAR: ${pillar || "general"}
-CONCEPT: ${concept}
+CONCEPT: ${effectiveConcept}
 CURRENT COPY (rewrite this): ${current_copy}
 CURRENT CTA: ${current_cta || ""}
 
