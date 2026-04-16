@@ -90,7 +90,21 @@ export function DesignEditor({
 
     const loadImage = async () => {
       try {
-        const img = await FabricImage.fromURL(imageUrl, {
+        // Convert remote URLs to blob URLs to bypass CORS for Fabric.js
+        let loadUrl = imageUrl;
+        if (imageUrl.startsWith("http")) {
+          try {
+            const res = await fetch(imageUrl);
+            if (res.ok) {
+              const blob = await res.blob();
+              loadUrl = URL.createObjectURL(blob);
+            }
+          } catch {
+            // Fall back to direct URL
+          }
+        }
+
+        const img = await FabricImage.fromURL(loadUrl, {
           crossOrigin: "anonymous",
         });
         if (!img || !img.width || !img.height) {

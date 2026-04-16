@@ -940,25 +940,31 @@ function CalendarPostCard({
           brandIdentity={brandIdentity}
           clientId={clientId || ""}
           onSave={async (dataUrl) => {
-            // Upload edited image to Supabase storage (same as fresh generation)
+            console.log("[DesignEditor] onSave called, dataUrl length:", dataUrl?.length);
+            // Upload edited image to Supabase storage
             let finalUrl = dataUrl;
             try {
               const res = await fetch(dataUrl);
               const blob = await res.blob();
+              console.log("[DesignEditor] Blob created, size:", blob.size);
               const storagePath = `${clientId || "unknown"}/${Date.now()}-edited-design.png`;
               const { error: uploadErr } = await supabase.storage
                 .from("generated-media")
                 .upload(storagePath, blob, { contentType: "image/png", upsert: true });
-              if (!uploadErr) {
+              if (uploadErr) {
+                console.error("[DesignEditor] Upload error:", uploadErr);
+              } else {
                 const { data: urlData } = supabase.storage
                   .from("generated-media")
                   .getPublicUrl(storagePath);
                 finalUrl = urlData.publicUrl;
+                console.log("[DesignEditor] Uploaded to:", finalUrl);
               }
             } catch (e) {
-              console.error("Failed to upload edited design:", e);
+              console.error("[DesignEditor] Upload failed:", e);
             }
 
+            console.log("[DesignEditor] Setting generatedMediaUrls[" + editingMediaIndex + "] =", finalUrl?.substring(0, 80));
             setGeneratedMediaUrls((prev) => {
               const updated = [...prev];
               updated[editingMediaIndex!] = finalUrl;
