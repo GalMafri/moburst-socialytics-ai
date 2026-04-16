@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { Save, Scissors, Type, Download, Play, Loader2, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 export interface VideoTrimmerProps {
   videoUrl: string;
@@ -65,29 +66,56 @@ export function VideoTrimmer({ videoUrl, onSave, onClose, onThumbnailReady }: Vi
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
 
   // Step 1: Download video as blob to bypass CORS
+  // Try direct fetch first, fall back to proxy edge function
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
     setLoadError(null);
 
-    (async () => {
+    const downloadAsBlob = async (): Promise<string> => {
+      // Attempt 1: direct fetch (works for same-origin or CORS-enabled URLs)
       try {
-        const res = await fetch(videoUrl);
-        if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-        const blob = await res.blob();
-        if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        setBlobUrl(url);
-      } catch (err: any) {
-        if (cancelled) return;
-        // Fallback: use original URL directly (trim/overlay won't work but playback will)
-        console.warn("Could not download video as blob:", err.message);
-        setBlobUrl(videoUrl);
-        setLoadError("Video editing limited — could not download for processing. You can still preview and download.");
-      } finally {
-        if (!cancelled) setIsLoading(false);
+        const res = await fetch(videoUrl, { mode: "cors" });
+        if (res.ok) {
+          const blob = await res.blob();
+          return URL.createObjectURL(blob);
+        }
+      } catch {
+        // CORS blocked — try proxy
       }
-    })();
+
+      // Attempt 2: proxy through Supabase edge function
+      try {
+        const { data, error } = await supabase.functions.invoke("proxy-media", {
+          body: { url: videoUrl },
+        });
+        if (!error && data?.data_url) {
+          // Convert data URL to blob for better performance
+          const res = await fetch(data.data_url);
+          const blob = await res.blob();
+          return URL.createObjectURL(blob);
+        }
+      } catch {
+        // Proxy also failed
+      }
+
+      // Attempt 3: if it's already a blob or data URL, use directly
+      if (videoUrl.startsWith("blob:") || videoUrl.startsWith("data:")) {
+        return videoUrl;
+      }
+
+      throw new Error("Could not download video for editing");
+    };
+
+    downloadAsBlob()
+      .then((url) => { if (!cancelled) setBlobUrl(url); })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn("Video download failed:", err.message);
+        setBlobUrl(videoUrl);
+        setLoadError("Video editing limited — trim and overlay processing unavailable. You can still preview and download.");
+      })
+      .finally(() => { if (!cancelled) setIsLoading(false); });
 
     return () => {
       cancelled = true;
@@ -228,40 +256,63 @@ export function VideoTrimmer({ videoUrl, onSave, onClose, onThumbnailReady }: Vi
         if (e.data.size > 0) chunks.push(e.data);
       };
 
-      const done = new Promise<Blob>((resolve) => {
+      const done = new Promise<Blob>((resolve, reject) => {
         recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+        recorder.onerror = (e) => reject(new Error("Recording failed"));
+        // Safety timeout: max 30s processing for short clips
+        setTimeout(() => {
+          if (recorder.state === "recording") {
+            video.pause();
+            recorder.stop();
+          }
+        }, 30000);
       });
 
-      // Seek to trim start and wait
+      // Seek to trim start and wait for seek to complete
       video.currentTime = trimStart;
       video.muted = true;
       await new Promise<void>((resolve) => {
         const onSeeked = () => { video.removeEventListener("seeked", onSeeked); resolve(); };
         video.addEventListener("seeked", onSeeked);
-        setTimeout(resolve, 2000);
+        setTimeout(resolve, 3000); // generous timeout for remote video seeking
       });
 
-      recorder.start();
+      // Verify canvas can draw from this video (CORS check)
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toDataURL(); // this throws if canvas is tainted
+      } catch (corsErr) {
+        throw new Error("Cannot process: video source blocked by browser security (CORS). Try downloading and re-uploading the video.");
+      }
+
+      recorder.start(100); // collect data every 100ms for smoother output
       await video.play();
 
       // Render loop: draw video + overlay to canvas
       const renderLoop = () => {
         if (video.currentTime >= trimEnd || video.paused || video.ended) {
           video.pause();
-          recorder.stop();
+          if (recorder.state === "recording") recorder.stop();
           return;
         }
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        drawOverlay(ctx, canvas.width, canvas.height);
+        try {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          drawOverlay(ctx, canvas.width, canvas.height);
+        } catch {
+          // drawImage can fail if video frame not ready — skip frame
+        }
         requestAnimationFrame(renderLoop);
       };
       requestAnimationFrame(renderLoop);
 
       const blob = await done;
+      if (blob.size < 100) {
+        throw new Error("Processed video is empty — recording may have failed");
+      }
       const exportUrl = URL.createObjectURL(blob);
 
       video.muted = false;
-      toast.success("Video processed!");
+      toast.success(`Video processed! (${(blob.size / 1024 / 1024).toFixed(1)}MB)`);
       onSave(exportUrl);
     } catch (err: any) {
       console.error("Video processing error:", err);
