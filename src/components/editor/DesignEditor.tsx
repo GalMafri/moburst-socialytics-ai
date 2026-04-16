@@ -136,7 +136,7 @@ export function DesignEditor({
     return () => {
       canvas.off("object:modified", onChange);
       canvas.off("object:added", onChange);
-      canvas.dispose();
+      try { canvas.dispose(); } catch (e) { console.warn("Canvas disposal:", e); }
       fabricRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -146,14 +146,17 @@ export function VideoTrimmer({ videoUrl, onSave, onClose }: VideoTrimmerProps) {
 
       // Try to capture audio from the video element
       try {
-        const audioCtx = new AudioContext();
-        const source = audioCtx.createMediaElementSource(video);
-        const dest = audioCtx.createMediaStreamDestination();
-        source.connect(dest);
-        source.connect(audioCtx.destination); // keep audible during processing
-        dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const audioCtx = new AudioCtx();
+          const source = audioCtx.createMediaElementSource(video);
+          const dest = audioCtx.createMediaStreamDestination();
+          source.connect(dest);
+          source.connect(audioCtx.destination);
+          dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
+        }
       } catch {
-        // No audio capture support — video will be silent
+        // Audio capture unavailable — video will be silent
       }
 
       const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
@@ -179,9 +182,17 @@ export function VideoTrimmer({ videoUrl, onSave, onClose }: VideoTrimmerProps) {
       // Start recording
       recorder.start();
 
-      // Play video from trim start
+      // Seek to trim start and wait for seek to complete
       video.currentTime = trimStart;
       video.muted = true;
+      await new Promise<void>((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        };
+        video.addEventListener("seeked", onSeeked);
+        setTimeout(() => resolve(), 1000); // fallback timeout
+      });
       await video.play();
 
       // Render frames with overlay

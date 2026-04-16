@@ -912,13 +912,18 @@ export default function ClientSetup() {
                           size="sm"
                           className="shrink-0 h-7 px-2"
                           onClick={async () => {
-                            await supabase
-                              .from("brand_voice_learnings")
-                              .delete()
-                              .eq("id", learning.id);
-                            queryClient.invalidateQueries({
-                              queryKey: ["brand-voice-learnings", id],
-                            });
+                            try {
+                              const { error } = await supabase
+                                .from("brand_voice_learnings")
+                                .delete()
+                                .eq("id", learning.id);
+                              if (error) throw error;
+                              queryClient.invalidateQueries({
+                                queryKey: ["brand-voice-learnings", id],
+                              });
+                            } catch (err: any) {
+                              toast({ title: "Failed to remove", description: err.message, variant: "destructive" });
+                            }
                           }}
                         >
                           <X className="h-3.5 w-3.5" />

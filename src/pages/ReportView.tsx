@@ -552,7 +552,7 @@ function CalendarPostCard({
   // Load previously generated media from post_iterations on mount
   useEffect(() => {
     if (!clientId) return;
-    const query = supabase
+    let query = supabase
       .from("post_iterations")
       .select("media_urls")
       .eq("client_id", clientId)
@@ -561,8 +561,9 @@ function CalendarPostCard({
       .limit(1);
 
     // Narrow by platform + copy to match the specific post
-    if (post.platform) query.eq("platform", post.platform);
-    if (post.copy) query.eq("post_copy", post.copy);
+    if (post.platform) query = query.eq("platform", post.platform);
+    const postCopy = post.copy || post.caption_angle || "";
+    if (postCopy) query = query.eq("post_copy", postCopy);
 
     query.then(({ data }) => {
       if (data?.[0]?.media_urls?.length) {
