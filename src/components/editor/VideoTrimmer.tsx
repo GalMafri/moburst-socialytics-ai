@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Save, Type, Download, Play, Pause, Plus, Trash2, GripVertical, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 export interface VideoEditData {
   overlays: TextOverlay[];
