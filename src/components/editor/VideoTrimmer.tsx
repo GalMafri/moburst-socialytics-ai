@@ -52,24 +52,55 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
   const [selectedOverlay, setSelectedOverlay] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
 
-  // Duration detection
+  // Duration detection — aggressive, tries everything
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const setDur = () => {
-      if (video.duration && isFinite(video.duration) && video.duration > 0) {
-        setDuration(video.duration);
-        if (trimEnd === 0) setTrimEnd(video.duration);
+    let found = false;
+
+    const trySetDuration = () => {
+      if (found) return;
+      const d = video.duration;
+      if (d && isFinite(d) && d > 0) {
+        found = true;
+        setDuration(d);
+        if (trimEnd === 0) setTrimEnd(d);
       }
     };
-    video.addEventListener("loadedmetadata", setDur);
-    video.addEventListener("durationchange", setDur);
-    video.addEventListener("canplay", setDur);
-    if (video.readyState >= 1) setDur();
+
+    // Listen to every possible event
+    const events = ["loadedmetadata", "loadeddata", "durationchange", "canplay", "canplaythrough", "playing", "timeupdate"];
+    events.forEach((ev) => video.addEventListener(ev, trySetDuration));
+
+    // Check immediately
+    trySetDuration();
+
+    // Force load by briefly playing (some servers won't send metadata until playback starts)
+    if (!found && video.readyState < 2) {
+      video.muted = true;
+      video.play()
+        .then(() => {
+          setTimeout(() => {
+            trySetDuration();
+            video.pause();
+            video.currentTime = 0;
+            video.muted = false;
+          }, 200);
+        })
+        .catch(() => {}); // autoplay might be blocked
+    }
+
+    // Polling fallback — check every 500ms for 10s
+    const pollId = setInterval(() => {
+      trySetDuration();
+      if (found) clearInterval(pollId);
+    }, 500);
+    const timeoutId = setTimeout(() => clearInterval(pollId), 10000);
+
     return () => {
-      video.removeEventListener("loadedmetadata", setDur);
-      video.removeEventListener("durationchange", setDur);
-      video.removeEventListener("canplay", setDur);
+      events.forEach((ev) => video.removeEventListener(ev, trySetDuration));
+      clearInterval(pollId);
+      clearTimeout(timeoutId);
     };
   }, []);
 
@@ -232,7 +263,7 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
               className="w-full"
               preload="auto"
               playsInline
-              onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+              controls
             />
 
             {/* Draggable text overlays */}
@@ -260,15 +291,7 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
               </div>
             ))}
 
-            {/* Play/pause indicator */}
-            {!isPlaying && (
-              <div
-                className="absolute inset-0 flex items-center justify-center bg-black/20 cursor-pointer"
-                onClick={togglePlay}
-              >
-                <Play className="h-12 w-12 text-white/80" fill="white" />
-              </div>
-            )}
+            {/* Play overlay — only when no native controls interaction */}
           </div>
 
           {/* ─── Visual timeline with trim handles ─── */}
@@ -333,10 +356,10 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
                 </>
               )}
 
-              {/* Timeline background label */}
+              {/* Timeline fallback — click video to play, which triggers duration detection */}
               {duration === 0 && (
                 <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-                  Loading timeline...
+                  Click play on the video to load timeline
                 </div>
               )}
             </div>
