@@ -54,54 +54,43 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
   const [trimStart, setTrimStart] = useState(initialEdits?.trimStart || 0);
   const [trimEnd, setTrimEnd] = useState(initialEdits?.trimEnd || 0);
 
+  // Ref to avoid stale closure in event handlers
+  const durationFoundRef = useRef(false);
+  const trimStartRef = useRef(trimStart);
+  const trimEndRef = useRef(trimEnd);
+  trimStartRef.current = trimStart;
+  trimEndRef.current = trimEnd;
+
   // Draggable text overlays — restore from saved edits if available
   const [overlays, setOverlays] = useState<TextOverlay[]>(initialEdits?.overlays || []);
   const [selectedOverlay, setSelectedOverlay] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
 
-  // Duration detection — poll until found
-  useEffect(() => {
+  // Called from multiple video events to detect duration
+  const tryDetectDuration = () => {
+    if (durationFoundRef.current) return;
     const video = videoRef.current;
     if (!video) return;
+    const d = video.duration;
+    if (d && isFinite(d) && d > 0) {
+      durationFoundRef.current = true;
+      setDuration(d);
+      setTrimEnd((prev) => prev === 0 ? d : prev);
+    }
+  };
 
-    const check = () => {
-      const d = video.duration;
-      if (d && isFinite(d) && d > 0 && duration === 0) {
-        setDuration(d);
-        setTrimEnd((prev) => prev === 0 ? d : prev);
-      }
-    };
-
-    // Poll every 300ms — most reliable across all browsers/servers
-    const pollId = setInterval(check, 300);
-    check(); // check immediately too
-
-    return () => clearInterval(pollId);
-  });
-
-  // Playback tracking + trim enforcement
-  useEffect(() => {
+  // Track time + enforce trim boundaries (called from onTimeUpdate on the video element)
+  const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video) return;
-    const onTime = () => {
-      setCurrentTime(video.currentTime);
-      if (trimEnd > 0 && video.currentTime >= trimEnd) {
-        video.pause();
-        video.currentTime = trimStart;
-        setIsPlaying(false);
-      }
-    };
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-    video.addEventListener("timeupdate", onTime);
-    video.addEventListener("play", onPlay);
-    video.addEventListener("pause", onPause);
-    return () => {
-      video.removeEventListener("timeupdate", onTime);
-      video.removeEventListener("play", onPlay);
-      video.removeEventListener("pause", onPause);
-    };
-  }, [trimStart, trimEnd]);
+    tryDetectDuration();
+    setCurrentTime(video.currentTime);
+    if (trimEndRef.current > 0 && video.currentTime >= trimEndRef.current) {
+      video.pause();
+      video.currentTime = trimStartRef.current;
+      setIsPlaying(false);
+    }
+  };
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -239,6 +228,13 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
               preload="auto"
               playsInline
               controls
+              onTimeUpdate={handleTimeUpdate}
+              onPlay={() => { tryDetectDuration(); setIsPlaying(true); }}
+              onPause={() => setIsPlaying(false)}
+              onLoadedMetadata={tryDetectDuration}
+              onLoadedData={tryDetectDuration}
+              onCanPlay={tryDetectDuration}
+              onDurationChange={tryDetectDuration}
             />
 
             {/* Draggable text overlays */}
