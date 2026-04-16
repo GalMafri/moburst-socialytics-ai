@@ -83,9 +83,9 @@ export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }:
 
   const spec = getPlatformVideoSpec(post.platform, post.format);
 
-  const buildVideoPrompt = (adaptedDirection?: string) => {
-    const visualDirection = adaptedDirection || post.ai_visual_prompt || post.visual_direction || "";
-    const postCopy = post.copy || "";
+  const buildVideoPrompt = (direction?: string) => {
+    const visualDirection = direction || post.ai_visual_prompt || post.visual_direction || post.copy || post.concept || "";
+    const postCopy = post.copy || post.caption_angle || "";
 
     const sections: string[] = [];
 
@@ -139,33 +139,38 @@ export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }:
   const handleOpen = async () => {
     setOpen(true);
 
-    // Detect format mismatch: post recommended image/carousel but user is generating a video
-    let baseDirection = post.ai_visual_prompt || post.visual_direction || "";
+    // Get the visual direction from whichever field the post has
+    let direction = post.ai_visual_prompt || post.visual_direction || post.copy || post.concept || "";
+
+    // Detect format mismatch: post recommended image/carousel but user wants a video
     const postFormat = (post.format || "").toLowerCase();
     const isImageRecommendation =
       postFormat.includes("image") ||
       postFormat.includes("carousel") ||
       postFormat.includes("static");
-    if (isImageRecommendation && baseDirection) {
+
+    if (isImageRecommendation && direction) {
+      // Try to adapt the prompt from image/carousel to video format
       try {
         const { data: adapted } = await supabase.functions.invoke("adapt-creative-prompt", {
           body: {
             concept: post.concept || post.hook || post.copy || "",
-            visual_direction: baseDirection,
+            visual_direction: direction,
             original_format: post.format,
             target_format: "Video",
             platform: post.platform,
           },
         });
         if (adapted?.adapted_prompt) {
-          baseDirection = adapted.adapted_prompt;
+          direction = adapted.adapted_prompt;
         }
       } catch (e) {
-        // Silently fall through — use original prompt
+        // Silently fall through — use original direction
       }
     }
 
-    setPrompt(buildVideoPrompt(isImageRecommendation ? baseDirection : undefined));
+    // Always pass the direction to buildVideoPrompt
+    setPrompt(buildVideoPrompt(direction));
   };
 
   const generateVideo = async () => {
