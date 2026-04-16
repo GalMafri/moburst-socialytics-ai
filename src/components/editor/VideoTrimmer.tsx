@@ -59,57 +59,25 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
   const [selectedOverlay, setSelectedOverlay] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
 
-  // Duration detection — aggressive, tries everything
+  // Duration detection — poll until found
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    let found = false;
 
-    const trySetDuration = () => {
-      if (found) return;
+    const check = () => {
       const d = video.duration;
-      if (d && isFinite(d) && d > 0) {
-        found = true;
+      if (d && isFinite(d) && d > 0 && duration === 0) {
         setDuration(d);
-        if (trimEnd === 0) setTrimEnd(d);
+        setTrimEnd((prev) => prev === 0 ? d : prev);
       }
     };
 
-    // Listen to every possible event
-    const events = ["loadedmetadata", "loadeddata", "durationchange", "canplay", "canplaythrough", "playing", "timeupdate"];
-    events.forEach((ev) => video.addEventListener(ev, trySetDuration));
+    // Poll every 300ms — most reliable across all browsers/servers
+    const pollId = setInterval(check, 300);
+    check(); // check immediately too
 
-    // Check immediately
-    trySetDuration();
-
-    // Force load by briefly playing (some servers won't send metadata until playback starts)
-    if (!found && video.readyState < 2) {
-      video.muted = true;
-      video.play()
-        .then(() => {
-          setTimeout(() => {
-            trySetDuration();
-            video.pause();
-            video.currentTime = 0;
-            video.muted = false;
-          }, 200);
-        })
-        .catch(() => {}); // autoplay might be blocked
-    }
-
-    // Polling fallback — check every 500ms for 10s
-    const pollId = setInterval(() => {
-      trySetDuration();
-      if (found) clearInterval(pollId);
-    }, 500);
-    const timeoutId = setTimeout(() => clearInterval(pollId), 10000);
-
-    return () => {
-      events.forEach((ev) => video.removeEventListener(ev, trySetDuration));
-      clearInterval(pollId);
-      clearTimeout(timeoutId);
-    };
-  }, []);
+    return () => clearInterval(pollId);
+  });
 
   // Playback tracking + trim enforcement
   useEffect(() => {
