@@ -556,18 +556,17 @@ function CalendarPostCard({
   // Store video edit data per media index (overlays, trim)
   const [videoEdits, setVideoEdits] = useState<Record<number, VideoEditData>>({});
 
-  // Load previously generated media from post_iterations on mount
+  // Load previously generated media + video edits from post_iterations on mount
   useEffect(() => {
     if (!clientId) return;
     let query = supabase
       .from("post_iterations")
-      .select("media_urls")
+      .select("media_urls, video_edits")
       .eq("client_id", clientId)
       .not("media_urls", "is", null)
       .order("created_at", { ascending: false })
       .limit(1);
 
-    // Narrow by platform + copy to match the specific post
     if (post.platform) query = query.eq("platform", post.platform);
     const postCopy = post.copy || post.caption_angle || "";
     if (postCopy) query = query.eq("post_copy", postCopy);
@@ -575,6 +574,10 @@ function CalendarPostCard({
     query.then(({ data }) => {
       if (data?.[0]?.media_urls?.length) {
         setGeneratedMediaUrls(data[0].media_urls);
+      }
+      // Restore saved video edits
+      if (data?.[0]?.video_edits && typeof data[0].video_edits === "object") {
+        setVideoEdits(data[0].video_edits as Record<number, VideoEditData>);
       }
     }, () => {});
   }, [clientId, post.platform]);
@@ -957,10 +960,23 @@ function CalendarPostCard({
           clientId={clientId}
           initialEdits={videoEdits[editingMediaIndex]}
           onSave={(url, edits) => {
-            // Store the edit data for this media index
-            setVideoEdits((prev) => ({ ...prev, [editingMediaIndex!]: edits }));
+            // Store in local state
+            const updatedEdits = { ...videoEdits, [editingMediaIndex!]: edits };
+            setVideoEdits(updatedEdits);
             setEditingMediaIndex(null);
             setEditingMediaType(null);
+
+            // Persist to database
+            if (clientId) {
+              const postCopy = post.copy || post.caption_angle || "";
+              supabase
+                .from("post_iterations")
+                .update({ video_edits: updatedEdits } as any)
+                .eq("client_id", clientId)
+                .eq("platform", post.platform || "")
+                .not("media_urls", "is", null)
+                .then(() => {}, (err: any) => console.error("Failed to save video edits:", err));
+            }
           }}
           onClose={() => { setEditingMediaIndex(null); setEditingMediaType(null); }}
         />
