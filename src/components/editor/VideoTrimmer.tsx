@@ -116,26 +116,50 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
     return () => { cancelled = true; };
   }, [videoUrl]);
 
-  // Video duration + time tracking
+  // Video duration detection — try multiple events
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const onLoaded = () => { setDuration(video.duration || 0); setTrimEnd(video.duration || 0); };
-    const onTime = () => {
-      setCurrentTime(video.currentTime);
-      if (video.currentTime >= trimEnd && !video.paused) {
-        video.pause();
-        video.currentTime = trimStart;
+    const setDur = () => {
+      const dur = video.duration;
+      if (dur && isFinite(dur) && dur > 0 && duration === 0) {
+        setDuration(dur);
+        setTrimEnd(dur);
       }
     };
-    video.addEventListener("loadedmetadata", onLoaded);
-    video.addEventListener("timeupdate", onTime);
-    if (video.readyState >= 1) onLoaded();
+    video.addEventListener("loadedmetadata", setDur);
+    video.addEventListener("loadeddata", setDur);
+    video.addEventListener("durationchange", setDur);
+    video.addEventListener("canplay", setDur);
+    // Check immediately in case already loaded
+    if (video.readyState >= 1) setDur();
     return () => {
-      video.removeEventListener("loadedmetadata", onLoaded);
-      video.removeEventListener("timeupdate", onTime);
+      video.removeEventListener("loadedmetadata", setDur);
+      video.removeEventListener("loadeddata", setDur);
+      video.removeEventListener("durationchange", setDur);
+      video.removeEventListener("canplay", setDur);
     };
-  }, [trimStart, trimEnd]);
+  }, [duration]);
+
+  // Playback time tracking + trim boundary enforcement
+  const trimStartRef = useRef(trimStart);
+  const trimEndRef = useRef(trimEnd);
+  trimStartRef.current = trimStart;
+  trimEndRef.current = trimEnd;
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onTime = () => {
+      setCurrentTime(video.currentTime);
+      if (trimEndRef.current > 0 && video.currentTime >= trimEndRef.current && !video.paused) {
+        video.pause();
+        video.currentTime = trimStartRef.current;
+      }
+    };
+    video.addEventListener("timeupdate", onTime);
+    return () => video.removeEventListener("timeupdate", onTime);
+  }, []);
 
   const handlePreview = () => {
     const video = videoRef.current;
@@ -312,7 +336,15 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
         <div className="space-y-4">
           {/* Video player with live text overlay */}
           <div className="relative rounded-md overflow-hidden border bg-black">
-            <video ref={videoRef} src={videoUrl} controls className="w-full" preload="metadata" />
+            <video ref={videoRef} src={videoUrl} controls className="w-full" preload="auto"
+              onLoadedMetadata={() => {
+                const v = videoRef.current;
+                if (v && v.duration && isFinite(v.duration) && duration === 0) {
+                  setDuration(v.duration);
+                  setTrimEnd(v.duration);
+                }
+              }}
+            />
             {overlayText.trim() && <div style={overlayStyle}>{overlayText}</div>}
           </div>
 
@@ -325,35 +357,63 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
           </p>
 
           {/* Trim */}
-          {duration > 0 && (
-            <div className="space-y-3 border rounded-lg p-3">
-              <Label className="text-sm font-medium flex items-center gap-1.5">
-                <Scissors className="h-3.5 w-3.5" /> Trim
-              </Label>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Start</span>
-                  <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">{formatTime(trimStart)}</span>
+          <div className="space-y-3 border rounded-lg p-3">
+            <Label className="text-sm font-medium flex items-center gap-1.5">
+              <Scissors className="h-3.5 w-3.5" /> Trim
+            </Label>
+            {duration > 0 ? (
+              <>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Start</span>
+                    <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">{formatTime(trimStart)}</span>
+                  </div>
+                  <Slider min={0} max={Math.max(trimEnd - 0.1, 0)} step={0.1} value={[trimStart]}
+                    onValueChange={(v) => { setTrimStart(v[0]); if (videoRef.current) videoRef.current.currentTime = v[0]; }} />
                 </div>
-                <Slider min={0} max={Math.max(trimEnd - 0.1, 0)} step={0.1} value={[trimStart]}
-                  onValueChange={(v) => { setTrimStart(v[0]); if (videoRef.current) videoRef.current.currentTime = v[0]; }} />
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">End</span>
-                  <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">{formatTime(trimEnd)}</span>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">End</span>
+                    <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">{formatTime(trimEnd)}</span>
+                  </div>
+                  <Slider min={Math.max(trimStart + 0.1, 0.1)} max={duration} step={0.1} value={[trimEnd]}
+                    onValueChange={(v) => { setTrimEnd(v[0]); if (videoRef.current) videoRef.current.currentTime = v[0]; }} />
                 </div>
-                <Slider min={Math.max(trimStart + 0.1, 0.1)} max={duration} step={0.1} value={[trimEnd]}
-                  onValueChange={(v) => { setTrimEnd(v[0]); if (videoRef.current) videoRef.current.currentTime = v[0]; }} />
+              </>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Enter trim times manually (seconds):</p>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Label className="text-xs text-muted-foreground">Start (sec)</Label>
+                    <Input type="number" min={0} step={0.1} value={trimStart}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value) || 0;
+                        setTrimStart(v);
+                        if (videoRef.current) videoRef.current.currentTime = v;
+                      }} className="h-8 text-xs" />
+                  </div>
+                  <div className="flex-1">
+                    <Label className="text-xs text-muted-foreground">End (sec)</Label>
+                    <Input type="number" min={0.1} step={0.1} value={trimEnd || ""}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value) || 0;
+                        setTrimEnd(v);
+                        if (videoRef.current) videoRef.current.currentTime = v;
+                      }} className="h-8 text-xs" />
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">Duration: {formatTime(trimEnd - trimStart)}</p>
-                <Button variant="outline" size="sm" onClick={handlePreview}>
-                  <Play className="h-3 w-3 mr-1" /> Preview
-                </Button>
-              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                {duration > 0 ? `Duration: ${formatTime(trimEnd - trimStart)}` : "Play video to detect duration"}
+              </p>
+              <Button variant="outline" size="sm" onClick={handlePreview}>
+                <Play className="h-3 w-3 mr-1" /> Preview
+              </Button>
             </div>
-          )}
+          </div>
 
           {/* Text overlay */}
           <div className="space-y-3 border rounded-lg p-3">
