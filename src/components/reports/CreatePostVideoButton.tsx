@@ -86,94 +86,74 @@ export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGe
 
   const spec = getPlatformVideoSpec(post.platform, post.format);
 
-  const buildVideoPrompt = (direction?: string) => {
-    const visualDirection = direction || post.ai_visual_prompt || post.visual_direction || post.copy || post.concept || "";
-    const postCopy = post.copy || post.caption_angle || "";
+  /**
+   * Build a clean, concise Veo-compatible video prompt.
+   * Veo works best with 1-3 sentence scene descriptions — not storyboards.
+   */
+  const buildVideoPrompt = (sceneDescription: string) => {
+    const colors = [brandIdentity?.primary_color, brandIdentity?.secondary_color, brandIdentity?.accent_color].filter(Boolean);
+    const colorNote = colors.length > 0
+      ? ` Use a ${colors.join("/")} color palette.`
+      : "";
+    const styleNote = brandIdentity?.visual_style
+      ? ` Visual style: ${brandIdentity.visual_style}.`
+      : "";
 
-    const sections: string[] = [];
+    return `${sceneDescription}${colorNote}${styleNote} ${spec.aspect} format, ${spec.duration}, ${spec.style} No text overlays, watermarks, logos, hex codes, or color codes visible in any frame.`;
+  };
 
-    // 1. Video-specific creative direction
-    sections.push(`Create a ${spec.duration} ${spec.aspect} video for ${spec.label}.`);
-
-    // 2. Scene description from the post's visual direction
-    if (visualDirection) {
-      sections.push(`SCENE: ${visualDirection}`);
-    }
-
-    // 3. Post context for thematic alignment
-    if (postCopy) {
-      sections.push(`CONTEXT: This video accompanies this post: "${postCopy.slice(0, 150)}${postCopy.length > 150 ? '...' : ''}"`);
-    }
-
-    // 4. Platform-specific motion and style direction
-    sections.push(`MOTION & STYLE: ${spec.style}`);
-
-    // 5. Brand identity
-    if (brandIdentity) {
-      const brandParts: string[] = [];
-      const colors = [brandIdentity.primary_color, brandIdentity.secondary_color, brandIdentity.accent_color].filter(Boolean);
-      if (colors.length > 0) {
-        brandParts.push(`Use this color palette in the video design (apply these colors, NEVER show them as text): ${colors.join(", ")}. IMPORTANT: Do not render any hex codes, color values, or technical notation as visible text in the video.`);
+  /**
+   * Distill a complex storyboard/visual direction into a simple Veo scene description
+   * using Claude. Falls back to extracting the first meaningful sentence.
+   */
+  const distillForVeo = async (rawDirection: string, postCopy: string): Promise<string> => {
+    // Try Claude first for best results
+    try {
+      const { data } = await supabase.functions.invoke("adapt-creative-prompt", {
+        body: {
+          concept: postCopy || rawDirection.slice(0, 200),
+          visual_direction: rawDirection,
+          original_format: post.format || "Storyboard",
+          target_format: `${spec.duration} ${spec.aspect} AI-generated video clip (Google Veo)`,
+          platform: post.platform,
+        },
+      });
+      if (data?.adapted_prompt && data.adapted_prompt.length > 20) {
+        return data.adapted_prompt;
       }
-      if (brandIdentity.visual_style) brandParts.push(`Visual style: ${brandIdentity.visual_style}`);
-      if (brandIdentity.tone_of_voice) brandParts.push(`Tone: ${brandIdentity.tone_of_voice}`);
-      if (brandIdentity.design_elements) brandParts.push(`Design elements: ${brandIdentity.design_elements}`);
-      if (brandIdentity.background_style) brandParts.push(`Background: ${brandIdentity.background_style}`);
-
-      if (brandParts.length > 0) {
-        sections.push(`BRAND GUIDELINES:\n${brandParts.join("\n")}`);
-      }
+    } catch {
+      // Fall through to manual extraction
     }
 
-    // 6. Video-specific constraints
-    sections.push(`REQUIREMENTS:
-- Smooth, professional camera motion (slow pan, dolly, or gentle zoom)
-- No text overlays, watermarks, or logos
-- No jarring cuts — use smooth transitions
-- Photorealistic quality, cinematic lighting
-- Content must be appropriate for ${spec.label} audience`);
+    // Fallback: strip markdown and extract the core scene description
+    const cleaned = rawDirection
+      .replace(/#+\s*/g, "")            // remove markdown headers
+      .replace(/\*\*([^*]+)\*\*/g, "$1") // remove bold markers
+      .replace(/\*([^*]+)\*/g, "$1")     // remove italic markers
+      .replace(/\([^)]*\)/g, "")         // remove parenthetical notes
+      .replace(/\d+-\d+s?:?\s*/g, "")    // remove timestamp markers like "0-3s:"
+      .replace(/\n{2,}/g, ". ")          // collapse double newlines
+      .replace(/\n/g, " ")              // collapse single newlines
+      .replace(/\s{2,}/g, " ")          // collapse spaces
+      .trim();
 
-    // 7. Final hex-code guard
-    sections.push(`CRITICAL: No hex codes, color codes, or technical color notation should appear as visible text in any frame of this video.`);
-
-    return sections.join("\n\n");
+    // Take the first 2-3 sentences that describe the visual scene
+    const sentences = cleaned.split(/\.\s+/).filter(s => s.length > 15).slice(0, 3);
+    return sentences.join(". ") + ".";
   };
 
   const handleOpen = async () => {
     setOpen(true);
+    setPrompt("Generating video prompt...");
 
-    // Get the visual direction from whichever field the post has
-    let direction = post.ai_visual_prompt || post.visual_direction || post.copy || post.concept || "";
+    // Get the raw visual direction from whichever field the post has
+    const rawDirection = post.ai_visual_prompt || post.visual_direction || post.copy || post.concept || "";
+    const postCopy = post.copy || post.caption_angle || "";
 
-    // Detect format mismatch: post recommended image/carousel but user wants a video
-    const postFormat = (post.format || "").toLowerCase();
-    const isImageRecommendation =
-      postFormat.includes("image") ||
-      postFormat.includes("carousel") ||
-      postFormat.includes("static");
+    // Distill the complex storyboard into a simple Veo-compatible scene description
+    const sceneDescription = await distillForVeo(rawDirection, postCopy);
 
-    if (isImageRecommendation && direction) {
-      // Try to adapt the prompt from image/carousel to video format
-      try {
-        const { data: adapted } = await supabase.functions.invoke("adapt-creative-prompt", {
-          body: {
-            concept: post.concept || post.hook || post.copy || "",
-            visual_direction: direction,
-            original_format: post.format,
-            target_format: "Video",
-            platform: post.platform,
-          },
-        });
-        if (adapted?.adapted_prompt) {
-          direction = adapted.adapted_prompt;
-        }
-      } catch (e) {
-        // Silently fall through — use original direction
-      }
-    }
-
-    // Always pass the direction to buildVideoPrompt
-    setPrompt(buildVideoPrompt(direction));
+    setPrompt(buildVideoPrompt(sceneDescription));
   };
 
   const generateVideo = async () => {

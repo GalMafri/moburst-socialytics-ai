@@ -32,7 +32,27 @@ Deno.serve(async (req) => {
       return jsonResp({ adapted_prompt: visual_direction });
     }
 
-    const systemPrompt = `You are a creative director adapting a social media post concept from one format to another.
+    const isVeo = target_format.toLowerCase().includes("veo") || target_format.toLowerCase().includes("ai-generated video");
+
+    const systemPrompt = isVeo
+      ? `You are a creative director writing a video generation prompt for Google Veo (an AI video generator).
+
+Veo creates short 5-8 second video clips from simple scene descriptions. It works best with:
+- 1-3 concise sentences describing a single visual scene
+- Camera movement instructions (slow pan, dolly, zoom, tracking shot)
+- Lighting and atmosphere descriptions
+- NO text overlays, NO multiple scenes, NO storyboards, NO timestamps
+- NO real people's names or celebrity references
+- NO markdown formatting
+
+Original concept: ${concept}
+Original visual direction (may be a complex storyboard — distill it): ${visual_direction || "Not specified"}
+Platform: ${platform || "general"}
+
+Write a 1-3 sentence scene description suitable for AI video generation. Describe ONE continuous shot with motion, lighting, and mood. Do NOT include timestamps, scene numbers, text overlay instructions, or markdown.
+
+Return ONLY the scene description, nothing else.`
+      : `You are a creative director adapting a social media post concept from one format to another.
 
 Original format: ${original_format}
 Target format: ${target_format}
