@@ -44,7 +44,7 @@ import {
 } from "recharts";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { ReportActions } from "@/components/reports/ReportActions";
@@ -548,6 +548,24 @@ function CalendarPostCard({
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [generatedMediaUrls, setGeneratedMediaUrls] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
+
+  // Load previously generated media from post_iterations on mount
+  useEffect(() => {
+    if (!clientId) return;
+    supabase
+      .from("post_iterations")
+      .select("media_urls")
+      .eq("client_id", clientId)
+      .eq("platform", post.platform || "")
+      .not("media_urls", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        if (data?.[0]?.media_urls?.length) {
+          setGeneratedMediaUrls(data[0].media_urls);
+        }
+      }, () => {});
+  }, [clientId, post.platform]);
   const initialCopy = post.copy || post.caption_angle || post.concept || "";
   const [editedCopy, setEditedCopy] = useState(initialCopy);
   const [displayCopy, setDisplayCopy] = useState(initialCopy);

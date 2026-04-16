@@ -159,8 +159,47 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
         }
       }
 
-      if (generated.length > 0 && onImagesGenerated) {
-        onImagesGenerated(generated);
+      // Upload generated images to persistent storage
+      const persistentUrls: string[] = [];
+      for (let i = 0; i < generated.length; i++) {
+        try {
+          const { data: uploaded } = await supabase.functions.invoke("upload-generated-media", {
+            body: {
+              client_id: clientId || "unknown",
+              media_data: generated[i],
+              media_type: "image",
+              file_name: `design-${post.platform || "post"}-slide${i + 1}`,
+            },
+          });
+          if (uploaded?.url) {
+            persistentUrls.push(uploaded.url);
+          } else {
+            persistentUrls.push(generated[i]); // fallback to base64
+          }
+        } catch {
+          persistentUrls.push(generated[i]); // fallback to base64
+        }
+      }
+
+      // Update local state with persistent URLs
+      const finalUrls = persistentUrls.length > 0 ? persistentUrls : generated;
+      setImageUrls(finalUrls);
+
+      // Save to post_iterations with media_urls
+      if (clientId) {
+        supabase.from("post_iterations").insert({
+          client_id: clientId,
+          platform: post.platform || null,
+          post_copy: post.copy || post.caption_angle || null,
+          visual_direction: post.visual_direction || post.ai_visual_prompt || null,
+          format: post.format || null,
+          source: "calendar",
+          media_urls: finalUrls,
+        }).then(() => {}, () => {});
+      }
+
+      if (finalUrls.length > 0 && onImagesGenerated) {
+        onImagesGenerated(finalUrls);
       }
     } catch (err: any) {
       // Keep any images generated so far

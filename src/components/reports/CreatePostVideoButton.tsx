@@ -190,8 +190,26 @@ export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }:
 
       if (error) throw error;
       if (data?.video_url) {
-        setVideoUrl(data.video_url);
-        if (onVideoGenerated) onVideoGenerated(data.video_url);
+        // Upload video to persistent storage
+        let persistentUrl = data.video_url;
+        try {
+          const { data: uploaded } = await supabase.functions.invoke("upload-generated-media", {
+            body: {
+              client_id: post.client_id || "unknown",
+              media_data: data.video_url,
+              media_type: "video",
+              file_name: `video-${post.platform || "post"}`,
+            },
+          });
+          if (uploaded?.url) {
+            persistentUrl = uploaded.url;
+          }
+        } catch {
+          // Fallback to original URL
+        }
+
+        setVideoUrl(persistentUrl);
+        if (onVideoGenerated) onVideoGenerated(persistentUrl);
         toast.success("Video generated!");
       } else {
         toast.error("Video generation failed — no video returned");
