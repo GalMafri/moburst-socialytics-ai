@@ -257,6 +257,7 @@ export type Database = {
           report_id: string | null
           source: string | null
           version: number
+          video_edits: Json | null
           visual_direction: string | null
         }
         Insert: {
@@ -275,6 +276,7 @@ export type Database = {
           report_id?: string | null
           source?: string | null
           version?: number
+          video_edits?: Json | null
           visual_direction?: string | null
         }
         Update: {
@@ -293,6 +295,7 @@ export type Database = {
           report_id?: string | null
           source?: string | null
           version?: number
+          video_edits?: Json | null
           visual_direction?: string | null
         }
         Relationships: [
