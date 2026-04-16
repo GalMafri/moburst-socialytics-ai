@@ -172,12 +172,15 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
             },
           });
           if (uploaded?.url) {
+            console.log("Image uploaded to storage:", uploaded.url);
             persistentUrls.push(uploaded.url);
           } else {
-            persistentUrls.push(generated[i]); // fallback to base64
+            console.warn("Upload returned no URL, falling back to base64. Response:", uploaded);
+            persistentUrls.push(generated[i]);
           }
-        } catch {
-          persistentUrls.push(generated[i]); // fallback to base64
+        } catch (uploadErr) {
+          console.error("Image upload failed:", uploadErr);
+          persistentUrls.push(generated[i]);
         }
       }
 

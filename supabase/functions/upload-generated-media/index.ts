@@ -78,16 +78,20 @@ Deno.serve(async (req) => {
       });
 
     if (uploadError) {
+      console.error("Initial upload error:", uploadError.message);
       // If bucket doesn't exist, try to create it
       if (
         uploadError.message?.includes("not found") ||
-        uploadError.message?.includes("Bucket")
+        uploadError.message?.includes("Bucket") ||
+        uploadError.message?.includes("does not exist")
       ) {
-        // Try creating the bucket
-        await supabase.storage.createBucket(bucket, {
+        console.log("Attempting to create bucket:", bucket);
+        const { error: bucketError } = await supabase.storage.createBucket(bucket, {
           public: true,
           fileSizeLimit: 52428800, // 50MB
         });
+        if (bucketError) console.error("Bucket creation error:", bucketError.message);
+
         // Retry upload
         const { error: retryError } = await supabase.storage
           .from(bucket)
