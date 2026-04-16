@@ -4,7 +4,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Video, Loader2, Download, RefreshCw } from "lucide-react";
+import { Video, Loader2, Download, RefreshCw, Scissors } from "lucide-react";
+import { VideoTrimmer } from "@/components/editor/VideoTrimmer";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -80,6 +81,7 @@ export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }:
   const [loading, setLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [showTrimmer, setShowTrimmer] = useState(false);
 
   const spec = getPlatformVideoSpec(post.platform, post.format);
 
@@ -298,12 +300,34 @@ export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }:
                   loop
                   muted
                 />
-                <a href={videoUrl} download className="block">
-                  <Button variant="outline" size="sm" className="w-full">
-                    <Download className="h-3 w-3 mr-1" /> Download Video
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => setShowTrimmer(true)}
+                  >
+                    <Scissors className="h-3 w-3 mr-1" /> Edit Video
                   </Button>
-                </a>
+                  <a href={videoUrl} download className="flex-1">
+                    <Button variant="outline" size="sm" className="w-full">
+                      <Download className="h-3 w-3 mr-1" /> Download
+                    </Button>
+                  </a>
+                </div>
               </div>
+            )}
+
+            {showTrimmer && videoUrl && (
+              <VideoTrimmer
+                videoUrl={videoUrl}
+                onSave={(updatedUrl) => {
+                  setVideoUrl(updatedUrl);
+                  setShowTrimmer(false);
+                  toast.success("Video edits saved");
+                }}
+                onClose={() => setShowTrimmer(false)}
+              />
             )}
           </div>
         </DialogContent>
