@@ -960,7 +960,16 @@ function CalendarPostCard({
           clientId={clientId}
           initialEdits={videoEdits[editingMediaIndex]}
           onSave={(url, edits) => {
-            // Store in local state
+            // Update the media URL with the processed video
+            if (url && url !== generatedMediaUrls[editingMediaIndex!]) {
+              setGeneratedMediaUrls((prev) => {
+                const updated = [...prev];
+                updated[editingMediaIndex!] = url;
+                return updated;
+              });
+            }
+
+            // Store edit metadata
             const updatedEdits = { ...videoEdits, [editingMediaIndex!]: edits };
             setVideoEdits(updatedEdits);
             setEditingMediaIndex(null);
