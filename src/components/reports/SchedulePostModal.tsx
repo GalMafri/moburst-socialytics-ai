@@ -296,9 +296,11 @@ export function SchedulePostModal({
                   const isDataImage = url.startsWith("data:image/");
                   const isVideo = !isDataImage && (
                     url.startsWith("data:video/") ||
+                    url.startsWith("blob:") ||
                     url.endsWith(".mp4") ||
                     url.endsWith(".webm") ||
-                    url.includes("generativelanguage.googleapis.com")
+                    url.includes("generativelanguage.googleapis.com") ||
+                    url.includes("video")
                   );
                   return isVideo ? (
                     <video key={i} src={url} controls className="w-full max-h-48 rounded-md border object-contain" />
