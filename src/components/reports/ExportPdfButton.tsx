@@ -46,7 +46,7 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
         if (tabLabels[i]) {
           const header = document.createElement("h2");
           header.className = "pdf-tab-section-header";
-          header.style.cssText = "font-size:1.25rem;font-weight:700;margin:32px 0 16px;padding-bottom:8px;border-bottom:2px solid hsl(0 0% 89.8%);";
+          header.style.cssText = "font-size:1.25rem;font-weight:700;margin:32px 0 16px;padding-bottom:8px;border-bottom:2px solid rgba(255,255,255,0.08);color:#ffffff;";
           header.textContent = tabLabels[i];
           panel.parentElement?.insertBefore(header, panel);
         }
@@ -79,34 +79,36 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
   <style>
     ${cssText}
 
-    /* Print overrides */
+    /* Intercept dark theme for PDF */
     :root {
-      --background: 0 0% 100%;
-      --foreground: 0 0% 3.9%;
-      --card: 0 0% 100%;
-      --card-foreground: 0 0% 3.9%;
-      --muted: 0 0% 96.1%;
-      --muted-foreground: 0 0% 45.1%;
-      --border: 0 0% 89.8%;
-      --primary: 0 0% 9%;
-      --primary-foreground: 0 0% 98%;
-      --secondary: 0 0% 96.1%;
-      --secondary-foreground: 0 0% 9%;
-      --accent: 0 0% 96.1%;
-      --accent-foreground: 0 0% 9%;
-      --destructive: 0 84.2% 60.2%;
-      --success: 142 76% 36%;
-      --warning: 38 92% 50%;
+      --background: 228 23% 5%;
+      --foreground: 0 0% 100%;
+      --card: 0 0% 0%;
+      --card-foreground: 0 0% 100%;
+      --muted: 222 10% 16%;
+      --muted-foreground: 218 11% 65%;
+      --border: 220 12% 14%;
+      --primary: 72 75% 57%;
+      --primary-foreground: 0 0% 0%;
+      --secondary: 220 12% 16%;
+      --secondary-foreground: 0 0% 90%;
+      --accent: 222 10% 16%;
+      --accent-foreground: 0 0% 95%;
+      --destructive: 0 70% 50%;
+      --destructive-foreground: 0 0% 100%;
+      --success: 160 84% 39%;
+      --warning: 30 100% 55%;
     }
 
     * {
-      color-scheme: light !important;
+      color-scheme: dark !important;
+      border-color: rgba(255, 255, 255, 0.05);
     }
 
     body {
-      background: white !important;
-      color: hsl(0 0% 3.9%) !important;
-      font-family: Inter, system-ui, -apple-system, sans-serif;
+      background: #0b0c10 !important;
+      color: #ffffff !important;
+      font-family: "Geist", "Inter", system-ui, -apple-system, sans-serif;
       padding: 20px 40px;
       max-width: 1100px;
       margin: 0 auto;
@@ -114,10 +116,12 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       print-color-adjust: exact;
     }
 
-    /* Ensure cards have visible borders */
-    [data-slot="card"], .rounded-lg.border {
-      border: 1px solid hsl(0 0% 89.8%) !important;
-      background: white !important;
+    /* Cards: dark glass appearance */
+    [data-slot="card"], .glass, .rounded-lg.border {
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      border-top-color: rgba(255, 255, 255, 0.14) !important;
+      background: rgba(26, 29, 35, 0.85) !important;
+      border-radius: 20px !important;
       break-inside: avoid;
       margin-bottom: 12px;
     }
@@ -133,44 +137,81 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
     .space-y-4 > * + * { margin-top: 16px !important; }
     .space-y-3 > * + * { margin-top: 12px !important; }
 
-    /* Fix text colors */
+    /* Text colors */
     .text-muted-foreground {
-      color: hsl(0 0% 45.1%) !important;
+      color: #9ca3af !important;
     }
 
-    .text-foreground {
-      color: hsl(0 0% 3.9%) !important;
+    .text-foreground, h1, h2, h3, h4 {
+      color: #ffffff !important;
     }
 
     .text-destructive {
-      color: hsl(0 84.2% 60.2%) !important;
+      color: rgb(248, 113, 113) !important;
     }
 
     .text-success {
-      color: hsl(142 76% 36%) !important;
+      color: #10b981 !important;
     }
 
     .text-warning {
-      color: hsl(38 92% 50%) !important;
+      color: #f59e0b !important;
     }
 
-    /* Badge styling */
+    p, span, div, td, th, li {
+      color: inherit;
+    }
+
+    /* Badge styling — dark theme */
     [data-slot="badge"] {
       display: inline-flex !important;
-      border: 1px solid hsl(0 0% 89.8%) !important;
       padding: 2px 8px !important;
-      border-radius: 6px !important;
+      border-radius: 9999px !important;
       font-size: 12px !important;
-      background: hsl(0 0% 96.1%) !important;
-      color: hsl(0 0% 9%) !important;
+      font-weight: 700 !important;
+    }
+
+    /* Table styling */
+    table { border-collapse: collapse; width: 100%; }
+    th {
+      color: #9ca3af !important;
+      text-transform: uppercase;
+      font-size: 11px !important;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+    }
+    tr {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+    }
+    td {
+      color: #ffffff !important;
+    }
+
+    /* Inner surfaces */
+    .glass-inner, .bg-\\[rgba\\(255\\,255\\,255\\,0\\.03\\)\\], .bg-\\[rgba\\(255\\,255\\,255\\,0\\.04\\)\\] {
+      background: rgba(255, 255, 255, 0.03) !important;
+      border: 1px solid rgba(255, 255, 255, 0.06) !important;
+      border-radius: 12px !important;
+    }
+
+    /* Separator */
+    hr, [role="separator"] {
+      border-color: rgba(255, 255, 255, 0.06) !important;
+      background: rgba(255, 255, 255, 0.06) !important;
     }
 
     /* Recharts fix */
     .recharts-wrapper {
       break-inside: avoid;
     }
+    .recharts-cartesian-axis-tick text {
+      fill: #9ca3af !important;
+    }
+    .recharts-cartesian-grid line {
+      stroke: rgba(255, 255, 255, 0.05) !important;
+    }
 
-    /* Hide any leftover tablist elements */
+    /* Hide leftover tablist elements */
     [role="tablist"] {
       display: none !important;
     }
@@ -185,8 +226,20 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       break-after: avoid;
     }
 
-    .animate-pulse {
+    /* Remove animations in print */
+    .animate-pulse, .animate-slide-up {
       animation: none !important;
+    }
+
+    /* Remove glass effects that won't render in print */
+    .glass, .glass-inner, .glass-elevated {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+
+    /* Accent color for links */
+    a {
+      color: #b9e045 !important;
     }
 
     @media print {
