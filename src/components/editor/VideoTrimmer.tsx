@@ -43,14 +43,24 @@ let ffmpegLoaded = false;
 async function getFFmpeg(): Promise<FFmpeg> {
   if (ffmpegInstance && ffmpegLoaded) return ffmpegInstance;
 
-  ffmpegInstance = new FFmpeg();
-  const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
-  await ffmpegInstance.load({
-    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-  });
+  const ff = new FFmpeg();
+
+  // Use single-threaded core — works WITHOUT SharedArrayBuffer headers
+  // (no Cross-Origin-Opener-Policy / Cross-Origin-Embedder-Policy needed)
+  const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+  try {
+    await ff.load({
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+    });
+  } catch (e: any) {
+    console.error("FFmpeg load failed:", e);
+    throw new Error("Could not load video processor. " + (e.message || ""));
+  }
+
+  ffmpegInstance = ff;
   ffmpegLoaded = true;
-  return ffmpegInstance;
+  return ff;
 }
 
 export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimmerProps) {
@@ -255,7 +265,9 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
       args.push("-y", "output.mp4");
 
       setProcessStatus(noOverlay ? "Trimming video..." : "Processing video with overlay...");
-      await ffmpeg.exec(args);
+      console.log("FFmpeg command:", args.join(" "));
+      const exitCode = await ffmpeg.exec(args);
+      console.log("FFmpeg exit code:", exitCode);
 
       // Read output
       setProcessStatus("Finalizing...");
@@ -270,17 +282,23 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
       let finalUrl: string;
       try {
         setProcessStatus("Uploading...");
+        // Convert blob to data URL for the edge function
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(outputBlob);
+        });
         const { data: uploaded } = await supabase.functions.invoke("upload-generated-media", {
           body: {
             client_id: clientId || "unknown",
-            media_data: URL.createObjectURL(outputBlob),
+            media_data: dataUrl,
             media_type: "video",
             file_name: `edited-video`,
           },
         });
         finalUrl = uploaded?.url || URL.createObjectURL(outputBlob);
       } catch {
-        // Fallback: use blob URL (won't persist across refreshes but works for now)
+        // Fallback: use blob URL (works for session but won't persist)
         finalUrl = URL.createObjectURL(outputBlob);
       }
 
