@@ -225,11 +225,21 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
   };
 
   const handleOpen = () => {
+    // Only reset prompt if no images exist yet — preserve generated designs
+    if (imageUrls.length === 0) {
+      setEditablePrompt(defaultPrompt);
+      setSlideCount(isCarousel ? 5 : 1);
+    }
+    setOpen(true);
+  };
+
+  const handleStartOver = () => {
     setEditablePrompt(defaultPrompt);
     setImageUrls([]);
     setRevisedPrompt(null);
     setSlideCount(isCarousel ? 5 : 1);
-    setOpen(true);
+    setEditableImageUrl(null);
+    setShowEditor(false);
   };
 
   const handleCopyPrompt = () => {
@@ -423,6 +433,9 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
                     ))}
                   <Button variant="outline" size="sm" onClick={generateImages}>
                     <Paintbrush className="h-4 w-4 mr-1" /> Regenerate
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={handleStartOver}>
+                    New Design
                   </Button>
                 </div>
               </div>

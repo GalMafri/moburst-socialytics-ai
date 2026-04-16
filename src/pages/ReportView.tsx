@@ -30,6 +30,7 @@ import {
   Pencil,
   RefreshCw,
   Loader2,
+  Download,
 } from "lucide-react";
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import {
@@ -837,17 +838,51 @@ function CalendarPostCard({
         </div>
       )}
 
-      {/* Show previously generated media */}
+      {/* Show previously generated media — compact thumbnails */}
       {generatedMediaUrls.length > 0 && (
         <div className="space-y-2 border-t pt-3">
           <p className="text-xs font-medium text-muted-foreground">Generated Media</p>
-          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(generatedMediaUrls.length, 3)}, 1fr)` }}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {generatedMediaUrls.map((url, i) => {
-              const isVideo = url.includes(".mp4") || url.includes(".webm") || url.includes("video");
-              return isVideo ? (
-                <video key={i} src={url} controls className="w-full rounded-md border" muted />
-              ) : (
-                <img key={i} src={url} alt={`Design ${i + 1}`} className="w-full rounded-md border" />
+              const isVideo = url.includes(".mp4") || url.includes(".webm") || url.includes("video") || url.includes("generativelanguage");
+              return (
+                <div key={i} className="relative group">
+                  {isVideo ? (
+                    <video
+                      src={url}
+                      className="w-full h-32 object-cover rounded-md border bg-black cursor-pointer"
+                      muted
+                      preload="metadata"
+                      onClick={(e) => {
+                        const v = e.currentTarget;
+                        v.controls = true;
+                        v.play();
+                      }}
+                    />
+                  ) : (
+                    <img
+                      src={url}
+                      alt={`Design ${i + 1}`}
+                      className="w-full h-32 object-cover rounded-md border cursor-pointer"
+                      onClick={() => window.open(url, "_blank")}
+                    />
+                  )}
+                  {/* Download button overlay */}
+                  <a
+                    href={url}
+                    download={`${post.platform || "design"}-${i + 1}.${isVideo ? "mp4" : "png"}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Download className="h-3 w-3" />
+                  </a>
+                  {/* Type label */}
+                  <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">
+                    {isVideo ? "Video" : `Slide ${i + 1}`}
+                  </span>
+                </div>
               );
             })}
           </div>
