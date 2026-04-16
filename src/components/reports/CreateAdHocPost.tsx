@@ -328,6 +328,7 @@ export function CreateAdHocPost({
                       format: generatedPost.format,
                     }}
                     brandIdentity={brandIdentity}
+                    clientId={clientId}
                   />
                 )}
                 <Button

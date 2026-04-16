@@ -12,6 +12,7 @@ import { toast } from "sonner";
 interface CreatePostVideoButtonProps {
   post: any;
   brandIdentity?: any;
+  clientId?: string;
   onVideoGenerated?: (url: string) => void;
 }
 
@@ -76,7 +77,7 @@ function getPlatformVideoSpec(platform?: string, format?: string) {
   };
 }
 
-export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }: CreatePostVideoButtonProps) {
+export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGenerated }: CreatePostVideoButtonProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -195,7 +196,7 @@ export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }:
         try {
           const { data: uploaded } = await supabase.functions.invoke("upload-generated-media", {
             body: {
-              client_id: post.client_id || "unknown",
+              client_id: clientId || "unknown",
               media_data: data.video_url,
               media_type: "video",
               file_name: `video-${post.platform || "post"}`,
@@ -209,6 +210,20 @@ export function CreatePostVideoButton({ post, brandIdentity, onVideoGenerated }:
         }
 
         setVideoUrl(persistentUrl);
+
+        // Save to post_iterations with media_urls
+        if (clientId) {
+          supabase.from("post_iterations").insert({
+            client_id: clientId,
+            platform: post.platform || null,
+            post_copy: post.copy || null,
+            visual_direction: post.visual_direction || post.ai_visual_prompt || null,
+            format: post.format || null,
+            source: "calendar",
+            media_urls: [persistentUrl],
+          } as any).then(() => {}, (err: any) => console.error("post_iterations save failed:", err));
+        }
+
         if (onVideoGenerated) onVideoGenerated(persistentUrl);
         toast.success("Video generated!");
       } else {

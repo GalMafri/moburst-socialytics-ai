@@ -552,19 +552,23 @@ function CalendarPostCard({
   // Load previously generated media from post_iterations on mount
   useEffect(() => {
     if (!clientId) return;
-    supabase
+    const query = supabase
       .from("post_iterations")
       .select("media_urls")
       .eq("client_id", clientId)
-      .eq("platform", post.platform || "")
       .not("media_urls", "is", null)
       .order("created_at", { ascending: false })
-      .limit(1)
-      .then(({ data }) => {
-        if (data?.[0]?.media_urls?.length) {
-          setGeneratedMediaUrls(data[0].media_urls);
-        }
-      }, () => {});
+      .limit(1);
+
+    // Narrow by platform + copy to match the specific post
+    if (post.platform) query.eq("platform", post.platform);
+    if (post.copy) query.eq("post_copy", post.copy);
+
+    query.then(({ data }) => {
+      if (data?.[0]?.media_urls?.length) {
+        setGeneratedMediaUrls(data[0].media_urls);
+      }
+    }, () => {});
   }, [clientId, post.platform]);
   const initialCopy = post.copy || post.caption_angle || post.concept || "";
   const [editedCopy, setEditedCopy] = useState(initialCopy);
@@ -708,6 +712,7 @@ function CalendarPostCard({
           <CreatePostVideoButton
             post={post}
             brandIdentity={brandIdentity}
+            clientId={clientId}
             onVideoGenerated={(url) => setGeneratedMediaUrls([url])}
           />
           {clientId && (
@@ -828,6 +833,23 @@ function CalendarPostCard({
       {post.rationale && (
         <div className="bg-muted/50 p-3 rounded-md text-sm leading-relaxed text-muted-foreground">
           💡 {post.rationale}
+        </div>
+      )}
+
+      {/* Show previously generated media */}
+      {generatedMediaUrls.length > 0 && (
+        <div className="space-y-2 border-t pt-3">
+          <p className="text-xs font-medium text-muted-foreground">Generated Media</p>
+          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(generatedMediaUrls.length, 3)}, 1fr)` }}>
+            {generatedMediaUrls.map((url, i) => {
+              const isVideo = url.includes(".mp4") || url.includes(".webm") || url.includes("video");
+              return isVideo ? (
+                <video key={i} src={url} controls className="w-full rounded-md border" muted />
+              ) : (
+                <img key={i} src={url} alt={`Design ${i + 1}`} className="w-full rounded-md border" />
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

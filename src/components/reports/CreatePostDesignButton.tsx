@@ -195,7 +195,7 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
           format: post.format || null,
           source: "calendar",
           media_urls: finalUrls,
-        }).then(() => {}, () => {});
+        } as any).then(() => {}, (err: any) => console.error("post_iterations save failed:", err));
       }
 
       if (finalUrls.length > 0 && onImagesGenerated) {
