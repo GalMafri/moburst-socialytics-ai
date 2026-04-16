@@ -79,95 +79,70 @@ export function DesignEditor({
     setUndoStack((prev) => [...prev.slice(-19), json]);
   }, []);
 
-  // -- initialize canvas & load image --
-  useEffect(() => {
-    if (!canvasRef.current) return;
+  // -- initialize canvas via callback ref (fires when DOM element mounts) --
+  const initCanvas = useCallback((el: HTMLCanvasElement | null) => {
+    if (!el || fabricRef.current) return;
+    canvasRef.current = el;
 
-    const canvas = new Canvas(canvasRef.current, {
-      backgroundColor: "#f0f0f0",
-    });
+    const canvas = new Canvas(el, { backgroundColor: "#f0f0f0" });
     fabricRef.current = canvas;
 
-    const loadImage = async () => {
-      try {
-        // Step 1: Load image into a regular HTMLImageElement first (most reliable)
-        const htmlImg = new Image();
-        htmlImg.crossOrigin = "anonymous";
+    // Load image
+    const htmlImg = new Image();
+    htmlImg.crossOrigin = "anonymous";
 
-        const imgLoaded = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error("Image load timed out")), 10000);
-          htmlImg.onload = () => { clearTimeout(timeout); resolve(htmlImg); };
-          htmlImg.onerror = () => {
-            clearTimeout(timeout);
-            // CORS failed on direct load — try fetching as blob
-            if (imageUrl.startsWith("http")) {
-              fetch(imageUrl)
-                .then(res => res.blob())
-                .then(blob => {
-                  const blobUrl = URL.createObjectURL(blob);
-                  const retryImg = new Image();
-                  retryImg.onload = () => resolve(retryImg);
-                  retryImg.onerror = () => reject(new Error("Failed to load image"));
-                  retryImg.src = blobUrl;
-                })
-                .catch(() => reject(new Error("Failed to fetch image")));
-            } else {
-              reject(new Error("Failed to load image"));
-            }
-          };
-          htmlImg.src = imageUrl;
-        });
-
-        // Step 2: Create FabricImage from the loaded HTMLImageElement
-        const img = new FabricImage(imgLoaded);
-        if (!img || !img.width || !img.height) {
-          setLoadError("Failed to load image — invalid image data.");
-          return;
-        }
-
-        // scale to fit
-        const scale = Math.min(
-          MAX_CANVAS_WIDTH / img.width,
-          MAX_CANVAS_HEIGHT / img.height,
-          1
-        );
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-
-        canvas.setDimensions({ width: w, height: h });
-
-        img.scaleX = scale;
-        img.scaleY = scale;
-        img.selectable = false;
-        img.evented = false;
-        canvas.backgroundImage = img;
-        canvas.renderAll();
-
-        saveSnapshot();
-        setReady(true);
-      } catch (err) {
-        console.error("DesignEditor: image load error", err);
-        setLoadError(
-          "Could not load the image. It may be a cross-origin or invalid URL."
-        );
+    const onImgReady = (loadedImg: HTMLImageElement) => {
+      const img = new FabricImage(loadedImg);
+      if (!img.width || !img.height) {
+        setLoadError("Invalid image data.");
+        return;
       }
+      const scale = Math.min(MAX_CANVAS_WIDTH / img.width, MAX_CANVAS_HEIGHT / img.height, 1);
+      canvas.setDimensions({ width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
+      img.scaleX = scale;
+      img.scaleY = scale;
+      img.selectable = false;
+      img.evented = false;
+      canvas.backgroundImage = img;
+      canvas.renderAll();
+      saveSnapshot();
+      setReady(true);
     };
 
-    loadImage();
+    htmlImg.onload = () => onImgReady(htmlImg);
+    htmlImg.onerror = () => {
+      // CORS failed — try blob
+      if (imageUrl.startsWith("http")) {
+        fetch(imageUrl)
+          .then((r) => r.blob())
+          .then((blob) => {
+            const retryImg = new Image();
+            retryImg.onload = () => onImgReady(retryImg);
+            retryImg.onerror = () => setLoadError("Failed to load image for editing.");
+            retryImg.src = URL.createObjectURL(blob);
+          })
+          .catch(() => setLoadError("Failed to download image for editing."));
+      } else {
+        setLoadError("Could not load image.");
+      }
+    };
+    htmlImg.src = imageUrl;
 
-    // track changes for undo
     const onChange = () => saveSnapshot();
     canvas.on("object:modified", onChange);
     canvas.on("object:added", onChange);
-
-    return () => {
-      canvas.off("object:modified", onChange);
-      canvas.off("object:added", onChange);
-      try { canvas.dispose(); } catch (e) { console.warn("Canvas disposal:", e); }
-      fabricRef.current = null;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageUrl]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (fabricRef.current) {
+        try { fabricRef.current.dispose(); } catch {}
+        fabricRef.current = null;
+      }
+    };
+  }, []);
 
   // -- toolbar actions --
 
@@ -396,7 +371,7 @@ export function DesignEditor({
 
             {/* Canvas */}
             <div className="flex justify-center bg-muted/30 rounded-lg p-2">
-              <canvas ref={canvasRef} />
+              <canvas ref={initCanvas} />
             </div>
           </>
         )}
