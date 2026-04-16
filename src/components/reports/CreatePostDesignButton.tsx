@@ -159,28 +159,30 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
         }
       }
 
-      // Upload generated images to persistent storage
+      // Upload generated images directly to Supabase storage
       const persistentUrls: string[] = [];
       for (let i = 0; i < generated.length; i++) {
         try {
-          const { data: uploaded } = await supabase.functions.invoke("upload-generated-media", {
-            body: {
-              client_id: clientId || "unknown",
-              media_data: generated[i],
-              media_type: "image",
-              file_name: `design-${post.platform || "post"}-slide${i + 1}`,
-            },
-          });
-          if (uploaded?.url) {
-            console.log("Image uploaded to storage:", uploaded.url);
-            persistentUrls.push(uploaded.url);
-          } else {
-            console.warn("Upload returned no URL, falling back to base64. Response:", uploaded);
-            persistentUrls.push(generated[i]);
-          }
+          // Convert base64 data URL to blob
+          const res = await fetch(generated[i]);
+          const blob = await res.blob();
+          const storagePath = `${clientId || "unknown"}/${Date.now()}-design-${post.platform || "post"}-slide${i + 1}.png`;
+
+          const { error: uploadErr } = await supabase.storage
+            .from("generated-media")
+            .upload(storagePath, blob, { contentType: "image/png", upsert: true });
+
+          if (uploadErr) throw uploadErr;
+
+          const { data: urlData } = supabase.storage
+            .from("generated-media")
+            .getPublicUrl(storagePath);
+
+          console.log("Image uploaded to storage:", urlData.publicUrl);
+          persistentUrls.push(urlData.publicUrl);
         } catch (uploadErr) {
           console.error("Image upload failed:", uploadErr);
-          persistentUrls.push(generated[i]);
+          persistentUrls.push(generated[i]); // fallback to base64
         }
       }
 

@@ -359,20 +359,26 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
         return;
       }
 
-      // Step 5: Upload processed video
+      // Step 5: Upload directly to Supabase storage (no edge function, no size limits)
       setProcessStatus("Uploading...");
       let finalUrl: string;
+      const storagePath = `${clientId || "unknown"}/${Date.now()}-edited-video.webm`;
       try {
-        const dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(outputBlob);
-        });
-        const { data: uploaded } = await supabase.functions.invoke("upload-generated-media", {
-          body: { client_id: clientId || "unknown", media_data: dataUrl, media_type: "video", file_name: "edited-video" },
-        });
-        finalUrl = uploaded?.url || URL.createObjectURL(outputBlob);
-      } catch {
+        const { error: uploadErr } = await supabase.storage
+          .from("generated-media")
+          .upload(storagePath, outputBlob, { contentType: "video/webm", upsert: true });
+
+        if (uploadErr) throw uploadErr;
+
+        const { data: urlData } = supabase.storage
+          .from("generated-media")
+          .getPublicUrl(storagePath);
+
+        finalUrl = urlData.publicUrl;
+        console.log("Edited video uploaded:", finalUrl);
+      } catch (uploadErr: any) {
+        console.error("Direct storage upload failed:", uploadErr);
+        // Last resort: blob URL (won't persist but works for this session)
         finalUrl = URL.createObjectURL(outputBlob);
       }
 
