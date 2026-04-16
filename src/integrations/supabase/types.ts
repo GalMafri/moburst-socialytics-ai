@@ -250,6 +250,7 @@ export type Database = {
           format: string | null
           hashtags: string[] | null
           id: string
+          media_urls: string[] | null
           platform: string | null
           post_copy: string | null
           recommendation_index: number | null
@@ -267,6 +268,7 @@ export type Database = {
           format?: string | null
           hashtags?: string[] | null
           id?: string
+          media_urls?: string[] | null
           platform?: string | null
           post_copy?: string | null
           recommendation_index?: number | null
@@ -284,6 +286,7 @@ export type Database = {
           format?: string | null
           hashtags?: string[] | null
           id?: string
+          media_urls?: string[] | null
           platform?: string | null
           post_copy?: string | null
           recommendation_index?: number | null
