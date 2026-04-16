@@ -90,23 +90,36 @@ export function DesignEditor({
 
     const loadImage = async () => {
       try {
-        // Convert remote URLs to blob URLs to bypass CORS for Fabric.js
-        let loadUrl = imageUrl;
-        if (imageUrl.startsWith("http")) {
-          try {
-            const res = await fetch(imageUrl);
-            if (res.ok) {
-              const blob = await res.blob();
-              loadUrl = URL.createObjectURL(blob);
-            }
-          } catch {
-            // Fall back to direct URL
-          }
-        }
+        // Step 1: Load image into a regular HTMLImageElement first (most reliable)
+        const htmlImg = new Image();
+        htmlImg.crossOrigin = "anonymous";
 
-        const img = await FabricImage.fromURL(loadUrl, {
-          crossOrigin: "anonymous",
+        const imgLoaded = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error("Image load timed out")), 10000);
+          htmlImg.onload = () => { clearTimeout(timeout); resolve(htmlImg); };
+          htmlImg.onerror = () => {
+            clearTimeout(timeout);
+            // CORS failed on direct load — try fetching as blob
+            if (imageUrl.startsWith("http")) {
+              fetch(imageUrl)
+                .then(res => res.blob())
+                .then(blob => {
+                  const blobUrl = URL.createObjectURL(blob);
+                  const retryImg = new Image();
+                  retryImg.onload = () => resolve(retryImg);
+                  retryImg.onerror = () => reject(new Error("Failed to load image"));
+                  retryImg.src = blobUrl;
+                })
+                .catch(() => reject(new Error("Failed to fetch image")));
+            } else {
+              reject(new Error("Failed to load image"));
+            }
+          };
+          htmlImg.src = imageUrl;
         });
+
+        // Step 2: Create FabricImage from the loaded HTMLImageElement
+        const img = new FabricImage(imgLoaded);
         if (!img || !img.width || !img.height) {
           setLoadError("Failed to load image — invalid image data.");
           return;
