@@ -925,6 +925,7 @@ function CalendarPostCard({
       {editingMediaType === "video" && editingMediaIndex !== null && generatedMediaUrls[editingMediaIndex] && (
         <VideoTrimmer
           videoUrl={generatedMediaUrls[editingMediaIndex]}
+          clientId={clientId}
           onSave={(url) => {
             setGeneratedMediaUrls((prev) => {
               const updated = [...prev];

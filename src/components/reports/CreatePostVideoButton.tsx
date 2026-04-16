@@ -360,6 +360,7 @@ export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGe
             {showTrimmer && videoUrl && (
               <VideoTrimmer
                 videoUrl={videoUrl}
+                clientId={clientId}
                 onSave={(updatedUrl) => {
                   setVideoUrl(updatedUrl);
                   setShowTrimmer(false);
