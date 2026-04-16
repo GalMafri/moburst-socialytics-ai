@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Save, Type, Download, Play, Pause, Plus, Trash2, GripVertical } from "lucide-react";
+import { Save, Type, Download, Play, Pause, Plus, Trash2, GripVertical, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export interface VideoEditData {
@@ -192,6 +192,9 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
   };
 
   const selectedOv = overlays.find((o) => o.id === selectedOverlay);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processStatus, setProcessStatus] = useState("");
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const fmt = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -205,6 +208,184 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
     a.download = `video-${Date.now()}.mp4`;
     a.target = "_blank";
     a.click();
+  };
+
+  // Draw text overlays on canvas
+  const drawOverlaysOnCanvas = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
+    for (const ov of overlays) {
+      if (!ov.text.trim()) continue;
+      ctx.save();
+      ctx.font = `${ov.fontWeight} ${ov.fontSize}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.shadowColor = "rgba(0,0,0,0.8)";
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
+      ctx.fillStyle = ov.color;
+      ctx.fillText(ov.text, (ov.x / 100) * w, (ov.y / 100) * h);
+      ctx.restore();
+    }
+  };
+
+  // Process video: download as blob → canvas+MediaRecorder → upload
+  const handleSave = async () => {
+    const edits: VideoEditData = { overlays, trimStart, trimEnd };
+    const hasOverlays = overlays.some((o) => o.text.trim());
+    const hasTrim = trimStart > 0.1 || (duration > 0 && Math.abs(trimEnd - duration) > 0.2);
+
+    // No edits — just save metadata and return original URL
+    if (!hasOverlays && !hasTrim) {
+      onSave(videoUrl, edits);
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      // Step 1: Get a CORS-free video blob
+      setProcessStatus("Downloading video...");
+      let videoBlob: Blob | null = null;
+
+      // Try direct fetch
+      try {
+        const res = await fetch(videoUrl, { mode: "cors" });
+        if (res.ok) videoBlob = await res.blob();
+      } catch {}
+
+      // Try proxy
+      if (!videoBlob) {
+        try {
+          const { data } = await supabase.functions.invoke("proxy-media", {
+            body: { url: videoUrl },
+          });
+          if (data?.data_url) {
+            const res = await fetch(data.data_url);
+            videoBlob = await res.blob();
+          }
+        } catch {}
+      }
+
+      if (!videoBlob) {
+        toast.error("Couldn't download video for processing. Saving edits as metadata only.");
+        onSave(videoUrl, edits);
+        return;
+      }
+
+      // Step 2: Create a hidden video element from the blob (CORS-free)
+      setProcessStatus("Processing video...");
+      const blobUrl = URL.createObjectURL(videoBlob);
+      const processingVideo = document.createElement("video");
+      processingVideo.src = blobUrl;
+      processingVideo.muted = true;
+      processingVideo.playsInline = true;
+
+      await new Promise<void>((resolve, reject) => {
+        processingVideo.onloadeddata = () => resolve();
+        processingVideo.onerror = () => reject(new Error("Failed to load video for processing"));
+        setTimeout(() => resolve(), 5000); // fallback
+      });
+
+      const vw = processingVideo.videoWidth || 720;
+      const vh = processingVideo.videoHeight || 1280;
+      const canvas = canvasRef.current || document.createElement("canvas");
+      canvas.width = vw;
+      canvas.height = vh;
+      const ctx = canvas.getContext("2d")!;
+
+      // Step 3: Canvas stream + MediaRecorder
+      const stream = canvas.captureStream(30);
+      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+        ? "video/webm;codecs=vp9"
+        : MediaRecorder.isTypeSupported("video/webm")
+          ? "video/webm"
+          : "video/mp4";
+
+      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2_500_000 });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+      const recordingDone = new Promise<Blob>((resolve) => {
+        recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+      });
+
+      // Safety timeout
+      const safetyTimeout = setTimeout(() => {
+        if (recorder.state === "recording") { processingVideo.pause(); recorder.stop(); }
+      }, 30000);
+
+      // Seek to trim start
+      const effectiveStart = hasTrim ? trimStart : 0;
+      const effectiveEnd = hasTrim && trimEnd > 0 ? trimEnd : (processingVideo.duration || 10);
+      processingVideo.currentTime = effectiveStart;
+      await new Promise<void>((r) => { processingVideo.onseeked = () => r(); setTimeout(r, 2000); });
+
+      // Verify canvas can draw (CORS check)
+      try {
+        ctx.drawImage(processingVideo, 0, 0, vw, vh);
+        canvas.toDataURL();
+      } catch {
+        URL.revokeObjectURL(blobUrl);
+        toast.error("Browser blocked video processing. Saving edits as metadata only.");
+        onSave(videoUrl, edits);
+        return;
+      }
+
+      // Step 4: Record
+      recorder.start(100);
+      await processingVideo.play();
+
+      setProcessStatus("Recording edited video...");
+      const renderLoop = () => {
+        if (processingVideo.currentTime >= effectiveEnd || processingVideo.paused || processingVideo.ended) {
+          processingVideo.pause();
+          if (recorder.state === "recording") recorder.stop();
+          return;
+        }
+        try {
+          ctx.drawImage(processingVideo, 0, 0, vw, vh);
+          if (hasOverlays) drawOverlaysOnCanvas(ctx, vw, vh);
+        } catch {}
+        requestAnimationFrame(renderLoop);
+      };
+      requestAnimationFrame(renderLoop);
+
+      const outputBlob = await recordingDone;
+      clearTimeout(safetyTimeout);
+      URL.revokeObjectURL(blobUrl);
+
+      if (outputBlob.size < 100) {
+        toast.error("Processing produced empty video. Saving edits as metadata only.");
+        onSave(videoUrl, edits);
+        return;
+      }
+
+      // Step 5: Upload processed video
+      setProcessStatus("Uploading...");
+      let finalUrl: string;
+      try {
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(outputBlob);
+        });
+        const { data: uploaded } = await supabase.functions.invoke("upload-generated-media", {
+          body: { client_id: clientId || "unknown", media_data: dataUrl, media_type: "video", file_name: "edited-video" },
+        });
+        finalUrl = uploaded?.url || URL.createObjectURL(outputBlob);
+      } catch {
+        finalUrl = URL.createObjectURL(outputBlob);
+      }
+
+      toast.success(`Video processed! (${(outputBlob.size / 1024 / 1024).toFixed(1)}MB)`);
+      onSave(finalUrl, edits);
+    } catch (err: any) {
+      console.error("Video save error:", err);
+      toast.error("Processing failed. Saving edits as metadata only.");
+      onSave(videoUrl, { overlays, trimStart, trimEnd });
+    } finally {
+      setIsProcessing(false);
+      setProcessStatus("");
+    }
   };
 
   return (
@@ -439,21 +620,32 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
               </div>
             )}
           </div>
+
+          {/* Hidden canvas for video processing */}
+          <canvas ref={canvasRef} className="hidden" />
+
+          {/* Processing status */}
+          {isProcessing && (
+            <div className="flex items-center gap-2 bg-primary/10 rounded-lg p-3">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <span className="text-sm text-primary">{processStatus}</span>
+            </div>
+          )}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="outline" size="sm" onClick={handleDownload}>
+          <Button variant="outline" size="sm" onClick={handleDownload} disabled={isProcessing}>
             <Download className="h-4 w-4 mr-1" /> Download
           </Button>
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" onClick={() => {
-            const edits: VideoEditData = { overlays, trimStart, trimEnd };
-            onSave(videoUrl, edits);
-            toast.success("Video edits saved");
-          }}>
-            <Save className="h-4 w-4 mr-1" /> Done
+          <Button size="sm" onClick={handleSave} disabled={isProcessing}>
+            {isProcessing ? (
+              <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> {processStatus || "Processing..."}</>
+            ) : (
+              <><Save className="h-4 w-4 mr-1" /> Save & Apply Edits</>
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
