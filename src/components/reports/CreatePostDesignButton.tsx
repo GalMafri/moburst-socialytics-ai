@@ -190,7 +190,7 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
         supabase.from("post_iterations").insert({
           client_id: clientId,
           platform: post.platform || null,
-          post_copy: post.copy || post.caption_angle || null,
+          post_copy: post.copy || null,
           visual_direction: post.visual_direction || post.ai_visual_prompt || null,
           format: post.format || null,
           source: "calendar",
