@@ -54,7 +54,9 @@ import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignBut
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
 import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
-import { Send } from "lucide-react";
+import { Send, Pencil as PencilEdit } from "lucide-react";
+import { DesignEditor } from "@/components/editor/DesignEditor";
+import { VideoTrimmer } from "@/components/editor/VideoTrimmer";
 
 export default function ReportView() {
   const { id, reportId } = useParams();
@@ -549,6 +551,8 @@ function CalendarPostCard({
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [generatedMediaUrls, setGeneratedMediaUrls] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
+  const [editingMediaIndex, setEditingMediaIndex] = useState<number | null>(null);
+  const [editingMediaType, setEditingMediaType] = useState<"image" | "video" | null>(null);
 
   // Load previously generated media from post_iterations on mount
   useEffect(() => {
@@ -838,7 +842,7 @@ function CalendarPostCard({
         </div>
       )}
 
-      {/* Show previously generated media — compact thumbnails */}
+      {/* Show previously generated media — compact thumbnails with edit */}
       {generatedMediaUrls.length > 0 && (
         <div className="space-y-2 border-t pt-3">
           <p className="text-xs font-medium text-muted-foreground">Generated Media</p>
@@ -850,34 +854,42 @@ function CalendarPostCard({
                   {isVideo ? (
                     <video
                       src={url}
-                      className="w-full h-32 object-cover rounded-md border bg-black cursor-pointer"
+                      className="w-full h-32 object-cover rounded-md border bg-black"
                       muted
                       preload="metadata"
-                      onClick={(e) => {
-                        const v = e.currentTarget;
-                        v.controls = true;
-                        v.play();
-                      }}
                     />
                   ) : (
                     <img
                       src={url}
                       alt={`Design ${i + 1}`}
-                      className="w-full h-32 object-cover rounded-md border cursor-pointer"
-                      onClick={() => window.open(url, "_blank")}
+                      className="w-full h-32 object-cover rounded-md border"
                     />
                   )}
-                  {/* Download button overlay */}
-                  <a
-                    href={url}
-                    download={`${post.platform || "design"}-${i + 1}.${isVideo ? "mp4" : "png"}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Download className="h-3 w-3" />
-                  </a>
+                  {/* Action buttons overlay */}
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors rounded-md flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => {
+                        setEditingMediaIndex(i);
+                        setEditingMediaType(isVideo ? "video" : "image");
+                      }}
+                    >
+                      <PencilEdit className="h-3 w-3 mr-1" /> Edit
+                    </Button>
+                    <a
+                      href={url}
+                      download={`${post.platform || "design"}-${i + 1}.${isVideo ? "mp4" : "png"}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Button variant="secondary" size="sm" className="h-7 px-2 text-xs">
+                        <Download className="h-3 w-3" />
+                      </Button>
+                    </a>
+                  </div>
                   {/* Type label */}
                   <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">
                     {isVideo ? "Video" : `Slide ${i + 1}`}
@@ -887,6 +899,44 @@ function CalendarPostCard({
             })}
           </div>
         </div>
+      )}
+
+      {/* Image editor dialog */}
+      {editingMediaType === "image" && editingMediaIndex !== null && generatedMediaUrls[editingMediaIndex] && (
+        <DesignEditor
+          imageUrl={generatedMediaUrls[editingMediaIndex]}
+          brandIdentity={brandIdentity}
+          clientId={clientId || ""}
+          onSave={(dataUrl) => {
+            setGeneratedMediaUrls((prev) => {
+              const updated = [...prev];
+              updated[editingMediaIndex!] = dataUrl;
+              return updated;
+            });
+            setEditingMediaIndex(null);
+            setEditingMediaType(null);
+            toast.success("Design updated!");
+          }}
+          onClose={() => { setEditingMediaIndex(null); setEditingMediaType(null); }}
+        />
+      )}
+
+      {/* Video editor dialog */}
+      {editingMediaType === "video" && editingMediaIndex !== null && generatedMediaUrls[editingMediaIndex] && (
+        <VideoTrimmer
+          videoUrl={generatedMediaUrls[editingMediaIndex]}
+          onSave={(url) => {
+            setGeneratedMediaUrls((prev) => {
+              const updated = [...prev];
+              updated[editingMediaIndex!] = url;
+              return updated;
+            });
+            setEditingMediaIndex(null);
+            setEditingMediaType(null);
+            toast.success("Video updated!");
+          }}
+          onClose={() => { setEditingMediaIndex(null); setEditingMediaType(null); }}
+        />
       )}
     </div>
   );
