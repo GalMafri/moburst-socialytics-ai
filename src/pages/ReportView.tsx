@@ -56,7 +56,7 @@ import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
 import { Send, Pencil as PencilEdit } from "lucide-react";
 import { DesignEditor } from "@/components/editor/DesignEditor";
-import { VideoTrimmer } from "@/components/editor/VideoTrimmer";
+import { VideoTrimmer, type VideoEditData, type TextOverlay } from "@/components/editor/VideoTrimmer";
 
 export default function ReportView() {
   const { id, reportId } = useParams();
@@ -553,6 +553,8 @@ function CalendarPostCard({
   const [isEditing, setIsEditing] = useState(false);
   const [editingMediaIndex, setEditingMediaIndex] = useState<number | null>(null);
   const [editingMediaType, setEditingMediaType] = useState<"image" | "video" | null>(null);
+  // Store video edit data per media index (overlays, trim)
+  const [videoEdits, setVideoEdits] = useState<Record<number, VideoEditData>>({});
 
   // Load previously generated media from post_iterations on mount
   useEffect(() => {
@@ -852,12 +854,39 @@ function CalendarPostCard({
               return (
                 <div key={i} className="relative group">
                   {isVideo ? (
-                    <video
-                      src={url}
-                      className="w-full h-32 object-cover rounded-md border bg-black"
-                      muted
-                      preload="metadata"
-                    />
+                    <>
+                      <video
+                        src={url}
+                        className="w-full h-32 object-cover rounded-md border bg-black"
+                        muted
+                        preload="metadata"
+                      />
+                      {/* Render saved text overlays on video thumbnail */}
+                      {videoEdits[i]?.overlays?.map((ov) => (
+                        <div
+                          key={ov.id}
+                          className="pointer-events-none"
+                          style={{
+                            position: "absolute",
+                            left: `${ov.x}%`,
+                            top: `${ov.y}%`,
+                            transform: "translate(-50%, -50%)",
+                            fontSize: `${Math.max(ov.fontSize * 0.4, 10)}px`,
+                            fontWeight: ov.fontWeight,
+                            color: ov.color,
+                            textShadow: "1px 1px 3px rgba(0,0,0,0.9)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {ov.text}
+                        </div>
+                      ))}
+                      {videoEdits[i]?.trimStart > 0 && (
+                        <span className="absolute top-1 left-1 bg-primary/80 text-primary-foreground text-[9px] px-1 rounded">
+                          Trimmed
+                        </span>
+                      )}
+                    </>
                   ) : (
                     <img
                       src={url}
@@ -926,15 +955,12 @@ function CalendarPostCard({
         <VideoTrimmer
           videoUrl={generatedMediaUrls[editingMediaIndex]}
           clientId={clientId}
-          onSave={(url) => {
-            setGeneratedMediaUrls((prev) => {
-              const updated = [...prev];
-              updated[editingMediaIndex!] = url;
-              return updated;
-            });
+          initialEdits={videoEdits[editingMediaIndex]}
+          onSave={(url, edits) => {
+            // Store the edit data for this media index
+            setVideoEdits((prev) => ({ ...prev, [editingMediaIndex!]: edits }));
             setEditingMediaIndex(null);
             setEditingMediaType(null);
-            toast.success("Video updated!");
           }}
           onClose={() => { setEditingMediaIndex(null); setEditingMediaType(null); }}
         />

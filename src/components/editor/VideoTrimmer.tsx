@@ -19,14 +19,21 @@ import {
 import { Save, Type, Download, Play, Pause, Plus, Trash2, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 
+export interface VideoEditData {
+  overlays: TextOverlay[];
+  trimStart: number;
+  trimEnd: number;
+}
+
 export interface VideoTrimmerProps {
   videoUrl: string;
   clientId?: string;
-  onSave: (url: string) => void;
+  initialEdits?: VideoEditData;
+  onSave: (url: string, edits: VideoEditData) => void;
   onClose: () => void;
 }
 
-interface TextOverlay {
+export interface TextOverlay {
   id: string;
   text: string;
   x: number; // percentage 0-100
@@ -36,7 +43,7 @@ interface TextOverlay {
   fontWeight: "normal" | "bold";
 }
 
-export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimmerProps) {
+export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose }: VideoTrimmerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -44,11 +51,11 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [trimStart, setTrimStart] = useState(0);
-  const [trimEnd, setTrimEnd] = useState(0);
+  const [trimStart, setTrimStart] = useState(initialEdits?.trimStart || 0);
+  const [trimEnd, setTrimEnd] = useState(initialEdits?.trimEnd || 0);
 
-  // Draggable text overlays
-  const [overlays, setOverlays] = useState<TextOverlay[]>([]);
+  // Draggable text overlays — restore from saved edits if available
+  const [overlays, setOverlays] = useState<TextOverlay[]>(initialEdits?.overlays || []);
   const [selectedOverlay, setSelectedOverlay] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
 
@@ -477,7 +484,11 @@ export function VideoTrimmer({ videoUrl, clientId, onSave, onClose }: VideoTrimm
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="sm" onClick={() => { onSave(videoUrl); toast.success("Video saved"); }}>
+          <Button size="sm" onClick={() => {
+            const edits: VideoEditData = { overlays, trimStart, trimEnd };
+            onSave(videoUrl, edits);
+            toast.success("Video edits saved");
+          }}>
             <Save className="h-4 w-4 mr-1" /> Done
           </Button>
         </DialogFooter>

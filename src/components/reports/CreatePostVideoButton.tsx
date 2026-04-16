@@ -361,7 +361,7 @@ export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGe
               <VideoTrimmer
                 videoUrl={videoUrl}
                 clientId={clientId}
-                onSave={(updatedUrl) => {
+                onSave={(updatedUrl, _edits) => {
                   setVideoUrl(updatedUrl);
                   setShowTrimmer(false);
                   toast.success("Video edits saved");
