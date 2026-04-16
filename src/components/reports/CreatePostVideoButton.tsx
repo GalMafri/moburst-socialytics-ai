@@ -91,15 +91,34 @@ export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGe
    * Veo works best with 1-3 sentence scene descriptions — not storyboards.
    */
   const buildVideoPrompt = (sceneDescription: string) => {
-    const colors = [brandIdentity?.primary_color, brandIdentity?.secondary_color, brandIdentity?.accent_color].filter(Boolean);
-    const colorNote = colors.length > 0
-      ? ` Use a ${colors.join("/")} color palette.`
-      : "";
-    const styleNote = brandIdentity?.visual_style
-      ? ` Visual style: ${brandIdentity.visual_style}.`
-      : "";
+    const parts: string[] = [];
 
-    return `${sceneDescription}${colorNote}${styleNote} ${spec.aspect} format, ${spec.duration}, ${spec.style} No text overlays, watermarks, logos, hex codes, or color codes visible in any frame.`;
+    // 1. Core scene description (from Claude distillation)
+    parts.push(sceneDescription);
+
+    // 2. Brand color palette
+    const colors = [brandIdentity?.primary_color, brandIdentity?.secondary_color, brandIdentity?.accent_color].filter(Boolean);
+    if (colors.length > 0) {
+      parts.push(`Color palette: ${colors.join(", ")} — apply these colors throughout backgrounds, lighting gels, objects, and environment.`);
+    }
+
+    // 3. Brand visual style and tone
+    const brandNotes: string[] = [];
+    if (brandIdentity?.visual_style) brandNotes.push(`Visual style: ${brandIdentity.visual_style}`);
+    if (brandIdentity?.tone_of_voice) brandNotes.push(`Tone: ${brandIdentity.tone_of_voice}`);
+    if (brandIdentity?.design_elements) brandNotes.push(`Design language: ${brandIdentity.design_elements}`);
+    if (brandIdentity?.background_style) brandNotes.push(`Environment: ${brandIdentity.background_style}`);
+    if (brandNotes.length > 0) {
+      parts.push(brandNotes.join(". ") + ".");
+    }
+
+    // 4. Platform + format specs
+    parts.push(`${spec.aspect} format, ${spec.duration}. ${spec.style}`);
+
+    // 5. Constraints
+    parts.push("No text overlays, watermarks, logos, or color codes visible in any frame. No real people's names or celebrity likenesses.");
+
+    return parts.join("\n\n");
   };
 
   /**
@@ -107,11 +126,18 @@ export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGe
    * using Claude. Falls back to extracting the first meaningful sentence.
    */
   const distillForVeo = async (rawDirection: string, postCopy: string): Promise<string> => {
+    // Build brand context string for Claude
+    const brandContext = [
+      brandIdentity?.visual_style ? `Visual style: ${brandIdentity.visual_style}` : "",
+      brandIdentity?.tone_of_voice ? `Tone: ${brandIdentity.tone_of_voice}` : "",
+      brandIdentity?.background_style ? `Environment: ${brandIdentity.background_style}` : "",
+    ].filter(Boolean).join(". ");
+
     // Try Claude first for best results
     try {
       const { data } = await supabase.functions.invoke("adapt-creative-prompt", {
         body: {
-          concept: postCopy || rawDirection.slice(0, 200),
+          concept: `${postCopy || rawDirection.slice(0, 200)}${brandContext ? `\n\nBrand context: ${brandContext}` : ""}`,
           visual_direction: rawDirection,
           original_format: post.format || "Storyboard",
           target_format: `${spec.duration} ${spec.aspect} AI-generated video clip (Google Veo)`,
