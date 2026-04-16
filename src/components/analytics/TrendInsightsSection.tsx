@@ -130,7 +130,7 @@ function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram
             </h4>
             <div className="space-y-2">
               {data.opportunities_for_client.map((opp, i) => (
-                <div key={i} className="text-xs text-muted-foreground bg-muted p-2.5 rounded-md leading-relaxed">
+                <div key={i} className="text-xs text-muted-foreground bg-[rgba(255,255,255,0.04)] p-2.5 rounded-md leading-relaxed">
                   {opp}
                 </div>
               ))}

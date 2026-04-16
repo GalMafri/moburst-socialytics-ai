@@ -43,7 +43,7 @@ export default function AnalyticsIndex() {
             {clients.map((c) => (
               <Card
                 key={c.id}
-                className="cursor-pointer hover:shadow-md transition-shadow"
+                className="cursor-pointer hover-lift transition-shadow"
                 onClick={() => navigate(`/clients/${c.id}/analytics`)}
               >
                 <CardContent className="pt-5 flex items-center gap-3">

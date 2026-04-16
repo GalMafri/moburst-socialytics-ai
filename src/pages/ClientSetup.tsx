@@ -465,7 +465,7 @@ export default function ClientSetup() {
                 </div>
 
                 {form.brand_identity && (
-                  <div className="space-y-4 rounded-lg border p-4 bg-muted/30">
+                  <div className="space-y-4 rounded-lg border p-4 bg-[rgba(255,255,255,0.02)]">
                     <Label className="text-sm font-semibold">Brand Identity</Label>
 
                     {/* Colors */}
@@ -596,7 +596,7 @@ export default function ClientSetup() {
                         <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
                           Source code colors found ({brandDebug.structured_colors.length}) — click to expand
                         </summary>
-                        <div className="mt-2 space-y-1 rounded bg-muted p-2">
+                        <div className="mt-2 space-y-1 rounded bg-[rgba(255,255,255,0.04)] p-2">
                           {brandDebug.structured_colors.map((c: any, i: number) => (
                             <div key={i} className="flex items-center gap-2">
                               <div className="h-4 w-4 rounded border shrink-0" style={{ backgroundColor: c.hex }} />
@@ -860,7 +860,7 @@ export default function ClientSetup() {
                     onChange={(e) => setForm((f) => ({ ...f, brief_file_id: e.target.value }))}
                     placeholder="e.g., 1BxiMVs0XRA5nFMdKvBdBZjgmUii3ObRy2CmEkTzOQ5s"
                   />
-                  <div className="bg-muted/50 rounded-md p-3 text-xs text-muted-foreground space-y-1.5">
+                  <div className="bg-[rgba(255,255,255,0.03)] rounded-md p-3 text-xs text-muted-foreground space-y-1.5">
                     <p className="font-medium text-foreground flex items-center gap-1">
                       <Info className="h-3 w-3" /> How to find your Google Doc ID:
                     </p>

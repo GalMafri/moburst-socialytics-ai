@@ -139,11 +139,11 @@ export function AdminDashboard() {
           {[1, 2, 3].map((i) => (
             <Card key={i} className="animate-pulse">
               <CardHeader className="pb-3">
-                <div className="h-5 bg-muted rounded w-1/2" />
+                <div className="h-5 bg-[rgba(255,255,255,0.04)] rounded w-1/2" />
               </CardHeader>
               <CardContent>
-                <div className="h-4 bg-muted rounded w-3/4 mb-2" />
-                <div className="h-4 bg-muted rounded w-1/2" />
+                <div className="h-4 bg-[rgba(255,255,255,0.04)] rounded w-3/4 mb-2" />
+                <div className="h-4 bg-[rgba(255,255,255,0.04)] rounded w-1/2" />
               </CardContent>
             </Card>
           ))}
@@ -156,7 +156,7 @@ export function AdminDashboard() {
             return (
               <Card
                 key={client.id}
-                className="cursor-pointer hover:shadow-md transition-shadow"
+                className="cursor-pointer hover-lift transition-shadow"
                 onClick={() => navigate(`/clients/${client.id}/setup`)}
               >
                 <CardHeader className="pb-3">
@@ -251,7 +251,7 @@ export function AdminDashboard() {
       ) : (
         <Card className="p-12 text-center">
           <div className="space-y-3">
-            <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mx-auto">
+            <div className="h-12 w-12 rounded-full bg-[rgba(255,255,255,0.04)] flex items-center justify-center mx-auto">
               <Plus className="h-6 w-6 text-muted-foreground" />
             </div>
             <h3 className="font-semibold">{canManageClients ? "Add your first client" : "No clients yet"}</h3>

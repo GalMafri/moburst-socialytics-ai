@@ -260,7 +260,7 @@ export function CreateAdHocPost({
                 )}
 
                 {generatedPost.caption_angle && (
-                  <div className="bg-muted/50 rounded-md p-3">
+                  <div className="bg-[rgba(255,255,255,0.03)] rounded-md p-3">
                     <p className="text-xs font-medium text-muted-foreground mb-1">
                       Caption
                     </p>

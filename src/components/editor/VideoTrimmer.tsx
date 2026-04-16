@@ -457,7 +457,7 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
           <div className="space-y-1">
             <div
               ref={timelineRef}
-              className="relative h-10 bg-muted rounded-md cursor-pointer overflow-hidden"
+              className="relative h-10 bg-[rgba(255,255,255,0.04)] rounded-md cursor-pointer overflow-hidden"
               onClick={handleTimelineClick}
             >
               {/* Trimmed-out zones (dimmed) */}

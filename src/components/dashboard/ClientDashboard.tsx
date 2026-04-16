@@ -62,7 +62,7 @@ export function ClientDashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card
-          className="cursor-pointer hover:shadow-md transition-shadow"
+          className="cursor-pointer hover-lift transition-shadow"
           onClick={() => latestReport && navigate(`/clients/${clientId}/reports/${latestReport.id}`)}
         >
           <CardHeader>
@@ -83,7 +83,7 @@ export function ClientDashboard() {
         </Card>
 
         <Card
-          className="cursor-pointer hover:shadow-md transition-shadow"
+          className="cursor-pointer hover-lift transition-shadow"
           onClick={() => navigate(`/clients/${clientId}/reports`)}
         >
           <CardHeader>

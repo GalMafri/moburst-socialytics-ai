@@ -238,7 +238,7 @@ export default function Analytics() {
         </div>
 
         {/* Guidance text */}
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 border border-border/50">
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.04)]">
           <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
           <div className="space-y-1">
             <p className="text-sm text-muted-foreground">
@@ -367,7 +367,7 @@ export default function Analytics() {
                             {formatNumbersInText(latestAISummary)}
                           </p>
                           {topContentInsight && (
-                            <p className="text-xs text-muted-foreground/80 pt-1 border-t border-border/50 mt-2">
+                            <p className="text-xs text-muted-foreground/80 pt-1 border-t border-[rgba(255,255,255,0.04)] mt-2">
                               <Lightbulb className="h-3 w-3 inline mr-1" />
                               {formatNumbersInText(topContentInsight)}
                             </p>
@@ -421,7 +421,7 @@ export default function Analytics() {
                           const current = val?.current ?? 0;
                           const previous = val?.previous ?? comparison.previous?.[key] ?? 0;
                           return (
-                            <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-muted">
+                            <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-[rgba(255,255,255,0.04)]">
                               <div className="flex-1">
                                 <div className="text-xs text-muted-foreground">{label}</div>
                                 <div className="text-lg font-semibold">{fmtVal(current)}</div>
@@ -485,10 +485,10 @@ export default function Analytics() {
                             <div className="h-48">
                               <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={chartData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
-                                  <Tooltip formatter={(v: any) => [Number(v).toLocaleString(), "Impressions"]} />
+                                  <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any) => [Number(v).toLocaleString(), "Impressions"]} />
                                   <Line
                                     type="monotone"
                                     dataKey="impressions"
@@ -541,10 +541,10 @@ export default function Analytics() {
                             <div className="h-48">
                               <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={chartData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
-                                  <Tooltip formatter={(v: any, name: any) => [Number(v).toLocaleString(), name]} />
+                                  <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any, name: any) => [Number(v).toLocaleString(), name]} />
                                   <Legend />
                                   <Line
                                     type="monotone"
@@ -602,10 +602,10 @@ export default function Analytics() {
                             <div className="h-40">
                               <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={chartData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
-                                  <Tooltip formatter={(v: any) => [Number(v).toLocaleString(), "Video Views"]} />
+                                  <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any) => [Number(v).toLocaleString(), "Video Views"]} />
                                   <Line
                                     type="monotone"
                                     dataKey="video_views"
@@ -637,7 +637,7 @@ export default function Analytics() {
                       <div className="h-56">
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={chartData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                             <XAxis
                               dataKey="date"
                               tick={{ fontSize: 12 }}
@@ -660,7 +660,7 @@ export default function Analytics() {
                                 fill: "hsl(var(--muted-foreground))",
                               }}
                             />
-                            <Tooltip formatter={(v: any) => [`${Number(v).toFixed(2)}%`, "Engagement Rate"]} />
+                            <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any) => [`${Number(v).toFixed(2)}%`, "Engagement Rate"]} />
                             <Line
                               type="monotone"
                               dataKey="engagement_rate"
@@ -710,7 +710,7 @@ export default function Analytics() {
                     return (
                       <div
                         key={r.id}
-                        className="flex items-center justify-between p-3 rounded-md bg-muted cursor-pointer hover:bg-muted/80 transition-colors"
+                        className="flex items-center justify-between p-3 rounded-md bg-[rgba(255,255,255,0.04)] cursor-pointer hover:bg-[rgba(255,255,255,0.06)] transition-colors"
                         onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}
                       >
                         <div className="flex items-center gap-3">
@@ -760,7 +760,7 @@ function SummaryCard({
         <div className="text-xl font-bold">{value}</div>
         {change != null && change !== 0 && (
           <div
-            className={`flex items-center gap-1 text-xs font-medium ${change > 0 ? "text-green-600" : "text-destructive"}`}
+            className={`flex items-center gap-1 text-xs font-medium ${change > 0 ? "text-[#10b981]" : "text-destructive"}`}
           >
             {change > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
             {change > 0 ? "+" : ""}
@@ -790,7 +790,7 @@ function MetricBarSingle({
   color: string;
 }) {
   return (
-    <div className="p-3 rounded-lg bg-muted/50 space-y-1.5">
+    <div className="p-3 rounded-lg bg-[rgba(255,255,255,0.03)] space-y-1.5">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-lg font-bold" style={{ color }}>
         {fmtVal(value)}

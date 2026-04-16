@@ -143,7 +143,7 @@ export function BrandBookUpload({
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground">Upload File (PDF, PNG, JPG)</Label>
           {uploadedFileName ? (
-            <div className="flex items-center gap-2 p-2 border rounded-md bg-muted/50">
+            <div className="flex items-center gap-2 p-2 border rounded-md bg-[rgba(255,255,255,0.03)]">
               <FileText className="h-4 w-4 text-primary" />
               <span className="text-sm flex-1 truncate">{uploadedFileName}</span>
               <Button variant="ghost" size="sm" onClick={handleRemoveFile}>

@@ -496,7 +496,7 @@ export default function RunAnalysis() {
                 {pastReports.map((r: any) => (
                   <div
                     key={r.id}
-                    className="flex items-center justify-between p-3 rounded-md bg-muted cursor-pointer hover:bg-muted/80"
+                    className="flex items-center justify-between p-3 rounded-md bg-[rgba(255,255,255,0.04)] cursor-pointer hover:bg-[rgba(255,255,255,0.06)]"
                     onClick={() => r.status === "completed" && navigate(`/clients/${id}/reports/${r.id}`)}
                   >
                     <div className="flex items-center gap-3">

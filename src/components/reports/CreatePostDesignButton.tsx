@@ -274,7 +274,7 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
           <div className="space-y-4">
             {/* Brand context indicator */}
             {brandColors.length > 0 && (
-              <div className="flex items-center gap-3 text-xs text-muted-foreground rounded-lg bg-muted/50 px-3 py-2">
+              <div className="flex items-center gap-3 text-xs text-muted-foreground rounded-lg bg-[rgba(255,255,255,0.03)] px-3 py-2">
                 <span className="font-medium">Brand:</span>
                 <div className="flex items-center gap-1.5">
                   {brandColors.map((color, i) => (

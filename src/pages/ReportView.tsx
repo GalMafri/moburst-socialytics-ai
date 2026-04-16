@@ -138,7 +138,7 @@ export default function ReportView() {
           <CardContent className="py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div
-                className={`h-10 w-10 rounded-lg flex items-center justify-center ${gammaUrl ? "bg-primary/10" : "bg-muted"}`}
+                className={`h-10 w-10 rounded-lg flex items-center justify-center ${gammaUrl ? "bg-primary/10" : "bg-[rgba(255,255,255,0.04)]"}`}
               >
                 <ExternalLink className={`h-5 w-5 ${gammaUrl ? "text-primary" : "text-muted-foreground"}`} />
               </div>
@@ -521,7 +521,7 @@ function ContentRecommendations({ recommendations }: { recommendations: any[] })
                 </p>
               )}
               {rec.why_this && (
-                <div className="bg-muted/50 p-3 rounded-md text-sm leading-relaxed text-muted-foreground">
+                <div className="bg-[rgba(255,255,255,0.03)] p-3 rounded-md text-sm leading-relaxed text-muted-foreground">
                   💡 {rec.why_this}
                 </div>
               )}
@@ -696,7 +696,7 @@ function CalendarPostCard({
   };
 
   return (
-    <div className="border rounded-lg p-4 space-y-3 bg-muted/20">
+    <div className="border rounded-lg p-4 space-y-3 bg-[rgba(255,255,255,0.02)]">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <PlatformBadge platform={post.platform} size="sm" />
@@ -842,7 +842,7 @@ function CalendarPostCard({
         </p>
       )}
       {post.rationale && (
-        <div className="bg-muted/50 p-3 rounded-md text-sm leading-relaxed text-muted-foreground">
+        <div className="bg-[rgba(255,255,255,0.03)] p-3 rounded-md text-sm leading-relaxed text-muted-foreground">
           💡 {post.rationale}
         </div>
       )}
@@ -1093,7 +1093,7 @@ function PerformanceChart({ comparison }: { comparison: any }) {
           <p className="text-xs font-medium text-muted-foreground capitalize">{label}</p>
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
-              <div className="flex-1 h-5 rounded bg-muted overflow-hidden">
+              <div className="flex-1 h-5 rounded bg-[rgba(255,255,255,0.04)] overflow-hidden">
                 <div
                   className="h-full rounded bg-[hsl(var(--chart-1))]"
                   style={{ width: `${Math.max((current / max) * 100, 2)}%` }}
@@ -1102,7 +1102,7 @@ function PerformanceChart({ comparison }: { comparison: any }) {
               <span className="text-xs font-semibold w-14 text-right">{fmtVal(current)}</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex-1 h-3.5 rounded bg-muted overflow-hidden">
+              <div className="flex-1 h-3.5 rounded bg-[rgba(255,255,255,0.04)] overflow-hidden">
                 <div
                   className="h-full rounded bg-[hsl(var(--chart-4))] opacity-60"
                   style={{ width: `${Math.max((previous / max) * 100, 2)}%` }}
@@ -1290,7 +1290,7 @@ function TrendsSection({
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {analysis.successful_formats.map((f: string, i: number) => (
-                <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-[rgba(255,255,255,0.03)]">
                   <span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center mt-0.5">
                     {i + 1}
                   </span>

@@ -221,7 +221,7 @@ export function SchedulePostModal({
 
             {/* Auto-detected: single DB-assigned profile for this platform */}
             {!loadingApi && autoSelected && selectedProfile && (
-              <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+              <div className="flex items-center gap-2 rounded-md border bg-[rgba(255,255,255,0.03)] px-3 py-2 text-sm">
                 <span className="font-medium">
                   {selectedProfile.name || selectedProfile.native_name || "Profile"}
                 </span>

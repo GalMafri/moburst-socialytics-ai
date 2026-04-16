@@ -99,7 +99,8 @@ export default {
   		},
   		fontFamily: {
   			sans: [
-  				'Open Sans',
+  				'Geist',
+  				'Inter',
   				'ui-sans-serif',
   				'system-ui',
   				'sans-serif',
