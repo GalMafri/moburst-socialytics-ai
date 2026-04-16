@@ -577,7 +577,7 @@ function CalendarPostCard({
       }
       // Restore saved video edits
       if (data?.[0]?.video_edits && typeof data[0].video_edits === "object") {
-        setVideoEdits(data[0].video_edits as Record<number, VideoEditData>);
+        setVideoEdits(data[0].video_edits as unknown as Record<number, VideoEditData>);
       }
     }, () => {});
   }, [clientId, post.platform]);
