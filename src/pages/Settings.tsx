@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Navigate } from "react-router-dom";
 import { Save, Loader2 } from "lucide-react";
+import { HubCompanySync } from "@/components/HubCompanySync";
 
 export default function Settings() {
   const { isAdmin } = useAuth();
@@ -80,6 +81,8 @@ export default function Settings() {
             </Button>
           </CardContent>
         </Card>
+
+        <HubCompanySync />
 
         <Card>
           <CardHeader>

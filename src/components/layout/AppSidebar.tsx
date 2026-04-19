@@ -17,12 +17,13 @@ import { Home, FileText, Settings, TrendingUp, LogOut } from "lucide-react";
 export function AppSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, isMoburstStaff, isClient, user } = useAuth();
 
   const navItems = [
     { icon: Home, label: "Dashboard", href: "/" },
     { icon: FileText, label: "Reports", href: "/reports" },
-    { icon: TrendingUp, label: "Analytics", href: "/analytics" },
+    // Cross-client analytics is Moburst-staff only
+    ...(isMoburstStaff ? [{ icon: TrendingUp, label: "Analytics", href: "/analytics" }] : []),
     ...(isAdmin ? [{ icon: Settings, label: "Settings", href: "/settings" }] : []),
   ];
 
