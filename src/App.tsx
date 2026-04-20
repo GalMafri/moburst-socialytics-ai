@@ -34,7 +34,7 @@ const App = () => (
               {/* Staff-only: client management + cross-client views */}
               <Route path="/clients/:id/setup" element={<StaffOnlyRoute><ClientSetup /></StaffOnlyRoute>} />
               <Route path="/clients/:id/analyze" element={<StaffOnlyRoute><RunAnalysis /></StaffOnlyRoute>} />
-              <Route path="/analytics" element={<StaffOnlyRoute><AnalyticsIndex /></StaffOnlyRoute>} />
+              <Route path="/analytics" element={<AnalyticsIndex />} />
               <Route path="/reports" element={<StaffOnlyRoute><AllReports /></StaffOnlyRoute>} />
               <Route path="/settings" element={<StaffOnlyRoute><Settings /></StaffOnlyRoute>} />
               {/* Open to Clients for their own mapped clients only (RLS-scoped) */}

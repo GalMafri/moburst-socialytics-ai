@@ -1,24 +1,38 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { BarChart3 } from "lucide-react";
 
 export default function AnalyticsIndex() {
   const navigate = useNavigate();
+  const { isClient, user } = useAuth();
 
   const { data: clients, isLoading } = useQuery({
     queryKey: ["clients-for-analytics"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("clients")
-        .select("id, name, logo_url")
+        .select("id, name, logo_url, hub_company_name")
         .order("name");
       if (error) throw error;
       return data;
     },
   });
+
+  // Client-role users should skip the chooser and go straight to their own
+  // client's analytics page.
+  useEffect(() => {
+    if (!isClient || !clients?.length) return;
+    const userCompany = (user?.company ?? "").trim().toLowerCase();
+    const mine =
+      clients.find((c) => (c.hub_company_name ?? "").trim().toLowerCase() === userCompany) ??
+      (clients.length === 1 ? clients[0] : null);
+    if (mine) navigate(`/clients/${mine.id}/analytics`, { replace: true });
+  }, [isClient, clients, user?.company, navigate]);
 
   return (
     <AppLayout title="Analytics">

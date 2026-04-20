@@ -24,7 +24,7 @@ export function AppSidebar() {
     // Cross-client "All Reports" view is Moburst-staff only. Clients use the
     // per-client report history linked from ClientDashboard.
     ...(isMoburstStaff ? [{ icon: FileText, label: "Reports", href: "/reports" }] : []),
-    ...(isMoburstStaff ? [{ icon: TrendingUp, label: "Analytics", href: "/analytics" }] : []),
+    { icon: TrendingUp, label: "Analytics", href: "/analytics" },
     ...(isAdmin ? [{ icon: Settings, label: "Settings", href: "/settings" }] : []),
   ];
 
