@@ -5,7 +5,8 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import {
   ArrowLeft,
   Eye,
@@ -220,6 +221,9 @@ export default function Analytics() {
     });
   };
 
+  const exportRef = useRef<HTMLDivElement>(null);
+  const pdfFilename = `${client?.name || "client"}_analytics_${range}_${new Date().toISOString().split("T")[0]}`;
+
   return (
     <AppLayout title={title}>
       <div className="space-y-6">
@@ -228,15 +232,23 @@ export default function Analytics() {
           <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${id}/setup`)}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Back to Client
           </Button>
-          <div className="flex gap-1">
-            {(["7d", "30d", "90d", "all"] as TimeRange[]).map((r) => (
-              <Button key={r} variant={range === r ? "default" : "outline"} size="sm" onClick={() => setRange(r)}>
-                {r === "all" ? "All Time" : r}
-              </Button>
-            ))}
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1">
+              {(["7d", "30d", "90d", "all"] as TimeRange[]).map((r) => (
+                <Button key={r} variant={range === r ? "default" : "outline"} size="sm" onClick={() => setRange(r)}>
+                  {r === "all" ? "All Time" : r}
+                </Button>
+              ))}
+            </div>
+            <ExportPdfButton
+              contentRef={exportRef}
+              filename={pdfFilename}
+              title={`${client?.name || "Client"} — Analytics (${range === "all" ? "All Time" : range})`}
+            />
           </div>
         </div>
 
+        <div ref={exportRef} className="space-y-6">
         {/* Guidance text */}
         <div className="flex items-start gap-2 p-3 rounded-lg bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.04)]">
           <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -733,6 +745,7 @@ export default function Analytics() {
             </Card>
           </>
         )}
+        </div>
       </div>
     </AppLayout>
   );
