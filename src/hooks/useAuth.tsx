@@ -56,13 +56,15 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-async function bridgeHubSession(hubToken: string): Promise<{ toolRole: UserRole; error?: string }> {
+async function callBridge(
+  payload: { hubToken: string } | { devEmail: string },
+): Promise<{ toolRole: UserRole; error?: string }> {
   if (!SUPABASE_URL) return { toolRole: null, error: "Supabase URL not configured" };
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/hub-auth-bridge`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hubToken }),
+      body: JSON.stringify(payload),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -76,7 +78,7 @@ async function bridgeHubSession(hubToken: string): Promise<{ toolRole: UserRole;
     }
     return { toolRole: (body.tool_role as UserRole) || null };
   } catch (err) {
-    console.error("bridgeHubSession error:", err);
+    console.error("callBridge error:", err);
     return { toolRole: null, error: "Could not reach auth bridge" };
   }
 }
@@ -103,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const hubUser = (await hubRes.json()) as HubUser;
 
           // 2. Bridge to Supabase: mints a session and syncs role + company mapping
-          const { toolRole, error } = await bridgeHubSession(token);
+          const { toolRole, error } = await callBridge({ hubToken: token });
           if (cancelled) return;
 
           if (error) {
@@ -119,9 +121,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error("Authentication error:", err);
           if (cancelled) return;
           if (IS_DEV) {
-            console.warn("[Auth] Hub unreachable — falling back to dev user");
-            setUser(DEV_USER);
-            setUserRole("admin");
+            console.warn("[Auth] Hub unreachable — falling back to dev sign-in");
+            await devSignIn();
           } else {
             setUser(null);
             setUserRole(null);
@@ -133,13 +134,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // No Hub token. Dev mode: use dev user. Prod: stay unauthenticated.
+      // No Hub token. In Lovable preview / localhost, auto-sign-in to a dev admin
+      // so we can see real data while iterating on UI. The bridge rejects this path
+      // unless the request Origin matches a Lovable preview domain.
       if (IS_DEV) {
-        console.warn("[Auth] No hubToken — using dev user (preview/localhost only)");
-        setUser(DEV_USER);
-        setUserRole("admin");
+        await devSignIn();
       }
       if (!cancelled) setIsLoading(false);
+    }
+
+    async function devSignIn() {
+      const devEmail = import.meta.env.VITE_DEV_EMAIL || "dev@moburst.local";
+      console.warn(`[Auth] Dev preview — signing in as ${devEmail} via bridge`);
+      const { error } = await callBridge({ devEmail });
+      if (cancelled) return;
+      if (error) {
+        // Bridge refused (e.g. origin didn't match). Fall back to a non-DB dev user.
+        console.warn(`[Auth] Dev bridge rejected (${error}). RLS will block data queries.`);
+        setUser(DEV_USER);
+        setUserRole("admin");
+        return;
+      }
+      setUser({ ...DEV_USER, email: devEmail });
+      setUserRole("admin");
     }
 
     authenticate();

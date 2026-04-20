@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ThemeProvider } from "next-themes";
+import { StaffOnlyRoute } from "@/components/StaffOnlyRoute";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import ClientSetup from "./pages/ClientSetup";
@@ -30,14 +31,16 @@ const App = () => (
             <Routes>
               <Route path="/auth" element={<Auth />} />
               <Route path="/" element={<Index />} />
-              <Route path="/clients/:id/setup" element={<ClientSetup />} />
-              <Route path="/clients/:id/analyze" element={<RunAnalysis />} />
+              {/* Staff-only: client management + cross-client views */}
+              <Route path="/clients/:id/setup" element={<StaffOnlyRoute><ClientSetup /></StaffOnlyRoute>} />
+              <Route path="/clients/:id/analyze" element={<StaffOnlyRoute><RunAnalysis /></StaffOnlyRoute>} />
+              <Route path="/analytics" element={<StaffOnlyRoute><AnalyticsIndex /></StaffOnlyRoute>} />
+              <Route path="/reports" element={<StaffOnlyRoute><AllReports /></StaffOnlyRoute>} />
+              <Route path="/settings" element={<StaffOnlyRoute><Settings /></StaffOnlyRoute>} />
+              {/* Open to Clients for their own mapped clients only (RLS-scoped) */}
               <Route path="/clients/:id/reports/:reportId" element={<ReportView />} />
               <Route path="/clients/:id/reports" element={<ReportHistory />} />
               <Route path="/clients/:id/analytics" element={<Analytics />} />
-              <Route path="/analytics" element={<AnalyticsIndex />} />
-              <Route path="/reports" element={<AllReports />} />
-              <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AuthProvider>
