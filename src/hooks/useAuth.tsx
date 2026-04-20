@@ -5,20 +5,6 @@ import { supabase } from "@/integrations/supabase/client";
 const HUB_API_URL = import.meta.env.VITE_HUB_BACKEND_URL || "https://tools-server.moburst.com";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-// IS_DEV matches Lovable EDITOR PREVIEW contexts + localhost, NOT the published
-// Lovable URL. The published URL (moburst-socialytics-ai.lovable.app) is what the
-// Hub iframes — in production, we MUST go through the Hub token path, never fall
-// back to dev sign-in. The bridge would reject dev sign-in from that origin
-// anyway, but checking here avoids the 403 roundtrip and prevents the runtime
-// error toast from triggering in the Hub.
-const HOSTNAME = window.location.hostname;
-const IS_DEV =
-  import.meta.env.DEV ||
-  HOSTNAME.startsWith("id-preview-") || // id-preview-<sha>--<project-id>.lovable.app
-  HOSTNAME.endsWith(".lovableproject.com") || // Lovable editor iframe
-  HOSTNAME === "localhost" ||
-  HOSTNAME === "127.0.0.1";
-
 export interface HubUser {
   _id: string;
   name: string;
@@ -32,6 +18,19 @@ export interface HubUser {
 }
 
 export type UserRole = "admin" | "moburst_user" | "client" | null;
+
+// Pure dev fallback (no Supabase session, no data). Used only when the app is
+// loaded from a Lovable preview URL and localStorage still has a cached
+// Supabase session from the legacy Auth.tsx signup. If the cached session is
+// admin, data flows via that. If not, RLS blocks — which is fine, Lovable
+// preview is for UI iteration, real data testing happens via the Hub.
+const HOSTNAME = window.location.hostname;
+const IS_LOVABLE_PREVIEW =
+  import.meta.env.DEV ||
+  HOSTNAME.startsWith("id-preview-") ||
+  HOSTNAME.endsWith(".lovableproject.com") ||
+  HOSTNAME === "localhost" ||
+  HOSTNAME === "127.0.0.1";
 
 const DEV_USER: HubUser = {
   _id: "00000000-0000-0000-0000-000000000000",
@@ -49,11 +48,11 @@ interface AuthContextType {
   user: HubUser | null;
   userRole: UserRole;
   isAdmin: boolean;
-  isMoburstStaff: boolean; // admin OR moburst_user
+  isMoburstStaff: boolean;
   isClient: boolean;
-  canDelete: boolean;       // admin only
-  canManageClients: boolean; // admin OR moburst_user
-  canRunAnalysis: boolean;   // admin OR moburst_user
+  canDelete: boolean;
+  canManageClients: boolean;
+  canRunAnalysis: boolean;
   isLoading: boolean;
   isAuthenticated: boolean;
   authError: string | null;
@@ -61,21 +60,18 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-async function callBridge(
-  payload: { hubToken: string } | { devEmail: string },
+async function bridgeHubSession(
+  hubToken: string,
 ): Promise<{ toolRole: UserRole; error?: string; debug?: unknown }> {
   if (!SUPABASE_URL) return { toolRole: null, error: "Supabase URL not configured" };
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/hub-auth-bridge`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ hubToken }),
     });
-    // Bridge always returns 200 with either {access_token,...} or {error,...}
     const body = await res.json().catch(() => ({}));
-    if (body?.debug) {
-      console.log("[Auth] bridge debug:", body.debug);
-    }
+    if (body?.debug) console.log("[Auth] bridge debug:", body.debug);
     if (!res.ok || body?.error) {
       return { toolRole: null, error: body?.error || `Bridge failed (${res.status})`, debug: body?.debug };
     }
@@ -87,7 +83,7 @@ async function callBridge(
     }
     return { toolRole: (body.tool_role as UserRole) || null, debug: body?.debug };
   } catch (err) {
-    console.error("callBridge error:", err);
+    console.error("bridgeHubSession error:", err);
     return { toolRole: null, error: "Could not reach auth bridge" };
   }
 }
@@ -106,15 +102,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (token) {
         try {
-          // 1. Fetch the Hub user (source of truth for identity + tool assignment)
           const hubRes = await fetch(`${HUB_API_URL}/api/auth/me`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (!hubRes.ok) throw new Error(`Hub auth failed (${hubRes.status})`);
           const hubUser = (await hubRes.json()) as HubUser;
 
-          // 2. Bridge to Supabase: mints a session and syncs role + company mapping
-          const { toolRole, error } = await callBridge({ hubToken: token });
+          const { toolRole, error } = await bridgeHubSession(token);
           if (cancelled) return;
 
           if (error) {
@@ -129,43 +123,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (err) {
           console.error("Authentication error:", err);
           if (cancelled) return;
-          if (IS_DEV) {
-            console.warn("[Auth] Hub unreachable — falling back to dev sign-in");
-            await devSignIn();
-          } else {
-            setUser(null);
-            setUserRole(null);
-            setAuthError(err instanceof Error ? err.message : "Authentication failed");
-          }
+          setUser(null);
+          setUserRole(null);
+          setAuthError(err instanceof Error ? err.message : "Authentication failed");
         } finally {
           if (!cancelled) setIsLoading(false);
         }
         return;
       }
 
-      // No Hub token. In Lovable preview / localhost, auto-sign-in to a dev admin
-      // so we can see real data while iterating on UI. The bridge rejects this path
-      // unless the request Origin matches a Lovable preview domain.
-      if (IS_DEV) {
-        await devSignIn();
+      // No Hub token. In Lovable preview, present a dev user so the UI renders
+      // normally for layout work. Any existing persisted Supabase session in
+      // localStorage (from a prior Hub-bridged sign-in on the same browser) will
+      // continue to work and data will flow through RLS. If no such session
+      // exists, queries return empty — that's expected, Lovable preview isn't
+      // for data testing. Do NOT call any edge function here; a failed call
+      // would surface as a Lovable runtime error toast.
+      if (IS_LOVABLE_PREVIEW) {
+        if (!cancelled) {
+          setUser(DEV_USER);
+          setUserRole("admin");
+        }
       }
       if (!cancelled) setIsLoading(false);
-    }
-
-    async function devSignIn() {
-      const devEmail = import.meta.env.VITE_DEV_EMAIL || "dev@moburst.local";
-      console.warn(`[Auth] Dev preview — signing in as ${devEmail} via bridge`);
-      const { error } = await callBridge({ devEmail });
-      if (cancelled) return;
-      if (error) {
-        // Bridge refused (e.g. origin didn't match). Fall back to a non-DB dev user.
-        console.warn(`[Auth] Dev bridge rejected (${error}). RLS will block data queries.`);
-        setUser(DEV_USER);
-        setUserRole("admin");
-        return;
-      }
-      setUser({ ...DEV_USER, email: devEmail });
-      setUserRole("admin");
     }
 
     authenticate();
