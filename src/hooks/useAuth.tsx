@@ -5,14 +5,19 @@ import { supabase } from "@/integrations/supabase/client";
 const HUB_API_URL = import.meta.env.VITE_HUB_BACKEND_URL || "https://tools-server.moburst.com";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-// In Lovable preview (or localhost dev) we may have no hubToken. If a persisted
-// Supabase session exists from a prior email/password signup, the data will still
-// load — we just present the dev user for UI context.
+// IS_DEV matches Lovable EDITOR PREVIEW contexts + localhost, NOT the published
+// Lovable URL. The published URL (moburst-socialytics-ai.lovable.app) is what the
+// Hub iframes — in production, we MUST go through the Hub token path, never fall
+// back to dev sign-in. The bridge would reject dev sign-in from that origin
+// anyway, but checking here avoids the 403 roundtrip and prevents the runtime
+// error toast from triggering in the Hub.
+const HOSTNAME = window.location.hostname;
 const IS_DEV =
   import.meta.env.DEV ||
-  window.location.hostname.includes("lovableproject.com") ||
-  window.location.hostname.includes("lovable.app") ||
-  window.location.hostname === "localhost";
+  HOSTNAME.startsWith("id-preview-") || // id-preview-<sha>--<project-id>.lovable.app
+  HOSTNAME.endsWith(".lovableproject.com") || // Lovable editor iframe
+  HOSTNAME === "localhost" ||
+  HOSTNAME === "127.0.0.1";
 
 export interface HubUser {
   _id: string;
