@@ -3,17 +3,23 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { FileText, TrendingUp } from "lucide-react";
+import { FileText, TrendingUp, AlertCircle } from "lucide-react";
+
+// Defense-in-depth: even when RLS returns extra/stale clients (e.g. client_users
+// cache not yet cleaned, or migration to computed is_client_member not applied
+// yet), we filter client-side to the user's CURRENT Hub company. This keeps the
+// dashboard showing only the right client's data no matter what the DB state is.
+
+function normalize(s: string | null | undefined): string {
+  return (s ?? "").trim().toLowerCase();
+}
 
 export function ClientDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // RLS-scoped: returns only clients the user has access to (via is_client_member:
-  // either profiles.hub_company_name = clients.hub_company_name, or a manual
-  // client_users row). Do NOT filter by user._id — that's the Hub MongoDB
-  // ObjectId and does not match Supabase's auth.users.id UUID.
-  const { data: accessibleClients, isLoading } = useQuery({
+  // Pull everything RLS allows, then filter here.
+  const { data: allClients, isLoading, error } = useQuery({
     queryKey: ["client-dashboard-clients"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -26,7 +32,14 @@ export function ClientDashboard() {
     enabled: !!user,
   });
 
-  const firstClient = accessibleClients?.[0];
+  // Filter to clients whose hub_company_name matches the user's Hub company.
+  const userCompany = normalize(user?.company);
+  const matchingClients = (allClients ?? []).filter((c) => {
+    if (!userCompany) return false;
+    return normalize(c.hub_company_name) === userCompany;
+  });
+
+  const firstClient = matchingClients[0];
   const clientId = firstClient?.id;
 
   const { data: latestReport } = useQuery({
@@ -54,25 +67,55 @@ export function ClientDashboard() {
     );
   }
 
-  if (!accessibleClients?.length) {
+  if (error) {
     return (
       <Card className="p-12 text-center">
-        <h3 className="font-semibold mb-2">No client access yet</h3>
-        <p className="text-sm text-muted-foreground">
-          Your Hub company does not match any client in this tool. Ask your Moburst
-          account manager to confirm your company name is set correctly in the Hub
-          and that a matching client exists here.
+        <AlertCircle className="h-10 w-10 mx-auto text-destructive mb-3" />
+        <h3 className="font-semibold mb-2">Couldn't load client data</h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          {error instanceof Error ? error.message : "Unknown error"}
         </p>
-        {user?.company && (
-          <p className="text-xs text-muted-foreground mt-4">
-            Your Hub company: <code className="text-foreground">{user.company}</code>
-          </p>
-        )}
       </Card>
     );
   }
 
-  const displayName = firstClient?.hub_company_name || firstClient?.name || user?.company;
+  if (matchingClients.length === 0) {
+    // Distinguish between "RLS returned nothing" and "RLS returned clients but none match your company"
+    const rlsReturnedZero = (allClients?.length ?? 0) === 0;
+    return (
+      <Card className="p-12 text-center">
+        <h3 className="font-semibold mb-2">No client access yet</h3>
+        <p className="text-sm text-muted-foreground">
+          {rlsReturnedZero
+            ? "No clients are linked to your account yet. Ask your Moburst account manager to confirm your company is set up correctly in the Hub and linked to a client in this tool."
+            : "Your Hub company doesn't match any client in this tool. Ask your account manager to fix the mapping in Settings → Hub Company Mapping."}
+        </p>
+        <div className="mt-4 p-3 rounded-lg bg-[rgba(255,255,255,0.03)] text-xs text-muted-foreground text-left max-w-sm mx-auto">
+          <div>
+            Your Hub company:{" "}
+            <code className="text-foreground">{user?.company || "(not set)"}</code>
+          </div>
+          <div>Clients visible to you: {allClients?.length ?? 0}</div>
+          {!!allClients?.length && allClients.length <= 10 && (
+            <div className="mt-2">
+              Their Hub company names:{" "}
+              {allClients.map((c) => (
+                <span
+                  key={c.id}
+                  className="inline-block mx-0.5 px-1.5 py-0.5 rounded bg-[rgba(255,255,255,0.04)]"
+                >
+                  {c.hub_company_name || "(blank)"}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
+    );
+  }
+
+  const displayName =
+    firstClient.hub_company_name || firstClient.name || user?.company;
 
   return (
     <div className="space-y-6">
