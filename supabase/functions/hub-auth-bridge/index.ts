@@ -20,10 +20,31 @@ const corsHeaders = {
 const HUB_BACKEND_URL = "https://tools-server.moburst.com";
 const TOOL_NAME = Deno.env.get("HUB_TOOL_NAME") || "Socialytics";
 
-// Matches Lovable editor preview origins + localhost. Does NOT match the published
-// Lovable URL (moburst-socialytics-ai.lovable.app) — production must go through Hub.
-const DEV_ORIGIN_PATTERN =
-  /^https?:\/\/(id-preview-[a-z0-9-]+--[a-z0-9-]+\.lovable\.app|[a-z0-9-]+\.lovableproject\.com|localhost(:\d+)?)$/i;
+// Production hostnames that MUST use the Hub token path, never dev sign-in.
+const PRODUCTION_HOSTNAMES = new Set([
+  "moburst-socialytics-ai.lovable.app",
+  "socialytics.moburst.com",
+]);
+
+// A request Origin is a "dev origin" (and therefore allowed to use dev sign-in)
+// if its hostname is NOT in the production set AND is one of the Lovable/dev
+// surfaces where we want preview data visible. This is more forgiving than a
+// regex that has to match UUID/sha formats exactly — Lovable's preview URL
+// format can drift, and we don't want that to silently break the editor.
+function isDevOrigin(origin: string): boolean {
+  if (!origin) return false;
+  let host: string;
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (PRODUCTION_HOSTNAMES.has(host)) return false;
+  if (host.endsWith(".lovable.app")) return true;
+  if (host.endsWith(".lovableproject.com")) return true;
+  if (host === "localhost" || host === "127.0.0.1") return true;
+  return false;
+}
 
 type HubUser = {
   _id: string;
@@ -182,9 +203,10 @@ Deno.serve(async (req) => {
     // match this pattern, so production must go through the Hub path below.
     if (devEmail && !hubToken) {
       const origin = req.headers.get("origin") || "";
-      if (!DEV_ORIGIN_PATTERN.test(origin)) {
+      if (!isDevOrigin(origin)) {
+        console.log(`[bridge] Rejected dev sign-in from origin="${origin}"`);
         return json(
-          { error: "Dev-mode sign-in is only allowed from Lovable preview origins" },
+          { error: `Dev-mode sign-in not allowed from ${origin || "this origin"}` },
           403,
         );
       }
