@@ -38,19 +38,27 @@ type HubUser = {
 type ToolRole = "admin" | "moburst_user" | "client" | null;
 
 function resolveToolRole(hubUser: HubUser): ToolRole {
-  if ((hubUser.role || "").toLowerCase() === "admin") return "admin";
-
+  // The per-tool role in hubUser.tools[] is the source of truth. We ONLY fall back
+  // to the global Hub role when the user has no entry for this tool (which happens
+  // during initial setup and prevents admin lockout). Explicitly assigning a tool
+  // role — even "Client" to a global admin — always wins.
   const toolEntry = (hubUser.tools || []).find(
     (t) => (t?.tool?.name || "").toLowerCase() === TOOL_NAME.toLowerCase(),
   );
-  if (!toolEntry) return null;
 
-  const r = (toolEntry.role || "").toLowerCase();
-  if (r === "admin") return "admin";
-  if (r === "moburst user" || r === "moburst" || r === "moburst_user" || r === "staff") {
-    return "moburst_user";
+  if (toolEntry) {
+    const r = (toolEntry.role || "").toLowerCase();
+    if (r === "admin") return "admin";
+    if (r === "moburst user" || r === "moburst" || r === "moburst_user" || r === "staff") {
+      return "moburst_user";
+    }
+    if (r === "client" || r === "viewer") return "client";
+    return null; // explicitly assigned but with an unrecognised role
   }
-  if (r === "client" || r === "viewer") return "client";
+
+  // No tool entry at all — fall back to global role so Moburst admins can still
+  // reach the tool during setup before they explicitly assign themselves.
+  if ((hubUser.role || "").toLowerCase() === "admin") return "admin";
   return null;
 }
 
