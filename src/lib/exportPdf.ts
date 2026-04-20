@@ -120,6 +120,42 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       border-color: rgba(255, 255, 255, 0.05);
     }
 
+    /* ─── OVERFLOW & SIZING FIXES ───
+       The live app uses overflow: hidden and fixed heights for scroll areas
+       (report pages, trend grids, etc). In print we want EVERYTHING to flow
+       naturally so nothing is clipped. */
+    .pdf-root [class*="overflow-"],
+    .pdf-root .overflow-hidden,
+    .pdf-root .overflow-x-auto,
+    .pdf-root .overflow-y-auto,
+    .pdf-root .overflow-auto,
+    .pdf-root .overflow-scroll {
+      overflow: visible !important;
+    }
+    .pdf-root [class*="max-h-"],
+    .pdf-root .max-h-screen,
+    .pdf-root .max-h-96 {
+      max-height: none !important;
+    }
+    .pdf-root [class*="h-screen"] { height: auto !important; }
+
+    /* Ensure all text wraps — long URLs/hashtags shouldn't overflow */
+    .pdf-root p, .pdf-root span, .pdf-root div,
+    .pdf-root td, .pdf-root th, .pdf-root li, .pdf-root a {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    /* Truncation classes commonly used — disable for print */
+    .pdf-root .truncate,
+    .pdf-root [class*="line-clamp-"] {
+      -webkit-line-clamp: unset !important;
+      display: block !important;
+      overflow: visible !important;
+      text-overflow: clip !important;
+      white-space: normal !important;
+    }
+
     /* Design tokens — mirror the live app's Intercept dark theme */
     .pdf-root {
       --background: 228 23% 5%;
@@ -141,7 +177,26 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       background: rgba(26, 29, 35, 0.85) !important;
       border-radius: 20px !important;
       break-inside: avoid;
+      page-break-inside: avoid;
       margin-bottom: 12px;
+    }
+
+    /* Additional page-break discipline:
+       - Don't break inside rows of a grid (each card is already avoid)
+       - Don't break after the first line of a paragraph/heading (orphans)
+       - Keep images with their captions */
+    .pdf-root img,
+    .pdf-root .recharts-wrapper,
+    .pdf-root table,
+    .pdf-root blockquote,
+    .pdf-root pre,
+    .pdf-root figure {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .pdf-root p, .pdf-root h1, .pdf-root h2, .pdf-root h3, .pdf-root h4 {
+      orphans: 3;
+      widows: 3;
     }
 
     .pdf-root .grid { gap: 12px !important; }
