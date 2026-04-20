@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { FileText, TrendingUp, AlertCircle } from "lucide-react";
+import { FileText, TrendingUp, BarChart3, AlertCircle } from "lucide-react";
 
 // Defense-in-depth: even when RLS returns extra/stale clients (e.g. client_users
 // cache not yet cleaned, or migration to computed is_client_member not applied
@@ -158,6 +158,21 @@ export function ClientDashboard() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">View all past reports and analyses</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          className="cursor-pointer hover-lift transition-shadow"
+          onClick={() => navigate(`/clients/${clientId}/analytics`)}
+        >
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-accent" />
+              Analytics
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">Performance metrics and trend insights</p>
           </CardContent>
         </Card>
       </div>
