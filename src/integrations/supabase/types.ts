@@ -123,6 +123,7 @@ export type Database = {
           created_by: string | null
           design_references: Json | null
           geo: string | null
+          hub_company_name: string | null
           id: string
           language: string | null
           logo_url: string | null
@@ -149,6 +150,7 @@ export type Database = {
           created_by?: string | null
           design_references?: Json | null
           geo?: string | null
+          hub_company_name?: string | null
           id?: string
           language?: string | null
           logo_url?: string | null
@@ -175,6 +177,7 @@ export type Database = {
           created_by?: string | null
           design_references?: Json | null
           geo?: string | null
+          hub_company_name?: string | null
           id?: string
           language?: string | null
           logo_url?: string | null
@@ -320,6 +323,7 @@ export type Database = {
           avatar_url: string | null
           created_at: string | null
           display_name: string | null
+          hub_company_name: string | null
           id: string
           updated_at: string | null
           user_id: string
@@ -328,6 +332,7 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string | null
           display_name?: string | null
+          hub_company_name?: string | null
           id?: string
           updated_at?: string | null
           user_id: string
@@ -336,6 +341,7 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string | null
           display_name?: string | null
+          hub_company_name?: string | null
           id?: string
           updated_at?: string | null
           user_id?: string
