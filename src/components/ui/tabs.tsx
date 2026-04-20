@@ -38,9 +38,14 @@ TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
 const TabsContent = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
->(({ className, ...props }, ref) => (
+>(({ className, forceMount, ...props }, ref) => (
+  // forceMount defaults to true so all tab panels are in the DOM. Inactive ones
+  // are hidden via CSS (data-[state=inactive]:hidden). This matters for PDF
+  // export — we need every panel present when we clone the DOM, otherwise
+  // only the currently-visible tab ends up in the PDF.
   <TabsPrimitive.Content
     ref={ref}
+    forceMount={forceMount ?? true}
     className={cn(
       "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[state=inactive]:hidden",
       className,

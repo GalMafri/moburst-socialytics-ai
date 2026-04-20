@@ -139,11 +139,21 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     }
     .pdf-root [class*="h-screen"] { height: auto !important; }
 
-    /* Ensure all text wraps — long URLs/hashtags shouldn't overflow */
+    /* Soft text wrapping — break long words ONLY when they'd overflow
+       (e.g. URLs, hashtags without spaces). Regular prose wraps at word
+       boundaries naturally. Previous version used overflow-wrap: anywhere
+       + word-break: break-word which was too aggressive and caused
+       mid-word breaks in normal text. */
     .pdf-root p, .pdf-root span, .pdf-root div,
-    .pdf-root td, .pdf-root th, .pdf-root li, .pdf-root a {
+    .pdf-root td, .pdf-root th, .pdf-root li {
+      overflow-wrap: break-word;
+      word-break: normal;
+    }
+    /* Long URLs / hashtags without spaces — allow breaking anywhere */
+    .pdf-root a,
+    .pdf-root code,
+    .pdf-root [class*="hashtag"] {
       overflow-wrap: anywhere;
-      word-break: break-word;
     }
 
     /* Truncation classes commonly used — disable for print */
