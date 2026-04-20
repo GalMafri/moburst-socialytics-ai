@@ -226,9 +226,13 @@ export default function ClientSetup() {
       };
       let clientId: string;
       if (isNew) {
+        // clients.created_by references auth.users(id) — a Supabase UUID.
+        // user._id is the Hub Mongo ObjectId, which Postgres rejects as not-a-UUID.
+        // Use the Supabase session's UUID (set by hub-auth-bridge); null if no session.
+        const { data: { user: supabaseUser } } = await supabase.auth.getUser();
         const { data, error } = await supabase
           .from("clients")
-          .insert({ ...payload, created_by: user!._id } as any)
+          .insert({ ...payload, created_by: supabaseUser?.id ?? null } as any)
           .select()
           .single();
         if (error) throw error;
