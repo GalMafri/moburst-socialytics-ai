@@ -256,15 +256,26 @@ export function ExportPdfButton({ contentRef, filename = "report" }: ExportPdfBu
       printWindow.document.write(html);
       printWindow.document.close();
 
-      // Wait for content and styles to load, then trigger print
+      // Wait for content and styles to load, then trigger the print dialog.
+      // Do NOT auto-close the tab — the user needs time to confirm "Save as PDF"
+      // in the browser's print dialog. Previous behavior closed after 1 second,
+      // which killed the dialog before users could save. Now they close the
+      // tab manually after saving.
       printWindow.onload = () => {
         setTimeout(() => {
-          printWindow.print();
-          setTimeout(() => printWindow.close(), 1000);
+          try {
+            printWindow.focus();
+            printWindow.print();
+          } catch (err) {
+            console.error("Print dialog failed:", err);
+          }
         }, 500);
       };
 
-      toast({ title: "PDF export ready", description: "Use the print dialog to save as PDF" });
+      toast({
+        title: "PDF export ready",
+        description: "Save as PDF from the print dialog, then close the tab when done.",
+      });
     } catch (err: any) {
       toast({ title: "Export failed", description: err.message, variant: "destructive" });
     } finally {
