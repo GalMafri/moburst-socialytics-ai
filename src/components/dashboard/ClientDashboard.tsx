@@ -3,30 +3,34 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { FileText, TrendingUp } from "lucide-react";
 
 export function ClientDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const { data: clientAccess } = useQuery({
-    queryKey: ["my-clients", user?._id],
+  // RLS-scoped: returns only clients the user has access to (via is_client_member:
+  // either profiles.hub_company_name = clients.hub_company_name, or a manual
+  // client_users row). Do NOT filter by user._id — that's the Hub MongoDB
+  // ObjectId and does not match Supabase's auth.users.id UUID.
+  const { data: accessibleClients, isLoading } = useQuery({
+    queryKey: ["client-dashboard-clients"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("client_users")
-        .select("client_id, clients(id, name, logo_url)")
-        .eq("user_id", user!._id);
+        .from("clients")
+        .select("id, name, logo_url, hub_company_name")
+        .order("name");
       if (error) throw error;
       return data;
     },
     enabled: !!user,
   });
 
-  const clientId = clientAccess?.[0]?.client_id;
+  const firstClient = accessibleClients?.[0];
+  const clientId = firstClient?.id;
 
   const { data: latestReport } = useQuery({
-    queryKey: ["latest-report", clientId],
+    queryKey: ["client-dashboard-latest-report", clientId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("reports")
@@ -42,21 +46,38 @@ export function ClientDashboard() {
     enabled: !!clientId,
   });
 
-  if (!clientAccess?.length) {
+  if (isLoading) {
     return (
       <Card className="p-12 text-center">
-        <h3 className="font-semibold mb-2">No client access</h3>
-        <p className="text-sm text-muted-foreground">Contact your account manager to get access.</p>
+        <p className="text-sm text-muted-foreground">Loading your dashboard…</p>
       </Card>
     );
   }
 
-  const client = clientAccess[0]?.clients as any;
+  if (!accessibleClients?.length) {
+    return (
+      <Card className="p-12 text-center">
+        <h3 className="font-semibold mb-2">No client access yet</h3>
+        <p className="text-sm text-muted-foreground">
+          Your Hub company does not match any client in this tool. Ask your Moburst
+          account manager to confirm your company name is set correctly in the Hub
+          and that a matching client exists here.
+        </p>
+        {user?.company && (
+          <p className="text-xs text-muted-foreground mt-4">
+            Your Hub company: <code className="text-foreground">{user.company}</code>
+          </p>
+        )}
+      </Card>
+    );
+  }
+
+  const displayName = firstClient?.hub_company_name || firstClient?.name || user?.company;
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold">{client?.name}</h2>
+        <h2 className="text-2xl font-bold">{displayName}</h2>
         <p className="text-muted-foreground text-sm">Your social media intelligence dashboard</p>
       </div>
 
