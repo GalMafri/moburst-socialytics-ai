@@ -3,11 +3,12 @@
 // Two code paths:
 //   1. Production: {hubToken} → validate against Hub → mint session with resolved tool role
 //   2. Dev preview: {devEmail} → ONLY if the request originates from a Lovable preview
-//      domain (id-preview-*.lovable.app / *.lovableproject.com / localhost). Provisions a
-//      dev user and grants admin. Lets the Lovable editor preview show real data.
+//      domain. Provisions a dev user and grants admin.
 //
-// On success either path returns { access_token, refresh_token, tool_role, user_id }
-// which the frontend passes to supabase.auth.setSession(). RLS then enforces scope.
+// Response envelope: this function ALWAYS returns HTTP 200 with a JSON body. Success
+// bodies have {access_token, refresh_token, tool_role, user_id, debug}; error bodies
+// have {error, debug}. Returning 200 for errors avoids Lovable's runtime-error banner,
+// which fires on any non-2xx response regardless of whether the frontend handles it.
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -20,17 +21,12 @@ const corsHeaders = {
 const HUB_BACKEND_URL = "https://tools-server.moburst.com";
 const TOOL_NAME = Deno.env.get("HUB_TOOL_NAME") || "Socialytics";
 
-// Production hostnames that MUST use the Hub token path, never dev sign-in.
+// Production hostnames MUST use the Hub token path — never dev sign-in.
 const PRODUCTION_HOSTNAMES = new Set([
   "moburst-socialytics-ai.lovable.app",
   "socialytics.moburst.com",
 ]);
 
-// A request Origin is a "dev origin" (and therefore allowed to use dev sign-in)
-// if its hostname is NOT in the production set AND is one of the Lovable/dev
-// surfaces where we want preview data visible. This is more forgiving than a
-// regex that has to match UUID/sha formats exactly — Lovable's preview URL
-// format can drift, and we don't want that to silently break the editor.
 function isDevOrigin(origin: string): boolean {
   if (!origin) return false;
   let host: string;
@@ -57,59 +53,67 @@ type HubUser = {
 };
 
 type ToolRole = "admin" | "moburst_user" | "client" | null;
+type RoleResolution = {
+  role: ToolRole;
+  source: "tool_entry" | "global_admin_fallback" | "none";
+  tool_entry_name?: string;
+  tool_entry_role?: string;
+  tool_names_from_hub?: string[];
+};
 
-function resolveToolRole(hubUser: HubUser): ToolRole {
-  // The per-tool role in hubUser.tools[] is the source of truth. We ONLY fall back
-  // to the global Hub role when the user has no entry for this tool (which happens
-  // during initial setup and prevents admin lockout). Explicitly assigning a tool
-  // role — even "Client" to a global admin — always wins.
-  const toolEntry = (hubUser.tools || []).find(
-    (t) => (t?.tool?.name || "").toLowerCase() === TOOL_NAME.toLowerCase(),
-  );
+function resolveToolRole(hubUser: HubUser): RoleResolution {
+  const target = TOOL_NAME.toLowerCase().trim();
+  const allNames = (hubUser.tools || []).map((t) => t?.tool?.name || "");
+
+  // Permissive match: exact OR starts-with (e.g. "Socialytics AI" or "Socialytics by Moburst")
+  const toolEntry = (hubUser.tools || []).find((t) => {
+    const n = (t?.tool?.name || "").toLowerCase().trim();
+    return n === target || n.startsWith(target + " ") || n.startsWith(target + "-") || n.startsWith(target);
+  });
 
   if (toolEntry) {
-    const r = (toolEntry.role || "").toLowerCase();
-    if (r === "admin") return "admin";
-    if (r === "moburst user" || r === "moburst" || r === "moburst_user" || r === "staff") {
-      return "moburst_user";
-    }
-    if (r === "client" || r === "viewer") return "client";
-    return null; // explicitly assigned but with an unrecognised role
+    const rawRole = toolEntry.role || "";
+    const r = rawRole.toLowerCase().trim();
+    let role: ToolRole = null;
+    if (r === "admin") role = "admin";
+    else if (r === "moburst user" || r === "moburst" || r === "moburst_user" || r === "staff") role = "moburst_user";
+    else if (r === "client" || r === "viewer") role = "client";
+    return {
+      role,
+      source: "tool_entry",
+      tool_entry_name: toolEntry.tool?.name,
+      tool_entry_role: rawRole,
+      tool_names_from_hub: allNames,
+    };
   }
 
-  // No tool entry at all — fall back to global role so Moburst admins can still
-  // reach the tool during setup before they explicitly assign themselves.
-  if ((hubUser.role || "").toLowerCase() === "admin") return "admin";
-  return null;
+  // No tool entry — fall back to global role so Moburst admins can access tools they
+  // haven't been explicitly assigned to yet (lockout prevention).
+  if ((hubUser.role || "").toLowerCase() === "admin") {
+    return { role: "admin", source: "global_admin_fallback", tool_names_from_hub: allNames };
+  }
+  return { role: null, source: "none", tool_names_from_hub: allNames };
 }
 
-function json(body: unknown, status = 200) {
+function json(body: unknown) {
   return new Response(JSON.stringify(body), {
-    status,
+    status: 200,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
 
-// Provision/find Supabase user, sync profile + role + client_users, mint a session.
-// Shared by production and dev paths — only the source of `hubUser` differs.
 async function provisionAndSignIn(
   supabase: SupabaseClient,
   serviceRoleKey: string,
   hubUser: HubUser,
   toolRole: Exclude<ToolRole, null>,
-): Promise<{
-  access_token: string;
-  refresh_token: string;
-  tool_role: ToolRole;
-  user_id: string;
-} | { error: string; status: number }> {
+): Promise<{ ok: true; access_token: string; refresh_token: string; user_id: string; mapped_clients: number }
+  | { ok: false; error: string }> {
   const email = hubUser.email.toLowerCase();
   const password = `hub_bridge_${email}_${serviceRoleKey.slice(-16)}`;
 
   const { data: existingUsers } = await supabase.auth.admin.listUsers();
-  const existingUser = existingUsers?.users?.find(
-    (u) => u.email?.toLowerCase() === email,
-  );
+  const existingUser = existingUsers?.users?.find((u) => u.email?.toLowerCase() === email);
 
   let supabaseUserId: string;
   if (existingUser) {
@@ -128,7 +132,7 @@ async function provisionAndSignIn(
     });
     if (createErr || !created?.user) {
       console.error("Create user error:", createErr);
-      return { error: "Failed to provision user", status: 500 };
+      return { ok: false, error: "Failed to provision user" };
     }
     supabaseUserId = created.user.id;
   }
@@ -144,43 +148,60 @@ async function provisionAndSignIn(
     { onConflict: "user_id" },
   );
 
+  // Reconcile role: wipe then insert. Previous role (if any) is overwritten.
   await supabase.from("user_roles").delete().eq("user_id", supabaseUserId);
   const { error: roleErr } = await supabase
     .from("user_roles")
     .insert({ user_id: supabaseUserId, role: toolRole });
-  if (roleErr) console.error("Role upsert error:", roleErr);
+  if (roleErr) console.error("Role insert error:", roleErr);
 
-  if (toolRole === "client" && hubUser.company) {
-    const { data: matchingClients } = await supabase
-      .from("clients")
-      .select("id")
-      .ilike("hub_company_name", hubUser.company);
+  // Reconcile client_users mapping: wipe ALL existing rows for this user, then
+  // auto-populate based on current hub company. This prevents stale mappings from
+  // prior tests (e.g. user was once mapped to "Bader Law", now should map to
+  // "Acme" but the old row persisted).
+  let mappedClients = 0;
+  if (toolRole === "client") {
+    await supabase.from("client_users").delete().eq("user_id", supabaseUserId);
 
-    if (matchingClients && matchingClients.length > 0) {
-      const rows = matchingClients.map((c: { id: string }) => ({
-        user_id: supabaseUserId,
-        client_id: c.id,
-        role: "viewer",
-      }));
-      await supabase.from("client_users").upsert(rows, {
-        onConflict: "user_id,client_id",
-        ignoreDuplicates: true,
-      });
+    if (hubUser.company) {
+      const { data: matchingClients } = await supabase
+        .from("clients")
+        .select("id")
+        .ilike("hub_company_name", hubUser.company);
+
+      if (matchingClients && matchingClients.length > 0) {
+        const rows = matchingClients.map((c: { id: string }) => ({
+          user_id: supabaseUserId,
+          client_id: c.id,
+          role: "viewer",
+        }));
+        const { error: mapErr } = await supabase.from("client_users").insert(rows);
+        if (mapErr) console.error("client_users insert error:", mapErr);
+        else mappedClients = rows.length;
+      }
     }
+  } else {
+    // Non-client roles don't need client_users mapping, and any existing rows
+    // from a prior client stint should be cleared so is_client_member() doesn't
+    // accidentally grant old scope.
+    await supabase.from("client_users").delete().eq("user_id", supabaseUserId);
   }
 
-  const { data: signIn, error: signInErr } =
-    await supabase.auth.signInWithPassword({ email: hubUser.email, password });
+  const { data: signIn, error: signInErr } = await supabase.auth.signInWithPassword({
+    email: hubUser.email,
+    password,
+  });
   if (signInErr || !signIn?.session) {
     console.error("Sign in error:", signInErr);
-    return { error: "Failed to create session", status: 500 };
+    return { ok: false, error: "Failed to create session" };
   }
 
   return {
+    ok: true,
     access_token: signIn.session.access_token,
     refresh_token: signIn.session.refresh_token,
-    tool_role: toolRole,
     user_id: supabaseUserId,
+    mapped_clients: mappedClients,
   };
 }
 
@@ -190,6 +211,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const { hubToken, devEmail } = body as { hubToken?: string; devEmail?: string };
+    const origin = req.headers.get("origin") || "";
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -197,18 +219,14 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // ── Dev-mode path ─────────────────────────────────────────────────────────
-    // Used ONLY by Lovable editor preview (id-preview-*.lovable.app, *.lovableproject.com,
-    // and localhost). Production Lovable URL (moburst-socialytics-ai.lovable.app) does NOT
-    // match this pattern, so production must go through the Hub path below.
+    // ── Dev path (Lovable preview only) ────────────────────────────────────────
     if (devEmail && !hubToken) {
-      const origin = req.headers.get("origin") || "";
       if (!isDevOrigin(origin)) {
         console.log(`[bridge] Rejected dev sign-in from origin="${origin}"`);
-        return json(
-          { error: `Dev-mode sign-in not allowed from ${origin || "this origin"}` },
-          403,
-        );
+        return json({
+          error: "dev_origin_not_allowed",
+          debug: { origin, tool_name: TOOL_NAME },
+        });
       }
 
       const synthHubUser: HubUser = {
@@ -222,35 +240,67 @@ Deno.serve(async (req) => {
       };
 
       const result = await provisionAndSignIn(supabase, serviceRoleKey, synthHubUser, "admin");
-      if ("error" in result) return json({ error: result.error }, result.status);
-      return json(result);
+      if (!result.ok) return json({ error: result.error, debug: { origin, tool_name: TOOL_NAME } });
+      return json({
+        access_token: result.access_token,
+        refresh_token: result.refresh_token,
+        tool_role: "admin",
+        user_id: result.user_id,
+        debug: { source: "dev", origin, tool_name: TOOL_NAME, mapped_clients: result.mapped_clients },
+      });
     }
 
-    // ── Production path (Hub JWT) ─────────────────────────────────────────────
-    if (!hubToken) return json({ error: "Missing hubToken" }, 400);
+    // ── Production path (Hub JWT) ──────────────────────────────────────────────
+    if (!hubToken) return json({ error: "Missing hubToken", debug: { origin, tool_name: TOOL_NAME } });
 
     const hubRes = await fetch(`${HUB_BACKEND_URL}/api/auth/me`, {
       headers: { Authorization: `Bearer ${hubToken}` },
     });
-    if (!hubRes.ok) return json({ error: "Invalid hub token" }, 401);
-
-    const hubUser = (await hubRes.json()) as HubUser;
-    if (!hubUser?.email) return json({ error: "No email from Hub" }, 400);
-    if (hubUser.isActive === false) return json({ error: "User is deactivated in Hub" }, 403);
-
-    const toolRole = resolveToolRole(hubUser);
-    if (!toolRole) {
-      return json(
-        { error: "User has no role for this tool. Contact a Hub admin to assign access." },
-        403,
-      );
+    if (!hubRes.ok) {
+      return json({ error: "Invalid hub token", debug: { origin, tool_name: TOOL_NAME, hub_status: hubRes.status } });
     }
 
-    const result = await provisionAndSignIn(supabase, serviceRoleKey, hubUser, toolRole);
-    if ("error" in result) return json({ error: result.error }, result.status);
-    return json(result);
+    const hubUser = (await hubRes.json()) as HubUser;
+    if (!hubUser?.email) {
+      return json({ error: "No email from Hub", debug: { origin, tool_name: TOOL_NAME } });
+    }
+    if (hubUser.isActive === false) {
+      return json({ error: "User is deactivated in Hub", debug: { origin, tool_name: TOOL_NAME, hub_email: hubUser.email } });
+    }
+
+    const resolution = resolveToolRole(hubUser);
+    const debug = {
+      origin,
+      tool_name: TOOL_NAME,
+      hub_email: hubUser.email,
+      hub_company: hubUser.company,
+      hub_global_role: hubUser.role,
+      resolved_role: resolution.role,
+      resolution_source: resolution.source,
+      tool_entry_name: resolution.tool_entry_name,
+      tool_entry_role: resolution.tool_entry_role,
+      tool_names_from_hub: resolution.tool_names_from_hub,
+    };
+
+    if (!resolution.role) {
+      return json({
+        error: "User has no role for this tool. Contact a Hub admin to assign access.",
+        debug,
+      });
+    }
+
+    const result = await provisionAndSignIn(supabase, serviceRoleKey, hubUser, resolution.role);
+    if (!result.ok) return json({ error: result.error, debug });
+
+    return json({
+      access_token: result.access_token,
+      refresh_token: result.refresh_token,
+      tool_role: resolution.role,
+      user_id: result.user_id,
+      debug: { ...debug, mapped_clients: result.mapped_clients },
+    });
   } catch (err) {
     console.error("hub-auth-bridge error:", err);
-    return json({ error: "Internal error" }, 500);
+    return json({ error: "Internal error", debug: { message: err instanceof Error ? err.message : String(err) } });
   }
 });

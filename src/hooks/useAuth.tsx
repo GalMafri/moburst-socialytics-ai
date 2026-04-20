@@ -63,7 +63,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 async function callBridge(
   payload: { hubToken: string } | { devEmail: string },
-): Promise<{ toolRole: UserRole; error?: string }> {
+): Promise<{ toolRole: UserRole; error?: string; debug?: unknown }> {
   if (!SUPABASE_URL) return { toolRole: null, error: "Supabase URL not configured" };
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/hub-auth-bridge`, {
@@ -71,9 +71,13 @@ async function callBridge(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    // Bridge always returns 200 with either {access_token,...} or {error,...}
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return { toolRole: null, error: body?.error || `Bridge failed (${res.status})` };
+    if (body?.debug) {
+      console.log("[Auth] bridge debug:", body.debug);
+    }
+    if (!res.ok || body?.error) {
+      return { toolRole: null, error: body?.error || `Bridge failed (${res.status})`, debug: body?.debug };
     }
     if (body.access_token && body.refresh_token) {
       await supabase.auth.setSession({
@@ -81,7 +85,7 @@ async function callBridge(
         refresh_token: body.refresh_token,
       });
     }
-    return { toolRole: (body.tool_role as UserRole) || null };
+    return { toolRole: (body.tool_role as UserRole) || null, debug: body?.debug };
   } catch (err) {
     console.error("callBridge error:", err);
     return { toolRole: null, error: "Could not reach auth bridge" };
