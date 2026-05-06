@@ -48,6 +48,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
+import { useAuth } from "@/hooks/useAuth";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
@@ -62,6 +63,7 @@ export default function ReportView() {
   const { id, reportId } = useParams();
   const reportContentRef = useRef<HTMLDivElement>(null);
   useRealtimeReports(id);
+  const { isClient } = useAuth();
 
   const { data: report, isLoading } = useQuery({
     queryKey: ["report", reportId],
@@ -133,33 +135,35 @@ export default function ReportView() {
   return (
     <AppLayout title={`Report: ${clientName}`}>
       <div className="max-w-6xl mx-auto space-y-6" ref={reportContentRef}>
-        {/* Presentation Deck Banner */}
-        <Card className={gammaUrl ? "border-primary/30 bg-primary/5" : "border-dashed"}>
-          <CardContent className="py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div
-                className={`h-10 w-10 rounded-lg flex items-center justify-center ${gammaUrl ? "bg-primary/10" : "bg-[rgba(255,255,255,0.04)]"}`}
-              >
-                <ExternalLink className={`h-5 w-5 ${gammaUrl ? "text-primary" : "text-muted-foreground"}`} />
+        {/* Presentation Deck Banner (hidden for client role) */}
+        {!isClient && (
+          <Card className={gammaUrl ? "border-primary/30 bg-primary/5" : "border-dashed"}>
+            <CardContent className="py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`h-10 w-10 rounded-lg flex items-center justify-center ${gammaUrl ? "bg-primary/10" : "bg-[rgba(255,255,255,0.04)]"}`}
+                >
+                  <ExternalLink className={`h-5 w-5 ${gammaUrl ? "text-primary" : "text-muted-foreground"}`} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">{gammaUrl ? "Interactive Presentation" : "Presentation Deck"}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {gammaUrl
+                      ? "View the full interactive presentation"
+                      : "This feature will be added soon — stay tuned!"}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-medium">{gammaUrl ? "Interactive Presentation" : "Presentation Deck"}</p>
-                <p className="text-xs text-muted-foreground">
-                  {gammaUrl
-                    ? "View the full interactive presentation"
-                    : "This feature will be added soon — stay tuned!"}
-                </p>
-              </div>
-            </div>
-            {gammaUrl ? (
-              <Button onClick={() => window.open(gammaUrl, "_blank")}>
-                <ExternalLink className="h-4 w-4 mr-2" /> Open Presentation
-              </Button>
-            ) : (
-              <Badge variant="outline">Pending</Badge>
-            )}
-          </CardContent>
-        </Card>
+              {gammaUrl ? (
+                <Button onClick={() => window.open(gammaUrl, "_blank")}>
+                  <ExternalLink className="h-4 w-4 mr-2" /> Open Presentation
+                </Button>
+              ) : (
+                <Badge variant="outline">Pending</Badge>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Header */}
         <div className="flex items-start justify-between gap-4">

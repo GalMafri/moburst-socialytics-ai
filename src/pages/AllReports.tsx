@@ -69,7 +69,7 @@ export default function AllReports() {
                     <TableHead>Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Period</TableHead>
-                    <TableHead>Presentation</TableHead>
+                    {!isClient && <TableHead>Presentation</TableHead>}
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -86,15 +86,17 @@ export default function AllReports() {
                       <TableCell className="text-sm text-muted-foreground">
                         {r.date_range_start && r.date_range_end ? `${r.date_range_start} — ${r.date_range_end}` : "—"}
                       </TableCell>
-                      <TableCell>
-                        {r.gamma_url ? (
-                          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
-                            <ExternalLink className="h-3.5 w-3.5" /> View
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Coming soon</span>
-                        )}
-                      </TableCell>
+                      {!isClient && (
+                        <TableCell>
+                          {r.gamma_url ? (
+                            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
+                              <ExternalLink className="h-3.5 w-3.5" /> View
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Coming soon</span>
+                          )}
+                        </TableCell>
+                      )}
                       <TableCell className="text-right flex items-center justify-end gap-1">
                         {r.status === "completed" && (
                           <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.clients?.id}/reports/${r.id}`)}>

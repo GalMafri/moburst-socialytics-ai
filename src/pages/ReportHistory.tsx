@@ -15,7 +15,7 @@ export default function ReportHistory() {
   const { id } = useParams();
   useRealtimeReports(id);
   const navigate = useNavigate();
-  const { canRunAnalysis } = useAuth();
+  const { canRunAnalysis, isClient } = useAuth();
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -59,7 +59,7 @@ export default function ReportHistory() {
                     <TableHead>Status</TableHead>
                     <TableHead>Period</TableHead>
                     <TableHead>Duration</TableHead>
-                    <TableHead>Presentation</TableHead>
+                    {!isClient && <TableHead>Presentation</TableHead>}
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -87,15 +87,17 @@ export default function ReportHistory() {
                         <TableCell className="text-sm text-muted-foreground">
                           {r.duration_minutes ? `${r.duration_minutes}m` : "—"}
                         </TableCell>
-                        <TableCell>
-                          {r.gamma_url ? (
-                            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
-                              <ExternalLink className="h-3.5 w-3.5" /> View
-                            </Button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">Coming soon</span>
-                          )}
-                        </TableCell>
+                        {!isClient && (
+                          <TableCell>
+                            {r.gamma_url ? (
+                              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
+                                <ExternalLink className="h-3.5 w-3.5" /> View
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Coming soon</span>
+                            )}
+                          </TableCell>
+                        )}
                         <TableCell className="text-right flex items-center justify-end gap-1">
                           {r.status === "completed" && (
                             <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}>
