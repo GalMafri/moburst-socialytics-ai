@@ -28,7 +28,37 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { prompt, platform, format, brand_context, design_references, brand_book_file_path } = await req.json();
+    const {
+      prompt,
+      platform,
+      format,
+      brand_context,                  // legacy
+      design_references,              // legacy
+      brand_book_file_path,           // legacy
+      client_context,                 // new — full structured context
+      post,                           // new — post-level brief
+    } = await req.json();
+
+    // Backward compat: resolve from client_context if present, else legacy fields.
+    const resolvedBrand = client_context?.brand_identity ?? brand_context ?? null;
+    const resolvedRefs: string[] = client_context?.design_references ?? design_references ?? [];
+    const resolvedBrandBookPath: string | null =
+      client_context?.brand_book_file_path ?? brand_book_file_path ?? null;
+    const resolvedSynthesis = client_context?.design_style_synthesis ?? null;
+    const resolvedPillars = client_context?.content_pillars ?? [];
+    const resolvedBriefText: string | null = client_context?.brief_text ?? null;
+    const resolvedBrandNotes: string | null = client_context?.brand_notes ?? null;
+    const resolvedLanguages: string[] = client_context?.languages ?? [];
+    const resolvedGeo: string[] = client_context?.geo ?? [];
+
+    console.log("[generate-post-image] context received:", {
+      has_brand: !!resolvedBrand,
+      ref_count: resolvedRefs.length,
+      has_brand_book: !!resolvedBrandBookPath,
+      has_synthesis: !!resolvedSynthesis,
+      pillar_count: resolvedPillars.length,
+      has_brief: !!resolvedBriefText,
+    });
 
     if (!prompt) {
       return jsonResp({ error: "prompt is required" }, 400);
@@ -67,18 +97,27 @@ Deno.serve(async (req) => {
       platform,
       format,
       { ratio: aspectRatio, orientation },
-      brand_context,
+      resolvedBrand,
+      {
+        synthesis: resolvedSynthesis,
+        pillars: resolvedPillars,
+        brief_text: resolvedBriefText,
+        brand_notes: resolvedBrandNotes,
+        languages: resolvedLanguages,
+        geo: resolvedGeo,
+        post,
+      },
     );
 
     // ── Fetch design reference images for multimodal input ──
     const contentParts: any[] = [];
 
-    if (design_references && Array.isArray(design_references) && design_references.length > 0) {
+    if (resolvedRefs && Array.isArray(resolvedRefs) && resolvedRefs.length > 0) {
       const storageClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
       contentParts.push({ text: "Here are existing brand design references. Match their visual style, layout patterns, and color usage:" });
 
-      for (const ref of design_references.slice(0, 3)) {
+      for (const ref of resolvedRefs.slice(0, 3)) {
         try {
           const { data: fileData } = await storageClient.storage.from("design-references").download(ref);
           if (fileData) {
@@ -99,6 +138,46 @@ Deno.serve(async (req) => {
       }
 
       contentParts.push({ text: "Now create a new design based on this brief:" });
+    }
+
+    // Attach the brand book file as an inline part. Gemini 3.1 supports inline PDF/PNG/JPG.
+    if (resolvedBrandBookPath) {
+      try {
+        const storageClient = createClient(
+          Deno.env.get("SUPABASE_URL")!,
+          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+        );
+        const { data: fileData } = await storageClient.storage
+          .from("brand-books")
+          .download(resolvedBrandBookPath);
+
+        if (fileData) {
+          const arrayBuffer = await fileData.arrayBuffer();
+          if (arrayBuffer.byteLength <= 4 * 1024 * 1024) {
+            const uint8Array = new Uint8Array(arrayBuffer);
+            let binary = "";
+            for (let i = 0; i < uint8Array.length; i++) {
+              binary += String.fromCharCode(uint8Array[i]);
+            }
+            const base64 = btoa(binary);
+            const ext = resolvedBrandBookPath.split(".").pop()?.toLowerCase();
+            const mimeType =
+              ext === "pdf"
+                ? "application/pdf"
+                : ext === "png"
+                ? "image/png"
+                : "image/jpeg";
+            contentParts.push({
+              text: "Canonical brand book — defer to it on color, typography, and overall identity:",
+            });
+            contentParts.push({ inlineData: { mimeType, data: base64 } });
+          } else {
+            console.warn("[generate-post-image] brand book exceeds 4MB, skipping");
+          }
+        }
+      } catch (e) {
+        console.error("[generate-post-image] brand book attach failed:", e);
+      }
     }
 
     // Add the main design prompt
@@ -189,6 +268,7 @@ function buildDesignPrompt(
   format?: string,
   aspect?: { ratio: string; orientation: string },
   brand?: any,
+  extras?: any,    // wired up in Phase 3
 ): string {
   const sections: string[] = [];
 
