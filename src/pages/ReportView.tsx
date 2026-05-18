@@ -58,6 +58,12 @@ import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
 import { Send, Pencil as PencilEdit } from "lucide-react";
 import { DesignEditor } from "@/components/editor/DesignEditor";
 import { VideoTrimmer, type VideoEditData, type TextOverlay } from "@/components/editor/VideoTrimmer";
+import {
+  parseCsv,
+  stripVoicePreset,
+  type ClientContext,
+  type ContentPillar,
+} from "@/lib/clientContext";
 
 export default function ReportView() {
   const { id, reportId } = useParams();
@@ -70,7 +76,15 @@ export default function ReportView() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("reports")
-        .select("*, clients(name, brand_identity)")
+        .select(`
+          *,
+          clients (
+            id, name, brand_identity, design_references,
+            brand_book_file_path, brand_book_url,
+            content_pillars, brief_text, brand_notes,
+            geo, language, timezone, design_style_synthesis
+          )
+        `)
         .eq("id", reportId!)
         .maybeSingle();
       if (error) throw error;
@@ -96,6 +110,28 @@ export default function ReportView() {
   const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
   const clientName = (report as any).clients?.name || "Client";
   const brandIdentity = (report as any).clients?.brand_identity || null;
+
+  // Build the full client context once, pass down via props.
+  const clientRow = (report as any).clients || {};
+  const clientContext: ClientContext = {
+    client_id: clientRow.id || id || "",
+    client_name: clientRow.name || "Client",
+    brand_identity: clientRow.brand_identity || null,
+    design_references: Array.isArray(clientRow.design_references)
+      ? (clientRow.design_references as string[])
+      : [],
+    brand_book_file_path: clientRow.brand_book_file_path || null,
+    brand_book_url: clientRow.brand_book_url || null,
+    content_pillars: Array.isArray(clientRow.content_pillars)
+      ? (clientRow.content_pillars as ContentPillar[])
+      : [],
+    brief_text: clientRow.brief_text || null,
+    brand_notes: stripVoicePreset(clientRow.brand_notes),
+    geo: parseCsv(clientRow.geo),
+    languages: parseCsv(clientRow.language),
+    timezone: clientRow.timezone || "UTC",
+    design_style_synthesis: clientRow.design_style_synthesis || null,
+  };
 
   const sproutPerformance = rd?.sprout_performance || {};
   const monthComparison = sproutPerformance?.month_comparison || {};
