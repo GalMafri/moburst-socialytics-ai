@@ -84,4 +84,17 @@ describe("buildImagePrompt", () => {
     expect(creativeIdx).toBeGreaterThanOrEqual(0);
     expect(brandIdx).toBeGreaterThan(creativeIdx);
   });
+
+  it("omits the 'Underlying palette' section when no synthesis and no brandIdentity", () => {
+    const out = buildImagePrompt({ basePrompt: "x", platform: "Instagram" });
+    expect(out).not.toContain("Underlying palette");
+  });
+
+  it("includes the 'Underlying palette' section when synthesis is provided", () => {
+    const out = buildImagePrompt({
+      basePrompt: "x",
+      synthesis: { composition_patterns: "Asymmetric" },
+    });
+    expect(out).toContain("## Underlying palette");
+  });
 });

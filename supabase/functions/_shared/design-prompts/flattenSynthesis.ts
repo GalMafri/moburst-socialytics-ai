@@ -41,5 +41,5 @@ export function flattenSynthesis(s: DesignStyleSynthesis | null | undefined): st
     }
   }
   if (sections.length === 0) return "";
-  return [`## Brand design language\n`, ...sections].join("\n\n");
+  return [`## Brand design language`, ...sections].join("\n\n");
 }

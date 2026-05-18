@@ -12,11 +12,14 @@ export interface BuildImagePromptInput {
   format?: string;
   brandIdentity?: any;
   synthesis?: DesignStyleSynthesis | null;
+  // Reserved for future phases — accepted now so callers don't have to change later.
+  // The current builder doesn't use these; richer prompts will pull from them.
   pillars?: Array<{ name: string; description: string }>;
   briefText?: string | null;
   brandNotes?: string | null;
   languages?: string[];
   geo?: string[];
+  // End reserved.
   post?: {
     pillar?: string;
     language?: string;
@@ -105,11 +108,15 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
   }
 
   // 5. Underlying palette (qualitative only — NO hex codes)
-  sections.push(
-    `## Underlying palette\n` +
-      `Use the brand's primary, secondary, and accent colors as established in the design language above. ` +
-      `Apply them per the composition patterns and color usage rules. White and neutral darks are fine for contrast.`,
-  );
+  // Only emit when there's an actual design language section above to reference.
+  const hasDesignLanguage = !!synthesisMd || !!input.brandIdentity;
+  if (hasDesignLanguage) {
+    sections.push(
+      `## Underlying palette\n` +
+        `Use the brand's primary, secondary, and accent colors as established in the design language above. ` +
+        `Apply them per the composition patterns and color usage rules. White and neutral darks are fine for contrast.`,
+    );
+  }
 
   // 6. Variant angle (Phase 6 will populate this)
   if (input.variantAngle && input.variantAngle.trim()) {
