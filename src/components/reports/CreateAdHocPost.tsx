@@ -24,11 +24,14 @@ import { toast } from "sonner";
 import { PlatformBadge } from "@/lib/platform-config";
 import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
+import type { ClientContext } from "@/lib/clientContext";
 
 interface CreateAdHocPostProps {
   clientId: string;
   platforms: string[];
-  brandIdentity: any;
+  clientContext?: ClientContext;
+  /** @deprecated — prefer clientContext.brand_identity */
+  brandIdentity?: any;
   onPostCreated?: (post: any) => void;
 }
 
@@ -44,6 +47,7 @@ const CREATIVE_TYPES = [
 export function CreateAdHocPost({
   clientId,
   platforms,
+  clientContext,
   brandIdentity,
   onPostCreated,
 }: CreateAdHocPostProps) {
@@ -313,8 +317,10 @@ export function CreateAdHocPost({
                     copy: generatedPost.caption_angle,
                     platform: generatedPost.platform,
                     format: generatedPost.format,
+                    pillar: generatedPost.pillar,
+                    language: generatedPost.language,
                   }}
-                  brandIdentity={brandIdentity}
+                  clientContext={clientContext}
                   clientId={clientId}
                 />
                 {isVideoFormat && (
@@ -326,8 +332,10 @@ export function CreateAdHocPost({
                       copy: generatedPost.caption_angle,
                       platform: generatedPost.platform,
                       format: generatedPost.format,
+                      pillar: generatedPost.pillar,
+                      language: generatedPost.language,
                     }}
-                    brandIdentity={brandIdentity}
+                    clientContext={clientContext}
                     clientId={clientId}
                   />
                 )}
