@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
 import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
@@ -39,6 +39,7 @@ export function ContentIdeasTab({
     language: "all",
   });
   const [activePost, setActivePost] = useState<any | null>(null);
+  const qc = useQueryClient();
 
   useRealtimePostIterations(clientId);
 
@@ -54,6 +55,55 @@ export function ContentIdeasTab({
       return data || [];
     },
     enabled: !!clientId,
+  });
+
+  const { data: scheduledPosts = [] } = useQuery({
+    queryKey: ["scheduled-posts", clientId],
+    queryFn: async () => {
+      if (!clientId) return [];
+      const { data } = await supabase
+        .from("scheduled_posts")
+        .select("id, client_id, report_id, platform, post_content, status")
+        .eq("client_id", clientId);
+      return data || [];
+    },
+    enabled: !!clientId,
+  });
+
+  const toggleApproved = useMutation({
+    mutationFn: async (iterationId: string) => {
+      if (!clientId) return;
+      // Read current state
+      const { data: current } = await supabase
+        .from("post_iterations")
+        .select("variant_group_id, is_approved")
+        .eq("id", iterationId)
+        .maybeSingle();
+      if (!current) return;
+
+      const variantGroupId = (current as any).variant_group_id;
+      const newApproved = !((current as any).is_approved);
+      const update: any = {
+        is_approved: newApproved,
+        approved_at: newApproved ? new Date().toISOString() : null,
+      };
+
+      // Apply to entire variant group if it exists; otherwise to the single row.
+      if (variantGroupId) {
+        await supabase
+          .from("post_iterations")
+          .update(update)
+          .eq("variant_group_id", variantGroupId);
+      } else {
+        await supabase
+          .from("post_iterations")
+          .update(update)
+          .eq("id", iterationId);
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
+    },
   });
 
   const activeIteration = activePost
@@ -87,8 +137,10 @@ export function ContentIdeasTab({
       <CalendarKanban
         contentCalendar={contentCalendar}
         postIterations={postIterations as any}
+        scheduledPosts={scheduledPosts as any}
         filters={filters}
         onCardClick={setActivePost}
+        onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
       />
 
       <PostPanel

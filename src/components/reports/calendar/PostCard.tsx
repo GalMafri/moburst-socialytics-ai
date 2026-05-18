@@ -24,9 +24,10 @@ interface Props {
   iteration: Iteration | null;
   status: PostStatus;
   onOpen: () => void;
+  onToggleApproved?: () => void;
 }
 
-export function PostCard({ post, iteration, status, onOpen }: Props) {
+export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: Props) {
   const copy = post.copy || post.caption_angle || "";
   const thumb = iteration?.media_urls?.[0] || null;
   const isVideo = !!thumb && /\.(mp4|webm|mov)/.test(thumb);
@@ -79,7 +80,7 @@ export function PostCard({ post, iteration, status, onOpen }: Props) {
 
       {/* Status + overflow */}
       <div className="flex items-center justify-between">
-        <PostStatusChip status={status} />
+        <PostStatusChip status={status} onToggleApproved={onToggleApproved} />
         {/* Overflow menu placeholder — real menu wired in Phase 8C if needed */}
         <span
           className="text-muted-foreground"

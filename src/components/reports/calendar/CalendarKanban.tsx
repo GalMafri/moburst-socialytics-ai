@@ -16,14 +16,21 @@ interface Iteration {
   created_at?: string | null;
 }
 
+interface ScheduledPostRef {
+  platform?: string | null;
+  post_content?: string | null;
+}
+
 interface Props {
   contentCalendar: Array<{
     day?: string;
     posts?: any[];
   }>;
   postIterations: Iteration[];
+  scheduledPosts: ScheduledPostRef[];
   filters: CalendarFilterState;
   onCardClick: (post: any) => void;
+  onToggleApproved: (iterationId: string) => void;
 }
 
 /**
@@ -51,6 +58,24 @@ export function findLatestSelectedIteration(
   return sorted[0] || null;
 }
 
+/**
+ * Check whether a calendar post has a matching scheduled_posts row.
+ * Match by (platform, post_content first ~200 chars) — same heuristic as
+ * findLatestSelectedIteration.
+ */
+function hasMatchingScheduledPost(
+  scheduledPosts: Array<{ platform?: string | null; post_content?: string | null }>,
+  post: { platform?: string; copy?: string; caption_angle?: string },
+): boolean {
+  const matchingPlatform = (post.platform || "").toLowerCase();
+  const matchingCopy = (post.copy || post.caption_angle || "").trim().slice(0, 200);
+  return scheduledPosts.some(
+    (s) =>
+      (s.platform || "").toLowerCase() === matchingPlatform &&
+      (s.post_content || "").trim().slice(0, 200) === matchingCopy,
+  );
+}
+
 function matchesFilters(
   post: any,
   status: PostStatus,
@@ -65,8 +90,10 @@ function matchesFilters(
 export function CalendarKanban({
   contentCalendar,
   postIterations,
+  scheduledPosts,
   filters,
   onCardClick,
+  onToggleApproved,
 }: Props) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-7 gap-2 print:grid-cols-1">
@@ -92,7 +119,7 @@ export function CalendarKanban({
                   mediaUrls: iteration?.media_urls || [],
                   isSelectedAny: !!iteration?.is_selected,
                   isApproved: !!iteration?.is_approved,
-                  hasScheduledPost: false, // wired in 8D if needed
+                  hasScheduledPost: hasMatchingScheduledPost(scheduledPosts, post),
                 });
                 if (!matchesFilters(post, status, filters)) {
                   return (
@@ -108,6 +135,7 @@ export function CalendarKanban({
                     iteration={iteration}
                     status={status}
                     onOpen={() => onCardClick(post)}
+                    onToggleApproved={iteration?.id ? () => onToggleApproved(iteration.id) : undefined}
                   />
                 );
               })
