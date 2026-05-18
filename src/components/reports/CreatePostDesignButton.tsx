@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { DesignEditor } from "@/components/editor/DesignEditor";
+import type { ClientContext } from "@/lib/clientContext";
 
 export interface BrandIdentity {
   primary_color?: string;
@@ -29,9 +30,19 @@ interface CreatePostDesignButtonProps {
     copy?: string;
     platform?: string;
     format?: string;
+    pillar?: string;
+    language?: string;
   };
+  /**
+   * Full client context. Pass the object built in ReportView. Optional only
+   * for backwards compat — components without it fall back to brandIdentity.
+   */
+  clientContext?: ClientContext;
+  /** @deprecated — prefer clientContext.brand_identity */
   brandIdentity?: BrandIdentity | null;
+  /** @deprecated — prefer clientContext.design_references */
   designReferences?: string[];
+  /** @deprecated — prefer clientContext.brand_book_file_path */
   brandBookFilePath?: string;
   clientId?: string;
   onImagesGenerated?: (urls: string[]) => void;
@@ -45,7 +56,10 @@ function isCarouselFormat(format?: string): boolean {
   return CAROUSEL_FORMATS.some((cf) => f.includes(cf));
 }
 
-export function CreatePostDesignButton({ post, brandIdentity, designReferences, brandBookFilePath, clientId, onImagesGenerated }: CreatePostDesignButtonProps) {
+export function CreatePostDesignButton({ post, clientContext, brandIdentity, designReferences, brandBookFilePath, clientId, onImagesGenerated }: CreatePostDesignButtonProps) {
+  const effectiveBrandIdentity = clientContext?.brand_identity ?? brandIdentity ?? null;
+  const effectiveDesignReferences = clientContext?.design_references ?? designReferences ?? [];
+  const effectiveBrandBookFilePath = clientContext?.brand_book_file_path ?? brandBookFilePath ?? null;
   const isCarousel = isCarouselFormat(post.format);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -111,9 +125,16 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
             prompt: slidePrompt,
             platform: post.platform,
             format: post.format,
-            brand_context: brandIdentity || undefined,
-            design_references: designReferences || undefined,
-            brand_book_file_path: brandBookFilePath || undefined,
+            brand_context: effectiveBrandIdentity || undefined,
+            design_references: effectiveDesignReferences.length > 0 ? effectiveDesignReferences : undefined,
+            brand_book_file_path: effectiveBrandBookFilePath || undefined,
+            client_context: clientContext || undefined,
+            post: {
+              pillar: post.pillar,
+              language: post.language,
+              visual_direction: post.visual_direction,
+              copy: post.copy,
+            },
           },
         });
 
@@ -138,9 +159,16 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
                   prompt: retryPrompt,
                   platform: post.platform,
                   format: post.format,
-                  brand_context: brandIdentity || undefined,
-                  design_references: designReferences || undefined,
-                  brand_book_file_path: brandBookFilePath || undefined,
+                  brand_context: effectiveBrandIdentity || undefined,
+                  design_references: effectiveDesignReferences.length > 0 ? effectiveDesignReferences : undefined,
+                  brand_book_file_path: effectiveBrandBookFilePath || undefined,
+                  client_context: clientContext || undefined,
+                  post: {
+                    pillar: post.pillar,
+                    language: post.language,
+                    visual_direction: post.visual_direction,
+                    copy: post.copy,
+                  },
                 },
               });
               if (retryData?.image_url) {
@@ -254,9 +282,9 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
   };
 
   const brandColors = [
-    brandIdentity?.primary_color,
-    brandIdentity?.secondary_color,
-    brandIdentity?.accent_color,
+    effectiveBrandIdentity?.primary_color,
+    effectiveBrandIdentity?.secondary_color,
+    effectiveBrandIdentity?.accent_color,
   ].filter(Boolean);
 
   return (
@@ -286,8 +314,8 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
                     />
                   ))}
                 </div>
-                {brandIdentity?.visual_style && (
-                  <span className="text-muted-foreground ml-1">· {brandIdentity.visual_style}</span>
+                {effectiveBrandIdentity?.visual_style && (
+                  <span className="text-muted-foreground ml-1">· {effectiveBrandIdentity.visual_style}</span>
                 )}
               </div>
             )}
@@ -452,7 +480,7 @@ export function CreatePostDesignButton({ post, brandIdentity, designReferences, 
       {showEditor && editableImageUrl && (
         <DesignEditor
           imageUrl={editableImageUrl}
-          brandIdentity={brandIdentity}
+          brandIdentity={effectiveBrandIdentity}
           clientId={clientId || ""}
           onSave={(dataUrl) => {
             // Replace the edited image in the array
