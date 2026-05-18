@@ -107,8 +107,13 @@ export function CalendarKanban({
 
         return (
           <div key={dayName} className="space-y-2 min-w-0">
-            <div className="text-xs font-semibold sticky top-16 lg:top-20 py-1 bg-background z-[5]">
+            <div className="text-sm font-semibold sticky top-16 lg:top-20 py-2 px-2 -mx-2 bg-background/95 backdrop-blur z-[5] border-b border-white/5 text-foreground">
               {dayName}
+              {posts.length > 0 && (
+                <span className="ml-2 text-xs text-muted-foreground font-normal">
+                  {posts.length}
+                </span>
+              )}
             </div>
             {posts.length === 0 ? (
               <p className="text-[10px] text-muted-foreground italic">No posts</p>
