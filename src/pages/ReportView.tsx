@@ -424,6 +424,7 @@ export default function ReportView() {
                   clientId={id!}
                   platforms={availablePlatforms}
                   brandIdentity={brandIdentity}
+                  clientContext={clientContext}
                 />
               </div>
             )}
@@ -459,6 +460,7 @@ export default function ReportView() {
                             key={postIdx}
                             post={post}
                             brandIdentity={brandIdentity}
+                            clientContext={clientContext}
                             clientId={id}
                             reportId={reportId}
                             clientTimezone={(report?.report_data as any)?.context?.timezone || "UTC"}
@@ -577,12 +579,14 @@ function ContentRecommendations({ recommendations }: { recommendations: any[] })
 function CalendarPostCard({
   post,
   brandIdentity,
+  clientContext,
   clientId,
   reportId,
   clientTimezone,
 }: {
   post: any;
   brandIdentity?: any;
+  clientContext: ClientContext;
   clientId?: string;
   reportId?: string;
   clientTimezone?: string;
@@ -757,12 +761,14 @@ function CalendarPostCard({
           <CreatePostDesignButton
             post={post}
             brandIdentity={brandIdentity}
+            clientContext={clientContext}
             clientId={clientId}
             onImagesGenerated={(urls) => setGeneratedMediaUrls(urls)}
           />
           <CreatePostVideoButton
             post={post}
             brandIdentity={brandIdentity}
+            clientContext={clientContext}
             clientId={clientId}
             onVideoGenerated={(url) => setGeneratedMediaUrls([url])}
           />
