@@ -17,13 +17,20 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { concept, visual_direction, original_format, target_format, platform } =
+    const { concept, visual_direction, original_format, target_format, platform, client_context } =
       await req.json();
 
     // If formats match, return as-is
     if (original_format === target_format) {
       return jsonResp({ adapted_prompt: visual_direction });
     }
+
+    const synthesisJson = client_context?.design_style_synthesis
+      ? JSON.stringify(client_context.design_style_synthesis)
+      : "";
+    const brandContextPreamble = synthesisJson
+      ? `\n\nClient brand design language (JSON):\n${synthesisJson}\n\nDistill the scene in a way that fits this design language.`
+      : "";
 
     const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
 
@@ -47,7 +54,7 @@ Veo creates short 5-8 second video clips from simple scene descriptions. It work
 
 Original concept: ${concept}
 Original visual direction (may be a complex storyboard — distill it): ${visual_direction || "Not specified"}
-Platform: ${platform || "general"}
+Platform: ${platform || "general"}${brandContextPreamble}
 
 Write a 1-3 sentence scene description suitable for AI video generation. Describe ONE continuous shot with motion, lighting, and mood. Do NOT include timestamps, scene numbers, text overlay instructions, or markdown.
 
@@ -56,7 +63,7 @@ Return ONLY the scene description, nothing else.`
 
 Original format: ${original_format}
 Target format: ${target_format}
-Platform: ${platform || "general"}
+Platform: ${platform || "general"}${brandContextPreamble}
 
 Original concept: ${concept}
 Original visual direction: ${visual_direction || "Not specified"}
