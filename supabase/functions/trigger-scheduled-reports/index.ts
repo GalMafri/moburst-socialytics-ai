@@ -124,6 +124,9 @@ Deno.serve(async (req) => {
           brand_book_text: client.brand_book_text || "",
           brief_text: client.brief_text || "",
           brief_file_id: client.brief_file_id || "",
+          design_style_synthesis: client.design_style_synthesis || null,
+          design_references: client.design_references || [],
+          brand_book_file_path: client.brand_book_file_path || null,
           date_range_start: dateRangeStart,
           date_range_end: dateRangeEnd,
         };
