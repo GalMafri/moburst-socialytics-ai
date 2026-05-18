@@ -8,9 +8,12 @@ import { Video, Loader2, Download, RefreshCw, Scissors } from "lucide-react";
 import { VideoTrimmer } from "@/components/editor/VideoTrimmer";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import type { ClientContext } from "@/lib/clientContext";
 
 interface CreatePostVideoButtonProps {
   post: any;
+  clientContext?: ClientContext;
+  /** @deprecated — prefer clientContext.brand_identity */
   brandIdentity?: any;
   clientId?: string;
   onVideoGenerated?: (url: string) => void;
@@ -77,7 +80,8 @@ function getPlatformVideoSpec(platform?: string, format?: string) {
   };
 }
 
-export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGenerated }: CreatePostVideoButtonProps) {
+export function CreatePostVideoButton({ post, clientContext, brandIdentity, clientId, onVideoGenerated }: CreatePostVideoButtonProps) {
+  const effectiveBrandIdentity = clientContext?.brand_identity ?? brandIdentity ?? null;
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -97,17 +101,17 @@ export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGe
     parts.push(sceneDescription);
 
     // 2. Brand color palette
-    const colors = [brandIdentity?.primary_color, brandIdentity?.secondary_color, brandIdentity?.accent_color].filter(Boolean);
+    const colors = [effectiveBrandIdentity?.primary_color, effectiveBrandIdentity?.secondary_color, effectiveBrandIdentity?.accent_color].filter(Boolean);
     if (colors.length > 0) {
       parts.push(`Color palette: ${colors.join(", ")} — apply these colors throughout backgrounds, lighting gels, objects, and environment.`);
     }
 
     // 3. Brand visual style and tone
     const brandNotes: string[] = [];
-    if (brandIdentity?.visual_style) brandNotes.push(`Visual style: ${brandIdentity.visual_style}`);
-    if (brandIdentity?.tone_of_voice) brandNotes.push(`Tone: ${brandIdentity.tone_of_voice}`);
-    if (brandIdentity?.design_elements) brandNotes.push(`Design language: ${brandIdentity.design_elements}`);
-    if (brandIdentity?.background_style) brandNotes.push(`Environment: ${brandIdentity.background_style}`);
+    if (effectiveBrandIdentity?.visual_style) brandNotes.push(`Visual style: ${effectiveBrandIdentity.visual_style}`);
+    if (effectiveBrandIdentity?.tone_of_voice) brandNotes.push(`Tone: ${effectiveBrandIdentity.tone_of_voice}`);
+    if (effectiveBrandIdentity?.design_elements) brandNotes.push(`Design language: ${effectiveBrandIdentity.design_elements}`);
+    if (effectiveBrandIdentity?.background_style) brandNotes.push(`Environment: ${effectiveBrandIdentity.background_style}`);
     if (brandNotes.length > 0) {
       parts.push(brandNotes.join(". ") + ".");
     }
@@ -128,9 +132,9 @@ export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGe
   const distillForVeo = async (rawDirection: string, postCopy: string): Promise<string> => {
     // Build brand context string for Claude
     const brandContext = [
-      brandIdentity?.visual_style ? `Visual style: ${brandIdentity.visual_style}` : "",
-      brandIdentity?.tone_of_voice ? `Tone: ${brandIdentity.tone_of_voice}` : "",
-      brandIdentity?.background_style ? `Environment: ${brandIdentity.background_style}` : "",
+      effectiveBrandIdentity?.visual_style ? `Visual style: ${effectiveBrandIdentity.visual_style}` : "",
+      effectiveBrandIdentity?.tone_of_voice ? `Tone: ${effectiveBrandIdentity.tone_of_voice}` : "",
+      effectiveBrandIdentity?.background_style ? `Environment: ${effectiveBrandIdentity.background_style}` : "",
     ].filter(Boolean).join(". ");
 
     // Try Claude first for best results
@@ -191,7 +195,14 @@ export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGe
           prompt,
           platform: post.platform,
           format: post.format,
-          brandIdentity,
+          brandIdentity: effectiveBrandIdentity,
+          client_context: clientContext || undefined,
+          post: {
+            pillar: post.pillar,
+            language: post.language,
+            visual_direction: post.visual_direction,
+            copy: post.copy,
+          },
         },
       });
 
@@ -246,9 +257,9 @@ export function CreatePostVideoButton({ post, brandIdentity, clientId, onVideoGe
     .some((f) => (post.format || "").toLowerCase().includes(f));
 
   const brandColors = [
-    brandIdentity?.primary_color,
-    brandIdentity?.secondary_color,
-    brandIdentity?.accent_color,
+    effectiveBrandIdentity?.primary_color,
+    effectiveBrandIdentity?.secondary_color,
+    effectiveBrandIdentity?.accent_color,
   ].filter(Boolean);
 
   return (
