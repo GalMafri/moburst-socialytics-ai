@@ -110,6 +110,24 @@ export function ContentIdeasTab({
     ? findLatestSelectedIteration(postIterations as any, activePost)
     : null;
 
+  // All iterations matching the active post (across variant groups). Used by the
+  // panel to show the FULL set of variants from the most recent generation, not
+  // just one row from the matched iteration. Same heuristic as findLatestSelected.
+  const activePostIterations = activePost
+    ? (postIterations as any[]).filter((it) => {
+        const matchingPlatform = (activePost.platform || "").toLowerCase();
+        const matchingCopy = (activePost.copy || activePost.caption_angle || "")
+          .trim()
+          .slice(0, 200);
+        return (
+          (it.platform || "").toLowerCase() === matchingPlatform &&
+          (it.post_copy || "").trim().slice(0, 200) === matchingCopy &&
+          it.media_urls &&
+          it.media_urls.length > 0
+        );
+      })
+    : [];
+
   return (
     <div className="space-y-4">
       {availablePlatforms.length > 0 && clientId && (
@@ -148,10 +166,20 @@ export function ContentIdeasTab({
         onOpenChange={(open) => !open && setActivePost(null)}
         post={activePost}
         iteration={activeIteration}
+        postIterations={activePostIterations}
         clientContext={clientContext}
         clientId={clientId}
         reportId={reportId}
         clientTimezone={clientTimezone}
+        onToggleSelected={(iterationId, nextSelected) => {
+          supabase
+            .from("post_iterations")
+            .update({ is_selected: nextSelected } as any)
+            .eq("id", iterationId)
+            .then(() => {
+              qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
+            });
+        }}
       />
     </div>
   );

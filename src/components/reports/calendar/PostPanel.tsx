@@ -8,7 +8,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Download, Expand, Sparkles } from "lucide-react";
+import { Check, Download, Expand, Sparkles, Star } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { PlatformBadge } from "@/lib/platform-config";
 import { CopyEditor } from "./CopyEditor";
@@ -23,32 +23,98 @@ interface Iteration {
   media_urls?: string[] | null;
   is_selected?: boolean | null;
   variant_group_id?: string | null;
+  created_at?: string | null;
+}
+
+interface MediaTile {
+  iterationId?: string;
+  url: string;
+  isSelected: boolean;
 }
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   post: any | null;
-  iteration: Iteration | null;
+  /** Best-guess "primary" iteration for the active post — kept for backward-compat. */
+  iteration?: Iteration | null;
+  /** All iterations matching the active post (across variant groups). */
+  postIterations: Iteration[];
   clientContext?: ClientContext;
   clientId?: string;
   reportId?: string;
   clientTimezone?: string;
+  /** Toggle is_selected on a variant. */
+  onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
 }
 
 function isVideoUrl(url: string): boolean {
   return /\.(mp4|webm|mov)/i.test(url);
 }
 
+/**
+ * Resolve which variant group to display: most recent one with media. Return
+ * one tile per (iteration row × url) pair so multi-url rows (carousels) all
+ * surface. Falls back gracefully if no group is present.
+ */
+function tilesFromIterations(
+  iterations: Iteration[],
+  filter: (url: string) => boolean,
+): MediaTile[] {
+  if (!iterations || iterations.length === 0) return [];
+
+  // Bucket by variant_group_id (or per-row when no group).
+  const byGroup = new Map<string, Iteration[]>();
+  for (const it of iterations) {
+    const key = it.variant_group_id || `solo:${it.id}`;
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key)!.push(it);
+  }
+
+  // Find the group whose latest member is the most recent overall.
+  let bestGroup: Iteration[] | null = null;
+  let bestTs = "";
+  for (const group of byGroup.values()) {
+    const ts = group
+      .map((it) => it.created_at || "")
+      .sort()
+      .reverse()[0];
+    if (ts > bestTs) {
+      bestTs = ts;
+      bestGroup = group;
+    }
+  }
+  if (!bestGroup) return [];
+
+  // Stable order: created_at asc so variant #1 lands first, then variant #2, etc.
+  const ordered = [...bestGroup].sort((a, b) =>
+    (a.created_at || "").localeCompare(b.created_at || ""),
+  );
+
+  const tiles: MediaTile[] = [];
+  for (const it of ordered) {
+    for (const url of it.media_urls || []) {
+      if (!filter(url)) continue;
+      tiles.push({
+        iterationId: it.id,
+        url,
+        isSelected: !!it.is_selected,
+      });
+    }
+  }
+  return tiles;
+}
+
 export function PostPanel({
   open,
   onOpenChange,
   post,
-  iteration,
+  postIterations,
   clientContext,
   clientId,
   reportId,
   clientTimezone,
+  onToggleSelected,
 }: Props) {
   const { isClient } = useAuth();
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -56,9 +122,8 @@ export function PostPanel({
   const [previewIsVideo, setPreviewIsVideo] = useState(false);
   if (!post) return null;
 
-  const mediaUrls = iteration?.media_urls || [];
-  const imageUrls = mediaUrls.filter((u) => !isVideoUrl(u));
-  const videoUrls = mediaUrls.filter((u) => isVideoUrl(u));
+  const imageTiles = tilesFromIterations(postIterations, (u) => !isVideoUrl(u));
+  const videoTiles = tilesFromIterations(postIterations, isVideoUrl);
 
   const openPreview = (url: string, video: boolean) => {
     setPreviewUrl(url);
@@ -97,17 +162,16 @@ export function PostPanel({
 
             {/* Design tab */}
             <TabsContent value="design" className="mt-4 space-y-4">
-              {/* Primary action — generate */}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold">
-                    {imageUrls.length > 0
-                      ? `${imageUrls.length} design${imageUrls.length === 1 ? "" : "s"}`
+                    {imageTiles.length > 0
+                      ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
                       : "No designs yet"}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {imageUrls.length > 0
-                      ? "Click any design to preview at full size."
+                    {imageTiles.length > 0
+                      ? "Click any design to preview at full size. Star your favorites."
                       : "Generate brand-aligned variants to get started."}
                   </p>
                 </div>
@@ -118,40 +182,18 @@ export function PostPanel({
                 />
               </div>
 
-              {imageUrls.length > 0 ? (
+              {imageTiles.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {imageUrls.map((url, i) => (
-                    <div
-                      key={i}
-                      className="glass-elevated rounded-lg overflow-hidden border border-white/5"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => openPreview(url, false)}
-                        className="block w-full aspect-square bg-black relative group"
-                      >
-                        <img src={url} alt={`Design ${i + 1}`} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                          <Expand className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </div>
-                      </button>
-                      <div className="flex items-center justify-between px-2 py-1.5 bg-[rgba(0,0,0,0.4)]">
-                        <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                          #{i + 1}
-                        </span>
-                        <a
-                          href={url}
-                          download={`design-${post.platform || "post"}-${i + 1}.png`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
-                            <Download className="h-3 w-3 mr-1" /> Download
-                          </Button>
-                        </a>
-                      </div>
-                    </div>
+                  {imageTiles.map((tile, i) => (
+                    <MediaTileCard
+                      key={tile.iterationId || i}
+                      tile={tile}
+                      index={i}
+                      isVideo={false}
+                      filenameStub={`design-${post.platform || "post"}`}
+                      onPreview={() => openPreview(tile.url, false)}
+                      onToggleSelected={onToggleSelected}
+                    />
                   ))}
                 </div>
               ) : (
@@ -161,8 +203,7 @@ export function PostPanel({
                     No designs generated for this post yet.
                   </p>
                   <p className="text-xs text-muted-foreground/70">
-                    Use the "Design" button above to generate 2–6 brand-aligned variants and pick your
-                    favorite.
+                    Click "Design" above to generate 2–6 brand-aligned variants.
                   </p>
                 </div>
               )}
@@ -170,15 +211,15 @@ export function PostPanel({
 
             {/* Video tab */}
             <TabsContent value="video" className="mt-4 space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold">
-                    {videoUrls.length > 0
-                      ? `${videoUrls.length} video${videoUrls.length === 1 ? "" : "s"}`
+                    {videoTiles.length > 0
+                      ? `${videoTiles.length} video${videoTiles.length === 1 ? "" : "s"}`
                       : "No videos yet"}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {videoUrls.length > 0
+                    {videoTiles.length > 0
                       ? "Click any video to preview at full size."
                       : "Generate 2–3 video variants — takes ~30–120s each."}
                   </p>
@@ -190,46 +231,18 @@ export function PostPanel({
                 />
               </div>
 
-              {videoUrls.length > 0 ? (
+              {videoTiles.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {videoUrls.map((url, i) => (
-                    <div
-                      key={i}
-                      className="glass-elevated rounded-lg overflow-hidden border border-white/5"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => openPreview(url, true)}
-                        className="block w-full aspect-[9/16] bg-black relative group"
-                      >
-                        <video
-                          src={url}
-                          className="w-full h-full object-cover"
-                          muted
-                          loop
-                          preload="metadata"
-                        />
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                          <Expand className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </div>
-                      </button>
-                      <div className="flex items-center justify-between px-2 py-1.5 bg-[rgba(0,0,0,0.4)]">
-                        <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
-                          #{i + 1}
-                        </span>
-                        <a
-                          href={url}
-                          download={`video-${post.platform || "post"}-${i + 1}.mp4`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
-                            <Download className="h-3 w-3 mr-1" /> Download
-                          </Button>
-                        </a>
-                      </div>
-                    </div>
+                  {videoTiles.map((tile, i) => (
+                    <MediaTileCard
+                      key={tile.iterationId || i}
+                      tile={tile}
+                      index={i}
+                      isVideo={true}
+                      filenameStub={`video-${post.platform || "post"}`}
+                      onPreview={() => openPreview(tile.url, true)}
+                      onToggleSelected={onToggleSelected}
+                    />
                   ))}
                 </div>
               ) : (
@@ -246,8 +259,8 @@ export function PostPanel({
             {!isClient && (
               <TabsContent value="schedule" className="mt-4 space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Schedule this post to your Sprout profile. Make sure design and copy are finalized
-                  first.
+                  Schedule this post to your Sprout profile. Make sure design and copy are
+                  finalized first.
                 </p>
                 {clientId && reportId ? (
                   <>
@@ -258,7 +271,10 @@ export function PostPanel({
                       post={post}
                       clientId={clientId}
                       reportId={reportId}
-                      generatedMediaUrls={mediaUrls}
+                      generatedMediaUrls={imageTiles
+                        .filter((t) => t.isSelected)
+                        .map((t) => t.url)
+                        .concat(videoTiles.filter((t) => t.isSelected).map((t) => t.url))}
                       clientTimezone={clientTimezone}
                     />
                   </>
@@ -275,11 +291,11 @@ export function PostPanel({
 
       {/* Full-size preview overlay */}
       <Dialog open={!!previewUrl} onOpenChange={(o) => !o && setPreviewUrl(null)}>
-        <DialogContent className="max-w-4xl bg-black/95 border-white/10 p-0 overflow-hidden">
+        <DialogContent className="max-w-5xl bg-black/95 border-white/10 p-0 overflow-hidden">
           {previewUrl && previewIsVideo && (
             <video
               src={previewUrl}
-              className="w-full h-auto max-h-[85vh]"
+              className="w-full h-auto max-h-[88vh]"
               controls
               autoPlay
               loop
@@ -289,11 +305,93 @@ export function PostPanel({
             <img
               src={previewUrl}
               alt="Full-size preview"
-              className="w-full h-auto max-h-[85vh] object-contain"
+              className="w-full h-auto max-h-[88vh] object-contain"
             />
           )}
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+interface TileCardProps {
+  tile: MediaTile;
+  index: number;
+  isVideo: boolean;
+  filenameStub: string;
+  onPreview: () => void;
+  onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
+}
+
+function MediaTileCard({
+  tile,
+  index,
+  isVideo,
+  filenameStub,
+  onPreview,
+  onToggleSelected,
+}: TileCardProps) {
+  const canToggle = !!tile.iterationId && !!onToggleSelected;
+  return (
+    <div
+      className={`glass-elevated rounded-lg overflow-hidden border ${
+        tile.isSelected ? "border-primary/60 ring-1 ring-primary/40" : "border-white/5"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onPreview}
+        className={`block w-full bg-black relative group ${isVideo ? "aspect-[9/16]" : "aspect-square"}`}
+      >
+        {isVideo ? (
+          <video src={tile.url} className="w-full h-full object-cover" muted loop preload="metadata" />
+        ) : (
+          <img src={tile.url} alt={`Variant ${index + 1}`} className="w-full h-full object-cover" />
+        )}
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+          <Expand className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+        {tile.isSelected && (
+          <span className="absolute top-2 left-2 bg-primary text-primary-foreground rounded-full p-1.5">
+            <Check className="h-3 w-3" />
+          </span>
+        )}
+      </button>
+
+      <div className="flex items-center justify-between px-2 py-1.5 bg-[rgba(0,0,0,0.4)]">
+        <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+          #{index + 1}
+        </span>
+        <div className="flex items-center gap-1">
+          {canToggle && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleSelected!(tile.iterationId!, !tile.isSelected);
+              }}
+              title={tile.isSelected ? "Unmark as favorite" : "Mark as favorite"}
+            >
+              <Star
+                className={`h-3 w-3 ${tile.isSelected ? "fill-primary text-primary" : ""}`}
+              />
+            </Button>
+          )}
+          <a
+            href={tile.url}
+            download={`${filenameStub}-${index + 1}.${isVideo ? "mp4" : "png"}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
+              <Download className="h-3 w-3 mr-1" /> Download
+            </Button>
+          </a>
+        </div>
+      </div>
+    </div>
   );
 }

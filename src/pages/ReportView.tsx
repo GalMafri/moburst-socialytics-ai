@@ -151,7 +151,7 @@ export default function ReportView() {
 
   return (
     <AppLayout title={`Report: ${clientName}`}>
-      <div className="max-w-6xl mx-auto space-y-6" ref={reportContentRef}>
+      <div className="w-full mx-auto px-4 lg:px-6 space-y-6" ref={reportContentRef}>
         {/* Presentation Deck Banner (hidden for client role) */}
         {!isClient && (
           <Card className={gammaUrl ? "border-primary/30 bg-primary/5" : "border-dashed"}>
