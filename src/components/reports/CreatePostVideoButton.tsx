@@ -91,39 +91,10 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   const spec = getPlatformVideoSpec(post.platform, post.format);
 
   /**
-   * Build a clean, concise Veo-compatible video prompt.
-   * Veo works best with 1-3 sentence scene descriptions — not storyboards.
+   * Passthrough — the edge function now builds the full layered prompt from
+   * `client_context`. The client sends only the distilled scene description.
    */
-  const buildVideoPrompt = (sceneDescription: string) => {
-    const parts: string[] = [];
-
-    // 1. Core scene description (from Claude distillation)
-    parts.push(sceneDescription);
-
-    // 2. Brand color palette
-    const colors = [effectiveBrandIdentity?.primary_color, effectiveBrandIdentity?.secondary_color, effectiveBrandIdentity?.accent_color].filter(Boolean);
-    if (colors.length > 0) {
-      parts.push(`Color palette: ${colors.join(", ")} — apply these colors throughout backgrounds, lighting gels, objects, and environment.`);
-    }
-
-    // 3. Brand visual style and tone
-    const brandNotes: string[] = [];
-    if (effectiveBrandIdentity?.visual_style) brandNotes.push(`Visual style: ${effectiveBrandIdentity.visual_style}`);
-    if (effectiveBrandIdentity?.tone_of_voice) brandNotes.push(`Tone: ${effectiveBrandIdentity.tone_of_voice}`);
-    if (effectiveBrandIdentity?.design_elements) brandNotes.push(`Design language: ${effectiveBrandIdentity.design_elements}`);
-    if (effectiveBrandIdentity?.background_style) brandNotes.push(`Environment: ${effectiveBrandIdentity.background_style}`);
-    if (brandNotes.length > 0) {
-      parts.push(brandNotes.join(". ") + ".");
-    }
-
-    // 4. Platform + format specs
-    parts.push(`${spec.aspect} format, ${spec.duration}. ${spec.style}`);
-
-    // 5. Constraints
-    parts.push("No text overlays, watermarks, logos, or color codes visible in any frame. No real people's names or celebrity likenesses.");
-
-    return parts.join("\n\n");
-  };
+  const buildVideoPrompt = (sceneDescription: string) => sceneDescription;
 
   /**
    * Distill a complex storyboard/visual direction into a simple Veo scene description
