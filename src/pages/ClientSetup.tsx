@@ -611,14 +611,14 @@ export default function ClientSetup() {
                               <span className="text-muted-foreground">— {c.source}</span>
                               <Badge
                                 variant={c.confidence === "high" ? "default" : "outline"}
-                                className="text-[10px] h-4"
+                                className="text-xs h-4"
                               >
                                 {c.confidence}
                               </Badge>
                             </div>
                           ))}
                           {brandDebug.log && (
-                            <div className="mt-2 pt-2 border-t text-[10px] text-muted-foreground space-y-0.5">
+                            <div className="mt-2 pt-2 border-t text-xs text-muted-foreground space-y-0.5">
                               {brandDebug.log.map((l: string, i: number) => (
                                 <div key={i}>{l}</div>
                               ))}
@@ -637,46 +637,73 @@ export default function ClientSetup() {
                     receive content recommendations and calendar posts.
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {PLATFORMS.map((p) => (
-                      <Badge
-                        key={p}
-                        variant={form.primary_platforms.includes(p) ? "default" : "outline"}
-                        className="cursor-pointer"
-                        onClick={() => togglePlatform(p)}
-                      >
-                        {p}
-                      </Badge>
-                    ))}
+                    {PLATFORMS.map((p) => {
+                      const active = form.primary_platforms.includes(p);
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => togglePlatform(p)}
+                          aria-pressed={active}
+                          className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        >
+                          <Badge
+                            variant={active ? "default" : "outline"}
+                            className="cursor-pointer text-sm py-1.5 px-3"
+                          >
+                            {p}
+                          </Badge>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Geographic Focus (select multiple)</Label>
                   <div className="flex flex-wrap gap-2">
-                    {GEOS.map((g) => (
-                      <Badge
-                        key={g.value}
-                        variant={form.geo.includes(g.value) ? "default" : "outline"}
-                        className="cursor-pointer"
-                        onClick={() => toggleGeo(g.value)}
-                      >
-                        {g.label}
-                      </Badge>
-                    ))}
+                    {GEOS.map((g) => {
+                      const active = form.geo.includes(g.value);
+                      return (
+                        <button
+                          key={g.value}
+                          type="button"
+                          onClick={() => toggleGeo(g.value)}
+                          aria-pressed={active}
+                          className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        >
+                          <Badge
+                            variant={active ? "default" : "outline"}
+                            className="cursor-pointer text-sm py-1.5 px-3"
+                          >
+                            {g.label}
+                          </Badge>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Content Languages (select multiple)</Label>
                   <div className="flex flex-wrap gap-2">
-                    {LANGUAGES.map((l) => (
-                      <Badge
-                        key={l.value}
-                        variant={form.language.includes(l.value) ? "default" : "outline"}
-                        className="cursor-pointer"
-                        onClick={() => toggleLanguage(l.value)}
-                      >
-                        {l.label}
-                      </Badge>
-                    ))}
+                    {LANGUAGES.map((l) => {
+                      const active = form.language.includes(l.value);
+                      return (
+                        <button
+                          key={l.value}
+                          type="button"
+                          onClick={() => toggleLanguage(l.value)}
+                          aria-pressed={active}
+                          className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        >
+                          <Badge
+                            variant={active ? "default" : "outline"}
+                            className="cursor-pointer text-sm py-1.5 px-3"
+                          >
+                            {l.label}
+                          </Badge>
+                        </button>
+                      );
+                    })}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     AI-generated copy will target these languages. Trends will include posts matching any selected
@@ -719,7 +746,12 @@ export default function ClientSetup() {
                       <div key={index} className="p-3 rounded-md border bg-card space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="font-medium text-sm">{pillar.name}</span>
-                          <Button variant="ghost" size="sm" onClick={() => removePillar(index)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removePillar(index)}
+                            aria-label={`Remove pillar ${pillar.name}`}
+                          >
                             <X className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -756,14 +788,18 @@ export default function ClientSetup() {
                   </p>
                   <div className="flex flex-wrap gap-2 mb-2">
                     {form.social_keywords.map((k) => (
-                      <Badge key={k} variant="outline" className="gap-1">
+                      <Badge key={k} variant="outline" className="gap-1.5 pr-1 text-sm py-1">
                         {k}
-                        <X
-                          className="h-3 w-3 cursor-pointer"
+                        <button
+                          type="button"
+                          aria-label={`Remove keyword ${k}`}
                           onClick={() =>
                             setForm((f) => ({ ...f, social_keywords: f.social_keywords.filter((x) => x !== k) }))
                           }
-                        />
+                          className="rounded-full p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
                       </Badge>
                     ))}
                   </div>
@@ -925,7 +961,8 @@ export default function ClientSetup() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="shrink-0 h-7 px-2"
+                          className="shrink-0 h-8 px-2"
+                          aria-label="Remove brand voice learning"
                           onClick={async () => {
                             try {
                               const { error } = await supabase

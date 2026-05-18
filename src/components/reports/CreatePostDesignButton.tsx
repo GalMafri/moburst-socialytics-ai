@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -412,6 +413,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>AI Post Design {isCarousel && "(Carousel)"}</DialogTitle>
+            <DialogDescription>
+              {isCarousel
+                ? "Generate a brand-aligned carousel. Slides share a single design system."
+                : "Generate brand-aligned design variants. Star the ones you want to keep."}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -438,20 +444,22 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             {/* Variant count slider — non-carousel only */}
             {!isCarousel && (
               <div className="space-y-2">
-                <Label>Number of variants</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
+                <Label htmlFor="variant-count">Number of variants</Label>
+                <div className="flex items-center gap-3">
+                  <Slider
+                    id="variant-count"
                     min={2}
                     max={6}
-                    value={variantCount}
-                    onChange={(e) => setVariantCount(parseInt(e.target.value))}
+                    step={1}
+                    value={[variantCount]}
+                    onValueChange={(v) => setVariantCount(v[0])}
                     disabled={loading}
                     className="flex-1"
+                    aria-label="Number of design variants"
                   />
-                  <span className="text-xs font-medium w-8 text-center">{variantCount}</span>
+                  <span className="text-sm font-medium w-8 text-center">{variantCount}</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   More variants = more options to pick from. Generation runs in parallel.
                 </p>
               </div>
@@ -596,12 +604,12 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                         </div>
                       )}
                       {!isCarousel && angles[selectedAngleIdxs[i]] && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-2 py-1 truncate">
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs px-2 py-1 truncate">
                           {angles[selectedAngleIdxs[i]].label}
                         </div>
                       )}
                       {isCarousel && (
-                        <span className="absolute top-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">
+                        <span className="absolute top-1 left-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
                           {i + 1}/{variantUrls.length}
                         </span>
                       )}

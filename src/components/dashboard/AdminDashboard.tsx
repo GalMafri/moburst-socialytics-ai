@@ -16,6 +16,17 @@ import { PlatformBadge } from "@/lib/platform-config";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Label } from "@/components/ui/label";
 
 export function AdminDashboard() {
   const navigate = useNavigate();
@@ -23,6 +34,8 @@ export function AdminDashboard() {
   const { canManageClients, canRunAnalysis, canDelete } = useAuth();
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const archiveMutation = useMutation({
     mutationFn: async (clientId: string) => {
@@ -185,10 +198,8 @@ export function AdminDashboard() {
                                 <DropdownMenuItem
                                   className="text-destructive"
                                   onClick={() => {
-                                    const typed = prompt(`Type "${client.name}" to permanently delete this client:`);
-                                    if (typed === client.name) {
-                                      deleteMutation.mutate(client.id);
-                                    }
+                                    setDeleteTarget({ id: client.id, name: client.name });
+                                    setDeleteConfirmText("");
                                   }}
                                 >
                                   <Trash2 className="h-4 w-4 mr-2" /> Permanently Delete
@@ -266,6 +277,56 @@ export function AdminDashboard() {
           </div>
         </Card>
       )}
+
+      {/* Permanent delete confirmation */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteConfirmText("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Permanently delete this client?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This cannot be undone. The client, all of its reports, scheduled
+              posts, and uploaded files will be deleted from Supabase. Type the
+              client name below to confirm.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="confirm-name" className="text-sm">
+              Confirm by typing <span className="font-mono">{deleteTarget?.name}</span>
+            </Label>
+            <Input
+              id="confirm-name"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder={deleteTarget?.name}
+              autoFocus
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteConfirmText !== deleteTarget?.name}
+              onClick={() => {
+                if (deleteTarget && deleteConfirmText === deleteTarget.name) {
+                  deleteMutation.mutate(deleteTarget.id);
+                  setDeleteTarget(null);
+                  setDeleteConfirmText("");
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Permanently delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

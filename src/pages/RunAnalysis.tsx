@@ -448,9 +448,9 @@ export default function RunAnalysis() {
                     ) : i === currentStep ? (
                       <Loader2 className="h-5 w-5 text-accent animate-spin shrink-0" />
                     ) : (
-                      <Clock className="h-5 w-5 text-muted-foreground/40 shrink-0" />
+                      <Clock className="h-5 w-5 text-muted-foreground shrink-0" />
                     )}
-                    <span className={i <= currentStep ? "text-foreground" : "text-muted-foreground/40"}>{step}</span>
+                    <span className={i <= currentStep ? "text-foreground" : "text-muted-foreground"}>{step}</span>
                   </div>
                 ))}
                 <p className="text-xs text-muted-foreground mt-2">

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { VideoTrimmer } from "@/components/editor/VideoTrimmer";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { ClientContext } from "@/lib/clientContext";
+import { Slider } from "@/components/ui/slider";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -365,6 +366,9 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
             <DialogTitle className="flex items-center gap-2">
               <Video className="h-4 w-4" /> Generate Video — {spec.label}
             </DialogTitle>
+            <DialogDescription>
+              Generate 2–3 video variants with Google Veo. Each takes 30–120 seconds.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -388,20 +392,22 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
 
             {/* Variant count slider — 2 to 3 (Veo is slow + expensive) */}
             <div className="space-y-2">
-              <Label>Number of variants</Label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
+              <Label htmlFor="video-variant-count">Number of variants</Label>
+              <div className="flex items-center gap-3">
+                <Slider
+                  id="video-variant-count"
                   min={2}
                   max={3}
-                  value={variantCount}
-                  onChange={(e) => setVariantCount(parseInt(e.target.value))}
+                  step={1}
+                  value={[variantCount]}
+                  onValueChange={(v) => setVariantCount(v[0])}
                   disabled={loading}
                   className="flex-1"
+                  aria-label="Number of video variants"
                 />
-                <span className="text-xs font-medium w-8 text-center">{variantCount}</span>
+                <span className="text-sm font-medium w-8 text-center">{variantCount}</span>
               </div>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Video generation takes 30-120 seconds per variant.
               </p>
             </div>
@@ -513,7 +519,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                         </div>
                       )}
                       {angles[selectedAngleIdxs[i]] && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-2 py-1 truncate">
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs px-2 py-1 truncate">
                           {angles[selectedAngleIdxs[i]].label}
                         </div>
                       )}

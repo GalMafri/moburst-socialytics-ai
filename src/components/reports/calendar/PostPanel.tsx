@@ -363,7 +363,7 @@ function MediaTileCard({
       </button>
 
       <div className="flex items-center justify-between px-2 py-1.5 bg-[rgba(0,0,0,0.4)]">
-        <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+        <span className="text-xs text-muted-foreground uppercase tracking-wide">
           #{index + 1}
         </span>
         <div className="flex items-center gap-1">

@@ -130,7 +130,7 @@ export function HubCompanySync() {
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <h4 className="text-sm font-semibold">Hub Companies</h4>
-            <Badge variant="outline" className="text-[10px]">
+            <Badge variant="outline" className="text-xs">
               {hubCompanies?.length ?? 0} from Hub
             </Badge>
           </div>

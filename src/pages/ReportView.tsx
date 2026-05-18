@@ -23,6 +23,8 @@ import {
   Target,
   Globe,
   Languages,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -152,32 +154,25 @@ export default function ReportView() {
   return (
     <AppLayout title={`Report: ${clientName}`}>
       <div className="w-full mx-auto px-4 lg:px-6 space-y-6" ref={reportContentRef}>
-        {/* Presentation Deck Banner (hidden for client role) */}
-        {!isClient && (
-          <Card className={gammaUrl ? "border-primary/30 bg-primary/5" : "border-dashed"}>
+        {/* Presentation Deck Banner — only when a gamma URL exists.
+            Hidden for client role and when the deck isn't ready. */}
+        {!isClient && gammaUrl && (
+          <Card className="border-primary/30 bg-primary/5">
             <CardContent className="py-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div
-                  className={`h-10 w-10 rounded-lg flex items-center justify-center ${gammaUrl ? "bg-primary/10" : "bg-[rgba(255,255,255,0.04)]"}`}
-                >
-                  <ExternalLink className={`h-5 w-5 ${gammaUrl ? "text-primary" : "text-muted-foreground"}`} />
+                <div className="h-10 w-10 rounded-lg flex items-center justify-center bg-primary/10">
+                  <ExternalLink className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{gammaUrl ? "Interactive Presentation" : "Presentation Deck"}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {gammaUrl
-                      ? "View the full interactive presentation"
-                      : "This feature will be added soon — stay tuned!"}
+                  <p className="text-sm font-medium">Interactive Presentation</p>
+                  <p className="text-sm text-muted-foreground">
+                    View the full interactive presentation
                   </p>
                 </div>
               </div>
-              {gammaUrl ? (
-                <Button onClick={() => window.open(gammaUrl, "_blank")}>
-                  <ExternalLink className="h-4 w-4 mr-2" /> Open Presentation
-                </Button>
-              ) : (
-                <Badge variant="outline">Pending</Badge>
-              )}
+              <Button onClick={() => window.open(gammaUrl, "_blank")}>
+                <ExternalLink className="h-4 w-4 mr-2" /> Open Presentation
+              </Button>
             </CardContent>
           </Card>
         )}
@@ -340,7 +335,9 @@ export default function ReportView() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {aiAnalysis.sprout_performance_analysis.pillar_alignment.well_represented?.length > 0 && (
                       <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">✅ Well Represented</p>
+                        <p className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                          <CheckCircle2 className="h-4 w-4 text-success" /> Well Represented
+                        </p>
                         <div className="flex flex-wrap gap-1.5">
                           {aiAnalysis.sprout_performance_analysis.pillar_alignment.well_represented.map((p: string) => (
                             <Badge key={p} variant="secondary">
@@ -352,7 +349,9 @@ export default function ReportView() {
                     )}
                     {aiAnalysis.sprout_performance_analysis.pillar_alignment.underrepresented?.length > 0 && (
                       <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground">⚠️ Needs Attention</p>
+                        <p className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                          <AlertCircle className="h-4 w-4 text-warning" /> Needs Attention
+                        </p>
                         <div className="flex flex-wrap gap-1.5">
                           {aiAnalysis.sprout_performance_analysis.pillar_alignment.underrepresented.map((p: string) => (
                             <Badge key={p} variant="outline">
@@ -521,7 +520,7 @@ function PerformanceChart({ comparison }: { comparison: any }) {
                   style={{ width: `${Math.max((previous / max) * 100, 2)}%` }}
                 />
               </div>
-              <span className="text-[10px] text-muted-foreground w-14 text-right">{fmtVal(previous)}</span>
+              <span className="text-xs text-muted-foreground w-14 text-right">{fmtVal(previous)}</span>
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -400,6 +401,9 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
       <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto p-4">
         <DialogHeader>
           <DialogTitle>Edit Video</DialogTitle>
+          <DialogDescription>
+            Trim the clip and add text overlays. Saved changes apply to this variant only.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
@@ -524,7 +528,7 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
             </div>
 
             {/* Time labels */}
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
+            <div className="flex items-center justify-between text-xs text-muted-foreground font-mono">
               <span>{fmt(trimStart)}</span>
               <span className="text-foreground font-medium">{fmt(currentTime)}</span>
               <span>{fmt(trimEnd)}{duration > 0 && ` / ${fmt(duration)}`}</span>
@@ -623,7 +627,7 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
                     </Select>
                   </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground">Drag the text on the video to reposition it.</p>
+                <p className="text-xs text-muted-foreground">Drag the text on the video to reposition it.</p>
               </div>
             )}
           </div>

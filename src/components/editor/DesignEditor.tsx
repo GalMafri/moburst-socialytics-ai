@@ -293,7 +293,7 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
                     </Select>
                   </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground">Drag text on the image to reposition. Brand colors shown as swatches.</p>
+                <p className="text-xs text-muted-foreground">Drag text on the image to reposition. Brand colors shown as swatches.</p>
               </div>
             )}
           </div>

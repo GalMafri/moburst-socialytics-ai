@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -200,6 +200,10 @@ export function SchedulePostModal({
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-4 w-4" /> Schedule to Sprout Social
           </DialogTitle>
+          <DialogDescription>
+            Schedule this post to a connected Sprout Social profile. Confirm the
+            date, time, copy, and media before sending.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
