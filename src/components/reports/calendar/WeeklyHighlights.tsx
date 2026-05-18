@@ -28,7 +28,7 @@ export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
         <Sparkles className="h-4 w-4 text-primary" />
         <span className="text-sm font-semibold">Weekly highlights</span>
         {!open && underrepresented.length > 0 && (
-          <span className="text-xs text-muted-foreground ml-2">
+          <span className="text-sm text-muted-foreground ml-2">
             · {underrepresented.length} underrepresented pillar{underrepresented.length === 1 ? "" : "s"} this week
           </span>
         )}
@@ -39,14 +39,14 @@ export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
       >
         {sproutMonthSummary && (
           <div>
-            <p className="text-xs font-medium text-muted-foreground mb-1">Month-over-month</p>
+            <p className="text-sm font-medium text-muted-foreground mb-1">Month-over-month</p>
             <p className="leading-relaxed">{sproutMonthSummary}</p>
           </div>
         )}
 
         {underrepresented.length > 0 && (
           <div>
-            <p className="text-xs font-medium text-muted-foreground mb-1">Underrepresented pillars</p>
+            <p className="text-sm font-medium text-muted-foreground mb-1">Underrepresented pillars</p>
             <ul className="list-disc list-inside space-y-0.5">
               {underrepresented.map((p, i) => (
                 <li key={i}>{p}</li>
@@ -57,7 +57,7 @@ export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
 
         {tiktokOpps.length > 0 && (
           <div>
-            <p className="text-xs font-medium text-muted-foreground mb-1">TikTok opportunities</p>
+            <p className="text-sm font-medium text-muted-foreground mb-1">TikTok opportunities</p>
             <ul className="list-disc list-inside space-y-0.5">
               {tiktokOpps.slice(0, 3).map((o, i) => (
                 <li key={i}>{o}</li>
@@ -68,7 +68,7 @@ export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
 
         {igOpps.length > 0 && (
           <div>
-            <p className="text-xs font-medium text-muted-foreground mb-1">Instagram opportunities</p>
+            <p className="text-sm font-medium text-muted-foreground mb-1">Instagram opportunities</p>
             <ul className="list-disc list-inside space-y-0.5">
               {igOpps.slice(0, 3).map((o, i) => (
                 <li key={i}>{o}</li>

@@ -36,7 +36,7 @@ export function PostStatusChip({ status, onToggleApproved }: Props) {
     onToggleApproved;
   return (
     <Badge
-      className={`${STATUS_CLASS[status]} ${clickable ? "cursor-pointer hover:opacity-80" : ""}`}
+      className={`${STATUS_CLASS[status]} text-sm py-1 px-2.5 ${clickable ? "cursor-pointer hover:opacity-80" : ""}`}
       onClick={clickable ? onToggleApproved : undefined}
     >
       {STATUS_LABEL[status]}

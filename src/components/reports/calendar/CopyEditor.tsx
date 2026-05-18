@@ -156,12 +156,12 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
         </div>
       ) : (
         <>
-          <div className="bg-background rounded-md p-3 border">
-            <p className="text-sm leading-relaxed whitespace-pre-line">{displayCopy}</p>
+          <div className="bg-background rounded-md p-4 border">
+            <p className="text-base leading-relaxed whitespace-pre-line">{displayCopy}</p>
             {post.hashtags?.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mt-3 pt-2 border-t">
+              <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t">
                 {post.hashtags.map((h: string) => (
-                  <span key={h} className="text-xs text-primary">
+                  <span key={h} className="text-sm text-primary">
                     {h.startsWith("#") ? h : `#${h}`}
                   </span>
                 ))}
@@ -197,13 +197,13 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
             </div>
           )}
           {post.visual_direction && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-base text-muted-foreground leading-relaxed">
               <span className="font-medium text-foreground">Visual: </span>
               {post.visual_direction}
             </p>
           )}
           {post.rationale && (
-            <div className="bg-[rgba(255,255,255,0.03)] p-3 rounded-md text-xs leading-relaxed text-muted-foreground">
+            <div className="bg-[rgba(255,255,255,0.03)] p-3.5 rounded-md text-sm leading-relaxed text-muted-foreground">
               💡 {post.rationale}
             </div>
           )}

@@ -29,10 +29,10 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
     <div className="sticky top-0 z-10 bg-background/95 backdrop-blur py-2 space-y-2 border-b print:hidden">
       {/* Day row */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-xs font-medium text-muted-foreground mr-1">Day:</span>
+        <span className="text-sm font-medium text-muted-foreground mr-1">Day:</span>
         <Badge
           variant={filters.day === "all" ? "default" : "outline"}
-          className="cursor-pointer text-xs"
+          className="cursor-pointer text-sm py-1 px-2.5"
           onClick={() => onChange({ ...filters, day: "all" })}
         >
           All
@@ -41,7 +41,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
           <Badge
             key={d}
             variant={filters.day === d ? "default" : "outline"}
-            className="cursor-pointer text-xs"
+            className="cursor-pointer text-sm py-1 px-2.5"
             onClick={() => onChange({ ...filters, day: d })}
           >
             {d.slice(0, 3)}
@@ -52,10 +52,10 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
       {/* Platform + status + language row */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground mr-1">Platform:</span>
+          <span className="text-sm font-medium text-muted-foreground mr-1">Platform:</span>
           <Badge
             variant={filters.platform === "all" ? "default" : "outline"}
-            className="cursor-pointer text-xs"
+            className="cursor-pointer text-sm py-1 px-2.5"
             onClick={() => onChange({ ...filters, platform: "all" })}
           >
             All
@@ -76,12 +76,12 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground mr-1">Status:</span>
+          <span className="text-sm font-medium text-muted-foreground mr-1">Status:</span>
           {STATUSES.map((s) => (
             <Badge
               key={s.value}
               variant={filters.status === s.value ? "default" : "outline"}
-              className="cursor-pointer text-xs"
+              className="cursor-pointer text-sm py-1 px-2.5"
               onClick={() => onChange({ ...filters, status: s.value })}
             >
               {s.label}
@@ -91,10 +91,10 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
 
         {availableLanguages.length > 1 && (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground mr-1">Lang:</span>
+            <span className="text-sm font-medium text-muted-foreground mr-1">Lang:</span>
             <Badge
               variant={filters.language === "all" ? "default" : "outline"}
-              className="cursor-pointer text-xs"
+              className="cursor-pointer text-sm py-1 px-2.5"
               onClick={() => onChange({ ...filters, language: "all" })}
             >
               All
@@ -103,7 +103,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
               <Badge
                 key={l}
                 variant={filters.language === l ? "default" : "outline"}
-                className="cursor-pointer text-xs uppercase"
+                className="cursor-pointer text-sm py-1 px-2.5 uppercase"
                 onClick={() => onChange({ ...filters, language: l })}
               >
                 {l}

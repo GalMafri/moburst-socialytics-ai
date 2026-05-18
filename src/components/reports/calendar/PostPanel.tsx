@@ -140,9 +140,13 @@ export function PostPanel({
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2 flex-wrap text-base">
               {post.platform && <PlatformBadge platform={post.platform} size="sm" />}
-              {post.format && <Badge variant="outline">{post.format}</Badge>}
+              {post.format && (
+                <Badge variant="outline" className="text-sm py-0.5 px-2">
+                  {post.format}
+                </Badge>
+              )}
               {post.posting_time && (
-                <span className="text-xs text-muted-foreground">{post.posting_time}</span>
+                <span className="text-sm text-muted-foreground">{post.posting_time}</span>
               )}
             </SheetTitle>
           </SheetHeader>
@@ -169,7 +173,7 @@ export function PostPanel({
                       ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
                       : "No designs yet"}
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     {imageTiles.length > 0
                       ? "Click any design to preview at full size. Star your favorites."
                       : "Generate brand-aligned variants to get started."}
@@ -202,7 +206,7 @@ export function PostPanel({
                   <p className="text-sm text-muted-foreground">
                     No designs generated for this post yet.
                   </p>
-                  <p className="text-xs text-muted-foreground/70">
+                  <p className="text-sm text-muted-foreground/70">
                     Click "Design" above to generate 2–6 brand-aligned variants.
                   </p>
                 </div>
@@ -218,7 +222,7 @@ export function PostPanel({
                       ? `${videoTiles.length} video${videoTiles.length === 1 ? "" : "s"}`
                       : "No videos yet"}
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     {videoTiles.length > 0
                       ? "Click any video to preview at full size."
                       : "Generate 2–3 video variants — takes ~30–120s each."}
@@ -279,7 +283,7 @@ export function PostPanel({
                     />
                   </>
                 ) : (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     Cannot schedule — missing client or report context.
                   </p>
                 )}
@@ -367,7 +371,7 @@ function MediaTileCard({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-xs"
+              className="h-8 px-2 text-sm"
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleSelected!(tile.iterationId!, !tile.isSelected);
@@ -386,7 +390,7 @@ function MediaTileCard({
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
           >
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-sm">
               <Download className="h-3 w-3 mr-1" /> Download
             </Button>
           </a>
