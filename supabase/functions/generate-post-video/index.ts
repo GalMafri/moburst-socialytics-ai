@@ -30,7 +30,26 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, platform, format, brandIdentity } = await req.json();
+    const {
+      prompt,
+      platform,
+      format,
+      brandIdentity,
+      client_context,
+      post,
+    } = await req.json();
+
+    const resolvedBrand = client_context?.brand_identity ?? brandIdentity ?? null;
+    const resolvedRefs = client_context?.design_references ?? [];
+    const resolvedBrandBookPath = client_context?.brand_book_file_path ?? null;
+    const resolvedSynthesis = client_context?.design_style_synthesis ?? null;
+
+    console.log("[generate-post-video] context received:", {
+      has_brand: !!resolvedBrand,
+      ref_count: resolvedRefs.length,
+      has_brand_book: !!resolvedBrandBookPath,
+      has_synthesis: !!resolvedSynthesis,
+    });
 
     if (!prompt) {
       return new Response(JSON.stringify({ error: "prompt is required" }), {
