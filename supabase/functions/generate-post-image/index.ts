@@ -104,6 +104,9 @@ Deno.serve(async (req) => {
       variantAngle: variant_angle || null,
     });
 
+    console.log("[generate-post-image] prompt (first 2000 chars):", designPrompt.slice(0, 2000));
+    console.log("[generate-post-image] prompt total length:", designPrompt.length);
+
     // ── Fetch design reference images for multimodal input ──
     const contentParts: any[] = [];
 

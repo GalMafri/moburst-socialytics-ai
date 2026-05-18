@@ -12,11 +12,11 @@ function json(body: unknown, status = 200) {
   });
 }
 
-const SYSTEM_PROMPT = `You are a senior brand designer doing a forensic style analysis.
+const SYSTEM_PROMPT = `You are a senior brand designer doing a forensic style analysis. You are writing a BINDING STYLE RULEBOOK — not a description, not a vibes check. A generative image model will follow these rules verbatim to produce new work for this brand. If the rules are soft, the output will be generic. If the rules are sharp and opinionated, the output will look like the brand.
 
-You receive a set of reference images and (optionally) a brand book document from a single client. Your job is to write a structured "design language" descriptor that another designer (or generative image model) could use to produce new on-brand work.
+You receive a set of reference images and (optionally) a brand book document from a single client. Your job is to extract the visible patterns and codify them as imperative rules.
 
-OUTPUT FORMAT: A single JSON object with these fields, all strings (1-4 sentences each):
+OUTPUT FORMAT: A single JSON object with these fields, all strings (2-5 sentences each):
 
 {
   "composition_patterns": "...",
@@ -30,12 +30,19 @@ OUTPUT FORMAT: A single JSON object with these fields, all strings (1-4 sentence
   "platform_adaptations": "..."
 }
 
-RULES:
-- Describe colors qualitatively only — never use hex codes, RGB values, or any technical color notation. Example: "warm coral as accent in roughly 10-15% of compositions, against a deep navy ground" (good); "#FF5733 accent on #1A2B3C" (forbidden).
-- Each field is concrete and actionable. Avoid "Sometimes uses bold colors" — prefer "Bold color blocks at ~30% of the composition, anchored bottom-left in 60% of references."
-- anti_patterns lists 2-4 things to NOT do (gleaned from what's absent or contradicted in the refs).
-- platform_adaptations describes how the style translates across IG/LinkedIn/TikTok/etc.
-- Return ONLY the JSON object, no preamble, no markdown fence.`;
+WRITING STYLE — CRITICAL:
+- Use imperative voice. "Place the subject..." not "Often places the subject...". You are writing rules, not observations.
+- Be quantitative when possible: "Type occupies 30-40% of the composition" beats "Type is prominent". "Subject fills 70% of vertical height" beats "Subject is large".
+- Be specific about typography: "Sans-serif geometric headline (Söhne, Inter, or close) at weight 600-700, all caps, kerning -2%" beats "Bold modern type".
+- Describe colors qualitatively only — never use hex codes, RGB values, or any technical color notation. Example: "Warm coral as the dominant accent in 25-30% of the composition, against a deep navy ground" (good); "#FF5733 accent on #1A2B3C" (forbidden).
+- anti_patterns lists 3-5 things to NEVER do, written as direct prohibitions. Examples: "Never use gradients", "Never center the subject", "Never render the logo at >12% of the canvas". Be opinionated — this is where the brand says no.
+- platform_adaptations describes concretely how the style shifts per platform. For each of Instagram (feed + reel), LinkedIn, TikTok, give one short rule about what changes (composition, type weight, color emphasis).
+- logo_and_marks_treatment is the highest-leverage field for stopping AI slop. Describe exactly when and how the logo appears (size as % of canvas, placement quadrant, color treatment, in which post types), or state "The logo does not appear in any in-feed social post — only in profile artwork" if that's the observed pattern.
+- mood_and_voice_visual should name 2-3 concrete adjectives followed by what they look like in execution: "Confident — high-contrast type set against generous whitespace, no decoration".
+
+FORMAT:
+- Return ONLY the JSON object. No preamble. No markdown code fence. No commentary.
+- Every field is mandatory. If a category truly isn't visible in the refs, write a defensible default in the same imperative voice rather than skipping or writing "varies".`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });

@@ -23,7 +23,7 @@ describe("buildImagePrompt", () => {
         imagery_style: "Editorial photography, restrained palette",
       },
     });
-    expect(out).toContain("## Brand design language");
+    expect(out).toContain("BRAND DESIGN LANGUAGE");
     expect(out).toContain("### Composition");
     expect(out).toContain("Generous whitespace");
   });
@@ -74,10 +74,25 @@ describe("buildImagePrompt", () => {
     expect(out).toContain("Type-led");
   });
 
-  it("places the creative direction before the brand language", () => {
+  it("places brand language BEFORE creative direction when synthesis is present", () => {
+    // Rationale: the brand language must anchor the design, otherwise generic-flavored
+    // creative direction text overrides strong brand patterns. The post brief is what
+    // to depict; the brand language is how to execute it.
     const out = buildImagePrompt({
       basePrompt: "The post brief",
       synthesis: { composition_patterns: "Asymmetric" },
+    });
+    const brandIdx = out.indexOf("BRAND DESIGN LANGUAGE");
+    const creativeIdx = out.indexOf("Creative direction");
+    expect(brandIdx).toBeGreaterThanOrEqual(0);
+    expect(creativeIdx).toBeGreaterThan(brandIdx);
+  });
+
+  it("places creative direction first when no synthesis is present", () => {
+    // Without synthesis there's no binding brand language to anchor on; the brief leads.
+    const out = buildImagePrompt({
+      basePrompt: "The post brief",
+      brandIdentity: { visual_style: "Bold" },
     });
     const creativeIdx = out.indexOf("Creative direction");
     const brandIdx = out.indexOf("Brand design language");

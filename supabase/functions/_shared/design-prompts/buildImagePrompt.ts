@@ -40,10 +40,14 @@ function stripHex(text: string): string {
 }
 
 /**
- * Compose a clean, layered prompt for Gemini 3.1 Flash Image. The order
- * matters — LLMs weight early tokens heavier — so the post-specific creative
- * direction leads, followed by the brand design language, then the platform
- * playbook, then a thin constraints block.
+ * Compose a clean, layered prompt for Gemini 3.1 Flash Image.
+ *
+ * Order matters — LLMs weight early tokens heavier. When the client has a
+ * synthesized design language, that language leads (so the brand IS the
+ * anchor); the creative direction follows as the specific application. When
+ * no synthesis exists, creative direction leads. This split prevents
+ * generic-flavored creative direction text from overriding strong brand
+ * patterns.
  *
  * No hex codes appear anywhere in the returned string. Colors are described
  * qualitatively via the synthesis. The base prompt is sanitized of any hex
@@ -52,22 +56,56 @@ function stripHex(text: string): string {
 export function buildImagePrompt(input: BuildImagePromptInput): string {
   const sections: string[] = [];
 
-  // 1. Creative direction (post-specific)
+  const synthesisMd = flattenSynthesis(input.synthesis);
+  const hasStrongBrand = !!synthesisMd;
+
+  // 0. Primary objective — sets the model's priority order before anything else.
+  if (hasStrongBrand) {
+    sections.push(
+      `## Primary objective\n` +
+        `Produce a single ready-to-post social media graphic that visually belongs to this ` +
+        `client's brand. The BRAND DESIGN LANGUAGE section below is the binding style guide — ` +
+        `composition, typography, imagery, color usage, surface, logo treatment, mood, and ` +
+        `platform adaptations are NOT suggestions. The creative direction tells you WHAT the ` +
+        `post is about; the brand design language tells you HOW it must look.`,
+    );
+  } else {
+    sections.push(
+      `## Primary objective\n` +
+        `Produce a single ready-to-post social media graphic with the look and feel of work ` +
+        `a senior in-house designer would ship. Not a stock template, not abstract decoration.`,
+    );
+  }
+
   const sanitizedBase = stripHex(input.basePrompt);
   const pillarLabel = input.post?.pillar ? `\nContent pillar: ${input.post.pillar}` : "";
   const langLabel = input.post?.language ? `\nLanguage of any visible text: ${input.post.language}` : "";
-  sections.push(
-    `## Creative direction\n` +
-      `${sanitizedBase}${pillarLabel}${langLabel}\n\n` +
-      `This is a complete, ready-to-post social media image — not a placeholder, abstract background, ` +
-      `or generic stock. Treat it like work a senior social media designer would ship.`,
-  );
 
-  // 2. Brand design language (synthesis if present, else brand identity fallback)
-  const synthesisMd = flattenSynthesis(input.synthesis);
-  if (synthesisMd) {
-    sections.push(synthesisMd);
+  // 1. BRAND DESIGN LANGUAGE first when present — it's the binding style guide.
+  //    Otherwise creative direction leads.
+  if (hasStrongBrand) {
+    sections.push(
+      `## BRAND DESIGN LANGUAGE — REQUIRED STYLE\n` +
+        `Every choice (layout, typography, imagery treatment, color application, surface, ` +
+        `logo handling, mood) MUST follow the rules below. Treat each section as a hard ` +
+        `requirement, not a description. If any rule conflicts with the creative direction, ` +
+        `apply the rule — translate the creative direction to fit the brand, not the other way.\n\n` +
+        synthesisMd.replace(/^## Brand design language\n?/, ""),
+    );
+    sections.push(
+      `## Creative direction (what to depict)\n` +
+        `${sanitizedBase}${pillarLabel}${langLabel}\n\n` +
+        `Apply the BRAND DESIGN LANGUAGE above to render this brief. The brief tells you the ` +
+        `subject and concept; the language above dictates the execution.`,
+    );
   } else if (input.brandIdentity) {
+    // No synthesis — fall back to brand_identity fields, then creative direction.
+    sections.push(
+      `## Creative direction\n` +
+        `${sanitizedBase}${pillarLabel}${langLabel}\n\n` +
+        `This is a complete, ready-to-post social media image — not a placeholder, abstract ` +
+        `background, or generic stock. Treat it like work a senior social media designer would ship.`,
+    );
     const fallback: string[] = ["## Brand design language"];
     if (input.brandIdentity.visual_style) {
       fallback.push(`### Visual style\n${input.brandIdentity.visual_style}`);
@@ -85,6 +123,14 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
       fallback.push(`### Typography\nPrefer ${input.brandIdentity.font_family}-style typography or a close-feel sans alternative.`);
     }
     if (fallback.length > 1) sections.push(fallback.join("\n\n"));
+  } else {
+    // No synthesis, no brand identity — creative direction stands alone.
+    sections.push(
+      `## Creative direction\n` +
+        `${sanitizedBase}${pillarLabel}${langLabel}\n\n` +
+        `This is a complete, ready-to-post social media image — not a placeholder, abstract ` +
+        `background, or generic stock. Treat it like work a senior social media designer would ship.`,
+    );
   }
 
   // 3. Platform & format playbook
