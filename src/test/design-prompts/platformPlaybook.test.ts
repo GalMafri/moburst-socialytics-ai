@@ -36,4 +36,21 @@ describe("platformPlaybook", () => {
     expect(md).toContain("Aspect: 1.91:1");
     expect(md).toContain("Avoid:");
   });
+
+  it("falls back to a platform-appropriate default for unknown formats on known platforms", () => {
+    // Instagram is vertical-first; unknown format on IG should not collapse to 1:1.
+    expect(getPlaybookEntry("Instagram", "tiktok-style").orientation).not.toBe("square");
+    expect(getPlaybookEntry("Instagram", "tiktok-style").aspectRatio).not.toBe("1:1");
+    // LinkedIn defaults to landscape single image.
+    expect(getPlaybookEntry("LinkedIn", "weird-format").aspectRatio).toBe("1.91:1");
+    // YouTube defaults to 16:9.
+    expect(getPlaybookEntry("YouTube", "weird-format").aspectRatio).toBe("16:9");
+  });
+
+  it("renders motionGuidance only when present (single-image case)", () => {
+    const single = getPlaybookEntry("LinkedIn", "Single Image");
+    expect(single.motionGuidance).toBeUndefined();
+    const md = renderPlaybookSection(single, "LinkedIn", "Single Image");
+    expect(md).not.toContain("Motion:");
+  });
 });
