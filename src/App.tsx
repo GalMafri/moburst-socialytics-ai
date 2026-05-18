@@ -17,6 +17,7 @@ import Analytics from "./pages/Analytics";
 import AnalyticsIndex from "./pages/AnalyticsIndex";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import DevCalendarPreview from "./pages/DevCalendarPreview";
 
 const queryClient = new QueryClient();
 
@@ -41,6 +42,10 @@ const App = () => (
               <Route path="/clients/:id/reports/:reportId" element={<ReportView />} />
               <Route path="/clients/:id/reports" element={<ReportHistory />} />
               <Route path="/clients/:id/analytics" element={<Analytics />} />
+              {/* Dev-only — see src/pages/DevCalendarPreview.tsx. Remove after launch. */}
+              {import.meta.env.DEV && (
+                <Route path="/dev/calendar" element={<DevCalendarPreview />} />
+              )}
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AuthProvider>

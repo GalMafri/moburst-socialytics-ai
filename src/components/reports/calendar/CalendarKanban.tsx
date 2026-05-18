@@ -96,56 +96,54 @@ export function CalendarKanban({
   onToggleApproved,
 }: Props) {
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-7 gap-2 print:grid-cols-1">
+    <div className="space-y-6">
       {DAYS.map((dayName) => {
-        // Skip entire column if day filter excludes it.
-        if (filters.day !== "all" && filters.day !== dayName) {
-          return <div key={dayName} className="hidden lg:block opacity-30" />;
-        }
+        // If day filter excludes this day, skip rendering entirely.
+        if (filters.day !== "all" && filters.day !== dayName) return null;
         const dayEntry = contentCalendar.find((d) => d.day === dayName);
         const posts = dayEntry?.posts || [];
 
         return (
-          <div key={dayName} className="space-y-2 min-w-0">
-            <div className="text-sm font-semibold sticky top-16 lg:top-20 py-2 px-2 -mx-2 bg-background/95 backdrop-blur z-[5] border-b border-white/5 text-foreground">
-              {dayName}
-              {posts.length > 0 && (
-                <span className="ml-2 text-xs text-muted-foreground font-normal">
-                  {posts.length}
-                </span>
-              )}
+          <section key={dayName} className="space-y-3">
+            {/* Day header row */}
+            <div className="flex items-baseline gap-3 sticky top-16 lg:top-20 bg-background/95 backdrop-blur py-2 z-[5] border-b border-white/10">
+              <h3 className="text-lg font-semibold text-foreground">{dayName}</h3>
+              <span className="text-sm text-muted-foreground">
+                {posts.length === 0 ? "No posts" : `${posts.length} post${posts.length === 1 ? "" : "s"}`}
+              </span>
             </div>
-            {posts.length === 0 ? (
-              <p className="text-[10px] text-muted-foreground italic">No posts</p>
-            ) : (
-              posts.map((post: any, postIdx: number) => {
-                const iteration = findLatestSelectedIteration(postIterations, post);
-                const status = resolvePostStatus({
-                  mediaUrls: iteration?.media_urls || [],
-                  isSelectedAny: !!iteration?.is_selected,
-                  isApproved: !!iteration?.is_approved,
-                  hasScheduledPost: hasMatchingScheduledPost(scheduledPosts, post),
-                });
-                if (!matchesFilters(post, status, filters)) {
+
+            {posts.length > 0 && (
+              <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
+                {posts.map((post: any, postIdx: number) => {
+                  const iteration = findLatestSelectedIteration(postIterations, post);
+                  const status = resolvePostStatus({
+                    mediaUrls: iteration?.media_urls || [],
+                    isSelectedAny: !!iteration?.is_selected,
+                    isApproved: !!iteration?.is_approved,
+                    hasScheduledPost: hasMatchingScheduledPost(scheduledPosts, post),
+                  });
+                  if (!matchesFilters(post, status, filters)) {
+                    return (
+                      <div key={postIdx} className="opacity-30 pointer-events-none">
+                        <PostCard post={post} iteration={iteration} status={status} onOpen={() => {}} />
+                      </div>
+                    );
+                  }
                   return (
-                    <div key={postIdx} className="opacity-30 pointer-events-none">
-                      <PostCard post={post} iteration={iteration} status={status} onOpen={() => {}} />
-                    </div>
+                    <PostCard
+                      key={postIdx}
+                      post={post}
+                      iteration={iteration}
+                      status={status}
+                      onOpen={() => onCardClick(post)}
+                      onToggleApproved={iteration?.id ? () => onToggleApproved(iteration.id) : undefined}
+                    />
                   );
-                }
-                return (
-                  <PostCard
-                    key={postIdx}
-                    post={post}
-                    iteration={iteration}
-                    status={status}
-                    onOpen={() => onCardClick(post)}
-                    onToggleApproved={iteration?.id ? () => onToggleApproved(iteration.id) : undefined}
-                  />
-                );
-              })
+                })}
+              </div>
             )}
-          </div>
+          </section>
         );
       })}
     </div>
