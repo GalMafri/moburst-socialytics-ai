@@ -26,7 +26,7 @@ const STATUSES: Array<{ value: string; label: string }> = [
 
 export function CalendarFilters({ filters, onChange, availablePlatforms, availableLanguages }: Props) {
   return (
-    <div className="sticky top-0 z-10 bg-background/95 backdrop-blur py-2 space-y-2 border-b">
+    <div className="sticky top-0 z-10 bg-background/95 backdrop-blur py-2 space-y-2 border-b print:hidden">
       {/* Day row */}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-xs font-medium text-muted-foreground mr-1">Day:</span>

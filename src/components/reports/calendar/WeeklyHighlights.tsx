@@ -34,49 +34,49 @@ export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
         )}
       </CardContent>
 
-      {open && (
-        <CardContent className="pt-0 space-y-4 text-sm">
-          {sproutMonthSummary && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Month-over-month</p>
-              <p className="leading-relaxed">{sproutMonthSummary}</p>
-            </div>
-          )}
+      <CardContent
+        className={`pt-0 space-y-4 text-sm ${open ? "block" : "hidden"} print:block`}
+      >
+        {sproutMonthSummary && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">Month-over-month</p>
+            <p className="leading-relaxed">{sproutMonthSummary}</p>
+          </div>
+        )}
 
-          {underrepresented.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Underrepresented pillars</p>
-              <ul className="list-disc list-inside space-y-0.5">
-                {underrepresented.map((p, i) => (
-                  <li key={i}>{p}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+        {underrepresented.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">Underrepresented pillars</p>
+            <ul className="list-disc list-inside space-y-0.5">
+              {underrepresented.map((p, i) => (
+                <li key={i}>{p}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
-          {tiktokOpps.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">TikTok opportunities</p>
-              <ul className="list-disc list-inside space-y-0.5">
-                {tiktokOpps.slice(0, 3).map((o, i) => (
-                  <li key={i}>{o}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+        {tiktokOpps.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">TikTok opportunities</p>
+            <ul className="list-disc list-inside space-y-0.5">
+              {tiktokOpps.slice(0, 3).map((o, i) => (
+                <li key={i}>{o}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
-          {igOpps.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Instagram opportunities</p>
-              <ul className="list-disc list-inside space-y-0.5">
-                {igOpps.slice(0, 3).map((o, i) => (
-                  <li key={i}>{o}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </CardContent>
-      )}
+        {igOpps.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">Instagram opportunities</p>
+            <ul className="list-disc list-inside space-y-0.5">
+              {igOpps.slice(0, 3).map((o, i) => (
+                <li key={i}>{o}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </CardContent>
     </Card>
   );
 }

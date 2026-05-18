@@ -59,7 +59,7 @@ export function PostPanel({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
+      <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto print:hidden">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2 flex-wrap">
             {post.platform && <PlatformBadge platform={post.platform} size="sm" />}
