@@ -38,6 +38,7 @@ serve(async (req) => {
       brandIdentity,
       client_context,
       post,
+      variant_angle,
     } = await req.json();
 
     const resolvedBrand = client_context?.brand_identity ?? brandIdentity ?? null;
@@ -66,6 +67,7 @@ serve(async (req) => {
       brandIdentity: resolvedBrand,
       synthesis: resolvedSynthesis,
       post,
+      variantAngle: variant_angle || null,
     });
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
