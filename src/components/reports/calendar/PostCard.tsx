@@ -38,9 +38,10 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
       onClick={onOpen}
       className="glass-elevated w-full text-left rounded-lg p-3.5 hover:border-primary/50 transition-colors space-y-3 group flex flex-col"
     >
-      {/* Thumbnail / empty state */}
+      {/* Thumbnail / empty state — 16:10 keeps cards from going too tall.
+          Full-aspect preview is available in the side panel lightbox. */}
       {thumb ? (
-        <div className="relative w-full aspect-square bg-black rounded overflow-hidden">
+        <div className="relative w-full aspect-[16/10] bg-black rounded overflow-hidden">
           {isVideo ? (
             <video src={thumb} className="w-full h-full object-cover" muted preload="metadata" />
           ) : (

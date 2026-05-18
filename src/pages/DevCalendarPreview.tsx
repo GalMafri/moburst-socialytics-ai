@@ -1,7 +1,11 @@
 // Dev-only preview route for iterating on the calendar UI without needing a
 // real client + report. Mounted at /dev/calendar in App.tsx behind a
 // VITE_DEV_MODE check. Safe to delete after launch.
-import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
+import { useState } from "react";
+import { CalendarFilters, type CalendarFilterState } from "@/components/reports/calendar/CalendarFilters";
+import { CalendarKanban } from "@/components/reports/calendar/CalendarKanban";
+import { WeeklyHighlights } from "@/components/reports/calendar/WeeklyHighlights";
+import { PostPanel } from "@/components/reports/calendar/PostPanel";
 import { AppLayout } from "@/components/layout/AppLayout";
 import type { ClientContext } from "@/lib/clientContext";
 
@@ -188,22 +192,124 @@ const MOCK_AI_ANALYSIS = {
   },
 };
 
+// Mock iterations so we can verify the populated card + design panel look
+// without a real Supabase round-trip. Friday's LinkedIn Single Image gets a
+// finished image; Wednesday's IG Carousel gets multiple variants in a group.
+const MOCK_ITERATIONS = [
+  {
+    id: "it-friday-li-1",
+    client_id: "dev-client",
+    platform: "LinkedIn",
+    post_copy: MOCK_CALENDAR[4].posts[0].copy,
+    media_urls: [
+      "https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=800&q=80",
+    ],
+    is_selected: true,
+    is_approved: false,
+    variant_group_id: "vg-friday-li",
+    variant_angle: "Photo-led editorial composition",
+    created_at: "2026-05-18T10:00:00Z",
+  },
+  {
+    id: "it-wed-ig-1",
+    client_id: "dev-client",
+    platform: "Instagram",
+    post_copy: MOCK_CALENDAR[2].posts[1].copy,
+    media_urls: [
+      "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800&q=80",
+    ],
+    is_selected: false,
+    is_approved: false,
+    variant_group_id: "vg-wed-ig",
+    variant_angle: "Type-led with brand color blocks",
+    created_at: "2026-05-18T11:00:00Z",
+  },
+  {
+    id: "it-wed-ig-2",
+    client_id: "dev-client",
+    platform: "Instagram",
+    post_copy: MOCK_CALENDAR[2].posts[1].copy,
+    media_urls: [
+      "https://images.unsplash.com/photo-1551434678-e076c223a692?w=800&q=80",
+    ],
+    is_selected: true,
+    is_approved: false,
+    variant_group_id: "vg-wed-ig",
+    variant_angle: "Photo-led with subtle overlay",
+    created_at: "2026-05-18T11:00:30Z",
+  },
+  {
+    id: "it-wed-ig-3",
+    client_id: "dev-client",
+    platform: "Instagram",
+    post_copy: MOCK_CALENDAR[2].posts[1].copy,
+    media_urls: [
+      "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=800&q=80",
+    ],
+    is_selected: false,
+    is_approved: false,
+    variant_group_id: "vg-wed-ig",
+    variant_angle: "Illustrated abstract",
+    created_at: "2026-05-18T11:01:00Z",
+  },
+];
+
 export default function DevCalendarPreview() {
+  const [filters, setFilters] = useState<CalendarFilterState>({
+    day: "all",
+    platform: "all",
+    status: "all",
+    language: "all",
+  });
+  const [activePost, setActivePost] = useState<any | null>(null);
+
+  // Same matching heuristic ContentIdeasTab uses.
+  const activePostIterations = activePost
+    ? MOCK_ITERATIONS.filter((it) => {
+        const mp = (activePost.platform || "").toLowerCase();
+        const mc = (activePost.copy || activePost.caption_angle || "")
+          .trim()
+          .slice(0, 200);
+        return (
+          (it.platform || "").toLowerCase() === mp &&
+          (it.post_copy || "").trim().slice(0, 200) === mc
+        );
+      })
+    : [];
+
   return (
     <AppLayout title="Calendar UI Preview (DEV)">
-      <ContentIdeasTab
-        contentCalendar={MOCK_CALENDAR}
-        aiAnalysis={MOCK_AI_ANALYSIS}
-        sproutPerformance={{
-          month_comparison: { summary: "Engagement up 28% MoM, impressions up 41%." },
-        }}
-        clientContext={MOCK_CLIENT_CONTEXT}
-        clientId={undefined}
-        reportId={undefined}
-        clientTimezone="UTC"
-        availablePlatforms={["LinkedIn", "Instagram", "Facebook"]}
-        availableLanguages={["en"]}
-      />
+      <div className="space-y-4">
+        <WeeklyHighlights
+          aiAnalysis={MOCK_AI_ANALYSIS}
+          sproutMonthSummary="Engagement up 28% MoM, impressions up 41%."
+        />
+        <CalendarFilters
+          filters={filters}
+          onChange={setFilters}
+          availablePlatforms={["LinkedIn", "Instagram", "Facebook"]}
+          availableLanguages={["en"]}
+        />
+        <CalendarKanban
+          contentCalendar={MOCK_CALENDAR}
+          postIterations={MOCK_ITERATIONS as any}
+          scheduledPosts={[]}
+          filters={filters}
+          onCardClick={setActivePost}
+          onToggleApproved={() => {}}
+        />
+        <PostPanel
+          open={!!activePost}
+          onOpenChange={(open) => !open && setActivePost(null)}
+          post={activePost}
+          postIterations={activePostIterations as any}
+          clientContext={MOCK_CLIENT_CONTEXT}
+          clientId={undefined}
+          reportId={undefined}
+          clientTimezone="UTC"
+          onToggleSelected={() => {}}
+        />
+      </div>
     </AppLayout>
   );
 }

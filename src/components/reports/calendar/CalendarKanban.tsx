@@ -114,7 +114,7 @@ export function CalendarKanban({
             </div>
 
             {posts.length > 0 && (
-              <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
+              <div className="grid gap-4 grid-cols-1 md:grid-cols-2 2xl:grid-cols-3">
                 {posts.map((post: any, postIdx: number) => {
                   const iteration = findLatestSelectedIteration(postIterations, post);
                   const status = resolvePostStatus({
