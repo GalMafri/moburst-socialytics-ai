@@ -33,6 +33,7 @@ Deno.serve(async (req) => {
       client_context,                 // new — full structured context
       post,                           // new — post-level brief
       slide_context,                  // new — { index, total } for carousels
+      variant_angle,                  // new — creative angle override (Phase 6)
     } = await req.json();
 
     // Backward compat: resolve from client_context if present, else legacy fields.
@@ -100,6 +101,7 @@ Deno.serve(async (req) => {
       geo: resolvedGeo,
       post,
       slideContext: slide_context,
+      variantAngle: variant_angle || null,
     });
 
     // ── Fetch design reference images for multimodal input ──
