@@ -19,6 +19,7 @@ import { Navigate } from "react-router-dom";
 import { Switch } from "@/components/ui/switch";
 import { BrandBookUpload } from "@/components/onboarding/BrandBookUpload";
 import { DesignReferencesUpload } from "@/components/onboarding/DesignReferencesUpload";
+import { DesignSynthesisCard } from "@/components/onboarding/DesignSynthesisCard";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 
@@ -102,6 +103,7 @@ export default function ClientSetup() {
     brand_identity: null as any,
     brief_text: "",
     brief_file_id: "",
+    design_style_synthesis: null as any,
   });
   const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
   const [researchingBrand, setResearchingBrand] = useState(false);
@@ -187,6 +189,7 @@ export default function ClientSetup() {
         brand_identity: client.brand_identity || null,
         brief_text: client.brief_text || "",
         brief_file_id: client.brief_file_id || "",
+        design_style_synthesis: (client as any).design_style_synthesis || null,
       });
     }
   }, [client]);
@@ -847,6 +850,14 @@ export default function ClientSetup() {
                   clientName={form.name}
                   designReferences={form.design_references}
                   onDesignReferencesChange={(refs) => setForm((f) => ({ ...f, design_references: refs }))}
+                />
+
+                <DesignSynthesisCard
+                  clientId={id !== "new" ? id : undefined}
+                  designReferencesCount={form.design_references.length}
+                  hasBrandBook={!!form.brand_book_file_path}
+                  existingSynthesis={form.design_style_synthesis}
+                  onSynthesized={(s) => setForm((f) => ({ ...f, design_style_synthesis: s }))}
                 />
                 <div className="space-y-2">
                   <Label>Brief Text</Label>
