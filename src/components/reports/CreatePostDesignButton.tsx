@@ -116,9 +116,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
       for (let i = 0; i < count; i++) {
         setCurrentSlide(i + 1);
-        const slidePrompt = count > 1
-          ? `${designPrompt}\n\nThis is slide ${i + 1} of ${count} in a carousel post. ${i === 0 ? "This is the cover/hook slide — make it attention-grabbing." : `This is slide ${i + 1} — continue the visual story with a distinct but cohesive design.`} Maintain consistent brand colors and style across all slides.`
-          : designPrompt;
+        const slidePrompt = designPrompt;
 
         const { data, error } = await supabase.functions.invoke("generate-post-image", {
           body: {
@@ -135,6 +133,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               visual_direction: post.visual_direction,
               copy: post.copy,
             },
+            slide_context: count > 1 ? { index: i, total: count } : undefined,
           },
         });
 
@@ -169,6 +168,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                     visual_direction: post.visual_direction,
                     copy: post.copy,
                   },
+                  slide_context: count > 1 ? { index: i, total: count } : undefined,
                 },
               });
               if (retryData?.image_url) {

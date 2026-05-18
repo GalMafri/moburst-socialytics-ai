@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -16,12 +17,6 @@ function getAspectRatio(platform?: string, format?: string): string {
   return "1:1";
 }
 
-function getOrientationLabel(ratio: string): string {
-  if (ratio === "9:16" || ratio === "2:3") return "vertical/portrait";
-  if (ratio === "16:9") return "horizontal/landscape";
-  return "square";
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -37,6 +32,7 @@ Deno.serve(async (req) => {
       brand_book_file_path,           // legacy
       client_context,                 // new — full structured context
       post,                           // new — post-level brief
+      slide_context,                  // new — { index, total } for carousels
     } = await req.json();
 
     // Backward compat: resolve from client_context if present, else legacy fields.
@@ -91,23 +87,20 @@ Deno.serve(async (req) => {
 
     // ── Build the design prompt ──
     const aspectRatio = getAspectRatio(platform, format);
-    const orientation = getOrientationLabel(aspectRatio);
-    const designPrompt = buildDesignPrompt(
-      prompt,
+    const designPrompt = buildImagePrompt({
+      basePrompt: prompt,
       platform,
       format,
-      { ratio: aspectRatio, orientation },
-      resolvedBrand,
-      {
-        synthesis: resolvedSynthesis,
-        pillars: resolvedPillars,
-        brief_text: resolvedBriefText,
-        brand_notes: resolvedBrandNotes,
-        languages: resolvedLanguages,
-        geo: resolvedGeo,
-        post,
-      },
-    );
+      brandIdentity: resolvedBrand,
+      synthesis: resolvedSynthesis,
+      pillars: resolvedPillars,
+      briefText: resolvedBriefText,
+      brandNotes: resolvedBrandNotes,
+      languages: resolvedLanguages,
+      geo: resolvedGeo,
+      post,
+      slideContext: slide_context,
+    });
 
     // ── Fetch design reference images for multimodal input ──
     const contentParts: any[] = [];
@@ -256,86 +249,3 @@ function jsonResp(body: any, status = 200) {
   });
 }
 
-/**
- * Build a design prompt that prioritizes creative direction over restrictions.
- * The prompt leads with WHAT to create, then adds brand context and constraints.
- * Hex codes are isolated into a metadata palette block so the model never
- * renders them as visible text in the output image.
- */
-function buildDesignPrompt(
-  basePrompt: string,
-  platform?: string,
-  format?: string,
-  aspect?: { ratio: string; orientation: string },
-  brand?: any,
-  extras?: any,    // wired up in Phase 3
-): string {
-  const sections: string[] = [];
-
-  // ── Strip hex codes from the free-text prompt as a safety net ──
-  const sanitizedPrompt = basePrompt.replace(/#[0-9A-Fa-f]{3,8}/g, "[brand color]");
-
-  // ── 1. LEAD with the creative direction (MOST IMPORTANT) ──
-  sections.push(`Generate a professional social media graphic based on this creative direction:
-
-${sanitizedPrompt}
-
-This must be a COMPLETE, ready-to-post social media image — NOT an abstract background or placeholder.
-If the direction mentions photos of people, create realistic photographic content.
-If the direction mentions text/headlines/copy overlays, include that exact text beautifully typeset in the image.
-The image should look like it was designed by a professional social media designer using tools like Canva or Adobe.`);
-
-  // ── 2. Image format ──
-  sections.push(`FORMAT: ${aspect?.ratio || "1:1"} ${aspect?.orientation || "square"} image.
-Keep all important elements within safe margins (15% from edges). Clean, balanced composition.`);
-
-  // ── 3. Platform context (brief) ──
-  const p = (platform || "").toLowerCase();
-  if (p.includes("instagram") || p.includes("tiktok")) {
-    sections.push(`PLATFORM: ${platform} ${format || ""} — mobile-first, bold, scroll-stopping. High contrast.`);
-  } else if (p.includes("linkedin")) {
-    sections.push(`PLATFORM: LinkedIn — professional, polished, corporate-friendly.`);
-  } else if (p.includes("facebook")) {
-    sections.push(`PLATFORM: Facebook — shareable, attention-grabbing.`);
-  } else if (p.includes("youtube")) {
-    sections.push(`PLATFORM: YouTube — bold, cinematic, high impact.`);
-  }
-
-  // ── 4. Brand colors — clearly delimited metadata block ──
-  if (brand) {
-    const colorLines: string[] = [];
-    if (brand.primary_color) colorLines.push(`Primary: ${brand.primary_color}`);
-    if (brand.secondary_color) colorLines.push(`Secondary: ${brand.secondary_color}`);
-    if (brand.accent_color) colorLines.push(`Accent: ${brand.accent_color}`);
-
-    if (colorLines.length > 0) {
-      sections.push(
-        `=== DESIGN COLOR PALETTE (use these colors in the design, NEVER display them as text) ===\n` +
-        colorLines.join("\n") +
-        `\n=== END PALETTE ===\n` +
-        `Incorporate these colors naturally into backgrounds, overlays, text, and design elements. White and dark neutrals are OK for contrast.`
-      );
-    }
-
-    const styleParts: string[] = [];
-    if (brand.visual_style) styleParts.push(brand.visual_style);
-    if (brand.tone_of_voice) styleParts.push(`Tone: ${brand.tone_of_voice}`);
-    if (brand.font_family) styleParts.push(`Typography: ${brand.font_family}`);
-
-    if (styleParts.length > 0) {
-      sections.push(`BRAND STYLE: ${styleParts.join(". ")}`);
-    }
-  }
-
-  // ── 5. Constraints (short, at the end) ──
-  sections.push(`IMPORTANT CONSTRAINTS:
-- Do NOT include any company logos, brand wordmarks, or watermarks — the client adds those later
-- Do NOT invent company names or brand text — only use text from the creative direction above
-- Produce a polished, editorial-quality graphic — not stock photography, not abstract art, not clip art
-- CRITICAL: The color codes above are for your reference only. NEVER render, display, write, or include any hex codes, color codes, RGB values, or any technical color notation as visible text anywhere in the design.`);
-
-  // ── 6. Final reminder ──
-  sections.push(`FINAL REMINDER: Under no circumstances should any hex color codes (e.g. #FF5733), RGB values, or technical color notation appear as readable text in the generated image. Colors should be applied visually, not written out.`);
-
-  return sections.join("\n\n");
-}
