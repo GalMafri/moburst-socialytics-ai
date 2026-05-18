@@ -1,5 +1,7 @@
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { PlatformBadge } from "@/lib/platform-config";
+import { X } from "lucide-react";
 
 export interface CalendarFilterState {
   day: string;        // "all" | "Monday" | ... | "Sunday"
@@ -24,94 +26,155 @@ const STATUSES: Array<{ value: string; label: string }> = [
   { value: "scheduled", label: "Scheduled" },
 ];
 
-export function CalendarFilters({ filters, onChange, availablePlatforms, availableLanguages }: Props) {
+const DEFAULT_FILTERS: CalendarFilterState = {
+  day: "all",
+  platform: "all",
+  status: "all",
+  language: "all",
+};
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+  ariaLabel,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  ariaLabel?: string;
+}) {
   return (
-    <div className="sticky top-0 z-10 bg-background/95 backdrop-blur py-2 space-y-2 border-b print:hidden">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={ariaLabel}
+      className="inline-flex items-center rounded-full
+                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
+                 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    >
+      <Badge
+        variant={active ? "default" : "outline"}
+        className={`cursor-pointer text-sm py-2 px-3 transition-colors ${
+          active ? "" : "hover:border-foreground/40"
+        }`}
+      >
+        {children}
+      </Badge>
+    </button>
+  );
+}
+
+export function CalendarFilters({ filters, onChange, availablePlatforms, availableLanguages }: Props) {
+  const hasActive =
+    filters.day !== "all" ||
+    filters.platform !== "all" ||
+    filters.status !== "all" ||
+    filters.language !== "all";
+
+  return (
+    <div className="sticky top-0 z-10 bg-background/95 backdrop-blur py-3 space-y-3 border-b border-white/10 print:hidden">
       {/* Day row */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-sm font-medium text-muted-foreground mr-1">Day:</span>
-        <Badge
-          variant={filters.day === "all" ? "default" : "outline"}
-          className="cursor-pointer text-sm py-1 px-2.5"
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-muted-foreground w-16">Day</span>
+        <FilterChip
+          active={filters.day === "all"}
           onClick={() => onChange({ ...filters, day: "all" })}
         >
           All
-        </Badge>
+        </FilterChip>
         {DAYS.map((d) => (
-          <Badge
+          <FilterChip
             key={d}
-            variant={filters.day === d ? "default" : "outline"}
-            className="cursor-pointer text-sm py-1 px-2.5"
+            active={filters.day === d}
             onClick={() => onChange({ ...filters, day: d })}
+            ariaLabel={d}
           >
             {d.slice(0, 3)}
-          </Badge>
+          </FilterChip>
         ))}
       </div>
 
-      {/* Platform + status + language row */}
+      {/* Platform row */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-sm font-medium text-muted-foreground mr-1">Platform:</span>
-          <Badge
-            variant={filters.platform === "all" ? "default" : "outline"}
-            className="cursor-pointer text-sm py-1 px-2.5"
-            onClick={() => onChange({ ...filters, platform: "all" })}
+        <span className="text-sm font-medium text-muted-foreground w-16">Platform</span>
+        <FilterChip
+          active={filters.platform === "all"}
+          onClick={() => onChange({ ...filters, platform: "all" })}
+        >
+          All
+        </FilterChip>
+        {availablePlatforms.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onChange({ ...filters, platform: p })}
+            aria-pressed={filters.platform === p}
+            className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <PlatformBadge
+              platform={p}
+              size="sm"
+              className={`cursor-pointer ${
+                filters.platform === p
+                  ? "ring-2 ring-primary ring-offset-2 ring-offset-background"
+                  : "opacity-75 hover:opacity-100"
+              }`}
+            />
+          </button>
+        ))}
+      </div>
+
+      {/* Status row */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-muted-foreground w-16">Status</span>
+        {STATUSES.map((s) => (
+          <FilterChip
+            key={s.value}
+            active={filters.status === s.value}
+            onClick={() => onChange({ ...filters, status: s.value })}
+          >
+            {s.label}
+          </FilterChip>
+        ))}
+      </div>
+
+      {/* Language row — only when more than one available */}
+      {availableLanguages.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-muted-foreground w-16">Language</span>
+          <FilterChip
+            active={filters.language === "all"}
+            onClick={() => onChange({ ...filters, language: "all" })}
           >
             All
-          </Badge>
-          {availablePlatforms.map((p) => (
-            <span
-              key={p}
-              className="cursor-pointer"
-              onClick={() => onChange({ ...filters, platform: p })}
+          </FilterChip>
+          {availableLanguages.map((l) => (
+            <FilterChip
+              key={l}
+              active={filters.language === l}
+              onClick={() => onChange({ ...filters, language: l })}
             >
-              <PlatformBadge
-                platform={p}
-                size="sm"
-                className={filters.platform === p ? "ring-1 ring-offset-1 ring-current" : "opacity-70 hover:opacity-100"}
-              />
-            </span>
+              <span className="uppercase">{l}</span>
+            </FilterChip>
           ))}
         </div>
+      )}
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-sm font-medium text-muted-foreground mr-1">Status:</span>
-          {STATUSES.map((s) => (
-            <Badge
-              key={s.value}
-              variant={filters.status === s.value ? "default" : "outline"}
-              className="cursor-pointer text-sm py-1 px-2.5"
-              onClick={() => onChange({ ...filters, status: s.value })}
-            >
-              {s.label}
-            </Badge>
-          ))}
+      {/* Clear filters action */}
+      {hasActive && (
+        <div className="flex items-center justify-end pt-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange(DEFAULT_FILTERS)}
+            className="text-sm text-muted-foreground hover:text-foreground gap-1.5"
+          >
+            <X className="h-3.5 w-3.5" /> Clear filters
+          </Button>
         </div>
-
-        {availableLanguages.length > 1 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-sm font-medium text-muted-foreground mr-1">Lang:</span>
-            <Badge
-              variant={filters.language === "all" ? "default" : "outline"}
-              className="cursor-pointer text-sm py-1 px-2.5"
-              onClick={() => onChange({ ...filters, language: "all" })}
-            >
-              All
-            </Badge>
-            {availableLanguages.map((l) => (
-              <Badge
-                key={l}
-                variant={filters.language === l ? "default" : "outline"}
-                className="cursor-pointer text-sm py-1 px-2.5 uppercase"
-                onClick={() => onChange({ ...filters, language: l })}
-              >
-                {l}
-              </Badge>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

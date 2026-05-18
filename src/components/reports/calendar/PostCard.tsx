@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { PlatformBadge } from "@/lib/platform-config";
-import { Clock, ImagePlus, MoreVertical } from "lucide-react";
+import { Clock, ImagePlus } from "lucide-react";
 import { PostStatusChip, type PostStatus } from "./PostStatusChip";
 
 interface Iteration {
@@ -36,7 +36,10 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
     <button
       type="button"
       onClick={onOpen}
-      className="glass-elevated w-full text-left rounded-lg p-4 hover:border-primary/50 transition-colors space-y-3.5 group flex flex-col"
+      aria-label={`Open post: ${copy.slice(0, 60) || post.platform}`}
+      className="glass-elevated w-full text-left rounded-lg p-4 space-y-3.5 group flex flex-col
+                 transition-colors hover:border-primary/60
+                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       {/* Thumbnail / empty state — 16:10 keeps cards from going too tall. */}
       {thumb ? (
@@ -49,18 +52,18 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         </div>
       ) : (
         <div className="w-full aspect-[16/10] rounded flex items-center justify-center bg-[rgba(255,255,255,0.04)] border border-dashed border-white/10 group-hover:border-primary/40 transition-colors">
-          <div className="flex flex-col items-center gap-1.5 text-muted-foreground/70">
+          <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
             <ImagePlus className="h-5 w-5" />
             <span className="text-sm">No design yet</span>
           </div>
         </div>
       )}
 
-      {/* Badges row — bumped to text-sm */}
+      {/* Badges row */}
       <div className="flex items-center gap-2 flex-wrap">
         {post.platform && <PlatformBadge platform={post.platform} size="sm" />}
         {post.format && (
-          <Badge variant="outline" className="text-sm py-0.5 px-2 border-white/20">
+          <Badge variant="outline" className="text-sm py-0.5 px-2 border-white/25">
             {post.format}
           </Badge>
         )}
@@ -76,7 +79,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         )}
       </div>
 
-      {/* Pillar — bumped to text-sm */}
+      {/* Pillar */}
       {post.pillar && (
         <div>
           <Badge className="bg-accent text-accent-foreground text-sm py-1 px-2.5 font-normal">
@@ -85,22 +88,16 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         </div>
       )}
 
-      {/* Copy — bumped to text-base (16px) with relaxed leading */}
+      {/* Copy */}
       {copy && (
-        <p className="text-base leading-relaxed line-clamp-3 print:line-clamp-none text-foreground/95 flex-1">
+        <p className="text-base leading-relaxed line-clamp-3 print:line-clamp-none text-foreground flex-1">
           {copy}
         </p>
       )}
 
-      {/* Status + overflow */}
-      <div className="flex items-center justify-between pt-2 border-t border-white/5">
+      {/* Status (interactive if onToggleApproved provided) */}
+      <div className="pt-2 border-t border-white/10">
         <PostStatusChip status={status} onToggleApproved={onToggleApproved} />
-        <span
-          className="text-muted-foreground/60 hover:text-muted-foreground"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <MoreVertical className="h-4 w-4" />
-        </span>
       </div>
     </button>
   );

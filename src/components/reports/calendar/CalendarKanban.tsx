@@ -24,6 +24,7 @@ interface ScheduledPostRef {
 interface Props {
   contentCalendar: Array<{
     day?: string;
+    date_label?: string;
     posts?: any[];
   }>;
   postIterations: Iteration[];
@@ -106,9 +107,17 @@ export function CalendarKanban({
         return (
           <section key={dayName} className="space-y-3">
             {/* Day header row */}
-            <div className="flex items-baseline gap-3 sticky top-16 lg:top-20 bg-background/95 backdrop-blur py-3 z-[5] border-b border-white/10">
+            <div className="flex items-baseline gap-3 flex-wrap sticky top-16 lg:top-20 bg-background/95 backdrop-blur py-3 z-[5] border-b border-white/10">
               <h3 className="text-2xl font-semibold text-foreground tracking-tight">{dayName}</h3>
-              <span className="text-base text-muted-foreground">
+              {dayEntry?.date_label && (
+                <span className="text-base text-muted-foreground">
+                  {dayEntry.date_label}
+                </span>
+              )}
+              <span
+                className="text-sm text-muted-foreground ml-auto"
+                aria-live="polite"
+              >
                 {posts.length === 0 ? "No posts" : `${posts.length} post${posts.length === 1 ? "" : "s"}`}
               </span>
             </div>

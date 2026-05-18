@@ -37,6 +37,7 @@ const MOCK_CLIENT_CONTEXT: ClientContext = {
 const MOCK_CALENDAR = [
   {
     day: "Monday",
+    date_label: "May 19",
     posts: [
       {
         platform: "LinkedIn",
@@ -61,7 +62,7 @@ const MOCK_CALENDAR = [
     ],
   },
   {
-    day: "Tuesday",
+    day: "Tuesday", date_label: "May 20",
     posts: [
       {
         platform: "Facebook",
@@ -75,7 +76,7 @@ const MOCK_CALENDAR = [
     ],
   },
   {
-    day: "Wednesday",
+    day: "Wednesday", date_label: "May 21",
     posts: [
       {
         platform: "LinkedIn",
@@ -98,7 +99,7 @@ const MOCK_CALENDAR = [
     ],
   },
   {
-    day: "Thursday",
+    day: "Thursday", date_label: "May 22",
     posts: [
       {
         platform: "LinkedIn",
@@ -121,7 +122,7 @@ const MOCK_CALENDAR = [
     ],
   },
   {
-    day: "Friday",
+    day: "Friday", date_label: "May 23",
     posts: [
       {
         platform: "LinkedIn",
@@ -144,7 +145,7 @@ const MOCK_CALENDAR = [
     ],
   },
   {
-    day: "Saturday",
+    day: "Saturday", date_label: "May 24",
     posts: [
       {
         platform: "Instagram",
@@ -158,7 +159,7 @@ const MOCK_CALENDAR = [
     ],
   },
   {
-    day: "Sunday",
+    day: "Sunday", date_label: "May 25",
     posts: [
       {
         platform: "LinkedIn",
