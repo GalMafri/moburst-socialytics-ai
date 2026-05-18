@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import {
   ExternalLink,
   TrendingUp,
@@ -18,46 +17,21 @@ import {
   Share2,
   MousePointerClick,
   Video,
-  Calendar,
-  Clock,
   Lightbulb,
-  Copy,
   BarChart3,
   Sparkles,
   Target,
   Globe,
   Languages,
-  Pencil,
-  RefreshCw,
-  Loader2,
-  Download,
 } from "lucide-react";
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { Textarea } from "@/components/ui/textarea";
-import { useState, useRef, useEffect } from "react";
-import { toast } from "sonner";
+import { useRef } from "react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { useAuth } from "@/hooks/useAuth";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
-import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
-import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
-import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
-import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
-import { Send, Pencil as PencilEdit } from "lucide-react";
-import { DesignEditor } from "@/components/editor/DesignEditor";
-import { VideoTrimmer, type VideoEditData, type TextOverlay } from "@/components/editor/VideoTrimmer";
+import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import {
   parseCsv,
   stripVoicePreset,
@@ -109,7 +83,6 @@ export default function ReportView() {
   const rawRd = report.report_data as any;
   const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
   const clientName = (report as any).clients?.name || "Client";
-  const brandIdentity = (report as any).clients?.brand_identity || null;
 
   // Build the full client context once, pass down via props.
   const clientRow = (report as any).clients || {};
@@ -148,6 +121,14 @@ export default function ReportView() {
         (day.posts || []).map((p: any) => p.platform).filter(Boolean)
       ),
     ]),
+  ] as string[];
+
+  const availableLanguages = [
+    ...new Set(
+      (contentCalendar || []).flatMap((day: any) =>
+        (day.posts || []).map((p: any) => p.language).filter(Boolean),
+      ),
+    ),
   ] as string[];
 
   // Build available tabs
@@ -416,62 +397,18 @@ export default function ReportView() {
           </TabsContent>
 
           {/* ── CONTENT IDEAS TAB ── */}
-          <TabsContent value="content" className="space-y-8">
-            {/* Ad Hoc Post Creation */}
-            {availablePlatforms.length > 0 && (
-              <div className="flex justify-end">
-                <CreateAdHocPost
-                  clientId={id!}
-                  platforms={availablePlatforms}
-                  brandIdentity={brandIdentity}
-                  clientContext={clientContext}
-                />
-              </div>
-            )}
-
-            {/* Recommendations */}
-            {aiAnalysis?.content_recommendations?.length > 0 && (
-              <ContentRecommendations recommendations={aiAnalysis.content_recommendations} />
-            )}
-
-            {/* Calendar */}
-            {contentCalendar.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-base font-semibold flex items-center gap-2">
-                  <Calendar className="h-4 w-4" /> Weekly Content Calendar
-                </h3>
-                <div className="space-y-4">
-                  {contentCalendar.map((day: any, dayIdx: number) => (
-                    <Card key={dayIdx}>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">
-                            {dayIdx + 1}
-                          </span>
-                          {day.day}
-                          {day.date_label && (
-                            <span className="text-xs text-muted-foreground font-normal">({day.date_label})</span>
-                          )}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        {(day.posts || []).map((post: any, postIdx: number) => (
-                          <CalendarPostCard
-                            key={postIdx}
-                            post={post}
-                            brandIdentity={brandIdentity}
-                            clientContext={clientContext}
-                            clientId={id}
-                            reportId={reportId}
-                            clientTimezone={(report?.report_data as any)?.context?.timezone || "UTC"}
-                          />
-                        ))}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            )}
+          <TabsContent value="content" className="space-y-4">
+            <ContentIdeasTab
+              contentCalendar={contentCalendar}
+              aiAnalysis={aiAnalysis}
+              sproutPerformance={sproutPerformance}
+              clientContext={clientContext}
+              clientId={id}
+              reportId={reportId}
+              clientTimezone={rd?.context?.timezone || "UTC"}
+              availablePlatforms={availablePlatforms}
+              availableLanguages={availableLanguages}
+            />
           </TabsContent>
 
           {/* ── TRENDS TAB ── */}
@@ -492,576 +429,6 @@ export default function ReportView() {
         </Tabs>
       </div>
     </AppLayout>
-  );
-}
-
-/* ─── Content Recommendations ─── */
-function ContentRecommendations({ recommendations }: { recommendations: any[] }) {
-  const [platformFilter, setPlatformFilter] = useState("all");
-  const platforms = [...new Set(recommendations.map((r: any) => r.platform).filter(Boolean))];
-  const filtered =
-    platformFilter === "all" ? recommendations : recommendations.filter((r: any) => r.platform === platformFilter);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold flex items-center gap-2">
-          <Sparkles className="h-4 w-4" /> Content Recommendations
-        </h3>
-        <div className="flex gap-1.5">
-          <Badge
-            variant={platformFilter === "all" ? "default" : "outline"}
-            className="cursor-pointer text-xs"
-            onClick={() => setPlatformFilter("all")}
-          >
-            All
-          </Badge>
-          {platforms.map((p) => (
-            <span key={p} className="cursor-pointer" onClick={() => setPlatformFilter(p)}>
-              <PlatformBadge
-                platform={p}
-                className={platformFilter === p ? "ring-1 ring-offset-1 ring-current" : "opacity-70 hover:opacity-100"}
-                size="sm"
-              />
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="space-y-4">
-        {filtered.map((rec: any, i: number) => (
-          <Card key={i}>
-            <CardContent className="pt-5 space-y-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <PlatformBadge platform={rec.platform} size="sm" />
-                <Badge variant="outline">{rec.format}</Badge>
-                {rec.addresses_pillar && (
-                  <Badge className="bg-accent text-accent-foreground text-xs">{rec.addresses_pillar}</Badge>
-                )}
-              </div>
-              <blockquote className="border-l-2 border-primary pl-4 text-sm font-medium leading-relaxed">
-                {rec.hook}
-              </blockquote>
-              <p className="text-sm leading-relaxed">{rec.concept}</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-muted-foreground">
-                {rec.caption_angle && (
-                  <div>
-                    <span className="font-medium text-foreground">Caption angle: </span>
-                    {rec.caption_angle}
-                  </div>
-                )}
-                {rec.cta && (
-                  <div>
-                    <span className="font-medium text-foreground">CTA: </span>
-                    {rec.cta}
-                  </div>
-                )}
-              </div>
-              {rec.visual_direction && (
-                <p className="text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">Visual: </span>
-                  {rec.visual_direction}
-                </p>
-              )}
-              {rec.why_this && (
-                <div className="bg-[rgba(255,255,255,0.03)] p-3 rounded-md text-sm leading-relaxed text-muted-foreground">
-                  💡 {rec.why_this}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ─── Calendar Post Card ─── */
-function CalendarPostCard({
-  post,
-  brandIdentity,
-  clientContext,
-  clientId,
-  reportId,
-  clientTimezone,
-}: {
-  post: any;
-  brandIdentity?: any;
-  clientContext: ClientContext;
-  clientId?: string;
-  reportId?: string;
-  clientTimezone?: string;
-}) {
-  const [copied, setCopied] = useState(false);
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [generatedMediaUrls, setGeneratedMediaUrls] = useState<string[]>([]);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editingMediaIndex, setEditingMediaIndex] = useState<number | null>(null);
-  const [editingMediaType, setEditingMediaType] = useState<"image" | "video" | null>(null);
-  // Store video edit data per media index (overlays, trim)
-  const [videoEdits, setVideoEdits] = useState<Record<number, VideoEditData>>({});
-
-  // Load previously generated media + video edits from post_iterations on mount
-  useEffect(() => {
-    if (!clientId) return;
-    let query = supabase
-      .from("post_iterations")
-      .select("media_urls, video_edits")
-      .eq("client_id", clientId)
-      .not("media_urls", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    if (post.platform) query = query.eq("platform", post.platform);
-    const postCopy = post.copy || post.caption_angle || "";
-    if (postCopy) query = query.eq("post_copy", postCopy);
-
-    query.then(({ data }) => {
-      if (data?.[0]?.media_urls?.length) {
-        setGeneratedMediaUrls(data[0].media_urls);
-      }
-      // Restore saved video edits
-      if (data?.[0]?.video_edits && typeof data[0].video_edits === "object") {
-        setVideoEdits(data[0].video_edits as unknown as Record<number, VideoEditData>);
-      }
-    }, () => {});
-  }, [clientId, post.platform]);
-  const initialCopy = post.copy || post.caption_angle || post.concept || "";
-  const [editedCopy, setEditedCopy] = useState(initialCopy);
-  const [displayCopy, setDisplayCopy] = useState(initialCopy);
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
-  const [isRegenerating, setIsRegenerating] = useState(false);
-
-  const handleCopy = () => {
-    const fullText =
-      displayCopy + (post.hashtags?.length ? "\n\n" + post.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`).join(" ") : "");
-    navigator.clipboard.writeText(fullText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleSaveEdit = async () => {
-    if (!clientId || !editedCopy.trim()) return;
-    setIsSavingEdit(true);
-    try {
-      // Save original version (version 1)
-      await supabase.from("post_iterations").insert({
-        client_id: clientId,
-        report_id: reportId || null,
-        version: 1,
-        platform: post.platform || null,
-        post_copy: displayCopy,
-        hashtags: post.hashtags || null,
-        cta: post.CTA || post.cta || null,
-        concept: post.concept || null,
-        visual_direction: post.visual_direction || null,
-        format: post.format || null,
-        source: "calendar",
-      });
-
-      // Save edited version (version 2)
-      await supabase.from("post_iterations").insert({
-        client_id: clientId,
-        report_id: reportId || null,
-        version: 2,
-        platform: post.platform || null,
-        post_copy: editedCopy,
-        hashtags: post.hashtags || null,
-        cta: post.CTA || post.cta || null,
-        concept: post.concept || null,
-        visual_direction: post.visual_direction || null,
-        format: post.format || null,
-        source: "calendar",
-      });
-
-      // Call analyze-post-edits edge function
-      supabase.functions.invoke("analyze-post-edits", {
-        body: {
-          client_id: clientId,
-          original_copy: displayCopy,
-          edited_copy: editedCopy,
-        },
-      });
-
-      // Update local display
-      setDisplayCopy(editedCopy);
-      setIsEditing(false);
-      toast.success("Post updated and preferences saved");
-    } catch (err: any) {
-      toast.error("Failed to save edit: " + (err.message || "Unknown error"));
-    } finally {
-      setIsSavingEdit(false);
-    }
-  };
-
-  const handleRegenerate = async () => {
-    if (!clientId) return;
-    setIsRegenerating(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("regenerate-post-copy", {
-        body: {
-          client_id: clientId,
-          platform: post.platform || null,
-          concept: post.concept || post.copy || post.caption_angle || post.rationale || displayCopy || "social media post",
-          pillar: post.pillar || null,
-          current_copy: displayCopy,
-          current_cta: post.CTA || post.cta || null,
-        },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-
-      const postResult = data?.post || data;
-      const newCopy = postResult?.caption_angle || postResult?.copy || postResult?.post_copy;
-      if (newCopy) {
-        // Save regenerated version to post_iterations
-        await supabase.from("post_iterations").insert({
-          client_id: clientId,
-          report_id: reportId || null,
-          version: 1,
-          platform: post.platform || null,
-          post_copy: newCopy,
-          hashtags: postResult?.hashtags || post.hashtags || null,
-          cta: postResult?.CTA || postResult?.cta || post.CTA || post.cta || null,
-          concept: post.concept || null,
-          visual_direction: post.visual_direction || null,
-          format: post.format || null,
-          source: "regeneration",
-        });
-
-        setDisplayCopy(newCopy);
-        setEditedCopy(newCopy);
-        toast.success("Copy regenerated");
-      }
-    } catch (err: any) {
-      toast.error("Failed to regenerate: " + (err.message || "Unknown error"));
-    } finally {
-      setIsRegenerating(false);
-    }
-  };
-
-  return (
-    <div className="border rounded-lg p-4 space-y-3 bg-[rgba(255,255,255,0.02)]">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <PlatformBadge platform={post.platform} size="sm" />
-          <Badge variant="outline">{post.format}</Badge>
-          {post.language && (
-            <Badge variant="secondary" className="text-xs uppercase">
-              {post.language}
-            </Badge>
-          )}
-          {post.pillar && <Badge className="bg-accent text-accent-foreground text-xs">{post.pillar}</Badge>}
-        </div>
-        <div className="flex items-center gap-2">
-          {post.posting_time && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Clock className="h-3 w-3" /> {post.posting_time}
-            </span>
-          )}
-          <CreatePostDesignButton
-            post={post}
-            brandIdentity={brandIdentity}
-            clientContext={clientContext}
-            clientId={clientId}
-            onImagesGenerated={(urls) => setGeneratedMediaUrls(urls)}
-          />
-          <CreatePostVideoButton
-            post={post}
-            brandIdentity={brandIdentity}
-            clientContext={clientContext}
-            clientId={clientId}
-            onVideoGenerated={(url) => setGeneratedMediaUrls([url])}
-          />
-          {clientId && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2"
-                onClick={() => {
-                  setEditedCopy(displayCopy);
-                  setIsEditing(true);
-                }}
-                disabled={isEditing || isRegenerating}
-              >
-                <Pencil className="h-3.5 w-3.5 mr-1" /> Edit Copy
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2"
-                onClick={handleRegenerate}
-                disabled={isRegenerating || isEditing}
-              >
-                {isRegenerating ? (
-                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                )}
-                {isRegenerating ? "Regenerating..." : "Regenerate"}
-              </Button>
-            </>
-          )}
-          {clientId && reportId && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setScheduleOpen(true);
-                }}
-              >
-                <Send className="h-3 w-3 mr-1" /> Schedule
-              </Button>
-              <SchedulePostModal
-                open={scheduleOpen}
-                onOpenChange={setScheduleOpen}
-                post={post}
-                clientId={clientId}
-                reportId={reportId}
-                generatedMediaUrls={generatedMediaUrls}
-                clientTimezone={clientTimezone}
-              />
-            </>
-          )}
-          <Button variant="ghost" size="sm" onClick={handleCopy} className="h-7 px-2">
-            <Copy className="h-3.5 w-3.5 mr-1" />
-            {copied ? "Copied!" : "Copy"}
-          </Button>
-        </div>
-      </div>
-
-      {isEditing ? (
-        <div className="space-y-2">
-          <Textarea
-            value={editedCopy}
-            onChange={(e) => setEditedCopy(e.target.value)}
-            rows={5}
-            className="text-sm"
-            placeholder="Edit post copy..."
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={handleSaveEdit}
-              disabled={isSavingEdit || !editedCopy.trim()}
-            >
-              {isSavingEdit ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-              ) : null}
-              Save
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setEditedCopy(displayCopy);
-                setIsEditing(false);
-              }}
-              disabled={isSavingEdit}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-background rounded-md p-3 border">
-          <p className="text-sm leading-relaxed whitespace-pre-line">{displayCopy}</p>
-          {post.hashtags?.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-3 pt-2 border-t">
-              {post.hashtags.map((h: string) => (
-                <span key={h} className="text-xs text-primary">
-                  {h.startsWith('#') ? h : `#${h}`}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {post.visual_direction && (
-        <p className="text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">Visual: </span>
-          {post.visual_direction}
-        </p>
-      )}
-      {post.rationale && (
-        <div className="bg-[rgba(255,255,255,0.03)] p-3 rounded-md text-sm leading-relaxed text-muted-foreground">
-          💡 {post.rationale}
-        </div>
-      )}
-
-      {/* Show previously generated media — compact thumbnails with edit */}
-      {generatedMediaUrls.length > 0 && (
-        <div className="space-y-2 border-t pt-3">
-          <p className="text-xs font-medium text-muted-foreground">Generated Media</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {generatedMediaUrls.map((url, i) => {
-              const isVideo = url.includes(".mp4") || url.includes(".webm") || url.includes("video") || url.includes("generativelanguage");
-              return (
-                <div key={i} className="relative group">
-                  {isVideo ? (
-                    <>
-                      <video
-                        src={url}
-                        className="w-full h-32 object-cover rounded-md border bg-black"
-                        muted
-                        preload="metadata"
-                      />
-                      {/* Render saved text overlays on video thumbnail */}
-                      {videoEdits[i]?.overlays?.map((ov) => (
-                        <div
-                          key={ov.id}
-                          className="pointer-events-none"
-                          style={{
-                            position: "absolute",
-                            left: `${ov.x}%`,
-                            top: `${ov.y}%`,
-                            transform: "translate(-50%, -50%)",
-                            fontSize: `${Math.max(ov.fontSize * 0.4, 10)}px`,
-                            fontWeight: ov.fontWeight,
-                            color: ov.color,
-                            textShadow: "1px 1px 3px rgba(0,0,0,0.9)",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {ov.text}
-                        </div>
-                      ))}
-                      {videoEdits[i]?.trimStart > 0 && (
-                        <span className="absolute top-1 left-1 bg-primary/80 text-primary-foreground text-[9px] px-1 rounded">
-                          Trimmed
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <img
-                      src={url}
-                      alt={`Design ${i + 1}`}
-                      className="w-full h-32 object-cover rounded-md border"
-                    />
-                  )}
-                  {/* Action buttons overlay */}
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors rounded-md flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => {
-                        setEditingMediaIndex(i);
-                        setEditingMediaType(isVideo ? "video" : "image");
-                      }}
-                    >
-                      <PencilEdit className="h-3 w-3 mr-1" /> Edit
-                    </Button>
-                    <a
-                      href={url}
-                      download={`${post.platform || "design"}-${i + 1}.${isVideo ? "mp4" : "png"}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Button variant="secondary" size="sm" className="h-7 px-2 text-xs">
-                        <Download className="h-3 w-3" />
-                      </Button>
-                    </a>
-                  </div>
-                  {/* Type label */}
-                  <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">
-                    {isVideo ? "Video" : `Slide ${i + 1}`}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Image editor dialog */}
-      {editingMediaType === "image" && editingMediaIndex !== null && generatedMediaUrls[editingMediaIndex] && (
-        <DesignEditor
-          imageUrl={generatedMediaUrls[editingMediaIndex]}
-          brandIdentity={brandIdentity}
-          clientId={clientId || ""}
-          onSave={async (dataUrl) => {
-            console.log("[DesignEditor] onSave called, dataUrl length:", dataUrl?.length);
-            // Upload edited image to Supabase storage
-            let finalUrl = dataUrl;
-            try {
-              const res = await fetch(dataUrl);
-              const blob = await res.blob();
-              console.log("[DesignEditor] Blob created, size:", blob.size);
-              const storagePath = `${clientId || "unknown"}/${Date.now()}-edited-design.png`;
-              const { error: uploadErr } = await supabase.storage
-                .from("generated-media")
-                .upload(storagePath, blob, { contentType: "image/png", upsert: true });
-              if (uploadErr) {
-                console.error("[DesignEditor] Upload error:", uploadErr);
-              } else {
-                const { data: urlData } = supabase.storage
-                  .from("generated-media")
-                  .getPublicUrl(storagePath);
-                finalUrl = urlData.publicUrl;
-                console.log("[DesignEditor] Uploaded to:", finalUrl);
-              }
-            } catch (e) {
-              console.error("[DesignEditor] Upload failed:", e);
-            }
-
-            console.log("[DesignEditor] Setting generatedMediaUrls[" + editingMediaIndex + "] =", finalUrl?.substring(0, 80));
-            setGeneratedMediaUrls((prev) => {
-              const updated = [...prev];
-              updated[editingMediaIndex!] = finalUrl;
-              return updated;
-            });
-            setEditingMediaIndex(null);
-            setEditingMediaType(null);
-            toast.success("Design updated!");
-          }}
-          onClose={() => { setEditingMediaIndex(null); setEditingMediaType(null); }}
-        />
-      )}
-
-      {/* Video editor dialog */}
-      {editingMediaType === "video" && editingMediaIndex !== null && generatedMediaUrls[editingMediaIndex] && (
-        <VideoTrimmer
-          videoUrl={generatedMediaUrls[editingMediaIndex]}
-          clientId={clientId}
-          initialEdits={videoEdits[editingMediaIndex]}
-          onSave={(url, edits) => {
-            // Update the media URL with the processed video
-            if (url && url !== generatedMediaUrls[editingMediaIndex!]) {
-              setGeneratedMediaUrls((prev) => {
-                const updated = [...prev];
-                updated[editingMediaIndex!] = url;
-                return updated;
-              });
-            }
-
-            // Store edit metadata
-            const updatedEdits = { ...videoEdits, [editingMediaIndex!]: edits };
-            setVideoEdits(updatedEdits);
-            setEditingMediaIndex(null);
-            setEditingMediaType(null);
-
-            // Persist to database
-            if (clientId) {
-              const postCopy = post.copy || post.caption_angle || "";
-              supabase
-                .from("post_iterations")
-                .update({ video_edits: updatedEdits } as any)
-                .eq("client_id", clientId)
-                .eq("platform", post.platform || "")
-                .not("media_urls", "is", null)
-                .then(() => {}, (err: any) => console.error("Failed to save video edits:", err));
-            }
-          }}
-          onClose={() => { setEditingMediaIndex(null); setEditingMediaType(null); }}
-        />
-      )}
-    </div>
   );
 }
 
