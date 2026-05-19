@@ -12,6 +12,7 @@ import { Play, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, CalendarDays, T
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Loading } from "@/components/ui/loading";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { Navigate } from "react-router-dom";
 
@@ -318,7 +319,7 @@ export default function RunAnalysis() {
   if (!client)
     return (
       <AppLayout title="Run Analysis">
-        <div className="animate-pulse text-muted-foreground">Loading...</div>
+        <Loading label="Loading" />
       </AppLayout>
     );
 

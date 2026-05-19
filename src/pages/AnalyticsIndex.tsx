@@ -5,6 +5,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
+import { ClickableCard } from "@/components/ui/clickable-card";
+import { Loading } from "@/components/ui/loading";
+import { EmptyState } from "@/components/ui/empty-state";
 import { BarChart3 } from "lucide-react";
 
 export default function AnalyticsIndex() {
@@ -43,22 +46,21 @@ export default function AnalyticsIndex() {
         </div>
 
         {isLoading ? (
-          <div className="animate-pulse text-muted-foreground">Loading clients...</div>
+          <Loading label="Loading clients" />
         ) : !clients?.length ? (
-          <Card className="p-12 text-center">
-            <div className="space-y-3">
-              <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto" />
-              <h3 className="font-semibold">No clients yet</h3>
-              <p className="text-sm text-muted-foreground">Create a client first to see analytics.</p>
-            </div>
-          </Card>
+          <EmptyState
+            icon={BarChart3}
+            title="No clients yet"
+            description="Create a client first to see analytics."
+          />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {clients.map((c) => (
-              <Card
+              <ClickableCard
                 key={c.id}
-                className="cursor-pointer hover-lift transition-shadow"
+                className="hover-lift transition-shadow"
                 onClick={() => navigate(`/clients/${c.id}/analytics`)}
+                ariaLabel={`View analytics for ${c.name}`}
               >
                 <CardContent className="pt-5 flex items-center gap-3">
                   {c.logo_url ? (
@@ -70,10 +72,10 @@ export default function AnalyticsIndex() {
                   )}
                   <div>
                     <div className="font-medium">{c.name}</div>
-                    <div className="text-xs text-muted-foreground">View analytics →</div>
+                    <div className="text-sm text-muted-foreground">View analytics →</div>
                   </div>
                 </CardContent>
-              </Card>
+              </ClickableCard>
             ))}
           </div>
         )}

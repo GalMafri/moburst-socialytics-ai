@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loading } from "@/components/ui/loading";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { Save, Plus, X, RefreshCw, Loader2, Play, Info, CalendarClock, Globe } from "lucide-react";
@@ -363,12 +364,14 @@ export default function ClientSetup() {
         </div>
 
         <Tabs defaultValue="info">
-          <TabsList className="grid w-full grid-cols-5">
-            <TabsTrigger value="info">Client Info</TabsTrigger>
-            <TabsTrigger value="sprout">Sprout Social</TabsTrigger>
-            <TabsTrigger value="strategy">Content Strategy</TabsTrigger>
-            <TabsTrigger value="brief">Brief</TabsTrigger>
-            <TabsTrigger value="schedule">Schedule</TabsTrigger>
+          {/* On mobile (<sm), tabs scroll horizontally to keep labels readable.
+              From sm and up, they fill the row in a 5-column grid. */}
+          <TabsList className="w-full overflow-x-auto sm:grid sm:grid-cols-5 flex sm:flex-none gap-1 sm:gap-0 justify-start">
+            <TabsTrigger value="info" className="flex-shrink-0">Client Info</TabsTrigger>
+            <TabsTrigger value="sprout" className="flex-shrink-0">Sprout Social</TabsTrigger>
+            <TabsTrigger value="strategy" className="flex-shrink-0">Content Strategy</TabsTrigger>
+            <TabsTrigger value="brief" className="flex-shrink-0">Brief</TabsTrigger>
+            <TabsTrigger value="schedule" className="flex-shrink-0">Schedule</TabsTrigger>
           </TabsList>
 
           <TabsContent value="info" className="space-y-4 mt-4">
@@ -443,29 +446,33 @@ export default function ClientSetup() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Client Timezone</Label>
-                  <select
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  <Label htmlFor="client-timezone">Client Timezone</Label>
+                  <Select
                     value={form.timezone}
-                    onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))}
+                    onValueChange={(value) => setForm((f) => ({ ...f, timezone: value }))}
                   >
-                    <option value="UTC">UTC</option>
-                    <option value="America/New_York">Eastern Time (US)</option>
-                    <option value="America/Chicago">Central Time (US)</option>
-                    <option value="America/Denver">Mountain Time (US)</option>
-                    <option value="America/Los_Angeles">Pacific Time (US)</option>
-                    <option value="Europe/London">London (GMT/BST)</option>
-                    <option value="Europe/Paris">Central Europe (CET/CEST)</option>
-                    <option value="Europe/Berlin">Berlin (CET/CEST)</option>
-                    <option value="Asia/Jerusalem">Israel (IST/IDT)</option>
-                    <option value="Asia/Tokyo">Tokyo (JST)</option>
-                    <option value="Asia/Seoul">Seoul (KST)</option>
-                    <option value="Asia/Shanghai">Shanghai (CST)</option>
-                    <option value="America/Sao_Paulo">São Paulo (BRT)</option>
-                    <option value="Asia/Dubai">Dubai (GST)</option>
-                    <option value="Australia/Sydney">Sydney (AEST/AEDT)</option>
-                    <option value="Pacific/Auckland">Auckland (NZST/NZDT)</option>
-                  </select>
+                    <SelectTrigger id="client-timezone" className="w-full">
+                      <SelectValue placeholder="Select a timezone" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="UTC">UTC</SelectItem>
+                      <SelectItem value="America/New_York">Eastern Time (US)</SelectItem>
+                      <SelectItem value="America/Chicago">Central Time (US)</SelectItem>
+                      <SelectItem value="America/Denver">Mountain Time (US)</SelectItem>
+                      <SelectItem value="America/Los_Angeles">Pacific Time (US)</SelectItem>
+                      <SelectItem value="Europe/London">London (GMT/BST)</SelectItem>
+                      <SelectItem value="Europe/Paris">Central Europe (CET/CEST)</SelectItem>
+                      <SelectItem value="Europe/Berlin">Berlin (CET/CEST)</SelectItem>
+                      <SelectItem value="Asia/Jerusalem">Israel (IST/IDT)</SelectItem>
+                      <SelectItem value="Asia/Tokyo">Tokyo (JST)</SelectItem>
+                      <SelectItem value="Asia/Seoul">Seoul (KST)</SelectItem>
+                      <SelectItem value="Asia/Shanghai">Shanghai (CST)</SelectItem>
+                      <SelectItem value="America/Sao_Paulo">São Paulo (BRT)</SelectItem>
+                      <SelectItem value="Asia/Dubai">Dubai (GST)</SelectItem>
+                      <SelectItem value="Australia/Sydney">Sydney (AEST/AEDT)</SelectItem>
+                      <SelectItem value="Pacific/Auckland">Auckland (NZST/NZDT)</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <p className="text-xs text-muted-foreground">
                     Used for scheduling content calendar posting times.
                   </p>
@@ -1077,7 +1084,7 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
     },
   });
 
-  if (isLoading) return <div className="animate-pulse text-muted-foreground">Loading schedule...</div>;
+  if (isLoading) return <Loading label="Loading schedule" />;
 
   return (
     <Card>

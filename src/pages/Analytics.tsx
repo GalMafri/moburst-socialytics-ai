@@ -29,6 +29,7 @@ import { TrendInsightsSection } from "@/components/analytics/TrendInsightsSectio
 import { ConnectedProfiles } from "@/components/analytics/ConnectedProfiles";
 import { AIDeepInsights } from "@/components/analytics/AIDeepInsights";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Loading } from "@/components/ui/loading";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 type TimeRange = "7d" | "30d" | "90d" | "all";
@@ -235,7 +236,13 @@ export default function Analytics() {
           <div className="flex items-center gap-2">
             <div className="flex gap-1">
               {(["7d", "30d", "90d", "all"] as TimeRange[]).map((r) => (
-                <Button key={r} variant={range === r ? "default" : "outline"} size="sm" onClick={() => setRange(r)}>
+                <Button
+                  key={r}
+                  variant={range === r ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setRange(r)}
+                  aria-pressed={range === r}
+                >
                   {r === "all" ? "All Time" : r}
                 </Button>
               ))}
@@ -275,7 +282,7 @@ export default function Analytics() {
         </div>
 
         {isLoading ? (
-          <div className="animate-pulse text-muted-foreground">Loading analytics...</div>
+          <Loading label="Loading analytics" />
         ) : filtered.length === 0 ? (
           <Card className="p-12 text-center">
             <div className="space-y-3">
@@ -720,10 +727,12 @@ export default function Analytics() {
                     const hasMetrics = totals.impressions > 0 || totals.reactions > 0;
                     const totalEng = totals.reactions + totals.link_clicks + totals.comments + totals.shares;
                     return (
-                      <div
+                      <button
                         key={r.id}
-                        className="flex items-center justify-between p-3 rounded-md bg-[rgba(255,255,255,0.04)] cursor-pointer hover:bg-[rgba(255,255,255,0.06)] transition-colors"
+                        type="button"
+                        className="w-full text-left flex items-center justify-between p-3 rounded-md bg-[rgba(255,255,255,0.04)] hover:bg-[rgba(255,255,255,0.06)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                         onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}
+                        aria-label={`Open report from ${new Date(r.created_at).toLocaleString()}`}
                       >
                         <div className="flex items-center gap-3">
                           <Badge variant="default">{r.status}</Badge>
@@ -737,7 +746,7 @@ export default function Analytics() {
                         {r.duration_minutes && (
                           <span className="text-xs text-muted-foreground">{r.duration_minutes}m</span>
                         )}
-                      </div>
+                      </button>
                     );
                   })}
                 </div>

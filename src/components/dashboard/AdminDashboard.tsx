@@ -2,6 +2,9 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ClickableCard } from "@/components/ui/clickable-card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Loading } from "@/components/ui/loading";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -167,10 +170,11 @@ export function AdminDashboard() {
             const lastReport = client.reports?.[0];
             const reportCount = client.reports?.length ?? 0;
             return (
-              <Card
+              <ClickableCard
                 key={client.id}
-                className="cursor-pointer hover-lift transition-shadow"
+                className="hover-lift transition-shadow"
                 onClick={() => navigate(`/clients/${client.id}/setup`)}
+                ariaLabel={`Open ${client.name} setup`}
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
@@ -255,27 +259,23 @@ export function AdminDashboard() {
                     </div>
                   </div>
                 </CardContent>
-              </Card>
+              </ClickableCard>
             );
           })}
         </div>
       ) : (
-        <Card className="p-12 text-center">
-          <div className="space-y-3">
-            <div className="h-12 w-12 rounded-full bg-[rgba(255,255,255,0.04)] flex items-center justify-center mx-auto">
-              <Plus className="h-6 w-6 text-muted-foreground" />
-            </div>
-            <h3 className="font-semibold">{canManageClients ? "Add your first client" : "No clients yet"}</h3>
-            <p className="text-sm text-muted-foreground">
-              {canManageClients ? "Get started by creating a client configuration" : "No clients have been configured yet"}
-            </p>
-            {canManageClients && (
+        <EmptyState
+          icon={Plus}
+          title={canManageClients ? "Add your first client" : "No clients yet"}
+          description={canManageClients ? "Get started by creating a client configuration." : "No clients have been configured yet."}
+          action={
+            canManageClients ? (
               <Button onClick={() => navigate("/clients/new/setup")}>
                 <Plus className="h-4 w-4 mr-2" /> Add Client
               </Button>
-            )}
-          </div>
-        </Card>
+            ) : undefined
+          }
+        />
       )}
 
       {/* Permanent delete confirmation */}

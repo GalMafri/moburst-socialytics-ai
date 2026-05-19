@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { Loading } from "@/components/ui/loading";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Eye, ExternalLink } from "lucide-react";
 import { ReportActions } from "@/components/reports/ReportActions";
 
@@ -60,7 +62,7 @@ export default function AllReports() {
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <div className="animate-pulse text-muted-foreground text-sm">Loading...</div>
+              <Loading label="Loading reports" />
             ) : reports && reports.length > 0 ? (
               <Table>
                 <TableHeader>
@@ -110,7 +112,10 @@ export default function AllReports() {
                 </TableBody>
               </Table>
             ) : (
-              <p className="text-center text-muted-foreground py-8">No reports yet</p>
+              <EmptyState
+                title="No reports yet"
+                description="Reports across all clients will appear here once analyses have been run."
+              />
             )}
           </CardContent>
         </Card>

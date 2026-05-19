@@ -195,7 +195,7 @@ export function SchedulePostModal({
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-4 w-4" /> Schedule to Sprout Social
@@ -240,13 +240,13 @@ export function SchedulePostModal({
             {!loadingApi && !autoSelected && displayProfiles.length > 0 && (
               <>
                 {noMatchWarning && (
-                  <p className="text-xs text-amber-600 bg-amber-50 rounded-md px-2 py-1">
+                  <p className="text-sm text-amber-300 bg-amber-500/10 rounded-md px-2 py-1">
                     No {post?.platform} profiles found — showing all connected profiles.
                     Assign the correct one in <strong>Client Setup → Sprout Social</strong>.
                   </p>
                 )}
                 {!hasDbAssigned && !noMatchWarning && (
-                  <p className="text-xs text-amber-600 bg-amber-50 rounded-md px-2 py-1">
+                  <p className="text-sm text-amber-300 bg-amber-500/10 rounded-md px-2 py-1">
                     Assign profiles in <strong>Client Setup → Sprout Social</strong> to enable auto-detection.
                   </p>
                 )}
@@ -266,7 +266,7 @@ export function SchedulePostModal({
             )}
 
             {!loadingApi && !apiError && displayProfiles.length === 0 && (
-              <div className="flex items-start gap-2 text-sm text-amber-700 bg-amber-50 rounded-md p-2">
+              <div className="flex items-start gap-2 text-sm text-amber-300 bg-amber-500/10 rounded-md p-2">
                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>No Sprout Social profiles found. Check your credentials.</span>
               </div>

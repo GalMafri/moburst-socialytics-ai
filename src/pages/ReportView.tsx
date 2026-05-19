@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Loading } from "@/components/ui/loading";
 import { useRef } from "react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { useAuth } from "@/hooks/useAuth";
@@ -72,7 +73,7 @@ export default function ReportView() {
   if (isLoading)
     return (
       <AppLayout title="Report">
-        <div className="animate-pulse text-muted-foreground">Loading report...</div>
+        <Loading label="Loading report" />
       </AppLayout>
     );
   if (!report)
@@ -212,9 +213,9 @@ export default function ReportView() {
         </div>
 
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList>
+          <TabsList className="w-full sm:w-auto overflow-x-auto justify-start">
             {tabs.map((t) => (
-              <TabsTrigger key={t.value} value={t.value} className="gap-1.5">
+              <TabsTrigger key={t.value} value={t.value} className="gap-1.5 flex-shrink-0">
                 {t.icon} {t.label}
               </TabsTrigger>
             ))}

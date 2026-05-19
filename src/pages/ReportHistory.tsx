@@ -10,6 +10,8 @@ import { Eye, Loader2, ExternalLink } from "lucide-react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { useAuth } from "@/hooks/useAuth";
+import { Loading } from "@/components/ui/loading";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default function ReportHistory() {
   const { id } = useParams();
@@ -50,7 +52,7 @@ export default function ReportHistory() {
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <div className="animate-pulse text-muted-foreground text-sm">Loading...</div>
+              <Loading label="Loading reports" />
             ) : reports && reports.length > 0 ? (
               <Table>
                 <TableHeader>
@@ -94,7 +96,7 @@ export default function ReportHistory() {
                                 <ExternalLink className="h-3.5 w-3.5" /> View
                               </Button>
                             ) : (
-                              <span className="text-xs text-muted-foreground">Coming soon</span>
+                              <span className="text-xs text-muted-foreground/70">—</span>
                             )}
                           </TableCell>
                         )}
@@ -112,14 +114,17 @@ export default function ReportHistory() {
                 </TableBody>
               </Table>
             ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                <p>No reports yet</p>
-                {canRunAnalysis && (
-                  <Button variant="outline" className="mt-3" onClick={() => navigate(`/clients/${id}/analyze`)}>
-                    Run your first analysis
-                  </Button>
-                )}
-              </div>
+              <EmptyState
+                title="No reports yet"
+                description="Reports for this client will appear here once an analysis has been run."
+                action={
+                  canRunAnalysis ? (
+                    <Button onClick={() => navigate(`/clients/${id}/analyze`)}>
+                      Run your first analysis
+                    </Button>
+                  ) : undefined
+                }
+              />
             )}
           </CardContent>
         </Card>
