@@ -352,8 +352,21 @@ serve(async (req) => {
             ? `${videoUri}&key=${geminiKey}`
             : `${videoUri}?key=${geminiKey}`;
 
+          // Return diagnostic info too: whether the seed image was generated
+          // and a data-URL preview of it. If the user reports the video looks
+          // off-brand, comparing the seed image tells us whether the issue
+          // is upstream (seed was generic) or downstream (Veo ignored a good
+          // seed). Without this we have no visibility into the chain.
+          const seedPreview = seedImage
+            ? `data:${seedImage.mimeType};base64,${seedImage.base64}`
+            : null;
+
           return new Response(
-            JSON.stringify({ video_url: authenticatedUrl }),
+            JSON.stringify({
+              video_url: authenticatedUrl,
+              seed_image_url: seedPreview,
+              seed_used: !!seedImage,
+            }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }

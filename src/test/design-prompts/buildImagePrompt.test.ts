@@ -71,6 +71,52 @@ describe("buildImagePrompt", () => {
     expect(interior).toContain("SINGLE-SLIDE OUTPUT");
   });
 
+  it("front-loads the single-slide directive before primary objective and creative direction", () => {
+    // Rationale: in the previous version the SINGLE-SLIDE OUTPUT block was in
+    // position 5, AFTER primary objective + brand language + creative direction
+    // + platform playbook. LLMs weight early tokens heavier, so a brief that
+    // says "5-slide carousel" earlier in the prompt can override the later
+    // single-slide instruction. Front-loading is the proven fix — the model's
+    // very first instruction is "one image, one slide", and everything else is
+    // rendered in service of that.
+    const out = buildImagePrompt({
+      basePrompt: "Render a 5-slide carousel about the new product",
+      synthesis: { composition_patterns: "Asymmetric" },
+      slideContext: { index: 0, total: 5 },
+    });
+    const criticalIdx = out.indexOf("CRITICAL OUTPUT FORMAT");
+    const objectiveIdx = out.indexOf("Primary objective");
+    const brandIdx = out.indexOf("BRAND DESIGN LANGUAGE");
+    const creativeIdx = out.indexOf("Creative direction");
+    expect(criticalIdx).toBeGreaterThanOrEqual(0);
+    expect(criticalIdx).toBeLessThan(objectiveIdx);
+    expect(criticalIdx).toBeLessThan(brandIdx);
+    expect(criticalIdx).toBeLessThan(creativeIdx);
+  });
+
+  it("repeats the single-slide reminder mid-prompt for multi-instance reinforcement", () => {
+    // Rationale: even with the directive front-loaded, repeating it after the
+    // creative direction prevents the model from drifting back to multi-panel
+    // composition once it's deep in rendering decisions. This is a standard
+    // prompt-engineering technique for getting models to follow critical rules
+    // through long prompts.
+    const out = buildImagePrompt({
+      basePrompt: "x",
+      slideContext: { index: 0, total: 5 },
+    });
+    expect(out).toContain("SINGLE-SLIDE OUTPUT — REMINDER");
+    // Reminder must come after the front-loaded directive.
+    const criticalIdx = out.indexOf("CRITICAL OUTPUT FORMAT");
+    const reminderIdx = out.indexOf("SINGLE-SLIDE OUTPUT — REMINDER");
+    expect(reminderIdx).toBeGreaterThan(criticalIdx);
+  });
+
+  it("does not emit slide-context sections when no slideContext is present", () => {
+    const out = buildImagePrompt({ basePrompt: "x" });
+    expect(out).not.toContain("CRITICAL OUTPUT FORMAT");
+    expect(out).not.toContain("SINGLE-SLIDE OUTPUT");
+  });
+
   it("includes the variant angle when provided", () => {
     const out = buildImagePrompt({
       basePrompt: "x",

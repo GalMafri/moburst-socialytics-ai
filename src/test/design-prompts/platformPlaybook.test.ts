@@ -53,4 +53,28 @@ describe("platformPlaybook", () => {
     const md = renderPlaybookSection(single, "LinkedIn", "Single Image");
     expect(md).not.toContain("Motion:");
   });
+
+  it("sanitizes multi-slide language from the carousel playbook when slideContext is present", () => {
+    // Rationale: the Instagram/LinkedIn carousel playbook entries describe
+    // "users swipe through" and "cover vs interior slides" — phrases that
+    // confuse Gemini into composing multi-panel images even when the rest of
+    // the prompt demands a single slide. When the call is for ONE slide of
+    // an N-slide carousel, the rendered playbook must stop describing the
+    // OTHER slides.
+    const entry = getPlaybookEntry("Instagram", "carousel");
+    const withSlide = renderPlaybookSection(
+      entry,
+      "Instagram",
+      "carousel",
+      { index: 0, total: 5 },
+    );
+    // No raw "swipe through" instructions to other slides.
+    expect(withSlide.toLowerCase()).not.toMatch(/swipe through/);
+    // No raw "interior slides" framing — should have been reframed.
+    expect(withSlide.toLowerCase()).not.toMatch(/interior slides have/);
+
+    // Sanity: the un-sanitized version still has the multi-slide language.
+    const withoutSlide = renderPlaybookSection(entry, "Instagram", "carousel");
+    expect(withoutSlide.toLowerCase()).toMatch(/swipe|interior/);
+  });
 });

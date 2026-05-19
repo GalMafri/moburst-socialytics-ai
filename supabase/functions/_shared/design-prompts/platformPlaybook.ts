@@ -385,20 +385,65 @@ export function getPlaybookEntry(platform?: string, format?: string): PlatformPl
 }
 
 /**
- * Render the playbook entry as a labelled markdown section for inclusion in a
- * generation prompt.
+ * When this prompt is for ONE slide of an N-slide carousel, the playbook's
+ * multi-slide language (e.g. "Users swipe through", "cover vs interior
+ * slides") confuses Gemini into composing a contact sheet. This sanitizer
+ * rewrites phrases that describe other-slide content so the playbook only
+ * describes THIS slide's role.
  */
-export function renderPlaybookSection(entry: PlatformPlaybookEntry, platform?: string, format?: string): string {
+function sanitizePlaybookForSingleSlide(
+  text: string,
+  slide: { index: number; total: number },
+): string {
+  const isCover = slide.index === 0;
+  return text
+    // "Users see the cover slide in feed and swipe through" → just first half
+    .replace(/and (then\s+)?swipe through[^.]*\.?/gi, ".")
+    .replace(/users? (swipe|click) (through|across|to)[^.]*\.?/gi, "")
+    .replace(/swipe through[^.]*\.?/gi, "")
+    // Reframe "cover vs interior" language depending on which slide we are.
+    .replace(
+      /\binterior slides?\b/gi,
+      isCover ? "the other slides (rendered separately)" : "this slide",
+    )
+    .replace(
+      /\bcover slides?\b/gi,
+      isCover ? "this slide (the cover)" : "the cover slide (rendered separately)",
+    )
+    // Generic plural "slides" that talks about multiple at once.
+    .replace(/each slide a complete thought\.?/gi, "this slide is a complete thought.")
+    .replace(/shared (visual )?system\s+\(common[^)]+\)\.?/gi, "shared visual system.")
+    // Collapse runs of whitespace introduced by the substitutions.
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\.\s*\./g, ".");
+}
+
+/**
+ * Render the playbook entry as a labelled markdown section for inclusion in a
+ * generation prompt. When `slideContext` is provided, the rendered output is
+ * sanitized of multi-slide language so the per-slide call doesn't receive
+ * conflicting instructions ("ONE slide" vs "users swipe through slides").
+ */
+export function renderPlaybookSection(
+  entry: PlatformPlaybookEntry,
+  platform?: string,
+  format?: string,
+  slideContext?: { index: number; total: number },
+): string {
+  const sanitize = slideContext
+    ? (s: string) => sanitizePlaybookForSingleSlide(s, slideContext)
+    : (s: string) => s;
+
   const lines = [
     `## Platform & format playbook — ${platform || "general"} ${format || ""}`.trim(),
     `Aspect: ${entry.aspectRatio} (${entry.orientation}).`,
-    `Safe zones: ${entry.safeZones}`,
-    `Scroll/encounter: ${entry.scrollBehavior}`,
-    `First frame: ${entry.firstFrameGuidance}`,
-    `Composition: ${entry.compositionGuidance}`,
+    `Safe zones: ${sanitize(entry.safeZones)}`,
+    `Scroll/encounter: ${sanitize(entry.scrollBehavior)}`,
+    `First frame: ${sanitize(entry.firstFrameGuidance)}`,
+    `Composition: ${sanitize(entry.compositionGuidance)}`,
   ];
-  if (entry.motionGuidance) lines.push(`Motion: ${entry.motionGuidance}`);
-  lines.push(`Text overlay rules: ${entry.textOverlayRules}`);
-  lines.push(`Avoid: ${entry.avoid}`);
+  if (entry.motionGuidance) lines.push(`Motion: ${sanitize(entry.motionGuidance)}`);
+  lines.push(`Text overlay rules: ${sanitize(entry.textOverlayRules)}`);
+  lines.push(`Avoid: ${sanitize(entry.avoid)}`);
   return lines.join("\n");
 }
