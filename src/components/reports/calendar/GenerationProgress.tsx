@@ -104,11 +104,13 @@ export function GenerationProgress() {
               {g.failed > 0 && ` · ${g.failed} failed`}
             </p>
 
-            {/* View action — open panel for this post */}
+            {/* View action — open panel for this post. Passes the variant
+                group id so the panel filters to the exact set we just made
+                (rather than relying on the platform+copy match heuristic). */}
             {(isDone || g.completed > 0) && (
               <button
                 type="button"
-                onClick={() => openPanel(g.post)}
+                onClick={() => openPanel(g.post, { variantGroupId: g.variantGroupId })}
                 className="mt-3 w-full inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-[8px] bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.10)] text-sm font-medium text-white tracking-[-0.2px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 View {g.type === "design" ? "designs" : "videos"}

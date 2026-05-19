@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildVideoPrompt } from "../_shared/design-prompts/buildVideoPrompt.ts";
+import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,6 +25,143 @@ const VEO_MODELS = [
   "veo-3-generate-preview",
   "veo-2.0-generate-001",
 ];
+
+/**
+ * Generate a brand-aligned anchor still via Gemini 3.1 Flash Image, using
+ * the FULL multimodal context (design references + brand book + brief).
+ * Veo's `image` field on a `predictLongRunning` instance uses this still
+ * as the starting frame / style anchor for the video — without it, Veo
+ * gets only a text prompt and produces generic results.
+ *
+ * Returns null if any step fails — caller falls back to text-only Veo,
+ * which preserves the previous behavior as a safety net.
+ */
+async function generateSeedImage(args: {
+  geminiKey: string;
+  supabase: any;
+  basePrompt: string;
+  platform?: string;
+  format?: string;
+  brandIdentity: any;
+  synthesis: any;
+  designReferences: string[];
+  brandBookPath: string | null;
+  post: any;
+  variantAngle: string | null;
+  aspectRatio: string;
+}): Promise<{ base64: string; mimeType: string } | null> {
+  try {
+    const seedPrompt = buildImagePrompt({
+      basePrompt:
+        args.basePrompt +
+        "\n\nThis still will be used as the OPENING FRAME of a short social-media video — " +
+        "compose for motion. Place the subject so it can move or transform without falling off frame.",
+      platform: args.platform,
+      format: args.format,
+      brandIdentity: args.brandIdentity,
+      synthesis: args.synthesis,
+      post: args.post,
+      variantAngle: args.variantAngle || undefined,
+    });
+
+    const contentParts: any[] = [];
+
+    // Attach design references as inline multimodal parts (same approach as
+    // generate-post-image). Cap at 3 to keep payload sane.
+    if (args.designReferences && args.designReferences.length > 0) {
+      contentParts.push({
+        text:
+          "Existing brand design references — match their visual style, palette, " +
+          "composition, and typography:",
+      });
+      for (const ref of args.designReferences.slice(0, 3)) {
+        try {
+          const { data: fileData } = await args.supabase.storage
+            .from("design-references")
+            .download(ref);
+          if (fileData) {
+            const arrayBuffer = await fileData.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            let binary = "";
+            for (let i = 0; i < uint8Array.length; i++) binary += String.fromCharCode(uint8Array[i]);
+            const base64 = btoa(binary);
+            const ext = ref.split(".").pop()?.toLowerCase();
+            const mimeType = ext === "png" ? "image/png" : "image/jpeg";
+            contentParts.push({ inlineData: { mimeType, data: base64 } });
+          }
+        } catch (e) {
+          console.warn("[generate-post-video] seed: ref download failed:", ref, e);
+        }
+      }
+    }
+
+    // Attach brand book if present and under 4MB.
+    if (args.brandBookPath) {
+      try {
+        const { data: fileData } = await args.supabase.storage
+          .from("brand-books")
+          .download(args.brandBookPath);
+        if (fileData) {
+          const arrayBuffer = await fileData.arrayBuffer();
+          if (arrayBuffer.byteLength <= 4 * 1024 * 1024) {
+            const uint8Array = new Uint8Array(arrayBuffer);
+            let binary = "";
+            for (let i = 0; i < uint8Array.length; i++) binary += String.fromCharCode(uint8Array[i]);
+            const base64 = btoa(binary);
+            const ext = args.brandBookPath.split(".").pop()?.toLowerCase();
+            const mimeType =
+              ext === "pdf" ? "application/pdf" : ext === "png" ? "image/png" : "image/jpeg";
+            contentParts.push({
+              text: "Canonical brand book — defer to it on color, typography, and identity:",
+            });
+            contentParts.push({ inlineData: { mimeType, data: base64 } });
+          }
+        }
+      } catch (e) {
+        console.warn("[generate-post-video] seed: brand book download failed:", e);
+      }
+    }
+
+    contentParts.push({ text: seedPrompt });
+
+    const apiUrl =
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${args.geminiKey}`;
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: contentParts }],
+        generationConfig: {
+          responseModalities: ["TEXT", "IMAGE"],
+          imageConfig: { aspectRatio: args.aspectRatio, imageSize: "2K" },
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const t = await response.text().catch(() => "");
+      console.warn("[generate-post-video] seed: Gemini Flash Image error:", response.status, t.slice(0, 200));
+      return null;
+    }
+
+    const result = await response.json();
+    for (const candidate of result.candidates || []) {
+      for (const part of candidate.content?.parts || []) {
+        if (part.inlineData?.data) {
+          return {
+            base64: part.inlineData.data,
+            mimeType: part.inlineData.mimeType || "image/png",
+          };
+        }
+      }
+    }
+    console.warn("[generate-post-video] seed: no inlineData in Gemini response");
+    return null;
+  } catch (e) {
+    console.warn("[generate-post-video] seed generation threw:", e);
+    return null;
+  }
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -60,16 +198,6 @@ serve(async (req) => {
       });
     }
 
-    const enhancedPrompt = buildVideoPrompt({
-      sceneDescription: prompt,
-      platform,
-      format,
-      brandIdentity: resolvedBrand,
-      synthesis: resolvedSynthesis,
-      post,
-      variantAngle: variant_angle || null,
-    });
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
@@ -90,6 +218,48 @@ serve(async (req) => {
 
     const aspectRatio = getAspectRatio(platform, format);
 
+    // ── Step 1: Generate a brand-aligned anchor still via Gemini 3.1 Flash Image.
+    // This still becomes Veo's `image` seed — without it, Veo only has the text
+    // prompt and produces generic "AI-flavored" footage with no brand alignment.
+    // With it, Veo animates from a frame that already encodes the brand's
+    // palette, composition, typography, and design references.
+    console.log("[generate-post-video] generating brand-aligned seed image…");
+    const seedImage = await generateSeedImage({
+      geminiKey,
+      supabase,
+      basePrompt: prompt,
+      platform,
+      format,
+      brandIdentity: resolvedBrand,
+      synthesis: resolvedSynthesis,
+      designReferences: resolvedRefs,
+      brandBookPath: resolvedBrandBookPath,
+      post,
+      variantAngle: variant_angle || null,
+      aspectRatio,
+    });
+    if (seedImage) {
+      console.log("[generate-post-video] seed image ready — Veo will animate from brand-aligned frame");
+    } else {
+      console.warn(
+        "[generate-post-video] seed image generation failed — falling back to text-only Veo. Output will be less brand-aligned.",
+      );
+    }
+
+    // ── Step 2: Build the Veo prompt. When a seed image is present, the prompt
+    // describes the MOTION the video should add to the still. Without one, it
+    // describes the full scene.
+    const enhancedPrompt = buildVideoPrompt({
+      sceneDescription: prompt,
+      platform,
+      format,
+      brandIdentity: resolvedBrand,
+      synthesis: resolvedSynthesis,
+      post,
+      variantAngle: variant_angle || null,
+      hasSeedImage: !!seedImage,
+    });
+
     // Try each Veo model until one works
     let operationName: string | null = null;
     let lastError = "";
@@ -99,6 +269,16 @@ serve(async (req) => {
 
       console.log(`Trying Veo model: ${model}`);
 
+      const instance: any = { prompt: enhancedPrompt };
+      if (seedImage) {
+        // Image-to-video conditioning. Veo uses this as the starting frame
+        // AND the style anchor for the generated clip.
+        instance.image = {
+          bytesBase64Encoded: seedImage.base64,
+          mimeType: seedImage.mimeType,
+        };
+      }
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -106,7 +286,7 @@ serve(async (req) => {
           "x-goog-api-key": geminiKey,
         },
         body: JSON.stringify({
-          instances: [{ prompt: enhancedPrompt }],
+          instances: [instance],
           parameters: {
             aspectRatio,
             durationSeconds: 8,

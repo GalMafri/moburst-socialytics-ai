@@ -54,17 +54,29 @@ export interface GenerationEntry {
   completedAt?: number;
   /** The post object so the floating card / completion toast can open the panel. */
   post: any;
+  /** The variant_group_id we just created. Passed back to openPanel so the
+   *  panel can filter iterations by group_id directly — bypassing the
+   *  platform+copy match heuristic that can mis-fire when copy is edited or
+   *  realtime hasn't caught up yet. */
+  variantGroupId?: string;
 }
 
 interface ContextValue {
   generations: Record<string, GenerationEntry>;
-  startGeneration: (args: { post: any; type: GenerationType; total: number }) => string;
+  startGeneration: (args: {
+    post: any;
+    type: GenerationType;
+    total: number;
+    variantGroupId?: string;
+  }) => string;
   progressGeneration: (postKey: string, opts?: { failed?: boolean }) => void;
   completeGeneration: (postKey: string) => void;
   dismissGeneration: (postKey: string) => void;
   /** Optional handler so the floating progress / completion toast can open the
-   *  panel for a given post. Provided by ContentIdeasTab. */
-  openPanel: (post: any) => void;
+   *  panel for a given post. Provided by ContentIdeasTab. The optional
+   *  variantGroupId lets the panel filter to the exact set of rows we just
+   *  produced (no copy-slice heuristic). */
+  openPanel: (post: any, opts?: { variantGroupId?: string }) => void;
 }
 
 const GenerationContext = createContext<ContextValue | null>(null);
@@ -74,14 +86,24 @@ export function GenerationProvider({
   onOpenPanel,
 }: {
   children: React.ReactNode;
-  onOpenPanel: (post: any) => void;
+  onOpenPanel: (post: any, opts?: { variantGroupId?: string }) => void;
 }) {
   const [generations, setGenerations] = useState<Record<string, GenerationEntry>>({});
   const onOpenPanelRef = useRef(onOpenPanel);
   onOpenPanelRef.current = onOpenPanel;
 
   const startGeneration = useCallback(
-    ({ post, type, total }: { post: any; type: GenerationType; total: number }) => {
+    ({
+      post,
+      type,
+      total,
+      variantGroupId,
+    }: {
+      post: any;
+      type: GenerationType;
+      total: number;
+      variantGroupId?: string;
+    }) => {
       const key = postKeyOf(post);
       const label = postLabelOf(post);
       setGenerations((prev) => ({
@@ -96,6 +118,7 @@ export function GenerationProvider({
           status: "running",
           startedAt: Date.now(),
           post,
+          variantGroupId,
         },
       }));
       return key;
@@ -144,8 +167,8 @@ export function GenerationProvider({
     });
   }, []);
 
-  const openPanel = useCallback((post: any) => {
-    onOpenPanelRef.current(post);
+  const openPanel = useCallback((post: any, opts?: { variantGroupId?: string }) => {
+    onOpenPanelRef.current(post, opts);
   }, []);
 
   const value = useMemo<ContextValue>(

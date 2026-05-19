@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
@@ -41,6 +41,10 @@ export function ContentIdeasTab({
     language: "all",
   });
   const [activePost, setActivePost] = useState<any | null>(null);
+  /** When the user opens the panel via the floating GenerationProgress card,
+   *  we know the exact variant_group_id they want to see. Filtering by it is
+   *  bulletproof — no copy-slice heuristic, no realtime lag dependency. */
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const qc = useQueryClient();
 
   useRealtimePostIterations(clientId);
@@ -112,26 +116,52 @@ export function ContentIdeasTab({
     ? findLatestSelectedIteration(postIterations as any, activePost)
     : null;
 
-  // All iterations matching the active post (across variant groups). Used by the
-  // panel to show the FULL set of variants from the most recent generation, not
-  // just one row from the matched iteration. Same heuristic as findLatestSelected.
+  // Force a fresh fetch when the panel opens for a new post. Defeats the
+  // case where realtime hasn't yet delivered the rows we just inserted from
+  // a parallel variant generation — without this, "View designs" can open
+  // an empty tab for a few seconds.
+  useEffect(() => {
+    if (activePost && clientId) {
+      qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
+    }
+    // We intentionally don't depend on the whole post object — just identity
+    // markers so we refetch when the active post truly changes.
+  }, [activePost?.platform, activePost?.copy, activePost?.caption_angle, clientId, qc]);
+
+  // All iterations matching the active post. When a variant_group_id is
+  // provided (set by openPanel from the floating GenerationProgress card),
+  // filter to that exact group — no string-match heuristic, no surprises.
+  // Otherwise fall back to platform+copy matching as before so direct card
+  // clicks still surface every variant ever generated for the post.
   const activePostIterations = activePost
-    ? (postIterations as any[]).filter((it) => {
-        const matchingPlatform = (activePost.platform || "").toLowerCase();
-        const matchingCopy = (activePost.copy || activePost.caption_angle || "")
-          .trim()
-          .slice(0, 200);
-        return (
-          (it.platform || "").toLowerCase() === matchingPlatform &&
-          (it.post_copy || "").trim().slice(0, 200) === matchingCopy &&
-          it.media_urls &&
-          it.media_urls.length > 0
-        );
-      })
+    ? activeGroupId
+      ? (postIterations as any[]).filter(
+          (it) =>
+            (it as any).variant_group_id === activeGroupId &&
+            it.media_urls &&
+            it.media_urls.length > 0,
+        )
+      : (postIterations as any[]).filter((it) => {
+          const matchingPlatform = (activePost.platform || "").toLowerCase();
+          const matchingCopy = (activePost.copy || activePost.caption_angle || "")
+            .trim()
+            .slice(0, 200);
+          return (
+            (it.platform || "").toLowerCase() === matchingPlatform &&
+            (it.post_copy || "").trim().slice(0, 200) === matchingCopy &&
+            it.media_urls &&
+            it.media_urls.length > 0
+          );
+        })
     : [];
 
   return (
-    <GenerationProvider onOpenPanel={(post) => setActivePost(post)}>
+    <GenerationProvider
+      onOpenPanel={(post, opts) => {
+        setActivePost(post);
+        setActiveGroupId(opts?.variantGroupId || null);
+      }}
+    >
       <div className="space-y-4">
         {availablePlatforms.length > 0 && clientId && (
           <div className="flex justify-end">
@@ -160,13 +190,24 @@ export function ContentIdeasTab({
           postIterations={postIterations as any}
           scheduledPosts={scheduledPosts as any}
           filters={filters}
-          onCardClick={setActivePost}
+          onCardClick={(post) => {
+            // Direct card clicks should show the most recent variant group
+            // (the heuristic path) — clear any group filter set by the
+            // floating "View" button.
+            setActivePost(post);
+            setActiveGroupId(null);
+          }}
           onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
         />
 
         <PostPanel
           open={!!activePost}
-          onOpenChange={(open) => !open && setActivePost(null)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setActivePost(null);
+              setActiveGroupId(null);
+            }
+          }}
           post={activePost}
           iteration={activeIteration}
           postIterations={activePostIterations}

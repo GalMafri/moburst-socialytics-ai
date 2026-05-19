@@ -236,8 +236,15 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     setVariantUrls(new Array(count).fill(null));
 
     // Notify the page-level generation tracker so the floating progress card
-    // and the per-post overlay can render. This survives modal close.
-    const postKey = generation.startGeneration({ post, type: "design", total: count });
+    // and the per-post overlay can render. Pass the variantGroupId so the
+    // "View designs" button can filter iterations to this exact group
+    // (rather than relying on the platform+copy match heuristic).
+    const postKey = generation.startGeneration({
+      post,
+      type: "design",
+      total: count,
+      variantGroupId: groupId,
+    });
 
     // Fire all N calls in parallel.
     const promises = angleInstructions.map((angle) =>
@@ -299,8 +306,15 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     const generated: string[] = [];
     setVariantUrls(new Array(count).fill(null));
 
-    // Page-level generation tracker — same as the variant flow.
-    const postKey = generation.startGeneration({ post, type: "design", total: count });
+    // Page-level generation tracker — same as the variant flow. Pass the
+    // variantGroupId so the floating "View designs" button resolves to this
+    // exact carousel group on click.
+    const postKey = generation.startGeneration({
+      post,
+      type: "design",
+      total: count,
+      variantGroupId: groupId,
+    });
 
     // Decompose the carousel brief into per-slide briefs. Falls back to using
     // the same brief for each slide if the decomposition call fails — the

@@ -288,8 +288,14 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     }
 
     // Page-level generation tracker — survives modal close so the user can
-    // navigate away and still see progress / completion.
-    const postKey = generation.startGeneration({ post, type: "video", total: count });
+    // navigate away and still see progress / completion. Pass the groupId so
+    // the "View videos" button resolves to this exact set on click.
+    const postKey = generation.startGeneration({
+      post,
+      type: "video",
+      total: count,
+      variantGroupId: groupId,
+    });
 
     // Fire all variants in parallel.
     const promises = angleInstructions.map((angle) =>

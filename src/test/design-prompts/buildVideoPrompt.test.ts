@@ -69,4 +69,37 @@ describe("buildVideoPrompt", () => {
     // Nothing after Constraints except whitespace.
     expect(out.slice(constraintsIdx).split("\n\n").length).toBeLessThanOrEqual(2);
   });
+
+  it("switches to anchor-frame + motion-brief mode when a seed image is present", () => {
+    // Rationale: when generate-post-video passes a Gemini-generated brand-aligned
+    // still to Veo via `image: { bytesBase64Encoded }`, the prompt must pivot
+    // from "describe the whole scene" to "describe the MOTION that animates the
+    // anchor frame". Without this pivot, Veo re-imagines the scene and drifts
+    // off-brand.
+    const out = buildVideoPrompt({
+      sceneDescription: "Product hero shot, close-up on the device",
+      synthesis: { composition_patterns: "Asymmetric" },
+      hasSeedImage: true,
+    });
+    expect(out).toContain("ANCHOR FRAME");
+    expect(out).toContain("MOTION BRIEF");
+    // The motion brief should still contain the user's scene description.
+    expect(out).toContain("Product hero shot");
+    // Anchor must come before brand language so it's the primary instruction.
+    const anchorIdx = out.indexOf("ANCHOR FRAME");
+    const brandIdx = out.indexOf("Brand design language");
+    expect(anchorIdx).toBeGreaterThanOrEqual(0);
+    expect(brandIdx).toBeGreaterThan(anchorIdx);
+  });
+
+  it("omits anchor-frame language when no seed image is present (default)", () => {
+    const out = buildVideoPrompt({
+      sceneDescription: "Product hero shot",
+      synthesis: { composition_patterns: "Asymmetric" },
+    });
+    expect(out).not.toContain("ANCHOR FRAME");
+    expect(out).not.toContain("MOTION BRIEF");
+    // Scene description still leads.
+    expect(out.indexOf("Product hero shot")).toBe(0);
+  });
 });
