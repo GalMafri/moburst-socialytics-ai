@@ -137,20 +137,28 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
   const playbook = getPlaybookEntry(input.platform, input.format);
   sections.push(renderPlaybookSection(playbook, input.platform, input.format));
 
-  // 4. Composition checklist (carousel context, if any)
+  // 4. Slide context — when this call is for ONE slide of an N-slide carousel.
+  //    This section must be unambiguous: each Gemini call returns ONE image of
+  //    ONE slide. Without this language, Gemini happily composes a "contact
+  //    sheet" showing all N slides in a grid, which defeats the entire point.
   if (input.slideContext) {
     const { index, total } = input.slideContext;
-    if (index === 0) {
-      sections.push(
-        `## Slide context\nThis is slide 1 of ${total} (cover/hook). ` +
-          `Carry the strongest visual idea — interior slides build on this system.`,
-      );
-    } else {
-      sections.push(
-        `## Slide context\nThis is slide ${index + 1} of ${total}. ` +
-          `Maintain the cover's type scale, color story, and grid. Each interior slide is one clear idea.`,
-      );
-    }
+    const slideRole =
+      index === 0
+        ? `slide 1 of ${total} — the COVER / hook. A single magazine-cover composition: a strong headline + one supporting visual idea. No numbered list, no preview of upcoming slides.`
+        : `slide ${index + 1} of ${total} — an INTERIOR slide. One clear idea, different content from the cover but the same visual system. No "next slide" preview, no slide counter, no thumbnail strip.`;
+
+    sections.push(
+      `## SINGLE-SLIDE OUTPUT — MANDATORY\n` +
+        `You are generating ${slideRole}\n\n` +
+        `Output ONE image that fills the entire canvas with this single slide's content. Hard rules:\n` +
+        `- DO NOT show multiple slides in one image.\n` +
+        `- DO NOT compose a grid, contact sheet, mosaic, storyboard, or multi-panel layout.\n` +
+        `- DO NOT show thumbnails or previews of other slides.\n` +
+        `- DO NOT label this image "1 of ${total}" or include any slide-number text overlays unless the creative direction explicitly asks for them.\n` +
+        `- Treat this as a standalone post — every pixel is one slide's content.\n` +
+        `The remaining ${total - 1} slide${total - 1 === 1 ? "" : "s"} ${total - 1 === 1 ? "is" : "are"} being generated separately by other calls; do not include them here.`,
+    );
   }
 
   // 5. Underlying palette (qualitative only — NO hex codes)

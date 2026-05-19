@@ -50,19 +50,25 @@ describe("buildImagePrompt", () => {
     expect(out).toContain("9:16");
   });
 
-  it("includes carousel cover/interior context when slideContext present", () => {
+  it("includes single-slide carousel context when slideContext present", () => {
     const cover = buildImagePrompt({
       basePrompt: "x",
       slideContext: { index: 0, total: 5 },
     });
     expect(cover).toContain("slide 1 of 5");
     expect(cover.toLowerCase()).toContain("cover");
+    // Critical anti-instructions that prevent the contact-sheet output:
+    expect(cover).toContain("SINGLE-SLIDE OUTPUT");
+    expect(cover).toContain("DO NOT show multiple slides");
+    expect(cover).toContain("contact sheet");
 
     const interior = buildImagePrompt({
       basePrompt: "x",
       slideContext: { index: 2, total: 5 },
     });
     expect(interior).toContain("slide 3 of 5");
+    expect(interior).toContain("INTERIOR");
+    expect(interior).toContain("SINGLE-SLIDE OUTPUT");
   });
 
   it("includes the variant angle when provided", () => {

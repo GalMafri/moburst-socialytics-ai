@@ -289,6 +289,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   };
 
   // Carousel path lives in its own helper for clarity.
+  //
+  // Critical: each slide is generated as its OWN standalone image. If we just
+  // pass the same multi-slide brief to N calls, Gemini happily returns a
+  // contact sheet of all N slides for each call. So we first ask Claude to
+  // decompose the brief into N focused per-slide briefs, then generate.
   const runCarouselGeneration = async (groupId: string) => {
     const count = slideCount;
     const generated: string[] = [];
@@ -297,12 +302,44 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     // Page-level generation tracker — same as the variant flow.
     const postKey = generation.startGeneration({ post, type: "design", total: count });
 
+    // Decompose the carousel brief into per-slide briefs. Falls back to using
+    // the same brief for each slide if the decomposition call fails — the
+    // strengthened slide_context section in buildImagePrompt is the safety
+    // net that prevents contact-sheet output even with a shared brief.
+    let slideBriefs: Array<{ index: number; role: string; headline?: string; content_brief: string }> = [];
+    try {
+      const { data: decomposed } = await supabase.functions.invoke("propose-carousel-slides", {
+        body: {
+          brief: editablePrompt || defaultPrompt,
+          total: count,
+          platform: post.platform,
+          format: post.format,
+          post_copy: post.copy,
+          design_language: clientContext?.design_style_synthesis || null,
+        },
+      });
+      if (decomposed?.slides && Array.isArray(decomposed.slides)) {
+        slideBriefs = decomposed.slides.slice(0, count);
+      }
+    } catch (e) {
+      console.warn("[CreatePostDesignButton] carousel decomposition failed, falling back to shared brief:", e);
+    }
+
     try {
       for (let i = 0; i < count; i++) {
         setCurrentSlide(i + 1);
+
+        // Per-slide brief if available; otherwise reuse the original carousel
+        // brief. Per-slide is dramatically better — each call focuses on ONE
+        // slide's content, not the whole deck.
+        const slideBrief = slideBriefs[i];
+        const perSlidePrompt = slideBrief
+          ? `${slideBrief.headline ? `Headline: ${slideBrief.headline}\n\n` : ""}${slideBrief.content_brief}`
+          : editablePrompt || defaultPrompt;
+
         const { data, error } = await supabase.functions.invoke("generate-post-image", {
           body: {
-            prompt: editablePrompt || defaultPrompt,
+            prompt: perSlidePrompt,
             platform: post.platform,
             format: post.format,
             brand_context: effectiveBrandIdentity || undefined,
@@ -331,7 +368,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             });
             if (validation?.has_hex_codes) {
               toast({ title: "Refining design..." });
-              const retryPrompt = (editablePrompt || defaultPrompt) +
+              const retryPrompt = perSlidePrompt +
                 "\n\nCRITICAL: The previous generation contained visible hex color codes as text. Do NOT render any hex codes, color codes, RGB values, or technical color notation as readable text anywhere in the image. Colors should be applied visually only.";
               const { data: retryData } = await supabase.functions.invoke("generate-post-image", {
                 body: {
