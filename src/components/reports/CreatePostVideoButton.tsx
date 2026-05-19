@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { ClientContext } from "@/lib/clientContext";
 import { Slider } from "@/components/ui/slider";
+import { useGenerationContext } from "@/components/reports/calendar/GenerationContext";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -85,6 +86,7 @@ type VariantSlot = string | null | "FAILED";
 
 export function CreatePostVideoButton({ post, clientContext, brandIdentity, clientId, onVideoGenerated }: CreatePostVideoButtonProps) {
   const effectiveBrandIdentity = clientContext?.brand_identity ?? brandIdentity ?? null;
+  const generation = useGenerationContext();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   // Legacy: holds the URL of whatever variant is currently being trimmed.
@@ -197,8 +199,13 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     groupId: string | null,
     isSelected: boolean,
   ) => {
-    if (!clientId) return;
-    await supabase.from("post_iterations").insert({
+    if (!clientId) {
+      console.warn(
+        "[CreatePostVideoButton] persistVariantRow skipped — no clientId. Variant will not persist across reloads.",
+      );
+      return;
+    }
+    const { error } = await supabase.from("post_iterations").insert({
       client_id: clientId,
       platform: post.platform || null,
       post_copy: post.copy || null,
@@ -210,6 +217,10 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       variant_angle: angle || null,
       is_selected: isSelected,
     } as any);
+    if (error) {
+      console.error("[CreatePostVideoButton] persistVariantRow failed:", error);
+      toast.error(`Failed to save video variant: ${error.message}`);
+    }
   };
 
   // "Use favorites" button: update is_selected on rows in the current variant group.
@@ -276,6 +287,10 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       for (let i = 0; i < count; i++) angleInstructions.push({ label: "", instruction: "" });
     }
 
+    // Page-level generation tracker — survives modal close so the user can
+    // navigate away and still see progress / completion.
+    const postKey = generation.startGeneration({ post, type: "video", total: count });
+
     // Fire all variants in parallel.
     const promises = angleInstructions.map((angle) =>
       supabase.functions.invoke("generate-post-video", {
@@ -321,6 +336,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
           return next;
         });
         await persistVariantRow(persistentUrl, angleInstructions[i].instruction, groupId, false);
+        generation.progressGeneration(postKey);
 
         if (firstSuccessUrl === null) firstSuccessUrl = persistentUrl;
       } else {
@@ -329,16 +345,14 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
           next[i] = "FAILED";
           return next;
         });
+        generation.progressGeneration(postKey, { failed: true });
       }
     }
 
+    generation.completeGeneration(postKey);
     setLoading(false);
-
-    if (!firstSuccessUrl) {
-      toast.error("All video variants failed");
-    } else {
-      toast.success("Variants ready — pick your favorites");
-    }
+    // Toast intentionally minimal — the floating GenerationProgress card now
+    // surfaces the "ready" state with a View action that opens the panel.
   };
 
   const isVideoFormat = ["reel", "reels", "story", "stories", "tiktok", "video", "short"]

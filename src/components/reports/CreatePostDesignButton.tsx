@@ -11,6 +11,7 @@ import { toast as sonnerToast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { DesignEditor } from "@/components/editor/DesignEditor";
 import type { ClientContext } from "@/lib/clientContext";
+import { useGenerationContext } from "@/components/reports/calendar/GenerationContext";
 
 export interface BrandIdentity {
   primary_color?: string;
@@ -64,6 +65,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const effectiveDesignReferences = clientContext?.design_references ?? designReferences ?? [];
   const effectiveBrandBookFilePath = clientContext?.brand_book_file_path ?? brandBookFilePath ?? null;
   const isCarousel = isCarouselFormat(post.format);
+  const generation = useGenerationContext();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   // Variant slot tracking — null=loading, string=URL, "FAILED"=error.
@@ -144,8 +146,13 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     groupId: string | null,
     isSelected: boolean,
   ) => {
-    if (!clientId) return;
-    await supabase.from("post_iterations").insert({
+    if (!clientId) {
+      console.warn(
+        "[CreatePostDesignButton] persistVariantRow skipped — no clientId. Variant will not persist across reloads.",
+      );
+      return;
+    }
+    const { error } = await supabase.from("post_iterations").insert({
       client_id: clientId,
       platform: post.platform || null,
       post_copy: post.copy || null,
@@ -157,6 +164,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       variant_angle: angle || null,
       is_selected: isSelected,
     } as any);
+    if (error) {
+      console.error("[CreatePostDesignButton] persistVariantRow failed:", error);
+      sonnerToast.error(`Failed to save variant: ${error.message}`);
+    }
   };
 
   // Toggle a variant's favorite state.
@@ -224,6 +235,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     // Initialize all slots as loading.
     setVariantUrls(new Array(count).fill(null));
 
+    // Notify the page-level generation tracker so the floating progress card
+    // and the per-post overlay can render. This survives modal close.
+    const postKey = generation.startGeneration({ post, type: "design", total: count });
+
     // Fire all N calls in parallel.
     const promises = angleInstructions.map((angle) =>
       supabase.functions.invoke("generate-post-image", {
@@ -258,15 +273,18 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         });
         // Persist a variant row (initially not selected).
         await persistVariantRow(uploadedUrl, angleInstructions[i].instruction, groupId, false);
+        generation.progressGeneration(postKey);
       } else {
         setVariantUrls((prev) => {
           const next = [...prev];
           next[i] = "FAILED";
           return next;
         });
+        generation.progressGeneration(postKey, { failed: true });
       }
     }
 
+    generation.completeGeneration(postKey);
     setLoading(false);
   };
 
@@ -275,6 +293,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     const count = slideCount;
     const generated: string[] = [];
     setVariantUrls(new Array(count).fill(null));
+
+    // Page-level generation tracker — same as the variant flow.
+    const postKey = generation.startGeneration({ post, type: "design", total: count });
 
     try {
       for (let i = 0; i < count; i++) {
@@ -298,6 +319,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             next[i] = "FAILED";
             return next;
           });
+          generation.progressGeneration(postKey, { failed: true });
           continue;
         }
         if (data?.image_url) {
@@ -338,6 +360,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             return next;
           });
           if (i === 0 && data.revised_prompt) setRevisedPrompt(data.revised_prompt);
+          generation.progressGeneration(postKey);
         }
       }
 
@@ -360,6 +383,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     } catch (err: any) {
       toast({ title: "Generation failed", description: err.message, variant: "destructive" });
     } finally {
+      generation.completeGeneration(postKey);
       setLoading(false);
       setCurrentSlide(0);
     }

@@ -7,6 +7,8 @@ import { CalendarKanban, findLatestSelectedIteration } from "./CalendarKanban";
 import { PostPanel } from "./PostPanel";
 import { WeeklyHighlights } from "./WeeklyHighlights";
 import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
+import { GenerationProvider } from "./GenerationContext";
+import { GenerationProgress } from "./GenerationProgress";
 import type { ClientContext } from "@/lib/clientContext";
 
 interface Props {
@@ -129,58 +131,63 @@ export function ContentIdeasTab({
     : [];
 
   return (
-    <div className="space-y-4">
-      {availablePlatforms.length > 0 && clientId && (
-        <div className="flex justify-end">
-          <CreateAdHocPost
-            clientId={clientId}
-            platforms={availablePlatforms}
-            clientContext={clientContext}
-          />
-        </div>
-      )}
+    <GenerationProvider onOpenPanel={(post) => setActivePost(post)}>
+      <div className="space-y-4">
+        {availablePlatforms.length > 0 && clientId && (
+          <div className="flex justify-end">
+            <CreateAdHocPost
+              clientId={clientId}
+              platforms={availablePlatforms}
+              clientContext={clientContext}
+            />
+          </div>
+        )}
 
-      <WeeklyHighlights
-        aiAnalysis={aiAnalysis}
-        sproutMonthSummary={sproutPerformance?.month_comparison?.summary || null}
-      />
+        <WeeklyHighlights
+          aiAnalysis={aiAnalysis}
+          sproutMonthSummary={sproutPerformance?.month_comparison?.summary || null}
+        />
 
-      <CalendarFilters
-        filters={filters}
-        onChange={setFilters}
-        availablePlatforms={availablePlatforms}
-        availableLanguages={availableLanguages}
-      />
+        <CalendarFilters
+          filters={filters}
+          onChange={setFilters}
+          availablePlatforms={availablePlatforms}
+          availableLanguages={availableLanguages}
+        />
 
-      <CalendarKanban
-        contentCalendar={contentCalendar}
-        postIterations={postIterations as any}
-        scheduledPosts={scheduledPosts as any}
-        filters={filters}
-        onCardClick={setActivePost}
-        onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
-      />
+        <CalendarKanban
+          contentCalendar={contentCalendar}
+          postIterations={postIterations as any}
+          scheduledPosts={scheduledPosts as any}
+          filters={filters}
+          onCardClick={setActivePost}
+          onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
+        />
 
-      <PostPanel
-        open={!!activePost}
-        onOpenChange={(open) => !open && setActivePost(null)}
-        post={activePost}
-        iteration={activeIteration}
-        postIterations={activePostIterations}
-        clientContext={clientContext}
-        clientId={clientId}
-        reportId={reportId}
-        clientTimezone={clientTimezone}
-        onToggleSelected={(iterationId, nextSelected) => {
-          supabase
-            .from("post_iterations")
-            .update({ is_selected: nextSelected } as any)
-            .eq("id", iterationId)
-            .then(() => {
-              qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
-            });
-        }}
-      />
-    </div>
+        <PostPanel
+          open={!!activePost}
+          onOpenChange={(open) => !open && setActivePost(null)}
+          post={activePost}
+          iteration={activeIteration}
+          postIterations={activePostIterations}
+          clientContext={clientContext}
+          clientId={clientId}
+          reportId={reportId}
+          clientTimezone={clientTimezone}
+          onToggleSelected={(iterationId, nextSelected) => {
+            supabase
+              .from("post_iterations")
+              .update({ is_selected: nextSelected } as any)
+              .eq("id", iterationId)
+              .then(() => {
+                qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
+              });
+          }}
+        />
+
+        {/* Floating progress + completion indicator (bottom-right) */}
+        <GenerationProgress />
+      </div>
+    </GenerationProvider>
   );
 }
