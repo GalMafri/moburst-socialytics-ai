@@ -56,8 +56,8 @@ function FilterChip({
     >
       <Badge
         variant={active ? "default" : "outline"}
-        className={`cursor-pointer text-sm py-2 px-3 transition-colors ${
-          active ? "" : "hover:border-foreground/40"
+        className={`cursor-pointer text-sm font-bold tracking-[-0.2px] py-1.5 px-3.5 rounded-full transition-colors ${
+          active ? "" : "border-white/15 hover:border-foreground/40"
         }`}
       >
         {children}
@@ -77,7 +77,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
     <div className="sticky top-0 z-10 bg-background/95 backdrop-blur py-3 space-y-3 border-b border-white/10 print:hidden">
       {/* Day row */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground w-16">Day</span>
+        <span className="text-xs font-medium tracking-[0.1px] uppercase text-muted-foreground w-20">Day</span>
         <FilterChip
           active={filters.day === "all"}
           onClick={() => onChange({ ...filters, day: "all" })}
@@ -98,7 +98,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
 
       {/* Platform row */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground w-16">Platform</span>
+        <span className="text-xs font-medium tracking-[0.1px] uppercase text-muted-foreground w-20">Platform</span>
         <FilterChip
           active={filters.platform === "all"}
           onClick={() => onChange({ ...filters, platform: "all" })}
@@ -128,7 +128,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
 
       {/* Status row */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground w-16">Status</span>
+        <span className="text-xs font-medium tracking-[0.1px] uppercase text-muted-foreground w-20">Status</span>
         {STATUSES.map((s) => (
           <FilterChip
             key={s.value}
@@ -143,7 +143,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
       {/* Language row — only when more than one available */}
       {availableLanguages.length > 1 && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-muted-foreground w-16">Language</span>
+          <span className="text-xs font-medium tracking-[0.1px] uppercase text-muted-foreground w-20">Language</span>
           <FilterChip
             active={filters.language === "all"}
             onClick={() => onChange({ ...filters, language: "all" })}

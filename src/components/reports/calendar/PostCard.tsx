@@ -37,13 +37,12 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
       type="button"
       onClick={onOpen}
       aria-label={`Open post: ${copy.slice(0, 60) || post.platform}`}
-      className="glass-elevated w-full text-left rounded-lg p-4 space-y-3.5 group flex flex-col
-                 transition-colors hover:border-primary/60
+      className="glass hover-lift w-full text-left p-5 space-y-4 group flex flex-col
                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       {/* Thumbnail / empty state — 16:10 keeps cards from going too tall. */}
       {thumb ? (
-        <div className="relative w-full aspect-[16/10] bg-black rounded overflow-hidden">
+        <div className="relative w-full aspect-[16/10] bg-black rounded-[10px] overflow-hidden">
           {isVideo ? (
             <video src={thumb} className="w-full h-full object-cover" muted preload="metadata" />
           ) : (
@@ -51,10 +50,10 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
           )}
         </div>
       ) : (
-        <div className="w-full aspect-[16/10] rounded flex items-center justify-center bg-[rgba(255,255,255,0.04)] border border-dashed border-white/10 group-hover:border-primary/40 transition-colors">
+        <div className="w-full aspect-[16/10] rounded-[10px] flex items-center justify-center bg-[rgba(255,255,255,0.04)] border border-dashed border-white/10 group-hover:border-primary/40 transition-colors">
           <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
             <ImagePlus className="h-5 w-5" />
-            <span className="text-sm">No design yet</span>
+            <span className="text-sm tracking-[-0.5px]">No design yet</span>
           </div>
         </div>
       )}
@@ -63,17 +62,23 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
       <div className="flex items-center gap-2 flex-wrap">
         {post.platform && <PlatformBadge platform={post.platform} size="sm" />}
         {post.format && (
-          <Badge variant="outline" className="text-sm py-0.5 px-2 border-white/25">
+          <Badge
+            variant="outline"
+            className="text-xs font-bold tracking-[-0.2px] py-0.5 px-2 border-white/15 rounded-full"
+          >
             {post.format}
           </Badge>
         )}
         {post.language && (
-          <Badge variant="secondary" className="text-sm py-0.5 px-2 uppercase">
+          <Badge
+            variant="secondary"
+            className="text-xs font-bold tracking-[-0.2px] py-0.5 px-2 uppercase rounded-full"
+          >
             {post.language}
           </Badge>
         )}
         {post.posting_time && (
-          <span className="text-sm text-muted-foreground flex items-center gap-1 ml-auto">
+          <span className="text-xs text-muted-foreground tracking-[-0.5px] flex items-center gap-1 ml-auto">
             <Clock className="h-3.5 w-3.5" /> {post.posting_time}
           </span>
         )}
@@ -82,21 +87,21 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
       {/* Pillar */}
       {post.pillar && (
         <div>
-          <Badge className="bg-accent text-accent-foreground text-sm py-1 px-2.5 font-normal">
+          <Badge className="bg-accent text-accent-foreground text-xs font-bold tracking-[-0.2px] py-1 px-2.5 rounded-full">
             {post.pillar}
           </Badge>
         </div>
       )}
 
-      {/* Copy */}
+      {/* Copy — Intercept body: 14px Regular tracking-[-0.5px] (bumped to 15px for readability) */}
       {copy && (
-        <p className="text-base leading-relaxed line-clamp-3 print:line-clamp-none text-foreground flex-1">
+        <p className="text-[15px] leading-relaxed tracking-[-0.5px] line-clamp-3 print:line-clamp-none text-foreground flex-1">
           {copy}
         </p>
       )}
 
-      {/* Status (interactive if onToggleApproved provided) */}
-      <div className="pt-2 border-t border-white/10">
+      {/* Status */}
+      <div className="pt-3 border-t border-white/[0.06]">
         <PostStatusChip status={status} onToggleApproved={onToggleApproved} />
       </div>
     </button>

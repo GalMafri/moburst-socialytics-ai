@@ -37,7 +37,7 @@ export function PostStatusChip({ status, onToggleApproved }: Props) {
 
   const badgeContent = (
     <Badge
-      className={`${STATUS_CLASS[status]} text-sm py-1 px-2.5 ${
+      className={`${STATUS_CLASS[status]} text-xs font-bold tracking-[-0.2px] py-1 px-2.5 rounded-full ${
         clickable ? "group-hover/chip:opacity-80 transition-opacity" : ""
       }`}
     >

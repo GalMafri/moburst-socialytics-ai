@@ -135,18 +135,23 @@ export function PostPanel({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="right"
-          className="w-full sm:max-w-2xl overflow-y-auto print:hidden bg-background border-l border-white/10"
+          className="w-full sm:max-w-2xl overflow-y-auto print:hidden bg-[rgba(11,12,16,0.92)] backdrop-blur-[60px] border-l border-white/[0.08]"
         >
           <SheetHeader>
-            <SheetTitle className="flex items-center gap-2 flex-wrap text-base">
+            <SheetTitle className="flex items-center gap-2 flex-wrap text-[18px] font-semibold tracking-[-0.5px]">
               {post.platform && <PlatformBadge platform={post.platform} size="sm" />}
               {post.format && (
-                <Badge variant="outline" className="text-sm py-0.5 px-2">
+                <Badge
+                  variant="outline"
+                  className="text-xs font-bold tracking-[-0.2px] py-0.5 px-2 rounded-full border-white/15"
+                >
                   {post.format}
                 </Badge>
               )}
               {post.posting_time && (
-                <span className="text-sm text-muted-foreground">{post.posting_time}</span>
+                <span className="text-sm font-normal text-muted-foreground tracking-[-0.5px]">
+                  {post.posting_time}
+                </span>
               )}
             </SheetTitle>
           </SheetHeader>
@@ -201,7 +206,7 @@ export function PostPanel({
                   ))}
                 </div>
               ) : (
-                <div className="glass-elevated rounded-lg border border-dashed border-white/10 p-8 text-center space-y-2">
+                <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
                   <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
                   <p className="text-sm text-muted-foreground">
                     No designs generated for this post yet.
@@ -250,7 +255,7 @@ export function PostPanel({
                   ))}
                 </div>
               ) : (
-                <div className="glass-elevated rounded-lg border border-dashed border-white/10 p-8 text-center space-y-2">
+                <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
                   <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
                   <p className="text-sm text-muted-foreground">
                     No videos generated for this post yet.
@@ -338,7 +343,7 @@ function MediaTileCard({
   const canToggle = !!tile.iterationId && !!onToggleSelected;
   return (
     <div
-      className={`glass-elevated rounded-lg overflow-hidden border ${
+      className={`glass-inner overflow-hidden border ${
         tile.isSelected ? "border-primary/60 ring-1 ring-primary/40" : "border-white/5"
       }`}
     >
