@@ -105,19 +105,19 @@ export function CalendarKanban({
         const posts = dayEntry?.posts || [];
 
         return (
-          <section key={dayName} className="space-y-4 animate-slide-up">
-            {/* Day header row — Intercept Page title spec: 20px Bold tracking-[-0.5px] */}
-            <div className="flex items-baseline gap-3 flex-wrap sticky top-16 lg:top-20 bg-background/95 backdrop-blur py-3 z-[5] border-b border-white/[0.06]">
+          <section key={dayName} className="space-y-5 animate-slide-up">
+            {/* Day header — typography only, no chrome */}
+            <div className="flex items-baseline gap-3 flex-wrap">
               <h3 className="text-[20px] font-bold leading-6 tracking-[-0.5px] text-foreground">
                 {dayName}
               </h3>
               {dayEntry?.date_label && (
-                <span className="text-sm text-muted-foreground tracking-[-0.5px]">
+                <span className="text-sm text-[#9ca3af] tracking-[-0.5px]">
                   {dayEntry.date_label}
                 </span>
               )}
               <span
-                className="text-xs font-medium tracking-[0.1px] uppercase text-muted-foreground ml-auto"
+                className="text-[11px] font-medium tracking-wider uppercase text-[#9ca3af] ml-auto"
                 aria-live="polite"
               >
                 {posts.length === 0 ? "No posts" : `${posts.length} post${posts.length === 1 ? "" : "s"}`}

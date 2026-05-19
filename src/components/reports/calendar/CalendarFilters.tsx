@@ -35,6 +35,12 @@ const DEFAULT_FILTERS: CalendarFilterState = {
  * Filter group with caption label + a segmented control of chips inside a
  * glass container. Matches the Intercept Tabs pattern.
  */
+/**
+ * Segmented control matching the Intercept "Tabs list" spec exactly:
+ *   rounded-[12px] bg-[rgba(0,0,0,0.2)] backdrop-blur-xl
+ *   border border-[rgba(255,255,255,0.07)]
+ *   inset shadow on the container
+ */
 function SegmentedGroup({
   label,
   children,
@@ -43,17 +49,27 @@ function SegmentedGroup({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2.5">
       <span className="text-[11px] font-medium uppercase tracking-wider text-[#9ca3af] shrink-0">
         {label}
       </span>
-      <div className="flex items-center gap-1 p-1 rounded-[12px] bg-[rgba(0,0,0,0.25)] backdrop-blur-xl border border-[rgba(255,255,255,0.07)] shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.03)]">
+      <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] backdrop-blur-xl border border-[rgba(255,255,255,0.07)] shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.03)]">
         {children}
       </div>
     </div>
   );
 }
 
+/**
+ * Single chip / segment matching the Intercept "Tabs trigger" spec:
+ *   active:  bg-[rgba(255,255,255,0.08)] text-white
+ *            shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06),0_2px_8px_rgba(0,0,0,0.2)]
+ *            backdrop-blur-sm
+ *   inactive: text-[#9ca3af] hover:text-white
+ *
+ * The active state is the elevated subtle-white overlay — NOT the lime primary
+ * accent (which is reserved for primary action buttons per the design system).
+ */
 function Segment({
   active,
   onClick,
@@ -71,12 +87,12 @@ function Segment({
       onClick={onClick}
       aria-pressed={active}
       aria-label={ariaLabel}
-      className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium tracking-[-0.2px] transition-colors
+      className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium tracking-[-0.2px] transition-all
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
         ${
           active
-            ? "bg-[#b9e045] text-black"
-            : "text-[#9ca3af] hover:text-white hover:bg-[rgba(255,255,255,0.06)]"
+            ? "bg-[rgba(255,255,255,0.08)] text-white backdrop-blur-sm shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06),0_2px_8px_rgba(0,0,0,0.2)]"
+            : "text-[#9ca3af] hover:text-white"
         }`}
     >
       {children}
@@ -99,14 +115,18 @@ function PlatformSegment({
       onClick={onClick}
       aria-pressed={active}
       aria-label={platform}
-      className={`px-2.5 py-1 rounded-[8px] transition-colors
+      className={`px-2.5 py-1 rounded-[8px] transition-all
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
-        ${active ? "bg-[rgba(255,255,255,0.08)]" : "hover:bg-[rgba(255,255,255,0.06)]"}`}
+        ${
+          active
+            ? "bg-[rgba(255,255,255,0.08)] backdrop-blur-sm shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06),0_2px_8px_rgba(0,0,0,0.2)]"
+            : ""
+        }`}
     >
       <PlatformBadge
         platform={platform}
         size="sm"
-        className={active ? "" : "opacity-70"}
+        className={active ? "" : "opacity-60"}
       />
     </button>
   );
@@ -120,8 +140,8 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
     filters.language !== "all";
 
   return (
-    <div className="sticky top-0 z-10 -mx-2 px-2 py-3 bg-background/80 backdrop-blur-xl print:hidden">
-      <div className="flex flex-wrap items-center gap-4">
+    <div className="print:hidden">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         {/* Day */}
         <SegmentedGroup label="Day">
           <Segment active={filters.day === "all"} onClick={() => onChange({ ...filters, day: "all" })}>
