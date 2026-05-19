@@ -41,3 +41,42 @@ verify_jwt = false
 
 [functions.data-snapshot]
 verify_jwt = false
+
+# ── Functions added during the design pipeline v2 work. These exist on disk
+# and are invoked from the app, but were not previously registered here so
+# Lovable did not deploy them. Without propose-carousel-slides in particular,
+# carousel briefs fall back to a shared prompt across all slide calls and
+# Gemini composes contact-sheet layouts.
+
+[functions.propose-carousel-slides]
+verify_jwt = false
+
+[functions.propose-design-angles]
+verify_jwt = false
+
+[functions.synthesize-design-language]
+verify_jwt = false
+
+[functions.adapt-creative-prompt]
+verify_jwt = false
+
+[functions.validate-design-output]
+verify_jwt = false
+
+[functions.analyze-post-edits]
+verify_jwt = false
+
+[functions.generate-ad-hoc-post]
+verify_jwt = false
+
+[functions.regenerate-post-copy]
+verify_jwt = false
+
+[functions.upload-generated-media]
+verify_jwt = false
+
+[functions.hub-auth-bridge]
+verify_jwt = false
+
+[functions.proxy-media]
+verify_jwt = false

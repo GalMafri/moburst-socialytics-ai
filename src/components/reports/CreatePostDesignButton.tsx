@@ -339,17 +339,35 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       console.warn("[CreatePostDesignButton] carousel decomposition failed, falling back to shared brief:", e);
     }
 
+    // Sanitize the raw carousel brief in case we have to fall back to it for
+    // a slide call (decomposition unavailable or partial). We want each slide
+    // call to receive a brief that does NOT scream "5 slides" — otherwise
+    // Gemini composes a contact sheet even with the slide_context guardrail
+    // in buildImagePrompt. This regex is a best-effort sanitizer.
+    const stripMultiSlideLanguage = (s: string): string =>
+      s
+        .replace(/\b\d+-?slide(s)?\b/gi, "single-slide")
+        .replace(/\bcarousel\b/gi, "social post")
+        .replace(/\bswipe\s+(through|across|to)\b/gi, "explore")
+        .replace(/\bslides?\s+\d+\s*(-|–|to)\s*\d+\b/gi, "this slide")
+        .replace(/\bnext slide\b/gi, "this image")
+        .replace(/\bprevious slide\b/gi, "this image")
+        .replace(/\ball\s+\d+\s+slides?\b/gi, "this slide");
+
     try {
       for (let i = 0; i < count; i++) {
         setCurrentSlide(i + 1);
 
-        // Per-slide brief if available; otherwise reuse the original carousel
-        // brief. Per-slide is dramatically better — each call focuses on ONE
-        // slide's content, not the whole deck.
+        // Per-slide brief if available; otherwise fall back to the sanitized
+        // overall brief. Per-slide is dramatically better — each call focuses
+        // on ONE slide's content, not the whole deck. The sanitized fallback
+        // strips multi-slide language so that even partial decomposition
+        // failures don't re-introduce contact-sheet output. buildImagePrompt's
+        // slide_context section adds the "single-slide output" guardrails.
         const slideBrief = slideBriefs[i];
         const perSlidePrompt = slideBrief
           ? `${slideBrief.headline ? `Headline: ${slideBrief.headline}\n\n` : ""}${slideBrief.content_brief}`
-          : editablePrompt || defaultPrompt;
+          : stripMultiSlideLanguage(editablePrompt || defaultPrompt);
 
         const { data, error } = await supabase.functions.invoke("generate-post-image", {
           body: {
