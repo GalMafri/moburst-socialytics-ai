@@ -1,13 +1,11 @@
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { PlatformBadge } from "@/lib/platform-config";
 import { X } from "lucide-react";
 
 export interface CalendarFilterState {
-  day: string;        // "all" | "Monday" | ... | "Sunday"
-  platform: string;   // "all" | platform value
-  status: string;     // "all" | "draft" | "designed" | "approved" | "scheduled"
-  language: string;   // "all" | language code
+  day: string;
+  platform: string;
+  status: string;
+  language: string;
 }
 
 interface Props {
@@ -19,7 +17,7 @@ interface Props {
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const STATUSES: Array<{ value: string; label: string }> = [
-  { value: "all", label: "Any status" },
+  { value: "all", label: "Any" },
   { value: "draft", label: "Draft" },
   { value: "designed", label: "Designed" },
   { value: "approved", label: "Approved" },
@@ -33,7 +31,30 @@ const DEFAULT_FILTERS: CalendarFilterState = {
   language: "all",
 };
 
-function FilterChip({
+/**
+ * Filter group with caption label + a segmented control of chips inside a
+ * glass container. Matches the Intercept Tabs pattern.
+ */
+function SegmentedGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-[11px] font-medium uppercase tracking-wider text-[#9ca3af] shrink-0">
+        {label}
+      </span>
+      <div className="flex items-center gap-1 p-1 rounded-[12px] bg-[rgba(0,0,0,0.25)] backdrop-blur-xl border border-[rgba(255,255,255,0.07)] shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.03)]">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Segment({
   active,
   onClick,
   children,
@@ -50,18 +71,43 @@ function FilterChip({
       onClick={onClick}
       aria-pressed={active}
       aria-label={ariaLabel}
-      className="inline-flex items-center rounded-full
-                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
-                 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-    >
-      <Badge
-        variant={active ? "default" : "outline"}
-        className={`cursor-pointer text-sm font-bold tracking-[-0.2px] py-1.5 px-3.5 rounded-full transition-colors ${
-          active ? "" : "border-white/15 hover:border-foreground/40"
+      className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium tracking-[-0.2px] transition-colors
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
+        ${
+          active
+            ? "bg-[#b9e045] text-black"
+            : "text-[#9ca3af] hover:text-white hover:bg-[rgba(255,255,255,0.06)]"
         }`}
-      >
-        {children}
-      </Badge>
+    >
+      {children}
+    </button>
+  );
+}
+
+function PlatformSegment({
+  active,
+  platform,
+  onClick,
+}: {
+  active: boolean;
+  platform: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={platform}
+      className={`px-2.5 py-1 rounded-[8px] transition-colors
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
+        ${active ? "bg-[rgba(255,255,255,0.08)]" : "hover:bg-[rgba(255,255,255,0.06)]"}`}
+    >
+      <PlatformBadge
+        platform={platform}
+        size="sm"
+        className={active ? "" : "opacity-70"}
+      />
     </button>
   );
 }
@@ -74,107 +120,89 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
     filters.language !== "all";
 
   return (
-    <div className="sticky top-0 z-10 bg-background/95 backdrop-blur py-3 space-y-3 border-b border-white/10 print:hidden">
-      {/* Day row */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium tracking-[0.1px] uppercase text-muted-foreground w-20">Day</span>
-        <FilterChip
-          active={filters.day === "all"}
-          onClick={() => onChange({ ...filters, day: "all" })}
-        >
-          All
-        </FilterChip>
-        {DAYS.map((d) => (
-          <FilterChip
-            key={d}
-            active={filters.day === d}
-            onClick={() => onChange({ ...filters, day: d })}
-            ariaLabel={d}
-          >
-            {d.slice(0, 3)}
-          </FilterChip>
-        ))}
-      </div>
+    <div className="sticky top-0 z-10 -mx-2 px-2 py-3 bg-background/80 backdrop-blur-xl print:hidden">
+      <div className="flex flex-wrap items-center gap-4">
+        {/* Day */}
+        <SegmentedGroup label="Day">
+          <Segment active={filters.day === "all"} onClick={() => onChange({ ...filters, day: "all" })}>
+            All
+          </Segment>
+          {DAYS.map((d) => (
+            <Segment
+              key={d}
+              active={filters.day === d}
+              onClick={() => onChange({ ...filters, day: d })}
+              ariaLabel={d}
+            >
+              {d.slice(0, 3)}
+            </Segment>
+          ))}
+        </SegmentedGroup>
 
-      {/* Platform row */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium tracking-[0.1px] uppercase text-muted-foreground w-20">Platform</span>
-        <FilterChip
-          active={filters.platform === "all"}
-          onClick={() => onChange({ ...filters, platform: "all" })}
-        >
-          All
-        </FilterChip>
-        {availablePlatforms.map((p) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => onChange({ ...filters, platform: p })}
-            aria-pressed={filters.platform === p}
-            className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            <PlatformBadge
-              platform={p}
-              size="sm"
-              className={`cursor-pointer ${
-                filters.platform === p
-                  ? "ring-2 ring-primary ring-offset-2 ring-offset-background"
-                  : "opacity-75 hover:opacity-100"
-              }`}
-            />
-          </button>
-        ))}
-      </div>
-
-      {/* Status row */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium tracking-[0.1px] uppercase text-muted-foreground w-20">Status</span>
-        {STATUSES.map((s) => (
-          <FilterChip
-            key={s.value}
-            active={filters.status === s.value}
-            onClick={() => onChange({ ...filters, status: s.value })}
-          >
-            {s.label}
-          </FilterChip>
-        ))}
-      </div>
-
-      {/* Language row — only when more than one available */}
-      {availableLanguages.length > 1 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium tracking-[0.1px] uppercase text-muted-foreground w-20">Language</span>
-          <FilterChip
-            active={filters.language === "all"}
-            onClick={() => onChange({ ...filters, language: "all" })}
+        {/* Platform */}
+        <SegmentedGroup label="Platform">
+          <Segment
+            active={filters.platform === "all"}
+            onClick={() => onChange({ ...filters, platform: "all" })}
           >
             All
-          </FilterChip>
-          {availableLanguages.map((l) => (
-            <FilterChip
-              key={l}
-              active={filters.language === l}
-              onClick={() => onChange({ ...filters, language: l })}
-            >
-              <span className="uppercase">{l}</span>
-            </FilterChip>
+          </Segment>
+          {availablePlatforms.map((p) => (
+            <PlatformSegment
+              key={p}
+              platform={p}
+              active={filters.platform === p}
+              onClick={() => onChange({ ...filters, platform: p })}
+            />
           ))}
-        </div>
-      )}
+        </SegmentedGroup>
 
-      {/* Clear filters action */}
-      {hasActive && (
-        <div className="flex items-center justify-end pt-1">
-          <Button
-            variant="ghost"
-            size="sm"
+        {/* Status */}
+        <SegmentedGroup label="Status">
+          {STATUSES.map((s) => (
+            <Segment
+              key={s.value}
+              active={filters.status === s.value}
+              onClick={() => onChange({ ...filters, status: s.value })}
+            >
+              {s.label}
+            </Segment>
+          ))}
+        </SegmentedGroup>
+
+        {/* Language — only when more than one available */}
+        {availableLanguages.length > 1 && (
+          <SegmentedGroup label="Language">
+            <Segment
+              active={filters.language === "all"}
+              onClick={() => onChange({ ...filters, language: "all" })}
+            >
+              All
+            </Segment>
+            {availableLanguages.map((l) => (
+              <Segment
+                key={l}
+                active={filters.language === l}
+                onClick={() => onChange({ ...filters, language: l })}
+              >
+                <span className="uppercase">{l}</span>
+              </Segment>
+            ))}
+          </SegmentedGroup>
+        )}
+
+        {/* Clear filters action — appears only when filters are active */}
+        {hasActive && (
+          <button
+            type="button"
             onClick={() => onChange(DEFAULT_FILTERS)}
-            className="text-sm text-muted-foreground hover:text-foreground gap-1.5"
+            className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[#9ca3af] hover:text-white hover:bg-[rgba(255,255,255,0.06)] transition-colors
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            <X className="h-3.5 w-3.5" /> Clear filters
-          </Button>
-        </div>
-      )}
+            <X className="h-3.5 w-3.5" /> Clear
+          </button>
+        )}
+      </div>
     </div>
   );
 }

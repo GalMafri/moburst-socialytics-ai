@@ -37,7 +37,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
       type="button"
       onClick={onOpen}
       aria-label={`Open post: ${copy.slice(0, 60) || post.platform}`}
-      className="glass hover-lift w-full text-left p-5 space-y-4 group flex flex-col
+      className="glass-elevated hover-lift w-full text-left p-5 space-y-4 group flex flex-col !rounded-[20px]
                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       {/* Thumbnail / empty state — 16:10 keeps cards from going too tall. */}
