@@ -101,6 +101,12 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   const [variantGroupId, setVariantGroupId] = useState<string | null>(null);
   const [favoriteIdxs, setFavoriteIdxs] = useState<Set<number>>(new Set());
   const [variantUrls, setVariantUrls] = useState<VariantSlot[]>([]);
+  // Per-variant seed image (Gemini-generated anchor still that Veo animates
+  // from). Surfacing this lets us SEE whether the seed itself was on-brand —
+  // if seed is good but video drifts, that's Veo conditioning; if seed is
+  // already generic, the multimodal context flow is the problem.
+  const [variantSeeds, setVariantSeeds] = useState<Array<string | null>>([]);
+  const [previewSeedUrl, setPreviewSeedUrl] = useState<string | null>(null);
 
   const spec = getPlatformVideoSpec(post.platform, post.format);
 
@@ -275,6 +281,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     setVideoUrl(null);
     setFavoriteIdxs(new Set());
     setVariantUrls(new Array(count).fill(null));
+    setVariantSeeds(new Array(count).fill(null));
 
     // Build angle instructions for each variant.
     const angleInstructions: Array<{ label: string; instruction: string }> = [];
@@ -320,6 +327,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       const r = results[i];
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.video_url) {
         const rawUrl = r.value.data.video_url;
+        const seedUrl: string | null = r.value.data.seed_image_url || null;
         // Upload to persistent storage via upload-generated-media edge function.
         let persistentUrl = rawUrl;
         try {
@@ -339,6 +347,11 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
         setVariantUrls((prev) => {
           const next = [...prev];
           next[i] = persistentUrl;
+          return next;
+        });
+        setVariantSeeds((prev) => {
+          const next = [...prev];
+          next[i] = seedUrl;
           return next;
         });
         await persistVariantRow(persistentUrl, angleInstructions[i].instruction, groupId, false);
@@ -587,7 +600,59 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                     )
                   ))}
                 </div>
+
+                {/* Seed images — the brand-aligned anchor frame each video
+                    was animated from. Surfacing these lets the user diagnose
+                    off-brand video: if the seed itself is brand-aligned but
+                    the video drifts, that's a Veo conditioning limitation; if
+                    the seed is already generic, the multimodal context flow
+                    needs fixing. */}
+                {variantSeeds.some((s) => !!s) && (
+                  <div className="space-y-2 pt-2 border-t border-white/[0.06]">
+                    <p className="text-xs text-muted-foreground tracking-[-0.2px]">
+                      Seed frames (what Veo animated from). Click to view full size.
+                    </p>
+                    <div className="flex gap-2 flex-wrap">
+                      {variantSeeds.map((seedUrl, i) =>
+                        seedUrl ? (
+                          <button
+                            key={`seed-${i}`}
+                            type="button"
+                            onClick={() => setPreviewSeedUrl(seedUrl)}
+                            className="relative aspect-square w-16 rounded-md overflow-hidden border border-white/10 hover:border-primary/60 transition-colors"
+                            title={`Variant ${i + 1} seed image`}
+                          >
+                            <img
+                              src={seedUrl}
+                              alt={`Variant ${i + 1} seed`}
+                              className="w-full h-full object-cover"
+                            />
+                            <span className="absolute bottom-0 right-0 bg-black/70 text-white text-[10px] font-bold px-1">
+                              V{i + 1}
+                            </span>
+                          </button>
+                        ) : null,
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
+            )}
+
+            {/* Full-size seed image preview overlay. */}
+            {previewSeedUrl && (
+              <Dialog
+                open={!!previewSeedUrl}
+                onOpenChange={(o) => !o && setPreviewSeedUrl(null)}
+              >
+                <DialogContent className="max-w-3xl bg-black/95 border-white/10 p-0 overflow-hidden">
+                  <img
+                    src={previewSeedUrl}
+                    alt="Seed image full size"
+                    className="w-full h-auto max-h-[88vh] object-contain"
+                  />
+                </DialogContent>
+              </Dialog>
             )}
 
             {showTrimmer && videoUrl && (

@@ -78,8 +78,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const [currentSlide, setCurrentSlide] = useState(0);
   const [showEditor, setShowEditor] = useState(false);
   const [editableImageUrl, setEditableImageUrl] = useState<string | null>(null);
-  // Phase 6 — multi-variant state.
-  const [variantCount, setVariantCount] = useState(isCarousel ? 1 : 4);
+  // Phase 6 — multi-variant state. For carousels, each variant is a whole
+  // N-slide deck (so 2 variants × 5 slides = 10 images total). Capped at 3
+  // for carousels to keep total generation time sane (5×3=15 sequential calls).
+  const [variantCount, setVariantCount] = useState(isCarousel ? 2 : 4);
   const [angles, setAngles] = useState<Array<{ label: string; instruction: string }>>([]);
   const [selectedAngleIdxs, setSelectedAngleIdxs] = useState<number[]>([]);
   const [fetchingAngles, setFetchingAngles] = useState(false);
@@ -297,53 +299,37 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
   // Carousel path lives in its own helper for clarity.
   //
+  // Each variant is a complete N-slide deck rendered through a distinct
+  // creative angle. So variantCount=2 + slideCount=5 = 10 images: variant 1
+  // gets slides 1..5 of angle A, variant 2 gets slides 1..5 of angle B.
+  // Each variant is persisted as its OWN post_iterations row with all N slide
+  // URLs in media_urls; all variants share the variant_group_id so the panel
+  // groups them together.
+  //
   // Critical: each slide is generated as its OWN standalone image. If we just
   // pass the same multi-slide brief to N calls, Gemini happily returns a
   // contact sheet of all N slides for each call. So we first ask Claude to
   // decompose the brief into N focused per-slide briefs, then generate.
   const runCarouselGeneration = async (groupId: string) => {
-    const count = slideCount;
-    const generated: string[] = [];
-    setVariantUrls(new Array(count).fill(null));
+    const slides = Math.min(Math.max(slideCount, 2), 10);
+    const variants = Math.min(Math.max(variantCount, 1), 3);
+    const totalImages = slides * variants;
+    setVariantUrls(new Array(totalImages).fill(null));
 
-    // Page-level generation tracker — same as the variant flow. Pass the
-    // variantGroupId so the floating "View designs" button resolves to this
-    // exact carousel group on click.
+    // Page-level generation tracker — survives modal close. Total = every
+    // image across every variant deck.
     const postKey = generation.startGeneration({
       post,
       type: "design",
-      total: count,
+      total: totalImages,
       variantGroupId: groupId,
     });
 
-    // Decompose the carousel brief into per-slide briefs. Falls back to using
-    // the same brief for each slide if the decomposition call fails — the
-    // strengthened slide_context section in buildImagePrompt is the safety
-    // net that prevents contact-sheet output even with a shared brief.
-    let slideBriefs: Array<{ index: number; role: string; headline?: string; content_brief: string }> = [];
-    try {
-      const { data: decomposed } = await supabase.functions.invoke("propose-carousel-slides", {
-        body: {
-          brief: editablePrompt || defaultPrompt,
-          total: count,
-          platform: post.platform,
-          format: post.format,
-          post_copy: post.copy,
-          design_language: clientContext?.design_style_synthesis || null,
-        },
-      });
-      if (decomposed?.slides && Array.isArray(decomposed.slides)) {
-        slideBriefs = decomposed.slides.slice(0, count);
-      }
-    } catch (e) {
-      console.warn("[CreatePostDesignButton] carousel decomposition failed, falling back to shared brief:", e);
-    }
-
     // Sanitize the raw carousel brief in case we have to fall back to it for
-    // a slide call (decomposition unavailable or partial). We want each slide
-    // call to receive a brief that does NOT scream "5 slides" — otherwise
-    // Gemini composes a contact sheet even with the slide_context guardrail
-    // in buildImagePrompt. This regex is a best-effort sanitizer.
+    // a slide call (decomposition unavailable). We want each slide call to
+    // receive a brief that does NOT scream "5 slides" — otherwise Gemini
+    // composes a contact sheet even with the slide_context guardrail in
+    // buildImagePrompt. Best-effort regex.
     const stripMultiSlideLanguage = (s: string): string =>
       s
         .replace(/\b\d+-?slide(s)?\b/gi, "single-slide")
@@ -354,100 +340,179 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         .replace(/\bprevious slide\b/gi, "this image")
         .replace(/\ball\s+\d+\s+slides?\b/gi, "this slide");
 
+    // Strip bullet-list / multi-concept structure from per-slide briefs so a
+    // single slide doesn't get rendered as a multi-panel layout. The
+    // propose-carousel-slides system prompt asks for ONE concept per slide,
+    // but Claude can still slip in "X, Y, and Z" lists. This is defense in
+    // depth — keep the first sentence and the first dependent clause only.
+    const collapseListsInBrief = (s: string): string => {
+      // Remove markdown bullets / numbered lists entirely.
+      const noBullets = s
+        .replace(/^\s*[-*•]\s+.*$/gm, "")
+        .replace(/^\s*\d+[.)]\s+.*$/gm, "")
+        .replace(/\n{2,}/g, "\n")
+        .trim();
+      // If the brief still reads like a list ("X, Y, and Z"), keep only the
+      // first concept.
+      if (/(,\s*[^,]+){2,}\s+and\s+/i.test(noBullets) && noBullets.length > 220) {
+        const firstSentence = noBullets.split(/(?<=[.!?])\s+/)[0] || noBullets;
+        return firstSentence;
+      }
+      return noBullets;
+    };
+
+    // Decompose the carousel brief into per-slide briefs ONCE — the same
+    // slide-by-slide breakdown is reused across variants (variants differ by
+    // creative angle, not by content). Falls back to a sanitized shared
+    // brief if decomposition fails.
+    let slideBriefs: Array<{ index: number; role: string; headline?: string; content_brief: string }> = [];
     try {
-      for (let i = 0; i < count; i++) {
-        setCurrentSlide(i + 1);
+      const { data: decomposed } = await supabase.functions.invoke("propose-carousel-slides", {
+        body: {
+          brief: editablePrompt || defaultPrompt,
+          total: slides,
+          platform: post.platform,
+          format: post.format,
+          post_copy: post.copy,
+          design_language: clientContext?.design_style_synthesis || null,
+        },
+      });
+      if (decomposed?.slides && Array.isArray(decomposed.slides)) {
+        slideBriefs = decomposed.slides.slice(0, slides);
+      }
+    } catch (e) {
+      console.warn("[CreatePostDesignButton] carousel decomposition failed, falling back to shared brief:", e);
+    }
 
-        // Per-slide brief if available; otherwise fall back to the sanitized
-        // overall brief. Per-slide is dramatically better — each call focuses
-        // on ONE slide's content, not the whole deck. The sanitized fallback
-        // strips multi-slide language so that even partial decomposition
-        // failures don't re-introduce contact-sheet output. buildImagePrompt's
-        // slide_context section adds the "single-slide output" guardrails.
-        const slideBrief = slideBriefs[i];
-        const perSlidePrompt = slideBrief
-          ? `${slideBrief.headline ? `Headline: ${slideBrief.headline}\n\n` : ""}${slideBrief.content_brief}`
-          : stripMultiSlideLanguage(editablePrompt || defaultPrompt);
+    // Pick one creative angle per variant deck. If we have angles fetched,
+    // use the user's selected ones (filling from the top if they picked
+    // fewer than variantCount). Otherwise use empty instructions so the
+    // variants only differ by Gemini's natural sampling variance.
+    const variantAngles: Array<{ label: string; instruction: string }> = [];
+    for (let v = 0; v < variants; v++) {
+      if (angles.length > 0 && selectedAngleIdxs.length > 0) {
+        const angleIdx = selectedAngleIdxs[v] ?? selectedAngleIdxs[selectedAngleIdxs.length - 1] ?? 0;
+        variantAngles.push(angles[angleIdx] || { label: "", instruction: "" });
+      } else if (angles.length > 0) {
+        variantAngles.push(angles[v % angles.length] || { label: "", instruction: "" });
+      } else {
+        variantAngles.push({ label: "", instruction: "" });
+      }
+    }
 
-        const { data, error } = await supabase.functions.invoke("generate-post-image", {
-          body: {
-            prompt: perSlidePrompt,
-            platform: post.platform,
-            format: post.format,
-            brand_context: effectiveBrandIdentity || undefined,
-            design_references: effectiveDesignReferences.length > 0 ? effectiveDesignReferences : undefined,
-            brand_book_file_path: effectiveBrandBookFilePath || undefined,
-            client_context: clientContext || undefined,
-            post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
-            slide_context: count > 1 ? { index: i, total: count } : undefined,
-          },
-        });
-        if (error || data?.error) {
-          setVariantUrls((prev) => {
-            const next = [...prev];
-            next[i] = "FAILED";
-            return next;
+    try {
+      // Outer loop: variants. Inner loop: slides within this variant.
+      for (let v = 0; v < variants; v++) {
+        const variantAngle = variantAngles[v];
+        const variantSlides: string[] = [];
+
+        for (let s = 0; s < slides; s++) {
+          const globalIdx = v * slides + s;
+          setCurrentSlide(globalIdx + 1);
+
+          // Per-slide brief if decomposition succeeded; otherwise the
+          // sanitized overall brief. Defense-in-depth: collapse any
+          // bullet-list / multi-concept structure that slipped through.
+          const slideBrief = slideBriefs[s];
+          const rawPerSlide = slideBrief
+            ? `${slideBrief.headline ? `Headline: ${slideBrief.headline}\n\n` : ""}${slideBrief.content_brief}`
+            : stripMultiSlideLanguage(editablePrompt || defaultPrompt);
+          const perSlidePrompt = collapseListsInBrief(rawPerSlide);
+
+          const { data, error } = await supabase.functions.invoke("generate-post-image", {
+            body: {
+              prompt: perSlidePrompt,
+              platform: post.platform,
+              format: post.format,
+              brand_context: effectiveBrandIdentity || undefined,
+              design_references: effectiveDesignReferences.length > 0 ? effectiveDesignReferences : undefined,
+              brand_book_file_path: effectiveBrandBookFilePath || undefined,
+              client_context: clientContext || undefined,
+              post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
+              slide_context: { index: s, total: slides },
+              variant_angle: variantAngle.instruction || undefined,
+            },
           });
-          generation.progressGeneration(postKey, { failed: true });
-          continue;
-        }
-        if (data?.image_url) {
-          // Existing hex validation/retry path preserved.
-          let finalImageUrl = data.image_url;
-          try {
-            const { data: validation } = await supabase.functions.invoke("validate-design-output", {
-              body: { image_data: data.image_url },
+
+          if (error || data?.error) {
+            setVariantUrls((prev) => {
+              const next = [...prev];
+              next[globalIdx] = "FAILED";
+              return next;
             });
-            if (validation?.has_hex_codes) {
-              toast({ title: "Refining design..." });
-              const retryPrompt = perSlidePrompt +
-                "\n\nCRITICAL: The previous generation contained visible hex color codes as text. Do NOT render any hex codes, color codes, RGB values, or technical color notation as readable text anywhere in the image. Colors should be applied visually only.";
-              const { data: retryData } = await supabase.functions.invoke("generate-post-image", {
-                body: {
-                  prompt: retryPrompt,
-                  platform: post.platform,
-                  format: post.format,
-                  brand_context: effectiveBrandIdentity || undefined,
-                  design_references: effectiveDesignReferences.length > 0 ? effectiveDesignReferences : undefined,
-                  brand_book_file_path: effectiveBrandBookFilePath || undefined,
-                  client_context: clientContext || undefined,
-                  post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
-                  slide_context: count > 1 ? { index: i, total: count } : undefined,
-                },
-              });
-              if (retryData?.image_url) finalImageUrl = retryData.image_url;
-            }
-          } catch {
-            // Validation or retry failed — keep the original image
+            generation.progressGeneration(postKey, { failed: true });
+            continue;
           }
 
-          const uploadedUrl = await uploadVariantToStorage(finalImageUrl, i);
-          generated.push(uploadedUrl);
-          setVariantUrls((prev) => {
-            const next = [...prev];
-            next[i] = uploadedUrl;
-            return next;
-          });
-          if (i === 0 && data.revised_prompt) setRevisedPrompt(data.revised_prompt);
-          generation.progressGeneration(postKey);
-        }
-      }
+          if (data?.image_url) {
+            // Hex-validation retry preserved from previous version.
+            let finalImageUrl = data.image_url;
+            try {
+              const { data: validation } = await supabase.functions.invoke("validate-design-output", {
+                body: { image_data: data.image_url },
+              });
+              if (validation?.has_hex_codes) {
+                toast({ title: "Refining design..." });
+                const retryPrompt = perSlidePrompt +
+                  "\n\nCRITICAL: The previous generation contained visible hex color codes as text. Do NOT render any hex codes, color codes, RGB values, or technical color notation as readable text anywhere in the image. Colors should be applied visually only.";
+                const { data: retryData } = await supabase.functions.invoke("generate-post-image", {
+                  body: {
+                    prompt: retryPrompt,
+                    platform: post.platform,
+                    format: post.format,
+                    brand_context: effectiveBrandIdentity || undefined,
+                    design_references: effectiveDesignReferences.length > 0 ? effectiveDesignReferences : undefined,
+                    brand_book_file_path: effectiveBrandBookFilePath || undefined,
+                    client_context: clientContext || undefined,
+                    post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
+                    slide_context: { index: s, total: slides },
+                    variant_angle: variantAngle.instruction || undefined,
+                  },
+                });
+                if (retryData?.image_url) finalImageUrl = retryData.image_url;
+              }
+            } catch {
+              // Validation/retry failed — keep the original image.
+            }
 
-      // Carousel: persist ONE row with all slide URLs, marked selected by default.
-      if (clientId && generated.length > 0) {
-        await supabase.from("post_iterations").insert({
-          client_id: clientId,
-          platform: post.platform || null,
-          post_copy: post.copy || null,
-          visual_direction: post.visual_direction || post.ai_visual_prompt || null,
-          format: post.format || null,
-          source: "calendar",
-          media_urls: generated,
-          variant_group_id: groupId,
-          variant_angle: null,
-          is_selected: true,
-        } as any);
-        if (onImagesGenerated) onImagesGenerated(generated);
+            const uploadedUrl = await uploadVariantToStorage(finalImageUrl, globalIdx);
+            variantSlides.push(uploadedUrl);
+            setVariantUrls((prev) => {
+              const next = [...prev];
+              next[globalIdx] = uploadedUrl;
+              return next;
+            });
+            if (globalIdx === 0 && data.revised_prompt) setRevisedPrompt(data.revised_prompt);
+            generation.progressGeneration(postKey);
+          }
+        }
+
+        // Persist THIS variant's deck as ONE row with all its slide URLs.
+        // All variants share the same variant_group_id so the panel groups
+        // them together; first variant is pre-selected for the SchedulePost
+        // path that picks one set to publish.
+        if (clientId && variantSlides.length > 0) {
+          const { error: insertErr } = await supabase.from("post_iterations").insert({
+            client_id: clientId,
+            platform: post.platform || null,
+            post_copy: post.copy || null,
+            visual_direction: post.visual_direction || post.ai_visual_prompt || null,
+            format: post.format || null,
+            source: "calendar",
+            media_urls: variantSlides,
+            variant_group_id: groupId,
+            variant_angle: variantAngle.instruction || null,
+            is_selected: v === 0,
+          } as any);
+          if (insertErr) {
+            console.error("[CreatePostDesignButton] carousel variant persist failed:", insertErr);
+            sonnerToast.error(`Failed to save carousel variant ${v + 1}: ${insertErr.message}`);
+          }
+        }
+
+        if (v === 0 && variantSlides.length > 0 && onImagesGenerated) {
+          onImagesGenerated(variantSlides);
+        }
       }
     } catch (err: any) {
       toast({ title: "Generation failed", description: err.message, variant: "destructive" });
@@ -466,8 +531,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     }
     setOpen(true);
 
-    // For non-carousels: pre-fetch angles in the background so they're ready when user clicks Generate.
-    if (!isCarousel && angles.length === 0) {
+    // Pre-fetch creative angles in the background so they're ready when the
+    // user clicks Generate. For carousels each angle drives a separate
+    // N-slide variant deck; for non-carousels each angle drives a single
+    // variant image.
+    if (angles.length === 0) {
       fetchAngles();
     }
   };
@@ -481,7 +549,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     setShowEditor(false);
     setVariantGroupId(null);
     setFavoriteIdxs(new Set());
-    setVariantCount(isCarousel ? 1 : 4);
+    setVariantCount(isCarousel ? 2 : 4);
   };
 
   const handleCopyPrompt = () => {
@@ -534,29 +602,31 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               </div>
             )}
 
-            {/* Variant count slider — non-carousel only */}
-            {!isCarousel && (
-              <div className="space-y-2">
-                <Label htmlFor="variant-count">Number of variants</Label>
-                <div className="flex items-center gap-3">
-                  <Slider
-                    id="variant-count"
-                    min={2}
-                    max={6}
-                    step={1}
-                    value={[variantCount]}
-                    onValueChange={(v) => setVariantCount(v[0])}
-                    disabled={loading}
-                    className="flex-1"
-                    aria-label="Number of design variants"
-                  />
-                  <span className="text-sm font-medium w-8 text-center">{variantCount}</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  More variants = more options to pick from. Generation runs in parallel.
-                </p>
+            {/* Variant count slider — works for both single-image and carousel.
+                For carousels, each variant is a whole N-slide deck — so the
+                cap is lower (3) to keep total latency reasonable. */}
+            <div className="space-y-2">
+              <Label htmlFor="variant-count">Number of variants</Label>
+              <div className="flex items-center gap-3">
+                <Slider
+                  id="variant-count"
+                  min={isCarousel ? 1 : 2}
+                  max={isCarousel ? 3 : 6}
+                  step={1}
+                  value={[variantCount]}
+                  onValueChange={(v) => setVariantCount(v[0])}
+                  disabled={loading}
+                  className="flex-1"
+                  aria-label="Number of design variants"
+                />
+                <span className="text-sm font-medium w-8 text-center">{variantCount}</span>
               </div>
-            )}
+              <p className="text-xs text-muted-foreground">
+                {isCarousel
+                  ? `Each variant = a complete ${slideCount}-slide carousel using a different creative angle. ${variantCount * slideCount} images total.`
+                  : "More variants = more options to pick from. Generation runs in parallel."}
+              </p>
+            </div>
 
             {/* Slide count for carousel */}
             {isCarousel && (
@@ -589,10 +659,14 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               </div>
             )}
 
-            {/* Suggested angles — non-carousel only */}
-            {!isCarousel && angles.length > 0 && (
+            {/* Suggested angles — used by both single-image and carousel.
+                For carousels, each selected angle drives a separate N-slide
+                variant deck. */}
+            {angles.length > 0 && (
               <div className="space-y-2">
-                <Label>Suggested angles</Label>
+                <Label>
+                  {isCarousel ? "Creative angles for each variant deck" : "Suggested angles"}
+                </Label>
                 <div className="space-y-1 max-h-40 overflow-y-auto">
                   {angles.map((a, i) => (
                     <label key={i} className="flex items-start gap-2 text-xs cursor-pointer">
@@ -618,7 +692,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               </div>
             )}
 
-            {!isCarousel && fetchingAngles && (
+            {fetchingAngles && (
               <p className="text-xs text-muted-foreground">Fetching angle suggestions…</p>
             )}
 
@@ -643,7 +717,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             {variantUrls.length === 0 && !loading && (
               <Button onClick={generateImages} className="w-full">
                 <Paintbrush className="h-4 w-4 mr-2" />
-                {isCarousel ? `Generate ${slideCount} Slides` : `Generate ${variantCount} Variants`}
+                {isCarousel
+                  ? `Generate ${variantCount} variant${variantCount === 1 ? "" : "s"} × ${slideCount} slides`
+                  : `Generate ${variantCount} Variants`}
               </Button>
             )}
 
@@ -653,7 +729,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
                 <p className="text-sm text-muted-foreground">
                   {isCarousel
-                    ? `Generating slide ${currentSlide} of ${slideCount}...`
+                    ? `Generating ${variantCount} variant${variantCount === 1 ? "" : "s"} (slide ${currentSlide} of ${slideCount * variantCount})…`
                     : `Generating ${variantCount} variants in parallel...`}
                 </p>
               </div>
@@ -701,11 +777,36 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                           {angles[selectedAngleIdxs[i]].label}
                         </div>
                       )}
-                      {isCarousel && (
-                        <span className="absolute top-1 left-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
-                          {i + 1}/{variantUrls.length}
-                        </span>
-                      )}
+                      {isCarousel && (() => {
+                        // Map global tile index → variant + slide indices so
+                        // the label shows "V1 S1", "V1 S2", ..., "V2 S1" etc.
+                        // Makes it obvious which slides belong together.
+                        const variantIdx = Math.floor(i / slideCount);
+                        const slideIdx = (i % slideCount) + 1;
+                        const variantLabelObj = (() => {
+                          if (angles.length === 0) return null;
+                          if (selectedAngleIdxs.length > 0) {
+                            return angles[
+                              selectedAngleIdxs[variantIdx] ??
+                                selectedAngleIdxs[selectedAngleIdxs.length - 1] ??
+                                0
+                            ] || null;
+                          }
+                          return angles[variantIdx % angles.length] || null;
+                        })();
+                        return (
+                          <>
+                            <span className="absolute top-1 left-1 bg-black/70 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+                              V{variantIdx + 1} · S{slideIdx}/{slideCount}
+                            </span>
+                            {variantLabelObj && (
+                              <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-2 py-1 truncate">
+                                {variantLabelObj.label}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </button>
                   ))}
                 </div>
