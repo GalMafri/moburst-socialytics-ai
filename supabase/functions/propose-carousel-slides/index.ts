@@ -67,6 +67,25 @@ Why bad: Tells Gemini to render four panels in one image. That is the bug we are
 { "content_brief": "A single interlocked geometric form, half human silhouette half abstract data-shape — a metaphor for partnership. Headline 'Partnership' in heavy sans. Brand-coral edge glow, deep navy ground." }
 \`\`\`
 
+### BAD (renders an entire case-study deck inside one brief — this is the bug we are fixing)
+Input brief: "Global growth case study for Sarah J., Head of Mobile Marketing. Manual optimization → algorithmic creative. Low conversion → optimized targeting. High CPI → significant CPI reduction. Results: 25% lower CPI, 40% higher retention, 150% ROAS increase."
+\`\`\`
+{ "content_brief": "Show the global growth case study: Sarah J.'s portrait, three before/after comparisons (manual vs algorithmic, low vs optimized, high vs reduced), and three result metrics (25% lower CPI, 40% retention, 150% ROAS)." }
+\`\`\`
+Why bad: Gemini renders this as a 7-panel infographic. Every metric becomes a card. This is the contact-sheet failure mode.
+
+### GOOD (atomizes the case study into 5 separate single-concept slides)
+\`\`\`
+[
+  { "index": 0, "role": "cover", "headline": "Global Growth Case Study", "content_brief": "Hero portrait of a Head of Mobile Marketing — confident, mid-thirties, soft studio lighting on a deep brand-navy backdrop. Crystalline brand-accent shapes float at the edges. Single headline 'Global Growth Case Study' in heavy sans across the upper third. No subtitle, no stats, no panels." },
+  { "index": 1, "role": "interior", "headline": "Manual to Algorithmic", "content_brief": "Single full-bleed visualization: a manual control dial dissolving into an algorithmic neural pattern. Brand-accent glow on the transition. Headline 'From manual to algorithmic' bottom-left. No other text, no other element." },
+  { "index": 2, "role": "interior", "headline": "25% Lower CPI", "content_brief": "Editorial poster: massive '25%' in heavy display type, brand-coral, occupying 70% of the canvas. Tiny caption 'Lower cost per install' beneath. Deep navy ground. No other content." },
+  { "index": 3, "role": "interior", "headline": "150% ROAS", "content_brief": "Single rising arrow visualization in brand-accent green-yellow, against a deep navy ground. Big number '150%' set into the arrow. Caption 'Return on ad spend, year over year'. Magazine cover composition." },
+  { "index": 4, "role": "cta", "headline": "Scale With Us", "content_brief": "Minimal end card: brand-coral CTA button shape with 'Let's grow' in heavy sans across the center. Generous whitespace. Deep navy ground. No body copy, no metrics, no portrait." }
+]
+\`\`\`
+Why good: Each slide describes ONE visual subject. ONE focal point. Gemini renders each as a single full-bleed editorial composition.
+
 ## OUTPUT FORMAT
 
 Return ONLY this JSON object — no preamble, no markdown code fence:

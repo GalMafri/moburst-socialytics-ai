@@ -428,6 +428,12 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       }
     }
 
+    // Count how many slides hit the server-side contact-sheet retry path so
+    // we can show the user "fixed N contact sheets" in the success toast.
+    // Helps them trust that the system is fighting against the contact-sheet
+    // failure mode rather than silently giving them bad output.
+    let autoFixedCount = 0;
+
     try {
       // Outer loop: variants. Inner loop: slides within this variant.
       // Cancel checks at both loop boundaries — once cancel is set we stop
@@ -479,8 +485,17 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           }
 
           if (data?.image_url) {
-            // Hex-validation retry preserved from previous version.
+            // The edge function does its OWN server-side contact-sheet
+            // detection + retry for carousel slides; if it triggered, the
+            // returned image is already the fixed version. We still run the
+            // hex-codes validator as a separate guardrail (different concern).
             let finalImageUrl = data.image_url;
+            if (data.was_retried) {
+              autoFixedCount++;
+              console.log(
+                `[CreatePostDesignButton] V${v + 1} S${s + 1}: contact-sheet auto-fixed (${data.validation_reason})`,
+              );
+            }
             try {
               const { data: validation } = await supabase.functions.invoke("validate-design-output", {
                 body: { image_data: data.image_url },
@@ -547,6 +562,13 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         if (v === 0 && variantSlides.length > 0 && onImagesGenerated) {
           onImagesGenerated(variantSlides);
         }
+      }
+      // Toast the auto-fix count so the user knows the system caught + fixed
+      // contact sheets. Without this they'd never know the retry path ran.
+      if (autoFixedCount > 0 && !cancelRef.current) {
+        sonnerToast.success(
+          `Auto-fixed ${autoFixedCount} slide${autoFixedCount === 1 ? "" : "s"} that came back as a contact sheet.`,
+        );
       }
     } catch (err: any) {
       toast({ title: "Generation failed", description: err.message, variant: "destructive" });
