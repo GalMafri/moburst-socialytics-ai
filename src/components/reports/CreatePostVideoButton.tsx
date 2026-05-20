@@ -1,16 +1,16 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Video, Loader2, Download, RefreshCw, Scissors, Check } from "lucide-react";
+import { Video, Loader2, Download, RefreshCw, Scissors, Check, Ban } from "lucide-react";
 import { VideoTrimmer } from "@/components/editor/VideoTrimmer";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { ClientContext } from "@/lib/clientContext";
 import { Slider } from "@/components/ui/slider";
-import { useGenerationContext } from "@/components/reports/calendar/GenerationContext";
+import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -107,6 +107,10 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   // already generic, the multimodal context flow is the problem.
   const [variantSeeds, setVariantSeeds] = useState<Array<string | null>>([]);
   const [previewSeedUrl, setPreviewSeedUrl] = useState<string | null>(null);
+  // Cancellation flag — checked when results return. Veo calls are 30-120s
+  // each, so users may want to abort an accidental click while we're still
+  // waiting on Google's servers.
+  const cancelRef = useRef(false);
 
   const spec = getPlatformVideoSpec(post.platform, post.format);
 
@@ -282,6 +286,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     setFavoriteIdxs(new Set());
     setVariantUrls(new Array(count).fill(null));
     setVariantSeeds(new Array(count).fill(null));
+    cancelRef.current = false;
 
     // Build angle instructions for each variant.
     const angleInstructions: Array<{ label: string; instruction: string }> = [];
@@ -296,12 +301,16 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
 
     // Page-level generation tracker — survives modal close so the user can
     // navigate away and still see progress / completion. Pass the groupId so
-    // the "View videos" button resolves to this exact set on click.
+    // the "View videos" button resolves to this exact set on click. Register
+    // an onCancel handler so the external Cancel button can flip our ref.
     const postKey = generation.startGeneration({
       post,
       type: "video",
       total: count,
       variantGroupId: groupId,
+      onCancel: () => {
+        cancelRef.current = true;
+      },
     });
 
     // Fire all variants in parallel.
@@ -324,6 +333,16 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     let firstSuccessUrl: string | null = null;
 
     for (let i = 0; i < results.length; i++) {
+      if (cancelRef.current) {
+        // User cancelled — don't persist further results or burn the
+        // upload+DB writes. Whatever already finished before cancel stays.
+        setVariantUrls((prev) => {
+          const next = [...prev];
+          if (next[i] === null) next[i] = "FAILED";
+          return next;
+        });
+        continue;
+      }
       const r = results[i];
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.video_url) {
         const rawUrl = r.value.data.video_url;
@@ -506,12 +525,29 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
             )}
 
             {loading && (
-              <div className="text-center py-6">
-                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-primary" />
-                <p className="text-sm text-muted-foreground">
-                  Generating {variantCount} {spec.label} variants with Google Veo...
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">This may take 30-120 seconds per variant</p>
+              <div className="text-center py-6 space-y-3">
+                <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {cancelRef.current
+                      ? "Cancelling — waiting for in-flight Veo calls to return…"
+                      : `Generating ${variantCount} ${spec.label} variants with Google Veo...`}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">This may take 30-120 seconds per variant</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    cancelRef.current = true;
+                    generation.cancelGeneration(postKeyOf(post));
+                  }}
+                  disabled={cancelRef.current}
+                  className="text-red-300 hover:text-red-200 hover:bg-[rgba(239,68,68,0.10)] border-[rgba(239,68,68,0.30)]"
+                >
+                  <Ban className="h-3.5 w-3.5 mr-1.5" />
+                  {cancelRef.current ? "Cancelling…" : "Cancel"}
+                </Button>
               </div>
             )}
 

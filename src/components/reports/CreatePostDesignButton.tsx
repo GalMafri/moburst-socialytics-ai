@@ -1,17 +1,17 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil } from "lucide-react";
+import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil, Ban } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { DesignEditor } from "@/components/editor/DesignEditor";
 import type { ClientContext } from "@/lib/clientContext";
-import { useGenerationContext } from "@/components/reports/calendar/GenerationContext";
+import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 
 export interface BrandIdentity {
   primary_color?: string;
@@ -87,6 +87,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const [fetchingAngles, setFetchingAngles] = useState(false);
   const [variantGroupId, setVariantGroupId] = useState<string | null>(null);
   const [favoriteIdxs, setFavoriteIdxs] = useState<Set<number>>(new Set());
+  // Cancellation flag — checked by the generation loops at every iteration
+  // boundary. A ref (not state) so the loop sees the update synchronously
+  // without re-rendering. Set to true via the registered onCancel handler
+  // OR the inline Cancel button.
+  const cancelRef = useRef(false);
   const { toast } = useToast();
 
   const defaultPrompt =
@@ -214,6 +219,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     setLoading(true);
     setRevisedPrompt(null);
     setFavoriteIdxs(new Set());
+    // Reset cancel flag at the start of every generation.
+    cancelRef.current = false;
 
     if (isCarousel) {
       // Carousel path: sequential slide-by-slide generation, single variant set.
@@ -240,12 +247,17 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     // Notify the page-level generation tracker so the floating progress card
     // and the per-post overlay can render. Pass the variantGroupId so the
     // "View designs" button can filter iterations to this exact group
-    // (rather than relying on the platform+copy match heuristic).
+    // (rather than relying on the platform+copy match heuristic). Register
+    // an onCancel handler so the external "Cancel" button in
+    // GenerationProgress can flip our local cancelRef.
     const postKey = generation.startGeneration({
       post,
       type: "design",
       total: count,
       variantGroupId: groupId,
+      onCancel: () => {
+        cancelRef.current = true;
+      },
     });
 
     // Fire all N calls in parallel.
@@ -268,7 +280,18 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     const results = await Promise.allSettled(promises);
 
     // Process each result in order; persist to storage + DB; update UI per slot.
+    // If the user cancelled mid-flight, stop uploading/persisting the remaining
+    // results. (The Gemini calls were already fired before await so we can't
+    // recall those, but we can avoid the storage+DB writes for everything left.)
     for (let i = 0; i < results.length; i++) {
+      if (cancelRef.current) {
+        setVariantUrls((prev) => {
+          const next = [...prev];
+          if (next[i] === null) next[i] = "FAILED";
+          return next;
+        });
+        continue;
+      }
       const r = results[i];
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.image_url) {
         const dataUrl = r.value.data.image_url;
@@ -317,12 +340,17 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     setVariantUrls(new Array(totalImages).fill(null));
 
     // Page-level generation tracker — survives modal close. Total = every
-    // image across every variant deck.
+    // image across every variant deck. onCancel lets the floating progress
+    // card request cancellation — we set the local ref and the loop below
+    // checks it at every iteration.
     const postKey = generation.startGeneration({
       post,
       type: "design",
       total: totalImages,
       variantGroupId: groupId,
+      onCancel: () => {
+        cancelRef.current = true;
+      },
     });
 
     // Sanitize the raw carousel brief in case we have to fall back to it for
@@ -402,11 +430,17 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
     try {
       // Outer loop: variants. Inner loop: slides within this variant.
+      // Cancel checks at both loop boundaries — once cancel is set we stop
+      // firing new requests immediately. Any partial variant whose slides
+      // already completed is still persisted below (don't waste finished
+      // work).
       for (let v = 0; v < variants; v++) {
+        if (cancelRef.current) break;
         const variantAngle = variantAngles[v];
         const variantSlides: string[] = [];
 
         for (let s = 0; s < slides; s++) {
+          if (cancelRef.current) break;
           const globalIdx = v * slides + s;
           setCurrentSlide(globalIdx + 1);
 
@@ -723,15 +757,32 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               </Button>
             )}
 
-            {/* Loading state */}
+            {/* Loading state — with inline Cancel for accidental clicks. */}
             {loading && (
-              <div className="flex flex-col items-center justify-center py-6">
-                <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
-                <p className="text-sm text-muted-foreground">
-                  {isCarousel
+              <div className="flex flex-col items-center justify-center py-6 space-y-3">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground text-center">
+                  {cancelRef.current
+                    ? "Cancelling — finishing current request…"
+                    : isCarousel
                     ? `Generating ${variantCount} variant${variantCount === 1 ? "" : "s"} (slide ${currentSlide} of ${slideCount * variantCount})…`
                     : `Generating ${variantCount} variants in parallel...`}
                 </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    cancelRef.current = true;
+                    // Also mark the page-level tracker as cancelled so the
+                    // floating progress card reflects it immediately.
+                    generation.cancelGeneration(postKeyOf(post));
+                  }}
+                  disabled={cancelRef.current}
+                  className="text-red-300 hover:text-red-200 hover:bg-[rgba(239,68,68,0.10)] border-[rgba(239,68,68,0.30)]"
+                >
+                  <Ban className="h-3.5 w-3.5 mr-1.5" />
+                  {cancelRef.current ? "Cancelling…" : "Cancel"}
+                </Button>
               </div>
             )}
 

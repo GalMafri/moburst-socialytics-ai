@@ -49,7 +49,7 @@ export interface GenerationEntry {
   total: number;
   completed: number;
   failed: number;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "cancelled";
   startedAt: number;
   completedAt?: number;
   /** The post object so the floating card / completion toast can open the panel. */
@@ -68,9 +68,17 @@ interface ContextValue {
     type: GenerationType;
     total: number;
     variantGroupId?: string;
+    /** Callback the owner of the generation registers so external surfaces
+     *  (floating progress card, etc.) can request cancellation. The owner
+     *  is responsible for actually stopping its loop — typically by
+     *  flipping a ref the loop checks at each iteration. */
+    onCancel?: () => void;
   }) => string;
   progressGeneration: (postKey: string, opts?: { failed?: boolean }) => void;
   completeGeneration: (postKey: string) => void;
+  /** Request cancellation of a running generation. Calls the registered
+   *  onCancel handler (if any) and marks the entry as cancelled. */
+  cancelGeneration: (postKey: string) => void;
   dismissGeneration: (postKey: string) => void;
   /** Optional handler so the floating progress / completion toast can open the
    *  panel for a given post. Provided by ContentIdeasTab. The optional
@@ -91,6 +99,10 @@ export function GenerationProvider({
   const [generations, setGenerations] = useState<Record<string, GenerationEntry>>({});
   const onOpenPanelRef = useRef(onOpenPanel);
   onOpenPanelRef.current = onOpenPanel;
+  // Cancellation callbacks live outside React state. State holds only the
+  // serializable parts of the entry; the function reference would otherwise
+  // bloat re-render diffs and force consumers to re-render unnecessarily.
+  const cancelHandlersRef = useRef<Record<string, () => void>>({});
 
   const startGeneration = useCallback(
     ({
@@ -98,14 +110,18 @@ export function GenerationProvider({
       type,
       total,
       variantGroupId,
+      onCancel,
     }: {
       post: any;
       type: GenerationType;
       total: number;
       variantGroupId?: string;
+      onCancel?: () => void;
     }) => {
       const key = postKeyOf(post);
       const label = postLabelOf(post);
+      if (onCancel) cancelHandlersRef.current[key] = onCancel;
+      else delete cancelHandlersRef.current[key];
       setGenerations((prev) => ({
         ...prev,
         [key]: {
@@ -148,6 +164,10 @@ export function GenerationProvider({
     setGenerations((prev) => {
       const entry = prev[postKey];
       if (!entry) return prev;
+      // Don't downgrade an already-cancelled entry back to completed/failed
+      // — the owner's loop may call completeGeneration in its finally block
+      // AFTER the user already cancelled.
+      if (entry.status === "cancelled") return prev;
       return {
         ...prev,
         [postKey]: {
@@ -157,6 +177,34 @@ export function GenerationProvider({
         },
       };
     });
+    delete cancelHandlersRef.current[postKey];
+  }, []);
+
+  const cancelGeneration = useCallback((postKey: string) => {
+    // Invoke the registered handler so the owner's loop stops firing more
+    // requests. We do this BEFORE updating state so the loop sees a state
+    // transition consistent with our cancel before its next check.
+    const handler = cancelHandlersRef.current[postKey];
+    if (handler) {
+      try {
+        handler();
+      } catch (e) {
+        console.warn("[GenerationContext] cancel handler threw:", e);
+      }
+    }
+    setGenerations((prev) => {
+      const entry = prev[postKey];
+      if (!entry || entry.status !== "running") return prev;
+      return {
+        ...prev,
+        [postKey]: {
+          ...entry,
+          status: "cancelled",
+          completedAt: Date.now(),
+        },
+      };
+    });
+    delete cancelHandlersRef.current[postKey];
   }, []);
 
   const dismissGeneration = useCallback((postKey: string) => {
@@ -165,6 +213,7 @@ export function GenerationProvider({
       delete next[postKey];
       return next;
     });
+    delete cancelHandlersRef.current[postKey];
   }, []);
 
   const openPanel = useCallback((post: any, opts?: { variantGroupId?: string }) => {
@@ -177,10 +226,19 @@ export function GenerationProvider({
       startGeneration,
       progressGeneration,
       completeGeneration,
+      cancelGeneration,
       dismissGeneration,
       openPanel,
     }),
-    [generations, startGeneration, progressGeneration, completeGeneration, dismissGeneration, openPanel],
+    [
+      generations,
+      startGeneration,
+      progressGeneration,
+      completeGeneration,
+      cancelGeneration,
+      dismissGeneration,
+      openPanel,
+    ],
   );
 
   return <GenerationContext.Provider value={value}>{children}</GenerationContext.Provider>;
@@ -195,6 +253,7 @@ export function useGenerationContext(): ContextValue {
       startGeneration: () => "",
       progressGeneration: () => {},
       completeGeneration: () => {},
+      cancelGeneration: () => {},
       dismissGeneration: () => {},
       openPanel: () => {},
     };

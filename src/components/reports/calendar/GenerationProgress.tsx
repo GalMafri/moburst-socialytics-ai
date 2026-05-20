@@ -6,13 +6,13 @@
  * that opens the PostPanel for that post, and a dismiss × on completed entries.
  */
 
-import { Sparkles, Video as VideoIcon, X, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
+import { Sparkles, Video as VideoIcon, X, ArrowRight, CheckCircle2, AlertCircle, Ban } from "lucide-react";
 import { useGenerationContext } from "./GenerationContext";
 
 const DISMISS_AFTER_MS = 90_000; // auto-dismiss completed entries after 90s
 
 export function GenerationProgress() {
-  const { generations, openPanel, dismissGeneration } = useGenerationContext();
+  const { generations, openPanel, dismissGeneration, cancelGeneration } = useGenerationContext();
   const entries = Object.values(generations).sort((a, b) => b.startedAt - a.startedAt);
 
   if (entries.length === 0) return null;
@@ -35,6 +35,8 @@ export function GenerationProgress() {
         const Icon = g.type === "design" ? Sparkles : VideoIcon;
         const isDone = g.status === "completed";
         const isFail = g.status === "failed";
+        const isCancelled = g.status === "cancelled";
+        const isRunning = g.status === "running";
         const successCount = g.completed - g.failed;
 
         return (
@@ -51,6 +53,8 @@ export function GenerationProgress() {
                     ? "bg-[rgba(16,185,129,0.10)] text-[#10b981]"
                     : isFail
                     ? "bg-[rgba(239,68,68,0.10)] text-red-400"
+                    : isCancelled
+                    ? "bg-[rgba(255,255,255,0.06)] text-[#9ca3af]"
                     : "bg-[rgba(185,224,69,0.10)] text-[#b9e045]"
                 }`}
               >
@@ -58,6 +62,8 @@ export function GenerationProgress() {
                   <CheckCircle2 className="h-4 w-4" />
                 ) : isFail ? (
                   <AlertCircle className="h-4 w-4" />
+                ) : isCancelled ? (
+                  <Ban className="h-4 w-4" />
                 ) : (
                   <Icon className="h-4 w-4" />
                 )}
@@ -68,13 +74,15 @@ export function GenerationProgress() {
                     ? `${successCount} ${g.type === "design" ? "design" : "video"}${successCount === 1 ? "" : "s"} ready`
                     : isFail
                     ? `${g.type === "design" ? "Design" : "Video"} generation failed`
+                    : isCancelled
+                    ? `Cancelled · ${successCount} of ${g.total} kept`
                     : `Generating ${g.total} ${g.type === "design" ? "design" : "video"}${g.total === 1 ? "" : "s"}…`}
                 </p>
                 <p className="text-xs text-[#9ca3af] tracking-[-0.2px] truncate mt-0.5">
                   {g.postLabel}
                 </p>
               </div>
-              {g.status !== "running" && (
+              {!isRunning && (
                 <button
                   type="button"
                   onClick={() => dismissGeneration(g.postKey)}
@@ -90,7 +98,13 @@ export function GenerationProgress() {
             <div className="mt-3 h-1.5 w-full rounded-full bg-[rgba(255,255,255,0.06)] overflow-hidden">
               <div
                 className={`h-full transition-[width] duration-500 ease-out ${
-                  isFail ? "bg-red-400" : isDone ? "bg-[#10b981]" : "bg-[#b9e045]"
+                  isFail
+                    ? "bg-red-400"
+                    : isDone
+                    ? "bg-[#10b981]"
+                    : isCancelled
+                    ? "bg-[#9ca3af]"
+                    : "bg-[#b9e045]"
                 }`}
                 style={{ width: `${pct}%` }}
                 aria-valuenow={pct}
@@ -104,19 +118,32 @@ export function GenerationProgress() {
               {g.failed > 0 && ` · ${g.failed} failed`}
             </p>
 
-            {/* View action — open panel for this post. Passes the variant
-                group id so the panel filters to the exact set we just made
-                (rather than relying on the platform+copy match heuristic). */}
-            {(isDone || g.completed > 0) && (
-              <button
-                type="button"
-                onClick={() => openPanel(g.post, { variantGroupId: g.variantGroupId })}
-                className="mt-3 w-full inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-[8px] bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.10)] text-sm font-medium text-white tracking-[-0.2px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                View {g.type === "design" ? "designs" : "videos"}
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            )}
+            {/* Action row. When running: a single Cancel button (the most
+                common need — the user clicked Generate by mistake). When
+                we have partial or full results: a View button to open the
+                panel for whatever finished. */}
+            <div className="mt-3 flex gap-2">
+              {isRunning && (
+                <button
+                  type="button"
+                  onClick={() => cancelGeneration(g.postKey)}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-[8px] bg-[rgba(239,68,68,0.10)] hover:bg-[rgba(239,68,68,0.18)] text-sm font-medium text-red-300 hover:text-red-200 tracking-[-0.2px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50"
+                >
+                  <Ban className="h-3.5 w-3.5" />
+                  Cancel
+                </button>
+              )}
+              {(isDone || (g.completed > 0 && !isRunning)) && (
+                <button
+                  type="button"
+                  onClick={() => openPanel(g.post, { variantGroupId: g.variantGroupId })}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-[8px] bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.10)] text-sm font-medium text-white tracking-[-0.2px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  View {g.type === "design" ? "designs" : "videos"}
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         );
       })}
