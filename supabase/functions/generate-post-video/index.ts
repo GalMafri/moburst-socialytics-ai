@@ -46,33 +46,20 @@ async function generateSeedImage(args: {
   synthesis: any;
   designReferences: string[];
   brandBookPath: string | null;
-  pillars: Array<{ name: string; description: string }>;
-  briefText: string | null;
-  brandNotes: string | null;
-  languages: string[];
-  geo: string[];
   post: any;
   variantAngle: string | null;
   aspectRatio: string;
 }): Promise<{ base64: string; mimeType: string } | null> {
   try {
-    // The seed call now mirrors a working generate-post-image call: same
-    // builder, same context fields, NO motion-framing wrapper. The previous
-    // appendix ("This still will be used as the OPENING FRAME ... compose for
-    // motion") was the only divergence from the working image path. Veo
-    // controls motion via its own prompt; the seed just needs to be brand-
-    // aligned, exactly like a regular brand image.
     const seedPrompt = buildImagePrompt({
-      basePrompt: args.basePrompt,
+      basePrompt:
+        args.basePrompt +
+        "\n\nThis still will be used as the OPENING FRAME of a short social-media video — " +
+        "compose for motion. Place the subject so it can move or transform without falling off frame.",
       platform: args.platform,
       format: args.format,
       brandIdentity: args.brandIdentity,
       synthesis: args.synthesis,
-      pillars: args.pillars,
-      briefText: args.briefText,
-      brandNotes: args.brandNotes,
-      languages: args.languages,
-      geo: args.geo,
       post: args.post,
       variantAngle: args.variantAngle || undefined,
     });
@@ -187,42 +174,21 @@ serve(async (req) => {
       platform,
       format,
       brandIdentity,
-      brand_context,          // legacy — top-level brand object
-      design_references,      // legacy — top-level array of storage paths
-      brand_book_file_path,   // legacy — top-level brand book path
       client_context,
       post,
       variant_angle,
     } = await req.json();
 
-    // Resolve from client_context first, fall back to legacy top-level fields.
-    // generate-post-image already has this fallback chain; without it here,
-    // callers that hadn't migrated to client_context produced un-anchored
-    // seeds → text-only Veo → generic stock footage.
-    const resolvedBrand = client_context?.brand_identity ?? brandIdentity ?? brand_context ?? null;
-    const resolvedRefs: string[] = client_context?.design_references ?? design_references ?? [];
-    const resolvedBrandBookPath: string | null =
-      client_context?.brand_book_file_path ?? brand_book_file_path ?? null;
+    const resolvedBrand = client_context?.brand_identity ?? brandIdentity ?? null;
+    const resolvedRefs = client_context?.design_references ?? [];
+    const resolvedBrandBookPath = client_context?.brand_book_file_path ?? null;
     const resolvedSynthesis = client_context?.design_style_synthesis ?? null;
-    // Same extended context the image function uses — without these the seed
-    // prompt is materially weaker than a regular brand image prompt.
-    const resolvedPillars = client_context?.content_pillars ?? [];
-    const resolvedBriefText: string | null = client_context?.brief_text ?? null;
-    const resolvedBrandNotes: string | null = client_context?.brand_notes ?? null;
-    const resolvedLanguages: string[] = client_context?.languages ?? [];
-    const resolvedGeo: string[] = client_context?.geo ?? [];
 
     console.log("[generate-post-video] context received:", {
       has_brand: !!resolvedBrand,
       ref_count: resolvedRefs.length,
       has_brand_book: !!resolvedBrandBookPath,
       has_synthesis: !!resolvedSynthesis,
-      pillar_count: resolvedPillars.length,
-      has_brief: !!resolvedBriefText,
-      has_brand_notes: !!resolvedBrandNotes,
-      lang_count: resolvedLanguages.length,
-      using_legacy_fallback:
-        !client_context && (!!brand_context || (design_references?.length ?? 0) > 0),
     });
 
     if (!prompt) {
@@ -268,11 +234,6 @@ serve(async (req) => {
       synthesis: resolvedSynthesis,
       designReferences: resolvedRefs,
       brandBookPath: resolvedBrandBookPath,
-      pillars: resolvedPillars,
-      briefText: resolvedBriefText,
-      brandNotes: resolvedBrandNotes,
-      languages: resolvedLanguages,
-      geo: resolvedGeo,
       post,
       variantAngle: variant_angle || null,
       aspectRatio,
