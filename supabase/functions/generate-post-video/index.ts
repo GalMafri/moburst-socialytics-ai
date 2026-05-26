@@ -46,27 +46,20 @@ async function generateSeedImage(args: {
   synthesis: any;
   designReferences: string[];
   brandBookPath: string | null;
-  pillars?: Array<{ name: string; description: string }>;
-  briefText?: string | null;
-  brandNotes?: string | null;
-  languages?: string[];
-  geo?: string[];
   post: any;
   variantAngle: string | null;
   aspectRatio: string;
 }): Promise<{ base64: string; mimeType: string } | null> {
   try {
     const seedPrompt = buildImagePrompt({
-      basePrompt: args.basePrompt,
+      basePrompt:
+        args.basePrompt +
+        "\n\nThis still will be used as the OPENING FRAME of a short social-media video — " +
+        "compose for motion. Place the subject so it can move or transform without falling off frame.",
       platform: args.platform,
       format: args.format,
       brandIdentity: args.brandIdentity,
       synthesis: args.synthesis,
-      pillars: args.pillars,
-      briefText: args.briefText,
-      brandNotes: args.brandNotes,
-      languages: args.languages,
-      geo: args.geo,
       post: args.post,
       variantAngle: args.variantAngle || undefined,
     });
@@ -180,35 +173,22 @@ serve(async (req) => {
       prompt,
       platform,
       format,
-      brandIdentity,         // legacy camelCase
-      brand_context,         // legacy snake_case (matches generate-post-image)
-      design_references,     // legacy
-      brand_book_file_path,  // legacy
+      brandIdentity,
       client_context,
       post,
       variant_angle,
     } = await req.json();
 
-    const resolvedBrand =
-      client_context?.brand_identity ?? brand_context ?? brandIdentity ?? null;
-    const resolvedRefs: string[] =
-      client_context?.design_references ?? design_references ?? [];
-    const resolvedBrandBookPath: string | null =
-      client_context?.brand_book_file_path ?? brand_book_file_path ?? null;
+    const resolvedBrand = client_context?.brand_identity ?? brandIdentity ?? null;
+    const resolvedRefs = client_context?.design_references ?? [];
+    const resolvedBrandBookPath = client_context?.brand_book_file_path ?? null;
     const resolvedSynthesis = client_context?.design_style_synthesis ?? null;
-    const resolvedPillars = client_context?.content_pillars ?? [];
-    const resolvedBriefText: string | null = client_context?.brief_text ?? null;
-    const resolvedBrandNotes: string | null = client_context?.brand_notes ?? null;
-    const resolvedLanguages: string[] = client_context?.languages ?? [];
-    const resolvedGeo: string[] = client_context?.geo ?? [];
 
     console.log("[generate-post-video] context received:", {
       has_brand: !!resolvedBrand,
       ref_count: resolvedRefs.length,
       has_brand_book: !!resolvedBrandBookPath,
       has_synthesis: !!resolvedSynthesis,
-      pillar_count: resolvedPillars.length,
-      has_brief: !!resolvedBriefText,
     });
 
     if (!prompt) {
@@ -254,11 +234,6 @@ serve(async (req) => {
       synthesis: resolvedSynthesis,
       designReferences: resolvedRefs,
       brandBookPath: resolvedBrandBookPath,
-      pillars: resolvedPillars,
-      briefText: resolvedBriefText,
-      brandNotes: resolvedBrandNotes,
-      languages: resolvedLanguages,
-      geo: resolvedGeo,
       post,
       variantAngle: variant_angle || null,
       aspectRatio,
