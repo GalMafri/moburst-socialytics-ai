@@ -36,10 +36,6 @@ const VEO_MODELS = [
  * Returns null if any step fails — caller falls back to text-only Veo,
  * which preserves the previous behavior as a safety net.
  */
-type SeedResult =
-  | { ok: true; base64: string; mimeType: string }
-  | { ok: false; reason: string };
-
 async function generateSeedImage(args: {
   geminiKey: string;
   supabase: any;
@@ -50,15 +46,10 @@ async function generateSeedImage(args: {
   synthesis: any;
   designReferences: string[];
   brandBookPath: string | null;
-  pillars: Array<{ name: string; description: string }>;
-  briefText: string | null;
-  brandNotes: string | null;
-  languages: string[];
-  geo: string[];
   post: any;
   variantAngle: string | null;
   aspectRatio: string;
-}): Promise<SeedResult> {
+}): Promise<{ base64: string; mimeType: string } | null> {
   try {
     const seedPrompt = buildImagePrompt({
       basePrompt:
@@ -69,11 +60,6 @@ async function generateSeedImage(args: {
       format: args.format,
       brandIdentity: args.brandIdentity,
       synthesis: args.synthesis,
-      pillars: args.pillars,
-      briefText: args.briefText,
-      brandNotes: args.brandNotes,
-      languages: args.languages,
-      geo: args.geo,
       post: args.post,
       variantAngle: args.variantAngle || undefined,
     });
@@ -154,9 +140,8 @@ async function generateSeedImage(args: {
 
     if (!response.ok) {
       const t = await response.text().catch(() => "");
-      const reason = `Gemini Flash Image returned ${response.status}: ${t.slice(0, 200)}`;
-      console.warn("[generate-post-video] seed:", reason);
-      return { ok: false, reason };
+      console.warn("[generate-post-video] seed: Gemini Flash Image error:", response.status, t.slice(0, 200));
+      return null;
     }
 
     const result = await response.json();
@@ -164,35 +149,17 @@ async function generateSeedImage(args: {
       for (const part of candidate.content?.parts || []) {
         if (part.inlineData?.data) {
           return {
-            ok: true,
             base64: part.inlineData.data,
             mimeType: part.inlineData.mimeType || "image/png",
           };
         }
       }
     }
-    // No image part — surface the model's text response (often a safety-filter
-    // explanation) instead of an opaque null. Pull the first text block we see
-    // so the caller can show a meaningful seed_error to the user.
-    let textHint = "";
-    for (const candidate of result.candidates || []) {
-      for (const part of candidate.content?.parts || []) {
-        if (part.text) {
-          textHint = part.text.slice(0, 240);
-          break;
-        }
-      }
-      if (textHint) break;
-    }
-    const reason = textHint
-      ? `Gemini returned no image. Model said: "${textHint}"`
-      : "Gemini returned no inlineData and no text — likely a safety-filter block";
-    console.warn("[generate-post-video] seed:", reason);
-    return { ok: false, reason };
-  } catch (e: any) {
-    const reason = `seed generation threw: ${e?.message || String(e)}`;
-    console.warn("[generate-post-video]", reason);
-    return { ok: false, reason };
+    console.warn("[generate-post-video] seed: no inlineData in Gemini response");
+    return null;
+  } catch (e) {
+    console.warn("[generate-post-video] seed generation threw:", e);
+    return null;
   }
 }
 
@@ -207,42 +174,21 @@ serve(async (req) => {
       platform,
       format,
       brandIdentity,
-      brand_context,          // legacy — top-level brand object
-      design_references,      // legacy — top-level array of storage paths
-      brand_book_file_path,   // legacy — top-level brand book path
       client_context,
       post,
       variant_angle,
     } = await req.json();
 
-    // Resolve from client_context first, then legacy top-level fields. The
-    // image function already had these fallbacks; the video function didn't —
-    // so any caller that hadn't migrated to client_context was producing
-    // un-anchored seeds → text-only Veo → generic stock footage.
-    const resolvedBrand = client_context?.brand_identity ?? brandIdentity ?? brand_context ?? null;
-    const resolvedRefs: string[] = client_context?.design_references ?? design_references ?? [];
-    const resolvedBrandBookPath: string | null =
-      client_context?.brand_book_file_path ?? brand_book_file_path ?? null;
+    const resolvedBrand = client_context?.brand_identity ?? brandIdentity ?? null;
+    const resolvedRefs = client_context?.design_references ?? [];
+    const resolvedBrandBookPath = client_context?.brand_book_file_path ?? null;
     const resolvedSynthesis = client_context?.design_style_synthesis ?? null;
-    // Same extended context the image function uses — without these the seed
-    // prompt is materially weaker than a regular brand image prompt.
-    const resolvedPillars = client_context?.content_pillars ?? [];
-    const resolvedBriefText: string | null = client_context?.brief_text ?? null;
-    const resolvedBrandNotes: string | null = client_context?.brand_notes ?? null;
-    const resolvedLanguages: string[] = client_context?.languages ?? [];
-    const resolvedGeo: string[] = client_context?.geo ?? [];
 
     console.log("[generate-post-video] context received:", {
       has_brand: !!resolvedBrand,
       ref_count: resolvedRefs.length,
       has_brand_book: !!resolvedBrandBookPath,
       has_synthesis: !!resolvedSynthesis,
-      pillar_count: resolvedPillars.length,
-      has_brief: !!resolvedBriefText,
-      has_brand_notes: !!resolvedBrandNotes,
-      lang_count: resolvedLanguages.length,
-      using_legacy_fallback:
-        !client_context && (!!brand_context || (design_references?.length ?? 0) > 0),
     });
 
     if (!prompt) {
@@ -278,7 +224,7 @@ serve(async (req) => {
     // With it, Veo animates from a frame that already encodes the brand's
     // palette, composition, typography, and design references.
     console.log("[generate-post-video] generating brand-aligned seed image…");
-    const seedResult = await generateSeedImage({
+    const seedImage = await generateSeedImage({
       geminiKey,
       supabase,
       basePrompt: prompt,
@@ -288,23 +234,15 @@ serve(async (req) => {
       synthesis: resolvedSynthesis,
       designReferences: resolvedRefs,
       brandBookPath: resolvedBrandBookPath,
-      pillars: resolvedPillars,
-      briefText: resolvedBriefText,
-      brandNotes: resolvedBrandNotes,
-      languages: resolvedLanguages,
-      geo: resolvedGeo,
       post,
       variantAngle: variant_angle || null,
       aspectRatio,
     });
-    const seedImage = seedResult.ok ? seedResult : null;
-    const seedError = seedResult.ok ? null : seedResult.reason;
     if (seedImage) {
       console.log("[generate-post-video] seed image ready — Veo will animate from brand-aligned frame");
     } else {
       console.warn(
-        `[generate-post-video] seed image generation failed (${seedError}) — ` +
-          "falling back to text-only Veo. Output will be less brand-aligned.",
+        "[generate-post-video] seed image generation failed — falling back to text-only Veo. Output will be less brand-aligned.",
       );
     }
 
@@ -428,10 +366,6 @@ serve(async (req) => {
               video_url: authenticatedUrl,
               seed_image_url: seedPreview,
               seed_used: !!seedImage,
-              // When the seed step failed, surface the reason so the frontend
-              // can show "no brand anchor — text-only Veo" instead of leaving
-              // the user wondering why output looks generic.
-              seed_error: seedError,
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
