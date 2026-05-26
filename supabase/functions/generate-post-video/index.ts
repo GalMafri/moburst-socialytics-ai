@@ -60,11 +60,14 @@ async function generateSeedImage(args: {
   aspectRatio: string;
 }): Promise<SeedResult> {
   try {
+    // The seed call uses the EXACT prompt shape that generate-post-image uses
+    // for a working brand image — no motion-framing wrapper appended. The
+    // previous wrapper ("This still will be used as the OPENING FRAME of a
+    // short social-media video — compose for motion…") was the only divergence
+    // between the working image path and the failing seed path. Veo controls
+    // motion via its own prompt; the seed just needs to be brand-aligned.
     const seedPrompt = buildImagePrompt({
-      basePrompt:
-        args.basePrompt +
-        "\n\nThis still will be used as the OPENING FRAME of a short social-media video — " +
-        "compose for motion. Place the subject so it can move or transform without falling off frame.",
+      basePrompt: args.basePrompt,
       platform: args.platform,
       format: args.format,
       brandIdentity: args.brandIdentity,
@@ -171,9 +174,9 @@ async function generateSeedImage(args: {
         }
       }
     }
-    // No image part — surface the model's text response (often a safety-filter
-    // explanation) instead of an opaque null. Pull the first text block we see
-    // so the caller can show a meaningful seed_error to the user.
+    // No image part — capture the model's text response (often a safety-filter
+    // explanation) into the failure reason so the server log records why,
+    // instead of an opaque null.
     let textHint = "";
     for (const candidate of result.candidates || []) {
       for (const part of candidate.content?.parts || []) {
@@ -428,10 +431,6 @@ serve(async (req) => {
               video_url: authenticatedUrl,
               seed_image_url: seedPreview,
               seed_used: !!seedImage,
-              // When the seed step failed, surface the reason so the frontend
-              // can show "no brand anchor — text-only Veo" instead of leaving
-              // the user wondering why output looks generic.
-              seed_error: seedError,
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );

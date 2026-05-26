@@ -106,11 +106,6 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   // if seed is good but video drifts, that's Veo conditioning; if seed is
   // already generic, the multimodal context flow is the problem.
   const [variantSeeds, setVariantSeeds] = useState<Array<string | null>>([]);
-  // Per-variant seed error reason. When the Edge Function couldn't produce a
-  // brand-aligned seed it falls back to text-only Veo — which is the silent
-  // path to generic stock footage. Surfacing the reason here lets the user
-  // see WHY a variant looks off-brand instead of guessing.
-  const [variantSeedErrors, setVariantSeedErrors] = useState<Array<string | null>>([]);
   const [previewSeedUrl, setPreviewSeedUrl] = useState<string | null>(null);
   // Cancellation flag — checked when results return. Veo calls are 30-120s
   // each, so users may want to abort an accidental click while we're still
@@ -291,7 +286,6 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     setFavoriteIdxs(new Set());
     setVariantUrls(new Array(count).fill(null));
     setVariantSeeds(new Array(count).fill(null));
-    setVariantSeedErrors(new Array(count).fill(null));
     cancelRef.current = false;
 
     // Build angle instructions for each variant.
@@ -353,7 +347,6 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.video_url) {
         const rawUrl = r.value.data.video_url;
         const seedUrl: string | null = r.value.data.seed_image_url || null;
-        const seedErr: string | null = r.value.data.seed_error || null;
         // Upload to persistent storage via upload-generated-media edge function.
         let persistentUrl = rawUrl;
         try {
@@ -378,11 +371,6 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
         setVariantSeeds((prev) => {
           const next = [...prev];
           next[i] = seedUrl;
-          return next;
-        });
-        setVariantSeedErrors((prev) => {
-          const next = [...prev];
-          next[i] = seedErr;
           return next;
         });
         await persistVariantRow(persistentUrl, angleInstructions[i].instruction, groupId, false);
@@ -654,13 +642,11 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                     off-brand video: if the seed itself is brand-aligned but
                     the video drifts, that's a Veo conditioning limitation; if
                     the seed is already generic, the multimodal context flow
-                    needs fixing. We ALSO surface failed-seed variants as amber
-                    chips — those fell back to text-only Veo and are the silent
-                    path to generic stock footage. */}
-                {(variantSeeds.some((s) => !!s) || variantSeedErrors.some((e) => !!e)) && (
+                    needs fixing. */}
+                {variantSeeds.some((s) => !!s) && (
                   <div className="space-y-2 pt-2 border-t border-white/[0.06]">
                     <p className="text-xs text-muted-foreground tracking-[-0.2px]">
-                      Brand seed frames — the still each video was animated from.
+                      Seed frames (what the video was animated from). Click to view full size.
                     </p>
                     <div className="flex gap-2 flex-wrap">
                       {variantSeeds.map((seedUrl, i) =>
@@ -681,28 +667,9 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                               V{i + 1}
                             </span>
                           </button>
-                        ) : variantSeedErrors[i] ? (
-                          <div
-                            key={`seed-err-${i}`}
-                            className="relative aspect-square w-16 rounded-md border border-amber-500/40 bg-amber-500/[0.06] p-1.5 flex flex-col items-center justify-center text-center"
-                            title={`Variant ${i + 1}: no brand seed — ${variantSeedErrors[i]}`}
-                          >
-                            <span className="text-[9px] font-medium text-amber-300 leading-tight">
-                              No seed
-                            </span>
-                            <span className="absolute bottom-0 right-0 bg-black/70 text-amber-200 text-[10px] font-bold px-1">
-                              V{i + 1}
-                            </span>
-                          </div>
                         ) : null,
                       )}
                     </div>
-                    {variantSeedErrors.some((e) => !!e) && (
-                      <p className="text-[11px] text-amber-300/80 leading-snug">
-                        Variants marked “No seed” fell back to text-only video — these are likely to
-                        look generic. Hover the chip for the reason.
-                      </p>
-                    )}
                   </div>
                 )}
               </div>
