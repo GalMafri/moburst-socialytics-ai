@@ -92,13 +92,25 @@ const GenerationContext = createContext<ContextValue | null>(null);
 export function GenerationProvider({
   children,
   onOpenPanel,
+  onActivity,
 }: {
   children: React.ReactNode;
   onOpenPanel: (post: any, opts?: { variantGroupId?: string }) => void;
+  /**
+   * Fired whenever a generation persists a result (each variant) and on
+   * completion. ContentIdeasTab uses this to refetch the post_iterations
+   * query so freshly generated designs/videos appear immediately — without
+   * it the panel/cards only update on a full page reload, because realtime
+   * for post_iterations isn't delivered (the table isn't in the
+   * supabase_realtime publication).
+   */
+  onActivity?: () => void;
 }) {
   const [generations, setGenerations] = useState<Record<string, GenerationEntry>>({});
   const onOpenPanelRef = useRef(onOpenPanel);
   onOpenPanelRef.current = onOpenPanel;
+  const onActivityRef = useRef(onActivity);
+  onActivityRef.current = onActivity;
   // Cancellation callbacks live outside React state. State holds only the
   // serializable parts of the entry; the function reference would otherwise
   // bloat re-render diffs and force consumers to re-render unnecessarily.
@@ -156,6 +168,8 @@ export function GenerationProvider({
           },
         };
       });
+      // A variant just persisted — let consumers refetch so the new tile shows.
+      onActivityRef.current?.();
     },
     [],
   );
@@ -178,6 +192,8 @@ export function GenerationProvider({
       };
     });
     delete cancelHandlersRef.current[postKey];
+    // Final refetch so the panel/cards reflect every persisted variant.
+    onActivityRef.current?.();
   }, []);
 
   const cancelGeneration = useCallback((postKey: string) => {

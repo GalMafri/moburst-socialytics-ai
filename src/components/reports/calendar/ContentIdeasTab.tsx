@@ -161,6 +161,14 @@ export function ContentIdeasTab({
         setActivePost(post);
         setActiveGroupId(opts?.variantGroupId || null);
       }}
+      onActivity={() => {
+        // Realtime for post_iterations isn't delivered (table not in the
+        // supabase_realtime publication), so refetch on generation activity
+        // to surface freshly generated designs/videos without a full reload.
+        if (clientId) {
+          qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
+        }
+      }}
     >
       <div className="space-y-4">
         {availablePlatforms.length > 0 && clientId && (
