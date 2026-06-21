@@ -26,7 +26,13 @@ import {
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
-import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
+import {
+  PlatformBadge,
+  PlatformIcon,
+  getPlatformColor,
+  normalizePlatformKey,
+  prettyPlatformName,
+} from "@/lib/platform-config";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Loading } from "@/components/ui/loading";
 import { useRef } from "react";
@@ -115,6 +121,57 @@ export default function ReportView() {
   const tiktokTrends = rd?.tiktok_trends || {};
   const instagramTrends = rd?.instagram_trends || {};
   const contentCalendar = rd?.content_calendar || aiAnalysis?.content_calendar || [];
+
+  // ── Per-platform performance (dynamic; degrades gracefully for older reports) ──
+  // Prefer the rich `platform_breakdown` (with month-over-month) from the workflow;
+  // fall back to the current-only `platform_metrics` object if that's all we have.
+  const platformBreakdown: any[] = (() => {
+    const provided = sproutPerformance?.platform_breakdown;
+    if (Array.isArray(provided) && provided.length > 0) return provided;
+    const pm = sproutPerformance?.platform_metrics || {};
+    return Object.entries(pm)
+      .map(([network, m]: [string, any]) => ({
+        network,
+        current: pick6(m),
+        previous: null,
+        changes: null,
+        post_count: m?.post_count ?? 0,
+        profile_names: m?.profile_names ?? (m?.profile_name ? [m.profile_name] : []),
+      }))
+      .sort((a, b) => (b.current.impressions || 0) - (a.current.impressions || 0));
+  })();
+
+  // Optional AI-written per-platform commentary (only present on newer reports).
+  const aiPlatformInsights: any[] = Array.isArray(
+    aiAnalysis?.sprout_performance_analysis?.platform_breakdown,
+  )
+    ? aiAnalysis.sprout_performance_analysis.platform_breakdown
+    : [];
+
+  // Top posts grouped by platform — prefer workflow-provided grouping, else group
+  // the flat cross-platform list client-side (so existing reports get this too).
+  const providedTPBP = sproutPerformance?.top_posts_by_platform;
+  const topPostsByPlatform: Record<string, any[]> =
+    providedTPBP && typeof providedTPBP === "object" && Object.keys(providedTPBP).length > 0
+      ? providedTPBP
+      : groupPostsByPlatform(sproutPerformance?.top_posts || []);
+
+  const postsForPlatform = (network: string): any[] => {
+    if (topPostsByPlatform[network]) return topPostsByPlatform[network];
+    const nk = normalizePlatformKey(network);
+    const hit = Object.entries(topPostsByPlatform).find(([k]) => normalizePlatformKey(k) === nk);
+    return hit ? hit[1] : [];
+  };
+
+  // Ordered platform list (by impressions when a breakdown exists, else group order),
+  // limited to platforms that actually have posts to show.
+  const topPostPlatforms = (
+    platformBreakdown.length > 0
+      ? platformBreakdown.map((p) => p.network)
+      : Object.keys(topPostsByPlatform)
+  ).filter((network) => postsForPlatform(network).length > 0);
+
+  const hasPerPlatformPosts = topPostPlatforms.length > 0;
 
   // Extract unique platforms from content recommendations and calendar
   const availablePlatforms = [
@@ -242,6 +299,64 @@ export default function ReportView() {
               </Card>
             )}
 
+            {/* Performance by Platform */}
+            {platformBreakdown.length > 0 && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-base font-semibold flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4 text-muted-foreground" /> Performance by Platform
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    How each connected account performed this period
+                    {platformBreakdown.some((p) => p.changes)
+                      ? ", with change vs. the previous period"
+                      : ""}
+                    .
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {platformBreakdown.map((p) => (
+                    <PlatformPerformanceCard key={p.network} platform={p} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* AI Platform Insights */}
+            {aiPlatformInsights.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {aiPlatformInsights.map((pi: any, idx: number) => (
+                  <Card key={idx}>
+                    <CardHeader className="pb-2 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <PlatformBadge platform={prettyPlatformName(pi.platform)} size="sm" />
+                      </div>
+                      {pi.headline && (
+                        <CardDescription className="leading-relaxed">
+                          {formatNumbersInText(pi.headline)}
+                        </CardDescription>
+                      )}
+                    </CardHeader>
+                    {Array.isArray(pi.insights) && pi.insights.length > 0 && (
+                      <CardContent>
+                        <ul className="space-y-1.5">
+                          {pi.insights.map((t: string, i: number) => (
+                            <li
+                              key={i}
+                              className="text-sm leading-relaxed text-muted-foreground flex gap-2"
+                            >
+                              <span className="text-primary flex-shrink-0">•</span>
+                              <span>{formatNumbersInText(t)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </CardContent>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            )}
+
             {/* Performance Insights */}
             {aiAnalysis?.sprout_performance_analysis?.key_insights?.length > 0 && (
               <Card>
@@ -282,21 +397,47 @@ export default function ReportView() {
               </Card>
             )}
 
-            {/* Top Posts by Impressions & Engagement */}
-            {sproutPerformance?.top_posts?.length > 0 &&
+            {/* Top Posts — grouped per platform (falls back to cross-platform ranking) */}
+            {hasPerPlatformPosts ? (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-base font-semibold flex items-center gap-2">
+                    <Heart className="h-4 w-4 text-muted-foreground" /> Top Posts by Platform
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Best-performing posts from each connected account, ranked by engagement.
+                  </p>
+                </div>
+                {topPostPlatforms.map((network) => {
+                  const posts = [...postsForPlatform(network)]
+                    .sort((a: any, b: any) => engagementOf(b) - engagementOf(a))
+                    .slice(0, 4);
+                  return (
+                    <div key={network} className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <PlatformBadge platform={prettyPlatformName(network)} size="sm" />
+                        <span className="text-xs text-muted-foreground">
+                          {posts.length} top {posts.length === 1 ? "post" : "posts"}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {posts.map((post: any, i: number) => (
+                          <PostCard key={`${network}-${i}`} post={post} />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              sproutPerformance?.top_posts?.length > 0 &&
               (() => {
                 const posts = [...sproutPerformance.top_posts];
                 const byImpressions = [...posts]
                   .sort((a: any, b: any) => (b.impressions ?? 0) - (a.impressions ?? 0))
                   .slice(0, 4);
                 const byEngagement = [...posts]
-                  .sort(
-                    (a: any, b: any) =>
-                      (b.reactions ?? b.likes ?? 0) +
-                      (b.comments ?? 0) +
-                      (b.shares ?? 0) -
-                      ((a.reactions ?? a.likes ?? 0) + (a.comments ?? 0) + (a.shares ?? 0)),
-                  )
+                  .sort((a: any, b: any) => engagementOf(b) - engagementOf(a))
                   .slice(0, 4);
                 return (
                   <div className="space-y-6">
@@ -322,7 +463,8 @@ export default function ReportView() {
                     </div>
                   </div>
                 );
-              })()}
+              })()
+            )}
 
             {/* Pillar Alignment */}
             {aiAnalysis?.sprout_performance_analysis?.pillar_alignment && (
@@ -578,6 +720,109 @@ function PostCard({ post }: { post: any }) {
             View Original <ExternalLink className="h-3 w-3" />
           </a>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ─── Per-Platform Helpers ─── */
+function pick6(m: any) {
+  const keys = ["impressions", "reactions", "link_clicks", "video_views", "comments", "shares"];
+  const out: Record<string, number> = {};
+  for (const k of keys) out[k] = Number(m?.[k]) || 0;
+  return out;
+}
+
+function engagementOf(p: any): number {
+  if (typeof p?.engagement === "number") return p.engagement;
+  return (p?.reactions ?? p?.likes ?? 0) + (p?.comments ?? 0) + (p?.shares ?? 0);
+}
+
+function groupPostsByPlatform(posts: any[]): Record<string, any[]> {
+  const grouped: Record<string, any[]> = {};
+  for (const post of posts || []) {
+    const raw = post?.platform_display || post?.network_type || post?.platform || "";
+    const name = prettyPlatformName(raw);
+    if (!name) continue;
+    if (!grouped[name]) grouped[name] = [];
+    grouped[name].push(post);
+  }
+  return grouped;
+}
+
+/* ─── Platform Performance Card ─── */
+function PlatformPerformanceCard({ platform }: { platform: any }) {
+  const metrics = [
+    { key: "impressions", label: "Impressions", icon: Eye },
+    { key: "reactions", label: "Reactions", icon: Heart },
+    { key: "comments", label: "Comments", icon: MessageCircle },
+    { key: "shares", label: "Shares", icon: Share2 },
+    { key: "link_clicks", label: "Link Clicks", icon: MousePointerClick },
+    { key: "video_views", label: "Video Views", icon: Video },
+  ];
+  const cur = platform.current || {};
+  const changes = platform.changes || null;
+  return (
+    <Card>
+      <CardHeader className="pb-3 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <PlatformBadge platform={prettyPlatformName(platform.network)} size="sm" />
+          {typeof platform.post_count === "number" && platform.post_count > 0 && (
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              {platform.post_count} {platform.post_count === 1 ? "post" : "posts"}
+            </span>
+          )}
+        </div>
+        {Array.isArray(platform.profile_names) && platform.profile_names.length > 0 && (
+          <p className="text-xs text-muted-foreground truncate">
+            {platform.profile_names.join(", ")}
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-3 gap-x-3 gap-y-3">
+          {metrics.map(({ key, label, icon: Icon }) => {
+            const value = Number(cur[key] ?? 0);
+            const ch = changes?.[key];
+            const pct = ch?.percent;
+            // A zero baseline isn't "+100% growth" — surface it as "New" instead.
+            const isNew = ch != null && Number(ch.previous ?? 0) === 0 && Number(ch.current ?? value) > 0;
+            const color =
+              pct == null
+                ? "text-muted-foreground"
+                : pct > 10
+                  ? "text-success"
+                  : pct < -10
+                    ? "text-destructive"
+                    : "text-warning";
+            return (
+              <div key={key} className="space-y-0.5">
+                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <Icon className="h-3 w-3 flex-shrink-0" /> {label}
+                </div>
+                <p className="text-sm font-semibold tracking-tight">{value.toLocaleString()}</p>
+                {pct != null &&
+                  (isNew ? (
+                    <div className="flex items-center gap-0.5 text-[11px] font-medium text-success">
+                      <TrendingUp className="h-2.5 w-2.5" /> New
+                    </div>
+                  ) : (
+                    <div className={`flex items-center gap-0.5 text-[11px] font-medium ${color}`}>
+                      {pct > 0 ? (
+                        <TrendingUp className="h-2.5 w-2.5" />
+                      ) : pct < 0 ? (
+                        <TrendingDown className="h-2.5 w-2.5" />
+                      ) : (
+                        <Minus className="h-2.5 w-2.5" />
+                      )}
+                      {pct > 0 ? "+" : ""}
+                      {pct}%
+                    </div>
+                  ))}
+              </div>
+            );
+          })}
+        </div>
       </CardContent>
     </Card>
   );
