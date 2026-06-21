@@ -35,7 +35,7 @@ import {
 } from "@/lib/platform-config";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Loading } from "@/components/ui/loading";
-import { useRef } from "react";
+import { useRef, useState, useMemo } from "react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { useAuth } from "@/hooks/useAuth";
 import { ReportActions } from "@/components/reports/ReportActions";
@@ -123,55 +123,44 @@ export default function ReportView() {
   const contentCalendar = rd?.content_calendar || aiAnalysis?.content_calendar || [];
 
   // ── Per-platform performance (dynamic; degrades gracefully for older reports) ──
-  // Prefer the rich `platform_breakdown` (with month-over-month) from the workflow;
-  // fall back to the current-only `platform_metrics` object if that's all we have.
-  const platformBreakdown: any[] = (() => {
-    const provided = sproutPerformance?.platform_breakdown;
-    if (Array.isArray(provided) && provided.length > 0) return provided;
-    const pm = sproutPerformance?.platform_metrics || {};
-    return Object.entries(pm)
-      .map(([network, m]: [string, any]) => ({
-        network,
-        current: pick6(m),
-        previous: null,
-        changes: null,
-        post_count: m?.post_count ?? 0,
-        profile_names: m?.profile_names ?? (m?.profile_name ? [m.profile_name] : []),
-      }))
-      .sort((a, b) => (b.current.impressions || 0) - (a.current.impressions || 0));
-  })();
-
-  // Optional AI-written per-platform commentary (only present on newer reports).
+  // Prefer the rich `platform_breakdown` (per-network month-over-month) from the
+  // workflow; fall back to the current-only `platform_metrics` object. Older reports
+  // have neither, so the "Performance by Platform" section simply doesn't render.
+  // Per-platform *top posts* are handled separately via a filter on the flat
+  // cross-platform `top_posts` list (which already carries a platform per post).
   const aiPlatformInsights: any[] = Array.isArray(
     aiAnalysis?.sprout_performance_analysis?.platform_breakdown,
   )
     ? aiAnalysis.sprout_performance_analysis.platform_breakdown
     : [];
 
-  // Top posts grouped by platform — prefer workflow-provided grouping, else group
-  // the flat cross-platform list client-side (so existing reports get this too).
-  const providedTPBP = sproutPerformance?.top_posts_by_platform;
-  const topPostsByPlatform: Record<string, any[]> =
-    providedTPBP && typeof providedTPBP === "object" && Object.keys(providedTPBP).length > 0
-      ? providedTPBP
-      : groupPostsByPlatform(sproutPerformance?.top_posts || []);
-
-  const postsForPlatform = (network: string): any[] => {
-    if (topPostsByPlatform[network]) return topPostsByPlatform[network];
-    const nk = normalizePlatformKey(network);
-    const hit = Object.entries(topPostsByPlatform).find(([k]) => normalizePlatformKey(k) === nk);
-    return hit ? hit[1] : [];
-  };
-
-  // Ordered platform list (by impressions when a breakdown exists, else group order),
-  // limited to platforms that actually have posts to show.
-  const topPostPlatforms = (
-    platformBreakdown.length > 0
-      ? platformBreakdown.map((p) => p.network)
-      : Object.keys(topPostsByPlatform)
-  ).filter((network) => postsForPlatform(network).length > 0);
-
-  const hasPerPlatformPosts = topPostPlatforms.length > 0;
+  const platformBreakdown: any[] = (() => {
+    const provided = sproutPerformance?.platform_breakdown;
+    const base: any[] =
+      Array.isArray(provided) && provided.length > 0
+        ? provided
+        : Object.entries(sproutPerformance?.platform_metrics || {}).map(
+            ([network, m]: [string, any]) => ({
+              network,
+              current: pick6(m),
+              previous: null,
+              changes: null,
+              post_count: m?.post_count ?? 0,
+              profile_names: m?.profile_names ?? (m?.profile_name ? [m.profile_name] : []),
+            }),
+          );
+    // Attach any AI-written per-platform commentary, matched by canonical platform key,
+    // so each platform shows its numbers and narrative together in one card.
+    return base
+      .map((p: any) => ({
+        ...p,
+        ai:
+          aiPlatformInsights.find(
+            (a: any) => normalizePlatformKey(a.platform) === normalizePlatformKey(p.network),
+          ) || null,
+      }))
+      .sort((a: any, b: any) => (b.current?.impressions || 0) - (a.current?.impressions || 0));
+  })();
 
   // Extract unique platforms from content recommendations and calendar
   const availablePlatforms = [
@@ -299,7 +288,7 @@ export default function ReportView() {
               </Card>
             )}
 
-            {/* Performance by Platform */}
+            {/* Performance by Platform — only when the workflow provides per-platform data */}
             {platformBreakdown.length > 0 && (
               <div className="space-y-4">
                 <div>
@@ -315,45 +304,10 @@ export default function ReportView() {
                   </p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {platformBreakdown.map((p) => (
-                    <PlatformPerformanceCard key={p.network} platform={p} />
+                  {platformBreakdown.map((p, i) => (
+                    <PlatformPerformanceCard key={`${p.network}-${i}`} platform={p} />
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* AI Platform Insights */}
-            {aiPlatformInsights.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {aiPlatformInsights.map((pi: any, idx: number) => (
-                  <Card key={idx}>
-                    <CardHeader className="pb-2 space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <PlatformBadge platform={prettyPlatformName(pi.platform)} size="sm" />
-                      </div>
-                      {pi.headline && (
-                        <CardDescription className="leading-relaxed">
-                          {formatNumbersInText(pi.headline)}
-                        </CardDescription>
-                      )}
-                    </CardHeader>
-                    {Array.isArray(pi.insights) && pi.insights.length > 0 && (
-                      <CardContent>
-                        <ul className="space-y-1.5">
-                          {pi.insights.map((t: string, i: number) => (
-                            <li
-                              key={i}
-                              className="text-sm leading-relaxed text-muted-foreground flex gap-2"
-                            >
-                              <span className="text-primary flex-shrink-0">•</span>
-                              <span>{formatNumbersInText(t)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </CardContent>
-                    )}
-                  </Card>
-                ))}
               </div>
             )}
 
@@ -397,73 +351,9 @@ export default function ReportView() {
               </Card>
             )}
 
-            {/* Top Posts — grouped per platform (falls back to cross-platform ranking) */}
-            {hasPerPlatformPosts ? (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-base font-semibold flex items-center gap-2">
-                    <Heart className="h-4 w-4 text-muted-foreground" /> Top Posts by Platform
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    Best-performing posts from each connected account, ranked by engagement.
-                  </p>
-                </div>
-                {topPostPlatforms.map((network) => {
-                  const posts = [...postsForPlatform(network)]
-                    .sort((a: any, b: any) => engagementOf(b) - engagementOf(a))
-                    .slice(0, 4);
-                  return (
-                    <div key={network} className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <PlatformBadge platform={prettyPlatformName(network)} size="sm" />
-                        <span className="text-xs text-muted-foreground">
-                          {posts.length} top {posts.length === 1 ? "post" : "posts"}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {posts.map((post: any, i: number) => (
-                          <PostCard key={`${network}-${i}`} post={post} />
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              sproutPerformance?.top_posts?.length > 0 &&
-              (() => {
-                const posts = [...sproutPerformance.top_posts];
-                const byImpressions = [...posts]
-                  .sort((a: any, b: any) => (b.impressions ?? 0) - (a.impressions ?? 0))
-                  .slice(0, 4);
-                const byEngagement = [...posts]
-                  .sort((a: any, b: any) => engagementOf(b) - engagementOf(a))
-                  .slice(0, 4);
-                return (
-                  <div className="space-y-6">
-                    <div className="space-y-4">
-                      <h3 className="text-base font-semibold flex items-center gap-2">
-                        <Eye className="h-4 w-4 text-muted-foreground" /> Top Posts by Impressions
-                      </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {byImpressions.map((post: any, i: number) => (
-                          <PostCard key={`imp-${i}`} post={post} />
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-4">
-                      <h3 className="text-base font-semibold flex items-center gap-2">
-                        <Heart className="h-4 w-4 text-muted-foreground" /> Top Posts by Engagement
-                      </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {byEngagement.map((post: any, i: number) => (
-                          <PostCard key={`eng-${i}`} post={post} />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()
+            {/* Top Posts — by Impressions & Engagement, filterable by platform */}
+            {sproutPerformance?.top_posts?.length > 0 && (
+              <TopPostsSection posts={sproutPerformance.top_posts} />
             )}
 
             {/* Pillar Alignment */}
@@ -738,30 +628,25 @@ function engagementOf(p: any): number {
   return (p?.reactions ?? p?.likes ?? 0) + (p?.comments ?? 0) + (p?.shares ?? 0);
 }
 
-function groupPostsByPlatform(posts: any[]): Record<string, any[]> {
-  const grouped: Record<string, any[]> = {};
-  for (const post of posts || []) {
-    const raw = post?.platform_display || post?.network_type || post?.platform || "";
-    const name = prettyPlatformName(raw);
-    if (!name) continue;
-    if (!grouped[name]) grouped[name] = [];
-    grouped[name].push(post);
-  }
-  return grouped;
+/** Canonical platform key for a Sprout post (carries platform/network_type per post). */
+function postPlatformKey(post: any): string {
+  return normalizePlatformKey(post?.network_type || post?.platform || post?.platform_display || "");
 }
 
-/* ─── Platform Performance Card ─── */
+/* ─── Platform Performance Card (mirrors the aggregate MetricsCards styling) ─── */
 function PlatformPerformanceCard({ platform }: { platform: any }) {
   const metrics = [
     { key: "impressions", label: "Impressions", icon: Eye },
     { key: "reactions", label: "Reactions", icon: Heart },
-    { key: "comments", label: "Comments", icon: MessageCircle },
-    { key: "shares", label: "Shares", icon: Share2 },
     { key: "link_clicks", label: "Link Clicks", icon: MousePointerClick },
     { key: "video_views", label: "Video Views", icon: Video },
+    { key: "comments", label: "Comments", icon: MessageCircle },
+    { key: "shares", label: "Shares", icon: Share2 },
   ];
   const cur = platform.current || {};
+  const prev = platform.previous || null;
   const changes = platform.changes || null;
+  const ai = platform.ai || null;
   return (
     <Card>
       <CardHeader className="pb-3 space-y-1.5">
@@ -778,15 +663,21 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
             {platform.profile_names.join(", ")}
           </p>
         )}
+        {ai?.headline && (
+          <CardDescription className="leading-relaxed">
+            {formatNumbersInText(ai.headline)}
+          </CardDescription>
+        )}
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <div className="grid grid-cols-3 gap-x-3 gap-y-3">
           {metrics.map(({ key, label, icon: Icon }) => {
             const value = Number(cur[key] ?? 0);
             const ch = changes?.[key];
             const pct = ch?.percent;
             // A zero baseline isn't "+100% growth" — surface it as "New" instead.
-            const isNew = ch != null && Number(ch.previous ?? 0) === 0 && Number(ch.current ?? value) > 0;
+            const isNew =
+              ch != null && Number(ch.previous ?? prev?.[key] ?? 0) === 0 && value > 0;
             const color =
               pct == null
                 ? "text-muted-foreground"
@@ -797,11 +688,11 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
                     : "text-warning";
             return (
               <div key={key} className="space-y-0.5">
-                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Icon className="h-3 w-3 flex-shrink-0" /> {label}
                 </div>
-                <p className="text-sm font-semibold tracking-tight">{value.toLocaleString()}</p>
-                {pct != null &&
+                <p className="text-base font-bold tracking-tight">{value.toLocaleString()}</p>
+                {(pct != null || isNew) &&
                   (isNew ? (
                     <div className="flex items-center gap-0.5 text-[11px] font-medium text-success">
                       <TrendingUp className="h-2.5 w-2.5" /> New
@@ -823,8 +714,154 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
             );
           })}
         </div>
+        {Array.isArray(ai?.insights) && ai.insights.length > 0 && (
+          <div className="pt-3 border-t">
+            <ul className="space-y-1.5">
+              {ai.insights.slice(0, 3).map((t: string, i: number) => (
+                <li
+                  key={i}
+                  className="text-xs leading-relaxed text-muted-foreground flex gap-2"
+                >
+                  <span className="text-primary flex-shrink-0">•</span>
+                  <span>{formatNumbersInText(t)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+/* ─── Top Posts (by impressions & engagement, optional per-platform filter) ─── */
+function TopPostsSection({ posts }: { posts: any[] }) {
+  // Distinct platforms present in the top posts, in first-seen order.
+  const platforms = useMemo(() => {
+    const keys: string[] = [];
+    for (const p of posts || []) {
+      const k = postPlatformKey(p);
+      if (k && !keys.includes(k)) keys.push(k);
+    }
+    return keys;
+  }, [posts]);
+
+  const [active, setActive] = useState<string>("all");
+  // Guard against a stale selection if the underlying platforms change.
+  const effective = active !== "all" && platforms.includes(active) ? active : "all";
+
+  const filtered =
+    effective === "all" ? posts : posts.filter((p) => postPlatformKey(p) === effective);
+
+  const byImpressions = [...filtered]
+    .sort((a: any, b: any) => (b.impressions ?? 0) - (a.impressions ?? 0))
+    .slice(0, 4);
+  const byEngagement = [...filtered]
+    .sort((a: any, b: any) => engagementOf(b) - engagementOf(a))
+    .slice(0, 4);
+
+  return (
+    <div className="space-y-6">
+      {platforms.length > 1 && (
+        <div className="flex items-center gap-2.5">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-[#9ca3af] shrink-0">
+            Platform
+          </span>
+          <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] backdrop-blur-xl border border-[rgba(255,255,255,0.07)] shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.03)]">
+            <FilterChip active={effective === "all"} onClick={() => setActive("all")}>
+              All
+            </FilterChip>
+            {platforms.map((k) => (
+              <PlatformFilterChip
+                key={k}
+                platform={prettyPlatformName(k)}
+                active={effective === k}
+                onClick={() => setActive(k)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-4">
+        <h3 className="text-base font-semibold flex items-center gap-2">
+          <Eye className="h-4 w-4 text-muted-foreground" /> Top Posts by Impressions
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {byImpressions.map((post: any, i: number) => (
+            <PostCard key={`imp-${i}`} post={post} />
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <h3 className="text-base font-semibold flex items-center gap-2">
+          <Heart className="h-4 w-4 text-muted-foreground" /> Top Posts by Engagement
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {byEngagement.map((post: any, i: number) => (
+            <PostCard key={`eng-${i}`} post={post} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Chip primitives matching the calendar's Intercept "Segment" spec (subtle-white
+   elevated active state — the lime primary accent is reserved for action buttons). */
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium tracking-[-0.2px] transition-all
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
+        ${
+          active
+            ? "bg-[rgba(255,255,255,0.08)] text-white backdrop-blur-sm shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06),0_2px_8px_rgba(0,0,0,0.2)]"
+            : "text-[#9ca3af] hover:text-white"
+        }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function PlatformFilterChip({
+  active,
+  platform,
+  onClick,
+}: {
+  active: boolean;
+  platform: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={platform}
+      className={`px-2.5 py-1 rounded-[8px] transition-all
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
+        ${
+          active
+            ? "bg-[rgba(255,255,255,0.08)] backdrop-blur-sm shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06),0_2px_8px_rgba(0,0,0,0.2)]"
+            : ""
+        }`}
+    >
+      <PlatformBadge platform={platform} size="sm" className={active ? "" : "opacity-60"} />
+    </button>
   );
 }
 
