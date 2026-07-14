@@ -1,0 +1,18 @@
+{
+    "uid": "socialytics",
+    "append": true,
+    "watch": false,
+    "script": "node_modules/.bin/serve",
+    "args": [
+        "-s",
+        "dist",
+        "-l",
+        "3003"
+    ],
+    "sourceDir": ".",
+    "logFile": "./forever.log",
+    "outFile": "./out.log",
+    "errFile": "./err.log",
+    "max": 10,
+    "restartDelay": 3000
+}
