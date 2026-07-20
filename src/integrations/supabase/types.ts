@@ -122,6 +122,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           design_references: Json | null
+          design_style_synthesis: Json | null
           geo: string | null
           hub_company_name: string | null
           id: string
@@ -149,6 +150,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           design_references?: Json | null
+          design_style_synthesis?: Json | null
           geo?: string | null
           hub_company_name?: string | null
           id?: string
@@ -176,6 +178,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           design_references?: Json | null
+          design_style_synthesis?: Json | null
           geo?: string | null
           hub_company_name?: string | null
           id?: string
@@ -245,6 +248,8 @@ export type Database = {
       }
       post_iterations: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
           client_id: string
           concept: string | null
           created_at: string | null
@@ -253,17 +258,23 @@ export type Database = {
           format: string | null
           hashtags: string[] | null
           id: string
+          is_approved: boolean | null
+          is_selected: boolean | null
           media_urls: string[] | null
           platform: string | null
           post_copy: string | null
           recommendation_index: number | null
           report_id: string | null
           source: string | null
+          variant_angle: string | null
+          variant_group_id: string | null
           version: number
           video_edits: Json | null
           visual_direction: string | null
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
           client_id: string
           concept?: string | null
           created_at?: string | null
@@ -272,17 +283,23 @@ export type Database = {
           format?: string | null
           hashtags?: string[] | null
           id?: string
+          is_approved?: boolean | null
+          is_selected?: boolean | null
           media_urls?: string[] | null
           platform?: string | null
           post_copy?: string | null
           recommendation_index?: number | null
           report_id?: string | null
           source?: string | null
+          variant_angle?: string | null
+          variant_group_id?: string | null
           version?: number
           video_edits?: Json | null
           visual_direction?: string | null
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
           client_id?: string
           concept?: string | null
           created_at?: string | null
@@ -291,12 +308,16 @@ export type Database = {
           format?: string | null
           hashtags?: string[] | null
           id?: string
+          is_approved?: boolean | null
+          is_selected?: boolean | null
           media_urls?: string[] | null
           platform?: string | null
           post_copy?: string | null
           recommendation_index?: number | null
           report_id?: string | null
           source?: string | null
+          variant_angle?: string | null
+          variant_group_id?: string | null
           version?: number
           video_edits?: Json | null
           visual_direction?: string | null
@@ -584,6 +605,7 @@ export type Database = {
     Functions: {
       is_admin: { Args: never; Returns: boolean }
       is_client_member: { Args: { _client_id: string }; Returns: boolean }
+      is_moburst_staff: { Args: never; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "user" | "moburst_user" | "client"
