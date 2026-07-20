@@ -8,6 +8,8 @@ import { ThemeProvider } from "next-themes";
 import { StaffOnlyRoute } from "@/components/StaffOnlyRoute";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import AuthHandoff from "./pages/AuthHandoff";
+import { PortalRedirect, Logout } from "./pages/GosPortal";
 import ClientSetup from "./pages/ClientSetup";
 import RunAnalysis from "./pages/RunAnalysis";
 import ReportView from "./pages/ReportView";
@@ -31,6 +33,11 @@ const App = () => (
           <AuthProvider>
             <Routes>
               <Route path="/auth" element={<Auth />} />
+              {/* gOS (moburst.ai) integration endpoints */}
+              <Route path="/auth/handoff" element={<AuthHandoff />} />
+              <Route path="/login" element={<PortalRedirect />} />
+              <Route path="/portal" element={<PortalRedirect />} />
+              <Route path="/logout" element={<Logout />} />
               <Route path="/" element={<Index />} />
               {/* Staff-only: client management + cross-client views */}
               <Route path="/clients/:id/setup" element={<StaffOnlyRoute><ClientSetup /></StaffOnlyRoute>} />

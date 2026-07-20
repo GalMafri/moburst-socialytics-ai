@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from "react";
-import { initHubToken } from "@/utils/hubAuth";
+import { initHubToken, clearHubToken } from "@/utils/hubAuth";
+import { getGosHandoffToken, PORTAL_URL } from "@/utils/gosAuth";
 import { supabase } from "@/integrations/supabase/client";
 
 const HUB_API_URL = import.meta.env.VITE_HUB_BACKEND_URL || "https://tools-server.moburst.com";
@@ -88,6 +89,68 @@ async function bridgeHubSession(
   }
 }
 
+// gOS (moburst.ai) exchange. Hands the single-use handoff token to the
+// gos-auth-bridge edge function, which performs the server-side exchange and
+// returns a Supabase session. On success the session is installed here.
+async function bridgeGosSession(handoffToken: string): Promise<{ error?: string }> {
+  if (!SUPABASE_URL) return { error: "Supabase URL not configured" };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/gos-auth-bridge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handoffToken }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (body?.debug) console.log("[Auth] gos-bridge debug:", body.debug);
+    if (!res.ok || body?.error) return { error: body?.error || `Bridge failed (${res.status})` };
+    if (body.access_token && body.refresh_token) {
+      await supabase.auth.setSession({
+        access_token: body.access_token,
+        refresh_token: body.refresh_token,
+      });
+    }
+    return {};
+  } catch (err) {
+    console.error("bridgeGosSession error:", err);
+    return { error: "Could not reach auth bridge" };
+  }
+}
+
+// Rebuild identity + role from an existing Supabase session. Used on reload for
+// gOS users, whose single-use handoff token cannot be replayed. Gated to
+// gOS-provenance sessions (user_metadata.auth_source === "gos") so the legacy-hub
+// path is entirely unaffected.
+async function reconstructGosSession(): Promise<{ user: HubUser; role: UserRole } | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const su = session?.user;
+  if (!su) return null;
+  const meta = (su.user_metadata || {}) as Record<string, unknown>;
+  if (meta.auth_source !== "gos") return null;
+
+  // Role: prefer the authoritative DB row, fall back to session metadata.
+  let role: UserRole = null;
+  const { data: roleRows } = await supabase.from("user_roles").select("role").eq("user_id", su.id);
+  const roles = (roleRows || []).map((r: { role: string }) => r.role);
+  if (roles.includes("admin")) role = "admin";
+  else if (roles.includes("moburst_user")) role = "moburst_user";
+  else if (roles.includes("client")) role = "client";
+  else if (typeof meta.tool_role === "string") role = meta.tool_role as UserRole;
+  if (!role) return null;
+
+  const hubUser: HubUser = {
+    _id: (meta.hub_user_id as string) || su.id,
+    name: (meta.full_name as string) || su.email || "User",
+    email: su.email || "",
+    role,
+    company: (meta.hub_company_name as string) || "",
+    isActive: true,
+    tools: [],
+    createdAt: su.created_at || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  return { user: hubUser, role };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<HubUser | null>(null);
   const [userRole, setUserRole] = useState<UserRole>(null);
@@ -98,6 +161,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function authenticate() {
+      // 0. gOS (moburst.ai) handoff. An explicit /auth/handoff?token means the user
+      //    is arriving from moburst.ai; it wins over any stale legacy token in this
+      //    tab. The single-use token is exchanged server-side, then we reload at "/"
+      //    so we re-enter via the session path (2) on a clean, token-free URL.
+      const gosToken = getGosHandoffToken();
+      if (gosToken) {
+        clearHubToken(); // moburst.ai wins over any cached legacy-hub token
+        const { error } = await bridgeGosSession(gosToken);
+        if (cancelled) return;
+        if (error) {
+          window.location.replace(PORTAL_URL); // fail closed → portal
+        } else {
+          window.location.replace("/"); // session set; reload on the branded host
+        }
+        return; // navigating away; leave isLoading as-is
+      }
+
       const token = initHubToken();
 
       if (token) {
@@ -130,6 +210,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!cancelled) setIsLoading(false);
         }
         return;
+      }
+
+      // 2. Existing gOS Supabase session (after a handoff reload, or a persisted
+      //    session). Rebuild identity + role without replaying the token. Returns
+      //    null for legacy-hub sessions, so the path below is unchanged for them.
+      try {
+        const reconstructed = await reconstructGosSession();
+        if (cancelled) return;
+        if (reconstructed) {
+          setUser(reconstructed.user);
+          setUserRole(reconstructed.role);
+          setAuthError(null);
+          setIsLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.error("Session reconstruction error:", err);
       }
 
       // No Hub token. In Lovable preview, present a dev user so the UI renders
