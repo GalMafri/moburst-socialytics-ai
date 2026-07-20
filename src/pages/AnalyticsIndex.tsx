@@ -12,7 +12,7 @@ import { BarChart3 } from "lucide-react";
 
 export default function AnalyticsIndex() {
   const navigate = useNavigate();
-  const { isClient, user } = useAuth();
+  const { isClient, user, isGosSession } = useAuth();
 
   const { data: clients, isLoading } = useQuery({
     queryKey: ["clients-for-analytics"],
@@ -31,11 +31,14 @@ export default function AnalyticsIndex() {
   useEffect(() => {
     if (!isClient || !clients?.length) return;
     const userCompany = (user?.company ?? "").trim().toLowerCase();
-    const mine =
-      clients.find((c) => (c.hub_company_name ?? "").trim().toLowerCase() === userCompany) ??
-      (clients.length === 1 ? clients[0] : null);
+    // gOS client sessions are RLS-scoped, so any returned client is theirs — take
+    // the first. Legacy sessions match on hub_company_name.
+    const mine = isGosSession
+      ? clients[0]
+      : (clients.find((c) => (c.hub_company_name ?? "").trim().toLowerCase() === userCompany) ??
+        (clients.length === 1 ? clients[0] : null));
     if (mine) navigate(`/clients/${mine.id}/analytics`, { replace: true });
-  }, [isClient, clients, user?.company, navigate]);
+  }, [isClient, clients, user?.company, isGosSession, navigate]);
 
   return (
     <AppLayout title="Analytics">

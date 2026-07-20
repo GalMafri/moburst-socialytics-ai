@@ -1,5 +1,10 @@
 project_id = "rwouwxqggjjacbpbhqsn"
 
+# gOS (moburst.ai) auth bridge — called with only the single-use handoff token
+# (no Supabase JWT), so JWT verification must be off, same as hub-auth-bridge.
+[functions.gos-auth-bridge]
+verify_jwt = false
+
 [functions.sprout-profiles]
 verify_jwt = false
 
