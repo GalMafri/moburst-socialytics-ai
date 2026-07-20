@@ -118,6 +118,7 @@ export type Database = {
           brand_notes: string | null
           brief_file_id: string | null
           brief_text: string | null
+          company_slug: string | null
           content_pillars: Json | null
           created_at: string | null
           created_by: string | null
@@ -146,6 +147,7 @@ export type Database = {
           brand_notes?: string | null
           brief_file_id?: string | null
           brief_text?: string | null
+          company_slug?: string | null
           content_pillars?: Json | null
           created_at?: string | null
           created_by?: string | null
@@ -174,6 +176,7 @@ export type Database = {
           brand_notes?: string | null
           brief_file_id?: string | null
           brief_text?: string | null
+          company_slug?: string | null
           content_pillars?: Json | null
           created_at?: string | null
           created_by?: string | null
@@ -341,6 +344,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          allowed_company_slugs: string[] | null
           avatar_url: string | null
           created_at: string | null
           display_name: string | null
@@ -350,6 +354,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          allowed_company_slugs?: string[] | null
           avatar_url?: string | null
           created_at?: string | null
           display_name?: string | null
@@ -359,6 +364,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          allowed_company_slugs?: string[] | null
           avatar_url?: string | null
           created_at?: string | null
           display_name?: string | null
