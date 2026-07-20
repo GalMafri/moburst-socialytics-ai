@@ -12,12 +12,13 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { Home, FileText, Settings, TrendingUp, LogOut } from "lucide-react";
+import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink } from "lucide-react";
+import { PORTAL_URL } from "@/utils/gosAuth";
 
 export function AppSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin, isMoburstStaff, isClient, user } = useAuth();
+  const { isAdmin, isMoburstStaff, isClient, user, isGosSession } = useAuth();
 
   const navItems = [
     { icon: Home, label: "Dashboard", href: "/" },
@@ -45,6 +46,22 @@ export function AppSidebar() {
           <SidebarGroupLabel className="text-[#9ca3af]/70 uppercase text-[11px] tracking-wider">Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              {/* Switch Tool — only for gOS (moburst.ai) sessions; never shown
+                  to legacy tools.moburst.com users, who have no portal to
+                  return to. */}
+              {isGosSession && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    className="h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] text-[#9ca3af] opacity-80 transition-all hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]"
+                  >
+                    <a href={PORTAL_URL}>
+                      <ExternalLink className="h-[24px] w-[24px]" />
+                      <span>Switch Tool</span>
+                    </a>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               {navItems.map((item) => {
                 const isActive = item.href === "/" ? location.pathname === "/" : location.pathname.startsWith(item.href);
                 return (
