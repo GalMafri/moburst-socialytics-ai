@@ -16,7 +16,7 @@ function normalize(s: string | null | undefined): string {
 
 export function ClientDashboard() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isGosSession } = useAuth();
 
   // Pull everything RLS allows, then filter here.
   const { data: allClients, isLoading, error } = useQuery({
@@ -33,11 +33,15 @@ export function ClientDashboard() {
   });
 
   // Filter to clients whose hub_company_name matches the user's Hub company.
+  // gOS sessions are already company-scoped by RLS (allowed_company_slugs), so
+  // trust the rows RLS returned; legacy sessions keep the name filter.
   const userCompany = normalize(user?.company);
-  const matchingClients = (allClients ?? []).filter((c) => {
-    if (!userCompany) return false;
-    return normalize(c.hub_company_name) === userCompany;
-  });
+  const matchingClients = isGosSession
+    ? (allClients ?? [])
+    : (allClients ?? []).filter((c) => {
+        if (!userCompany) return false;
+        return normalize(c.hub_company_name) === userCompany;
+      });
 
   const firstClient = matchingClients[0];
   const clientId = firstClient?.id;

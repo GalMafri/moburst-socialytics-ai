@@ -6,9 +6,14 @@
 -- This migration adds an ISOLATED slug-based path so gOS multi-company access works
 -- WITHOUT changing the existing name/client_users behavior for legacy-hub users.
 --
--- Safety: legacy-hub users have profiles.allowed_company_slugs = NULL, so the new
--- slug branch below is inert for them — is_client_member() behaves exactly as before
--- (the name-OR-client_users definition from 20260420145500).
+-- Safety: the slug branch fires ONLY for a gOS session, identified by
+-- profiles.hub_company_name IS NULL. The gOS bridge sets hub_company_name = NULL
+-- (company scope comes from allowed_company_slugs); the legacy bridge ALWAYS sets
+-- hub_company_name to the user's company. So even for a user who has authenticated
+-- via both hubs on the same (shared) Supabase account, a legacy login makes the
+-- slug branch inert again — the legacy bridge is never modified, and there is no
+-- cross-hub company-scope leakage. Pure legacy users (allowed_company_slugs NULL)
+-- are unaffected either way.
 
 -- ── 1. Canonical slug on each client ─────────────────────────────────────────
 ALTER TABLE public.clients
@@ -60,12 +65,14 @@ AS $$
         AND cu.client_id = _client_id
     )
     OR
-    -- (C) gOS canonical-slug allowlist (new; inert unless the gOS bridge set it)
+    -- (C) gOS canonical-slug allowlist. Gated on hub_company_name IS NULL so it fires
+    -- ONLY for a gOS session; a legacy login (which sets hub_company_name) disables it.
     EXISTS (
       SELECT 1
       FROM public.clients c
       JOIN public.profiles p ON p.user_id = auth.uid()
       WHERE c.id = _client_id
+        AND p.hub_company_name IS NULL
         AND p.allowed_company_slugs IS NOT NULL
         AND c.company_slug IS NOT NULL
         AND c.company_slug = ANY (p.allowed_company_slugs)
@@ -74,5 +81,5 @@ $$;
 
 COMMENT ON FUNCTION public.is_client_member(UUID) IS
   'True if the current user may see the given client. Matches the legacy company-name
-  link, an explicit client_users row, OR the gOS canonical-slug allowlist
-  (clients.company_slug = ANY(profiles.allowed_company_slugs)). Computed at query time.';
+  link, an explicit client_users row, OR — for a gOS session (hub_company_name IS NULL) —
+  the gOS canonical-slug allowlist (clients.company_slug = ANY(profiles.allowed_company_slugs)).';

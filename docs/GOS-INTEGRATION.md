@@ -57,3 +57,37 @@ slug. Staff/admin bypass company scoping (`is_moburst_staff()`), as before.
    and `moburst.ai` in prod, so usually no need to set it.
 6. **Verify**: click the tool in the portal grid → lands logged in; reload stays
    logged in; a legacy `tools.moburst.com` login still works unchanged.
+
+## Security notes (from adversarial review)
+
+- **No dev bypass in the bridge.** `gos-auth-bridge` only accepts a real handoff
+  token — there is no `devEmail`/Origin-gated path (that pattern is spoofable when
+  `verify_jwt=false`). UI-only preview still uses the frontend dev user.
+  ⚠️ The **legacy** `hub-auth-bridge` still has the origin-gated `devEmail` path; it
+  was left untouched here but should be hardened separately (gate on a server-only
+  secret, not the `Origin` header).
+- **Company-scope isolation.** The gOS slug branch of `is_client_member()` fires only
+  when `profiles.hub_company_name IS NULL` (a gOS session). Since the legacy bridge
+  always sets `hub_company_name`, a later legacy login makes the slug branch inert —
+  no cross-hub company leakage — without modifying the legacy bridge.
+- **Pre-existing `client_users` branch.** Socialytics' `is_client_member()` keeps its
+  legacy `client_users` override (AdVisor dropped it to fix the "Bader Law leak").
+  This migration preserves that existing behavior; the gOS bridge clears
+  `client_users` for gOS users so it can't affect a gOS session.
+- **Dual-hub = last login wins.** gOS and legacy share one Supabase shadow user, and
+  each login rewrites the single role row. A user who switches hubs takes the most
+  recent hub's role/company; a still-open session from the other hub may need a
+  reload. This is the "moburst.ai wins / last-write-wins" behavior to confirm as policy.
+
+## Known follow-ups / things to verify
+
+- **company_slug accuracy & uniqueness.** Slugs are backfilled by slugifying the
+  company name and are **not** unique-constrained. Verify each client's `company_slug`
+  matches the portal's canonical slug, and that two clients don't collapse to the same
+  slug (which would cross-grant). Correct by hand where needed.
+- **gOS client-role UX.** Staff (admin/moburst_user) is the fully-exercised path.
+  Client-role company visibility now defers to RLS via `isGosSession`; validate the
+  client dashboard / reports / analytics views with a real gOS client account.
+- **Handoff-token tool binding.** The exchange sends `tool_id` advisorily. Confirm with
+  Growth Labs that handoff tokens are tool-scoped server-side, so a token minted for
+  one tool can't be replayed against the other tool's bridge.

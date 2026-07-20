@@ -57,6 +57,11 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   authError: string | null;
+  // True when the session came from gOS (moburst.ai). For gOS sessions, client
+  // scoping is enforced by RLS via allowed_company_slugs, so the client-side
+  // company-NAME filters (which only understand the legacy single-company model)
+  // should defer to RLS instead of hiding rows.
+  isGosSession: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -156,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [userRole, setUserRole] = useState<UserRole>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isGosSession, setIsGosSession] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -221,6 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (reconstructed) {
           setUser(reconstructed.user);
           setUserRole(reconstructed.role);
+          setIsGosSession(true);
           setAuthError(null);
           setIsLoading(false);
           return;
@@ -269,6 +276,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         isAuthenticated: !!user,
         authError,
+        isGosSession,
       }}
     >
       {children}
