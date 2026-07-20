@@ -18,11 +18,16 @@
 -- ── Scoping helpers (identical contract to the AdVisor tool) ──────────────────
 CREATE OR REPLACE FUNCTION public.is_company_restricted()
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  -- Restricted ONLY when the gOS allowlist is NON-EMPTY. The gOS bridge writes an
+  -- empty array (never NULL) for unassigned users, so a NULL/empty allowlist means
+  -- "no company restriction" → sees all (matches the model; avoids locking out
+  -- unassigned staff).
   SELECT EXISTS (
     SELECT 1 FROM public.profiles
     WHERE user_id = auth.uid()
       AND hub_company_name IS NULL
       AND allowed_company_slugs IS NOT NULL
+      AND cardinality(allowed_company_slugs) > 0
   )
 $$;
 
@@ -108,6 +113,59 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- ── Drop residual permissive USING(true) policies (CRITICAL pre-existing leak) ─
+-- post_iterations, brand_voice_learnings and design_states were created with
+-- role-less USING(true) policies that granted every authenticated user (and even
+-- external clients) full read — and, via FOR ALL, write — of ALL clients' rows.
+-- RLS OR-s permissive policies, so these defeated the scoped policies above. Drop
+-- them; legitimate staff access now flows through the scoped policies, and edge
+-- functions use the service role (which bypasses RLS).
+DROP POLICY IF EXISTS "Users can read post iterations for their clients" ON public.post_iterations;
+DROP POLICY IF EXISTS "Users can insert post iterations" ON public.post_iterations;
+DROP POLICY IF EXISTS "Users can read brand voice learnings" ON public.brand_voice_learnings;
+DROP POLICY IF EXISTS "Service role can manage brand voice learnings" ON public.brand_voice_learnings;
+DROP POLICY IF EXISTS "Users can manage design states" ON public.design_states;
+
+-- ── Harden is_client_member: gate the client_users branch to non-gOS sessions ─
+-- The client_users override is a LEGACY mechanism. For a gOS session (which has a
+-- company allowlist), scoping must be slug-only, so a stale client_users row can't
+-- grant access to a company outside the allowlist. The gOS bridge already wipes
+-- client_users on every gOS login; this is defense-in-depth.
+CREATE OR REPLACE FUNCTION public.is_client_member(_client_id UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT
+    -- (A) legacy company-name match
+    EXISTS (
+      SELECT 1 FROM public.clients c
+      JOIN public.profiles p ON p.user_id = auth.uid()
+      WHERE c.id = _client_id
+        AND c.hub_company_name IS NOT NULL
+        AND p.hub_company_name IS NOT NULL
+        AND LOWER(TRIM(c.hub_company_name)) = LOWER(TRIM(p.hub_company_name))
+    )
+    OR
+    -- (B) explicit client_users override — legacy/manual only, never for a
+    --     company-restricted gOS session.
+    (
+      NOT public.is_company_restricted()
+      AND EXISTS (
+        SELECT 1 FROM public.client_users cu
+        WHERE cu.user_id = auth.uid() AND cu.client_id = _client_id
+      )
+    )
+    OR
+    -- (C) gOS canonical-slug allowlist (only for a gOS session)
+    EXISTS (
+      SELECT 1 FROM public.clients c
+      JOIN public.profiles p ON p.user_id = auth.uid()
+      WHERE c.id = _client_id
+        AND p.hub_company_name IS NULL
+        AND p.allowed_company_slugs IS NOT NULL
+        AND c.company_slug IS NOT NULL
+        AND c.company_slug = ANY (p.allowed_company_slugs)
+    )
+$$;
 
 -- NOTE: existing "Admins can do everything with <table>" (is_admin) policies and
 -- "Client users can view <table>" (is_client_member) policies are intentionally
