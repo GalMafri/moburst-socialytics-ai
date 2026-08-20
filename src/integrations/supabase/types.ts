@@ -609,6 +609,34 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_usage_trend: {
+        Args: never
+        Returns: { day: string; actions: number; active_users: number }[]
+      }
+      get_user_analytics: {
+        Args: never
+        Returns: {
+          email: string
+          name: string | null
+          company: string | null
+          role: string | null
+          provisioned_at: string | null
+          last_sign_in_at: string | null
+          first_action_at: string | null
+          last_action_at: string | null
+          actions_total: number
+          reports_ok: number
+          posts_created: number
+          posts_iterated: number
+          posts_approved: number
+          clients_created: number
+          clients_touched: number
+          active_days: number
+          failures: number
+          abandoned: number
+          state: string
+        }[]
+      }
       is_admin: { Args: never; Returns: boolean }
       is_client_member: { Args: { _client_id: string }; Returns: boolean }
       is_moburst_staff: { Args: never; Returns: boolean }
