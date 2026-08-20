@@ -195,20 +195,25 @@ export function initTelemetry(): void {
         "button, a, [role='tab'], [role='menuitem'], [data-track]",
       );
       if (!el) return;
+
+      // Only hand-named controls contribute a readable label. Visible text is
+      // deliberately NOT captured from anything else: in both products plenty
+      // of buttons and links carry a client's name, which would put customer
+      // data in the event stream and give every client its own label value,
+      // making the whole property useless to group by. Un-named controls are
+      // recorded structurally instead — enough to spot an unexpectedly hot
+      // control, with nothing sensitive and bounded cardinality.
       const explicit = el.getAttribute("data-track");
-      // Elements carrying data-track are hand-named; everything else is
-      // identified by its visible label, truncated and stripped of digits so
-      // the property stays groupable rather than turning into unique strings.
-      const label =
-        explicit ||
-        (el.getAttribute("aria-label") || el.textContent || "")
-          .trim()
-          .slice(0, 40)
-          .replace(/\s+/g, " ");
-      if (!label) return;
+      const region = el.closest("[data-region]")?.getAttribute("data-region") ?? null;
+
       track("ui_clicked", {
-        label,
+        label: explicit ?? null,
         tag: el.tagName.toLowerCase(),
+        role: el.getAttribute("role") ?? null,
+        variant: el.getAttribute("data-variant") ?? null,
+        in_dialog: Boolean(el.closest("[role='dialog']")),
+        in_nav: Boolean(el.closest("nav")),
+        region,
         instrumented: Boolean(explicit),
       });
     },
