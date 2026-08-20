@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { ThemeProvider } from "next-themes";
 import { StaffOnlyRoute } from "@/components/StaffOnlyRoute";
+import { AdminOnlyRoute } from "@/components/AdminOnlyRoute";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthHandoff from "./pages/AuthHandoff";
@@ -18,6 +19,7 @@ import AllReports from "./pages/AllReports";
 import Analytics from "./pages/Analytics";
 import AnalyticsIndex from "./pages/AnalyticsIndex";
 import Settings from "./pages/Settings";
+import Usage from "./pages/Usage";
 import NotFound from "./pages/NotFound";
 import DevCalendarPreview from "./pages/DevCalendarPreview";
 
@@ -45,6 +47,7 @@ const App = () => (
               <Route path="/analytics" element={<AnalyticsIndex />} />
               <Route path="/reports" element={<StaffOnlyRoute><AllReports /></StaffOnlyRoute>} />
               <Route path="/settings" element={<StaffOnlyRoute><Settings /></StaffOnlyRoute>} />
+              <Route path="/usage" element={<AdminOnlyRoute><Usage /></AdminOnlyRoute>} />
               {/* Open to Clients for their own mapped clients only (RLS-scoped) */}
               <Route path="/clients/:id/reports/:reportId" element={<ReportView />} />
               <Route path="/clients/:id/reports" element={<ReportHistory />} />
