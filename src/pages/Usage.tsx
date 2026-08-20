@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -22,6 +22,7 @@ import {
   type FunnelRow,
   type FeatureRow,
 } from "@/components/usage/UsageSections";
+import { UserDetail } from "@/components/usage/UserDetail";
 
 import {
   Area,
@@ -121,6 +122,7 @@ function Tile({
 }
 
 export default function Usage() {
+  const [selected, setSelected] = useState<{ email: string; name: string | null } | null>(null);
   const users = useQuery({
     queryKey: ["usage", "users"],
     queryFn: async () => {
@@ -236,12 +238,12 @@ export default function Usage() {
           <Tile label="Failures" value={summary.failures} hint={`across ${summary.actions} actions`} icon={AlertCircle} />
         </div>
 
-        <Tabs defaultValue="overview" className="space-y-4">
+        <Tabs defaultValue="people" className="space-y-4">
           <TabsList>
+            <TabsTrigger value="people">People</TabsTrigger>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="behaviour">Behaviour</TabsTrigger>
             <TabsTrigger value="features">Features</TabsTrigger>
-            <TabsTrigger value="people">People</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-4">
@@ -348,6 +350,10 @@ export default function Usage() {
           </TabsContent>
 
           <TabsContent value="people" className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Select anyone to see their full history: what they ran, for which client, how
+              long it took, and what failed.
+            </p>
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Per user</CardTitle>
@@ -369,7 +375,11 @@ export default function Usage() {
                   </TableHeader>
                   <TableBody>
                     {rows.map((u) => (
-                      <TableRow key={u.email}>
+                      <TableRow
+                      key={u.email}
+                      onClick={() => setSelected({ email: u.email, name: u.name })}
+                      className="cursor-pointer hover:bg-muted/40"
+                    >
                         <TableCell>
                           <div className="font-medium">{u.name || u.email}</div>
                           <div className="text-xs text-muted-foreground">
@@ -400,6 +410,12 @@ export default function Usage() {
           </Card>
           </TabsContent>
         </Tabs>
+
+        <UserDetail
+          email={selected?.email ?? null}
+          name={selected?.name ?? null}
+          onClose={() => setSelected(null)}
+        />
 
         <p className="text-xs text-muted-foreground">
           Counts come from work the product recorded. Rows written before Aug 2026 mostly carry no

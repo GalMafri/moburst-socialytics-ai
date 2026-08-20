@@ -669,6 +669,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_user_timeline: {
+        Args: { p_email: string; p_limit?: number }
+        Returns: {
+          at: string
+          kind: string
+          label: string
+          status: string | null
+          detail: string | null
+          entity_id: string | null
+          client_name: string | null
+        }[]
+      }
+      get_user_detail: {
+        Args: { p_email: string }
+        Returns: { metric: string; value: string; tone: string }[]
+      }
       get_funnel: {
         Args: { days?: number }
         Returns: { step: string; step_order: number; users: number; events: number }[]
