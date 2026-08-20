@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Pencil, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { track, editDistancePct } from "@/lib/telemetry";
 
 interface Props {
   post: any;
@@ -19,9 +20,35 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
+  // How much of the AI draft survives, and how long people deliberate before
+  // committing, are the two signals that separate "trusted" from "rewritten".
+  const editOpenedAt = useRef(0);
+  const regenCount = useRef(0);
+
+  const beginEdit = () => {
+    editOpenedAt.current = performance.now();
+    track("post_copy_edit_started", {
+      client_id: clientId,
+      platform: post.platform || null,
+      chars: String(displayCopy).length,
+      regenerations_so_far: regenCount.current,
+    });
+    setIsEditing(true);
+  };
+
+  const cancelEdit = () => {
+    track("post_copy_edit_cancelled", {
+      client_id: clientId,
+      platform: post.platform || null,
+      duration_ms: editOpenedAt.current ? performance.now() - editOpenedAt.current : null,
+    });
+    setIsEditing(false);
+  };
+
   const handleSaveEdit = async () => {
     if (!clientId || !editedCopy.trim()) return;
     setIsSavingEdit(true);
+    const distance = editDistancePct(displayCopy, editedCopy);
     try {
       // Save original version (v1) and edited version (v2) to post_iterations
       await supabase.from("post_iterations").insert({
@@ -60,10 +87,29 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
         },
       });
 
+      // distance 0 means the draft was accepted verbatim ("strong acceptance");
+      // anything above ~50 means the user effectively rewrote it.
+      track("post_copy_edited", {
+        client_id: clientId,
+        platform: post.platform || null,
+        edit_distance_pct: distance,
+        chars_before: String(displayCopy).length,
+        chars_after: String(editedCopy).length,
+        regenerations_first: regenCount.current,
+        duration_ms: editOpenedAt.current ? performance.now() - editOpenedAt.current : null,
+        ok: true,
+      });
+
       setDisplayCopy(editedCopy);
       setIsEditing(false);
       toast.success("Post updated and preferences saved");
     } catch (err: any) {
+      track("post_copy_edited", {
+        client_id: clientId,
+        platform: post.platform || null,
+        ok: false,
+        error_code: String(err?.message || "unknown").slice(0, 80),
+      });
       toast.error("Failed to save edit: " + (err.message || "Unknown error"));
     } finally {
       setIsSavingEdit(false);
@@ -73,6 +119,9 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
   const handleRegenerate = async () => {
     if (!clientId) return;
     setIsRegenerating(true);
+    regenCount.current += 1;
+    const t0 = performance.now();
+    const previousCopy = displayCopy;
     try {
       const { data, error } = await supabase.functions.invoke("regenerate-post-copy", {
         body: {
@@ -110,11 +159,31 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
           source: "regeneration",
         } as any);
 
+        // A high regeneration count on one post is the clearest "the model is
+        // not giving them what they want" signal the product emits.
+        track("post_copy_regenerated", {
+          client_id: clientId,
+          platform: post.platform || null,
+          attempt: regenCount.current,
+          changed_pct: editDistancePct(previousCopy, newCopy),
+          chars: String(newCopy).length,
+          duration_ms: performance.now() - t0,
+          ok: true,
+        });
+
         setDisplayCopy(newCopy);
         setEditedCopy(newCopy);
         toast.success("Copy regenerated");
       }
     } catch (err: any) {
+      track("post_copy_regenerated", {
+        client_id: clientId,
+        platform: post.platform || null,
+        attempt: regenCount.current,
+        duration_ms: performance.now() - t0,
+        ok: false,
+        error_code: String(err?.message || "unknown").slice(0, 80),
+      });
       toast.error("Failed to regenerate: " + (err.message || "Unknown error"));
     } finally {
       setIsRegenerating(false);
@@ -146,7 +215,7 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
               size="sm"
               onClick={() => {
                 setEditedCopy(displayCopy);
-                setIsEditing(false);
+                cancelEdit();
               }}
               disabled={isSavingEdit}
             >
@@ -175,7 +244,7 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
                 size="sm"
                 onClick={() => {
                   setEditedCopy(displayCopy);
-                  setIsEditing(true);
+                  beginEdit();
                 }}
                 disabled={isRegenerating}
               >

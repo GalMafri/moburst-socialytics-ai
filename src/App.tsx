@@ -7,6 +7,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { ThemeProvider } from "next-themes";
 import { StaffOnlyRoute } from "@/components/StaffOnlyRoute";
 import { AdminOnlyRoute } from "@/components/AdminOnlyRoute";
+import { Telemetry } from "@/components/Telemetry";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthHandoff from "./pages/AuthHandoff";
@@ -33,6 +34,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
+            <Telemetry />
             <Routes>
               <Route path="/auth" element={<Auth />} />
               {/* gOS (moburst.ai) integration endpoints */}

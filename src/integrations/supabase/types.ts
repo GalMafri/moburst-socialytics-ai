@@ -14,6 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_events: {
+        Row: {
+          client_id: string | null
+          duration_ms: number | null
+          email: string | null
+          entity_id: string | null
+          error_code: string | null
+          event: string
+          id: number
+          occurred_at: string
+          ok: boolean | null
+          path: string | null
+          props: Json
+          received_at: string
+          role: string | null
+          company: string | null
+          seq: number | null
+          session_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          duration_ms?: number | null
+          email?: string | null
+          entity_id?: string | null
+          error_code?: string | null
+          event: string
+          id?: number
+          occurred_at?: string
+          ok?: boolean | null
+          path?: string | null
+          props?: Json
+          received_at?: string
+          role?: string | null
+          company?: string | null
+          seq?: number | null
+          session_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          duration_ms?: number | null
+          email?: string | null
+          entity_id?: string | null
+          error_code?: string | null
+          event?: string
+          id?: number
+          occurred_at?: string
+          ok?: boolean | null
+          path?: string | null
+          props?: Json
+          received_at?: string
+          role?: string | null
+          company?: string | null
+          seq?: number | null
+          session_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       app_settings: {
         Row: {
           id: string
@@ -609,6 +669,32 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_funnel: {
+        Args: { days?: number }
+        Returns: { step: string; step_order: number; users: number; events: number }[]
+      }
+      get_ai_quality: {
+        Args: { days?: number }
+        Returns: { metric: string; value: number | null; sample: number }[]
+      }
+      get_report_engagement: {
+        Args: { days?: number }
+        Returns: { metric: string; value: number | null; sample: number }[]
+      }
+      get_session_quality: {
+        Args: { days?: number }
+        Returns: { metric: string; value: number | null; sample: number }[]
+      }
+      get_feature_adoption: {
+        Args: { days?: number }
+        Returns: {
+          event: string
+          users: number
+          uses: number
+          failures: number
+          median_ms: number | null
+        }[]
+      }
       get_usage_trend: {
         Args: never
         Returns: { day: string; actions: number; active_users: number }[]

@@ -2,6 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { track } from "@/lib/telemetry";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,8 @@ export default function RunAnalysis() {
   const [skipTrends, setSkipTrends] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Wall-clock for the whole run, so latency is measured as the user feels it.
+  const runStartedAt = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollStartRef = useRef<number>(0);
 
@@ -133,11 +136,25 @@ export default function RunAnalysis() {
       stopAllTimers();
       setCurrentStep(STEPS.length);
       setRunning(false);
+      track("analysis_completed", {
+        client_id: id,
+        entity_id: reportId,
+        duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
+        ok: true,
+      });
       toast({ title: "Analysis complete!", description: "Your report is ready." });
       setTimeout(() => navigate(`/clients/${id}/reports/${reportId}`), 1500);
     } else if (activeReport?.status === "failed") {
       stopAllTimers();
       setRunning(false);
+      track("analysis_failed", {
+        client_id: id,
+        entity_id: reportId,
+        stage: "server",
+        duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
+        ok: false,
+        error_code: "server_failed",
+      });
       setError("Analysis failed on the server. Check workflow logs.");
     }
   }, [pastReports, reportId, running, id, navigate, toast, stopAllTimers]);
@@ -152,6 +169,13 @@ export default function RunAnalysis() {
           if (Date.now() - pollStartRef.current > MAX_POLL_DURATION_MS) {
             stopAllTimers();
             setRunning(false);
+            track("analysis_timed_out", {
+              client_id: id,
+              entity_id: rId,
+              duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
+              ok: false,
+              error_code: "client_timeout",
+            });
             setError(
               "Analysis is taking longer than expected. The workflow may still be running — check n8n execution logs. You can also check the report in Recent Analyses below once it completes.",
             );
@@ -174,12 +198,28 @@ export default function RunAnalysis() {
             stopAllTimers();
             setCurrentStep(STEPS.length);
             setRunning(false);
+            track("analysis_completed", {
+              client_id: id,
+              entity_id: rId,
+              via: "poll",
+              duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
+              ok: true,
+            });
             toast({ title: "Analysis complete!", description: "Your report is ready." });
             refetchReports();
             setTimeout(() => navigate(`/clients/${id}/reports/${rId}`), 1500);
           } else if (data?.status === "failed") {
             stopAllTimers();
             setRunning(false);
+            track("analysis_failed", {
+              client_id: id,
+              entity_id: rId,
+              stage: "server",
+              via: "poll",
+              duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
+              ok: false,
+              error_code: "server_failed",
+            });
             setError("Analysis failed on the server. Check n8n execution logs.");
             refetchReports();
           }
@@ -195,6 +235,17 @@ export default function RunAnalysis() {
     setRunning(true);
     setError(null);
     setCurrentStep(0);
+    runStartedAt.current = performance.now();
+    track("analysis_started", {
+      client_id: id,
+      range_days:
+        dateRangeStart && dateRangeEnd
+          ? Math.round(
+              (new Date(dateRangeEnd).getTime() - new Date(dateRangeStart).getTime()) / 86400000,
+            )
+          : null,
+      skip_trends: effectiveSkipTrends,
+    });
 
     try {
       // Get webhook URL from app settings
@@ -312,6 +363,13 @@ export default function RunAnalysis() {
       stopAllTimers();
       setRunning(false);
       setError(err.message);
+      track("analysis_failed", {
+        client_id: id,
+        stage: "submit",
+        duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
+        ok: false,
+        error_code: String(err?.message || "unknown").slice(0, 120),
+      });
       toast({ title: "Analysis failed", description: err.message, variant: "destructive" });
     }
   };

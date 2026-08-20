@@ -13,6 +13,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Loader2, Users, Zap, AlertCircle, MoonStar } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  FunnelCard,
+  MetricsCard,
+  FeatureTable,
+  type MetricRow,
+  type FunnelRow,
+  type FeatureRow,
+} from "@/components/usage/UsageSections";
+
 import {
   Area,
   AreaChart,
@@ -37,6 +47,8 @@ import {
  * Aug 2026 mostly have no created_by, so historical per-user counts understate
  * reality. Client-level totals were always complete.
  */
+
+const WINDOW_DAYS = 90;
 
 type UserRow = {
   email: string;
@@ -127,6 +139,26 @@ export default function Usage() {
     },
   });
 
+
+  // Behavioural layer. These come from app_events, so they only cover the
+  // period since action tracking shipped — unlike the per-user counts above,
+  // which are derived from work records going back to the first run.
+  const metricQuery = (key: string, fn: "get_funnel" | "get_ai_quality" | "get_report_engagement" | "get_session_quality" | "get_feature_adoption") =>
+    ({
+      queryKey: ["usage", key, WINDOW_DAYS],
+      queryFn: async () => {
+        const { data, error } = await supabase.rpc(fn, { days: WINDOW_DAYS });
+        if (error) throw error;
+        return (data ?? []) as unknown as unknown[];
+      },
+    });
+
+  const funnel = useQuery(metricQuery("funnel", "get_funnel"));
+  const ai = useQuery(metricQuery("ai", "get_ai_quality"));
+  const reading = useQuery(metricQuery("reading", "get_report_engagement"));
+  const sessions = useQuery(metricQuery("sessions", "get_session_quality"));
+  const features = useQuery(metricQuery("features", "get_feature_adoption"));
+
   const rows = useMemo(
     () => [...(users.data ?? [])].sort((a, b) => b.actions_total - a.actions_total),
     [users.data],
@@ -204,132 +236,170 @@ export default function Usage() {
           <Tile label="Failures" value={summary.failures} hint={`across ${summary.actions} actions`} icon={AlertCircle} />
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-2">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Activity over time</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {trend.data && trend.data.length > 0 ? (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={trend.data} margin={{ top: 8, right: 8, bottom: 0, left: -20 }}>
-                      <defs>
-                        <linearGradient id="usageFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
-                          <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
-                      <XAxis
-                        dataKey="day"
-                        tickFormatter={(d) => fmtDate(d)}
-                        tick={{ fontSize: 11 }}
-                        stroke="hsl(var(--muted-foreground))"
-                        minTickGap={24}
-                      />
-                      <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" allowDecimals={false} />
-                      <Tooltip
-                        labelFormatter={(d) => fmtDate(String(d))}
-                        contentStyle={{
-                          background: "hsl(var(--popover))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="actions"
-                        name="Actions"
-                        stroke="hsl(var(--primary))"
-                        strokeWidth={2}
-                        fill="url(#usageFill)"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <p className="py-12 text-center text-sm text-muted-foreground">No activity recorded yet.</p>
-              )}
-            </CardContent>
-          </Card>
+        <Tabs defaultValue="overview" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="behaviour">Behaviour</TabsTrigger>
+            <TabsTrigger value="features">Features</TabsTrigger>
+            <TabsTrigger value="people">People</TabsTrigger>
+          </TabsList>
 
+          <TabsContent value="overview" className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Activity over time</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {trend.data && trend.data.length > 0 ? (
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={trend.data} margin={{ top: 8, right: 8, bottom: 0, left: -20 }}>
+                        <defs>
+                          <linearGradient id="usageFill" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
+                            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                        <XAxis
+                          dataKey="day"
+                          tickFormatter={(d) => fmtDate(d)}
+                          tick={{ fontSize: 11 }}
+                          stroke="hsl(var(--muted-foreground))"
+                          minTickGap={24}
+                        />
+                        <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" allowDecimals={false} />
+                        <Tooltip
+                          labelFormatter={(d) => fmtDate(String(d))}
+                          contentStyle={{
+                            background: "hsl(var(--popover))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: 8,
+                            fontSize: 12,
+                          }}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="actions"
+                          name="Actions"
+                          stroke="hsl(var(--primary))"
+                          strokeWidth={2}
+                          fill="url(#usageFill)"
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="py-12 text-center text-sm text-muted-foreground">No activity recorded yet.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Where people stand</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {Object.entries(summary.byState)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([state, n]) => (
+                    <div key={state}>
+                      <div className="mb-1 flex items-baseline justify-between gap-2">
+                        <span className="text-sm capitalize">{state}</span>
+                        <span className="text-sm font-medium tabular-nums">{n}</span>
+                      </div>
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${summary.total ? (n / summary.total) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+              </CardContent>
+            </Card>
+          </div>
+          </TabsContent>
+
+          <TabsContent value="behaviour" className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <FunnelCard rows={(funnel.data ?? []) as FunnelRow[]} />
+              <MetricsCard
+                title="Draft quality and trust"
+                note="Edit distance is how much of the generated draft the user rewrote. 0% means it shipped verbatim, above 50% means they effectively started over. Rising regenerations per draft is the earliest signal the model has stopped being useful."
+                rows={(ai.data ?? []) as MetricRow[]}
+              />
+              <MetricsCard
+                title="Is the output read?"
+                note="Read rate compares distinct calendars opened against calendars that completed in the same window. A low number means you are generating content nobody reviews."
+                rows={(reading.data ?? []) as MetricRow[]}
+              />
+              <MetricsCard
+                title="Session quality"
+                note="A dead-end session is one where somebody looked around and did nothing. High numbers point at navigation or discovery problems rather than broken features."
+                rows={(sessions.data ?? []) as MetricRow[]}
+              />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="features" className="space-y-4">
+            <FeatureTable rows={(features.data ?? []) as FeatureRow[]} />
+          </TabsContent>
+
+          <TabsContent value="people" className="space-y-4">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Where people stand</CardTitle>
+              <CardTitle className="text-base">Per user</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {Object.entries(summary.byState)
-                .sort((a, b) => b[1] - a[1])
-                .map(([state, n]) => (
-                  <div key={state}>
-                    <div className="mb-1 flex items-baseline justify-between gap-2">
-                      <span className="text-sm capitalize">{state}</span>
-                      <span className="text-sm font-medium tabular-nums">{n}</span>
-                    </div>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{ width: `${summary.total ? (n / summary.total) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+            <CardContent className="px-0 pb-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>User</TableHead>
+                      <TableHead>State</TableHead>
+                      <TableHead className="text-right">Reports</TableHead>
+                      <TableHead className="text-right">Posts</TableHead>
+                      <TableHead className="text-right">Approved</TableHead>
+                      <TableHead className="text-right">Active days</TableHead>
+                      <TableHead>Last active</TableHead>
+                      <TableHead>Last sign-in</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((u) => (
+                      <TableRow key={u.email}>
+                        <TableCell>
+                          <div className="font-medium">{u.name || u.email}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {u.email}
+                            {u.company ? ` · ${u.company}` : ""}
+                            {u.role ? ` · ${u.role}` : ""}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={STATE_STYLE[u.state] ?? ""}>
+                            {u.state}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{u.reports_ok}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {u.posts_created + u.posts_iterated}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{u.posts_approved}</TableCell>
+                        <TableCell className="text-right tabular-nums">{u.active_days}</TableCell>
+                        <TableCell className="text-muted-foreground">{fmtDate(u.last_action_at)}</TableCell>
+                        <TableCell className="text-muted-foreground">{fmtDate(u.last_sign_in_at)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
-        </div>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Per user</CardTitle>
-          </CardHeader>
-          <CardContent className="px-0 pb-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>User</TableHead>
-                    <TableHead>State</TableHead>
-                    <TableHead className="text-right">Reports</TableHead>
-                    <TableHead className="text-right">Posts</TableHead>
-                    <TableHead className="text-right">Approved</TableHead>
-                    <TableHead className="text-right">Active days</TableHead>
-                    <TableHead>Last active</TableHead>
-                    <TableHead>Last sign-in</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((u) => (
-                    <TableRow key={u.email}>
-                      <TableCell>
-                        <div className="font-medium">{u.name || u.email}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {u.email}
-                          {u.company ? ` · ${u.company}` : ""}
-                          {u.role ? ` · ${u.role}` : ""}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={STATE_STYLE[u.state] ?? ""}>
-                          {u.state}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{u.reports_ok}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {u.posts_created + u.posts_iterated}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{u.posts_approved}</TableCell>
-                      <TableCell className="text-right tabular-nums">{u.active_days}</TableCell>
-                      <TableCell className="text-muted-foreground">{fmtDate(u.last_action_at)}</TableCell>
-                      <TableCell className="text-muted-foreground">{fmtDate(u.last_sign_in_at)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
+          </TabsContent>
+        </Tabs>
 
         <p className="text-xs text-muted-foreground">
           Counts come from work the product recorded. Rows written before Aug 2026 mostly carry no
