@@ -38,6 +38,7 @@ import { Loading } from "@/components/ui/loading";
 import { useRef, useState, useMemo } from "react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { useAuth } from "@/hooks/useAuth";
+import { useTrackView } from "@/hooks/useTrackView";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
@@ -74,6 +75,13 @@ export default function ReportView() {
       return data;
     },
     enabled: !!reportId,
+  });
+
+  // Whether a generated calendar is ever actually read.
+  useTrackView("report", reportId, {
+    client_id: id,
+    status: report?.status ?? null,
+    report_type: report?.report_type ?? null,
   });
 
   if (isLoading)
