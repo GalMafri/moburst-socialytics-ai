@@ -69,6 +69,9 @@ Deno.serve(async (req) => {
             client_id: client.id,
             status: "running",
             report_data: {},
+            // Runs on the service role, so the auth.uid() default is null here.
+            // Attribute the run to whoever set the schedule up.
+            created_by: schedule.created_by,
             date_range_start: dateRangeStart,
             date_range_end: dateRangeEnd,
           })

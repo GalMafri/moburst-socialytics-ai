@@ -89,9 +89,12 @@ export function ContentIdeasTab({
 
       const variantGroupId = (current as any).variant_group_id;
       const newApproved = !((current as any).is_approved);
+      // Column defaults only apply on insert, so record the approver here.
+      const { data: auth } = await supabase.auth.getUser();
       const update: any = {
         is_approved: newApproved,
         approved_at: newApproved ? new Date().toISOString() : null,
+        approved_by: newApproved ? auth?.user?.id ?? null : null,
       };
 
       // Apply to entire variant group if it exists; otherwise to the single row.
