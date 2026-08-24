@@ -1,5 +1,6 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { PORTAL_URL } from "@/utils/gosAuth";
 import { BarChart3, TrendingUp, Zap, AlertCircle } from "lucide-react";
 
 export default function Auth() {
@@ -34,8 +35,19 @@ export default function Auth() {
             </>
           ) : (
             <>
-              <h2 className="text-2xl font-bold tracking-tight text-white">Not authenticated</h2>
-              <p className="text-[#9ca3af]">Please open this tool from the Moburst Hub Dashboard.</p>
+              <h2 className="text-2xl font-bold tracking-tight text-white">Sign in to continue</h2>
+              <p className="text-[#9ca3af]">
+                This tool signs you in through the Moburst portal. Open it there and you
+                will come straight back to the page you were trying to reach.
+              </p>
+              <div className="pt-2">
+                <a
+                  href={PORTAL_URL}
+                  className="inline-flex items-center justify-center rounded-lg bg-[#b9e045] px-4 py-2 text-sm font-semibold text-black transition-opacity hover:opacity-90"
+                >
+                  Open the Moburst portal
+                </a>
+              </div>
             </>
           )}
         </div>

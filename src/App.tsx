@@ -8,6 +8,7 @@ import { ThemeProvider } from "next-themes";
 import { StaffOnlyRoute } from "@/components/StaffOnlyRoute";
 import { AdminOnlyRoute } from "@/components/AdminOnlyRoute";
 import { Telemetry } from "@/components/Telemetry";
+import { ReturnTo } from "@/components/ReturnTo";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthHandoff from "./pages/AuthHandoff";
@@ -35,6 +36,7 @@ const App = () => (
         <BrowserRouter>
           <AuthProvider>
             <Telemetry />
+          <ReturnTo />
             <Routes>
               <Route path="/auth" element={<Auth />} />
               {/* gOS (moburst.ai) integration endpoints */}

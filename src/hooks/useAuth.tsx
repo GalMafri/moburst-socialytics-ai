@@ -1,6 +1,7 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from "react";
 import { initHubToken, clearHubToken } from "@/utils/hubAuth";
 import { getGosHandoffToken, PORTAL_URL } from "@/utils/gosAuth";
+import { rememberIntendedDestination } from "@/utils/returnTo";
 import { supabase } from "@/integrations/supabase/client";
 
 const HUB_API_URL = import.meta.env.VITE_HUB_BACKEND_URL || "https://tools-server.moburst.com";
@@ -173,6 +174,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       //    so we re-enter via the session path (2) on a clean, token-free URL.
       const gosToken = getGosHandoffToken();
       if (gosToken) {
+        // Lets the portal deep-link straight to a page:
+        //   /auth/handoff?token=...&next=/admin/usage
+        // Guards cannot capture this, because /auth/handoff is not behind one.
+        rememberIntendedDestination();
         clearHubToken(); // moburst.ai wins over any cached legacy-hub token
         const { error } = await bridgeGosSession(gosToken);
         if (cancelled) return;
