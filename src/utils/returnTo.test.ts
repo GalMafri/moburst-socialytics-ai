@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { rememberReturnTo, consumeReturnTo } from "./returnTo";
 
 describe("returnTo", () => {
-  beforeEach(() => sessionStorage.clear());
+  beforeEach(() => localStorage.clear());
 
   it("round-trips an in-app path", () => {
     rememberReturnTo("/admin/usage");
@@ -24,8 +24,35 @@ describe("returnTo", () => {
     expect(consumeReturnTo()).toBeNull();
   });
 
+  // A portal may open the tool in a new tab. sessionStorage does not cross
+  // tabs, localStorage does, which is why this is not stored per-tab.
+  it("survives a new tab", () => {
+    rememberReturnTo("/admin/usage");
+    expect(localStorage.getItem("mb_return_to")).toContain("/admin/usage");
+    expect(consumeReturnTo()).toBe("/admin/usage");
+  });
+
+  // localStorage outlives the trip, so a path must not linger and hijack an
+  // unrelated visit days later.
+  it("ignores a path older than the TTL", () => {
+    const t0 = 1_000_000;
+    rememberReturnTo("/admin/usage", t0);
+    expect(consumeReturnTo(t0 + 11 * 60 * 1000)).toBeNull();
+  });
+
+  it("honours a path inside the TTL", () => {
+    const t0 = 1_000_000;
+    rememberReturnTo("/admin/usage", t0);
+    expect(consumeReturnTo(t0 + 60 * 1000)).toBe("/admin/usage");
+  });
+
+  it("survives corrupt storage without throwing", () => {
+    localStorage.setItem("mb_return_to", "not json");
+    expect(consumeReturnTo()).toBeNull();
+  });
+
   // The security-relevant half: anything that could send a signed-in user
-  // somewhere off-site must be refused, not stored and later navigated to.
+  // off-site must be refused, not stored and later navigated to.
   it.each([
     ["protocol-relative", "//evil.example.com"],
     ["absolute http", "https://evil.example.com/steal"],
@@ -38,7 +65,7 @@ describe("returnTo", () => {
     expect(consumeReturnTo()).toBeNull();
   });
 
-  // Bouncing back to an auth route would loop the user straight back out.
+  // Bouncing back to an auth route would loop the user straight out again.
   it.each(["/auth", "/auth/handoff?token=x", "/login", "/logout", "/portal"])(
     "refuses the auth route %s",
     (route) => {

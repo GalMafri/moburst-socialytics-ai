@@ -1,10 +1,34 @@
+import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 import { PORTAL_URL } from "@/utils/gosAuth";
 import { BarChart3, TrendingUp, Zap, AlertCircle } from "lucide-react";
 
 export default function Auth() {
   const { isAuthenticated, isLoading, authError } = useAuth();
+
+  // Why sign-in did not happen, in plain terms. Without this the page is a
+  // dead end that looks identical whether there is no session at all, a
+  // session with no role for this tool, or a genuine bridge failure — and
+  // those need three different fixes.
+  const [reason, setReason] = useState<"checking" | "no-session" | "no-role" | "ready">("checking");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const su = data.session?.user;
+        if (!su) { if (!cancelled) setReason("no-session"); return; }
+        const { data: roles } = await supabase
+          .from("user_roles").select("role").eq("user_id", su.id);
+        if (!cancelled) setReason(roles && roles.length ? "ready" : "no-role");
+      } catch {
+        if (!cancelled) setReason("no-session");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   if (isLoading) return null;
   if (isAuthenticated) return <Navigate to="/" />;
@@ -48,6 +72,18 @@ export default function Auth() {
                   Open the Moburst portal
                 </a>
               </div>
+            {reason === "no-role" && (
+              <p className="text-xs text-amber-500 pt-2">
+                You are signed in, but this tool has no role assigned to your account.
+                A portal admin needs to grant you access to it.
+              </p>
+            )}
+            {reason === "ready" && (
+              <p className="text-xs text-amber-500 pt-2">
+                A session was found but could not be restored. Reload the page, and if
+                it persists, open the tool from the portal once.
+              </p>
+            )}
             </>
           )}
         </div>

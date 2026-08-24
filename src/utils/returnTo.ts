@@ -1,15 +1,19 @@
 // Remembering where someone was trying to go before they got sent to sign in.
 //
 // Both portals drop a user at the tool's root, not at the page they clicked:
-// the gOS handoff finishes with a redirect to "/", and the legacy hub opens the
-// tool at "/" with a ?hubToken. So a shared link to a deep page like
-// /admin/usage used to be a dead end for anyone not already signed in.
+// the gOS handoff ends in a redirect to "/", and the legacy hub opens the tool
+// at "/" with a ?hubToken. So a shared link to a deep page like /admin/usage
+// was a dead end for anyone not already signed in.
 //
-// The path is stashed in sessionStorage before we bounce to the portal. The
-// user leaves this origin and comes back to it in the same tab, so the value
-// survives, and it is scoped to that tab rather than leaking between windows.
+// Stored in localStorage rather than sessionStorage, because a portal may open
+// the tool in a NEW TAB, and sessionStorage does not cross tabs. localStorage
+// does, but it also outlives the trip, so entries carry a short expiry: without
+// one, a path saved days ago would hijack an unrelated visit later.
 
 const KEY = "mb_return_to";
+const TTL_MS = 10 * 60 * 1000; // long enough to sign in, short enough not to linger
+
+type Entry = { path: string; at: number };
 
 /**
  * Only same-origin, in-app paths are ever stored. Anything else is an open
@@ -25,20 +29,25 @@ function isSafeInAppPath(path: string): boolean {
   return true;
 }
 
-export function rememberReturnTo(path: string): void {
+export function rememberReturnTo(path: string, now: number = Date.now()): void {
   try {
-    if (isSafeInAppPath(path)) sessionStorage.setItem(KEY, path);
+    if (!isSafeInAppPath(path)) return;
+    localStorage.setItem(KEY, JSON.stringify({ path, at: now } satisfies Entry));
   } catch {
     /* storage disabled; deep links just fall back to the dashboard */
   }
 }
 
 /** Read the stored path and clear it, so a stale one cannot fire twice. */
-export function consumeReturnTo(): string | null {
+export function consumeReturnTo(now: number = Date.now()): string | null {
   try {
-    const v = sessionStorage.getItem(KEY);
-    sessionStorage.removeItem(KEY);
-    return v && isSafeInAppPath(v) ? v : null;
+    const raw = localStorage.getItem(KEY);
+    localStorage.removeItem(KEY);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as Entry;
+    if (!entry || typeof entry.path !== "string" || typeof entry.at !== "number") return null;
+    if (now - entry.at > TTL_MS) return null;
+    return isSafeInAppPath(entry.path) ? entry.path : null;
   } catch {
     return null;
   }
