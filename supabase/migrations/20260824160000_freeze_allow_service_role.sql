@@ -1,0 +1,20 @@
+-- freeze_quarter() now accepts a trusted server-side caller as well as an admin.
+--
+-- The quarterly freeze should be schedulable (cron or an edge function), and
+-- those run with no JWT as the service role, so an admin-only gate would have
+-- made automation impossible and forced a human to remember every quarter.
+--
+-- Browser callers are unaffected: auth.uid() is non-null for them, so they
+-- cannot take the service-role branch and still need is_admin().
+--
+--   if not (public.is_admin()
+--           or (auth.uid() is null and current_user in ('postgres','service_role')))
+--   then refuse; end if;
+--
+-- 2026-Q1 and 2026-Q2 were frozen on 2026-08-24 under the agreed definition of
+-- output-delivered: a run that finished AND produced a real artifact. A run
+-- that completes having produced nothing counts as complete, not delivered.
+-- Both quarters currently have zero such runs, so the two readings agree; the
+-- distinction starts to matter the first time a run comes back empty.
+--
+-- 2026-Q3 was correctly refused, as it has not closed.
