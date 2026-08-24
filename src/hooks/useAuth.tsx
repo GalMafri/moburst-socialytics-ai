@@ -122,16 +122,30 @@ async function bridgeGosSession(handoffToken: string): Promise<{ error?: string 
   }
 }
 
-// Rebuild identity + role from an existing Supabase session. Used on reload for
-// gOS users, whose single-use handoff token cannot be replayed. Gated to
-// gOS-provenance sessions (user_metadata.auth_source === "gos") so the legacy-hub
-// path is entirely unaffected.
-async function reconstructGosSession(): Promise<{ user: HubUser; role: UserRole } | null> {
+// Rebuild identity + role from an existing Supabase session, for any provenance.
+//
+// This used to bail unless user_metadata.auth_source === "gos", which was a
+// deliberately narrow gate when gOS was added so the legacy path could not be
+// disturbed. The side effect was that legacy tools.moburst.com users could not
+// resume at all: their hub token lives in sessionStorage and dies with the tab,
+// while the Supabase session sits in localStorage perfectly valid. Opening the
+// tool in a new tab, or following a shared link, therefore demanded a fresh
+// sign-in even though the user was signed in.
+//
+// Reconstruction now accepts any session that still resolves to a role. The
+// role is read from user_roles, which is the authoritative source either way,
+// so nothing is trusted that was not already trusted.
+//
+// isGosSession stays keyed strictly on auth_source, because it changes how
+// client-side company scoping behaves and must not be inferred loosely.
+async function reconstructSession(): Promise<
+  { user: HubUser; role: UserRole; isGos: boolean } | null
+> {
   const { data: { session } } = await supabase.auth.getSession();
   const su = session?.user;
   if (!su) return null;
   const meta = (su.user_metadata || {}) as Record<string, unknown>;
-  if (meta.auth_source !== "gos") return null;
+  const isGos = meta.auth_source === "gos";
 
   // Role: prefer the authoritative DB row, fall back to session metadata.
   let role: UserRole = null;
@@ -143,18 +157,29 @@ async function reconstructGosSession(): Promise<{ user: HubUser; role: UserRole 
   else if (typeof meta.tool_role === "string") role = meta.tool_role as UserRole;
   if (!role) return null;
 
+  // Legacy sessions carry no hub_company_name in metadata, so read the profile.
+  let company = (meta.hub_company_name as string) || "";
+  if (!company) {
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("hub_company_name")
+      .eq("user_id", su.id)
+      .maybeSingle();
+    company = (prof as { hub_company_name?: string } | null)?.hub_company_name || "";
+  }
+
   const hubUser: HubUser = {
     _id: (meta.hub_user_id as string) || su.id,
     name: (meta.full_name as string) || su.email || "User",
     email: su.email || "",
     role,
-    company: (meta.hub_company_name as string) || "",
+    company,
     isActive: true,
     tools: [],
     createdAt: su.created_at || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  return { user: hubUser, role };
+  return { user: hubUser, role, isGos };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -223,16 +248,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // 2. Existing gOS Supabase session (after a handoff reload, or a persisted
-      //    session). Rebuild identity + role without replaying the token. Returns
-      //    null for legacy-hub sessions, so the path below is unchanged for them.
+      // 2. Any persisted Supabase session, from either portal. Rebuild identity
+      //    and role without replaying a token, which cannot be replayed anyway:
+      //    the gOS handoff token is single-use, and the legacy hub token lives
+      //    in sessionStorage and dies with the tab. This is what lets a new tab
+      //    or a shared link resume instead of demanding a fresh sign-in.
       try {
-        const reconstructed = await reconstructGosSession();
+        const reconstructed = await reconstructSession();
         if (cancelled) return;
         if (reconstructed) {
           setUser(reconstructed.user);
           setUserRole(reconstructed.role);
-          setIsGosSession(true);
+          setIsGosSession(reconstructed.isGos);
           setAuthError(null);
           setIsLoading(false);
           return;
