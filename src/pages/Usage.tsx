@@ -193,6 +193,31 @@ export default function Usage() {
     );
   }
 
+  // A caller with no Supabase session is `anon`, which has no execute grant on
+  // the reporting functions, so PostgREST returns 42501. That is not a fault to
+  // report as one: it means the person is not signed in. It happens on the
+  // branded URL before the portal handoff, and in local dev where useAuth shows
+  // a placeholder user without ever creating a Supabase session.
+  const notSignedIn =
+    users.error != null &&
+    /permission denied|42501|JWT|not authenticated/i.test(String((users.error as Error).message));
+
+  if (notSignedIn) {
+    return (
+      <AppLayout title="User Analytics">
+        <Card>
+          <CardContent className="p-6">
+            <p className="text-sm font-medium">Sign in to view usage</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Open this tool from the Moburst portal so it can sign you in, then come
+              back to this page. If you opened it directly, that sign-in has not happened yet.
+            </p>
+          </CardContent>
+        </Card>
+      </AppLayout>
+    );
+  }
+
   if (users.error) {
     return (
       <AppLayout title="User Analytics">
