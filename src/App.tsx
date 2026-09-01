@@ -15,6 +15,8 @@ import AuthHandoff from "./pages/AuthHandoff";
 import { PortalRedirect, Logout } from "./pages/GosPortal";
 import ClientSetup from "./pages/ClientSetup";
 import RunAnalysis from "./pages/RunAnalysis";
+import CompetitorReview from "./pages/CompetitorReview";
+import CompetitiveRun from "./pages/CompetitiveRun";
 import ReportView from "./pages/ReportView";
 import ReportHistory from "./pages/ReportHistory";
 import AllReports from "./pages/AllReports";
@@ -48,6 +50,10 @@ const App = () => (
               {/* Staff-only: client management + cross-client views */}
               <Route path="/clients/:id/setup" element={<StaffOnlyRoute><ClientSetup /></StaffOnlyRoute>} />
               <Route path="/clients/:id/analyze" element={<StaffOnlyRoute><RunAnalysis /></StaffOnlyRoute>} />
+              {/* Competitive analysis — staff-only while sets are reviewed;
+                  the client-facing surface is the finished deck via RLS. */}
+              <Route path="/clients/:id/competitive" element={<StaffOnlyRoute><CompetitorReview /></StaffOnlyRoute>} />
+              <Route path="/clients/:id/competitive/run" element={<StaffOnlyRoute><CompetitiveRun /></StaffOnlyRoute>} />
               <Route path="/analytics" element={<AnalyticsIndex />} />
               <Route path="/reports" element={<StaffOnlyRoute><AllReports /></StaffOnlyRoute>} />
               <Route path="/settings" element={<StaffOnlyRoute><Settings /></StaffOnlyRoute>} />

@@ -105,6 +105,7 @@ export default function ClientSetup() {
     brief_text: "",
     brief_file_id: "",
     design_style_synthesis: null as any,
+    competitor_seed_notes: "",
   });
   const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
   const [researchingBrand, setResearchingBrand] = useState(false);
@@ -191,6 +192,7 @@ export default function ClientSetup() {
         brief_text: client.brief_text || "",
         brief_file_id: client.brief_file_id || "",
         design_style_synthesis: (client as any).design_style_synthesis || null,
+        competitor_seed_notes: (client as any).competitor_seed_notes || "",
       });
     }
   }, [client]);
@@ -370,6 +372,7 @@ export default function ClientSetup() {
             <TabsTrigger value="info" className="flex-shrink-0">Client Info</TabsTrigger>
             <TabsTrigger value="sprout" className="flex-shrink-0">Sprout Social</TabsTrigger>
             <TabsTrigger value="strategy" className="flex-shrink-0">Content Strategy</TabsTrigger>
+            <TabsTrigger value="competitors" className="flex-shrink-0">Competitors</TabsTrigger>
             <TabsTrigger value="brief" className="flex-shrink-0">Brief</TabsTrigger>
             <TabsTrigger value="schedule" className="flex-shrink-0">Schedule</TabsTrigger>
           </TabsList>
@@ -831,6 +834,37 @@ export default function ClientSetup() {
                     </Button>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="competitors" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Competitive Context</CardTitle>
+                <CardDescription>
+                  Who does the account team think this client competes with? These notes are fed
+                  into AI competitor identification and weighed heavily.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Competitor notes</Label>
+                  <Textarea
+                    rows={5}
+                    placeholder={'e.g. "Direct: Brand A, Brand B (same price point). Aspirational: Brand C — do not include. Regional player: Brand D."'}
+                    value={form.competitor_seed_notes}
+                    onChange={(e) => setForm((f) => ({ ...f, competitor_seed_notes: e.target.value }))}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Saved with the client. Remember to hit Save before running identification.
+                  </p>
+                </div>
+                {!isNew && (
+                  <Button variant="outline" onClick={() => navigate(`/clients/${id}/competitive`)}>
+                    Open competitor review
+                  </Button>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

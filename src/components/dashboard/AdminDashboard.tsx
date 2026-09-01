@@ -14,7 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, Search, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2 } from "lucide-react";
+import { Plus, Search, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair } from "lucide-react";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
@@ -246,15 +246,27 @@ export function AdminDashboard() {
                         <BarChart3 className="h-3 w-3 mr-1" /> Analytics
                       </Button>
                       {canRunAnalysis && (
-                        <Button
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigate(`/clients/${client.id}/analyze`);
-                          }}
-                        >
-                          <Play className="h-3 w-3 mr-1" /> Run Report
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/clients/${client.id}/competitive`);
+                            }}
+                          >
+                            <Crosshair className="h-3 w-3 mr-1" /> Competitive
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/clients/${client.id}/analyze`);
+                            }}
+                          >
+                            <Play className="h-3 w-3 mr-1" /> Run Report
+                          </Button>
+                        </>
                       )}
                     </div>
                   </div>

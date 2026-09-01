@@ -179,6 +179,7 @@ export type Database = {
           brief_file_id: string | null
           brief_text: string | null
           company_slug: string | null
+          competitor_seed_notes: string | null
           content_pillars: Json | null
           created_at: string | null
           created_by: string | null
@@ -208,6 +209,7 @@ export type Database = {
           brief_file_id?: string | null
           brief_text?: string | null
           company_slug?: string | null
+          competitor_seed_notes?: string | null
           content_pillars?: Json | null
           created_at?: string | null
           created_by?: string | null
@@ -237,6 +239,7 @@ export type Database = {
           brief_file_id?: string | null
           brief_text?: string | null
           company_slug?: string | null
+          competitor_seed_notes?: string | null
           content_pillars?: Json | null
           created_at?: string | null
           created_by?: string | null
@@ -257,6 +260,221 @@ export type Database = {
           website_url?: string | null
         }
         Relationships: []
+      }
+      competitive_reports: {
+        Row: {
+          client_id: string
+          created_at: string
+          created_by: string | null
+          date_range_end: string | null
+          date_range_start: string | null
+          duration_minutes: number | null
+          gamma_url: string | null
+          id: string
+          report_data: Json
+          set_id: string | null
+          status: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          created_by?: string | null
+          date_range_end?: string | null
+          date_range_start?: string | null
+          duration_minutes?: number | null
+          gamma_url?: string | null
+          id?: string
+          report_data?: Json
+          set_id?: string | null
+          status?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          created_by?: string | null
+          date_range_end?: string | null
+          date_range_start?: string | null
+          duration_minutes?: number | null
+          gamma_url?: string | null
+          id?: string
+          report_data?: Json
+          set_id?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitive_reports_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "competitive_reports_set_id_fkey"
+            columns: ["set_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_sets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitor_handles: {
+        Row: {
+          client_id: string
+          competitor_id: string
+          detected_at: string
+          detection_confidence: number | null
+          followers: number | null
+          handle: string
+          id: string
+          is_active: boolean
+          platform: string
+          profile_url: string | null
+        }
+        Insert: {
+          client_id: string
+          competitor_id: string
+          detected_at?: string
+          detection_confidence?: number | null
+          followers?: number | null
+          handle: string
+          id?: string
+          is_active?: boolean
+          platform: string
+          profile_url?: string | null
+        }
+        Update: {
+          client_id?: string
+          competitor_id?: string
+          detected_at?: string
+          detection_confidence?: number | null
+          followers?: number | null
+          handle?: string
+          id?: string
+          is_active?: boolean
+          platform?: string
+          profile_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_handles_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "competitor_handles_competitor_id_fkey"
+            columns: ["competitor_id"]
+            isOneToOne: false
+            referencedRelation: "competitors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitor_sets: {
+        Row: {
+          client_id: string
+          confirmed_at: string | null
+          confirmed_by: string | null
+          created_at: string
+          generated_by: string | null
+          id: string
+          notes: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          created_at?: string
+          generated_by?: string | null
+          id?: string
+          notes?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          created_at?: string
+          generated_by?: string | null
+          id?: string
+          notes?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_sets_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitors: {
+        Row: {
+          client_id: string
+          created_at: string
+          id: string
+          is_selected: boolean
+          name: string
+          rationale: string | null
+          rivaliq_company_id: string | null
+          selected_rank: number | null
+          set_id: string
+          similarity_score: number | null
+          source: string
+          website_url: string | null
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          id?: string
+          is_selected?: boolean
+          name: string
+          rationale?: string | null
+          rivaliq_company_id?: string | null
+          selected_rank?: number | null
+          set_id: string
+          similarity_score?: number | null
+          source?: string
+          website_url?: string | null
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          id?: string
+          is_selected?: boolean
+          name?: string
+          rationale?: string | null
+          rivaliq_company_id?: string | null
+          selected_rank?: number | null
+          set_id?: string
+          similarity_score?: number | null
+          source?: string
+          website_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitors_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "competitors_set_id_fkey"
+            columns: ["set_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_sets"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       design_states: {
         Row: {
