@@ -10,18 +10,21 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
       app_events: {
         Row: {
           client_id: string | null
+          company: string | null
+          company_slug: string | null
           duration_ms: number | null
           email: string | null
           entity_id: string | null
           error_code: string | null
           event: string
+          execution_id: string | null
           id: number
           occurred_at: string
           ok: boolean | null
@@ -29,18 +32,21 @@ export type Database = {
           props: Json
           received_at: string
           role: string | null
-          company: string | null
           seq: number | null
           session_id: string | null
+          tool: string | null
           user_id: string | null
         }
         Insert: {
           client_id?: string | null
+          company?: string | null
+          company_slug?: string | null
           duration_ms?: number | null
           email?: string | null
           entity_id?: string | null
           error_code?: string | null
           event: string
+          execution_id?: string | null
           id?: number
           occurred_at?: string
           ok?: boolean | null
@@ -48,18 +54,21 @@ export type Database = {
           props?: Json
           received_at?: string
           role?: string | null
-          company?: string | null
           seq?: number | null
           session_id?: string | null
+          tool?: string | null
           user_id?: string | null
         }
         Update: {
           client_id?: string | null
+          company?: string | null
+          company_slug?: string | null
           duration_ms?: number | null
           email?: string | null
           entity_id?: string | null
           error_code?: string | null
           event?: string
+          execution_id?: string | null
           id?: number
           occurred_at?: string
           ok?: boolean | null
@@ -67,9 +76,9 @@ export type Database = {
           props?: Json
           received_at?: string
           role?: string | null
-          company?: string | null
           seq?: number | null
           session_id?: string | null
+          tool?: string | null
           user_id?: string | null
         }
         Relationships: []
@@ -185,6 +194,7 @@ export type Database = {
           created_by: string | null
           design_references: Json | null
           design_style_synthesis: Json | null
+          exclude_from_reporting: boolean
           geo: string | null
           hub_company_name: string | null
           id: string
@@ -215,6 +225,7 @@ export type Database = {
           created_by?: string | null
           design_references?: Json | null
           design_style_synthesis?: Json | null
+          exclude_from_reporting?: boolean
           geo?: string | null
           hub_company_name?: string | null
           id?: string
@@ -245,6 +256,7 @@ export type Database = {
           created_by?: string | null
           design_references?: Json | null
           design_style_synthesis?: Json | null
+          exclude_from_reporting?: boolean
           geo?: string | null
           hub_company_name?: string | null
           id?: string
@@ -527,6 +539,51 @@ export type Database = {
           },
         ]
       }
+      gos_usage_snapshot: {
+        Row: {
+          company_slug: string | null
+          executions_completed: number
+          executions_failed: number
+          executions_started: number
+          frozen_at: string
+          id: number
+          outputs_delivered: number
+          quarter: string
+          row_hash: string
+          tool: string
+          tool_opens: number
+          user_email: string | null
+        }
+        Insert: {
+          company_slug?: string | null
+          executions_completed?: number
+          executions_failed?: number
+          executions_started?: number
+          frozen_at?: string
+          id?: number
+          outputs_delivered?: number
+          quarter: string
+          row_hash: string
+          tool: string
+          tool_opens?: number
+          user_email?: string | null
+        }
+        Update: {
+          company_slug?: string | null
+          executions_completed?: number
+          executions_failed?: number
+          executions_started?: number
+          frozen_at?: string
+          id?: number
+          outputs_delivered?: number
+          quarter?: string
+          row_hash?: string
+          tool?: string
+          tool_opens?: number
+          user_email?: string | null
+        }
+        Relationships: []
+      }
       media_jobs: {
         Row: {
           client_id: string
@@ -695,7 +752,9 @@ export type Database = {
           avatar_url: string | null
           created_at: string | null
           display_name: string | null
+          email: string | null
           hub_company_name: string | null
+          hub_user_id: string | null
           id: string
           updated_at: string | null
           user_id: string
@@ -705,7 +764,9 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string | null
           display_name?: string | null
+          email?: string | null
           hub_company_name?: string | null
+          hub_user_id?: string | null
           id?: string
           updated_at?: string | null
           user_id: string
@@ -715,7 +776,9 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string | null
           display_name?: string | null
+          email?: string | null
           hub_company_name?: string | null
+          hub_user_id?: string | null
           id?: string
           updated_at?: string | null
           user_id?: string
@@ -953,82 +1016,199 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      gos_events: {
+        Row: {
+          company_slug: string | null
+          duration_ms: number | null
+          event: string | null
+          execution_id: string | null
+          occurred_at: string | null
+          ok: boolean | null
+          props: Json | null
+          tool: string | null
+          user_email: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
+      user_activity: {
+        Row: {
+          action: string | null
+          at: string | null
+          client_id: string | null
+          outcome: string | null
+          seconds: number | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
+      user_analytics: {
+        Row: {
+          abandoned: number | null
+          actions_total: number | null
+          active_days: number | null
+          clients_created: number | null
+          clients_touched: number | null
+          company: string | null
+          email: string | null
+          failures: number | null
+          first_action_at: string | null
+          last_action_at: string | null
+          last_sign_in_at: string | null
+          name: string | null
+          posts_approved: number | null
+          posts_created: number | null
+          posts_iterated: number | null
+          provisioned_at: string | null
+          reports_ok: number | null
+          role: string | null
+          state: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      get_user_timeline: {
-        Args: { p_email: string; p_limit?: number }
+      attribution_health: {
+        Args: never
         Returns: {
-          at: string
-          kind: string
-          label: string
-          status: string | null
-          detail: string | null
-          entity_id: string | null
-          client_name: string | null
+          check_name: string
+          detail: string
+          failing: number
         }[]
       }
-      get_user_detail: {
-        Args: { p_email: string }
-        Returns: { metric: string; value: string; tone: string }[]
-      }
-      get_funnel: {
-        Args: { days?: number }
-        Returns: { step: string; step_order: number; users: number; events: number }[]
+      can_access_client: { Args: { _client_id: string }; Returns: boolean }
+      can_manage_roster: { Args: never; Returns: boolean }
+      can_write_client: { Args: { _client_id: string }; Returns: boolean }
+      freeze_quarter: {
+        Args: { p_quarter: string }
+        Returns: {
+          note: string
+          rows_written: number
+          status: string
+        }[]
       }
       get_ai_quality: {
         Args: { days?: number }
-        Returns: { metric: string; value: number | null; sample: number }[]
-      }
-      get_report_engagement: {
-        Args: { days?: number }
-        Returns: { metric: string; value: number | null; sample: number }[]
-      }
-      get_session_quality: {
-        Args: { days?: number }
-        Returns: { metric: string; value: number | null; sample: number }[]
+        Returns: {
+          metric: string
+          sample: number
+          value: number
+        }[]
       }
       get_feature_adoption: {
         Args: { days?: number }
         Returns: {
           event: string
+          failures: number
+          median_ms: number
           users: number
           uses: number
-          failures: number
-          median_ms: number | null
+        }[]
+      }
+      get_funnel: {
+        Args: { days?: number }
+        Returns: {
+          events: number
+          step: string
+          step_order: number
+          users: number
+        }[]
+      }
+      get_report_engagement: {
+        Args: { days?: number }
+        Returns: {
+          metric: string
+          sample: number
+          value: number
+        }[]
+      }
+      get_session_quality: {
+        Args: { days?: number }
+        Returns: {
+          metric: string
+          sample: number
+          value: number
         }[]
       }
       get_usage_trend: {
         Args: never
-        Returns: { day: string; actions: number; active_users: number }[]
+        Returns: {
+          actions: number
+          active_users: number
+          day: string
+        }[]
       }
       get_user_analytics: {
         Args: never
         Returns: {
-          email: string
-          name: string | null
+          abandoned: number | null
+          actions_total: number | null
+          active_days: number | null
+          clients_created: number | null
+          clients_touched: number | null
           company: string | null
-          role: string | null
-          provisioned_at: string | null
-          last_sign_in_at: string | null
+          email: string | null
+          failures: number | null
           first_action_at: string | null
           last_action_at: string | null
-          actions_total: number
-          reports_ok: number
-          posts_created: number
-          posts_iterated: number
-          posts_approved: number
-          clients_created: number
-          clients_touched: number
-          active_days: number
-          failures: number
-          abandoned: number
-          state: string
+          last_sign_in_at: string | null
+          name: string | null
+          posts_approved: number | null
+          posts_created: number | null
+          posts_iterated: number | null
+          provisioned_at: string | null
+          reports_ok: number | null
+          role: string | null
+          state: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "user_analytics"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      get_user_detail: {
+        Args: { p_email: string }
+        Returns: {
+          metric: string
+          tone: string
+          value: string
+        }[]
+      }
+      get_user_timeline: {
+        Args: { p_email: string; p_limit?: number }
+        Returns: {
+          at: string
+          client_name: string
+          detail: string
+          entity_id: string
+          kind: string
+          label: string
+          status: string
         }[]
       }
       is_admin: { Args: never; Returns: boolean }
       is_client_member: { Args: { _client_id: string }; Returns: boolean }
+      is_company_restricted: { Args: never; Returns: boolean }
       is_moburst_staff: { Args: never; Returns: boolean }
+      purge_raw_events: {
+        Args: { p_keep_months?: number }
+        Returns: {
+          deleted: number
+          note: string
+          status: string
+        }[]
+      }
+      verify_quarter: {
+        Args: { p_quarter: string }
+        Returns: {
+          frozen_at: string
+          intact: boolean
+          quarter: string
+          rows: number
+        }[]
+      }
     }
     Enums: {
       app_role: "admin" | "user" | "moburst_user" | "client"
