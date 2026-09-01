@@ -8,10 +8,9 @@ import {
 import {
   CANVAS_ONLY_GUARD,
   imageModelPath,
-  imageReferenceModelPath,
-  imageResolution,
   resolveContextImageUrls,
   toHiggsfieldAspectRatio,
+  toInputImages,
 } from "../_shared/higgsfield/context.ts";
 
 const corsHeaders = {
@@ -176,30 +175,18 @@ async function generateImage(args: {
   /** Called right after Higgsfield accepts, so the caller can record a job row. */
   onSubmitted?: (submission: { request_id: string }) => Promise<void>;
 }): Promise<{ base64: string; mimeType: string }> {
-  // Soul splits by input shape (see context.ts): a style reference means the
-  // /reference route with ONE image_reference_url; otherwise plain /standard.
-  // The first resolved URL is the primary design reference by construction.
-  const useReference = args.referenceUrls.length > 0;
-  const modelPath = useReference ? imageReferenceModelPath() : imageModelPath();
-  const body: Record<string, unknown> = useReference
-    ? {
-        prompt: args.prompt,
-        image_reference_url: args.referenceUrls[0],
-        aspect_ratio: toHiggsfieldAspectRatio(args.aspectRatio, "reference"),
-        resolution: imageResolution(),
-        // Full style adherence, and no server-side prompt rewriting: the
-        // whole point of the reference route is brand fidelity, and the
-        // enhancer can dilute the engineered brand rules.
-        style_strength: 1.0,
-        enhance_prompt: false,
-      }
-    : {
-        prompt: args.prompt,
-        aspect_ratio: toHiggsfieldAspectRatio(args.aspectRatio, "standard"),
-        resolution: imageResolution(),
-      };
+  // One route for everything: nano-banana takes references as input_images,
+  // so with-reference and without-reference calls differ by one field.
+  const body: Record<string, unknown> = {
+    prompt: args.prompt,
+    aspect_ratio: toHiggsfieldAspectRatio(args.aspectRatio),
+    output_format: "png",
+  };
+  if (args.referenceUrls.length > 0) {
+    body.input_images = toInputImages(args.referenceUrls);
+  }
 
-  const submission = await submit(modelPath, body, { webhookUrl: args.webhookUrl });
+  const submission = await submit(imageModelPath(), body, { webhookUrl: args.webhookUrl });
   console.log("[generate-post-image] higgsfield request:", submission.request_id);
   if (args.onSubmitted) await args.onSubmitted(submission);
 

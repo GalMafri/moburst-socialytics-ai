@@ -13,7 +13,7 @@
 // produce exactly that synthesis, so clients with a PDF-only brand book and no
 // synthesis row lose brand grounding — the caller surfaces that as a warning.
 
-export const MAX_REFERENCE_IMAGES = 3; // same cap the Gemini path used
+export const MAX_REFERENCE_IMAGES = 4; // nano-banana takes up to 8 input images; 3 refs + brand book
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // Higgsfield fetches immediately; 1h is generous
 
 /** Extensions Higgsfield will accept as image input. */
@@ -124,11 +124,11 @@ export async function resolveContextImageUrls(
 /**
  * Appended to every prompt sent to a Higgsfield image route.
  *
- * WHY: buildImagePrompt() injects platform playbook language ("cover slide in
- * feed", "Instagram crops to 1:1") that Gemini correctly read as design
- * constraints — but Soul renders it literally, producing fake app screenshots
- * with UI chrome and gibberish interface text around the artwork (observed on
- * the first live generation, 2026-09-01). This guard pins the interpretation.
+ * WHY: the playbook's platform language ("cover slide in feed") can be read
+ * as a scene to depict rather than constraints to follow — Soul did exactly
+ * that, twice, rendering fake app chrome around the artwork (2026-09-01).
+ * nano-banana interprets instructions correctly, but the guard stays: it is
+ * cheap insurance against the same failure class on any model.
  */
 export const CANVAS_ONLY_GUARD =
   "\n\n# FINAL RENDERING RULE\n" +
@@ -142,38 +142,26 @@ export const CANVAS_ONLY_GUARD =
 
 // ── Model routes ────────────────────────────────────────────────────────────
 //
-// Routes come from Higgsfield's published OpenAPI spec (docs.higgsfield.ai/
-// docs/openapi.json). NOTE: the quickstart shows "/soul/v2/standard", but the
-// spec — and the live API — have no /v2/ segment. Verified 2026-09-01: the
-// v2 path 404s, these do not.
+// Routes come from Higgsfield's published OpenAPI spec, corrected by live 422
+// probing where the two disagree (they do; see git history for the list).
 //
-// Soul splits by input shape:
-//   /higgsfield-ai/soul/standard   prompt-only  {prompt, aspect_ratio, resolution 2K|4K, num_images}
-//   /higgsfield-ai/soul/reference  style-anchored {prompt, image_reference_url (ONE url),
-//                                  style_strength, aspect_ratio, resolution 720p|1080p}
+// IMAGE MODEL CHOICE — the build-review decision of 2026-09-01. Soul is
+// Higgsfield's photorealism model; fed an 8k-character design-system brief it
+// twice depicted the brief itself as a fake app interface. Our workload is
+// graphic design (typography, panels, brand systems), and the right tool in
+// Higgsfield's catalog is /nano-banana — the Gemini-class image model the
+// prompt builder was originally tuned for, now routed and billed through
+// Higgsfield. It also restores multi-reference conditioning (input_images up
+// to 8, vs Soul's single reference) and native 4:5.
+//   /nano-banana                 {prompt, aspect_ratio (incl 4:5, auto),
+//                                 input_images[{type:"image_url",image_url}], output_format}
 // DoP (video) is image-to-video only:
-//   /higgsfield-ai/dop/standard    {prompt, image_url (REQUIRED), motions?, end_image_url?}
-// Env overrides remain for account-specific swaps (e.g. kling/veo routes).
+//   /higgsfield-ai/dop/standard  {prompt, image_url (REQUIRED), motions?, end_image_url?}
+// Env overrides remain for account-specific swaps.
 
 export function imageModelPath(): string {
   const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  return env?.get("HIGGSFIELD_IMAGE_MODEL_PATH") || "/higgsfield-ai/soul/standard";
-}
-
-export function imageReferenceModelPath(): string {
-  const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  return env?.get("HIGGSFIELD_IMAGE_REFERENCE_MODEL_PATH") || "/higgsfield-ai/soul/reference";
-}
-
-/**
- * Output resolution for Soul image routes. The LIVE API accepts '720p'|'1080p'
- * on BOTH /standard and /reference (verified 2026-09-01 via a 422 whose ctx
- * said so), even though the published OpenAPI spec claims 2K/4K for /standard.
- * Trust the live error over the spec; env-overridable if Higgsfield changes it.
- */
-export function imageResolution(): string {
-  const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  return env?.get("HIGGSFIELD_IMAGE_RESOLUTION") || "1080p";
+  return env?.get("HIGGSFIELD_IMAGE_MODEL_PATH") || "/nano-banana";
 }
 
 export function videoModelPath(): string {
@@ -181,22 +169,14 @@ export function videoModelPath(): string {
   return env?.get("HIGGSFIELD_VIDEO_MODEL_PATH") || "/higgsfield-ai/dop/standard";
 }
 
-/**
- * Map the app's platform/format-derived aspect ratio to what Soul accepts.
- * The LIVE enum is identical on /standard and /reference — 9:16, 16:9, 4:3,
- * 3:4, 1:1, 2:3, 3:2 (verified via 422 ctx on 2026-09-01) — even though the
- * published OpenAPI spec claims /standard also takes 4:5, 5:4 and 21:9. It
- * does not. Instagram's 4:5 therefore degrades to 3:4, the nearest portrait;
- * the route parameter is kept for call-site clarity but changes nothing.
- */
-const SOUL_RATIOS = new Set(["9:16", "16:9", "4:3", "3:4", "1:1", "2:3", "3:2"]);
+/** nano-banana's live aspect enum (superset of Soul's; includes 4:5 and auto). */
+const IMAGE_RATIOS = new Set(["auto", "1:1", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "16:9", "9:16", "21:9"]);
 
-export function toHiggsfieldAspectRatio(
-  ratio: string,
-  _route: "standard" | "reference" = "standard",
-): string {
-  if (SOUL_RATIOS.has(ratio)) return ratio;
-  if (ratio === "4:5") return "3:4"; // nearest legal portrait
-  if (ratio === "5:4") return "4:3";
-  return "1:1";
+export function toHiggsfieldAspectRatio(ratio: string): string {
+  return IMAGE_RATIOS.has(ratio) ? ratio : "1:1";
+}
+
+/** Build nano-banana's input_images array from resolved reference URLs. */
+export function toInputImages(urls: string[]): Array<{ type: "image_url"; image_url: string }> {
+  return urls.slice(0, 8).map((u) => ({ type: "image_url" as const, image_url: u }));
 }

@@ -4,6 +4,7 @@ import {
   MAX_REFERENCE_IMAGES,
   resolveContextImageUrls,
   toHiggsfieldAspectRatio,
+  toInputImages,
 } from "../../../supabase/functions/_shared/higgsfield/context";
 
 /** Fake storage client whose signed URL embeds bucket+path, for assertions. */
@@ -107,10 +108,19 @@ describe("toHiggsfieldAspectRatio", () => {
     expect(toHiggsfieldAspectRatio("banana")).toBe("1:1");
   });
 
-  it("degrades 4:5 to 3:4 on both routes — the live enum has no 4:5 anywhere", () => {
-    expect(toHiggsfieldAspectRatio("4:5", "standard")).toBe("3:4");
-    expect(toHiggsfieldAspectRatio("4:5", "reference")).toBe("3:4");
-    expect(toHiggsfieldAspectRatio("5:4", "reference")).toBe("4:3");
-    expect(toHiggsfieldAspectRatio("9:16", "reference")).toBe("9:16");
+  it("nano-banana renders 4:5 and 5:4 natively", () => {
+    expect(toHiggsfieldAspectRatio("4:5")).toBe("4:5");
+    expect(toHiggsfieldAspectRatio("5:4")).toBe("5:4");
+    expect(toHiggsfieldAspectRatio("9:16")).toBe("9:16");
+    expect(toHiggsfieldAspectRatio("auto")).toBe("auto");
+  });
+});
+
+describe("toInputImages", () => {
+  it("wraps URLs in nano-banana's typed shape and caps at 8", () => {
+    const urls = Array.from({ length: 10 }, (_, i) => `https://x/${i}.png`);
+    const out = toInputImages(urls);
+    expect(out).toHaveLength(8);
+    expect(out[0]).toEqual({ type: "image_url", image_url: "https://x/0.png" });
   });
 });
