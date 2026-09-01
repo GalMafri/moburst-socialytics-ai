@@ -885,6 +885,54 @@ export type Database = {
           },
         ]
       }
+      rivaliq_snapshots: {
+        Row: {
+          client_id: string | null
+          endpoint: string
+          fetched_at: string
+          id: string
+          landscape_id: string
+          params_hash: string | null
+          payload: Json
+          report_id: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          endpoint: string
+          fetched_at?: string
+          id?: string
+          landscape_id: string
+          params_hash?: string | null
+          payload: Json
+          report_id?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          endpoint?: string
+          fetched_at?: string
+          id?: string
+          landscape_id?: string
+          params_hash?: string | null
+          payload?: Json
+          report_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rivaliq_snapshots_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rivaliq_snapshots_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "competitive_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scheduled_posts: {
         Row: {
           client_id: string | null
