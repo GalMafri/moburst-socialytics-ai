@@ -32,3 +32,12 @@ describe("flattenSynthesis", () => {
     expect(md).toContain("### Typography");
   });
 });
+
+describe("logo section qualifier", () => {
+  it("marks the logo section as placement-only so it cannot contradict the no-logo constraint", () => {
+    const out = flattenSynthesis({ logo_and_marks_treatment: "Logo bottom-right, 20% width." });
+    expect(out).toContain("PLACEMENT AWARENESS ONLY");
+    expect(out).toContain("do NOT render any logo");
+    expect(out).toContain("Logo bottom-right, 20% width.");
+  });
+});

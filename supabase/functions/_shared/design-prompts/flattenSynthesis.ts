@@ -37,6 +37,17 @@ export function flattenSynthesis(s: DesignStyleSynthesis | null | undefined): st
   for (const [key, label] of SECTION_LABELS) {
     const value = s[key];
     if (typeof value === "string" && value.trim().length > 0) {
+      // The logo section describes where the REAL logo lives so the layout
+      // reserves that zone — but generated logos come out garbled, and the
+      // global constraint says the client adds the real one later. Without
+      // this qualifier the two instructions contradict each other and image
+      // models resolve the conflict unpredictably.
+      if (key === "logo_and_marks_treatment") {
+        sections.push(
+          `### ${label} (PLACEMENT AWARENESS ONLY — do NOT render any logo, wordmark, or brand insignia; keep this zone visually clear so the real logo can be added later)\n${value.trim()}`,
+        );
+        continue;
+      }
       sections.push(`### ${label}\n${value.trim()}`);
     }
   }

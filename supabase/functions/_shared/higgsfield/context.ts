@@ -182,13 +182,22 @@ export function videoModelPath(): string {
 }
 
 /**
- * Map the app's platform/format-derived aspect ratio to a value both Soul
- * routes accept. The whitelist is the INTERSECTION of /standard and
- * /reference enums (reference lacks 5:4, 4:5 and 21:9), so one mapping is
- * safe everywhere; anything else falls back to square.
+ * Map the app's platform/format-derived aspect ratio to what each Soul route
+ * accepts (their enums differ: /standard has 4:5, 5:4 and 21:9; /reference
+ * does not). 4:5 matters — the Instagram-feed playbook and several clients'
+ * platform adaptations specify it — so /standard renders it natively and
+ * /reference degrades to the nearest portrait ratio instead of erroring.
  */
-const KNOWN_RATIOS = new Set(["1:1", "9:16", "16:9", "2:3", "3:2", "3:4", "4:3"]);
+const STANDARD_RATIOS = new Set(["1:1", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "16:9", "9:16", "21:9"]);
+const REFERENCE_RATIOS = new Set(["9:16", "16:9", "4:3", "3:4", "1:1", "2:3", "3:2"]);
 
-export function toHiggsfieldAspectRatio(ratio: string): string {
-  return KNOWN_RATIOS.has(ratio) ? ratio : "1:1";
+export function toHiggsfieldAspectRatio(
+  ratio: string,
+  route: "standard" | "reference" = "standard",
+): string {
+  const allowed = route === "reference" ? REFERENCE_RATIOS : STANDARD_RATIOS;
+  if (allowed.has(ratio)) return ratio;
+  if (ratio === "4:5") return "3:4"; // nearest legal portrait on /reference
+  if (ratio === "5:4") return "4:3";
+  return "1:1";
 }

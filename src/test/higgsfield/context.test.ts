@@ -106,4 +106,11 @@ describe("toHiggsfieldAspectRatio", () => {
     expect(toHiggsfieldAspectRatio("2:3")).toBe("2:3");
     expect(toHiggsfieldAspectRatio("banana")).toBe("1:1");
   });
+
+  it("renders 4:5 natively on /standard but degrades to 3:4 on /reference", () => {
+    expect(toHiggsfieldAspectRatio("4:5", "standard")).toBe("4:5");
+    expect(toHiggsfieldAspectRatio("4:5", "reference")).toBe("3:4");
+    expect(toHiggsfieldAspectRatio("5:4", "reference")).toBe("4:3");
+    expect(toHiggsfieldAspectRatio("9:16", "reference")).toBe("9:16");
+  });
 });

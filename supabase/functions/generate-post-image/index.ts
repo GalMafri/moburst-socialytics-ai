@@ -29,13 +29,20 @@ const corsHeaders = {
 // tolerates this hold.
 const IMAGE_POLL_TIMEOUT_MS = 210_000;
 
-/** Map platform + format → aspect ratio (unchanged from the Gemini version). */
+/**
+ * Map platform + format → aspect ratio. One deliberate change from the Gemini
+ * version: Instagram feed posts are 4:5, matching both the platform playbook
+ * ("Aspect: 4:5 (portrait)") and clients' platform_adaptations — Gemini's
+ * config was pinned to 1:1 while the prompt said 4:5, a contradiction Soul
+ * lets us finally remove. Facebook and generic defaults stay square.
+ */
 function getAspectRatio(platform?: string, format?: string): string {
   if (!platform) return "1:1";
   const p = (platform + " " + (format || "")).toLowerCase();
   if (p.includes("story") || p.includes("reel") || p.includes("tiktok")) return "9:16";
   if (p.includes("linkedin") || p.includes("article")) return "16:9";
   if (p.includes("pinterest")) return "2:3";
+  if (p.includes("instagram")) return "4:5";
   return "1:1";
 }
 
@@ -166,20 +173,23 @@ async function generateImage(args: {
   // Soul splits by input shape (see context.ts): a style reference means the
   // /reference route with ONE image_reference_url; otherwise plain /standard.
   // The first resolved URL is the primary design reference by construction.
-  const ratio = toHiggsfieldAspectRatio(args.aspectRatio);
   const useReference = args.referenceUrls.length > 0;
   const modelPath = useReference ? imageReferenceModelPath() : imageModelPath();
   const body: Record<string, unknown> = useReference
     ? {
         prompt: args.prompt,
         image_reference_url: args.referenceUrls[0],
-        aspect_ratio: ratio,
+        aspect_ratio: toHiggsfieldAspectRatio(args.aspectRatio, "reference"),
         resolution: imageResolution(),
-        style_strength: 0.8,
+        // Full style adherence, and no server-side prompt rewriting: the
+        // whole point of the reference route is brand fidelity, and the
+        // enhancer can dilute the engineered brand rules.
+        style_strength: 1.0,
+        enhance_prompt: false,
       }
     : {
         prompt: args.prompt,
-        aspect_ratio: ratio,
+        aspect_ratio: toHiggsfieldAspectRatio(args.aspectRatio, "standard"),
         resolution: imageResolution(),
       };
 

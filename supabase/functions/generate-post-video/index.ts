@@ -115,7 +115,7 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    const aspectRatio = toHiggsfieldAspectRatio(getAspectRatio(platform, format));
+    const aspectRatio = getAspectRatio(platform, format);
 
     // ── Resolve brand visual context to reference URLs ──
     const resolved = await resolveContextImageUrls(
@@ -158,13 +158,14 @@ serve(async (req) => {
         ? {
             prompt: seedPrompt + CANVAS_ONLY_GUARD,
             image_reference_url: resolved.referenceUrls[0],
-            aspect_ratio: aspectRatio,
+            aspect_ratio: toHiggsfieldAspectRatio(aspectRatio, "reference"),
             resolution: imageResolution(),
-            style_strength: 0.8,
+            style_strength: 1.0,
+            enhance_prompt: false,
           }
         : {
             prompt: seedPrompt + CANVAS_ONLY_GUARD,
-            aspect_ratio: aspectRatio,
+            aspect_ratio: toHiggsfieldAspectRatio(aspectRatio, "standard"),
             resolution: imageResolution(),
           };
 
