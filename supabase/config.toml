@@ -97,3 +97,9 @@ verify_jwt = false
 
 [functions.confirm-competitor-set]
 verify_jwt = false
+
+# n8n writeback for the competitive pipeline. Gated by the
+# X-Socialytics-Secret header (SOCIALYTICS_N8N_SECRET edge secret) — the
+# secret is the auth, hence verify_jwt off like the rest of the project.
+[functions.update-competitive-report]
+verify_jwt = false
