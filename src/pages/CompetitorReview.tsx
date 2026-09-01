@@ -157,19 +157,26 @@ export default function CompetitorReview() {
       refreshAll();
       toast({ title: "Competitors identified", description: "Now detecting social handles…" });
 
-      // Kick handle detection right away; it fills in as it goes.
+      // Detect handles ONE COMPETITOR PER CALL. A whole-set call scrapes up
+      // to 12 third-party sites serially inside one edge request, and the
+      // platform kills requests at 150s — the tail of the list never ran.
+      // Driving the loop from here keeps every call small, and handles
+      // appear row by row as they land.
       setDetecting(true);
-      const det = await supabase.functions.invoke("detect-competitor-handles", {
-        body: { set_id: data.set_id },
-      });
-      if (det.error || det.data?.error) {
+      let detectFailures = 0;
+      for (const comp of data.competitors || []) {
+        const det = await supabase.functions.invoke("detect-competitor-handles", {
+          body: { competitor_id: comp.id },
+        });
+        if (det.error || det.data?.error) detectFailures++;
+        refreshAll();
+      }
+      if (detectFailures > 0) {
         toast({
-          title: "Handle detection had trouble",
-          description: String(det.data?.error || det.error?.message),
-          variant: "destructive",
+          title: "Some handle detections failed",
+          description: `${detectFailures} competitor site(s) could not be read — add or re-detect those handles manually.`,
         });
       }
-      refreshAll();
     } catch (err: any) {
       track("competitor_identification_failed", {
         client_id: clientId, ok: false, error_code: String(err?.message || "unknown").slice(0, 120),
@@ -182,15 +189,22 @@ export default function CompetitorReview() {
   };
 
   const redetectHandles = async () => {
-    if (!currentSet) return;
+    if (!currentSet || !competitors) return;
     setDetecting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("detect-competitor-handles", {
-        body: { set_id: currentSet.id, refresh: true },
+      // Same one-per-call pacing as the identify flow (150s gateway cap).
+      let failures = 0;
+      for (const comp of competitors) {
+        const { data, error } = await supabase.functions.invoke("detect-competitor-handles", {
+          body: { competitor_id: comp.id, refresh: true },
+        });
+        if (error || data?.error) failures++;
+        refreshAll();
+      }
+      toast({
+        title: failures === 0 ? "Handles refreshed" : "Handles refreshed with gaps",
+        description: failures > 0 ? `${failures} site(s) could not be read.` : undefined,
       });
-      if (error || data?.error) throw new Error(data?.error || error?.message);
-      refreshAll();
-      toast({ title: "Handles refreshed" });
     } catch (err: any) {
       toast({ title: "Detection failed", description: err.message, variant: "destructive" });
     } finally {
