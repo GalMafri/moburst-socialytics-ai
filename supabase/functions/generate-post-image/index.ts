@@ -1,5 +1,15 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
+import {
+  HiggsfieldError,
+  pollUntilTerminal,
+  submit,
+} from "../_shared/higgsfield/client.ts";
+import {
+  imageModelPath,
+  resolveContextImageUrls,
+  toHiggsfieldAspectRatio,
+} from "../_shared/higgsfield/context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,7 +17,12 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-/** Map platform + format → Gemini native aspect ratio */
+// Image generation is fast enough to stay synchronous from the caller's point
+// of view: submit to Higgsfield, poll, return. Video (a much longer job) uses
+// the media_jobs + webhook path instead.
+const IMAGE_POLL_TIMEOUT_MS = 120_000;
+
+/** Map platform + format → aspect ratio (unchanged from the Gemini version). */
 function getAspectRatio(platform?: string, format?: string): string {
   if (!platform) return "1:1";
   const p = (platform + " " + (format || "")).toLowerCase();
@@ -130,6 +145,60 @@ function buildStrippedRetryPrompt(args: {
   ].join("\n");
 }
 
+/**
+ * Run one Higgsfield image generation and download the first output.
+ * Higgsfield CDN URLs expire after ~7 days, so the bytes come back to us and
+ * the response stays a data URL, exactly like the Gemini version — the
+ * frontend then persists via upload-generated-media as before.
+ */
+async function generateImage(args: {
+  prompt: string;
+  aspectRatio: string;
+  referenceUrls: string[];
+}): Promise<{ base64: string; mimeType: string }> {
+  const body: Record<string, unknown> = {
+    prompt: args.prompt,
+    aspect_ratio: toHiggsfieldAspectRatio(args.aspectRatio),
+  };
+  // Soul-style models take style/content references as public URLs.
+  if (args.referenceUrls.length > 0) {
+    body.reference_image_urls = args.referenceUrls;
+  }
+
+  const submission = await submit(imageModelPath(), body);
+  console.log("[generate-post-image] higgsfield request:", submission.request_id);
+
+  const result = await pollUntilTerminal(submission.status_url, {
+    timeoutMs: IMAGE_POLL_TIMEOUT_MS,
+  });
+
+  const imageUrl = result.images?.[0]?.url;
+  if (!imageUrl) {
+    throw new HiggsfieldError(
+      "upstream_error",
+      "Completed without an image URL: " + JSON.stringify(result).slice(0, 300),
+      { requestId: result.request_id },
+    );
+  }
+
+  const dl = await fetch(imageUrl);
+  if (!dl.ok) {
+    throw new HiggsfieldError(
+      "upstream_error",
+      `Could not download generated image (${dl.status})`,
+      { requestId: result.request_id },
+    );
+  }
+  const mimeType = dl.headers.get("content-type") || "image/jpeg";
+  const buf = new Uint8Array(await dl.arrayBuffer());
+  let binary = "";
+  const chunk = 8192;
+  for (let i = 0; i < buf.length; i += chunk) {
+    binary += String.fromCharCode(...buf.subarray(i, i + chunk));
+  }
+  return { base64: btoa(binary), mimeType };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -174,32 +243,12 @@ Deno.serve(async (req) => {
       return jsonResp({ error: "prompt is required" }, 400);
     }
 
-    // ── Get Gemini API key (try env, then app_settings) ──
-    let geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
 
-    if (!geminiKey) {
-      const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-      // Try gemini key first, then google key
-      for (const keyName of ["gemini_api_key", "google_ai_api_key"]) {
-        const { data: setting } = await supabase.from("app_settings").select("value").eq("key", keyName).maybeSingle();
-        if (setting?.value) {
-          geminiKey = setting.value;
-          break;
-        }
-      }
-    }
-
-    if (!geminiKey) {
-      return jsonResp(
-        {
-          error:
-            "Gemini API key not configured. Add GEMINI_API_KEY to your Supabase environment secrets or add a row with key='gemini_api_key' to the app_settings table.",
-        },
-        400,
-      );
-    }
-
-    // ── Build the design prompt ──
+    // ── Build the design prompt (same builder as before) ──
     const aspectRatio = getAspectRatio(platform, format);
     const designPrompt = buildImagePrompt({
       basePrompt: prompt,
@@ -220,147 +269,38 @@ Deno.serve(async (req) => {
     console.log("[generate-post-image] prompt (first 2000 chars):", designPrompt.slice(0, 2000));
     console.log("[generate-post-image] prompt total length:", designPrompt.length);
 
-    // ── Fetch design reference images for multimodal input ──
-    const contentParts: any[] = [];
-
-    if (resolvedRefs && Array.isArray(resolvedRefs) && resolvedRefs.length > 0) {
-      const storageClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-
-      contentParts.push({ text: "Here are existing brand design references. Match their visual style, layout patterns, and color usage:" });
-
-      for (const ref of resolvedRefs.slice(0, 3)) {
-        try {
-          const { data: fileData } = await storageClient.storage.from("design-references").download(ref);
-          if (fileData) {
-            const arrayBuffer = await fileData.arrayBuffer();
-            const uint8Array = new Uint8Array(arrayBuffer);
-            let binary = "";
-            for (let i = 0; i < uint8Array.length; i++) {
-              binary += String.fromCharCode(uint8Array[i]);
-            }
-            const base64 = btoa(binary);
-            const ext = ref.split(".").pop()?.toLowerCase();
-            const mimeType = ext === "png" ? "image/png" : "image/jpeg";
-            contentParts.push({ inlineData: { mimeType, data: base64 } });
-          }
-        } catch (e) {
-          console.error("Failed to fetch design reference:", ref, e);
-        }
-      }
-
-      contentParts.push({ text: "Now create a new design based on this brief:" });
-    }
-
-    // Attach the brand book file as an inline part. Gemini 3.1 supports inline PDF/PNG/JPG.
-    if (resolvedBrandBookPath) {
-      try {
-        const storageClient = createClient(
-          Deno.env.get("SUPABASE_URL")!,
-          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-        );
-        const { data: fileData } = await storageClient.storage
-          .from("brand-books")
-          .download(resolvedBrandBookPath);
-
-        if (fileData) {
-          const arrayBuffer = await fileData.arrayBuffer();
-          if (arrayBuffer.byteLength <= 4 * 1024 * 1024) {
-            const uint8Array = new Uint8Array(arrayBuffer);
-            let binary = "";
-            for (let i = 0; i < uint8Array.length; i++) {
-              binary += String.fromCharCode(uint8Array[i]);
-            }
-            const base64 = btoa(binary);
-            const ext = resolvedBrandBookPath.split(".").pop()?.toLowerCase();
-            const mimeType =
-              ext === "pdf"
-                ? "application/pdf"
-                : ext === "png"
-                ? "image/png"
-                : "image/jpeg";
-            contentParts.push({
-              text: "Canonical brand book — defer to it on color, typography, and overall identity:",
-            });
-            contentParts.push({ inlineData: { mimeType, data: base64 } });
-          } else {
-            console.warn("[generate-post-image] brand book exceeds 4MB, skipping");
-          }
-        }
-      } catch (e) {
-        console.error("[generate-post-image] brand book attach failed:", e);
-      }
-    }
-
-    // Add the main design prompt
-    contentParts.push({ text: designPrompt });
-
-    // ── Call Gemini 3.1 Flash Image (Nano Banana 2) ──
-    const geminiModel = "gemini-3.1-flash-image-preview";
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
-
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: contentParts,
-          },
-        ],
-        generationConfig: {
-          responseModalities: ["TEXT", "IMAGE"],
-          imageConfig: {
-            aspectRatio: aspectRatio,
-            imageSize: "2K",
-          },
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => "");
-      return jsonResp({ error: `Gemini API error: ${response.status}`, details: errorBody }, 502);
-    }
-
-    const result = await response.json();
-
-    // ── Extract image from response ──
-    const candidates = result.candidates || [];
-    let imageB64: string | null = null;
-    let imageMime: string | null = null;
-    let textResponse: string | null = null;
-
-    for (const candidate of candidates) {
-      for (const part of candidate.content?.parts || []) {
-        if (part.inlineData) {
-          imageB64 = part.inlineData.data;
-          imageMime = part.inlineData.mimeType || "image/png";
-        }
-        if (part.text) {
-          textResponse = part.text;
-        }
-      }
-    }
-
-    if (!imageB64) {
-      return jsonResp(
-        {
-          error: "No image generated. The model may have refused the prompt or returned text only.",
-          details: textResponse || JSON.stringify(result).slice(0, 500),
-        },
-        500,
+    // ── Resolve visual references to signed URLs Higgsfield can fetch ──
+    // Replaces the inline-base64 multimodal parts of the Gemini path. A PDF
+    // brand book cannot cross (Higgsfield accepts images only); its influence
+    // arrives via design_style_synthesis inside the prompt.
+    const resolved = await resolveContextImageUrls(
+      {
+        design_references: resolvedRefs,
+        brand_book_file_path: resolvedBrandBookPath,
+        design_style_synthesis: resolvedSynthesis,
+      },
+      supabase,
+    );
+    if (resolved.brandGroundingMissing) {
+      console.warn(
+        "[generate-post-image] brand book is PDF-only and no design_style_synthesis exists — " +
+          "output will be less brand-aligned. Run synthesize-design-language for this client.",
       );
     }
+
+    // ── Generate ──
+    let { base64: imageB64, mimeType: imageMime } = await generateImage({
+      prompt: designPrompt,
+      aspectRatio,
+      referenceUrls: resolved.referenceUrls,
+    });
 
     // ── Carousel single-slide validation + retry ──
     //
     // When this call is for ONE slide of an N-slide carousel and the brief is
-    // rich enough to describe multiple concepts, Gemini sometimes composes a
-    // contact sheet anyway. The previous "DO NOT" instructions weren't strong
-    // enough — so now we VERIFY the output via Claude vision and, if it's a
-    // contact sheet, retry once with a stripped-down positive-only prompt that
-    // says "render ONE subject filling the canvas" without any multi-section
-    // brief content.
+    // rich enough to describe multiple concepts, image models sometimes compose
+    // a contact sheet anyway. Verify the output via Claude vision and, if it's
+    // a contact sheet, retry once with a stripped-down positive-only prompt.
     let wasRetried = false;
     let validationLayout: "single" | "multi" | "skipped" = "skipped";
     let validationReason = "";
@@ -369,8 +309,7 @@ Deno.serve(async (req) => {
       // Need an Anthropic key for validation. Try env first, then app_settings.
       let anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
       if (!anthropicKey) {
-        const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-        const { data: s } = await sb
+        const { data: s } = await supabase
           .from("app_settings")
           .select("value")
           .eq("key", "anthropic_api_key")
@@ -395,38 +334,21 @@ Deno.serve(async (req) => {
           });
           console.log("[generate-post-image] retry prompt (first 600 chars):", retryPrompt.slice(0, 600));
 
-          const retryParts: any[] = [{ text: retryPrompt }];
-          const retryResp = await fetch(apiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: retryParts }],
-              generationConfig: {
-                responseModalities: ["TEXT", "IMAGE"],
-                imageConfig: { aspectRatio, imageSize: "2K" },
-              },
-            }),
-          });
-
-          if (retryResp.ok) {
-            const retryResult = await retryResp.json();
-            for (const candidate of retryResult.candidates || []) {
-              for (const part of candidate.content?.parts || []) {
-                if (part.inlineData) {
-                  imageB64 = part.inlineData.data;
-                  imageMime = part.inlineData.mimeType || "image/png";
-                  wasRetried = true;
-                }
-              }
-            }
-            if (wasRetried) {
-              console.log("[generate-post-image] retry produced a new image");
-            } else {
-              console.warn("[generate-post-image] retry returned no image; keeping original");
-            }
-          } else {
-            const t = await retryResp.text().catch(() => "");
-            console.warn("[generate-post-image] retry failed:", retryResp.status, t.slice(0, 200));
+          try {
+            // Retry drops the reference images too — matching the old stripped
+            // retry, which sent a bare prompt to maximize the odds of a single
+            // clean composition.
+            const retry = await generateImage({
+              prompt: retryPrompt,
+              aspectRatio,
+              referenceUrls: [],
+            });
+            imageB64 = retry.base64;
+            imageMime = retry.mimeType;
+            wasRetried = true;
+            console.log("[generate-post-image] retry produced a new image");
+          } catch (e) {
+            console.warn("[generate-post-image] retry failed; keeping original:", e);
           }
         }
       } else {
@@ -438,13 +360,23 @@ Deno.serve(async (req) => {
 
     return jsonResp({
       image_url: imageUrl,
-      revised_prompt: textResponse,
+      // Higgsfield does not return a revised prompt the way Gemini's text part
+      // did; keep the field for contract stability.
+      revised_prompt: null,
       // Diagnostics so the frontend can show "this slide was auto-fixed" etc.
       was_retried: wasRetried,
       validation_layout: validationLayout,
       validation_reason: validationReason,
     });
   } catch (err: any) {
+    if (err instanceof HiggsfieldError) {
+      console.error("[generate-post-image] higgsfield error:", err.code, err.message);
+      const status =
+        err.code === "concurrency_exhausted" ? 429 :
+        err.code === "moderated" ? 422 :
+        err.code === "timeout" ? 504 : 502;
+      return jsonResp({ error: err.userMessage, code: err.code }, status);
+    }
     return jsonResp({ error: err.message }, 500);
   }
 });
@@ -455,4 +387,3 @@ function jsonResp(body: any, status = 200) {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
-

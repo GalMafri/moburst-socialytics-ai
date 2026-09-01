@@ -309,6 +309,75 @@ export type Database = {
           },
         ]
       }
+      media_jobs: {
+        Row: {
+          client_id: string
+          created_at: string
+          created_by: string | null
+          error: string | null
+          id: string
+          input: Json
+          kind: string
+          model_path: string | null
+          output_url: string | null
+          post_iteration_id: string | null
+          provider: string
+          request_id: string | null
+          seed_image_url: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          id?: string
+          input?: Json
+          kind: string
+          model_path?: string | null
+          output_url?: string | null
+          post_iteration_id?: string | null
+          provider?: string
+          request_id?: string | null
+          seed_image_url?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          id?: string
+          input?: Json
+          kind?: string
+          model_path?: string | null
+          output_url?: string | null
+          post_iteration_id?: string | null
+          provider?: string
+          request_id?: string | null
+          seed_image_url?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_jobs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "media_jobs_post_iteration_id_fkey"
+            columns: ["post_iteration_id"]
+            isOneToOne: false
+            referencedRelation: "post_iterations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       post_iterations: {
         Row: {
           approved_at: string | null

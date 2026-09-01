@@ -85,3 +85,7 @@ verify_jwt = false
 
 [functions.proxy-media]
 verify_jwt = false
+# Higgsfield calls this with only the ?t= shared secret (no Supabase JWT),
+# same rationale as gos-auth-bridge. The secret is checked in the function.
+[functions.higgsfield-webhook]
+verify_jwt = false
