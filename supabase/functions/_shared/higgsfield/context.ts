@@ -121,6 +121,25 @@ export async function resolveContextImageUrls(
   return { referenceUrls, brandBookSkipped, brandGroundingMissing };
 }
 
+/**
+ * Appended to every prompt sent to a Higgsfield image route.
+ *
+ * WHY: buildImagePrompt() injects platform playbook language ("cover slide in
+ * feed", "Instagram crops to 1:1") that Gemini correctly read as design
+ * constraints — but Soul renders it literally, producing fake app screenshots
+ * with UI chrome and gibberish interface text around the artwork (observed on
+ * the first live generation, 2026-09-01). This guard pins the interpretation.
+ */
+export const CANVAS_ONLY_GUARD =
+  "\n\n# FINAL RENDERING RULE\n" +
+  "Render ONLY the post artwork itself: one full-bleed graphic that fills the entire canvas edge to edge. " +
+  "The canvas IS the artwork.\n" +
+  "Never render any of these: a phone frame or device mockup, an app window or browser window, " +
+  "social-media interface elements (like/comment/share icons, follower counts, usernames, avatars, " +
+  "status bars, navigation bars, captions below the image), watermarks, or any interface text.\n" +
+  "Platform notes above describe where the artwork will be POSTED so you can design appropriately — " +
+  "they are context, not something to depict.";
+
 // ── Model routes ────────────────────────────────────────────────────────────
 //
 // Routes come from Higgsfield's published OpenAPI spec (docs.higgsfield.ai/

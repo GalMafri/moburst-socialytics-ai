@@ -29,6 +29,7 @@ import {
   submit,
 } from "../_shared/higgsfield/client.ts";
 import {
+  CANVAS_ONLY_GUARD,
   imageModelPath,
   imageReferenceModelPath,
   imageResolution,
@@ -155,14 +156,14 @@ serve(async (req) => {
       const useReference = resolved.referenceUrls.length > 0;
       const seedBody: Record<string, unknown> = useReference
         ? {
-            prompt: seedPrompt,
+            prompt: seedPrompt + CANVAS_ONLY_GUARD,
             image_reference_url: resolved.referenceUrls[0],
             aspect_ratio: aspectRatio,
             resolution: imageResolution(),
             style_strength: 0.8,
           }
         : {
-            prompt: seedPrompt,
+            prompt: seedPrompt + CANVAS_ONLY_GUARD,
             aspect_ratio: aspectRatio,
             resolution: imageResolution(),
           };

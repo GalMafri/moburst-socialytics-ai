@@ -6,6 +6,7 @@ import {
   submit,
 } from "../_shared/higgsfield/client.ts";
 import {
+  CANVAS_ONLY_GUARD,
   imageModelPath,
   imageReferenceModelPath,
   imageResolution,
@@ -303,7 +304,7 @@ Deno.serve(async (req) => {
 
     // ── Generate ──
     let { base64: imageB64, mimeType: imageMime } = await generateImage({
-      prompt: designPrompt,
+      prompt: designPrompt + CANVAS_ONLY_GUARD,
       aspectRatio,
       referenceUrls: resolved.referenceUrls,
     });
@@ -352,7 +353,7 @@ Deno.serve(async (req) => {
             // retry, which sent a bare prompt to maximize the odds of a single
             // clean composition.
             const retry = await generateImage({
-              prompt: retryPrompt,
+              prompt: retryPrompt + CANVAS_ONLY_GUARD,
               aspectRatio,
               referenceUrls: [],
             });
