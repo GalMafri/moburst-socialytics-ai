@@ -63,6 +63,11 @@ Deno.serve(async (req) => {
       return jsonResp({ error: "set_id or competitor_id is required" }, 400);
     }
 
+    // Staff gate FIRST — before any query, so unauthenticated callers learn
+    // nothing (not even whether an id exists). The per-client write check
+    // follows once the rows tell us which client this is.
+    const { asCaller } = await requireStaff(req);
+
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -76,8 +81,13 @@ Deno.serve(async (req) => {
       return jsonResp({ error: "No competitors found" }, 404);
     }
 
-    // All rows in a set share a client; authorize against it.
-    await requireStaff(req, { writeClientId: competitors[0].client_id });
+    // All rows in a set share a client; company-scoped staff must be allowed
+    // to write THIS client.
+    const { data: canWrite, error: writeErr } = await asCaller.rpc("can_write_client", {
+      _client_id: competitors[0].client_id,
+    });
+    if (writeErr) throw new Error(`Access check failed: ${writeErr.message}`);
+    if (!canWrite) return jsonResp({ error: "You do not have access to this client." }, 403);
 
     const results: Array<{ competitor_id: string; detected: DetectedHandle[] }> = [];
 

@@ -28,6 +28,10 @@ Deno.serve(async (req) => {
     const { set_id, notes } = await req.json();
     if (!set_id) return jsonResp({ error: "set_id is required" }, 400);
 
+    // Staff gate FIRST — an unauthenticated caller must not learn whether a
+    // set id exists. Per-client authorization follows once the row is loaded.
+    const { userId, asCaller } = await requireStaff(req);
+
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -40,7 +44,11 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (setErr || !set) return jsonResp({ error: "Set not found" }, 404);
 
-    const { userId } = await requireStaff(req, { writeClientId: set.client_id });
+    const { data: canWrite, error: writeErr } = await asCaller.rpc("can_write_client", {
+      _client_id: set.client_id,
+    });
+    if (writeErr) throw new Error(`Access check failed: ${writeErr.message}`);
+    if (!canWrite) return jsonResp({ error: "You do not have access to this client." }, 403);
 
     if (set.status !== "draft") {
       return jsonResp({ error: `Set is '${set.status}', only a draft can be confirmed.` }, 409);
