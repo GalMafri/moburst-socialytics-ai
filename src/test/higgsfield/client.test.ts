@@ -109,6 +109,18 @@ describe("submit", () => {
     expect(err.userMessage).toMatch(/limit/i);
   });
 
+  it("maps 403 not_enough_credits to insufficient_credits with a clear message", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: "not_enough_credits" }), { status: 403 }),
+    );
+    const err = await submit("/m", {}, {
+      credentials: CREDS,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).catch((e) => e);
+    expect(err.code).toBe("insufficient_credits");
+    expect(err.userMessage).toMatch(/credits/i);
+  });
+
   it("maps 401 to unauthorized", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("nope", { status: 401 }));
     const err = await submit("/m", {}, {

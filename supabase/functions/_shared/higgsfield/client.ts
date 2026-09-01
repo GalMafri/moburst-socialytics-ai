@@ -68,6 +68,8 @@ export type HiggsfieldErrorCode =
   | "moderated"
   /** Terminal status `failed`. */
   | "generation_failed"
+  /** 403 not_enough_credits — the account's API credit balance is empty. */
+  | "insufficient_credits"
   /** Our own application-level timeout while polling. */
   | "timeout"
   /** Credentials are not configured in this environment at all. */
@@ -108,6 +110,8 @@ export class HiggsfieldError extends Error {
         return "Higgsfield could not generate this. Try again, or adjust the brief.";
       case "timeout":
         return "The generation is taking longer than expected. It may still finish — check back shortly.";
+      case "insufficient_credits":
+        return "The Higgsfield account is out of API credits. Top up at cloud.higgsfield.ai, then try again.";
       case "not_configured":
         return "Higgsfield is not configured on this environment yet.";
       case "not_found":
@@ -213,6 +217,11 @@ async function submissionError(resp: Response): Promise<HiggsfieldError> {
   if (resp.status === 400 && /concurrent requests/i.test(text)) {
     return new HiggsfieldError("concurrency_exhausted", text.slice(0, 300), {
       httpStatus: 400,
+    });
+  }
+  if (resp.status === 403 && /not_enough_credits/i.test(text)) {
+    return new HiggsfieldError("insufficient_credits", text.slice(0, 300), {
+      httpStatus: 403,
     });
   }
   return new HiggsfieldError(

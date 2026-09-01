@@ -386,8 +386,9 @@ Deno.serve(async (req) => {
       console.error("[generate-post-image] higgsfield error:", err.code, err.message);
       const status =
         err.code === "concurrency_exhausted" ? 429 :
+        (err.code === "insufficient_credits" ? 402 :
         err.code === "moderated" ? 422 :
-        err.code === "timeout" ? 504 : 502;
+        err.code === "timeout" ? 504 : 502);
       return jsonResp({ error: err.userMessage, code: err.code, detail: err.message.slice(0, 400) }, status);
     }
     return jsonResp({ error: err.message }, 500);

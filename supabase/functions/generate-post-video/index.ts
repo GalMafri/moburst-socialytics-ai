@@ -323,8 +323,9 @@ serve(async (req) => {
       console.error("[generate-post-video] higgsfield error:", error.code, error.message);
       const status =
         error.code === "concurrency_exhausted" ? 429 :
+        (error.code === "insufficient_credits" ? 402 :
         error.code === "moderated" ? 422 :
-        error.code === "timeout" ? 504 : 502;
+        error.code === "timeout" ? 504 : 502);
       return jsonResp({ error: error.userMessage, code: error.code, detail: error.message.slice(0, 400) }, status);
     }
     console.error("Error generating video:", error);
