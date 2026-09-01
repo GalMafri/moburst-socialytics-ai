@@ -297,7 +297,7 @@ serve(async (req) => {
         error.code === "concurrency_exhausted" ? 429 :
         error.code === "moderated" ? 422 :
         error.code === "timeout" ? 504 : 502;
-      return jsonResp({ error: error.userMessage, code: error.code }, status);
+      return jsonResp({ error: error.userMessage, code: error.code, detail: error.message.slice(0, 400) }, status);
     }
     console.error("Error generating video:", error);
     return jsonResp({ error: error.message }, 500);

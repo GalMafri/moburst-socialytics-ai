@@ -375,7 +375,7 @@ Deno.serve(async (req) => {
         err.code === "concurrency_exhausted" ? 429 :
         err.code === "moderated" ? 422 :
         err.code === "timeout" ? 504 : 502;
-      return jsonResp({ error: err.userMessage, code: err.code }, status);
+      return jsonResp({ error: err.userMessage, code: err.code, detail: err.message.slice(0, 400) }, status);
     }
     return jsonResp({ error: err.message }, 500);
   }
