@@ -8,6 +8,7 @@ import {
 import {
   imageModelPath,
   imageReferenceModelPath,
+  imageResolution,
   resolveContextImageUrls,
   toHiggsfieldAspectRatio,
 } from "../_shared/higgsfield/context.ts";
@@ -168,13 +169,13 @@ async function generateImage(args: {
         prompt: args.prompt,
         image_reference_url: args.referenceUrls[0],
         aspect_ratio: ratio,
-        resolution: "1080p",
+        resolution: imageResolution(),
         style_strength: 0.8,
       }
     : {
         prompt: args.prompt,
         aspect_ratio: ratio,
-        resolution: "2K",
+        resolution: imageResolution(),
       };
 
   const submission = await submit(modelPath, body);

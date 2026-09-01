@@ -146,6 +146,17 @@ export function imageReferenceModelPath(): string {
   return env?.get("HIGGSFIELD_IMAGE_REFERENCE_MODEL_PATH") || "/higgsfield-ai/soul/reference";
 }
 
+/**
+ * Output resolution for Soul image routes. The LIVE API accepts '720p'|'1080p'
+ * on BOTH /standard and /reference (verified 2026-09-01 via a 422 whose ctx
+ * said so), even though the published OpenAPI spec claims 2K/4K for /standard.
+ * Trust the live error over the spec; env-overridable if Higgsfield changes it.
+ */
+export function imageResolution(): string {
+  const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
+  return env?.get("HIGGSFIELD_IMAGE_RESOLUTION") || "1080p";
+}
+
 export function videoModelPath(): string {
   const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
   return env?.get("HIGGSFIELD_VIDEO_MODEL_PATH") || "/higgsfield-ai/dop/standard";

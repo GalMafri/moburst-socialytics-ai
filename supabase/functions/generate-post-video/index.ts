@@ -31,6 +31,7 @@ import {
 import {
   imageModelPath,
   imageReferenceModelPath,
+  imageResolution,
   resolveContextImageUrls,
   toHiggsfieldAspectRatio,
   videoModelPath,
@@ -157,13 +158,13 @@ serve(async (req) => {
             prompt: seedPrompt,
             image_reference_url: resolved.referenceUrls[0],
             aspect_ratio: aspectRatio,
-            resolution: "1080p",
+            resolution: imageResolution(),
             style_strength: 0.8,
           }
         : {
             prompt: seedPrompt,
             aspect_ratio: aspectRatio,
-            resolution: "2K",
+            resolution: imageResolution(),
           };
 
       console.log("[generate-post-video] generating brand-aligned seed image…");
