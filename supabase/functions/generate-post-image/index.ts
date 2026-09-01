@@ -7,6 +7,7 @@ import {
 } from "../_shared/higgsfield/client.ts";
 import {
   imageModelPath,
+  imageReferenceModelPath,
   resolveContextImageUrls,
   toHiggsfieldAspectRatio,
 } from "../_shared/higgsfield/context.ts";
@@ -156,16 +157,27 @@ async function generateImage(args: {
   aspectRatio: string;
   referenceUrls: string[];
 }): Promise<{ base64: string; mimeType: string }> {
-  const body: Record<string, unknown> = {
-    prompt: args.prompt,
-    aspect_ratio: toHiggsfieldAspectRatio(args.aspectRatio),
-  };
-  // Soul-style models take style/content references as public URLs.
-  if (args.referenceUrls.length > 0) {
-    body.reference_image_urls = args.referenceUrls;
-  }
+  // Soul splits by input shape (see context.ts): a style reference means the
+  // /reference route with ONE image_reference_url; otherwise plain /standard.
+  // The first resolved URL is the primary design reference by construction.
+  const ratio = toHiggsfieldAspectRatio(args.aspectRatio);
+  const useReference = args.referenceUrls.length > 0;
+  const modelPath = useReference ? imageReferenceModelPath() : imageModelPath();
+  const body: Record<string, unknown> = useReference
+    ? {
+        prompt: args.prompt,
+        image_reference_url: args.referenceUrls[0],
+        aspect_ratio: ratio,
+        resolution: "1080p",
+        style_strength: 0.8,
+      }
+    : {
+        prompt: args.prompt,
+        aspect_ratio: ratio,
+        resolution: "2K",
+      };
 
-  const submission = await submit(imageModelPath(), body);
+  const submission = await submit(modelPath, body);
   console.log("[generate-post-image] higgsfield request:", submission.request_id);
 
   const result = await pollUntilTerminal(submission.status_url, {

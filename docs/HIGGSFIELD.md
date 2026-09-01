@@ -22,13 +22,16 @@ Set in the Supabase dashboard under Edge Functions → Secrets. Never in
 | `HIGGSFIELD_API_KEY_ID` | yes | REST key id |
 | `HIGGSFIELD_API_KEY_SECRET` | yes | REST key secret |
 | `HIGGSFIELD_WEBHOOK_SECRET` | yes for video | Shared secret in the webhook URL (`?t=`). Generate a long random string |
-| `HIGGSFIELD_IMAGE_MODEL_PATH` | no | Defaults to `/higgsfield-ai/soul/v2/standard` |
-| `HIGGSFIELD_VIDEO_MODEL_PATH` | no | Defaults to `/higgsfield-ai/dop/v2/standard`. Confirm against the models enabled on the account |
+| `HIGGSFIELD_IMAGE_MODEL_PATH` | no | Defaults to `/higgsfield-ai/soul/standard` (prompt-only route) |
+| `HIGGSFIELD_IMAGE_REFERENCE_MODEL_PATH` | no | Defaults to `/higgsfield-ai/soul/reference` (used whenever a design reference exists; takes ONE `image_reference_url`) |
+| `HIGGSFIELD_VIDEO_MODEL_PATH` | no | Defaults to `/higgsfield-ai/dop/standard` (image-to-video; `image_url` is required, so the seed frame is mandatory) |
 | `HIGGSFIELD_VIDEO_PARAMS` | no | JSON object merged into every video submission (duration/quality knobs, which are model-specific) |
 
-Model routes are account-specific on Higgsfield's side. If a generation fails
-with a 404-like upstream error, check which endpoints the account has enabled
-at cloud.higgsfield.ai and set the two `*_MODEL_PATH` overrides.
+Routes come from Higgsfield's OpenAPI spec (docs.higgsfield.ai/docs/openapi.json).
+Beware: the quickstart page shows `/soul/v2/standard`, but no `/v2/` routes exist
+on the live API. The full catalog (kling, veo3.1, sora-2, minimax, seedance, wan,
+flux, reve, nano-banana) is in that spec; swap routes via the `*_MODEL_PATH`
+overrides if the account favors a different model.
 
 ## How generation flows
 

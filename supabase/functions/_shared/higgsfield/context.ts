@@ -123,27 +123,41 @@ export async function resolveContextImageUrls(
 
 // ── Model routes ────────────────────────────────────────────────────────────
 //
-// Higgsfield model endpoints are account-specific ("Use the generation
-// endpoint available to your account"), so the defaults below are overridable
-// via env without a code change. Soul is the documented image default; the
-// video route must be confirmed against the account's enabled models.
+// Routes come from Higgsfield's published OpenAPI spec (docs.higgsfield.ai/
+// docs/openapi.json). NOTE: the quickstart shows "/soul/v2/standard", but the
+// spec — and the live API — have no /v2/ segment. Verified 2026-09-01: the
+// v2 path 404s, these do not.
+//
+// Soul splits by input shape:
+//   /higgsfield-ai/soul/standard   prompt-only  {prompt, aspect_ratio, resolution 2K|4K, num_images}
+//   /higgsfield-ai/soul/reference  style-anchored {prompt, image_reference_url (ONE url),
+//                                  style_strength, aspect_ratio, resolution 720p|1080p}
+// DoP (video) is image-to-video only:
+//   /higgsfield-ai/dop/standard    {prompt, image_url (REQUIRED), motions?, end_image_url?}
+// Env overrides remain for account-specific swaps (e.g. kling/veo routes).
 
 export function imageModelPath(): string {
   const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  return env?.get("HIGGSFIELD_IMAGE_MODEL_PATH") || "/higgsfield-ai/soul/v2/standard";
+  return env?.get("HIGGSFIELD_IMAGE_MODEL_PATH") || "/higgsfield-ai/soul/standard";
+}
+
+export function imageReferenceModelPath(): string {
+  const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
+  return env?.get("HIGGSFIELD_IMAGE_REFERENCE_MODEL_PATH") || "/higgsfield-ai/soul/reference";
 }
 
 export function videoModelPath(): string {
   const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  return env?.get("HIGGSFIELD_VIDEO_MODEL_PATH") || "/higgsfield-ai/dop/v2/standard";
+  return env?.get("HIGGSFIELD_VIDEO_MODEL_PATH") || "/higgsfield-ai/dop/standard";
 }
 
 /**
- * Map the app's platform/format-derived aspect ratio (computed by the existing
- * getAspectRatio helpers) to the string Higgsfield expects. Higgsfield accepts
- * "W:H" strings, so this is a pass-through with a whitelist to catch garbage.
+ * Map the app's platform/format-derived aspect ratio to a value both Soul
+ * routes accept. The whitelist is the INTERSECTION of /standard and
+ * /reference enums (reference lacks 5:4, 4:5 and 21:9), so one mapping is
+ * safe everywhere; anything else falls back to square.
  */
-const KNOWN_RATIOS = new Set(["1:1", "9:16", "16:9", "2:3", "3:2", "4:5", "5:4", "3:4", "4:3"]);
+const KNOWN_RATIOS = new Set(["1:1", "9:16", "16:9", "2:3", "3:2", "3:4", "4:3"]);
 
 export function toHiggsfieldAspectRatio(ratio: string): string {
   return KNOWN_RATIOS.has(ratio) ? ratio : "1:1";

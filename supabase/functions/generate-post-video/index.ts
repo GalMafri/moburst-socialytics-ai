@@ -30,6 +30,7 @@ import {
 } from "../_shared/higgsfield/client.ts";
 import {
   imageModelPath,
+  imageReferenceModelPath,
   resolveContextImageUrls,
   toHiggsfieldAspectRatio,
   videoModelPath,
@@ -148,16 +149,28 @@ serve(async (req) => {
         variantAngle: variant_angle || undefined,
       });
 
-      const seedBody: Record<string, unknown> = {
-        prompt: seedPrompt,
-        aspect_ratio: aspectRatio,
-      };
-      if (resolved.referenceUrls.length > 0) {
-        seedBody.reference_image_urls = resolved.referenceUrls;
-      }
+      // Same route split as generate-post-image: one style reference → the
+      // /reference route; none → plain /standard.
+      const useReference = resolved.referenceUrls.length > 0;
+      const seedBody: Record<string, unknown> = useReference
+        ? {
+            prompt: seedPrompt,
+            image_reference_url: resolved.referenceUrls[0],
+            aspect_ratio: aspectRatio,
+            resolution: "1080p",
+            style_strength: 0.8,
+          }
+        : {
+            prompt: seedPrompt,
+            aspect_ratio: aspectRatio,
+            resolution: "2K",
+          };
 
       console.log("[generate-post-video] generating brand-aligned seed image…");
-      const seedSubmission = await submit(imageModelPath(), seedBody);
+      const seedSubmission = await submit(
+        useReference ? imageReferenceModelPath() : imageModelPath(),
+        seedBody,
+      );
       const seedResult = await pollUntilTerminal(seedSubmission.status_url, {
         timeoutMs: SEED_TIMEOUT_MS,
       });
@@ -167,8 +180,19 @@ serve(async (req) => {
       }
     } catch (e) {
       console.warn(
-        "[generate-post-video] seed generation failed — falling back to text-only video:",
+        "[generate-post-video] seed generation failed:",
         e instanceof Error ? e.message : e,
+      );
+    }
+
+    // DoP is image-to-video ONLY (image_url is required by its schema), so a
+    // missing seed is a hard stop, not a degraded mode. The old Veo path could
+    // fall back to text-only; the equivalent here would silently switch model
+    // families, which is a worse surprise than a clear error.
+    if (!seedCdnUrl) {
+      throw new HiggsfieldError(
+        "generation_failed",
+        "Could not generate the brand-aligned anchor frame, and the video model requires one. Try again, or simplify the brief.",
       );
     }
 
@@ -184,12 +208,15 @@ serve(async (req) => {
       hasSeedImage: !!seedCdnUrl,
     });
 
+    // DoP schema: {prompt, image_url} required; no aspect_ratio field (the
+    // clip follows the seed frame's ratio, which we already generated to the
+    // platform's ratio). extraVideoParams stays last so env can add motions
+    // or swap in another route's fields.
     const videoBody: Record<string, unknown> = {
       prompt: enhancedPrompt,
-      aspect_ratio: aspectRatio,
+      image_url: seedCdnUrl,
       ...extraVideoParams(),
     };
-    if (seedCdnUrl) videoBody.image_url = seedCdnUrl;
 
     // Register the webhook when configured, so the terminal state reaches the
     // media_jobs row even after this function stops waiting.
