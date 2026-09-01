@@ -43,11 +43,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Budgets. The seed is an image job (fast); the video gets what's left of a
-// wall-clock envelope the platform will still tolerate. When the inline video
-// budget runs out we DON'T fail — we hand back the job id.
-const SEED_TIMEOUT_MS = 150_000;   // seed is a Soul image render: ~80s clean, queue adds variance
-const VIDEO_INLINE_TIMEOUT_MS = 180_000;
+// The platform hard-kills edge requests at 150s (IDLE_TIMEOUT, observed
+// live), so this function CANNOT wait for a video inline: the seed render
+// alone can eat most of the window. Flow: render the seed (bounded), submit
+// the video with the webhook registered, record the media_jobs row, and
+// answer 202 immediately — the webhook finishes the story and the frontend
+// watches the row. An inline wait remains only for legacy callers without a
+// client_id, who have no job row to watch.
+const SEED_TIMEOUT_MS = 110_000;
+const LEGACY_INLINE_TIMEOUT_MS = 60_000;
 
 function getAspectRatio(platform?: string, format?: string): string {
   const fmt = (format || "").toLowerCase();
@@ -268,10 +272,28 @@ serve(async (req) => {
       }
     }
 
-    // ── Step 4: inline wait for the fast path ──
+    // ── Step 4: async by default ──
+    // With a job row recorded and the webhook registered, waiting here only
+    // risks the 150s gateway kill. Answer immediately; the frontend's
+    // waitForMediaJob picks the row up over realtime + polling.
+    if (jobId) {
+      console.log("[generate-post-video] job recorded — answering 202, webhook completes it:", jobId);
+      return jsonResp(
+        {
+          job_id: jobId,
+          status: "processing",
+          seed_image_url: seedCdnUrl,
+          seed_used: !!seedCdnUrl,
+        },
+        202,
+      );
+    }
+
+    // Legacy caller with no client_id: no job row to watch, so a bounded
+    // inline wait is the only option. Short renders win; long ones error.
     try {
       const result = await pollUntilTerminal(submission.status_url, {
-        timeoutMs: VIDEO_INLINE_TIMEOUT_MS,
+        timeoutMs: LEGACY_INLINE_TIMEOUT_MS,
       });
       const videoUrl = result.video?.url;
       if (!videoUrl) {
@@ -281,43 +303,13 @@ serve(async (req) => {
           { requestId: result.request_id },
         );
       }
-
-      // The webhook will also stamp the job row and copy media; that's fine —
-      // its update is idempotent and the frontend persists this URL itself via
-      // upload-generated-media, exactly as it did with Veo.
       return jsonResp({
         video_url: videoUrl,
         seed_image_url: seedCdnUrl,
         seed_used: !!seedCdnUrl,
-        job_id: jobId,
+        job_id: null,
       });
     } catch (e) {
-      if (e instanceof HiggsfieldError && e.code === "timeout" && jobId) {
-        // Not a failure: the job continues server-side and the webhook will
-        // finish it. Hand the frontend the job to watch.
-        console.log("[generate-post-video] inline budget exhausted — continuing async as job", jobId);
-        return jsonResp(
-          {
-            job_id: jobId,
-            status: "processing",
-            seed_image_url: seedCdnUrl,
-            seed_used: !!seedCdnUrl,
-          },
-          202,
-        );
-      }
-      // Real failure — stamp the job row so nothing dangles as "submitted".
-      if (jobId) {
-        const msg = e instanceof Error ? e.message : String(e);
-        await supabase
-          .from("media_jobs")
-          .update({
-            status: e instanceof HiggsfieldError && e.code === "moderated" ? "nsfw" : "failed",
-            error: msg.slice(0, 500),
-          })
-          .eq("id", jobId)
-          .not("status", "in", '("completed","failed","nsfw","canceled","timed_out")');
-      }
       throw e;
     }
   } catch (error: any) {

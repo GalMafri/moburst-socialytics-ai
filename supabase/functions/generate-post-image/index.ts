@@ -20,14 +20,16 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Image generation is fast enough to stay synchronous from the caller's point
-// of view: submit to Higgsfield, poll, return. Video (a much longer job) uses
-// the media_jobs + webhook path instead.
-// 210s, not 120: a clean render takes ~80s but Soul's queue adds real
-// variance — the first 120s budget timed out on a job that was accepted and
-// still charged. The old Veo path held connections >3 min, so the platform
-// tolerates this hold.
-const IMAGE_POLL_TIMEOUT_MS = 210_000;
+// The platform hard-kills edge requests at 150s ({"code":"IDLE_TIMEOUT"},
+// observed live 2026-09-01), so inline waiting has a ceiling no budget can
+// raise. A clean Soul render takes ~80s; queue variance overruns the ceiling.
+// Strategy: poll inline for the fast path, and when the caller supplied a
+// client_id, fall back to the SAME media_jobs + webhook flow video uses —
+// the render finishes upstream, the webhook stores it, the frontend watches
+// the row. Credits are never spent on a result nobody collects.
+const IMAGE_INLINE_TIMEOUT_MS = 110_000;
+// Skip the contact-sheet retry when the first render already ate the clock.
+const TOTAL_FUNCTION_BUDGET_MS = 140_000;
 
 /**
  * Map platform + format → aspect ratio. One deliberate change from the Gemini
@@ -169,6 +171,10 @@ async function generateImage(args: {
   prompt: string;
   aspectRatio: string;
   referenceUrls: string[];
+  timeoutMs?: number;
+  webhookUrl?: string;
+  /** Called right after Higgsfield accepts, so the caller can record a job row. */
+  onSubmitted?: (submission: { request_id: string }) => Promise<void>;
 }): Promise<{ base64: string; mimeType: string }> {
   // Soul splits by input shape (see context.ts): a style reference means the
   // /reference route with ONE image_reference_url; otherwise plain /standard.
@@ -193,11 +199,12 @@ async function generateImage(args: {
         resolution: imageResolution(),
       };
 
-  const submission = await submit(modelPath, body);
+  const submission = await submit(modelPath, body, { webhookUrl: args.webhookUrl });
   console.log("[generate-post-image] higgsfield request:", submission.request_id);
+  if (args.onSubmitted) await args.onSubmitted(submission);
 
   const result = await pollUntilTerminal(submission.status_url, {
-    timeoutMs: IMAGE_POLL_TIMEOUT_MS,
+    timeoutMs: args.timeoutMs ?? IMAGE_INLINE_TIMEOUT_MS,
   });
 
   const imageUrl = result.images?.[0]?.url;
@@ -317,11 +324,63 @@ Deno.serve(async (req) => {
     }
 
     // ── Generate ──
-    let { base64: imageB64, mimeType: imageMime } = await generateImage({
-      prompt: designPrompt + CANVAS_ONLY_GUARD,
-      aspectRatio,
-      referenceUrls: resolved.referenceUrls,
-    });
+    const startedAt = Date.now();
+    const clientId: string | null = client_context?.client_id ?? null;
+    const webhookSecret = Deno.env.get("HIGGSFIELD_WEBHOOK_SECRET");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const webhookUrl = webhookSecret
+      ? `${supabaseUrl}/functions/v1/higgsfield-webhook?t=${webhookSecret}`
+      : undefined;
+
+    let jobId: string | null = null;
+    let imageB64: string;
+    let imageMime: string;
+    try {
+      const gen = await generateImage({
+        prompt: designPrompt + CANVAS_ONLY_GUARD,
+        aspectRatio,
+        referenceUrls: resolved.referenceUrls,
+        webhookUrl,
+        onSubmitted: async (sub) => {
+          if (!clientId) return; // legacy callers without a client get inline-only
+          const { data: jobRow, error: jobErr } = await supabase
+            .from("media_jobs")
+            .insert({
+              client_id: clientId,
+              kind: "image",
+              provider: "higgsfield",
+              request_id: sub.request_id,
+              status: "submitted",
+              input: { prompt: prompt.slice(0, 2000), platform, format, aspect_ratio: aspectRatio },
+            })
+            .select("id")
+            .single();
+          if (jobErr) console.warn("[generate-post-image] media_jobs insert failed:", jobErr.message);
+          else jobId = jobRow.id;
+        },
+      });
+      imageB64 = gen.base64;
+      imageMime = gen.mimeType;
+    } catch (e) {
+      if (e instanceof HiggsfieldError && e.code === "timeout" && jobId) {
+        // Not a failure: the render continues upstream; the webhook will copy
+        // it into storage and stamp the job. Hand the frontend the row to watch.
+        console.log("[generate-post-image] inline budget exhausted — continuing async as job", jobId);
+        return jsonResp({ job_id: jobId, status: "processing" }, 202);
+      }
+      if (jobId && !(e instanceof HiggsfieldError && e.code === "timeout")) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await supabase
+          .from("media_jobs")
+          .update({
+            status: e instanceof HiggsfieldError && e.code === "moderated" ? "nsfw" : "failed",
+            error: msg.slice(0, 500),
+          })
+          .eq("id", jobId)
+          .not("status", "in", '("completed","failed","nsfw","canceled","timed_out")');
+      }
+      throw e;
+    }
 
     // ── Carousel single-slide validation + retry ──
     //
@@ -353,7 +412,12 @@ Deno.serve(async (req) => {
           `[generate-post-image] carousel slide validation: layout=${validationLayout} reason="${validationReason}"`,
         );
 
-        if (validation.isContactSheet) {
+        const remainingMs = TOTAL_FUNCTION_BUDGET_MS - (Date.now() - startedAt);
+        if (validation.isContactSheet && remainingMs < 70_000) {
+          console.warn(
+            `[generate-post-image] contact sheet detected but only ${Math.round(remainingMs / 1000)}s left — returning as-is`,
+          );
+        } else if (validation.isContactSheet) {
           console.warn("[generate-post-image] contact sheet detected — retrying with stripped prompt");
           const retryPrompt = buildStrippedRetryPrompt({
             originalBrief: prompt,
@@ -370,6 +434,7 @@ Deno.serve(async (req) => {
               prompt: retryPrompt + CANVAS_ONLY_GUARD,
               aspectRatio,
               referenceUrls: [],
+              timeoutMs: Math.max(30_000, remainingMs - 10_000),
             });
             imageB64 = retry.base64;
             imageMime = retry.mimeType;

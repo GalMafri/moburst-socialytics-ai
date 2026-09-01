@@ -35,22 +35,25 @@ overrides if the account favors a different model.
 
 ## How generation flows
 
-**Images** (`generate-post-image`) stay synchronous from the frontend's point
-of view: submit → poll (2s→10s backoff, 120s budget) → download the output →
-return a data URL. The request/response contract is identical to the Gemini
-version, including the carousel contact-sheet validation and retry.
+**Images** (`generate-post-image`) are synchronous when the render beats the
+platform's hard 150-second request cap: submit → poll (2s→10s backoff, 110s
+inline budget) → download → return a data URL, carousel contact-sheet
+validation and retry included (the retry is skipped when the first render
+already ate the clock). When the render is slower AND the call carried a
+`client_context.client_id`, the function answers `202 {job_id}` instead and
+the webhook finishes the job — same flow as video, handled in the frontend by
+`resolveGenerationResult()`.
 
 **Videos** (`generate-post-video`) chain two async jobs (brand-aligned seed
 image → image-to-video), so they use a job row:
 
 1. The function records a `media_jobs` row and registers
    `higgsfield-webhook?t=<secret>` on the submission.
-2. If the video finishes inside the inline budget (~3 min), the response is the
-   classic `{video_url, seed_image_url, seed_used}` and the frontend persists
-   it via `upload-generated-media`, as it always did.
-3. If not, the response is `202 {job_id, status: "processing"}`. The webhook
-   copies the finished media into the `generated-media` bucket (Higgsfield CDN
-   URLs expire after ~7 days) and stamps the row; the frontend
+2. The function answers `202 {job_id, status: "processing"}` immediately after
+   submission — the 150s platform cap makes inline waiting for video
+   impossible (seed generation alone can consume most of the window).
+3. The webhook copies the finished media into the `generated-media` bucket
+   (Higgsfield CDN URLs expire after ~7 days) and stamps the row; the frontend
    (`src/lib/mediaJobs.ts`) watches the row over realtime + polling.
 
 Webhook deliveries can arrive more than once; the webhook only transitions

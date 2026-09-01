@@ -95,3 +95,33 @@ export function waitForMediaJob(
     void check(); // immediate first look — the job may already be done
   });
 }
+
+/**
+ * Resolve a generate-post-image / generate-post-video response into a usable
+ * media URL. Two shapes exist since the 150s gateway cap made slow renders
+ * async:
+ *   { image_url | video_url }           — finished inline (data or CDN URL;
+ *                                          caller persists it as before)
+ *   { job_id, status: "processing" }    — still rendering; wait on the
+ *                                          media_jobs row, whose output_url is
+ *                                          ALREADY our storage (webhook copied
+ *                                          it), so no re-upload is needed.
+ */
+export async function resolveGenerationResult(
+  data: { image_url?: string; video_url?: string; job_id?: string; status?: string } | null | undefined,
+): Promise<{ url: string | null; persistent: boolean }> {
+  if (data?.image_url) return { url: data.image_url, persistent: false };
+  if (data?.video_url) return { url: data.video_url, persistent: false };
+  if (data?.job_id && data?.status === "processing") {
+    try {
+      const job = await waitForMediaJob(data.job_id);
+      if (job.status === "completed" && job.output_url) {
+        return { url: job.output_url, persistent: true };
+      }
+      console.warn("Async media job ended without output:", job.status, job.error);
+    } catch (e) {
+      console.warn("Waiting for async media job failed:", e);
+    }
+  }
+  return { url: null, persistent: false };
+}
