@@ -11,7 +11,6 @@ import { toast } from "sonner";
 import type { ClientContext } from "@/lib/clientContext";
 import { Slider } from "@/components/ui/slider";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
-import { waitForMediaJob } from "@/lib/mediaJobs";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -140,7 +139,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
           concept: `${postCopy || rawDirection.slice(0, 200)}${brandContext ? `\n\nBrand context: ${brandContext}` : ""}`,
           visual_direction: rawDirection,
           original_format: post.format || "Storyboard",
-          target_format: `${spec.duration} ${spec.aspect} AI-generated video clip`,
+          target_format: `${spec.duration} ${spec.aspect} AI-generated video clip (Google Veo)`,
           platform: post.platform,
         },
       });
@@ -345,58 +344,23 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
         continue;
       }
       const r = results[i];
-
-      // Two success shapes from generate-post-video:
-      //   { video_url, ... }               — rendered inside the inline budget
-      //   { job_id, status: "processing" } — still rendering on Higgsfield; the
-      //     higgsfield-webhook function will stamp the media_jobs row, which we
-      //     wait on here. Its output_url is ALREADY our storage (the webhook
-      //     copies the media), so that branch skips upload-generated-media.
-      let rawUrl: string | null = null;
-      let seedUrl: string | null = null;
-      let alreadyPersistent = false;
-
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.video_url) {
-        rawUrl = r.value.data.video_url;
-        seedUrl = r.value.data.seed_image_url || null;
-      } else if (
-        r.status === "fulfilled" &&
-        !r.value.error &&
-        r.value.data?.job_id &&
-        r.value.data?.status === "processing"
-      ) {
-        seedUrl = r.value.data.seed_image_url || null;
-        try {
-          const job = await waitForMediaJob(r.value.data.job_id);
-          if (job.status === "completed" && job.output_url) {
-            rawUrl = job.output_url;
-            alreadyPersistent = true;
-            if (!seedUrl && job.seed_image_url) seedUrl = job.seed_image_url;
-          } else {
-            console.warn("Async video job ended without output:", job.status, job.error);
-          }
-        } catch (e) {
-          console.warn("Waiting for async video job failed:", e);
-        }
-      }
-
-      if (rawUrl) {
+        const rawUrl = r.value.data.video_url;
+        const seedUrl: string | null = r.value.data.seed_image_url || null;
         // Upload to persistent storage via upload-generated-media edge function.
         let persistentUrl = rawUrl;
-        if (!alreadyPersistent) {
-          try {
-            const { data: uploaded } = await supabase.functions.invoke("upload-generated-media", {
-              body: {
-                client_id: clientId || "unknown",
-                media_data: rawUrl,
-                media_type: "video",
-                file_name: `video-${post.platform || "post"}-variant-${i}`,
-              },
-            });
-            if (uploaded?.url) persistentUrl = uploaded.url;
-          } catch {
-            // Fall back to raw URL.
-          }
+        try {
+          const { data: uploaded } = await supabase.functions.invoke("upload-generated-media", {
+            body: {
+              client_id: clientId || "unknown",
+              media_data: rawUrl,
+              media_type: "video",
+              file_name: `video-${post.platform || "post"}-variant-${i}`,
+            },
+          });
+          if (uploaded?.url) persistentUrl = uploaded.url;
+        } catch {
+          // Fall back to raw URL.
         }
 
         setVariantUrls((prev) => {
@@ -455,7 +419,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
               <Video className="h-4 w-4" /> Generate Video — {spec.label}
             </DialogTitle>
             <DialogDescription>
-              Generate 2–3 video variants with Higgsfield. Each takes 1–4 minutes.
+              Generate 2–3 video variants with Google Veo. Each takes 30–120 seconds.
             </DialogDescription>
           </DialogHeader>
 
@@ -496,7 +460,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 <span className="text-sm font-medium w-8 text-center">{variantCount}</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Video generation takes 1-4 minutes per variant.
+                Video generation takes 30-120 seconds per variant.
               </p>
             </div>
 
@@ -566,8 +530,8 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 <div>
                   <p className="text-sm text-muted-foreground">
                     {cancelRef.current
-                      ? "Cancelling — waiting for in-flight video calls to return…"
-                      : `Generating ${variantCount} ${spec.label} variants with Higgsfield...`}
+                      ? "Cancelling — waiting for in-flight Veo calls to return…"
+                      : `Generating ${variantCount} ${spec.label} variants with Google Veo...`}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">This may take 30-120 seconds per variant</p>
                 </div>
@@ -682,7 +646,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 {variantSeeds.some((s) => !!s) && (
                   <div className="space-y-2 pt-2 border-t border-white/[0.06]">
                     <p className="text-xs text-muted-foreground tracking-[-0.2px]">
-                      Seed frames (what the video was animated from). Click to view full size.
+                      Seed frames (what Veo animated from). Click to view full size.
                     </p>
                     <div className="flex gap-2 flex-wrap">
                       {variantSeeds.map((seedUrl, i) =>

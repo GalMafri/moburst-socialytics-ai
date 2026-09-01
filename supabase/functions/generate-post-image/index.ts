@@ -1,16 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
-import {
-  HiggsfieldError,
-  pollUntilTerminal,
-  submit,
-} from "../_shared/higgsfield/client.ts";
-import {
-  buildImageRequest,
-  CANVAS_ONLY_GUARD,
-  imageModelPath,
-  resolveContextImageUrls,
-} from "../_shared/higgsfield/context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -18,31 +7,13 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// The platform hard-kills edge requests at 150s ({"code":"IDLE_TIMEOUT"},
-// observed live 2026-09-01), so inline waiting has a ceiling no budget can
-// raise. A clean Soul render takes ~80s; queue variance overruns the ceiling.
-// Strategy: poll inline for the fast path, and when the caller supplied a
-// client_id, fall back to the SAME media_jobs + webhook flow video uses —
-// the render finishes upstream, the webhook stores it, the frontend watches
-// the row. Credits are never spent on a result nobody collects.
-const IMAGE_INLINE_TIMEOUT_MS = 110_000;
-// Skip the contact-sheet retry when the first render already ate the clock.
-const TOTAL_FUNCTION_BUDGET_MS = 140_000;
-
-/**
- * Map platform + format → aspect ratio. One deliberate change from the Gemini
- * version: Instagram feed posts are 4:5, matching both the platform playbook
- * ("Aspect: 4:5 (portrait)") and clients' platform_adaptations — Gemini's
- * config was pinned to 1:1 while the prompt said 4:5, a contradiction Soul
- * lets us finally remove. Facebook and generic defaults stay square.
- */
+/** Map platform + format → Gemini native aspect ratio */
 function getAspectRatio(platform?: string, format?: string): string {
   if (!platform) return "1:1";
   const p = (platform + " " + (format || "")).toLowerCase();
   if (p.includes("story") || p.includes("reel") || p.includes("tiktok")) return "9:16";
   if (p.includes("linkedin") || p.includes("article")) return "16:9";
   if (p.includes("pinterest")) return "2:3";
-  if (p.includes("instagram")) return "4:5";
   return "1:1";
 }
 
@@ -159,63 +130,6 @@ function buildStrippedRetryPrompt(args: {
   ].join("\n");
 }
 
-/**
- * Run one Higgsfield image generation and download the first output.
- * Higgsfield CDN URLs expire after ~7 days, so the bytes come back to us and
- * the response stays a data URL, exactly like the Gemini version — the
- * frontend then persists via upload-generated-media as before.
- */
-async function generateImage(args: {
-  prompt: string;
-  aspectRatio: string;
-  referenceUrls: string[];
-  timeoutMs?: number;
-  webhookUrl?: string;
-  /** Called right after Higgsfield accepts, so the caller can record a job row. */
-  onSubmitted?: (submission: { request_id: string }) => Promise<void>;
-}): Promise<{ base64: string; mimeType: string }> {
-  // The adapter speaks each model family's dialect; the env decides the model.
-  const { path, body } = buildImageRequest(imageModelPath(), {
-    prompt: args.prompt,
-    aspectRatio: args.aspectRatio,
-    referenceUrls: args.referenceUrls,
-  });
-
-  const submission = await submit(path, body, { webhookUrl: args.webhookUrl });
-  console.log("[generate-post-image] higgsfield request:", submission.request_id);
-  if (args.onSubmitted) await args.onSubmitted(submission);
-
-  const result = await pollUntilTerminal(submission.status_url, {
-    timeoutMs: args.timeoutMs ?? IMAGE_INLINE_TIMEOUT_MS,
-  });
-
-  const imageUrl = result.images?.[0]?.url;
-  if (!imageUrl) {
-    throw new HiggsfieldError(
-      "upstream_error",
-      "Completed without an image URL: " + JSON.stringify(result).slice(0, 300),
-      { requestId: result.request_id },
-    );
-  }
-
-  const dl = await fetch(imageUrl);
-  if (!dl.ok) {
-    throw new HiggsfieldError(
-      "upstream_error",
-      `Could not download generated image (${dl.status})`,
-      { requestId: result.request_id },
-    );
-  }
-  const mimeType = dl.headers.get("content-type") || "image/jpeg";
-  const buf = new Uint8Array(await dl.arrayBuffer());
-  let binary = "";
-  const chunk = 8192;
-  for (let i = 0; i < buf.length; i += chunk) {
-    binary += String.fromCharCode(...buf.subarray(i, i + chunk));
-  }
-  return { base64: btoa(binary), mimeType };
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -260,12 +174,32 @@ Deno.serve(async (req) => {
       return jsonResp({ error: "prompt is required" }, 400);
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    // ── Get Gemini API key (try env, then app_settings) ──
+    let geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
 
-    // ── Build the design prompt (same builder as before) ──
+    if (!geminiKey) {
+      const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      // Try gemini key first, then google key
+      for (const keyName of ["gemini_api_key", "google_ai_api_key"]) {
+        const { data: setting } = await supabase.from("app_settings").select("value").eq("key", keyName).maybeSingle();
+        if (setting?.value) {
+          geminiKey = setting.value;
+          break;
+        }
+      }
+    }
+
+    if (!geminiKey) {
+      return jsonResp(
+        {
+          error:
+            "Gemini API key not configured. Add GEMINI_API_KEY to your Supabase environment secrets or add a row with key='gemini_api_key' to the app_settings table.",
+        },
+        400,
+      );
+    }
+
+    // ── Build the design prompt ──
     const aspectRatio = getAspectRatio(platform, format);
     const designPrompt = buildImagePrompt({
       basePrompt: prompt,
@@ -286,90 +220,147 @@ Deno.serve(async (req) => {
     console.log("[generate-post-image] prompt (first 2000 chars):", designPrompt.slice(0, 2000));
     console.log("[generate-post-image] prompt total length:", designPrompt.length);
 
-    // ── Resolve visual references to signed URLs Higgsfield can fetch ──
-    // Replaces the inline-base64 multimodal parts of the Gemini path. A PDF
-    // brand book cannot cross (Higgsfield accepts images only); its influence
-    // arrives via design_style_synthesis inside the prompt.
-    const resolved = await resolveContextImageUrls(
-      {
-        design_references: resolvedRefs,
-        brand_book_file_path: resolvedBrandBookPath,
-        design_style_synthesis: resolvedSynthesis,
-      },
-      supabase,
-    );
-    if (resolved.brandGroundingMissing) {
-      console.warn(
-        "[generate-post-image] brand book is PDF-only and no design_style_synthesis exists — " +
-          "output will be less brand-aligned. Run synthesize-design-language for this client.",
-      );
+    // ── Fetch design reference images for multimodal input ──
+    const contentParts: any[] = [];
+
+    if (resolvedRefs && Array.isArray(resolvedRefs) && resolvedRefs.length > 0) {
+      const storageClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+      contentParts.push({ text: "Here are existing brand design references. Match their visual style, layout patterns, and color usage:" });
+
+      for (const ref of resolvedRefs.slice(0, 3)) {
+        try {
+          const { data: fileData } = await storageClient.storage.from("design-references").download(ref);
+          if (fileData) {
+            const arrayBuffer = await fileData.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            let binary = "";
+            for (let i = 0; i < uint8Array.length; i++) {
+              binary += String.fromCharCode(uint8Array[i]);
+            }
+            const base64 = btoa(binary);
+            const ext = ref.split(".").pop()?.toLowerCase();
+            const mimeType = ext === "png" ? "image/png" : "image/jpeg";
+            contentParts.push({ inlineData: { mimeType, data: base64 } });
+          }
+        } catch (e) {
+          console.error("Failed to fetch design reference:", ref, e);
+        }
+      }
+
+      contentParts.push({ text: "Now create a new design based on this brief:" });
     }
 
-    // ── Generate ──
-    const startedAt = Date.now();
-    const clientId: string | null = client_context?.client_id ?? null;
-    const webhookSecret = Deno.env.get("HIGGSFIELD_WEBHOOK_SECRET");
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const webhookUrl = webhookSecret
-      ? `${supabaseUrl}/functions/v1/higgsfield-webhook?t=${webhookSecret}`
-      : undefined;
+    // Attach the brand book file as an inline part. Gemini 3.1 supports inline PDF/PNG/JPG.
+    if (resolvedBrandBookPath) {
+      try {
+        const storageClient = createClient(
+          Deno.env.get("SUPABASE_URL")!,
+          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+        );
+        const { data: fileData } = await storageClient.storage
+          .from("brand-books")
+          .download(resolvedBrandBookPath);
 
-    let jobId: string | null = null;
-    let imageB64: string;
-    let imageMime: string;
-    try {
-      const gen = await generateImage({
-        prompt: designPrompt + CANVAS_ONLY_GUARD,
-        aspectRatio,
-        referenceUrls: resolved.referenceUrls,
-        webhookUrl,
-        onSubmitted: async (sub) => {
-          if (!clientId) return; // legacy callers without a client get inline-only
-          const { data: jobRow, error: jobErr } = await supabase
-            .from("media_jobs")
-            .insert({
-              client_id: clientId,
-              kind: "image",
-              provider: "higgsfield",
-              request_id: sub.request_id,
-              status: "submitted",
-              input: { prompt: prompt.slice(0, 2000), platform, format, aspect_ratio: aspectRatio },
-            })
-            .select("id")
-            .single();
-          if (jobErr) console.warn("[generate-post-image] media_jobs insert failed:", jobErr.message);
-          else jobId = jobRow.id;
+        if (fileData) {
+          const arrayBuffer = await fileData.arrayBuffer();
+          if (arrayBuffer.byteLength <= 4 * 1024 * 1024) {
+            const uint8Array = new Uint8Array(arrayBuffer);
+            let binary = "";
+            for (let i = 0; i < uint8Array.length; i++) {
+              binary += String.fromCharCode(uint8Array[i]);
+            }
+            const base64 = btoa(binary);
+            const ext = resolvedBrandBookPath.split(".").pop()?.toLowerCase();
+            const mimeType =
+              ext === "pdf"
+                ? "application/pdf"
+                : ext === "png"
+                ? "image/png"
+                : "image/jpeg";
+            contentParts.push({
+              text: "Canonical brand book — defer to it on color, typography, and overall identity:",
+            });
+            contentParts.push({ inlineData: { mimeType, data: base64 } });
+          } else {
+            console.warn("[generate-post-image] brand book exceeds 4MB, skipping");
+          }
+        }
+      } catch (e) {
+        console.error("[generate-post-image] brand book attach failed:", e);
+      }
+    }
+
+    // Add the main design prompt
+    contentParts.push({ text: designPrompt });
+
+    // ── Call Gemini 3.1 Flash Image (Nano Banana 2) ──
+    const geminiModel = "gemini-3.1-flash-image-preview";
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: contentParts,
+          },
+        ],
+        generationConfig: {
+          responseModalities: ["TEXT", "IMAGE"],
+          imageConfig: {
+            aspectRatio: aspectRatio,
+            imageSize: "2K",
+          },
         },
-      });
-      imageB64 = gen.base64;
-      imageMime = gen.mimeType;
-    } catch (e) {
-      if (e instanceof HiggsfieldError && e.code === "timeout" && jobId) {
-        // Not a failure: the render continues upstream; the webhook will copy
-        // it into storage and stamp the job. Hand the frontend the row to watch.
-        console.log("[generate-post-image] inline budget exhausted — continuing async as job", jobId);
-        return jsonResp({ job_id: jobId, status: "processing" }, 202);
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      return jsonResp({ error: `Gemini API error: ${response.status}`, details: errorBody }, 502);
+    }
+
+    const result = await response.json();
+
+    // ── Extract image from response ──
+    const candidates = result.candidates || [];
+    let imageB64: string | null = null;
+    let imageMime: string | null = null;
+    let textResponse: string | null = null;
+
+    for (const candidate of candidates) {
+      for (const part of candidate.content?.parts || []) {
+        if (part.inlineData) {
+          imageB64 = part.inlineData.data;
+          imageMime = part.inlineData.mimeType || "image/png";
+        }
+        if (part.text) {
+          textResponse = part.text;
+        }
       }
-      if (jobId && !(e instanceof HiggsfieldError && e.code === "timeout")) {
-        const msg = e instanceof Error ? e.message : String(e);
-        await supabase
-          .from("media_jobs")
-          .update({
-            status: e instanceof HiggsfieldError && e.code === "moderated" ? "nsfw" : "failed",
-            error: msg.slice(0, 500),
-          })
-          .eq("id", jobId)
-          .not("status", "in", '("completed","failed","nsfw","canceled","timed_out")');
-      }
-      throw e;
+    }
+
+    if (!imageB64) {
+      return jsonResp(
+        {
+          error: "No image generated. The model may have refused the prompt or returned text only.",
+          details: textResponse || JSON.stringify(result).slice(0, 500),
+        },
+        500,
+      );
     }
 
     // ── Carousel single-slide validation + retry ──
     //
     // When this call is for ONE slide of an N-slide carousel and the brief is
-    // rich enough to describe multiple concepts, image models sometimes compose
-    // a contact sheet anyway. Verify the output via Claude vision and, if it's
-    // a contact sheet, retry once with a stripped-down positive-only prompt.
+    // rich enough to describe multiple concepts, Gemini sometimes composes a
+    // contact sheet anyway. The previous "DO NOT" instructions weren't strong
+    // enough — so now we VERIFY the output via Claude vision and, if it's a
+    // contact sheet, retry once with a stripped-down positive-only prompt that
+    // says "render ONE subject filling the canvas" without any multi-section
+    // brief content.
     let wasRetried = false;
     let validationLayout: "single" | "multi" | "skipped" = "skipped";
     let validationReason = "";
@@ -378,7 +369,8 @@ Deno.serve(async (req) => {
       // Need an Anthropic key for validation. Try env first, then app_settings.
       let anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
       if (!anthropicKey) {
-        const { data: s } = await supabase
+        const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+        const { data: s } = await sb
           .from("app_settings")
           .select("value")
           .eq("key", "anthropic_api_key")
@@ -394,12 +386,7 @@ Deno.serve(async (req) => {
           `[generate-post-image] carousel slide validation: layout=${validationLayout} reason="${validationReason}"`,
         );
 
-        const remainingMs = TOTAL_FUNCTION_BUDGET_MS - (Date.now() - startedAt);
-        if (validation.isContactSheet && remainingMs < 70_000) {
-          console.warn(
-            `[generate-post-image] contact sheet detected but only ${Math.round(remainingMs / 1000)}s left — returning as-is`,
-          );
-        } else if (validation.isContactSheet) {
+        if (validation.isContactSheet) {
           console.warn("[generate-post-image] contact sheet detected — retrying with stripped prompt");
           const retryPrompt = buildStrippedRetryPrompt({
             originalBrief: prompt,
@@ -408,22 +395,38 @@ Deno.serve(async (req) => {
           });
           console.log("[generate-post-image] retry prompt (first 600 chars):", retryPrompt.slice(0, 600));
 
-          try {
-            // Retry drops the reference images too — matching the old stripped
-            // retry, which sent a bare prompt to maximize the odds of a single
-            // clean composition.
-            const retry = await generateImage({
-              prompt: retryPrompt + CANVAS_ONLY_GUARD,
-              aspectRatio,
-              referenceUrls: [],
-              timeoutMs: Math.max(30_000, remainingMs - 10_000),
-            });
-            imageB64 = retry.base64;
-            imageMime = retry.mimeType;
-            wasRetried = true;
-            console.log("[generate-post-image] retry produced a new image");
-          } catch (e) {
-            console.warn("[generate-post-image] retry failed; keeping original:", e);
+          const retryParts: any[] = [{ text: retryPrompt }];
+          const retryResp = await fetch(apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: retryParts }],
+              generationConfig: {
+                responseModalities: ["TEXT", "IMAGE"],
+                imageConfig: { aspectRatio, imageSize: "2K" },
+              },
+            }),
+          });
+
+          if (retryResp.ok) {
+            const retryResult = await retryResp.json();
+            for (const candidate of retryResult.candidates || []) {
+              for (const part of candidate.content?.parts || []) {
+                if (part.inlineData) {
+                  imageB64 = part.inlineData.data;
+                  imageMime = part.inlineData.mimeType || "image/png";
+                  wasRetried = true;
+                }
+              }
+            }
+            if (wasRetried) {
+              console.log("[generate-post-image] retry produced a new image");
+            } else {
+              console.warn("[generate-post-image] retry returned no image; keeping original");
+            }
+          } else {
+            const t = await retryResp.text().catch(() => "");
+            console.warn("[generate-post-image] retry failed:", retryResp.status, t.slice(0, 200));
           }
         }
       } else {
@@ -435,24 +438,13 @@ Deno.serve(async (req) => {
 
     return jsonResp({
       image_url: imageUrl,
-      // Higgsfield does not return a revised prompt the way Gemini's text part
-      // did; keep the field for contract stability.
-      revised_prompt: null,
+      revised_prompt: textResponse,
       // Diagnostics so the frontend can show "this slide was auto-fixed" etc.
       was_retried: wasRetried,
       validation_layout: validationLayout,
       validation_reason: validationReason,
     });
   } catch (err: any) {
-    if (err instanceof HiggsfieldError) {
-      console.error("[generate-post-image] higgsfield error:", err.code, err.message);
-      const status =
-        err.code === "concurrency_exhausted" ? 429 :
-        (err.code === "insufficient_credits" ? 402 :
-        err.code === "moderated" ? 422 :
-        err.code === "timeout" ? 504 : 502);
-      return jsonResp({ error: err.userMessage, code: err.code, detail: err.message.slice(0, 400) }, status);
-    }
     return jsonResp({ error: err.message }, 500);
   }
 });
@@ -463,3 +455,4 @@ function jsonResp(body: any, status = 200) {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
+

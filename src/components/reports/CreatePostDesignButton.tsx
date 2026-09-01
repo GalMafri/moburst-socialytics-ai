@@ -12,7 +12,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { DesignEditor } from "@/components/editor/DesignEditor";
 import type { ClientContext } from "@/lib/clientContext";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
-import { resolveGenerationResult } from "@/lib/mediaJobs";
 
 export interface BrandIdentity {
   primary_color?: string;
@@ -294,16 +293,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         continue;
       }
       const r = results[i];
-      // Two success shapes: inline {image_url} (data URL, upload it ourselves)
-      // or async {job_id} (webhook already stored it; output_url is final).
-      const resolved =
-        r.status === "fulfilled" && !r.value.error
-          ? await resolveGenerationResult(r.value.data)
-          : { url: null as string | null, persistent: false };
-      if (resolved.url) {
-        const uploadedUrl = resolved.persistent
-          ? resolved.url
-          : await uploadVariantToStorage(resolved.url, i);
+      if (r.status === "fulfilled" && !r.value.error && r.value.data?.image_url) {
+        const dataUrl = r.value.data.image_url;
+        // Upload to persistent storage.
+        const uploadedUrl = await uploadVariantToStorage(dataUrl, i);
         // Update the slot.
         setVariantUrls((prev) => {
           const next = [...prev];
@@ -491,28 +484,22 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             continue;
           }
 
-          const slideResolved = await resolveGenerationResult(data);
-          if (slideResolved.url) {
+          if (data?.image_url) {
             // The edge function does its OWN server-side contact-sheet
             // detection + retry for carousel slides; if it triggered, the
             // returned image is already the fixed version. We still run the
             // hex-codes validator as a separate guardrail (different concern).
-            let finalImageUrl = slideResolved.url;
-            let finalIsPersistent = slideResolved.persistent;
-            if (data?.was_retried) {
+            let finalImageUrl = data.image_url;
+            if (data.was_retried) {
               autoFixedCount++;
               console.log(
                 `[CreatePostDesignButton] V${v + 1} S${s + 1}: contact-sheet auto-fixed (${data.validation_reason})`,
               );
             }
             try {
-              // Hex validation needs the raw data URL; async completions come
-              // back as storage URLs and skip this guardrail.
-              const { data: validation } = finalIsPersistent
-                ? { data: null }
-                : await supabase.functions.invoke("validate-design-output", {
-                    body: { image_data: finalImageUrl },
-                  });
+              const { data: validation } = await supabase.functions.invoke("validate-design-output", {
+                body: { image_data: data.image_url },
+              });
               if (validation?.has_hex_codes) {
                 toast({ title: "Refining design..." });
                 const retryPrompt = perSlidePrompt +
@@ -531,26 +518,20 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                     variant_angle: variantAngle.instruction || undefined,
                   },
                 });
-                const retryResolved = await resolveGenerationResult(retryData);
-                if (retryResolved.url) {
-                  finalImageUrl = retryResolved.url;
-                  finalIsPersistent = retryResolved.persistent;
-                }
+                if (retryData?.image_url) finalImageUrl = retryData.image_url;
               }
             } catch {
               // Validation/retry failed — keep the original image.
             }
 
-            const uploadedUrl = finalIsPersistent
-              ? finalImageUrl
-              : await uploadVariantToStorage(finalImageUrl, globalIdx);
+            const uploadedUrl = await uploadVariantToStorage(finalImageUrl, globalIdx);
             variantSlides.push(uploadedUrl);
             setVariantUrls((prev) => {
               const next = [...prev];
               next[globalIdx] = uploadedUrl;
               return next;
             });
-            if (globalIdx === 0 && data?.revised_prompt) setRevisedPrompt(data.revised_prompt);
+            if (globalIdx === 0 && data.revised_prompt) setRevisedPrompt(data.revised_prompt);
             generation.progressGeneration(postKey);
           }
         }

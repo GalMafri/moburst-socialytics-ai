@@ -1,55 +1,13 @@
-// Video generation via Higgsfield (replaces the Gemini-seed → Veo chain).
-//
-// Shape of a run:
-//   1. Generate a brand-aligned anchor still on Higgsfield's image model,
-//      passing the client's design references / brand book as reference URLs.
-//      Same rationale as the old Gemini seed: image-to-video from a frame that
-//      already encodes the brand beats text-only video every time.
-//   2. Submit image-to-video with that still as `image_url`, registering the
-//      higgsfield-webhook endpoint so the terminal result reaches us even if
-//      this function's inline wait runs out.
-//   3. Record a media_jobs row, then poll inline for the fast path. If the
-//      video finishes inside the inline budget, respond with the classic
-//      {video_url, seed_image_url, seed_used} shape and the frontend persists
-//      it exactly as before. If not, respond {job_id, status:"processing"} —
-//      the webhook completes the job row and the frontend watches it.
-//
-// The old function returned a Veo URL with the API key appended as a query
-// param, handing every staff browser a usable Gemini key. The Higgsfield CDN
-// URLs need no credential, so that leak class dies with this rewrite.
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildVideoPrompt } from "../_shared/design-prompts/buildVideoPrompt.ts";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
-import {
-  HiggsfieldError,
-  pollUntilTerminal,
-  submit,
-} from "../_shared/higgsfield/client.ts";
-import {
-  buildImageRequest,
-  CANVAS_ONLY_GUARD,
-  imageModelPath,
-  resolveContextImageUrls,
-  videoModelPath,
-} from "../_shared/higgsfield/context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-// The platform hard-kills edge requests at 150s (IDLE_TIMEOUT, observed
-// live), so this function CANNOT wait for a video inline: the seed render
-// alone can eat most of the window. Flow: render the seed (bounded), submit
-// the video with the webhook registered, record the media_jobs row, and
-// answer 202 immediately — the webhook finishes the story and the frontend
-// watches the row. An inline wait remains only for legacy callers without a
-// client_id, who have no job row to watch.
-const SEED_TIMEOUT_MS = 110_000;
-const LEGACY_INLINE_TIMEOUT_MS = 60_000;
 
 function getAspectRatio(platform?: string, format?: string): string {
   const fmt = (format || "").toLowerCase();
@@ -61,21 +19,147 @@ function getAspectRatio(platform?: string, format?: string): string {
   return "9:16";
 }
 
+// Try multiple Veo model names in order of preference
+const VEO_MODELS = [
+  "veo-3.1-generate-preview",
+  "veo-3-generate-preview",
+  "veo-2.0-generate-001",
+];
+
 /**
- * Extra model parameters for the account's video route, e.g. duration or
- * quality knobs. Higgsfield model schemas are account-specific, so rather than
- * hardcoding a guess, ops can set HIGGSFIELD_VIDEO_PARAMS to a JSON object and
- * it is merged into every video submission.
+ * Generate a brand-aligned anchor still via Gemini 3.1 Flash Image, using
+ * the FULL multimodal context (design references + brand book + brief).
+ * Veo's `image` field on a `predictLongRunning` instance uses this still
+ * as the starting frame / style anchor for the video — without it, Veo
+ * gets only a text prompt and produces generic results.
+ *
+ * Returns null if any step fails — caller falls back to text-only Veo,
+ * which preserves the previous behavior as a safety net.
  */
-function extraVideoParams(): Record<string, unknown> {
-  const raw = Deno.env.get("HIGGSFIELD_VIDEO_PARAMS");
-  if (!raw) return {};
+async function generateSeedImage(args: {
+  geminiKey: string;
+  supabase: any;
+  basePrompt: string;
+  platform?: string;
+  format?: string;
+  brandIdentity: any;
+  synthesis: any;
+  designReferences: string[];
+  brandBookPath: string | null;
+  post: any;
+  variantAngle: string | null;
+  aspectRatio: string;
+}): Promise<{ base64: string; mimeType: string } | null> {
   try {
-    const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null ? parsed : {};
-  } catch {
-    console.warn("[generate-post-video] HIGGSFIELD_VIDEO_PARAMS is not valid JSON; ignoring");
-    return {};
+    const seedPrompt = buildImagePrompt({
+      basePrompt:
+        args.basePrompt +
+        "\n\nThis still will be used as the OPENING FRAME of a short social-media video — " +
+        "compose for motion. Place the subject so it can move or transform without falling off frame.",
+      platform: args.platform,
+      format: args.format,
+      brandIdentity: args.brandIdentity,
+      synthesis: args.synthesis,
+      post: args.post,
+      variantAngle: args.variantAngle || undefined,
+    });
+
+    const contentParts: any[] = [];
+
+    // Attach design references as inline multimodal parts (same approach as
+    // generate-post-image). Cap at 3 to keep payload sane.
+    if (args.designReferences && args.designReferences.length > 0) {
+      contentParts.push({
+        text:
+          "Existing brand design references — match their visual style, palette, " +
+          "composition, and typography:",
+      });
+      for (const ref of args.designReferences.slice(0, 3)) {
+        try {
+          const { data: fileData } = await args.supabase.storage
+            .from("design-references")
+            .download(ref);
+          if (fileData) {
+            const arrayBuffer = await fileData.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            let binary = "";
+            for (let i = 0; i < uint8Array.length; i++) binary += String.fromCharCode(uint8Array[i]);
+            const base64 = btoa(binary);
+            const ext = ref.split(".").pop()?.toLowerCase();
+            const mimeType = ext === "png" ? "image/png" : "image/jpeg";
+            contentParts.push({ inlineData: { mimeType, data: base64 } });
+          }
+        } catch (e) {
+          console.warn("[generate-post-video] seed: ref download failed:", ref, e);
+        }
+      }
+    }
+
+    // Attach brand book if present and under 4MB.
+    if (args.brandBookPath) {
+      try {
+        const { data: fileData } = await args.supabase.storage
+          .from("brand-books")
+          .download(args.brandBookPath);
+        if (fileData) {
+          const arrayBuffer = await fileData.arrayBuffer();
+          if (arrayBuffer.byteLength <= 4 * 1024 * 1024) {
+            const uint8Array = new Uint8Array(arrayBuffer);
+            let binary = "";
+            for (let i = 0; i < uint8Array.length; i++) binary += String.fromCharCode(uint8Array[i]);
+            const base64 = btoa(binary);
+            const ext = args.brandBookPath.split(".").pop()?.toLowerCase();
+            const mimeType =
+              ext === "pdf" ? "application/pdf" : ext === "png" ? "image/png" : "image/jpeg";
+            contentParts.push({
+              text: "Canonical brand book — defer to it on color, typography, and identity:",
+            });
+            contentParts.push({ inlineData: { mimeType, data: base64 } });
+          }
+        }
+      } catch (e) {
+        console.warn("[generate-post-video] seed: brand book download failed:", e);
+      }
+    }
+
+    contentParts.push({ text: seedPrompt });
+
+    const apiUrl =
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${args.geminiKey}`;
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: contentParts }],
+        generationConfig: {
+          responseModalities: ["TEXT", "IMAGE"],
+          imageConfig: { aspectRatio: args.aspectRatio, imageSize: "2K" },
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const t = await response.text().catch(() => "");
+      console.warn("[generate-post-video] seed: Gemini Flash Image error:", response.status, t.slice(0, 200));
+      return null;
+    }
+
+    const result = await response.json();
+    for (const candidate of result.candidates || []) {
+      for (const part of candidate.content?.parts || []) {
+        if (part.inlineData?.data) {
+          return {
+            base64: part.inlineData.data,
+            mimeType: part.inlineData.mimeType || "image/png",
+          };
+        }
+      }
+    }
+    console.warn("[generate-post-video] seed: no inlineData in Gemini response");
+    return null;
+  } catch (e) {
+    console.warn("[generate-post-video] seed generation threw:", e);
+    return null;
   }
 }
 
@@ -93,102 +177,78 @@ serve(async (req) => {
       client_context,
       post,
       variant_angle,
-      post_iteration_id, // optional link for the job row
     } = await req.json();
 
     const resolvedBrand = client_context?.brand_identity ?? brandIdentity ?? null;
     const resolvedRefs = client_context?.design_references ?? [];
     const resolvedBrandBookPath = client_context?.brand_book_file_path ?? null;
     const resolvedSynthesis = client_context?.design_style_synthesis ?? null;
-    const clientId: string | null = client_context?.client_id ?? null;
 
     console.log("[generate-post-video] context received:", {
       has_brand: !!resolvedBrand,
       ref_count: resolvedRefs.length,
       has_brand_book: !!resolvedBrandBookPath,
       has_synthesis: !!resolvedSynthesis,
-      has_client_id: !!clientId,
     });
 
     if (!prompt) {
-      return jsonResp({ error: "prompt is required" }, 400);
+      return new Response(JSON.stringify({ error: "prompt is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    let geminiKey = Deno.env.get("GEMINI_API_KEY");
+    if (!geminiKey) {
+      const { data: settings } = await supabase
+        .from("app_settings")
+        .select("value")
+        .eq("key", "gemini_api_key")
+        .single();
+      geminiKey = settings?.value;
+    }
+
+    if (!geminiKey) {
+      throw new Error("Gemini API key not configured");
+    }
 
     const aspectRatio = getAspectRatio(platform, format);
 
-    // ── Resolve brand visual context to reference URLs ──
-    const resolved = await resolveContextImageUrls(
-      {
-        design_references: resolvedRefs,
-        brand_book_file_path: resolvedBrandBookPath,
-        design_style_synthesis: resolvedSynthesis,
-      },
+    // ── Step 1: Generate a brand-aligned anchor still via Gemini 3.1 Flash Image.
+    // This still becomes Veo's `image` seed — without it, Veo only has the text
+    // prompt and produces generic "AI-flavored" footage with no brand alignment.
+    // With it, Veo animates from a frame that already encodes the brand's
+    // palette, composition, typography, and design references.
+    console.log("[generate-post-video] generating brand-aligned seed image…");
+    const seedImage = await generateSeedImage({
+      geminiKey,
       supabase,
-    );
-    if (resolved.brandGroundingMissing) {
+      basePrompt: prompt,
+      platform,
+      format,
+      brandIdentity: resolvedBrand,
+      synthesis: resolvedSynthesis,
+      designReferences: resolvedRefs,
+      brandBookPath: resolvedBrandBookPath,
+      post,
+      variantAngle: variant_angle || null,
+      aspectRatio,
+    });
+    if (seedImage) {
+      console.log("[generate-post-video] seed image ready — Veo will animate from brand-aligned frame");
+    } else {
       console.warn(
-        "[generate-post-video] PDF-only brand book and no design_style_synthesis — " +
-          "seed will be less brand-aligned. Run synthesize-design-language for this client.",
+        "[generate-post-video] seed image generation failed — falling back to text-only Veo. Output will be less brand-aligned.",
       );
     }
 
-    // ── Step 1: brand-aligned anchor still ──
-    // Failure here falls back to text-only video, preserving the old
-    // safety-net semantics (seed_used=false tells the UI which path ran).
-    let seedCdnUrl: string | null = null;
-    try {
-      const seedPrompt = buildImagePrompt({
-        basePrompt:
-          prompt +
-          "\n\nThis still will be used as the OPENING FRAME of a short social-media video — " +
-          "compose for motion. Place the subject so it can move or transform without falling off frame.",
-        platform,
-        format,
-        brandIdentity: resolvedBrand,
-        synthesis: resolvedSynthesis,
-        post,
-        variantAngle: variant_angle || undefined,
-      });
-
-      // Seed through the same adapter as generate-post-image, so the seed
-      // always uses the same model family and reference dialect as stills.
-      const { path: seedPath, body: seedBody } = buildImageRequest(imageModelPath(), {
-        prompt: seedPrompt + CANVAS_ONLY_GUARD,
-        aspectRatio: aspectRatio,
-        referenceUrls: resolved.referenceUrls,
-      });
-
-      console.log("[generate-post-video] generating brand-aligned seed image…");
-      const seedSubmission = await submit(seedPath, seedBody);
-      const seedResult = await pollUntilTerminal(seedSubmission.status_url, {
-        timeoutMs: SEED_TIMEOUT_MS,
-      });
-      seedCdnUrl = seedResult.images?.[0]?.url ?? null;
-      if (seedCdnUrl) {
-        console.log("[generate-post-video] seed image ready — video will animate from it");
-      }
-    } catch (e) {
-      console.warn(
-        "[generate-post-video] seed generation failed:",
-        e instanceof Error ? e.message : e,
-      );
-    }
-
-    // DoP is image-to-video ONLY (image_url is required by its schema), so a
-    // missing seed is a hard stop, not a degraded mode. The old Veo path could
-    // fall back to text-only; the equivalent here would silently switch model
-    // families, which is a worse surprise than a clear error.
-    if (!seedCdnUrl) {
-      throw new HiggsfieldError(
-        "generation_failed",
-        "Could not generate the brand-aligned anchor frame, and the video model requires one. Try again, or simplify the brief.",
-      );
-    }
-
-    // ── Step 2: build the motion prompt and submit the video ──
+    // ── Step 2: Build the Veo prompt. When a seed image is present, the prompt
+    // describes the MOTION the video should add to the still. Without one, it
+    // describes the full scene.
     const enhancedPrompt = buildVideoPrompt({
       sceneDescription: prompt,
       platform,
@@ -197,124 +257,140 @@ serve(async (req) => {
       synthesis: resolvedSynthesis,
       post,
       variantAngle: variant_angle || null,
-      hasSeedImage: !!seedCdnUrl,
+      hasSeedImage: !!seedImage,
     });
 
-    // DoP schema: {prompt, image_url} required; no aspect_ratio field (the
-    // clip follows the seed frame's ratio, which we already generated to the
-    // platform's ratio). extraVideoParams stays last so env can add motions
-    // or swap in another route's fields.
-    const videoBody: Record<string, unknown> = {
-      prompt: enhancedPrompt,
-      image_url: seedCdnUrl,
-      ...extraVideoParams(),
-    };
+    // Try each Veo model until one works
+    let operationName: string | null = null;
+    let lastError = "";
 
-    // Register the webhook when configured, so the terminal state reaches the
-    // media_jobs row even after this function stops waiting.
-    const webhookSecret = Deno.env.get("HIGGSFIELD_WEBHOOK_SECRET");
-    const webhookUrl = webhookSecret
-      ? `${supabaseUrl}/functions/v1/higgsfield-webhook?t=${webhookSecret}`
-      : undefined;
-    if (!webhookUrl) {
-      console.warn(
-        "[generate-post-video] HIGGSFIELD_WEBHOOK_SECRET not set — async completion disabled, inline wait only",
-      );
-    }
+    for (const model of VEO_MODELS) {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`;
 
-    const submission = await submit(videoModelPath(), videoBody, { webhookUrl });
-    console.log("[generate-post-video] video request:", submission.request_id);
+      console.log(`Trying Veo model: ${model}`);
 
-    // ── Step 3: job row (needs a client_id; legacy callers without one just
-    // don't get async recovery) ──
-    let jobId: string | null = null;
-    if (clientId) {
-      const { data: jobRow, error: jobErr } = await supabase
-        .from("media_jobs")
-        .insert({
-          client_id: clientId,
-          post_iteration_id: post_iteration_id || null,
-          kind: "video",
-          provider: "higgsfield",
-          request_id: submission.request_id,
-          model_path: videoModelPath(),
-          status: "submitted",
-          input: {
-            prompt: enhancedPrompt.slice(0, 4000),
-            aspect_ratio: aspectRatio,
-            seed_used: !!seedCdnUrl,
-            platform,
-            format,
+      const instance: any = { prompt: enhancedPrompt };
+      if (seedImage) {
+        // Image-to-video conditioning. Veo uses this as the starting frame
+        // AND the style anchor for the generated clip.
+        instance.image = {
+          bytesBase64Encoded: seedImage.base64,
+          mimeType: seedImage.mimeType,
+        };
+      }
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": geminiKey,
+        },
+        body: JSON.stringify({
+          instances: [instance],
+          parameters: {
+            aspectRatio,
+            durationSeconds: 8,
+            resolution: "720p",
+            personGeneration: "allow_all",
           },
-          seed_image_url: seedCdnUrl,
-        })
-        .select("id")
-        .single();
-      if (jobErr) {
-        console.warn("[generate-post-video] media_jobs insert failed:", jobErr.message);
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.name) {
+          operationName = data.name;
+          console.log(`Veo operation started with model ${model}: ${operationName}`);
+          break;
+        }
       } else {
-        jobId = jobRow.id;
+        lastError = await response.text();
+        console.error(`Veo model ${model} failed: ${lastError}`);
       }
     }
 
-    // ── Step 4: async by default ──
-    // With a job row recorded and the webhook registered, waiting here only
-    // risks the 150s gateway kill. Answer immediately; the frontend's
-    // waitForMediaJob picks the row up over realtime + polling.
-    if (jobId) {
-      console.log("[generate-post-video] job recorded — answering 202, webhook completes it:", jobId);
-      return jsonResp(
-        {
-          job_id: jobId,
-          status: "processing",
-          seed_image_url: seedCdnUrl,
-          seed_used: !!seedCdnUrl,
-        },
-        202,
+    if (!operationName) {
+      throw new Error(
+        `Video generation failed. None of the Veo models are available for your API key. ` +
+        `Make sure your Gemini API key has access to Veo video generation models. ` +
+        `You can check availability at https://aistudio.google.com/models/veo-3. ` +
+        `Last error: ${lastError.slice(0, 200)}`
       );
     }
 
-    // Legacy caller with no client_id: no job row to watch, so a bounded
-    // inline wait is the only option. Short renders win; long ones error.
-    try {
-      const result = await pollUntilTerminal(submission.status_url, {
-        timeoutMs: LEGACY_INLINE_TIMEOUT_MS,
-      });
-      const videoUrl = result.video?.url;
-      if (!videoUrl) {
-        throw new HiggsfieldError(
-          "upstream_error",
-          "Completed without a video URL: " + JSON.stringify(result).slice(0, 300),
-          { requestId: result.request_id },
+    // Poll for completion (Veo is async — takes 30-120 seconds)
+    let attempts = 0;
+    const maxAttempts = 60; // 2 minutes at 2-second intervals
+
+    while (attempts < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      attempts++;
+
+      const pollResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/${operationName}`,
+        {
+          headers: { "x-goog-api-key": geminiKey },
+        }
+      );
+
+      if (!pollResponse.ok) {
+        console.error(`Poll failed (attempt ${attempts}): ${pollResponse.status}`);
+        continue;
+      }
+
+      const pollData = await pollResponse.json();
+
+      if (pollData.done) {
+        // Extract video URI from response
+        const videoUri =
+          pollData.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
+          pollData.response?.generatedSamples?.[0]?.video?.uri;
+
+        if (videoUri) {
+          // The video URI requires the API key to access
+          const authenticatedUrl = videoUri.includes("?")
+            ? `${videoUri}&key=${geminiKey}`
+            : `${videoUri}?key=${geminiKey}`;
+
+          // Return diagnostic info too: whether the seed image was generated
+          // and a data-URL preview of it. If the user reports the video looks
+          // off-brand, comparing the seed image tells us whether the issue
+          // is upstream (seed was generic) or downstream (Veo ignored a good
+          // seed). Without this we have no visibility into the chain.
+          const seedPreview = seedImage
+            ? `data:${seedImage.mimeType};base64,${seedImage.base64}`
+            : null;
+
+          return new Response(
+            JSON.stringify({
+              video_url: authenticatedUrl,
+              seed_image_url: seedPreview,
+              seed_used: !!seedImage,
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // Check for errors in the completed operation
+        if (pollData.error) {
+          throw new Error(`Video generation error: ${JSON.stringify(pollData.error)}`);
+        }
+
+        throw new Error(
+          "Operation completed but no video URL found in response: " +
+          JSON.stringify(pollData.response || pollData).slice(0, 300)
         );
       }
-      return jsonResp({
-        video_url: videoUrl,
-        seed_image_url: seedCdnUrl,
-        seed_used: !!seedCdnUrl,
-        job_id: null,
-      });
-    } catch (e) {
-      throw e;
+
+      console.log(`Polling attempt ${attempts}/${maxAttempts}...`);
     }
+
+    throw new Error("Video generation timed out after 3 minutes. Please try again.");
   } catch (error: any) {
-    if (error instanceof HiggsfieldError) {
-      console.error("[generate-post-video] higgsfield error:", error.code, error.message);
-      const status =
-        error.code === "concurrency_exhausted" ? 429 :
-        (error.code === "insufficient_credits" ? 402 :
-        error.code === "moderated" ? 422 :
-        error.code === "timeout" ? 504 : 502);
-      return jsonResp({ error: error.userMessage, code: error.code, detail: error.message.slice(0, 400) }, status);
-    }
     console.error("Error generating video:", error);
-    return jsonResp({ error: error.message }, 500);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
-
-function jsonResp(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
