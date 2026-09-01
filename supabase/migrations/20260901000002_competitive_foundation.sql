@@ -115,6 +115,11 @@ DO $$
 DECLARE t TEXT;
 BEGIN
   FOREACH t IN ARRAY ARRAY['competitor_sets','competitors','competitor_handles'] LOOP
+    EXECUTE format('DROP POLICY IF EXISTS "Admins can do everything with %I" ON public.%I', t, t);
+    EXECUTE format('DROP POLICY IF EXISTS "Moburst staff can select %I" ON public.%I', t, t);
+    EXECUTE format('DROP POLICY IF EXISTS "Moburst staff can insert %I" ON public.%I', t, t);
+    EXECUTE format('DROP POLICY IF EXISTS "Moburst staff can update %I" ON public.%I', t, t);
+    EXECUTE format('DROP POLICY IF EXISTS "Moburst staff can delete %I" ON public.%I', t, t);
     EXECUTE format('CREATE POLICY "Admins can do everything with %I" ON public.%I FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin())', t, t);
     EXECUTE format('CREATE POLICY "Moburst staff can select %I" ON public.%I FOR SELECT TO authenticated USING (public.is_moburst_staff() AND public.can_access_client(client_id))', t, t);
     EXECUTE format('CREATE POLICY "Moburst staff can insert %I" ON public.%I FOR INSERT TO authenticated WITH CHECK (public.can_write_client(client_id))', t, t);
@@ -124,17 +129,23 @@ BEGIN
 END $$;
 
 -- competitive_reports: staff full write; clients read finished reports only.
+DROP POLICY IF EXISTS "Admins can do everything with competitive_reports" ON public.competitive_reports;
 CREATE POLICY "Admins can do everything with competitive_reports" ON public.competitive_reports
   FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+DROP POLICY IF EXISTS "Moburst staff can select competitive_reports" ON public.competitive_reports;
 CREATE POLICY "Moburst staff can select competitive_reports" ON public.competitive_reports
   FOR SELECT TO authenticated USING (public.is_moburst_staff() AND public.can_access_client(client_id));
+DROP POLICY IF EXISTS "Client users can view complete competitive_reports" ON public.competitive_reports;
 CREATE POLICY "Client users can view complete competitive_reports" ON public.competitive_reports
   FOR SELECT TO authenticated USING (status = 'complete' AND public.is_client_member(client_id));
+DROP POLICY IF EXISTS "Moburst staff can insert competitive_reports" ON public.competitive_reports;
 CREATE POLICY "Moburst staff can insert competitive_reports" ON public.competitive_reports
   FOR INSERT TO authenticated WITH CHECK (public.can_write_client(client_id));
+DROP POLICY IF EXISTS "Moburst staff can update competitive_reports" ON public.competitive_reports;
 CREATE POLICY "Moburst staff can update competitive_reports" ON public.competitive_reports
   FOR UPDATE TO authenticated USING (public.can_write_client(client_id)) WITH CHECK (public.can_write_client(client_id));
 
+DROP TRIGGER IF EXISTS update_competitor_sets_updated_at ON public.competitor_sets;
 CREATE TRIGGER update_competitor_sets_updated_at BEFORE UPDATE ON public.competitor_sets
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 

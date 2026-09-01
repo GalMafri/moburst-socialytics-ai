@@ -46,17 +46,22 @@ alter table public.media_jobs enable row level security;
 -- read via can_access_client, write via can_write_client, admin override via
 -- the is_admin policy. NO USING(true) policies — that class of leak was
 -- already purged once in 20260720130000_company_scoped_staff.sql.
+drop policy if exists "Admins can do everything with media_jobs" on public.media_jobs;
 create policy "Admins can do everything with media_jobs" on public.media_jobs
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "Moburst staff can select media_jobs" on public.media_jobs;
 create policy "Moburst staff can select media_jobs" on public.media_jobs
   for select to authenticated using (public.can_access_client(client_id));
+drop policy if exists "Moburst staff can insert media_jobs" on public.media_jobs;
 create policy "Moburst staff can insert media_jobs" on public.media_jobs
   for insert to authenticated with check (public.can_write_client(client_id));
+drop policy if exists "Moburst staff can update media_jobs" on public.media_jobs;
 create policy "Moburst staff can update media_jobs" on public.media_jobs
   for update to authenticated using (public.can_write_client(client_id))
   with check (public.can_write_client(client_id));
 -- The webhook writes via the service role, which bypasses RLS; no anon policy.
 
+drop trigger if exists update_media_jobs_updated_at on public.media_jobs;
 create trigger update_media_jobs_updated_at before update on public.media_jobs
   for each row execute function public.update_updated_at_column();
 
