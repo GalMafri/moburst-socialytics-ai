@@ -161,7 +161,12 @@ export const CANVAS_ONLY_GUARD =
 
 export function imageModelPath(): string {
   const env = (globalThis as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env;
-  return env?.get("HIGGSFIELD_IMAGE_MODEL_PATH") || "/nano-banana";
+  // Popcorn is the default because it lives in the /higgsfield-ai/* namespace
+  // this account provably has (Soul and DoP both work), takes up to 8 plain
+  // reference URLs, and is Higgsfield's ad/product-consistency model. Flip to
+  // /nano-banana via the env override once it is enabled on the account —
+  // it answered 404 model_not_found on 2026-09-01.
+  return env?.get("HIGGSFIELD_IMAGE_MODEL_PATH") || "/higgsfield-ai/popcorn/auto";
 }
 
 export function videoModelPath(): string {
@@ -169,14 +174,122 @@ export function videoModelPath(): string {
   return env?.get("HIGGSFIELD_VIDEO_MODEL_PATH") || "/higgsfield-ai/dop/standard";
 }
 
-/** nano-banana's live aspect enum (superset of Soul's; includes 4:5 and auto). */
-const IMAGE_RATIOS = new Set(["auto", "1:1", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "16:9", "9:16", "21:9"]);
+// ── Model adapter ────────────────────────────────────────────────────────────
+//
+// Every image model family speaks a slightly different dialect (typed
+// input_images vs plain image_urls vs a single image_reference_url; different
+// aspect enums; different quality knobs). This adapter is the ONE place that
+// knows the dialects, so trying a different model is an env flip
+// (HIGGSFIELD_IMAGE_MODEL_PATH), never a code change. Enums verified against
+// the OpenAPI spec and corrected by live 422s where they disagreed.
 
-export function toHiggsfieldAspectRatio(ratio: string): string {
-  return IMAGE_RATIOS.has(ratio) ? ratio : "1:1";
+const RATIOS: Record<string, Set<string>> = {
+  nano: new Set(["auto", "1:1", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "16:9", "9:16", "21:9"]),
+  popcorn: new Set(["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"]),
+  soul: new Set(["9:16", "16:9", "4:3", "3:4", "1:1", "2:3", "3:2"]),
+  reve: new Set(["1:1", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "16:9", "9:16"]),
+};
+
+function fitRatio(ratio: string, allowed: Set<string>): string {
+  if (allowed.has(ratio)) return ratio;
+  if (ratio === "4:5" && allowed.has("3:4")) return "3:4"; // nearest portrait
+  if (ratio === "5:4" && allowed.has("4:3")) return "4:3";
+  return "1:1";
 }
 
-/** Build nano-banana's input_images array from resolved reference URLs. */
+/** Back-compat helper (tests, older call sites): maps against the widest enum. */
+export function toHiggsfieldAspectRatio(ratio: string): string {
+  return fitRatio(ratio, RATIOS.nano);
+}
+
+/** Build nano-banana's typed input_images array from resolved reference URLs. */
 export function toInputImages(urls: string[]): Array<{ type: "image_url"; image_url: string }> {
   return urls.slice(0, 8).map((u) => ({ type: "image_url" as const, image_url: u }));
+}
+
+export interface ImageRequestArgs {
+  prompt: string;
+  aspectRatio: string;
+  referenceUrls: string[];
+}
+
+/**
+ * Build the {path, body} for an image generation against whatever model the
+ * env selects. Reve is special-cased by reference count: /reve/remix demands
+ * 2-4 image_urls, so one reference is doubled and zero references falls back
+ * to /reve/text-to-image.
+ */
+export function buildImageRequest(
+  modelPath: string,
+  args: ImageRequestArgs,
+): { path: string; body: Record<string, unknown> } {
+  const refs = args.referenceUrls.slice(0, 8);
+
+  if (modelPath.includes("nano-banana")) {
+    const body: Record<string, unknown> = {
+      prompt: args.prompt,
+      aspect_ratio: fitRatio(args.aspectRatio, RATIOS.nano),
+      output_format: "png",
+    };
+    if (refs.length > 0) body.input_images = toInputImages(refs);
+    return { path: modelPath, body };
+  }
+
+  if (modelPath.includes("popcorn")) {
+    const body: Record<string, unknown> = {
+      prompt: args.prompt,
+      aspect_ratio: fitRatio(args.aspectRatio, RATIOS.popcorn),
+      resolution: "1600p",
+    };
+    if (refs.length > 0) body.image_urls = refs;
+    return { path: modelPath, body };
+  }
+
+  if (modelPath.includes("reve")) {
+    if (refs.length >= 1) {
+      const imageUrls = refs.length === 1 ? [refs[0], refs[0]] : refs.slice(0, 4);
+      return {
+        path: "/reve/remix",
+        body: {
+          prompt: args.prompt,
+          image_urls: imageUrls,
+          aspect_ratio: fitRatio(args.aspectRatio, RATIOS.reve),
+        },
+      };
+    }
+    return {
+      path: "/reve/text-to-image",
+      body: { prompt: args.prompt },
+    };
+  }
+
+  if (modelPath.includes("soul")) {
+    if (refs.length > 0) {
+      return {
+        path: "/higgsfield-ai/soul/reference",
+        body: {
+          prompt: args.prompt,
+          image_reference_url: refs[0],
+          aspect_ratio: fitRatio(args.aspectRatio, RATIOS.soul),
+          resolution: "1080p",
+          style_strength: 1.0,
+          enhance_prompt: false,
+        },
+      };
+    }
+    return {
+      path: modelPath,
+      body: {
+        prompt: args.prompt,
+        aspect_ratio: fitRatio(args.aspectRatio, RATIOS.soul),
+        resolution: "1080p",
+      },
+    };
+  }
+
+  // Unknown family: send the universally-supported minimum.
+  return {
+    path: modelPath,
+    body: { prompt: args.prompt, aspect_ratio: fitRatio(args.aspectRatio, RATIOS.soul) },
+  };
 }

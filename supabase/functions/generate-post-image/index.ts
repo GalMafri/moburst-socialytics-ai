@@ -6,11 +6,10 @@ import {
   submit,
 } from "../_shared/higgsfield/client.ts";
 import {
+  buildImageRequest,
   CANVAS_ONLY_GUARD,
   imageModelPath,
   resolveContextImageUrls,
-  toHiggsfieldAspectRatio,
-  toInputImages,
 } from "../_shared/higgsfield/context.ts";
 
 const corsHeaders = {
@@ -175,18 +174,14 @@ async function generateImage(args: {
   /** Called right after Higgsfield accepts, so the caller can record a job row. */
   onSubmitted?: (submission: { request_id: string }) => Promise<void>;
 }): Promise<{ base64: string; mimeType: string }> {
-  // One route for everything: nano-banana takes references as input_images,
-  // so with-reference and without-reference calls differ by one field.
-  const body: Record<string, unknown> = {
+  // The adapter speaks each model family's dialect; the env decides the model.
+  const { path, body } = buildImageRequest(imageModelPath(), {
     prompt: args.prompt,
-    aspect_ratio: toHiggsfieldAspectRatio(args.aspectRatio),
-    output_format: "png",
-  };
-  if (args.referenceUrls.length > 0) {
-    body.input_images = toInputImages(args.referenceUrls);
-  }
+    aspectRatio: args.aspectRatio,
+    referenceUrls: args.referenceUrls,
+  });
 
-  const submission = await submit(imageModelPath(), body, { webhookUrl: args.webhookUrl });
+  const submission = await submit(path, body, { webhookUrl: args.webhookUrl });
   console.log("[generate-post-image] higgsfield request:", submission.request_id);
   if (args.onSubmitted) await args.onSubmitted(submission);
 

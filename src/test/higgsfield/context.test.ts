@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  buildImageRequest,
   isHiggsfieldImagePath,
   MAX_REFERENCE_IMAGES,
   resolveContextImageUrls,
@@ -122,5 +123,53 @@ describe("toInputImages", () => {
     const out = toInputImages(urls);
     expect(out).toHaveLength(8);
     expect(out[0]).toEqual({ type: "image_url", image_url: "https://x/0.png" });
+  });
+});
+
+describe("buildImageRequest — one adapter per model dialect", () => {
+  const args = { prompt: "p", aspectRatio: "4:5", referenceUrls: ["https://a/1.png", "https://a/2.png"] };
+
+  it("popcorn: plain image_urls, 1600p, 4:5 degrades to 3:4", () => {
+    const { path, body } = buildImageRequest("/higgsfield-ai/popcorn/auto", args);
+    expect(path).toBe("/higgsfield-ai/popcorn/auto");
+    expect(body.image_urls).toEqual(args.referenceUrls);
+    expect(body.resolution).toBe("1600p");
+    expect(body.aspect_ratio).toBe("3:4");
+    expect(body.input_images).toBeUndefined();
+  });
+
+  it("popcorn without refs omits image_urls entirely", () => {
+    const { body } = buildImageRequest("/higgsfield-ai/popcorn/auto", { ...args, referenceUrls: [] });
+    expect("image_urls" in body).toBe(false);
+  });
+
+  it("nano-banana: typed input_images, png, native 4:5", () => {
+    const { body } = buildImageRequest("/nano-banana", args);
+    expect(body.input_images).toEqual([
+      { type: "image_url", image_url: "https://a/1.png" },
+      { type: "image_url", image_url: "https://a/2.png" },
+    ]);
+    expect(body.aspect_ratio).toBe("4:5");
+    expect(body.output_format).toBe("png");
+  });
+
+  it("reve: remix with 2+ refs, doubles a single ref, t2i with none", () => {
+    expect(buildImageRequest("/reve/text-to-image", args).path).toBe("/reve/remix");
+    const single = buildImageRequest("/reve/text-to-image", { ...args, referenceUrls: ["https://a/1.png"] });
+    expect(single.body.image_urls).toEqual(["https://a/1.png", "https://a/1.png"]);
+    const none = buildImageRequest("/reve/text-to-image", { ...args, referenceUrls: [] });
+    expect(none.path).toBe("/reve/text-to-image");
+    expect(none.body).toEqual({ prompt: "p" });
+  });
+
+  it("soul: reference route with one url and full adherence, standard without", () => {
+    const withRef = buildImageRequest("/higgsfield-ai/soul/standard", args);
+    expect(withRef.path).toBe("/higgsfield-ai/soul/reference");
+    expect(withRef.body.image_reference_url).toBe("https://a/1.png");
+    expect(withRef.body.style_strength).toBe(1.0);
+    expect(withRef.body.enhance_prompt).toBe(false);
+    const bare = buildImageRequest("/higgsfield-ai/soul/standard", { ...args, referenceUrls: [] });
+    expect(bare.path).toBe("/higgsfield-ai/soul/standard");
+    expect(bare.body.aspect_ratio).toBe("3:4"); // soul has no 4:5 either
   });
 });

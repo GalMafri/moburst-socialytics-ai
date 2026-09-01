@@ -29,11 +29,10 @@ import {
   submit,
 } from "../_shared/higgsfield/client.ts";
 import {
+  buildImageRequest,
   CANVAS_ONLY_GUARD,
   imageModelPath,
   resolveContextImageUrls,
-  toHiggsfieldAspectRatio,
-  toInputImages,
   videoModelPath,
 } from "../_shared/higgsfield/context.ts";
 
@@ -154,19 +153,16 @@ serve(async (req) => {
         variantAngle: variant_angle || undefined,
       });
 
-      // Seed via nano-banana, same shape as generate-post-image: references
-      // ride along as input_images when present.
-      const seedBody: Record<string, unknown> = {
+      // Seed through the same adapter as generate-post-image, so the seed
+      // always uses the same model family and reference dialect as stills.
+      const { path: seedPath, body: seedBody } = buildImageRequest(imageModelPath(), {
         prompt: seedPrompt + CANVAS_ONLY_GUARD,
-        aspect_ratio: toHiggsfieldAspectRatio(aspectRatio),
-        output_format: "png",
-      };
-      if (resolved.referenceUrls.length > 0) {
-        seedBody.input_images = toInputImages(resolved.referenceUrls);
-      }
+        aspectRatio: aspectRatio,
+        referenceUrls: resolved.referenceUrls,
+      });
 
       console.log("[generate-post-video] generating brand-aligned seed image…");
-      const seedSubmission = await submit(imageModelPath(), seedBody);
+      const seedSubmission = await submit(seedPath, seedBody);
       const seedResult = await pollUntilTerminal(seedSubmission.status_url, {
         timeoutMs: SEED_TIMEOUT_MS,
       });
