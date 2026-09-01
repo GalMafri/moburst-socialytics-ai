@@ -46,7 +46,7 @@ const corsHeaders = {
 // Budgets. The seed is an image job (fast); the video gets what's left of a
 // wall-clock envelope the platform will still tolerate. When the inline video
 // budget runs out we DON'T fail — we hand back the job id.
-const SEED_TIMEOUT_MS = 90_000;
+const SEED_TIMEOUT_MS = 150_000;   // seed is a Soul image render: ~80s clean, queue adds variance
 const VIDEO_INLINE_TIMEOUT_MS = 180_000;
 
 function getAspectRatio(platform?: string, format?: string): string {

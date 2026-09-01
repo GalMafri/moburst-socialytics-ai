@@ -23,7 +23,11 @@ const corsHeaders = {
 // Image generation is fast enough to stay synchronous from the caller's point
 // of view: submit to Higgsfield, poll, return. Video (a much longer job) uses
 // the media_jobs + webhook path instead.
-const IMAGE_POLL_TIMEOUT_MS = 120_000;
+// 210s, not 120: a clean render takes ~80s but Soul's queue adds real
+// variance — the first 120s budget timed out on a job that was accepted and
+// still charged. The old Veo path held connections >3 min, so the platform
+// tolerates this hold.
+const IMAGE_POLL_TIMEOUT_MS = 210_000;
 
 /** Map platform + format → aspect ratio (unchanged from the Gemini version). */
 function getAspectRatio(platform?: string, format?: string): string {
