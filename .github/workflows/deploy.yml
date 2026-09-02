@@ -42,4 +42,17 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script: |
             cd ~/tools/moburst-socialytics-ai
+            # .env is untracked as of Sep 2026 (it only holds public values;
+            # vite.config.ts carries fallbacks). The host's own copy is
+            # preserved across the pull: back it up, let git reconcile the
+            # tracked path, then put it back. A locally edited .env had
+            # aborted every pull since Aug 24.
+            if [ -f .env ]; then cp .env /tmp/socialytics-env-local; fi
+            if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+              git --no-pager diff --stat -- .env || true
+              git checkout -- .env
+            fi
+            git fetch --all
+            git pull --ff-only origin main
+            if [ -f /tmp/socialytics-env-local ]; then cp /tmp/socialytics-env-local .env; fi
             bash deploy.sh
