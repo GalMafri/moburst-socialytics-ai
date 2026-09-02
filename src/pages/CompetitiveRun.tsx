@@ -20,7 +20,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loading } from "@/components/ui/loading";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircle2, Clock, Crosshair, Loader2, Play, RefreshCw, XCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { useInsightFeedback } from "@/hooks/useInsightFeedback";
+import { PRESET_LABELS, presetRange, isValidRange, rangeDays, formatRange, type RangePreset, type DateRange } from "@/lib/dateRange";
+import { CheckCircle2, Clock, Crosshair, History, Loader2, Play, RefreshCw, XCircle } from "lucide-react";
 
 const STEPS = [
   "Pulling competitor metrics from Rival IQ...",
@@ -41,6 +44,13 @@ export default function CompetitiveRun() {
   const [currentStep, setCurrentStep] = useState(-1);
   const [error, setError] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
+  // Period to analyze: presets end yesterday (the last full day of data);
+  // custom ranges are capped at a year so a run stays inside RivalIQ's budget.
+  const [preset, setPreset] = useState<RangePreset>("30d");
+  const [custom, setCustom] = useState<DateRange>(() => presetRange("30d"));
+  const range: DateRange = preset === "custom" ? custom : presetRange(preset);
+  const rangeOk = isValidRange(range) && rangeDays(range) <= 366;
+  const { suppressedTexts } = useInsightFeedback(id);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const runStartedAt = useRef(0);
@@ -170,6 +180,10 @@ export default function CompetitiveRun() {
   );
 
   const runAnalysis = async () => {
+    if (!rangeOk) {
+      toast({ title: "Pick a valid period", description: "The end date must be on or after the start date, and the range at most one year.", variant: "destructive" });
+      return;
+    }
     setRunning(true);
     setError(null);
     setCurrentStep(0);
@@ -192,7 +206,7 @@ export default function CompetitiveRun() {
 
       const { data: report, error: reportErr } = await supabase
         .from("competitive_reports")
-        .insert({ client_id: id!, set_id: confirmedSet!.id, status: "running" })
+        .insert({ client_id: id!, set_id: confirmedSet!.id, status: "running", date_range_start: range.start, date_range_end: range.end })
         .select()
         .single();
       if (reportErr) throw reportErr;
@@ -208,6 +222,11 @@ export default function CompetitiveRun() {
         // Sets imported from RivalIQ carry the landscape id; the workflow then
         // resolves it explicitly instead of matching by focus-company name.
         rivaliq_landscape_id: (confirmedSet as any).rivaliq_landscape_id || undefined,
+        date_range_start: range.start,
+        date_range_end: range.end,
+        range_preset: preset,
+        // Gap suggestions the team voted down; the analysis never re-proposes them.
+        suppressed_insights: suppressedTexts,
         competitors: (selectedCompetitors || []).map((c: any) => ({
           id: c.id,
           rank: c.selected_rank,
@@ -304,16 +323,58 @@ export default function CompetitiveRun() {
           </CardContent>
         </Card>
 
+        {/* Period */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Period to analyze</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex gap-1.5 flex-wrap">
+              {(["7d", "30d", "90d", "previous_month", "custom"] as RangePreset[]).map((p) => (
+                <Button
+                  key={p}
+                  size="sm"
+                  variant={preset === p ? "default" : "outline"}
+                  aria-pressed={preset === p}
+                  disabled={running}
+                  onClick={() => { if (p === "custom") setCustom(range); setPreset(p); }}
+                >
+                  {PRESET_LABELS[p]}
+                </Button>
+              ))}
+            </div>
+            {preset === "custom" && (
+              <div className="flex items-end gap-3 flex-wrap">
+                <label className="text-xs text-muted-foreground">
+                  <span className="block mb-1">Start</span>
+                  <Input type="date" value={custom.start} max={custom.end} disabled={running} onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))} className="w-44" />
+                </label>
+                <label className="text-xs text-muted-foreground">
+                  <span className="block mb-1">End</span>
+                  <Input type="date" value={custom.end} min={custom.start} disabled={running} onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))} className="w-44" />
+                </label>
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground">
+              {rangeOk ? (
+                <>{formatRange(range)} · {rangeDays(range)} days of posts from every company in the landscape.</>
+              ) : (
+                <span className="text-destructive">The end date must be on or after the start date, and the range at most one year.</span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+
         {/* Run */}
         <Card>
           <CardContent className="pt-6 text-center space-y-6">
             {!running && !error && currentStep < 0 && (
               <>
-                <Button size="lg" onClick={runAnalysis} className="gap-2">
+                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!rangeOk}>
                   <Play className="h-5 w-5" /> Run Competitive Analysis
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  Pulls Rival IQ metrics for the top 3, breaks down their content, and assembles a deck.
+                  Pulls Rival IQ data for {rangeOk ? formatRange(range) : "the selected period"}, breaks content down by platform, finds the gaps, and assembles a deck.
                 </p>
               </>
             )}
@@ -366,8 +427,11 @@ export default function CompetitiveRun() {
         {/* Past runs */}
         {pastRuns && pastRuns.length > 0 && (
           <Card>
-            <CardHeader>
+            <CardHeader className="flex-row items-center justify-between space-y-0">
               <CardTitle className="text-base">Recent Runs</CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${id}/competitive/reports`)}>
+                <History className="h-4 w-4 mr-1" /> All runs
+              </Button>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
@@ -384,6 +448,9 @@ export default function CompetitiveRun() {
                         {r.status}
                       </Badge>
                       <span className="text-sm">{new Date(r.created_at).toLocaleString()}</span>
+                      {r.date_range_start && (
+                        <span className="text-xs text-muted-foreground hidden sm:inline">{formatRange({ start: r.date_range_start, end: r.date_range_end })}</span>
+                      )}
                     </div>
                     <div className="flex items-center gap-3">
                       {r.duration_minutes ? (

@@ -232,39 +232,48 @@ export function AdminDashboard() {
                       <PlatformBadge key={p} platform={p} size="sm" />
                     ))}
                   </div>
-                  <div className="flex items-center justify-between pt-2">
-                    <span className="text-xs text-muted-foreground">{reportCount} reports</span>
-                    <div className="flex gap-1.5">
+                  <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">{reportCount} reports</span>
+                    <div className="flex gap-1.5 flex-wrap justify-end">
                       <Button
                         size="sm"
                         variant="outline"
+                        className="h-8 px-2.5"
+                        title="Analytics"
+                        aria-label="Analytics"
                         onClick={(e) => {
                           e.stopPropagation();
                           navigate(`/clients/${client.id}/analytics`);
                         }}
                       >
-                        <BarChart3 className="h-3 w-3 mr-1" /> Analytics
+                        <BarChart3 className="h-3.5 w-3.5" /><span className="ml-1.5 hidden 2xl:inline">Analytics</span>
                       </Button>
                       {canRunAnalysis && (
                         <>
                           <Button
                             size="sm"
                             variant="outline"
+                            className="h-8 px-2.5"
+                            title="Competitive analysis"
+                            aria-label="Competitive analysis"
                             onClick={(e) => {
                               e.stopPropagation();
                               navigate(`/clients/${client.id}/competitive`);
                             }}
                           >
-                            <Crosshair className="h-3 w-3 mr-1" /> Competitive
+                            <Crosshair className="h-3.5 w-3.5" /><span className="ml-1.5 hidden 2xl:inline">Competitive</span>
                           </Button>
                           <Button
                             size="sm"
+                            className="h-8 px-2.5"
+                            title="Run monthly report"
+                            aria-label="Run monthly report"
                             onClick={(e) => {
                               e.stopPropagation();
                               navigate(`/clients/${client.id}/analyze`);
                             }}
                           >
-                            <Play className="h-3 w-3 mr-1" /> Run Report
+                            <Play className="h-3.5 w-3.5" /><span className="ml-1.5">Run</span>
                           </Button>
                         </>
                       )}

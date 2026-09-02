@@ -104,6 +104,18 @@ export default function RunAnalysis() {
     enabled: !!id,
   });
 
+  // Team verdicts on competitive gaps: endorsed gaps become must-address items
+  // for the synthesis, down-voted gaps are kept out of the brief entirely.
+  const { data: insightFeedback } = useQuery({
+    queryKey: ["insight-feedback", id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("competitive_insight_feedback").select("*").eq("client_id", id!);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!id,
+  });
+
   const { data: pastReports, refetch: refetchReports } = useQuery({
     queryKey: ["reports", id],
     queryFn: async () => {
@@ -353,7 +365,7 @@ export default function RunAnalysis() {
         date_range_end: dateRangeEnd || "",
         skip_trends: skipTrends,
         timezone: (client as any)?.timezone || "UTC",
-        competitive_context: buildCompetitiveContext(latestCompetitive),
+        competitive_context: buildCompetitiveContext(latestCompetitive, insightFeedback as any),
       };
 
       console.log("Sending webhook payload:", JSON.stringify(payload, null, 2));

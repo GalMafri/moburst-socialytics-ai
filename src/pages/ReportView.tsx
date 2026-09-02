@@ -44,6 +44,7 @@ import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
+import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
 import {
   parseCsv,
   stripVoicePreset,
@@ -590,10 +591,22 @@ function PerformanceChart({ comparison }: { comparison: any }) {
 }
 
 /* ─── Post Card ─── */
-function PostCard({ post }: { post: any }) {
+function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }) {
+  const link = post.permalink || post.url || null;
   return (
     <Card>
-      <CardContent className="pt-5 space-y-2.5">
+      <CardContent className="pt-5">
+        <div className="flex gap-4">
+          <PostVisual
+            url={link}
+            preview={preview}
+            image={post.image_url || post.media_url || post.thumbnail_url || null}
+            mediaType={post.post_type || post.media_type || post.content_type}
+            platform={post.network_type || post.platform}
+            className="w-28 shrink-0"
+            compact
+          />
+          <div className="flex-1 min-w-0 space-y-2.5">
         <div className="flex items-center justify-between">
           <PlatformBadge platform={post.network_type || post.platform} size="sm" />
           <span className="text-xs text-muted-foreground">
@@ -629,6 +642,8 @@ function PostCard({ post }: { post: any }) {
             View Original <ExternalLink className="h-3 w-3" />
           </a>
         )}
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
@@ -774,10 +789,12 @@ function TopPostsSection({ posts }: { posts: any[] }) {
 
   const byImpressions = [...filtered]
     .sort((a: any, b: any) => (b.impressions ?? 0) - (a.impressions ?? 0))
-    .slice(0, 4);
+    .slice(0, 5);
   const byEngagement = [...filtered]
     .sort((a: any, b: any) => engagementOf(b) - engagementOf(a))
-    .slice(0, 4);
+    .slice(0, 5);
+  // Sprout posts carry no media; resolve a thumbnail per permalink.
+  const { previews } = usePostPreviews([...byImpressions, ...byEngagement].map((p: any) => p.permalink || p.url));
 
   return (
     <div className="space-y-6">
@@ -808,7 +825,7 @@ function TopPostsSection({ posts }: { posts: any[] }) {
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {byImpressions.map((post: any, i: number) => (
-            <PostCard key={`imp-${i}`} post={post} />
+            <PostCard key={`imp-${i}`} post={post} preview={previews[post.permalink || post.url]} />
           ))}
         </div>
       </div>
@@ -819,7 +836,7 @@ function TopPostsSection({ posts }: { posts: any[] }) {
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {byEngagement.map((post: any, i: number) => (
-            <PostCard key={`eng-${i}`} post={post} />
+            <PostCard key={`eng-${i}`} post={post} preview={previews[post.permalink || post.url]} />
           ))}
         </div>
       </div>

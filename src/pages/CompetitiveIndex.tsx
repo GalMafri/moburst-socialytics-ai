@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Crosshair, FileText, Play } from "lucide-react";
+import { Crosshair, FileText, History, Play } from "lucide-react";
 
 export default function CompetitiveIndex() {
   const navigate = useNavigate();
@@ -62,6 +62,9 @@ export default function CompetitiveIndex() {
                     <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${c.id}/competitive/run`)} disabled={!c.set || !["confirmed", "analyzing", "complete", "failed"].includes(c.set.status)}><Play className="h-3.5 w-3.5 mr-1" /> Run</Button>
                     {c.report?.status === "complete" && (
                       <Button size="sm" onClick={() => navigate(`/clients/${c.id}/competitive/reports/${c.report.id}`)}><FileText className="h-3.5 w-3.5 mr-1" /> Latest report</Button>
+                    )}
+                    {c.report && (
+                      <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${c.id}/competitive/reports`)}><History className="h-3.5 w-3.5 mr-1" /> All runs</Button>
                     )}
                   </div>
                   {c.report && <p className="text-xs text-muted-foreground">Last run {new Date(c.report.created_at).toLocaleString()}</p>}

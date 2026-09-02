@@ -1,3 +1,4 @@
+import { PRESET_LABELS, presetRange, isValidRange, formatRange, rangesOverlap, reportPeriod, type DateRange } from "@/lib/dateRange";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -34,13 +35,14 @@ import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapsho
 import { Loading } from "@/components/ui/loading";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
-type TimeRange = "7d" | "30d" | "90d" | "all";
+type TimeRange = "7d" | "30d" | "90d" | "all" | "custom";
 type AnalyticsView = "performance" | "trends";
 
 export default function Analytics() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [range, setRange] = useState<TimeRange>("30d");
+  const [custom, setCustom] = useState<DateRange>(() => presetRange("30d"));
   const [view, setView] = useState<AnalyticsView>("performance");
 
   const { data: client } = useQuery({
@@ -68,15 +70,20 @@ export default function Analytics() {
     enabled: !!id,
   });
 
-  // Filter reports by time range
+  // The window being viewed. A report counts when the period it describes
+  // overlaps the window, so "Last 30 days" shows the report about those days
+  // rather than whichever report happened to be generated inside them.
+  const viewWindow = useMemo<DateRange | null>(() => {
+    if (range === "all") return null;
+    if (range === "custom") return isValidRange(custom) ? custom : null;
+    return presetRange(range);
+  }, [range, custom]);
   const filtered = useMemo(() => {
     if (!reports) return [];
-    if (range === "all") return reports;
-    const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    return reports.filter((r: any) => new Date(r.created_at) >= cutoff);
-  }, [reports, range]);
+    if (!viewWindow) return reports;
+    return reports.filter((r: any) => rangesOverlap(reportPeriod(r), viewWindow));
+  }, [reports, viewWindow]);
+  const rangeLabel = range === "all" ? "All Time" : range === "custom" ? (viewWindow ? formatRange(viewWindow) : "Custom") : PRESET_LABELS[range];
 
   // Helper: extract totals from sprout_performance with flexible key lookup
   function extractTotals(sp: any): {
@@ -236,8 +243,8 @@ export default function Analytics() {
             <ArrowLeft className="h-4 w-4 mr-1" /> Back to Client
           </Button>
           <div className="flex items-center gap-2">
-            <div className="flex gap-1">
-              {(["7d", "30d", "90d", "all"] as TimeRange[]).map((r) => (
+            <div className="flex gap-1 flex-wrap items-center">
+              {(["7d", "30d", "90d", "all", "custom"] as TimeRange[]).map((r) => (
                 <Button
                   key={r}
                   variant={range === r ? "default" : "outline"}
@@ -245,14 +252,35 @@ export default function Analytics() {
                   onClick={() => setRange(r)}
                   aria-pressed={range === r}
                 >
-                  {r === "all" ? "All Time" : r}
+                  {r === "all" ? "All Time" : r === "custom" ? "Custom" : r}
                 </Button>
               ))}
+              {range === "custom" && (
+                <div className="flex items-center gap-1.5 ml-1">
+                  <input
+                    type="date"
+                    aria-label="Start date"
+                    value={custom.start}
+                    max={custom.end}
+                    onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <input
+                    type="date"
+                    aria-label="End date"
+                    value={custom.end}
+                    min={custom.start}
+                    onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                </div>
+              )}
             </div>
             <ExportPdfButton
               contentRef={exportRef}
               filename={pdfFilename}
-              title={`${client?.name || "Client"} — Analytics (${range === "all" ? "All Time" : range})`}
+              title={`${client?.name || "Client"} — Analytics (${rangeLabel})`}
             />
           </div>
         </div>
