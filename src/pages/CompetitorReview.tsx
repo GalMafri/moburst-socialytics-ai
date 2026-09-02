@@ -26,6 +26,7 @@ import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { PlatformBadge } from "@/lib/platform-config";
+import { describeInvokeError } from "@/lib/invokeError";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Crosshair, Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Trophy, Play, Download,
@@ -156,7 +157,7 @@ export default function CompetitorReview() {
       body: { client_id: clientId, mode: "list" },
     });
     if (error || data?.error) {
-      setLandscapesError(String(data?.error || error?.message || "Could not reach RivalIQ"));
+      setLandscapesError(await describeInvokeError(error, data));
       return;
     }
     setLandscapes(data?.landscapes || []);
@@ -169,7 +170,7 @@ export default function CompetitorReview() {
       const { data, error } = await supabase.functions.invoke("import-rivaliq-landscape", {
         body: { client_id: clientId, mode: "import", landscape_id: landscapeId },
       });
-      if (error || data?.error) throw new Error(String(data?.error || error?.message));
+      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
       toast({
         title: "Landscape imported as a new draft",
         description: `${data.competitors} competitors, ${data.handles} handles from RivalIQ. Top ${data.preselected} pre-selected; adjust and confirm.`,
@@ -190,7 +191,7 @@ export default function CompetitorReview() {
       const { data, error } = await supabase.functions.invoke("identify-competitors", {
         body: { client_id: clientId },
       });
-      if (error || data?.error) throw new Error(data?.error || error?.message);
+      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
       track("competitor_identification_completed", {
         client_id: clientId, entity_id: data.set_id, ok: true,
         props: { proposed: data.competitors?.length },
@@ -335,7 +336,7 @@ export default function CompetitorReview() {
       const { data, error } = await supabase.functions.invoke("confirm-competitor-set", {
         body: { set_id: currentSet!.id },
       });
-      if (error || data?.error) throw new Error(data?.error || error?.message);
+      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
     },
     onSuccess: () => {
       track("competitor_set_confirmed", { client_id: clientId, entity_id: currentSet?.id, ok: true });
