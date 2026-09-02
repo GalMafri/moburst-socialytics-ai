@@ -106,3 +106,6 @@ verify_jwt = false
 
 [functions.import-rivaliq-landscape]
 verify_jwt = false
+
+[functions.post-preview]
+verify_jwt = false
