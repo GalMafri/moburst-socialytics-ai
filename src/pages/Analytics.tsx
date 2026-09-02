@@ -330,7 +330,7 @@ export default function Analytics() {
           <>
             {/* View segmentation */}
             <Tabs value={view} onValueChange={(v) => setView(v as AnalyticsView)}>
-              <TabsList className="grid w-full grid-cols-2 max-w-xs">
+              <TabsList className="grid w-full grid-cols-3 max-w-md">
                 <TabsTrigger value="performance" className="gap-1.5">
                   <BarChart3 className="h-3.5 w-3.5" /> Performance
                 </TabsTrigger>
