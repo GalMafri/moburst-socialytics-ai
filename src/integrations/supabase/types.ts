@@ -273,6 +273,57 @@ export type Database = {
         }
         Relationships: []
       }
+      competitive_insight_feedback: {
+        Row: {
+          client_id: string
+          created_at: string
+          gap_text: string
+          id: string
+          insight_key: string
+          platform: string | null
+          report_id: string | null
+          user_id: string | null
+          verdict: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          gap_text: string
+          id?: string
+          insight_key: string
+          platform?: string | null
+          report_id?: string | null
+          user_id?: string | null
+          verdict: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          gap_text?: string
+          id?: string
+          insight_key?: string
+          platform?: string | null
+          report_id?: string | null
+          user_id?: string | null
+          verdict?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitive_insight_feedback_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "competitive_insight_feedback_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "competitive_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       competitive_reports: {
         Row: {
           client_id: string
@@ -326,57 +377,6 @@ export type Database = {
             columns: ["set_id"]
             isOneToOne: false
             referencedRelation: "competitor_sets"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      competitive_insight_feedback: {
-        Row: {
-          client_id: string
-          created_at: string
-          gap_text: string
-          id: string
-          insight_key: string
-          platform: string | null
-          report_id: string | null
-          user_id: string | null
-          verdict: string
-        }
-        Insert: {
-          client_id: string
-          created_at?: string
-          gap_text: string
-          id?: string
-          insight_key: string
-          platform?: string | null
-          report_id?: string | null
-          user_id?: string | null
-          verdict: string
-        }
-        Update: {
-          client_id?: string
-          created_at?: string
-          gap_text?: string
-          id?: string
-          insight_key?: string
-          platform?: string | null
-          report_id?: string | null
-          user_id?: string | null
-          verdict?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "competitive_insight_feedback_client_id_fkey"
-            columns: ["client_id"]
-            isOneToOne: false
-            referencedRelation: "clients"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "competitive_insight_feedback_report_id_fkey"
-            columns: ["report_id"]
-            isOneToOne: false
-            referencedRelation: "competitive_reports"
             referencedColumns: ["id"]
           },
         ]
@@ -710,36 +710,6 @@ export type Database = {
           },
         ]
       }
-      post_previews: {
-        Row: {
-          fetched_at: string
-          image_url: string | null
-          media_type: string | null
-          platform: string | null
-          status: string
-          title: string | null
-          url: string
-        }
-        Insert: {
-          fetched_at?: string
-          image_url?: string | null
-          media_type?: string | null
-          platform?: string | null
-          status?: string
-          title?: string | null
-          url: string
-        }
-        Update: {
-          fetched_at?: string
-          image_url?: string | null
-          media_type?: string | null
-          platform?: string | null
-          status?: string
-          title?: string | null
-          url?: string
-        }
-        Relationships: []
-      }
       post_iterations: {
         Row: {
           approved_at: string | null
@@ -833,6 +803,36 @@ export type Database = {
           },
         ]
       }
+      post_previews: {
+        Row: {
+          fetched_at: string
+          image_url: string | null
+          media_type: string | null
+          platform: string | null
+          status: string
+          title: string | null
+          url: string
+        }
+        Insert: {
+          fetched_at?: string
+          image_url?: string | null
+          media_type?: string | null
+          platform?: string | null
+          status?: string
+          title?: string | null
+          url: string
+        }
+        Update: {
+          fetched_at?: string
+          image_url?: string | null
+          media_type?: string | null
+          platform?: string | null
+          status?: string
+          title?: string | null
+          url?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           allowed_company_slugs: string[] | null
@@ -881,12 +881,12 @@ export type Database = {
           frequency: string
           id: string
           is_active: boolean | null
-          last_result: Json | null
+          last_result: string | null
           last_run_at: string | null
+          next_run_at: string | null
           range_mode: string
           report_kind: string
           run_day_of_month: number
-          next_run_at: string | null
           trends_date_range_days: number | null
           updated_at: string | null
         }
@@ -898,12 +898,12 @@ export type Database = {
           frequency?: string
           id?: string
           is_active?: boolean | null
-          last_result?: Json | null
+          last_result?: string | null
           last_run_at?: string | null
+          next_run_at?: string | null
           range_mode?: string
           report_kind?: string
           run_day_of_month?: number
-          next_run_at?: string | null
           trends_date_range_days?: number | null
           updated_at?: string | null
         }
@@ -915,12 +915,12 @@ export type Database = {
           frequency?: string
           id?: string
           is_active?: boolean | null
-          last_result?: Json | null
+          last_result?: string | null
           last_run_at?: string | null
+          next_run_at?: string | null
           range_mode?: string
           report_kind?: string
           run_day_of_month?: number
-          next_run_at?: string | null
           trends_date_range_days?: number | null
           updated_at?: string | null
         }
@@ -1374,12 +1374,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1403,11 +1403,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1428,11 +1428,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1453,11 +1453,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1470,11 +1470,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
