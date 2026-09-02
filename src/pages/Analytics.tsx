@@ -24,11 +24,13 @@ import {
   Sparkles,
   Globe,
   Languages,
+  Crosshair,
 } from "lucide-react";
 import { TrendInsightsSection } from "@/components/analytics/TrendInsightsSection";
 import { ConnectedProfiles } from "@/components/analytics/ConnectedProfiles";
 import { AIDeepInsights } from "@/components/analytics/AIDeepInsights";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
 import { Loading } from "@/components/ui/loading";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
@@ -306,6 +308,9 @@ export default function Analytics() {
                 </TabsTrigger>
                 <TabsTrigger value="trends" className="gap-1.5">
                   <TrendingUp className="h-3.5 w-3.5" /> Trends
+                </TabsTrigger>
+                <TabsTrigger value="competitive" className="gap-1.5">
+                  <Crosshair className="h-4 w-4" /> Competitive
                 </TabsTrigger>
               </TabsList>
 
@@ -705,6 +710,9 @@ export default function Analytics() {
               <TabsContent value="trends" className="space-y-6 mt-4">
                 {/* Trend analysis (TikTok + Instagram) */}
                 <TrendInsightsSection reports={filtered} />
+              </TabsContent>
+              <TabsContent value="competitive" className="space-y-6 mt-4">
+                <CompetitiveSnapshot clientId={id!} />
               </TabsContent>
             </Tabs>
 

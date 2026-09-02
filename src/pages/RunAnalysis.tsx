@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Loading } from "@/components/ui/loading";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
+import { buildCompetitiveContext } from "@/components/competitive/CompetitiveSnapshot";
 import { Navigate } from "react-router-dom";
 
 const STEPS_FULL = [
@@ -78,6 +79,25 @@ export default function RunAnalysis() {
         .select("*")
         .eq("client_id", id!)
         .eq("is_active", true);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!id,
+  });
+
+  // Latest complete competitive analysis, sent along so the report synthesis
+  // can react to competitor gaps rather than analyze the client in isolation.
+  const { data: latestCompetitive } = useQuery({
+    queryKey: ["competitive-latest", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("competitive_reports")
+        .select("id, created_at, report_data")
+        .eq("client_id", id!)
+        .eq("status", "complete")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
       if (error) throw error;
       return data;
     },
@@ -333,6 +353,7 @@ export default function RunAnalysis() {
         date_range_end: dateRangeEnd || "",
         skip_trends: skipTrends,
         timezone: (client as any)?.timezone || "UTC",
+        competitive_context: buildCompetitiveContext(latestCompetitive),
       };
 
       console.log("Sending webhook payload:", JSON.stringify(payload, null, 2));
@@ -407,6 +428,10 @@ export default function RunAnalysis() {
               </div>
               <div>
                 <span className="text-muted-foreground">Profiles:</span> {profiles?.length || 0}
+              </div>
+              <div>
+                <span className="text-muted-foreground">Competitive context:</span>{" "}
+                {latestCompetitive ? `from ${new Date(latestCompetitive.created_at).toLocaleDateString()}` : "none yet"}
               </div>
             </div>
             {profiles && profiles.length === 0 && (

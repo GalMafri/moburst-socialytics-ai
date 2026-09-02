@@ -25,6 +25,7 @@ import {
   Languages,
   CheckCircle2,
   AlertCircle,
+  Crosshair,
 } from "lucide-react";
 import {
   PlatformBadge,
@@ -42,6 +43,7 @@ import { useTrackView } from "@/hooks/useTrackView";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
+import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
 import {
   parseCsv,
   stripVoicePreset,
@@ -203,6 +205,10 @@ export default function ReportView() {
   ) {
     tabs.push({ value: "trends", label: "Trends", icon: <TrendingUp className="h-4 w-4" /> });
   }
+
+  // Competitive is always offered: it either shows the latest analysis or
+  // explains how to get one, so the feature is discoverable from the report.
+  tabs.push({ value: "competitive", label: "Competitive", icon: <Crosshair className="h-4 w-4" /> });
 
   const gammaUrl = report.gamma_url || rd?.gamma_url;
 
@@ -466,6 +472,11 @@ export default function ReportView() {
               platform="instagram"
             />
           </TabsContent>
+          {/* ── COMPETITIVE TAB ── */}
+          <TabsContent value="competitive" className="space-y-6">
+            <CompetitiveSnapshot clientId={report.client_id} takeaways={aiAnalysis?.competitive_takeaways} />
+          </TabsContent>
+
         </Tabs>
       </div>
     </AppLayout>
