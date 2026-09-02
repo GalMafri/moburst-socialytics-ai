@@ -66,7 +66,9 @@ export default function CompetitiveRun() {
     enabled: !!id,
   });
 
-  // Deep analysis runs against the newest CONFIRMED set only.
+  // Deep analysis runs against the newest confirmed set. A set keeps its
+  // confirmation through later runs (its status moves to analyzing, complete
+  // or failed), so every post-confirmation status counts; only drafts do not.
   const { data: confirmedSet, isLoading: setLoading } = useQuery({
     queryKey: ["confirmed-competitor-set", id],
     queryFn: async () => {
@@ -74,7 +76,7 @@ export default function CompetitiveRun() {
         .from("competitor_sets")
         .select("*")
         .eq("client_id", id!)
-        .eq("status", "confirmed")
+        .in("status", ["confirmed", "analyzing", "complete", "failed"])
         .order("confirmed_at", { ascending: false })
         .limit(1)
         .maybeSingle();

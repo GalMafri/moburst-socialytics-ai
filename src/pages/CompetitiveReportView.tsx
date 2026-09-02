@@ -218,8 +218,10 @@ export default function CompetitiveReportView() {
         <Stat label="Eng. rate" value={p.engagement_rate ? pct(p.engagement_rate) : "–"} />
         <Stat label={p.views ? "Views" : "Reach"} value={p.views ? fmt(p.views) : p.reach ? fmt(p.reach) : "–"} />
       </div>
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <span title="Likes and reactions · comments · shares">{fmt(p.applause || 0)} likes · {fmt(p.conversation || 0)} comments · {fmt(p.amplification || 0)} shares</span>
+      <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+        {(p.applause || p.conversation || p.amplification) ? (
+          <span title="Likes and reactions · comments · shares">{fmt(p.applause || 0)} likes · {fmt(p.conversation || 0)} comments · {fmt(p.amplification || 0)} shares</span>
+        ) : <span />}
         <span>{p.created ? new Date(p.created).toLocaleDateString() : ""}</span>
       </div>
     </div>
