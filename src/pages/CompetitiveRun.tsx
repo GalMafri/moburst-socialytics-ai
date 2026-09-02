@@ -205,6 +205,9 @@ export default function CompetitiveRun() {
         company_slug: client!.company_slug,
         website_url: client!.website_url,
         set_id: confirmedSet!.id,
+        // Sets imported from RivalIQ carry the landscape id; the workflow then
+        // resolves it explicitly instead of matching by focus-company name.
+        rivaliq_landscape_id: (confirmedSet as any).rivaliq_landscape_id || undefined,
         competitors: (selectedCompetitors || []).map((c: any) => ({
           id: c.id,
           rank: c.selected_rank,
@@ -371,7 +374,8 @@ export default function CompetitiveRun() {
                 {pastRuns.map((r: any) => (
                   <div
                     key={r.id}
-                    className="flex items-center justify-between p-3 rounded-md bg-[rgba(255,255,255,0.04)]"
+                    className={`flex items-center justify-between p-3 rounded-md bg-[rgba(255,255,255,0.04)] ${r.status !== "running" ? "cursor-pointer hover:bg-[rgba(255,255,255,0.06)]" : ""}`}
+                    onClick={() => r.status !== "running" && navigate(`/clients/${id}/competitive/reports/${r.id}`)}
                   >
                     <div className="flex items-center gap-3">
                       <Badge
@@ -385,8 +389,12 @@ export default function CompetitiveRun() {
                       {r.duration_minutes ? (
                         <span className="text-xs text-muted-foreground">{r.duration_minutes}m</span>
                       ) : null}
+                      {r.status !== "running" && (
+                        <span className="text-xs underline underline-offset-2">View report</span>
+                      )}
                       {r.gamma_url && (
                         <a
+                          onClick={(e) => e.stopPropagation()}
                           href={r.gamma_url}
                           target="_blank"
                           rel="noreferrer"

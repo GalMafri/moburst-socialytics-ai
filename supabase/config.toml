@@ -103,3 +103,6 @@ verify_jwt = false
 # secret is the auth, hence verify_jwt off like the rest of the project.
 [functions.update-competitive-report]
 verify_jwt = false
+
+[functions.import-rivaliq-landscape]
+verify_jwt = false

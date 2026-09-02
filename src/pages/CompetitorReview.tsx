@@ -26,8 +26,9 @@ import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { PlatformBadge } from "@/lib/platform-config";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  Crosshair, Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Trophy, Play,
+  Crosshair, Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Trophy, Play, Download,
 } from "lucide-react";
 
 type CompetitorRow = {
@@ -62,6 +63,11 @@ export default function CompetitorReview() {
   const [detecting, setDetecting] = useState(false);
   const [manualName, setManualName] = useState("");
   const [manualUrl, setManualUrl] = useState("");
+  // RivalIQ import: the agency's landscapes are the curated competitor sets.
+  const [importOpen, setImportOpen] = useState(false);
+  const [landscapes, setLandscapes] = useState<any[] | null>(null);
+  const [landscapesError, setLandscapesError] = useState<string | null>(null);
+  const [importingId, setImportingId] = useState<string | null>(null);
 
   const { data: client } = useQuery({
     queryKey: ["client", clientId],
@@ -141,6 +147,41 @@ export default function CompetitorReview() {
   };
 
   // ── Actions ────────────────────────────────────────────────────────────────
+
+  const openImport = async () => {
+    setImportOpen(true);
+    setLandscapes(null);
+    setLandscapesError(null);
+    const { data, error } = await supabase.functions.invoke("import-rivaliq-landscape", {
+      body: { client_id: clientId, mode: "list" },
+    });
+    if (error || data?.error) {
+      setLandscapesError(String(data?.error || error?.message || "Could not reach RivalIQ"));
+      return;
+    }
+    setLandscapes(data?.landscapes || []);
+  };
+
+  const importLandscape = async (landscapeId: string) => {
+    setImportingId(landscapeId);
+    track("competitive_landscape_import_started", { client_id: clientId, landscape_id: landscapeId });
+    try {
+      const { data, error } = await supabase.functions.invoke("import-rivaliq-landscape", {
+        body: { client_id: clientId, mode: "import", landscape_id: landscapeId },
+      });
+      if (error || data?.error) throw new Error(String(data?.error || error?.message));
+      toast({
+        title: "Landscape imported as a new draft",
+        description: `${data.competitors} competitors, ${data.handles} handles from RivalIQ. Top ${data.preselected} pre-selected; adjust and confirm.`,
+      });
+      setImportOpen(false);
+      refreshAll();
+    } catch (err: any) {
+      toast({ title: "Import failed", description: err.message, variant: "destructive" });
+    } finally {
+      setImportingId(null);
+    }
+  };
 
   const identify = async () => {
     setIdentifying(true);
@@ -328,6 +369,47 @@ export default function CompetitorReview() {
   return (
     <AppLayout title={`Competitors: ${client.name}`}>
       <div className="max-w-4xl mx-auto space-y-6">
+        <Dialog open={importOpen} onOpenChange={setImportOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Import a RivalIQ landscape</DialogTitle>
+              <DialogDescription>
+                Landscapes whose focus company is this client are listed first. Importing creates a new draft set
+                with the landscape's companies and their tracked handles; the top 3 are pre-selected for you to adjust.
+              </DialogDescription>
+            </DialogHeader>
+            {landscapesError ? (
+              <p className="text-sm text-destructive">{landscapesError}</p>
+            ) : landscapes === null ? (
+              <Loading label="Reading RivalIQ landscapes" />
+            ) : landscapes.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No landscapes on the RivalIQ account.</p>
+            ) : (
+              <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+                {landscapes.map((l: any) => (
+                  <div key={l.id} className="p-3 rounded-md bg-[rgba(255,255,255,0.04)] flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium flex items-center gap-2">
+                        {l.name}
+                        {l.is_match && <Badge>matches {client?.name}</Badge>}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Focus: {l.focus_company || "?"} · {l.companies.filter((c: any) => !c.is_focus).length} competitors
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {l.companies.filter((c: any) => !c.is_focus).map((c: any) => c.name).join(", ")}
+                      </div>
+                    </div>
+                    <Button size="sm" onClick={() => importLandscape(l.id)} disabled={!!importingId}>
+                      {importingId === l.id ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
+                      Import
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
         {/* Status / primary actions */}
         <Card>
           <CardHeader className="pb-3">
@@ -345,7 +427,10 @@ export default function CompetitorReview() {
                   AI proposes, you decide. Swap out misfits, add your own, then lock the top 3.
                 </CardDescription>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" size="sm" onClick={openImport} disabled={identifying}>
+                  <Download className="h-3.5 w-3.5 mr-1" /> Import from RivalIQ
+                </Button>
                 {currentSet && (
                   <Button variant="outline" size="sm" onClick={redetectHandles} disabled={detecting || !isDraft}>
                     {detecting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Search className="h-3.5 w-3.5 mr-1" />}

@@ -17,6 +17,8 @@ import ClientSetup from "./pages/ClientSetup";
 import RunAnalysis from "./pages/RunAnalysis";
 import CompetitorReview from "./pages/CompetitorReview";
 import CompetitiveRun from "./pages/CompetitiveRun";
+import CompetitiveIndex from "./pages/CompetitiveIndex";
+import CompetitiveReportView from "./pages/CompetitiveReportView";
 import ReportView from "./pages/ReportView";
 import ReportHistory from "./pages/ReportHistory";
 import AllReports from "./pages/AllReports";
@@ -54,6 +56,9 @@ const App = () => (
                   the client-facing surface is the finished deck via RLS. */}
               <Route path="/clients/:id/competitive" element={<StaffOnlyRoute><CompetitorReview /></StaffOnlyRoute>} />
               <Route path="/clients/:id/competitive/run" element={<StaffOnlyRoute><CompetitiveRun /></StaffOnlyRoute>} />
+              <Route path="/competitive" element={<StaffOnlyRoute><CompetitiveIndex /></StaffOnlyRoute>} />
+              {/* Finished competitive reports are client-readable via RLS (status=complete only) */}
+              <Route path="/clients/:id/competitive/reports/:reportId" element={<CompetitiveReportView />} />
               <Route path="/analytics" element={<AnalyticsIndex />} />
               <Route path="/reports" element={<StaffOnlyRoute><AllReports /></StaffOnlyRoute>} />
               <Route path="/settings" element={<StaffOnlyRoute><Settings /></StaffOnlyRoute>} />

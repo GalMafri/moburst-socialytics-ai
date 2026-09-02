@@ -12,7 +12,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge } from "lucide-react";
+import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Crosshair } from "lucide-react";
 import { PORTAL_URL } from "@/utils/gosAuth";
 
 export function AppSidebar() {
@@ -26,6 +26,9 @@ export function AppSidebar() {
     // per-client report history linked from ClientDashboard.
     ...(isMoburstStaff ? [{ icon: FileText, label: "Reports", href: "/reports" }] : []),
     { icon: TrendingUp, label: "Analytics", href: "/analytics" },
+    // Competitive analysis: staff review competitor sets and run the RivalIQ
+    // deep analysis here; clients reach finished reports from their dashboard.
+    ...(isMoburstStaff ? [{ icon: Crosshair, label: "Competitive", href: "/competitive" }] : []),
     ...(isAdmin ? [{ icon: Gauge, label: "User Analytics", href: "/usage" }] : []),
     ...(isAdmin ? [{ icon: Settings, label: "Settings", href: "/settings" }] : []),
   ];

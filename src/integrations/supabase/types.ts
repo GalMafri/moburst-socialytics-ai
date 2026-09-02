@@ -393,6 +393,8 @@ export type Database = {
           generated_by: string | null
           id: string
           notes: string | null
+          rivaliq_landscape_id: string | null
+          source: string
           status: string
           updated_at: string
         }
@@ -404,6 +406,8 @@ export type Database = {
           generated_by?: string | null
           id?: string
           notes?: string | null
+          rivaliq_landscape_id?: string | null
+          source?: string
           status?: string
           updated_at?: string
         }
@@ -415,6 +419,8 @@ export type Database = {
           generated_by?: string | null
           id?: string
           notes?: string | null
+          rivaliq_landscape_id?: string | null
+          source?: string
           status?: string
           updated_at?: string
         }
