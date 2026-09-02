@@ -23,3 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 .claude/
+
+# Local environment. Only public VITE_* values ever lived here; vite.config.ts
+# carries production fallbacks so a missing .env cannot break a build.
+.env
+.env.*
+!.env.example
