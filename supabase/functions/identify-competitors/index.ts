@@ -95,47 +95,85 @@ async function proposeCompetitors(args: {
     .filter(Boolean)
     .join("\n");
 
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": args.anthropicKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-5",
-      max_tokens: 3000,
-      system:
-        "You are a competitive intelligence analyst for a social media marketing agency. " +
-        "You identify DIRECT competitors: companies a customer would genuinely consider instead, " +
-        "in the same market and rough size class — not aspirational giants, not tangential brands. " +
-        "Prefer competitors with an actual social media presence, since the analysis is about social. " +
-        "Output strict JSON only.",
-      messages: [
-        {
-          role: "user",
-          content:
-            `Identify 8-12 direct competitors for this company:\n\n${profile}\n\n` +
-            `Output exactly this JSON shape, nothing else:\n` +
-            `{"competitors":[{"name":"...","website_url":"https://...","rationale":"one sentence on why this is a direct competitor","similarity_score":0.0}]}\n\n` +
-            `similarity_score is 0..1 — how substitutable this competitor is for the client in a customer's eyes. ` +
-            `Sort by similarity_score descending. Real companies only; if you are not confident a company exists, leave it out.`,
-        },
-      ],
-    }),
-  });
+  // JSON prefill: the assistant turn starts as the object we want, so the
+  // model can only continue it. Parsing re-attaches the prefix. All text
+  // blocks are concatenated — Claude 5 responses can carry a non-text block
+  // first, which is exactly what produced "No JSON in model response" on
+  // 2026-09-02 while the model had in fact answered.
+  const PREFILL = '{"competitors":[';
+  const callModel = async (maxTokens: number) => {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": args.anthropicKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-5",
+        max_tokens: maxTokens,
+        temperature: 0,
+        system:
+          "You are a competitive intelligence analyst for a social media marketing agency. " +
+          "You identify DIRECT competitors: companies a customer would genuinely consider instead, " +
+          "in the same market and rough size class — not aspirational giants, not tangential brands. " +
+          "Prefer competitors with an actual social media presence, since the analysis is about social. " +
+          "Output strict JSON only.",
+        messages: [
+          {
+            role: "user",
+            content:
+              `Identify 8-12 direct competitors for this company:\n\n${profile}\n\n` +
+              `Output exactly this JSON shape, nothing else:\n` +
+              `{"competitors":[{"name":"...","website_url":"https://...","rationale":"one sentence on why this is a direct competitor","similarity_score":0.0}]}\n\n` +
+              `similarity_score is 0..1 — how substitutable this competitor is for the client in a customer's eyes. ` +
+              `Sort by similarity_score descending. Real companies only; if you are not confident a company exists, leave it out.`,
+          },
+          { role: "assistant", content: PREFILL },
+        ],
+      }),
+    });
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => "");
+      throw new Error(`Anthropic API error ${resp.status}: ${t.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    const text = (data.content || [])
+      .filter((b: { type?: string }) => b?.type === "text")
+      .map((b: { text?: string }) => b.text || "")
+      .join("\n");
+    return { text, stopReason: String(data.stop_reason || "") };
+  };
 
-  if (!resp.ok) {
-    const t = await resp.text().catch(() => "");
-    throw new Error(`Anthropic API error ${resp.status}: ${t.slice(0, 200)}`);
+  const extract = (raw: string): { competitors?: ProposedCompetitor[] } | null => {
+    const cleaned = raw.replace(/```(?:json)?/gi, "").trim();
+    const candidates = [PREFILL + cleaned, cleaned];
+    for (const cand of candidates) {
+      const start = cand.indexOf("{");
+      const end = cand.lastIndexOf("}");
+      if (start === -1 || end <= start) continue;
+      try {
+        return JSON.parse(cand.slice(start, end + 1));
+      } catch {
+        // try the next candidate
+      }
+    }
+    return null;
+  };
+
+  let { text, stopReason } = await callModel(3000);
+  let parsed = extract(text);
+  if (!parsed && stopReason === "max_tokens") {
+    // Truncated mid-JSON: one retry with more room.
+    ({ text, stopReason } = await callModel(6000));
+    parsed = extract(text);
+  }
+  if (!parsed) {
+    throw new Error(
+      `Model reply was not JSON (stop_reason=${stopReason || "?"}). First 200 chars: ${text.slice(0, 200).replace(/\s+/g, " ")}`,
+    );
   }
 
-  const data = await resp.json();
-  const text: string = data.content?.[0]?.text || "";
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("No JSON in model response");
-
-  const parsed = JSON.parse(match[0]) as { competitors?: ProposedCompetitor[] };
   const list = (parsed.competitors || [])
     .filter((x) => x?.name)
     .map((x) => ({
