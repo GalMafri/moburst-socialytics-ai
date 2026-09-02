@@ -83,7 +83,10 @@ Deno.serve(async (req) => {
       if (error) throw new Error(error.message);
       if (!data || data.length === 0) return jsonResp({ error: "report not found" }, 404);
 
-      // Keep the set's lifecycle in step with its latest run.
+      // Keep the set's lifecycle in step with its latest run. A successful run
+      // supersedes an earlier failure (sets are re-runnable by design), so
+      // "complete" may roll forward from failed as well; a failure only marks
+      // sets that were mid-run, never one that already completed.
       if (status === "complete" || status === "failed") {
         const { data: rep } = await supabase
           .from("competitive_reports")
@@ -91,11 +94,14 @@ Deno.serve(async (req) => {
           .eq("id", report_id)
           .maybeSingle();
         if (rep?.set_id) {
+          const from = status === "complete"
+            ? ["confirmed", "analyzing", "failed"]
+            : ["confirmed", "analyzing"];
           await supabase
             .from("competitor_sets")
-            .update({ status: status === "complete" ? "complete" : "failed" })
+            .update({ status })
             .eq("id", rep.set_id)
-            .in("status", ["confirmed", "analyzing"]);
+            .in("status", from);
         }
       }
       return jsonResp({ ok: true, report: data[0] });
