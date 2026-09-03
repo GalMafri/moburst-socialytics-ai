@@ -131,7 +131,7 @@ export default function ReportView() {
     );
   if (!report)
     return (
-      <AppLayout title="Report">
+      <AppLayout>
         <p className="text-muted-foreground">Report not found.</p>
       </AppLayout>
     );

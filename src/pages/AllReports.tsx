@@ -77,7 +77,8 @@ export default function AllReports() {
   });
 
   return (
-    <AppLayout title="Reports">
+    <AppLayout title="Reports"
+      description="Every monthly report and competitive analysis across clients, newest first.">
       <div className="w-full">
         <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
           <TabsList className="mb-4">

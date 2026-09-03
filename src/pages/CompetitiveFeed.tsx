@@ -155,7 +155,8 @@ export default function CompetitiveFeed() {
   const topicFor = (p: FeedPost) => `Our own take on this competitor post by ${p.companyName || "a competitor"} (${platformLabel(p.channel)}): "${String(p.message || "").slice(0, 240)}". Do not copy it; use the angle that works and make it ours.`;
 
   return (
-    <AppLayout title={`Competitor feed: ${clientName}`}>
+    <AppLayout title={`Competitor feed: ${clientName}`}
+      description="What the competitor set posted in the last seven days, and the topics they converged on.">
       <div className="w-full space-y-8">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-2">

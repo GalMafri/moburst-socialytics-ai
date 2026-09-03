@@ -41,11 +41,10 @@ export default function AnalyticsIndex() {
   }, [isClient, clients, user?.company, isGosSession, navigate]);
 
   return (
-    <AppLayout title="Analytics">
+    <AppLayout title="Analytics"
+      description="Choose a client to open its analytics: live Sprout numbers, trends and the competitive view.">
       <div className="space-y-6">
         <div>
-          <h2 className="t-h3">Select a Client</h2>
-          <p className="t-secondary">Choose a client to view their analytics dashboard.</p>
         </div>
 
         {isLoading ? (

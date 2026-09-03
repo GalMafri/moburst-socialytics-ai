@@ -47,7 +47,8 @@ export default function CompetitiveReportHistory() {
   });
 
   return (
-    <AppLayout title={`Competitive reports: ${client?.name ?? "Client"}`}>
+    <AppLayout title={`Competitive reports: ${client?.name ?? "Client"}`}
+      description="Every competitive analysis run for this client, newest first.">
       <div className="w-full space-y-6">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <Button variant="ghost" size="sm" onClick={() => navigate(isMoburstStaff ? "/competitive" : "/")}>

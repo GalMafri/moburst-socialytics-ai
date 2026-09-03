@@ -44,7 +44,8 @@ export default function ReportHistory() {
   });
 
   return (
-    <AppLayout title={`Reports: ${client?.name ?? "Client"}`}>
+    <AppLayout title={`Reports: ${client?.name ?? "Client"}`}
+      description="All monthly reports for this client, newest first.">
       <div className="w-full space-y-6">
         <Card>
           <CardHeader>

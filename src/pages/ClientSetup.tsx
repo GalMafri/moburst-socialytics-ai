@@ -337,13 +337,10 @@ export default function ClientSetup() {
   if (!canManageClients) return <Navigate to="/" replace />;
 
   return (
-    <AppLayout title={isNew ? "New Client" : `${form.name || "Client"} Setup`}>
+    <AppLayout title={isNew ? "New Client" : `${form.name || "Client"} Setup`}
+      description="Client details, social profiles, brand assets, competitors and report schedules.">
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold">{isNew ? "Create New Client" : "Client Configuration"}</h2>
-            <p className="t-secondary">Configure client details and social media settings</p>
-          </div>
           <div className="flex items-center gap-2">
             {!isNew && (
               <Button onClick={() => navigate(`/clients/${id}/analyze`)}>

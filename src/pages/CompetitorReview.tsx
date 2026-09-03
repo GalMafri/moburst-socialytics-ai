@@ -361,7 +361,8 @@ export default function CompetitorReview() {
 
   if (!client || setLoading) {
     return (
-      <AppLayout title="Competitive Analysis">
+      <AppLayout title="Competitive Analysis"
+      description="Review the proposed competitors, confirm the top three, then run the analysis.">
         <Loading label="Loading" />
       </AppLayout>
     );
