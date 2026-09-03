@@ -2,9 +2,9 @@
 // (image, video frame or carousel cover), the platform, the media type, and a
 // click-through to the original post.
 //
-// The tile takes the creative's own format: a square stays square, a Reel or
-// TikTok is 9:16, a YouTube thumbnail is 16:9. The ratio is read from the
-// loaded media; until then a sensible default for the platform holds the space.
+// Every tile has the same fixed frame so cards line up; inside it the creative
+// keeps its own format (a 9:16 Reel stands tall, a 16:9 YouTube thumbnail sits
+// wide, a square stays square) over a soft blurred backdrop of itself.
 //
 // Competitor posts arrive from RivalIQ with an `image` URL already attached.
 // Client posts come from Sprout, which carries no media, so their thumbnails
@@ -85,14 +85,6 @@ export function mediaLabel(kind: MediaKind): string {
   return kind === "video" ? "Video" : kind === "carousel" ? "Carousel" : kind === "text" ? "Text" : "Image";
 }
 
-/** The format a post most likely has before its media tells us for sure. */
-function defaultRatio(kind: MediaKind, plat: string, url: string | null | undefined): number {
-  if (plat === "youtube" && !String(url || "").includes("/shorts/")) return 16 / 9;
-  if (plat === "tiktok" || kind === "video") return 9 / 16;
-  if (plat === "instagram" || kind === "carousel") return 1;
-  return 4 / 5;
-}
-
 export type PreviewHint = { url: string | null | undefined; image?: string | null; mediaType?: string | null };
 
 /**
@@ -162,15 +154,18 @@ type PostVisualProps = {
   className?: string;
   /** Hide the platform and type badges (for very small tiles). */
   compact?: boolean;
-  /** Cap the tile height (CSS length) so a 9:16 video does not dominate a row. */
+  /** Tailwind aspect class for the fixed frame. Defaults to 4:5; compact tiles default to square. */
+  frame?: string;
+  /** Kept for callers; the fixed frame already bounds the height. */
   maxHeight?: string;
 };
 
 /**
- * Thumbnail tile in the creative's own format, linking to the original post.
- * Falls back to a labelled placeholder when no creative could be resolved.
+ * Thumbnail tile in a fixed frame, linking to the original post. The creative
+ * keeps its own format inside the frame; a labelled placeholder takes the
+ * frame when no creative could be resolved.
  */
-export function PostVisual({ url, image, preview, mediaType, platform, className = "", compact = false, maxHeight }: PostVisualProps) {
+export function PostVisual({ url, image, preview, mediaType, platform, className = "", compact = false, frame }: PostVisualProps) {
   // Sources in order of preference: the resolved preview first (a durable copy
   // in our storage when the original is an expiring CDN link), then the
   // creative the report already carries. A source that fails to load hands
@@ -181,16 +176,14 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
     return list;
   }, [preview?.image_url, image]);
   const [failed, setFailed] = useState<string[]>([]);
-  const [measured, setMeasured] = useState<Record<string, number>>({});
   const src = candidates.find((c) => !failed.includes(c)) || null;
   const fail = () => { if (src) setFailed((f) => [...f, src]); };
-  const measure = (w: number, h: number) => { if (src && w > 0 && h > 0) setMeasured((m) => (m[src] ? m : { ...m, [src]: w / h })); };
   // RivalIQ hands back the video file itself for Instagram Reels; a muted
   // <video> shows its first frame where an <img> would fail.
   const isVideoFile = !!src && /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(src);
   const kind = mediaKind(mediaType || preview?.media_type, url);
   const plat = normalizePlatform(platform || preview?.platform || platformFromUrl(url));
-  const ratio = (src && measured[src]) || defaultRatio(kind, plat, url);
+  const aspect = frame || (compact ? "aspect-square" : "aspect-[4/5]");
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const el = videoRef.current;
@@ -217,6 +210,9 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
 
   const body = (
     <>
+      {src && !isVideoFile && (
+        <img src={src} alt="" aria-hidden referrerPolicy="no-referrer" className="absolute inset-0 h-full w-full object-cover scale-110 blur-2xl opacity-50" />
+      )}
       {src && isVideoFile ? (
         <video
           ref={videoRef}
@@ -224,8 +220,7 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
           playsInline
           preload="none"
           onError={fail}
-          onLoadedMetadata={(e) => measure(e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
-          className="absolute inset-0 h-full w-full object-cover pointer-events-none"
+          className="absolute inset-0 h-full w-full object-contain pointer-events-none"
         />
       ) : src ? (
         <img
@@ -234,8 +229,7 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
           loading="lazy"
           referrerPolicy="no-referrer"
           onError={fail}
-          onLoad={(e) => measure(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-contain"
         />
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] text-muted-foreground">
@@ -266,14 +260,13 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
   );
   // Callers that pass a width class keep it; everyone else gets the full column.
   const width = /(^|\s)(w-|max-w-|flex-)/.test(className) ? "" : "w-full";
-  const base = `group relative block ${width} overflow-hidden rounded-[12px] bg-[rgba(255,255,255,0.04)] ${className}`;
-  const style: React.CSSProperties = { aspectRatio: String(ratio), maxHeight, marginInline: "auto" };
+  const base = `group relative block ${width} ${aspect} overflow-hidden rounded-[12px] bg-black/50 ${className}`;
   if (url) {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className={base} style={style} aria-label="Open the original post">
+      <a href={url} target="_blank" rel="noreferrer" className={base} aria-label="Open the original post">
         {body}
       </a>
     );
   }
-  return <div className={base} style={style}>{body}</div>;
+  return <div className={base}>{body}</div>;
 }

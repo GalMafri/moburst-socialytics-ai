@@ -1,4 +1,6 @@
 import { PRESET_LABELS, presetRange, isValidRange, formatRange, rangesOverlap, reportPeriod, type DateRange } from "@/lib/dateRange";
+import { PostVisual, usePostPreviews } from "@/components/competitive/PostVisual";
+import { PlatformBadge } from "@/lib/platform-config";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -26,6 +28,7 @@ import {
   Globe,
   Languages,
   Crosshair,
+  ExternalLink,
 } from "lucide-react";
 import { TrendInsightsSection } from "@/components/analytics/TrendInsightsSection";
 import { ConnectedProfiles } from "@/components/analytics/ConnectedProfiles";
@@ -84,6 +87,23 @@ export default function Analytics() {
     return reports.filter((r: any) => rangesOverlap(reportPeriod(r), viewWindow));
   }, [reports, viewWindow]);
   const rangeLabel = range === "all" ? "All Time" : range === "custom" ? (viewWindow ? formatRange(viewWindow) : "Custom") : PRESET_LABELS[range];
+
+  // Live Sprout numbers for the selected window. Reports only hold month-level
+  // snapshots, so presets and custom ranges are answered by Sprout directly,
+  // with the equal-length period before the window for comparison.
+  const liveQuery = useQuery({
+    queryKey: ["sprout-analytics", id, viewWindow?.start, viewWindow?.end],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("sprout-analytics", { body: { client_id: id, start: viewWindow!.start, end: viewWindow!.end } });
+      if (error) throw new Error((error as any)?.message || "Could not load Sprout data");
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data as any;
+    },
+    enabled: !!id && !!viewWindow,
+    staleTime: 10 * 60 * 1000,
+    retry: 1,
+  });
+  const liveData = viewWindow ? liveQuery.data : null;
 
   // Helper: extract totals from sprout_performance with flexible key lookup
   function extractTotals(sp: any): {
@@ -313,7 +333,7 @@ export default function Analytics() {
 
         {isLoading ? (
           <Loading label="Loading analytics" />
-        ) : filtered.length === 0 ? (
+        ) : filtered.length === 0 && !viewWindow ? (
           <Card className="p-12 text-center">
             <div className="space-y-3">
               <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto" />
@@ -343,8 +363,17 @@ export default function Analytics() {
               </TabsList>
 
               <TabsContent value="performance" className="space-y-6 mt-4">
-                {/* Summary cards — latest report metrics */}
-                {latestTotals ? (
+                {viewWindow && (
+                  <LiveSproutSection
+                    data={liveData}
+                    isLoading={liveQuery.isLoading}
+                    error={liveQuery.error as Error | null}
+                    rangeLabel={rangeLabel}
+                    fmtVal={fmtVal}
+                  />
+                )}
+                {/* Summary cards — latest report metrics (All Time view) */}
+                {viewWindow ? null : latestTotals ? (
                   <div>
                     <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
                       <BarChart3 className="h-3 w-3" />
@@ -455,7 +484,7 @@ export default function Analytics() {
                 )}
 
                 {/* Month-over-month comparison from latest report */}
-                {comparison && Object.keys(comparison.changes).length > 0 && (
+                {!viewWindow && comparison && Object.keys(comparison.changes).length > 0 && (
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-base">
@@ -853,6 +882,118 @@ function MetricBarSingle({
       <p className="text-lg font-bold" style={{ color }}>
         {fmtVal(value)}
       </p>
+    </div>
+  );
+}
+
+
+/* ─── Live Sprout data for the selected window ─── */
+function LiveSproutSection({
+  data,
+  isLoading,
+  error,
+  rangeLabel,
+  fmtVal,
+}: {
+  data: any;
+  isLoading: boolean;
+  error: Error | null;
+  rangeLabel: string;
+  fmtVal: (v: number) => string;
+}) {
+  const posts: any[] = data?.top_posts || [];
+  const { previews } = usePostPreviews(posts.map((p) => p.permalink));
+  if (isLoading) return <Loading label={`Loading Sprout data for ${rangeLabel}`} />;
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="pt-5 text-sm text-muted-foreground">
+          Live Sprout data is not available for this window: {error.message}
+        </CardContent>
+      </Card>
+    );
+  }
+  if (!data) return null;
+  const t = data.totals || {};
+  const ch = data.changes || {};
+  const metric = (key: string) => fmtVal(Number(t[key] || 0));
+  const pct = (key: string) => (typeof ch[key]?.percent === "number" ? ch[key].percent : undefined);
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
+          <BarChart3 className="h-3 w-3" />
+          Sprout data for {rangeLabel} · compared with the {data.previous_range?.days} days before ({formatRange(data.previous_range)})
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <SummaryCard icon={<Eye className="h-3.5 w-3.5" />} label="Impressions" value={metric("impressions")} change={pct("impressions")} />
+          <SummaryCard icon={<Heart className="h-3.5 w-3.5" />} label="Reactions" value={metric("reactions")} change={pct("reactions")} />
+          <SummaryCard icon={<MousePointerClick className="h-3.5 w-3.5" />} label="Link Clicks" value={metric("post_link_clicks")} change={pct("post_link_clicks")} />
+          <SummaryCard icon={<Play className="h-3.5 w-3.5" />} label="Video Views" value={metric("video_views")} change={pct("video_views")} />
+          <SummaryCard icon={<MessageCircle className="h-3.5 w-3.5" />} label="Comments" value={metric("comments")} change={pct("comments")} />
+          <SummaryCard icon={<Share2 className="h-3.5 w-3.5" />} label="Shares" value={metric("shares")} change={pct("shares")} />
+        </div>
+      </div>
+
+      {Array.isArray(data.by_profile) && data.by_profile.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">By profile <span className="font-normal text-muted-foreground text-sm">({rangeLabel})</span></CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {data.by_profile.map((p: any) => (
+                <div key={p.profile_id} className="rounded-[12px] p-4 bg-[rgba(255,255,255,0.04)] space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium truncate">{p.name}</span>
+                    {p.network && <PlatformBadge platform={p.network} size="sm" />}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div><p className="font-semibold">{fmtVal(p.impressions || 0)}</p><p className="text-[11px] text-muted-foreground uppercase tracking-wider">Impr.</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.reactions || 0)}</p><p className="text-[11px] text-muted-foreground uppercase tracking-wider">Reactions</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.video_views || 0)}</p><p className="text-[11px] text-muted-foreground uppercase tracking-wider">Views</p></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {posts.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Top posts <span className="font-normal text-muted-foreground text-sm">({rangeLabel}, by impressions)</span></CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2">
+              {posts.slice(0, 6).map((p: any, i: number) => (
+                <div key={i} className="flex gap-4 rounded-[12px] p-3 bg-[rgba(255,255,255,0.04)]">
+                  <PostVisual url={p.permalink} preview={p.permalink ? previews[p.permalink] : null} mediaType={p.post_type} platform={p.network_type} className="w-28 shrink-0" compact />
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      {p.network_type ? <PlatformBadge platform={p.network_type} size="sm" /> : <span />}
+                      <span className="text-xs text-muted-foreground">{p.posted_at ? new Date(p.posted_at).toLocaleDateString() : ""}</span>
+                    </div>
+                    <p className="text-sm leading-relaxed line-clamp-3">{p.text || "(no caption)"}</p>
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{fmtVal(p.impressions || 0)}</span>
+                      <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{fmtVal(p.reactions || 0)}</span>
+                      <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{fmtVal(p.comments || 0)}</span>
+                      <span className="flex items-center gap-1"><Share2 className="h-3 w-3" />{fmtVal(p.shares || 0)}</span>
+                    </div>
+                    {p.permalink && (
+                      <a href={p.permalink} target="_blank" rel="noopener" className="text-xs text-primary hover:underline flex items-center gap-1">
+                        View Original <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

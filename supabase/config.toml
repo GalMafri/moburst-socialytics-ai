@@ -109,3 +109,8 @@ verify_jwt = false
 
 [functions.post-preview]
 verify_jwt = false
+
+# Live Sprout analytics for a chosen date range (Analytics page). Validates the
+# caller's JWT itself and checks client access through RLS.
+[functions.sprout-analytics]
+verify_jwt = false

@@ -54,7 +54,10 @@ function youtubeId(url: string): string | null {
 }
 
 const isVideoFile = (u: string) => /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(u);
-const isExpiringCdn = (u: string) => /cdninstagram\.com|fbcdn\.net|scontent[-.]|lookaside\.fbsbx\.com|media\.licdn\.com/i.test(u);
+// Signed CDN links that stop working after hours or days; always copied into the bucket.
+const isExpiringCdn = (u: string) => /cdninstagram\.com|fbcdn\.net|scontent[-.]|lookaside\.fbsbx\.com|media\.licdn\.com|tiktokcdn(-[a-z]+)?\.com/i.test(u);
+// LinkedIn answers some posts with its generic logo instead of the creative.
+const isGenericPlaceholder = (u: string) => /static\.licdn\.com\/aero-v1\/sc\/h\//i.test(u);
 
 function mediaTypeOf(t: string | null | undefined): string {
   const s = String(t || "").toLowerCase();
@@ -143,7 +146,8 @@ async function ogPreview(url: string, userAgent: string = UA): Promise<Partial<P
     const re2 = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["']${prop}["']`, "i");
     return (html.match(re) || html.match(re2))?.[1] || null;
   };
-  const image = meta("og:image") || meta("twitter:image");
+  const rawImage = meta("og:image") || meta("twitter:image");
+  const image = rawImage && !isGenericPlaceholder(rawImage) ? rawImage : null;
   const video = meta("og:video") || meta("og:video:url");
   const title = meta("og:title");
   if (!image && !video) return { status: "unavailable", title };
@@ -187,7 +191,11 @@ async function resolve(supabase: Db, hint: Hint): Promise<Preview> {
       const r = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`, { headers: { "User-Agent": UA } });
       if (r.ok) {
         const j = await r.json();
-        if (j.thumbnail_url) return { ...base, media_type: "video", image_url: j.thumbnail_url, title: j.title || null, status: "ok" };
+        if (j.thumbnail_url) {
+          // TikTok thumbnails are signed and expire within a day; keep a copy.
+          const durable = await persist(supabase, j.thumbnail_url, url);
+          return { ...base, media_type: "video", image_url: durable || j.thumbnail_url, title: j.title || null, status: "ok" };
+        }
       }
     }
     let image = hint.image || null;
