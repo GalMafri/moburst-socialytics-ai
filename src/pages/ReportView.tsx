@@ -125,7 +125,7 @@ export default function ReportView() {
 
   if (isLoading)
     return (
-      <AppLayout title="Report">
+      <AppLayout>
         <Loading label="Loading report" />
       </AppLayout>
     );
@@ -292,7 +292,7 @@ export default function ReportView() {
         {/* Header */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-1.5">
-            <h2 className="t-h1">{clientName}: monthly report</h2>
+            <h1 className="t-h1">{clientName}: monthly report</h1>
             <p className="t-secondary flex items-center gap-2 flex-wrap">
               <span>{rd?.report_period?.current_month?.start} to {rd?.report_period?.current_month?.end}</span>
               <span className="opacity-50">·</span>

@@ -167,7 +167,7 @@ export default function CompetitiveReportView() {
   const hasChannels = platforms.length > 0;
   const effectivePlat = plat !== "all" && platforms.includes(plat) ? plat : "all";
 
-  if (isLoading) return <AppLayout title="Competitive Report"><Loading label="Loading report" /></AppLayout>;
+  if (isLoading) return <AppLayout><Loading label="Loading report" /></AppLayout>;
   if (!report) {
     return (
       <AppLayout title="Competitive Report">
@@ -245,7 +245,7 @@ export default function CompetitiveReportView() {
             <Button variant="ghost" size="sm" className="-ml-2" onClick={() => navigate(isMoburstStaff ? `/clients/${clientId}/competitive/run` : "/")}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Back
             </Button>
-            <h2 className="t-h1">{clientName} vs. the field</h2>
+            <h1 className="t-h1">{clientName} vs. the field</h1>
             <div className="flex items-center gap-2 flex-wrap t-secondary">
               <Badge variant={report.status === "complete" ? "default" : report.status === "failed" ? "destructive" : "secondary"}>{report.status}</Badge>
               {period && <Chip>{period}{rd.period?.days ? ` · ${rd.period.days} days` : ""}</Chip>}
