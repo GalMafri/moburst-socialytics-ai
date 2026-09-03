@@ -9,7 +9,6 @@
 import { useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
 
 export type Verdict = "up" | "down";
 
@@ -50,7 +49,6 @@ export function partitionGaps<T extends { gap?: string }>(gaps: T[], rows: Insig
 
 export function useInsightFeedback(clientId: string | undefined) {
   const qc = useQueryClient();
-  const { user } = useAuth();
 
   const query = useQuery({
     queryKey: ["insight-feedback", clientId],
@@ -78,7 +76,8 @@ export function useInsightFeedback(clientId: string | undefined) {
         const { error } = await supabase.from("competitive_insight_feedback").delete().eq("id", existing.id);
         if (error) throw error;
       } else {
-        const userId = (user as any)?._id ?? (user as any)?.id ?? null;
+        // user_id is filled by the column default (auth.uid()): the app's
+        // user object carries the hub id, which is not the Supabase UUID.
         const { error } = await supabase.from("competitive_insight_feedback").upsert(
           {
             client_id: clientId,
@@ -87,7 +86,6 @@ export function useInsightFeedback(clientId: string | undefined) {
             gap_text: args.gapText,
             verdict: args.verdict,
             report_id: args.reportId ?? null,
-            user_id: userId,
           },
           { onConflict: "client_id,insight_key" },
         );
@@ -95,7 +93,7 @@ export function useInsightFeedback(clientId: string | undefined) {
       }
       await qc.invalidateQueries({ queryKey: ["insight-feedback", clientId] });
     },
-    [byKey, clientId, qc, user],
+    [byKey, clientId, qc],
   );
 
   const suppressedTexts = useMemo(() => rows.filter((r) => r.verdict === "down").map((r) => r.gap_text || r.insight_key), [rows]);
