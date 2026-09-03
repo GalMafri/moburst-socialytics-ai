@@ -521,14 +521,14 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
 
               {/* Timeline fallback — click video to play, which triggers duration detection */}
               {duration === 0 && (
-                <div className="flex items-center justify-center h-full text-[14px] text-[#9ca3af]">
+                <div className="flex items-center justify-center h-full t-secondary">
                   Click play on the video to load timeline
                 </div>
               )}
             </div>
 
             {/* Time labels */}
-            <div className="flex items-center justify-between text-[14px] text-[#9ca3af] font-mono">
+            <div className="flex items-center justify-between t-secondary font-mono">
               <span>{fmt(trimStart)}</span>
               <span className="text-foreground font-medium">{fmt(currentTime)}</span>
               <span>{fmt(trimEnd)}{duration > 0 && ` / ${fmt(duration)}`}</span>
@@ -540,10 +540,10 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
             <Button variant="outline" size="sm" onClick={togglePlay}>
               {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             </Button>
-            <span className="text-[14px] text-[#9ca3af]">
+            <span className="t-secondary">
               Trim: {fmt(trimStart)} → {fmt(trimEnd)} ({fmt(trimEnd - trimStart)})
             </span>
-            <span className="ml-auto text-[14px] text-[#9ca3af]">
+            <span className="ml-auto t-secondary">
               Drag the colored handles to trim
             </span>
           </div>
@@ -560,7 +560,7 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
             </div>
 
             {overlays.length === 0 && (
-              <p className="text-[14px] text-[#9ca3af]">Click "Add Text" to place text on the video. Drag to position.</p>
+              <p className="t-secondary">Click "Add Text" to place text on the video. Drag to position.</p>
             )}
 
             {/* Overlay list */}
@@ -576,7 +576,7 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
                   className="w-4 h-4 rounded-full border flex-shrink-0"
                   style={{ backgroundColor: ov.color }}
                 />
-                <span className="truncate flex-1 text-[13px]">{ov.text}</span>
+                <span className="truncate flex-1 t-label">{ov.text}</span>
                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => removeOverlay(ov.id)}>
                   <Trash2 className="h-3 w-3 text-destructive" />
                 </Button>
@@ -594,7 +594,7 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
                 />
                 <div className="flex gap-2 flex-wrap">
                   <div className="flex items-center gap-1">
-                    <Label className="text-[14px] text-[#9ca3af]">Color</Label>
+                    <Label className="t-secondary">Color</Label>
                     <Input
                       type="color"
                       value={selectedOv.color}
@@ -603,23 +603,23 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
                     />
                   </div>
                   <div className="flex items-center gap-1">
-                    <Label className="text-[14px] text-[#9ca3af]">Size</Label>
+                    <Label className="t-secondary">Size</Label>
                     <Input
                       type="number"
                       min={12}
                       max={72}
                       value={selectedOv.fontSize}
                       onChange={(e) => updateOverlay(selectedOv.id, { fontSize: Number(e.target.value) })}
-                      className="h-7 w-16 text-[13px]"
+                      className="h-7 w-16 t-label"
                     />
                   </div>
                   <div className="flex items-center gap-1">
-                    <Label className="text-[14px] text-[#9ca3af]">Weight</Label>
+                    <Label className="t-secondary">Weight</Label>
                     <Select
                       value={selectedOv.fontWeight}
                       onValueChange={(v) => updateOverlay(selectedOv.id, { fontWeight: v as any })}
                     >
-                      <SelectTrigger className="h-7 w-20 text-[13px]"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="h-7 w-20 t-label"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="normal">Normal</SelectItem>
                         <SelectItem value="bold">Bold</SelectItem>
@@ -627,7 +627,7 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
                     </Select>
                   </div>
                 </div>
-                <p className="text-[14px] text-[#9ca3af]">Drag the text on the video to reposition it.</p>
+                <p className="t-secondary">Drag the text on the video to reposition it.</p>
               </div>
             )}
           </div>

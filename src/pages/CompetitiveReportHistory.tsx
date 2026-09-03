@@ -64,7 +64,7 @@ export default function CompetitiveReportHistory() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Competitive analysis history</CardTitle>
+            <CardTitle className="t-h3">Competitive analysis history</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -88,16 +88,16 @@ export default function CompetitiveReportHistory() {
                     const period = rd.period?.start ? formatRange(rd.period) : r.date_range_start ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "—";
                     return (
                       <TableRow key={r.id} className={running ? "animate-pulse" : ""}>
-                        <TableCell className="text-[15px]">{new Date(r.created_at).toLocaleString()}</TableCell>
+                        <TableCell className="t-body">{new Date(r.created_at).toLocaleString()}</TableCell>
                         <TableCell>
                           <Badge variant={r.status === "complete" ? "default" : running ? "secondary" : "destructive"} className="gap-1">
                             {running && <Loader2 className="h-3 w-3 animate-spin" />}
                             {r.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-[15px] text-[#9ca3af]">{period}</TableCell>
-                        <TableCell className="text-[15px] text-[#9ca3af]">{rd.landscape?.name || "—"}</TableCell>
-                        <TableCell className="text-[15px] text-[#9ca3af]">{r.duration_minutes ? `${r.duration_minutes}m` : "—"}</TableCell>
+                        <TableCell className="t-secondary">{period}</TableCell>
+                        <TableCell className="t-secondary">{rd.landscape?.name || "—"}</TableCell>
+                        <TableCell className="t-secondary">{r.duration_minutes ? `${r.duration_minutes}m` : "—"}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             {!running && (

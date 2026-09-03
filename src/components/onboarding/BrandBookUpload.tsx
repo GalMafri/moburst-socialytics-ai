@@ -137,15 +137,15 @@ export function BrandBookUpload({
   return (
     <Card>
       <CardContent className="pt-6 space-y-4">
-        <Label className="text-[15px] font-semibold">Brand Book / Style Guide</Label>
+        <Label className="t-body font-semibold">Brand Book / Style Guide</Label>
 
         {/* File Upload */}
         <div className="space-y-2">
-          <Label className="text-[14px] text-[#9ca3af]">Upload File (PDF, PNG, JPG)</Label>
+          <Label className="t-secondary">Upload File (PDF, PNG, JPG)</Label>
           {uploadedFileName ? (
             <div className="flex items-center gap-2 p-2 border rounded-md bg-[rgba(255,255,255,0.03)]">
               <FileText className="h-4 w-4 text-primary" />
-              <span className="text-[15px] flex-1 truncate">{uploadedFileName}</span>
+              <span className="t-body flex-1 truncate">{uploadedFileName}</span>
               <Button variant="ghost" size="sm" onClick={handleRemoveFile}>
                 <X className="h-3 w-3" />
               </Button>
@@ -166,7 +166,7 @@ export function BrandBookUpload({
                 ) : (
                   <Upload className="h-4 w-4 text-muted-foreground" />
                 )}
-                <span className="text-[15px] text-[#9ca3af]">
+                <span className="t-secondary">
                   {uploading ? "Uploading..." : "Click to upload brand book"}
                 </span>
               </div>
@@ -183,7 +183,7 @@ export function BrandBookUpload({
 
         {/* URL Input */}
         <div className="space-y-2">
-          <Label className="text-[14px] text-[#9ca3af]">Or enter Brand Book URL</Label>
+          <Label className="t-secondary">Or enter Brand Book URL</Label>
           <div className="flex gap-2">
             <div className="flex-1 relative">
               <Link className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

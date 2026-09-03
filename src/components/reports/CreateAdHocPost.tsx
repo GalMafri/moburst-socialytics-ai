@@ -245,37 +245,37 @@ export function CreateAdHocPost({
                   />
                   <Badge variant="outline">{generatedPost.format}</Badge>
                   {generatedPost.pillar && (
-                    <Badge className="bg-accent text-accent-foreground text-[13px]">
+                    <Badge className="bg-accent text-accent-foreground t-label">
                       {generatedPost.pillar}
                     </Badge>
                   )}
                 </div>
 
                 {generatedPost.hook && (
-                  <blockquote className="border-l-2 border-primary pl-4 text-[15px] font-medium leading-relaxed">
+                  <blockquote className="border-l-2 border-primary pl-4 t-body font-medium leading-relaxed">
                     {generatedPost.hook}
                   </blockquote>
                 )}
 
                 {generatedPost.concept && (
-                  <p className="text-[15px] leading-6">
+                  <p className="t-body">
                     {generatedPost.concept}
                   </p>
                 )}
 
                 {generatedPost.caption_angle && (
                   <div className="bg-[rgba(255,255,255,0.03)] rounded-md p-3">
-                    <p className="text-[13px] font-medium text-[#9ca3af] mb-1">
+                    <p className="t-label font-medium mb-1">
                       Caption
                     </p>
-                    <p className="text-[15px] leading-6 whitespace-pre-wrap">
+                    <p className="t-body whitespace-pre-wrap">
                       {generatedPost.caption_angle}
                     </p>
                   </div>
                 )}
 
                 {generatedPost.CTA && (
-                  <div className="text-[15px]">
+                  <div className="t-body">
                     <span className="font-medium text-foreground">CTA: </span>
                     <span className="text-muted-foreground">
                       {generatedPost.CTA}
@@ -284,7 +284,7 @@ export function CreateAdHocPost({
                 )}
 
                 {generatedPost.visual_direction && (
-                  <p className="text-[15px] text-[#9ca3af]">
+                  <p className="t-secondary">
                     <span className="font-medium text-foreground">
                       Visual:{" "}
                     </span>
@@ -300,7 +300,7 @@ export function CreateAdHocPost({
                         ? generatedPost.hashtags
                         : []
                     ).map((tag: string, i: number) => (
-                      <Badge key={i} variant="secondary" className="text-[13px]">
+                      <Badge key={i} variant="secondary" className="t-label">
                         {tag.startsWith("#") ? tag : `#${tag}`}
                       </Badge>
                     ))}

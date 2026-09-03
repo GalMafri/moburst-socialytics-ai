@@ -120,8 +120,8 @@ export function AdminDashboard() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Clients</h2>
-          <p className="text-muted-foreground text-[15px]">{clients?.length ?? 0} clients configured</p>
+          <h2 className="t-h1">Clients</h2>
+          <p className="text-muted-foreground t-body">{clients?.length ?? 0} clients configured</p>
         </div>
         {canManageClients && (
           <Button onClick={() => navigate("/clients/new/setup")}>
@@ -179,9 +179,9 @@ export function AdminDashboard() {
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">{client.name}</CardTitle>
+                      <CardTitle className="t-h3">{client.name}</CardTitle>
                       {(client as any).archived_at && (
-                        <Badge variant="secondary" className="text-[13px]">Archived</Badge>
+                        <Badge variant="secondary" className="t-label">Archived</Badge>
                       )}
                     </div>
                     <div className="flex items-center gap-1">
@@ -221,19 +221,19 @@ export function AdminDashboard() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="flex items-center gap-2 text-[15px] text-[#9ca3af]">
+                  <div className="flex items-center gap-2 t-secondary">
                     <Calendar className="h-3.5 w-3.5" />
                     {lastReport
                       ? `Last report: ${new Date(lastReport.created_at).toLocaleDateString()}`
                       : "No reports yet"}
                   </div>
-                  <div className="flex items-center gap-2 text-[15px] text-[#9ca3af]">
+                  <div className="flex items-center gap-2 t-secondary">
                     {client.primary_platforms?.slice(0, 3).map((p: string) => (
                       <PlatformBadge key={p} platform={p} size="sm" />
                     ))}
                   </div>
                   <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
-                    <span className="text-[14px] text-[#9ca3af] whitespace-nowrap">{reportCount} reports</span>
+                    <span className="t-secondary whitespace-nowrap">{reportCount} reports</span>
                     <div className="flex gap-1.5 flex-wrap justify-end">
                       <Button
                         size="sm"
@@ -319,7 +319,7 @@ export function AdminDashboard() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="confirm-name" className="text-[15px]">
+            <Label htmlFor="confirm-name" className="t-body">
               Confirm by typing <span className="font-mono">{deleteTarget?.name}</span>
             </Label>
             <Input

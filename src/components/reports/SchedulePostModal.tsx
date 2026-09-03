@@ -211,13 +211,13 @@ export function SchedulePostModal({
             <Label>Sprout Profile</Label>
 
             {loadingApi && (
-              <div className="flex items-center gap-2 text-[15px] text-[#9ca3af] py-2">
+              <div className="flex items-center gap-2 t-secondary py-2">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading profiles…
               </div>
             )}
 
             {apiError && (
-              <div className="flex items-start gap-2 text-[15px] text-destructive bg-destructive/10 rounded-md p-2">
+              <div className="flex items-start gap-2 t-body text-destructive bg-destructive/10 rounded-md p-2">
                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>Failed to load profiles: {(apiError as Error).message}</span>
               </div>
@@ -225,14 +225,14 @@ export function SchedulePostModal({
 
             {/* Auto-detected: single DB-assigned profile for this platform */}
             {!loadingApi && autoSelected && selectedProfile && (
-              <div className="flex items-center gap-2 rounded-md border bg-[rgba(255,255,255,0.03)] px-3 py-2 text-[15px]">
+              <div className="flex items-center gap-2 rounded-md border bg-[rgba(255,255,255,0.03)] px-3 py-2 t-body">
                 <span className="font-medium">
                   {selectedProfile.name || selectedProfile.native_name || "Profile"}
                 </span>
-                <Badge variant="secondary" className="text-[13px] capitalize">
+                <Badge variant="secondary" className="t-label capitalize">
                   {selectedProfile.network_type}
                 </Badge>
-                <span className="ml-auto text-[14px] text-[#9ca3af]">auto-detected</span>
+                <span className="ml-auto t-secondary">auto-detected</span>
               </div>
             )}
 
@@ -240,13 +240,13 @@ export function SchedulePostModal({
             {!loadingApi && !autoSelected && displayProfiles.length > 0 && (
               <>
                 {noMatchWarning && (
-                  <p className="text-[15px] text-amber-300 bg-amber-500/10 rounded-md px-2 py-1">
+                  <p className="t-body text-amber-300 bg-amber-500/10 rounded-md px-2 py-1">
                     No {post?.platform} profiles found — showing all connected profiles.
                     Assign the correct one in <strong>Client Setup → Sprout Social</strong>.
                   </p>
                 )}
                 {!hasDbAssigned && !noMatchWarning && (
-                  <p className="text-[15px] text-amber-300 bg-amber-500/10 rounded-md px-2 py-1">
+                  <p className="t-body text-amber-300 bg-amber-500/10 rounded-md px-2 py-1">
                     Assign profiles in <strong>Client Setup → Sprout Social</strong> to enable auto-detection.
                   </p>
                 )}
@@ -266,7 +266,7 @@ export function SchedulePostModal({
             )}
 
             {!loadingApi && !apiError && displayProfiles.length === 0 && (
-              <div className="flex items-start gap-2 text-[15px] text-amber-300 bg-amber-500/10 rounded-md p-2">
+              <div className="flex items-start gap-2 t-body text-amber-300 bg-amber-500/10 rounded-md p-2">
                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>No Sprout Social profiles found. Check your credentials.</span>
               </div>

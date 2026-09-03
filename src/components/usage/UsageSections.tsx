@@ -35,11 +35,11 @@ export function FunnelCard({ rows }: { rows: FunnelRow[] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Journey drop-off</CardTitle>
+        <CardTitle className="t-h3">Journey drop-off</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {rows.length === 0 && (
-          <p className="text-[15px] text-[#9ca3af]">No events in this window yet.</p>
+          <p className="t-secondary">No events in this window yet.</p>
         )}
         {rows.map((r, i) => {
           const prev = i > 0 ? rows[i - 1].users : r.users;
@@ -47,7 +47,7 @@ export function FunnelCard({ rows }: { rows: FunnelRow[] }) {
           const drop = prev - r.users;
           return (
             <div key={r.step}>
-              <div className="mb-1 flex items-baseline justify-between gap-3 text-[15px]">
+              <div className="mb-1 flex items-baseline justify-between gap-3 t-body">
                 <span>{r.step}</span>
                 <span className="tabular-nums text-muted-foreground">
                   {r.users} {r.users === 1 ? "person" : "people"}
@@ -85,25 +85,25 @@ export function MetricsCard({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">{title}</CardTitle>
+        <CardTitle className="t-h3">{title}</CardTitle>
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <p className="text-[15px] text-[#9ca3af]">Nothing recorded yet.</p>
+          <p className="t-secondary">Nothing recorded yet.</p>
         ) : (
           <dl className="divide-y divide-border">
             {rows.map((r) => (
               <div key={r.metric} className="flex items-baseline justify-between gap-4 py-2">
-                <dt className="text-[15px] capitalize text-muted-foreground">{r.metric}</dt>
+                <dt className="t-body capitalize text-muted-foreground">{r.metric}</dt>
                 <dd className="flex items-baseline gap-2">
-                  <span className="text-[18px] leading-7 font-semibold tracking-[-0.5px] tabular-nums">{fmt(r.value)}</span>
-                  <span className="text-[13px] tabular-nums text-muted-foreground">n={r.sample}</span>
+                  <span className="t-h3 tabular-nums">{fmt(r.value)}</span>
+                  <span className="t-label tabular-nums text-muted-foreground">n={r.sample}</span>
                 </dd>
               </div>
             ))}
           </dl>
         )}
-        {note && <p className="mt-3 text-[14px] text-[#9ca3af]">{note}</p>}
+        {note && <p className="mt-3 t-secondary">{note}</p>}
       </CardContent>
     </Card>
   );
@@ -114,7 +114,7 @@ export function FeatureTable({ rows }: { rows: FeatureRow[] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Feature adoption</CardTitle>
+        <CardTitle className="t-h3">Feature adoption</CardTitle>
       </CardHeader>
       <CardContent className="px-0 pb-0">
         <div className="overflow-x-auto">
@@ -131,14 +131,14 @@ export function FeatureTable({ rows }: { rows: FeatureRow[] }) {
             <TableBody>
               {rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-[15px] text-[#9ca3af]">
+                  <TableCell colSpan={5} className="t-secondary">
                     No actions recorded yet.
                   </TableCell>
                 </TableRow>
               )}
               {rows.map((r) => (
                 <TableRow key={r.event}>
-                  <TableCell className="font-mono text-[13px]">{r.event}</TableCell>
+                  <TableCell className="font-mono t-label">{r.event}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.users}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.uses}</TableCell>
                   <TableCell className="text-right tabular-nums">

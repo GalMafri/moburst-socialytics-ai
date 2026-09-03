@@ -88,7 +88,7 @@ export default function AllReports() {
           <TabsContent value="social">
             <Card>
               <CardHeader>
-                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">All monthly reports</CardTitle>
+                <CardTitle className="t-h3">All monthly reports</CardTitle>
               </CardHeader>
               <CardContent>
                 {isLoading ? (
@@ -108,14 +108,14 @@ export default function AllReports() {
                     <TableBody>
                       {reports.map((r: any) => (
                         <TableRow key={r.id}>
-                          <TableCell className="font-medium text-[15px]">{r.clients?.name ?? "—"}</TableCell>
-                          <TableCell className="text-[15px]">{new Date(r.created_at).toLocaleDateString()}</TableCell>
+                          <TableCell className="font-medium t-body">{r.clients?.name ?? "—"}</TableCell>
+                          <TableCell className="t-body">{new Date(r.created_at).toLocaleDateString()}</TableCell>
                           <TableCell>
                             <Badge variant={r.status === "completed" ? "default" : r.status === "running" ? "secondary" : "destructive"}>
                               {r.status}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-[15px] text-[#9ca3af]">
+                          <TableCell className="t-secondary">
                             {r.date_range_start && r.date_range_end ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "—"}
                           </TableCell>
                           {!isClient && (
@@ -125,7 +125,7 @@ export default function AllReports() {
                                   <ExternalLink className="h-3.5 w-3.5" /> View
                                 </Button>
                               ) : (
-                                <span className="text-[14px] text-[#9ca3af]">Coming soon</span>
+                                <span className="t-secondary">Coming soon</span>
                               )}
                             </TableCell>
                           )}
@@ -156,7 +156,7 @@ export default function AllReports() {
           <TabsContent value="competitive">
             <Card>
               <CardHeader>
-                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">All competitive analyses</CardTitle>
+                <CardTitle className="t-h3">All competitive analyses</CardTitle>
               </CardHeader>
               <CardContent>
                 {competitiveLoading ? (
@@ -179,13 +179,13 @@ export default function AllReports() {
                         const period = rd.period?.start ? formatRange(rd.period) : r.date_range_start ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "—";
                         return (
                           <TableRow key={r.id}>
-                            <TableCell className="font-medium text-[15px]">{r.clients?.name ?? "—"}</TableCell>
-                            <TableCell className="text-[15px]">{new Date(r.created_at).toLocaleString()}</TableCell>
+                            <TableCell className="font-medium t-body">{r.clients?.name ?? "—"}</TableCell>
+                            <TableCell className="t-body">{new Date(r.created_at).toLocaleString()}</TableCell>
                             <TableCell>
                               <Badge variant={r.status === "complete" ? "default" : r.status === "running" ? "secondary" : "destructive"}>{r.status}</Badge>
                             </TableCell>
-                            <TableCell className="text-[15px] text-[#9ca3af]">{period}</TableCell>
-                            <TableCell className="text-[15px] text-[#9ca3af]">{rd.landscape?.name || "—"}</TableCell>
+                            <TableCell className="t-secondary">{period}</TableCell>
+                            <TableCell className="t-secondary">{rd.landscape?.name || "—"}</TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
                                 <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.client_id}/competitive/reports`)}>All runs</Button>

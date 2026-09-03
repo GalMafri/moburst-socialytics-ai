@@ -67,7 +67,7 @@ function HeatStrip({ counts, keys, labelEvery = 1, size = "h-6 w-6", color = ACC
         return (
           <div key={k} className="flex flex-col items-center gap-1" title={`${k}: ${v} post${v === 1 ? "" : "s"}`}>
             <div className={`${size} rounded-[6px]`} style={{ backgroundColor: `rgba(${color},${v ? 0.18 + 0.82 * (v / max) : 0.06})` }} />
-            {i % labelEvery === 0 && <span className="text-[14px] text-[#9ca3af] leading-none">{k}</span>}
+            {i % labelEvery === 0 && <span className="t-secondary leading-none">{k}</span>}
           </div>
         );
       })}
@@ -79,16 +79,16 @@ function Kpi({ label, value, sub, accent = false }: { label: string; value: stri
   return (
     <Card className={accent ? "glass-accent" : ""}>
       <CardContent className="pt-5 pb-4">
-        <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">{label}</p>
-        <p className="text-[30px] leading-[36px] font-bold tracking-[-0.5px] mt-2">{value}</p>
-        {sub && <p className="text-[15px] text-[#9ca3af] mt-2">{sub}</p>}
+        <p className="t-label uppercase tracking-wider">{label}</p>
+        <p className="t-stat mt-2">{value}</p>
+        {sub && <p className="t-secondary mt-2">{sub}</p>}
       </CardContent>
     </Card>
   );
 }
 
 function Chip({ children }: { children: React.ReactNode }) {
-  return <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-[rgba(255,255,255,0.06)] text-[14px]">{children}</span>;
+  return <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-[rgba(255,255,255,0.06)] t-body">{children}</span>;
 }
 
 function Seg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -97,7 +97,7 @@ function Seg({ active, onClick, children }: { active: boolean; onClick: () => vo
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`px-3 py-1.5 rounded-[9px] text-[14px] font-medium transition-colors ${active ? "bg-[rgba(255,255,255,0.12)] text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+      className={`px-3 py-1.5 rounded-[9px] t-body font-medium transition-colors ${active ? "bg-[rgba(255,255,255,0.12)] text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
     >
       {children}
     </button>
@@ -107,8 +107,8 @@ function Seg({ active, onClick, children }: { active: boolean; onClick: () => vo
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[17px] font-semibold tracking-[-0.5px] truncate">{value}</p>
-      <p className="text-[12px] text-[#9ca3af] uppercase tracking-wider truncate">{label}</p>
+      <p className="t-body font-semibold truncate">{value}</p>
+      <p className="t-label uppercase tracking-wider truncate">{label}</p>
     </div>
   );
 }
@@ -224,16 +224,16 @@ export default function CompetitiveReportView() {
   };
 
   const postCard = (p: TopPost, key: string) => (
-    <div key={key} className="rounded-[12px] p-3 bg-[rgba(255,255,255,0.04)] space-y-2.5">
+    <div key={key} className="glass-inner p-3 space-y-2.5">
       <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} maxHeight="26rem" />
-      <p className="text-[15px] leading-6 line-clamp-2 min-h-[3rem]">{p.text || "(no caption)"}</p>
+      <p className="t-body line-clamp-2 min-h-[3rem]">{p.text || "(no caption)"}</p>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
         <Stat label="Est. impressions" value={p.est_impressions ? fmt(p.est_impressions) : "–"} />
         <Stat label="Engagements" value={fmt(p.engagement)} />
         <Stat label="Eng. rate" value={p.engagement_rate ? pct(p.engagement_rate) : "–"} />
         <Stat label={p.views ? "Views" : "Reach"} value={p.views ? fmt(p.views) : p.reach ? fmt(p.reach) : "–"} />
       </div>
-      <div className="flex items-center justify-between gap-2 text-[14px] text-[#9ca3af]">
+      <div className="flex items-center justify-between gap-2 t-secondary">
         {(p.applause || p.conversation || p.amplification) ? (
           <span title="Likes and reactions · comments · shares">{fmt(p.applause || 0)} likes · {fmt(p.conversation || 0)} comments · {fmt(p.amplification || 0)} shares</span>
         ) : <span />}
@@ -252,8 +252,8 @@ export default function CompetitiveReportView() {
             <Button variant="ghost" size="sm" className="-ml-2" onClick={() => navigate(isMoburstStaff ? `/clients/${clientId}/competitive/run` : "/")}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Back
             </Button>
-            <h2 className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{clientName} vs. the field</h2>
-            <div className="flex items-center gap-2 flex-wrap text-[15px] text-[#9ca3af]">
+            <h2 className="t-h1">{clientName} vs. the field</h2>
+            <div className="flex items-center gap-2 flex-wrap t-secondary">
               <Badge variant={report.status === "complete" ? "default" : report.status === "failed" ? "destructive" : "secondary"}>{report.status}</Badge>
               {period && <Chip>{period}{rd.period?.days ? ` · ${rd.period.days} days` : ""}</Chip>}
               {rd.landscape?.name && <Chip>RivalIQ · {rd.landscape.name}</Chip>}
@@ -276,16 +276,16 @@ export default function CompetitiveReportView() {
         {/* Platform filter */}
         {hasChannels && (
           <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-[12px] font-medium uppercase tracking-wider text-[#9ca3af]">Platform</span>
+            <span className="t-label uppercase tracking-wider">Platform</span>
             <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)]">
               <Seg active={effectivePlat === "all"} onClick={() => setPlat("all")}>All platforms</Seg>
               {platforms.map((k) => <Seg key={k} active={effectivePlat === k} onClick={() => setPlat(k)}>{platformLabel(k)}</Seg>)}
             </div>
-            {effectivePlat !== "all" && <span className="text-[15px] text-[#9ca3af]">Field, rhythm, gaps and top posts now show {platformLabel(effectivePlat)} only.</span>}
+            {effectivePlat !== "all" && <span className="t-secondary">Field, rhythm, gaps and top posts now show {platformLabel(effectivePlat)} only.</span>}
           </div>
         )}
         {!hasChannels && companies.length > 0 && (
-          <p className="text-[15px] text-[#9ca3af]">Per-platform breakdowns are produced for runs from September 2, 2026 onward. Re-run the analysis to get them for this client.</p>
+          <p className="t-secondary">Per-platform breakdowns are produced for runs from September 2, 2026 onward. Re-run the analysis to get them for this client.</p>
         )}
 
         {/* KPI tiles */}
@@ -299,13 +299,13 @@ export default function CompetitiveReportView() {
           </div>
         )}
 
-        {rd.schema_note && <p className="text-[15px] text-amber-400">{rd.schema_note}</p>}
+        {rd.schema_note && <p className="t-body text-amber-400">{rd.schema_note}</p>}
 
         {/* Executive summary */}
         {ai.executive_summary && (
           <Card className="glass-elevated">
             <CardHeader><CardTitle className="text-lg">Executive summary</CardTitle></CardHeader>
-            <CardContent><Clamp text={ai.executive_summary} lines={4} className="text-[16px] leading-[26px] whitespace-pre-line" /></CardContent>
+            <CardContent><Clamp text={ai.executive_summary} lines={4} className="t-body whitespace-pre-line" /></CardContent>
           </Card>
         )}
 
@@ -313,7 +313,7 @@ export default function CompetitiveReportView() {
         {scorecard?.dimensions?.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-[20px] leading-7 tracking-[-0.5px] flex items-center gap-2"><Gauge className="h-5 w-5" /> Where {clientName} stands</CardTitle>
+              <CardTitle className="t-h3 flex items-center gap-2"><Gauge className="h-5 w-5" /> Where {clientName} stands</CardTitle>
               <CardDescription>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -321,13 +321,13 @@ export default function CompetitiveReportView() {
                 <div key={i} className="space-y-2">
                   <div className="flex justify-between items-baseline gap-4">
                     <span className="font-medium">{d.dimension}</span>
-                    <span className="text-[15px] text-[#9ca3af] whitespace-nowrap">{d.client} <span className="opacity-60">vs</span> {d.competitor_avg}</span>
+                    <span className="t-secondary whitespace-nowrap">{d.client} <span className="opacity-60">vs</span> {d.competitor_avg}</span>
                   </div>
                   <div className="relative h-3 rounded-full bg-[rgba(255,255,255,0.06)]">
                     <div className="absolute left-0 top-0 h-3 rounded-full" style={{ width: `${Math.min(100, d.client || 0)}%`, backgroundColor: `rgb(${ACCENT})` }} />
                     <div className="absolute top-[-4px] h-5 w-[3px] rounded bg-white/80" style={{ left: `${Math.min(100, d.competitor_avg || 0)}%` }} title="competitor average" />
                   </div>
-                  {d.note && <p className="text-[15px] text-[#9ca3af]">{d.note}</p>}
+                  {d.note && <p className="t-secondary">{d.note}</p>}
                 </div>
               ))}
             </CardContent>
@@ -338,8 +338,8 @@ export default function CompetitiveReportView() {
         {companies.length > 0 && (
           <section className="space-y-4">
             <div>
-              <h3 className="text-[20px] leading-7 font-semibold tracking-[-0.5px]">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
-              <p className="text-[15px] text-[#9ca3af]">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
+              <h3 className="t-h3">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
+              <p className="t-secondary">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {ordered.map((c) => {
@@ -349,7 +349,7 @@ export default function CompetitiveReportView() {
                 return (
                   <Card key={c.company_id} className={c.is_client ? "glass-accent" : ""}>
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-[20px] leading-7 tracking-[-0.5px] flex items-center gap-2 flex-wrap">
+                      <CardTitle className="t-h3 flex items-center gap-2 flex-wrap">
                         {c.name}
                         {c.is_client && <Badge>client</Badge>}
                         {c.in_confirmed_top3 && <Badge variant="secondary">top 3</Badge>}
@@ -357,15 +357,15 @@ export default function CompetitiveReportView() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       {b.post_count === 0 ? (
-                        <p className="text-[15px] text-[#9ca3af]">No posts in this period{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}.</p>
+                        <p className="t-secondary">No posts in this period{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}.</p>
                       ) : (
                         <div className="grid grid-cols-3 gap-3">
-                          <div><p className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{b.post_count}</p><p className="text-[14px] text-[#9ca3af]">posts</p></div>
-                          <div><p className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{b.cadence_per_week}</p><p className="text-[14px] text-[#9ca3af]">per week</p></div>
-                          <div><p className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{pct(b.engagement_rate_avg)}</p><p className="text-[14px] text-[#9ca3af]">eng. rate</p></div>
-                          <div><p className="text-[24px] leading-7 font-bold tracking-[-0.5px]">{fmt(b.engagement_avg)}</p><p className="text-[14px] text-[#9ca3af]">avg engagements</p></div>
-                          <div><p className="text-[24px] leading-7 font-bold tracking-[-0.5px]">{b.impressions_avg ? fmt(b.impressions_avg) : fmt(b.post_count ? b.impressions_total / b.post_count : 0)}</p><p className="text-[14px] text-[#9ca3af]">avg est. impressions</p></div>
-                          <div><p className="text-[24px] leading-7 font-bold tracking-[-0.5px]">{fmt(b.views_total)}</p><p className="text-[14px] text-[#9ca3af]">video views</p></div>
+                          <div><p className="t-h1">{b.post_count}</p><p className="t-secondary">posts</p></div>
+                          <div><p className="t-h1">{b.cadence_per_week}</p><p className="t-secondary">per week</p></div>
+                          <div><p className="t-h1">{pct(b.engagement_rate_avg)}</p><p className="t-secondary">eng. rate</p></div>
+                          <div><p className="t-h1">{fmt(b.engagement_avg)}</p><p className="t-secondary">avg engagements</p></div>
+                          <div><p className="t-h1">{b.impressions_avg ? fmt(b.impressions_avg) : fmt(b.post_count ? b.impressions_total / b.post_count : 0)}</p><p className="t-secondary">avg est. impressions</p></div>
+                          <div><p className="t-h1">{fmt(b.views_total)}</p><p className="t-secondary">video views</p></div>
                         </div>
                       )}
                       {effectivePlat === "all" && (
@@ -379,7 +379,7 @@ export default function CompetitiveReportView() {
                         </div>
                       )}
                       {(platformNote || breakdown) && (
-                        <div className="text-[15px] leading-6 space-y-1.5 border-t border-[rgba(255,255,255,0.06)] pt-3">
+                        <div className="t-body space-y-1.5 border-t border-[rgba(255,255,255,0.06)] pt-3">
                           {platformNote && <p><span className="text-muted-foreground">{platformLabel(effectivePlat)}: </span>{platformNote}</p>}
                           {breakdown?.copy_style && <p><span className="text-muted-foreground">Copy: </span>{breakdown.copy_style}</p>}
                           {breakdown?.design_look && <p><span className="text-muted-foreground">Look: </span>{breakdown.design_look}</p>}
@@ -404,35 +404,35 @@ export default function CompetitiveReportView() {
         {ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0) && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-[20px] leading-7 tracking-[-0.5px] flex items-center gap-2"><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</CardTitle>
-              <CardDescription className="text-[16px] leading-[26px]">{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</CardDescription>
+              <CardTitle className="t-h3 flex items-center gap-2"><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</CardTitle>
+              <CardDescription className="t-body">{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.post_count > 0).map(({ c, b }) => (
                 <div key={c.company_id} className="space-y-2">
                   <div className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
                   <div className="flex flex-wrap gap-8">
-                    <div><p className="text-[14px] text-[#9ca3af] mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} /></div>
-                    <div><p className="text-[14px] text-[#9ca3af] mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" /></div>
+                    <div><p className="t-secondary mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} /></div>
+                    <div><p className="t-secondary mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" /></div>
                   </div>
                 </div>
               ))}
 
               {schedule && (schedule.by_weekday || schedule.by_hour) && (
-                <div className="rounded-[12px] p-4 space-y-3 border" style={{ backgroundColor: `rgba(${RECOMMEND},0.08)`, borderColor: `rgba(${RECOMMEND},0.3)` }}>
+                <div className="glass-inner p-4 space-y-3">
                   <div className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-4 w-4" /> Recommended schedule for {clientName}</div>
                   <div className="flex flex-wrap gap-8">
-                    {schedule.by_weekday && <div><p className="text-[14px] text-[#9ca3af] mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} color={RECOMMEND} /></div>}
-                    {schedule.by_hour && <div><p className="text-[14px] text-[#9ca3af] mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" color={RECOMMEND} /></div>}
+                    {schedule.by_weekday && <div><p className="t-secondary mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} color={RECOMMEND} /></div>}
+                    {schedule.by_hour && <div><p className="t-secondary mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" color={RECOMMEND} /></div>}
                   </div>
-                  {schedule.rationale && <Clamp text={schedule.rationale} lines={3} className="text-[16px] leading-[26px]" />}
+                  {schedule.rationale && <Clamp text={schedule.rationale} lines={3} className="t-body" />}
                 </div>
               )}
 
               {ai.posting_time_insights?.empty_airtime && (
-                <div className="rounded-[12px] p-4 bg-[rgba(185,224,69,0.08)] border border-[rgba(185,224,69,0.25)]">
-                  <p className="text-[12px] uppercase tracking-wider text-[#9ca3af] mb-1">Empty airtime</p>
-                  <Clamp text={ai.posting_time_insights.empty_airtime} lines={3} className="text-[16px] leading-[26px]" />
+                <div className="glass-accent p-4">
+                  <p className="t-label uppercase tracking-wider mb-1">Empty airtime</p>
+                  <Clamp text={ai.posting_time_insights.empty_airtime} lines={3} className="t-body" />
                 </div>
               )}
             </CardContent>
@@ -444,8 +444,8 @@ export default function CompetitiveReportView() {
           <section className="space-y-4">
             <div className="flex items-end justify-between gap-4 flex-wrap">
               <div>
-                <h3 className="text-[20px] leading-7 font-semibold tracking-[-0.5px] flex items-center gap-2"><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
-                <p className="text-[15px] text-[#9ca3af]">
+                <h3 className="t-h3 flex items-center gap-2"><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
+                <p className="t-secondary">
                   {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
                 </p>
               </div>
@@ -455,7 +455,7 @@ export default function CompetitiveReportView() {
                 </Button>
               )}
             </div>
-            {gaps.length === 0 && <p className="text-[15px] text-[#9ca3af]">Every suggestion for this view has been hidden by the team.</p>}
+            {gaps.length === 0 && <p className="t-secondary">Every suggestion for this view has been hidden by the team.</p>}
             <div className="grid gap-4 md:grid-cols-2">
               {gaps.map((g: any, i: number) => {
                 const v = verdictFor(g.gap);
@@ -463,18 +463,18 @@ export default function CompetitiveReportView() {
                   <Card key={i} className={v === "up" ? "glass-accent" : ""}>
                     <CardContent className="pt-5 space-y-3">
                       <div className="flex items-start gap-3">
-                        <span className="flex-shrink-0 h-8 w-8 rounded-full bg-primary text-primary-foreground text-[15px] font-bold flex items-center justify-center">{i + 1}</span>
+                        <span className="flex-shrink-0 h-8 w-8 rounded-full bg-primary text-primary-foreground t-body font-bold flex items-center justify-center">{i + 1}</span>
                         <div className="min-w-0 space-y-1">
-                          <p className="text-[18px] leading-7 font-semibold">{g.gap}</p>
+                          <p className="t-h3">{g.gap}</p>
                           <div className="flex gap-1.5 flex-wrap">
                             {g.platform && <Badge variant="outline">{g.platform === "all" ? "All platforms" : platformLabel(g.platform)}</Badge>}
                             {v === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                           </div>
                         </div>
                       </div>
-                      {g.why_it_matters && <p className="text-[16px] leading-[26px] text-[#9ca3af]">{g.why_it_matters}</p>}
+                      {g.why_it_matters && <p className="t-secondary">{g.why_it_matters}</p>}
                       {g.suggested_play && (
-                        <div className="rounded-[12px] p-3 bg-[rgba(185,224,69,0.08)] border border-[rgba(185,224,69,0.25)] text-[16px] leading-[26px]">
+                        <div className="glass-accent p-3 t-body">
                           <span className="font-semibold">The play: </span>{g.suggested_play}
                         </div>
                       )}
@@ -495,10 +495,10 @@ export default function CompetitiveReportView() {
             </div>
             {isMoburstStaff && showHidden && hiddenGaps.length > 0 && (
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Hidden suggestions</CardTitle><CardDescription>Excluded from future runs and from the monthly report brief.</CardDescription></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="t-h3">Hidden suggestions</CardTitle><CardDescription>Excluded from future runs and from the monthly report brief.</CardDescription></CardHeader>
                 <CardContent className="space-y-2">
                   {hiddenGaps.map((g: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between gap-3 text-[15px]">
+                    <div key={i} className="flex items-center justify-between gap-3 t-body">
                       <span className="text-muted-foreground line-through">{g.gap}</span>
                       <Button size="sm" variant="ghost" onClick={() => castVote(g, "down")}><RotateCcw className="h-3.5 w-3.5 mr-1" /> Restore</Button>
                     </div>
@@ -513,17 +513,17 @@ export default function CompetitiveReportView() {
         {Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-[20px] leading-7 tracking-[-0.5px] flex items-center gap-2"><Trophy className="h-5 w-5" /> What wins for them</CardTitle>
+              <CardTitle className="t-h3 flex items-center gap-2"><Trophy className="h-5 w-5" /> What wins for them</CardTitle>
               <CardDescription>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 md:grid-cols-3">
               {ai.winner_teardown.map((w: any, i: number) => {
                 const examples: Array<{ url: string; post?: TopPost }> = (w.example_post_urls || []).slice(0, 3).map((u: string) => ({ url: u, post: allPosts.get(u) }));
                 return (
-                  <div key={i} className="rounded-[12px] p-4 bg-[rgba(255,255,255,0.04)] space-y-3">
-                    <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">{w.competitor}</p>
+                  <div key={i} className="glass-inner p-4 space-y-3">
+                    <p className="t-label uppercase tracking-wider">{w.competitor}</p>
                     <p className="font-semibold leading-snug">{w.pattern}</p>
-                    <p className="text-[15px] leading-6 text-[#9ca3af]">{w.evidence}</p>
+                    <p className="t-secondary">{w.evidence}</p>
                     {examples.length > 0 && (
                       <div className="space-y-2 pt-1">
                         <div className={`grid gap-2 items-start ${examples.length === 1 ? "grid-cols-1" : examples.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
@@ -533,7 +533,7 @@ export default function CompetitiveReportView() {
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                           {examples.map((ex, j) => (
-                            <Button key={j} size="sm" variant="outline" className="h-7 text-[13px]" asChild>
+                            <Button key={j} size="sm" variant="outline" className="h-7 t-label" asChild>
                               <a href={ex.url} target="_blank" rel="noreferrer"><ExternalLink className="h-3 w-3 mr-1" /> Post {j + 1}{ex.post ? ` · ${fmt(ex.post.engagement)} eng.` : ""}</a>
                             </Button>
                           ))}
@@ -551,7 +551,7 @@ export default function CompetitiveReportView() {
         {ordered.some((c) => moodPosts(c).length > 0) && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-[20px] leading-7 tracking-[-0.5px] flex items-center gap-2"><Images className="h-5 w-5" /> Mood boards</CardTitle>
+              <CardTitle className="t-h3 flex items-center gap-2"><Images className="h-5 w-5" /> Mood boards</CardTitle>
               <CardDescription>The creative each company actually ran in the period, side by side. Click any tile to open the post.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -575,7 +575,7 @@ export default function CompetitiveReportView() {
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-[20px] leading-7 tracking-[-0.5px] flex items-center gap-2"><Layers className="h-5 w-5" /> Top 5 posts per company</CardTitle>
+              <CardTitle className="t-h3 flex items-center gap-2"><Layers className="h-5 w-5" /> Top 5 posts per company</CardTitle>
               <CardDescription>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-8">

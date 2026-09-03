@@ -203,3 +203,15 @@
 .hover-lift:hover { transform: translateY(-2px); }
 .press-effect:active { transform: scale(0.97); }
 .hover-glow:hover { box-shadow: 0 0 24px rgba(185, 224, 69, 0.12); }
+
+
+/* ── Intercept type ramp (moburst-ai-product-design). Use these instead of ad hoc sizes. ── */
+@layer utilities {
+  .t-stat { font-size: 30px; line-height: 36px; font-weight: 700; letter-spacing: -0.5px; }
+  .t-h1 { font-size: 20px; line-height: 24px; font-weight: 700; letter-spacing: -0.5px; }
+  .t-h3 { font-size: 18px; line-height: 28px; font-weight: 600; letter-spacing: -0.5px; }
+  .t-body { font-size: 14px; line-height: 20px; letter-spacing: -0.5px; }
+  .t-secondary { font-size: 14px; line-height: 20px; letter-spacing: -0.5px; color: #9ca3af; }
+  .t-label { font-size: 12px; line-height: 16px; letter-spacing: 0.1px; color: #9ca3af; }
+  .t-badge { font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: -0.2px; }
+}

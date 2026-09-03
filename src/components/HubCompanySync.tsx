@@ -114,7 +114,7 @@ export function HubCompanySync() {
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Hub Company Mapping</CardTitle>
+            <CardTitle className="t-h3">Hub Company Mapping</CardTitle>
             <CardDescription>
               The bridge matches Client users to clients by their Hub company.
             </CardDescription>
@@ -129,30 +129,30 @@ export function HubCompanySync() {
         {/* ── Hub companies side ── */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <h4 className="text-[15px] font-semibold">Hub Companies</h4>
-            <Badge variant="outline" className="text-[13px]">
+            <h4 className="t-body font-semibold">Hub Companies</h4>
+            <Badge variant="outline" className="t-label">
               {hubCompanies?.length ?? 0} from Hub
             </Badge>
           </div>
           {hubError ? (
-            <p className="text-[13px] text-[#ef4444] flex items-center gap-1">
+            <p className="t-label text-[#ef4444] flex items-center gap-1">
               <AlertCircle className="h-3 w-3" />
               {(hubError as Error).message}
             </p>
           ) : hubLoading ? (
-            <p className="text-[14px] text-[#9ca3af]">Loading from Hub…</p>
+            <p className="t-secondary">Loading from Hub…</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {(hubCompanies || []).map((c) => (
                 <span
                   key={c._id}
-                  className="px-2 py-0.5 rounded text-[13px] bg-[rgba(185,224,69,0.1)] text-[#b9e045] border border-[rgba(185,224,69,0.25)]"
+                  className="px-2 py-0.5 rounded t-label bg-[rgba(185,224,69,0.1)] text-[#b9e045] border border-[rgba(185,224,69,0.25)]"
                 >
                   {c.name}
                 </span>
               ))}
               {(!hubCompanies || hubCompanies.length === 0) && (
-                <p className="text-[14px] text-[#9ca3af] italic">
+                <p className="t-secondary italic">
                   No companies registered in the Hub yet.
                 </p>
               )}
@@ -164,7 +164,7 @@ export function HubCompanySync() {
         {missingInHub.length > 0 && hubCompanies && (
           <div className="rounded-lg border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.05)] p-3 space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-[15px] text-[#fbbf24] font-medium flex items-center gap-2">
+              <p className="t-body text-[#fbbf24] font-medium flex items-center gap-2">
                 <AlertCircle className="h-4 w-4" />
                 {missingInHub.length} tool company name{missingInHub.length === 1 ? "" : "s"} not found in Hub
               </p>
@@ -173,12 +173,12 @@ export function HubCompanySync() {
                 {copied ? "Copied" : "Copy list"}
               </Button>
             </div>
-            <p className="text-[14px] text-[#9ca3af]">
+            <p className="t-secondary">
               Create these in the Hub admin so Client users can be auto-mapped:
             </p>
             <div className="flex flex-wrap gap-1.5">
               {missingInHub.map((n) => (
-                <span key={n} className="px-2 py-0.5 rounded text-[13px] bg-[rgba(245,158,11,0.1)] border border-[rgba(245,158,11,0.3)]">
+                <span key={n} className="px-2 py-0.5 rounded t-label bg-[rgba(245,158,11,0.1)] border border-[rgba(245,158,11,0.3)]">
                   {n}
                 </span>
               ))}
@@ -188,9 +188,9 @@ export function HubCompanySync() {
 
         {/* ── Tool clients side ── */}
         <div className="space-y-2">
-          <h4 className="text-[15px] font-semibold">Tool Clients</h4>
+          <h4 className="t-body font-semibold">Tool Clients</h4>
           {clientsLoading ? (
-            <p className="text-[15px] text-[#9ca3af]">Loading clients…</p>
+            <p className="t-secondary">Loading clients…</p>
           ) : (
             <div className="rounded-lg border border-[rgba(255,255,255,0.06)] divide-y divide-[rgba(255,255,255,0.04)]">
               {(clients || []).map((c) => {
@@ -200,8 +200,8 @@ export function HubCompanySync() {
                 return (
                   <div key={c.id} className="flex items-center gap-3 px-4 py-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-[15px] font-medium text-white truncate">{c.name}</p>
-                      <p className="text-[13px] text-[#9ca3af]">Tool client</p>
+                      <p className="t-body font-medium text-white truncate">{c.name}</p>
+                      <p className="t-label">Tool client</p>
                     </div>
                     <div className="flex-1 min-w-0">
                       {editingId === c.id ? (
@@ -242,7 +242,7 @@ export function HubCompanySync() {
                             ) : null
                           ) : null}
                           <span
-                            className={`text-[15px] ${
+                            className={`t-body ${
                               c.hub_company_name ? "text-white" : "italic text-[#6b7280]"
                             } truncate`}
                           >
@@ -266,7 +266,7 @@ export function HubCompanySync() {
                 );
               })}
               {(!clients || clients.length === 0) && (
-                <div className="px-4 py-6 text-[15px] text-[#9ca3af] text-center">
+                <div className="px-4 py-6 t-secondary text-center">
                   No clients yet.
                 </div>
               )}

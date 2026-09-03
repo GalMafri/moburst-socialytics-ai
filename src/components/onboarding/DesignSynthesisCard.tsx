@@ -87,7 +87,7 @@ export function DesignSynthesisCard({
     <Card>
       <CardContent className="pt-6 space-y-3">
         <div className="flex items-center justify-between">
-          <Label className="text-[15px] font-semibold flex items-center gap-2">
+          <Label className="t-body font-semibold flex items-center gap-2">
             <Sparkles className="h-4 w-4" /> Brand design language
           </Label>
           <Button
@@ -106,33 +106,33 @@ export function DesignSynthesisCard({
         </div>
 
         {!hasInputs && (
-          <p className="text-[14px] text-[#9ca3af]">
+          <p className="t-secondary">
             Upload design references or a brand book above, then synthesize. The
             result is used to guide every generated design.
           </p>
         )}
 
         {hasInputs && !existingSynthesis && !running && !error && (
-          <p className="text-[14px] text-[#9ca3af]">
+          <p className="t-secondary">
             No synthesis yet. Auto-runs ~10s after upload, or click Synthesize.
           </p>
         )}
 
         {running && (
-          <p className="text-[14px] text-[#9ca3af] flex items-center gap-2">
+          <p className="t-secondary flex items-center gap-2">
             <Loader2 className="h-3 w-3 animate-spin" /> Synthesizing brand
             design language…
           </p>
         )}
 
         {error && !running && (
-          <div className="text-[13px] text-destructive flex items-center gap-2">
+          <div className="t-label text-destructive flex items-center gap-2">
             <AlertCircle className="h-3 w-3" /> Synthesis failed — re-run. ({error})
           </div>
         )}
 
         {existingSynthesis && !running && (
-          <div className="text-[14px] text-[#9ca3af] flex items-center gap-2">
+          <div className="t-secondary flex items-center gap-2">
             <CheckCircle2 className="h-3 w-3 text-success" />
             Synthesized{" "}
             {synthesizedAt ? synthesizedAt.toLocaleString() : "(unknown)"} from{" "}

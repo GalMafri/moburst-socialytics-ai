@@ -38,7 +38,7 @@ export default function CompetitiveIndex() {
   return (
     <AppLayout title="Competitive Analysis">
       <div className="w-full space-y-4">
-        <p className="text-[15px] text-[#9ca3af]">
+        <p className="t-secondary">
           Identify and confirm each client's top competitors, run the RivalIQ deep analysis, and open the results.
         </p>
         {isLoading ? (
@@ -70,7 +70,7 @@ export default function CompetitiveIndex() {
                       <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${c.id}/competitive/feed`)}><Rss className="h-3.5 w-3.5 mr-1" /> Feed</Button>
                     )}
                   </div>
-                  {c.report && <p className="text-[14px] text-[#9ca3af]">Last run {new Date(c.report.created_at).toLocaleString()}</p>}
+                  {c.report && <p className="t-secondary">Last run {new Date(c.report.created_at).toLocaleString()}</p>}
                 </CardContent>
               </Card>
             ))}

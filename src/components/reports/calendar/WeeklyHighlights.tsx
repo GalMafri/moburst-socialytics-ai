@@ -28,9 +28,9 @@ export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
       >
         {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
         <Sparkles className="h-4 w-4 text-primary" />
-        <span className="text-[15px] font-semibold tracking-[-0.5px]">Weekly highlights</span>
+        <span className="t-body font-semibold tracking-[-0.5px]">Weekly highlights</span>
         {!open && underrepresented.length > 0 && (
-          <span className="text-[15px] text-[#9ca3af] tracking-[-0.5px] ml-1">
+          <span className="t-secondary tracking-[-0.5px] ml-1">
             · {underrepresented.length} underrepresented pillar{underrepresented.length === 1 ? "" : "s"} this week
           </span>
         )}
@@ -41,21 +41,21 @@ export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
       >
         {sproutMonthSummary && (
           <div>
-            <p className="text-[13px] font-medium text-[#9ca3af] tracking-[0.1px] uppercase mb-1.5">
+            <p className="t-label font-medium tracking-[0.1px] uppercase mb-1.5">
               Month-over-month
             </p>
-            <p className="text-[15px] leading-relaxed tracking-[-0.5px]">{sproutMonthSummary}</p>
+            <p className="t-body leading-relaxed tracking-[-0.5px]">{sproutMonthSummary}</p>
           </div>
         )}
 
         {underrepresented.length > 0 && (
           <div>
-            <p className="text-[13px] font-medium text-[#9ca3af] tracking-[0.1px] uppercase mb-1.5">
+            <p className="t-label font-medium tracking-[0.1px] uppercase mb-1.5">
               Underrepresented pillars
             </p>
             <ul className="space-y-1">
               {underrepresented.map((p, i) => (
-                <li key={i} className="text-[15px] leading-relaxed tracking-[-0.5px]">
+                <li key={i} className="t-body leading-relaxed tracking-[-0.5px]">
                   • {p}
                 </li>
               ))}
@@ -65,12 +65,12 @@ export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
 
         {tiktokOpps.length > 0 && (
           <div>
-            <p className="text-[13px] font-medium text-[#9ca3af] tracking-[0.1px] uppercase mb-1.5">
+            <p className="t-label font-medium tracking-[0.1px] uppercase mb-1.5">
               TikTok opportunities
             </p>
             <ul className="space-y-1">
               {tiktokOpps.slice(0, 3).map((o, i) => (
-                <li key={i} className="text-[15px] leading-relaxed tracking-[-0.5px]">
+                <li key={i} className="t-body leading-relaxed tracking-[-0.5px]">
                   • {o}
                 </li>
               ))}
@@ -80,12 +80,12 @@ export function WeeklyHighlights({ aiAnalysis, sproutMonthSummary }: Props) {
 
         {igOpps.length > 0 && (
           <div>
-            <p className="text-[13px] font-medium text-[#9ca3af] tracking-[0.1px] uppercase mb-1.5">
+            <p className="t-label font-medium tracking-[0.1px] uppercase mb-1.5">
               Instagram opportunities
             </p>
             <ul className="space-y-1">
               {igOpps.slice(0, 3).map((o, i) => (
-                <li key={i} className="text-[15px] leading-relaxed tracking-[-0.5px]">
+                <li key={i} className="t-body leading-relaxed tracking-[-0.5px]">
                   • {o}
                 </li>
               ))}

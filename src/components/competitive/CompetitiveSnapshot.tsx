@@ -26,9 +26,9 @@ function Tile({ label, value, sub, accent = false }: { label: string; value: str
   return (
     <Card className={accent ? "glass-accent" : ""}>
       <CardContent className="pt-4 pb-4 space-y-2">
-        <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">{label}</p>
-        <p className="text-[30px] leading-[36px] font-bold tracking-[-0.5px]">{value}</p>
-        {sub && <p className="text-[15px] text-[#9ca3af]">{sub}</p>}
+        <p className="t-label uppercase tracking-wider">{label}</p>
+        <p className="t-stat">{value}</p>
+        {sub && <p className="t-secondary">{sub}</p>}
       </CardContent>
     </Card>
   );
@@ -102,7 +102,7 @@ export function CompetitiveSnapshot({
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-[15px] text-[#9ca3af]">
+        <p className="t-secondary">
           {rivals.length} competitors{rd.landscape?.name ? ` · ${rd.landscape.name}` : ""}{period ? ` · ${period}` : ""} · analyzed {new Date(latest.created_at).toLocaleDateString()}
         </p>
         <div className="flex gap-2 flex-wrap">
@@ -126,15 +126,17 @@ export function CompetitiveSnapshot({
         </div>
       )}
 
-      {ai.executive_summary && <Clamp text={ai.executive_summary} lines={3} className="text-[16px] leading-[26px]" />}
+      {ai.executive_summary && (
+        <Card><CardContent className="pt-5"><Clamp text={ai.executive_summary} lines={3} className="t-body" /></CardContent></Card>
+      )}
 
       {Array.isArray(takeaways) && takeaways.length > 0 && (
-        <div className="rounded-[12px] p-4 bg-[rgba(185,224,69,0.08)] border border-[rgba(185,224,69,0.25)] space-y-2">
-          <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">What this report took from the competitors</p>
+        <div className="glass-accent p-4 space-y-2">
+          <p className="t-label uppercase tracking-wider">What this report took from the competitors</p>
           <ol className="space-y-2">
             {takeaways.slice(0, 4).map((t, i) => (
-              <li key={i} className="flex gap-3 text-[16px] leading-[26px]">
-                <span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary text-primary-foreground text-[12px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+              <li key={i} className="flex gap-3 t-body">
+                <span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary text-primary-foreground t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
                 <span>{t}</span>
               </li>
             ))}
@@ -143,28 +145,28 @@ export function CompetitiveSnapshot({
       )}
 
       {gaps.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[12px] uppercase tracking-wider text-[#9ca3af] flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Gaps to fill</p>
+        <Card><CardContent className="pt-5 space-y-3">
+          <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Gaps to fill</p>
           <div className="grid gap-3 md:grid-cols-3">
             {gaps.map((g, i) => (
-              <div key={i} className="rounded-[12px] p-4 bg-[rgba(255,255,255,0.04)] space-y-2">
+              <div key={i} className="glass-inner p-4 space-y-2">
                 <div className="flex gap-1.5 flex-wrap">
-                  {g.platform && g.platform !== "all" && <Badge variant="outline" className="text-[12px]">{platformLabel(g.platform)}</Badge>}
-                  {verdictFor(g.gap) === "up" && <Badge className="text-[12px] gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
+                  {g.platform && g.platform !== "all" && <Badge variant="outline" className="t-label">{platformLabel(g.platform)}</Badge>}
+                  {verdictFor(g.gap) === "up" && <Badge className="t-label gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                 </div>
-                <p className="text-[16px] leading-[26px] font-medium">{g.gap}</p>
-                {g.suggested_play && <p className="text-[15px] leading-6 text-[#9ca3af] line-clamp-3">{g.suggested_play}</p>}
+                <p className="t-body font-medium">{g.gap}</p>
+                {g.suggested_play && <p className="t-secondary line-clamp-3">{g.suggested_play}</p>}
               </div>
             ))}
           </div>
-        </div>
+        </CardContent></Card>
       )}
 
       {ai.posting_time_insights?.empty_airtime && (
-        <div className="space-y-1">
-          <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">Empty airtime</p>
-          <Clamp text={ai.posting_time_insights.empty_airtime} lines={2} className="text-[15px] leading-6 text-[#9ca3af]" />
-        </div>
+        <Card><CardContent className="pt-5 space-y-1">
+          <p className="t-label uppercase tracking-wider">Empty airtime</p>
+          <Clamp text={ai.posting_time_insights.empty_airtime} lines={2} className="t-secondary" />
+        </CardContent></Card>
       )}
     </div>
   );

@@ -457,9 +457,9 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                   className="flex-1"
                   aria-label="Number of video variants"
                 />
-                <span className="text-[15px] font-medium w-8 text-center">{variantCount}</span>
+                <span className="t-body font-medium w-8 text-center">{variantCount}</span>
               </div>
-              <p className="text-[14px] text-[#9ca3af]">
+              <p className="t-secondary">
                 Video generation takes 30-120 seconds per variant.
               </p>
             </div>
@@ -470,7 +470,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 <Label>Suggested angles</Label>
                 <div className="space-y-1 max-h-32 overflow-y-auto">
                   {angles.map((a, i) => (
-                    <label key={i} className="flex items-start gap-2 text-[13px] cursor-pointer">
+                    <label key={i} className="flex items-start gap-2 t-label cursor-pointer">
                       <input
                         type="checkbox"
                         checked={selectedAngleIdxs.includes(i)}
@@ -494,7 +494,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
             )}
 
             {fetchingAngles && (
-              <p className="text-[14px] text-[#9ca3af]">Fetching angle suggestions…</p>
+              <p className="t-secondary">Fetching angle suggestions…</p>
             )}
 
             {/* Editable prompt */}
@@ -504,7 +504,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 rows={8}
-                className="text-[13px] font-mono"
+                className="t-label font-mono"
               />
             </div>
 
@@ -528,12 +528,12 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
               <div className="text-center py-6 space-y-3">
                 <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
                 <div>
-                  <p className="text-[15px] text-[#9ca3af]">
+                  <p className="t-secondary">
                     {cancelRef.current
                       ? "Cancelling — waiting for in-flight Veo calls to return…"
                       : `Generating ${variantCount} ${spec.label} variants with Google Veo...`}
                   </p>
-                  <p className="text-[14px] text-[#9ca3af] mt-1">This may take 30-120 seconds per variant</p>
+                  <p className="t-secondary mt-1">This may take 30-120 seconds per variant</p>
                 </div>
                 <Button
                   variant="outline"
@@ -554,7 +554,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
             {/* Variant grid */}
             {variantUrls.length > 0 && !loading && (
               <div className="space-y-3">
-                <p className="text-[14px] text-[#9ca3af]">
+                <p className="t-secondary">
                   Tap a variant to mark it as a favorite.
                 </p>
                 <div className="grid gap-2 grid-cols-2">
@@ -571,11 +571,11 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                       {url === null && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted/30">
                           <Loader2 className="h-6 w-6 animate-spin" />
-                          <span className="text-[14px] text-[#9ca3af]">~30-120s</span>
+                          <span className="t-secondary">~30-120s</span>
                         </div>
                       )}
                       {url === "FAILED" && (
-                        <div className="absolute inset-0 flex items-center justify-center text-[13px] text-destructive p-2 text-center">
+                        <div className="absolute inset-0 flex items-center justify-center t-label text-destructive p-2 text-center">
                           Failed
                         </div>
                       )}
@@ -588,7 +588,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                         </div>
                       )}
                       {angles[selectedAngleIdxs[i]] && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[13px] px-2 py-1 truncate">
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white t-label px-2 py-1 truncate">
                           {angles[selectedAngleIdxs[i]].label}
                         </div>
                       )}
@@ -645,7 +645,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                     needs fixing. */}
                 {variantSeeds.some((s) => !!s) && (
                   <div className="space-y-2 pt-2 border-t border-white/[0.06]">
-                    <p className="text-[14px] text-[#9ca3af] tracking-[-0.2px]">
+                    <p className="t-secondary tracking-[-0.2px]">
                       Seed frames (what Veo animated from). Click to view full size.
                     </p>
                     <div className="flex gap-2 flex-wrap">

@@ -272,7 +272,7 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
             </p>
           )}
           {post.rationale && (
-            <div className="bg-[rgba(255,255,255,0.03)] p-3.5 rounded-md text-[15px] leading-6 text-muted-foreground">
+            <div className="bg-[rgba(255,255,255,0.03)] p-3.5 rounded-md t-body text-muted-foreground">
               💡 {post.rationale}
             </div>
           )}

@@ -50,7 +50,7 @@ function SegmentedGroup({
 }) {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="text-[12px] font-medium uppercase tracking-wider text-[#9ca3af] shrink-0">
+      <span className="t-label uppercase tracking-wider shrink-0">
         {label}
       </span>
       <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] backdrop-blur-xl border border-[rgba(255,255,255,0.07)] shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.03)]">
@@ -87,7 +87,7 @@ function Segment({
       onClick={onClick}
       aria-pressed={active}
       aria-label={ariaLabel}
-      className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium tracking-[-0.2px] transition-all
+      className={`px-3 py-1.5 rounded-[8px] t-label font-medium tracking-[-0.2px] transition-all
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
         ${
           active
@@ -216,7 +216,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
           <button
             type="button"
             onClick={() => onChange(DEFAULT_FILTERS)}
-            className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[#9ca3af] hover:text-white hover:bg-[rgba(255,255,255,0.06)] transition-colors
+            className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] t-label font-medium hover:text-white hover:bg-[rgba(255,255,255,0.06)] transition-colors
               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <X className="h-3.5 w-3.5" /> Clear

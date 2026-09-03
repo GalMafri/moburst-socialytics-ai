@@ -44,8 +44,8 @@ export default function AnalyticsIndex() {
     <AppLayout title="Analytics">
       <div className="space-y-6">
         <div>
-          <h2 className="text-[20px] leading-7 font-semibold tracking-[-0.5px]">Select a Client</h2>
-          <p className="text-[15px] text-[#9ca3af]">Choose a client to view their analytics dashboard.</p>
+          <h2 className="t-h3">Select a Client</h2>
+          <p className="t-secondary">Choose a client to view their analytics dashboard.</p>
         </div>
 
         {isLoading ? (
@@ -75,7 +75,7 @@ export default function AnalyticsIndex() {
                   )}
                   <div>
                     <div className="font-medium">{c.name}</div>
-                    <div className="text-[15px] text-[#9ca3af]">View analytics →</div>
+                    <div className="t-secondary">View analytics →</div>
                   </div>
                 </CardContent>
               </ClickableCard>

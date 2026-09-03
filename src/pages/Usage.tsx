@@ -104,7 +104,7 @@ function Tile({
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[13px] uppercase tracking-wider text-muted-foreground">{label}</p>
+            <p className="t-label uppercase tracking-wider text-muted-foreground">{label}</p>
             <p
               className={`mt-1 text-3xl font-semibold tabular-nums ${
                 tone === "warn" ? "text-rose-400" : "text-foreground"
@@ -112,7 +112,7 @@ function Tile({
             >
               {value}
             </p>
-            {hint && <p className="mt-1 text-[14px] text-[#9ca3af]">{hint}</p>}
+            {hint && <p className="mt-1 t-secondary">{hint}</p>}
           </div>
           <Icon className={`h-5 w-5 shrink-0 ${tone === "warn" ? "text-rose-400" : "text-muted-foreground"}`} />
         </div>
@@ -207,8 +207,8 @@ export default function Usage() {
       <AppLayout title="User Analytics">
         <Card>
           <CardContent className="p-6">
-            <p className="text-[15px] font-medium">Sign in to view usage</p>
-            <p className="mt-1 text-[15px] text-[#9ca3af]">
+            <p className="t-body font-medium">Sign in to view usage</p>
+            <p className="mt-1 t-secondary">
               Open this tool from the Moburst portal so it can sign you in, then come
               back to this page. If you opened it directly, that sign-in has not happened yet.
             </p>
@@ -223,8 +223,8 @@ export default function Usage() {
       <AppLayout title="User Analytics">
         <Card>
           <CardContent className="p-6">
-            <p className="text-[15px] text-rose-400">Could not load usage data.</p>
-            <p className="mt-1 text-[15px] text-[#9ca3af]">{(users.error as Error).message}</p>
+            <p className="t-body text-rose-400">Could not load usage data.</p>
+            <p className="mt-1 t-secondary">{(users.error as Error).message}</p>
           </CardContent>
         </Card>
       </AppLayout>
@@ -236,7 +236,7 @@ export default function Usage() {
       <AppLayout title="User Analytics">
         <Card>
           <CardContent className="p-6">
-            <p className="text-[15px] text-[#9ca3af]">
+            <p className="t-secondary">
               No usage data visible. This page is limited to admin accounts.
             </p>
           </CardContent>
@@ -275,7 +275,7 @@ export default function Usage() {
           <div className="grid gap-4 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader className="pb-2">
-                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Activity over time</CardTitle>
+                <CardTitle className="t-h3">Activity over time</CardTitle>
               </CardHeader>
               <CardContent>
                 {trend.data && trend.data.length > 0 ? (
@@ -318,14 +318,14 @@ export default function Usage() {
                     </ResponsiveContainer>
                   </div>
                 ) : (
-                  <p className="py-12 text-center text-[15px] text-[#9ca3af]">No activity recorded yet.</p>
+                  <p className="py-12 text-center t-secondary">No activity recorded yet.</p>
                 )}
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Where people stand</CardTitle>
+                <CardTitle className="t-h3">Where people stand</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {Object.entries(summary.byState)
@@ -333,8 +333,8 @@ export default function Usage() {
                   .map(([state, n]) => (
                     <div key={state}>
                       <div className="mb-1 flex items-baseline justify-between gap-2">
-                        <span className="text-[15px] capitalize">{state}</span>
-                        <span className="text-[15px] font-medium tabular-nums">{n}</span>
+                        <span className="t-body capitalize">{state}</span>
+                        <span className="t-body font-medium tabular-nums">{n}</span>
                       </div>
                       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                         <div
@@ -375,13 +375,13 @@ export default function Usage() {
           </TabsContent>
 
           <TabsContent value="people" className="space-y-4">
-            <p className="text-[14px] text-[#9ca3af]">
+            <p className="t-secondary">
               Select anyone to see their full history: what they ran, for which client, how
               long it took, and what failed.
             </p>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Per user</CardTitle>
+              <CardTitle className="t-h3">Per user</CardTitle>
             </CardHeader>
             <CardContent className="px-0 pb-0">
               <div className="overflow-x-auto">
@@ -407,7 +407,7 @@ export default function Usage() {
                     >
                         <TableCell>
                           <div className="font-medium">{u.name || u.email}</div>
-                          <div className="text-[14px] text-[#9ca3af]">
+                          <div className="t-secondary">
                             {u.email}
                             {u.company ? ` · ${u.company}` : ""}
                             {u.role ? ` · ${u.role}` : ""}
@@ -442,7 +442,7 @@ export default function Usage() {
           onClose={() => setSelected(null)}
         />
 
-        <p className="text-[14px] text-[#9ca3af]">
+        <p className="t-secondary">
           Counts come from work the product recorded. Rows written before Aug 2026 mostly carry no
           author, so historical per-user figures understate real usage; totals per client were always
           complete. Page views and report opens are not tracked, so a user with zero actions may still

@@ -380,24 +380,24 @@ export default function CompetitorReview() {
               </DialogDescription>
             </DialogHeader>
             {landscapesError ? (
-              <p className="text-[15px] text-destructive">{landscapesError}</p>
+              <p className="t-body text-destructive">{landscapesError}</p>
             ) : landscapes === null ? (
               <Loading label="Reading RivalIQ landscapes" />
             ) : landscapes.length === 0 ? (
-              <p className="text-[15px] text-[#9ca3af]">No landscapes on the RivalIQ account.</p>
+              <p className="t-secondary">No landscapes on the RivalIQ account.</p>
             ) : (
               <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
                 {landscapes.map((l: any) => (
                   <div key={l.id} className="p-3 rounded-md bg-[rgba(255,255,255,0.04)] flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-[15px] font-medium flex items-center gap-2">
+                      <div className="t-body font-medium flex items-center gap-2">
                         {l.name}
                         {l.is_match && <Badge>matches {client?.name}</Badge>}
                       </div>
-                      <div className="text-[14px] text-[#9ca3af]">
+                      <div className="t-secondary">
                         Focus: {l.focus_company || "?"} · {l.companies.filter((c: any) => !c.is_focus).length} competitors
                       </div>
-                      <div className="text-[14px] text-[#9ca3af] truncate">
+                      <div className="t-secondary truncate">
                         {l.companies.filter((c: any) => !c.is_focus).map((c: any) => c.name).join(", ")}
                       </div>
                     </div>
@@ -416,7 +416,7 @@ export default function CompetitorReview() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
+                <CardTitle className="t-h3 flex items-center gap-2">
                   <Crosshair className="h-4 w-4" /> Competitor Set
                   {currentSet && (
                     <Badge variant={currentSet.status === "confirmed" ? "default" : "secondary"}>
@@ -447,7 +447,7 @@ export default function CompetitorReview() {
           </CardHeader>
           {client.competitor_seed_notes ? (
             <CardContent className="pt-0">
-              <p className="text-[14px] text-[#9ca3af]">
+              <p className="t-secondary">
                 <span className="font-medium">Account team notes fed to the AI:</span> {client.competitor_seed_notes}
               </p>
             </CardContent>
@@ -458,7 +458,7 @@ export default function CompetitorReview() {
         {selected.length > 0 && (
           <Card className="border-[#b9e045]/30">
             <CardHeader className="pb-3">
-              <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
+              <CardTitle className="t-h3 flex items-center gap-2">
                 <Trophy className="h-4 w-4 text-[#b9e045]" /> Top 3 for deep analysis
               </CardTitle>
             </CardHeader>
@@ -466,7 +466,7 @@ export default function CompetitorReview() {
               {selected.map((c) => (
                 <div key={c.id} className="flex items-center gap-3 p-2 rounded-md bg-[rgba(255,255,255,0.04)]">
                   <Badge className="shrink-0">#{c.selected_rank}</Badge>
-                  <span className="font-medium text-[15px]">{c.name}</span>
+                  <span className="font-medium t-body">{c.name}</span>
                   <span className="flex gap-1 ml-auto">
                     {(handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active).map((h) => (
                       <PlatformBadge key={h.id} platform={h.platform} size="sm" />
@@ -504,7 +504,7 @@ export default function CompetitorReview() {
         {currentSet && (competitors?.length ?? 0) > 0 ? (
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Candidates</CardTitle>
+              <CardTitle className="t-h3">Candidates</CardTitle>
               <CardDescription>
                 {competitors!.length} proposed · click a row's star slot to select it into the top 3
               </CardDescription>
@@ -522,7 +522,7 @@ export default function CompetitorReview() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-[15px]">{c.name}</span>
+                          <span className="font-medium t-body">{c.name}</span>
                           {c.source === "manual" && <Badge variant="outline">manual</Badge>}
                           {typeof c.similarity_score === "number" && (
                             <Badge variant="secondary">{Math.round(c.similarity_score * 100)}% match</Badge>
@@ -533,12 +533,12 @@ export default function CompetitorReview() {
                             href={c.website_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="text-[14px] text-[#9ca3af] hover:text-foreground underline-offset-2 hover:underline"
+                            className="t-secondary hover:text-foreground underline-offset-2 hover:underline"
                           >
                             {c.website_url.replace(/^https?:\/\/(www\.)?/, "")}
                           </a>
                         )}
-                        {c.rationale && <p className="text-[14px] text-[#9ca3af] mt-1">{c.rationale}</p>}
+                        {c.rationale && <p className="t-secondary mt-1">{c.rationale}</p>}
                         <div className="flex gap-1 mt-2 flex-wrap">
                           {compHandles.length > 0 ? (
                             compHandles.map((h) => (
@@ -547,7 +547,7 @@ export default function CompetitorReview() {
                               </a>
                             ))
                           ) : (
-                            <span className="text-[13px] text-amber-500/80">no handles detected yet</span>
+                            <span className="t-label text-amber-500/80">no handles detected yet</span>
                           )}
                         </div>
                       </div>
@@ -591,7 +591,7 @@ export default function CompetitorReview() {
         {(isDraft || !currentSet) && (
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Add manually</CardTitle>
+              <CardTitle className="t-h3">Add manually</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">

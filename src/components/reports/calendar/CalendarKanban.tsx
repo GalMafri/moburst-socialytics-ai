@@ -117,7 +117,7 @@ export function CalendarKanban({
                 </span>
               )}
               <span
-                className="text-[12px] font-medium tracking-wider uppercase text-[#9ca3af] ml-auto"
+                className="t-label font-medium tracking-wider uppercase text-[#9ca3af] ml-auto"
                 aria-live="polite"
               >
                 {posts.length === 0 ? "No posts" : `${posts.length} post${posts.length === 1 ? "" : "s"}`}
