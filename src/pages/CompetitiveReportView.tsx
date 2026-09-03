@@ -463,7 +463,7 @@ export default function CompetitiveReportView() {
         {(gaps.length > 0 || hiddenGaps.length > 0) && (
           <section id="gaps" className="space-y-4 scroll-mt-28">
             <div className="flex items-end justify-between gap-4 flex-wrap">
-              <div className="glass px-5 py-4">
+              <div className="glass px-5 py-4 flex-1 min-w-0">
                 <h2 className="t-h2 flex items-center gap-3"><span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">05</span><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
                 <p className="t-secondary">
                   {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
