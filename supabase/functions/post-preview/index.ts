@@ -22,7 +22,7 @@ const corsHeaders = {
 };
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 const OK_TTL_MS = 30 * 86400000;
-const MISS_TTL_MS = 6 * 3600000;
+const MISS_TTL_MS = 60 * 60000;
 const BUCKET = "generated-media";
 const FOLDER = "post-thumbnails";
 const MAX_PER_CALL = 40;
@@ -216,7 +216,9 @@ Deno.serve(async (req) => {
     for (const u of all) {
       const c = (cached || []).find((x) => x.url === u) as (Preview & { fetched_at: string }) | undefined;
       const age = c ? now - new Date(c.fetched_at).getTime() : Infinity;
-      const valid = c && ((c.status === "ok" && age < OK_TTL_MS) || (c.status !== "ok" && age < MISS_TTL_MS));
+      // A miss is retried after an hour, or straight away when the caller now knows the creative.
+      const hintedCreative = !!hints.get(u)?.image;
+      const valid = c && ((c.status === "ok" && age < OK_TTL_MS) || (c.status !== "ok" && age < MISS_TTL_MS && !hintedCreative));
       // A cached hit that still points at an expiring CDN link (image or video) is re-resolved so it gets a durable copy.
       if (valid && !(c!.status === "ok" && c!.image_url && isExpiringCdn(c!.image_url))) out[u] = c as Preview;
       else todo.push(hints.get(u)!);
