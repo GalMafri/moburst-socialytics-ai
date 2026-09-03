@@ -153,8 +153,10 @@ export default function CompetitiveReportView() {
     }
     return map;
   }, [companies]);
-  const previewUrls = useMemo(() => Array.from(allPosts.values()).filter((p) => !p.image).map((p) => p.url), [allPosts]);
-  const { previews } = usePostPreviews(previewUrls);
+  // Every post goes through post-preview: posts without a creative get one
+  // resolved, posts with an expiring CDN link get a durable copy.
+  const previewItems = useMemo(() => Array.from(allPosts.values()).map((p) => ({ url: p.url, image: p.image || null, mediaType: p.media_type })), [allPosts]);
+  const { previews } = usePostPreviews(previewItems);
 
   const platforms = useMemo(() => {
     const totals = new Map<string, number>();
@@ -210,7 +212,7 @@ export default function CompetitiveReportView() {
 
   const postCard = (p: TopPost, key: string) => (
     <div key={key} className="rounded-[12px] p-3 bg-[rgba(255,255,255,0.04)] space-y-2.5">
-      <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} />
+      <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} maxHeight="26rem" />
       <p className="text-[13px] leading-5 line-clamp-2 min-h-[2.5rem]">{p.text || "(no caption)"}</p>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
         <Stat label="Est. impressions" value={p.est_impressions ? fmt(p.est_impressions) : "–"} />
@@ -512,9 +514,9 @@ export default function CompetitiveReportView() {
                     <p className="text-sm leading-6 text-muted-foreground">{w.evidence}</p>
                     {examples.length > 0 && (
                       <div className="space-y-2 pt-1">
-                        <div className={`grid gap-2 ${examples.length === 1 ? "grid-cols-1" : examples.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+                        <div className={`grid gap-2 items-start ${examples.length === 1 ? "grid-cols-1" : examples.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
                           {examples.map((ex, j) => (
-                            <PostVisual key={j} url={ex.url} image={ex.post?.image} preview={previews[ex.url]} mediaType={ex.post?.media_type} platform={ex.post?.channel} aspectClass="aspect-square" compact />
+                            <PostVisual key={j} url={ex.url} image={ex.post?.image} preview={previews[ex.url]} mediaType={ex.post?.media_type} platform={ex.post?.channel} compact />
                           ))}
                         </div>
                         <div className="flex flex-wrap gap-1.5">
@@ -544,7 +546,7 @@ export default function CompetitiveReportView() {
               {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
                 <div key={c.company_id} className="space-y-3">
                   <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
-                  <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+                  <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5 items-start">
                     {b.top_posts.slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}
                   </div>
                 </div>

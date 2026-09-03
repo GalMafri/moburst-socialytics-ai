@@ -2,10 +2,14 @@
 // (image, video frame or carousel cover), the platform, the media type, and a
 // click-through to the original post.
 //
+// The tile takes the creative's own format: a square stays square, a Reel or
+// TikTok is 9:16, a YouTube thumbnail is 16:9. The ratio is read from the
+// loaded media; until then a sensible default for the platform holds the space.
+//
 // Competitor posts arrive from RivalIQ with an `image` URL already attached.
 // Client posts come from Sprout, which carries no media, so their thumbnails
 // are resolved by the post-preview edge function and cached in post_previews;
-// `usePostPreviews` batches that lookup for a whole list of URLs.
+// `usePostPreviews` batches that lookup for a whole list of posts.
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -20,7 +24,7 @@ export type PostPreview = {
   media_type: string | null;
   image_url: string | null;
   title: string | null;
-  status: "ok" | "miss" | "pending" | "error";
+  status: "ok" | "unavailable" | "miss" | "pending" | "error";
 };
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -81,25 +85,40 @@ export function mediaLabel(kind: MediaKind): string {
   return kind === "video" ? "Video" : kind === "carousel" ? "Carousel" : kind === "text" ? "Text" : "Image";
 }
 
+/** The format a post most likely has before its media tells us for sure. */
+function defaultRatio(kind: MediaKind, plat: string, url: string | null | undefined): number {
+  if (plat === "youtube" && !String(url || "").includes("/shorts/")) return 16 / 9;
+  if (plat === "tiktok" || kind === "video") return 9 / 16;
+  if (plat === "instagram" || kind === "carousel") return 1;
+  return 4 / 5;
+}
+
+export type PreviewHint = { url: string | null | undefined; image?: string | null; mediaType?: string | null };
+
 /**
- * Resolves thumbnails for a set of post URLs through the post-preview
- * function. Pass every URL you plan to render; the hook dedupes, skips empty
- * values and caches results for the session.
+ * Resolves thumbnails for a set of posts through the post-preview function.
+ * Pass every post you plan to render (a URL, or a URL plus the creative you
+ * already know, so an expiring CDN link can be copied into our storage); the
+ * hook dedupes, skips empty values and caches results for the session.
  */
-export function usePostPreviews(urls: Array<string | null | undefined>, enabled = true) {
+export function usePostPreviews(items: Array<string | PreviewHint | null | undefined>, enabled = true) {
   const list = useMemo(() => {
-    const set = new Set<string>();
-    for (const u of urls) if (u && /^https?:\/\//i.test(u)) set.add(u);
-    return Array.from(set).sort();
-  }, [urls]);
+    const map = new Map<string, { url: string; image: string | null; media_type: string | null }>();
+    for (const it of items) {
+      const h = typeof it === "string" ? { url: it } : it;
+      const u = h?.url;
+      if (u && /^https?:\/\//i.test(u) && !map.has(u)) map.set(u, { url: u, image: h?.image ?? null, media_type: h?.mediaType ?? null });
+    }
+    return Array.from(map.values()).sort((a, b) => a.url.localeCompare(b.url));
+  }, [items]);
 
   const query = useQuery({
-    queryKey: ["post-previews", list],
+    queryKey: ["post-previews", list.map((x) => x.url)],
     queryFn: async () => {
       const out: Record<string, PostPreview> = {};
       for (let i = 0; i < list.length; i += 40) {
         const chunk = list.slice(i, i + 40);
-        const { data, error } = await supabase.functions.invoke("post-preview", { body: { urls: chunk } });
+        const { data, error } = await supabase.functions.invoke("post-preview", { body: { posts: chunk } });
         if (error) throw error;
         Object.assign(out, (data as any)?.previews || {});
       }
@@ -121,37 +140,65 @@ type PostVisualProps = {
   preview?: PostPreview | null;
   mediaType?: string | null;
   platform?: string | null;
-  /** Tailwind aspect class. Defaults to 4:5, the most common feed format. */
-  aspectClass?: string;
   className?: string;
   /** Hide the platform and type badges (for very small tiles). */
   compact?: boolean;
+  /** Cap the tile height (CSS length) so a 9:16 video does not dominate a row. */
+  maxHeight?: string;
 };
 
 /**
- * Thumbnail tile linking to the original post. Falls back to a labelled
- * placeholder when no creative could be resolved, so lists stay aligned.
+ * Thumbnail tile in the creative's own format, linking to the original post.
+ * Falls back to a labelled placeholder when no creative could be resolved.
  */
-export function PostVisual({ url, image, preview, mediaType, platform, aspectClass = "aspect-[4/5]", className = "", compact = false }: PostVisualProps) {
-  const [broken, setBroken] = useState(false);
-  const src = !broken ? image || preview?.image_url || null : null;
+export function PostVisual({ url, image, preview, mediaType, platform, className = "", compact = false, maxHeight }: PostVisualProps) {
+  // Sources in order of preference: the resolved preview first (a durable copy
+  // in our storage when the original is an expiring CDN link), then the
+  // creative the report already carries. A source that fails to load hands
+  // over to the next one; the placeholder comes last.
+  const candidates = useMemo(() => {
+    const list: string[] = [];
+    for (const c of [preview?.image_url, image]) if (c && !list.includes(c)) list.push(c);
+    return list;
+  }, [preview?.image_url, image]);
+  const [failed, setFailed] = useState<string[]>([]);
+  const [measured, setMeasured] = useState<Record<string, number>>({});
+  const src = candidates.find((c) => !failed.includes(c)) || null;
+  const fail = () => { if (src) setFailed((f) => [...f, src]); };
+  const measure = (w: number, h: number) => { if (src && w > 0 && h > 0) setMeasured((m) => (m[src] ? m : { ...m, [src]: w / h })); };
+  // RivalIQ hands back the video file itself for Instagram Reels; a muted
+  // <video> shows its first frame where an <img> would fail.
+  const isVideoFile = !!src && /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(src);
   const kind = mediaKind(mediaType || preview?.media_type, url);
   const plat = normalizePlatform(platform || preview?.platform || platformFromUrl(url));
+  const ratio = (src && measured[src]) || defaultRatio(kind, plat, url);
+
   const body = (
     <>
-      {src ? (
+      {src && isVideoFile ? (
+        <video
+          src={`${src}#t=0.1`}
+          muted
+          playsInline
+          preload="metadata"
+          onError={fail}
+          onLoadedMetadata={(e) => measure(e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
+          className="absolute inset-0 h-full w-full object-cover pointer-events-none"
+        />
+      ) : src ? (
         <img
           src={src}
           alt=""
           loading="lazy"
           referrerPolicy="no-referrer"
-          onError={() => setBroken(true)}
+          onError={fail}
+          onLoad={(e) => measure(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
           className="absolute inset-0 h-full w-full object-cover"
         />
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] text-muted-foreground">
           {kind === "video" ? <Play className="h-7 w-7" /> : kind === "carousel" ? <Layers className="h-7 w-7" /> : <ImageIcon className="h-7 w-7" />}
-          {!compact && <span className="text-xs">{url ? "Preview unavailable" : "No link"}</span>}
+          {!compact && <span className="text-xs">{url ? `Open on ${platformLabel(plat)}` : "No link"}</span>}
         </div>
       )}
       {src && kind === "video" && (
@@ -175,13 +222,14 @@ export function PostVisual({ url, image, preview, mediaType, platform, aspectCla
       )}
     </>
   );
-  const base = `group relative block overflow-hidden rounded-[12px] bg-[rgba(255,255,255,0.04)] ${aspectClass} ${className}`;
+  const base = `group relative block w-full overflow-hidden rounded-[12px] bg-[rgba(255,255,255,0.04)] ${className}`;
+  const style: React.CSSProperties = { aspectRatio: String(ratio), maxHeight, marginInline: "auto" };
   if (url) {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className={base} aria-label="Open the original post">
+      <a href={url} target="_blank" rel="noreferrer" className={base} style={style} aria-label="Open the original post">
         {body}
       </a>
     );
   }
-  return <div className={base}>{body}</div>;
+  return <div className={base} style={style}>{body}</div>;
 }

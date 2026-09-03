@@ -5,10 +5,14 @@
 // preview per URL and caches it in post_previews:
 //   YouTube   → thumbnail from the video id (no auth needed)
 //   TikTok    → public oEmbed (thumbnail_url)
-//   others    → og:image / og:video from the page, best effort (Instagram and
-//               Facebook frequently refuse anonymous fetches; then 'unavailable')
-// Competitor posts from RivalIQ already carry an image and skip this entirely.
-// Any signed-in user may call it (read-only, no client data involved).
+//   RivalIQ   → the creative RivalIQ already fetched for every company in a
+//               landscape (passed in by the caller, or found in the cached
+//               socialposts snapshots by permalink)
+//   others    → og:image / og:video from the page, best effort (Instagram,
+//               Facebook and LinkedIn refuse anonymous fetches)
+// Instagram and Facebook image links are signed and expire after a few days,
+// so those are copied into the public generated-media bucket and the durable
+// copy is what gets cached. Any signed-in user may call this (read-only data).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -17,16 +21,23 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
-const TTL_DAYS = 14;
+const OK_TTL_MS = 30 * 86400000;
+const MISS_TTL_MS = 6 * 3600000;
+const BUCKET = "generated-media";
+const FOLDER = "post-thumbnails";
+const MAX_PER_CALL = 40;
+const CONCURRENCY = 8;
 
 type Preview = { url: string; platform: string | null; media_type: string; image_url: string | null; title: string | null; status: "ok" | "unavailable" };
+type Hint = { url: string; image?: string | null; media_type?: string | null };
+type Db = ReturnType<typeof createClient>;
 
 function platformOf(url: string): string | null {
   const h = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } })();
   if (h.includes("youtube.com") || h.includes("youtu.be")) return "youtube";
   if (h.includes("tiktok.com")) return "tiktok";
   if (h.includes("instagram.com")) return "instagram";
-  if (h.includes("facebook.com") || h.includes("fb.com")) return "facebook";
+  if (h.includes("facebook.com") || h.includes("fb.com") || h.includes("fb.watch")) return "facebook";
   if (h.includes("linkedin.com")) return "linkedin";
   if (h.includes("x.com") || h.includes("twitter.com")) return "x";
   return null;
@@ -35,6 +46,41 @@ function platformOf(url: string): string | null {
 function youtubeId(url: string): string | null {
   const m = url.match(/(?:v=|\/shorts\/|youtu\.be\/|\/embed\/)([A-Za-z0-9_-]{6,})/);
   return m ? m[1] : null;
+}
+
+const isVideoFile = (u: string) => /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(u);
+const isExpiringCdn = (u: string) => /cdninstagram\.com|fbcdn\.net|scontent[-.]/i.test(u);
+
+function mediaTypeOf(t: string | null | undefined): string {
+  const s = String(t || "").toLowerCase();
+  if (s.includes("video") || s.includes("reel")) return "video";
+  if (s.includes("carousel") || s.includes("album")) return "carousel";
+  if (s.includes("photo") || s.includes("image")) return "image";
+  return "unknown";
+}
+
+async function sha1(s: string): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Copy an expiring image into the public bucket; returns the durable URL or null. */
+async function persist(supabase: Db, sourceUrl: string, postUrl: string): Promise<string | null> {
+  try {
+    const r = await fetch(sourceUrl, { headers: { "User-Agent": UA, Accept: "image/*" } });
+    if (!r.ok) return null;
+    const ct = (r.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
+    if (!ct.startsWith("image/")) return null;
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    if (bytes.length === 0 || bytes.length > 8_000_000) return null;
+    const ext = ct.includes("png") ? "png" : ct.includes("webp") ? "webp" : "jpg";
+    const path = `${FOLDER}/${await sha1(postUrl)}.${ext}`;
+    const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, { contentType: ct, upsert: true });
+    if (error) return null;
+    return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl || null;
+  } catch {
+    return null;
+  }
 }
 
 async function ogPreview(url: string): Promise<Partial<Preview>> {
@@ -56,10 +102,10 @@ async function ogPreview(url: string): Promise<Partial<Preview>> {
 /**
  * RivalIQ already fetched the creative for every company in a landscape,
  * including the client. Its raw socialposts responses are cached in
- * rivaliq_snapshots, so a client's Instagram, Facebook or LinkedIn post can be
- * matched by permalink there instead of scraping a login-walled page.
+ * rivaliq_snapshots, so a client's post can be matched there by permalink
+ * instead of scraping a login-walled page.
  */
-async function rivaliqLookup(supabase: ReturnType<typeof createClient>, url: string): Promise<Partial<Preview> | null> {
+async function rivaliqLookup(supabase: Db, url: string): Promise<{ image: string; media_type: string; title: string | null } | null> {
   const variants = [...new Set([url, url.replace(/\/+$/, ""), url.endsWith("/") ? url : url + "/"])];
   for (const v of variants) {
     const { data } = await supabase
@@ -71,16 +117,14 @@ async function rivaliqLookup(supabase: ReturnType<typeof createClient>, url: str
       .limit(1);
     const posts: any[] = (data?.[0] as any)?.payload?.socialPosts || [];
     const post = posts.find((p) => p?.postLink === v);
-    if (post?.image || post?.imageLarge) {
-      const t = String(post.type || "").toLowerCase();
-      const media_type = t.includes("video") || t.includes("reel") ? "video" : t.includes("carousel") || t.includes("album") ? "carousel" : "image";
-      return { image_url: post.imageLarge || post.image, media_type, title: post.message ? String(post.message).slice(0, 140) : null, status: "ok" };
-    }
+    const image = post?.imageLarge || post?.image;
+    if (image) return { image, media_type: mediaTypeOf(post.type), title: post.message ? String(post.message).slice(0, 140) : null };
   }
   return null;
 }
 
-async function resolve(supabase: ReturnType<typeof createClient>, url: string): Promise<Preview> {
+async function resolve(supabase: Db, hint: Hint): Promise<Preview> {
+  const url = hint.url;
   const platform = platformOf(url);
   const base: Preview = { url, platform, media_type: "unknown", image_url: null, title: null, status: "unavailable" };
   try {
@@ -95,9 +139,24 @@ async function resolve(supabase: ReturnType<typeof createClient>, url: string): 
         if (j.thumbnail_url) return { ...base, media_type: "video", image_url: j.thumbnail_url, title: j.title || null, status: "ok" };
       }
     }
-    const fromRivaliq = await rivaliqLookup(supabase, url).catch(() => null);
-    if (fromRivaliq) return { ...base, ...fromRivaliq } as Preview;
+    let image = hint.image || null;
+    let media_type = mediaTypeOf(hint.media_type);
+    let title: string | null = null;
+    if (!image) {
+      const hit = await rivaliqLookup(supabase, url).catch(() => null);
+      if (hit) { image = hit.image; media_type = hit.media_type; title = hit.title; }
+    }
+    if (image) {
+      // Reels arrive as the video file itself; the client renders a frame from it.
+      if (isVideoFile(image)) return { ...base, media_type: "video", image_url: image, title, status: "ok" };
+      const durable = isExpiringCdn(image) ? await persist(supabase, image, url) : null;
+      return { ...base, media_type: media_type === "unknown" ? "image" : media_type, image_url: durable || image, title, status: "ok" };
+    }
     const og = await ogPreview(url);
+    if (og.status === "ok" && og.image_url) {
+      const durable = isExpiringCdn(og.image_url) ? await persist(supabase, og.image_url, url) : null;
+      return { ...base, ...og, image_url: durable || og.image_url } as Preview;
+    }
     return { ...base, ...og, media_type: og.media_type || base.media_type } as Preview;
   } catch {
     return base;
@@ -114,25 +173,37 @@ Deno.serve(async (req) => {
     if (!who?.user) return json({ error: "Invalid or expired session." }, 401);
 
     const body = await req.json();
-    const urls: string[] = Array.isArray(body.urls) ? body.urls : body.url ? [body.url] : [];
-    const clean = [...new Set(urls.map((u) => String(u || "").trim()).filter((u) => /^https?:\/\//i.test(u)))].slice(0, 40);
-    if (clean.length === 0) return json({ previews: {} });
+    const hints = new Map<string, Hint>();
+    const add = (h: Hint) => {
+      const u = String(h.url || "").trim();
+      if (/^https?:\/\//i.test(u) && !hints.has(u) && hints.size < MAX_PER_CALL) hints.set(u, { url: u, image: h.image || null, media_type: h.media_type || null });
+    };
+    if (Array.isArray(body.posts)) for (const p of body.posts) if (p && typeof p === "object") add({ url: p.url, image: p.image ?? p.image_url ?? null, media_type: p.media_type ?? p.mediaType ?? null });
+    if (Array.isArray(body.urls)) for (const u of body.urls) add({ url: String(u || "") });
+    if (body.url) add({ url: String(body.url) });
+    const all = [...hints.keys()];
+    if (all.length === 0) return json({ previews: {} });
 
-    const { data: cached } = await supabase.from("post_previews").select("*").in("url", clean);
-    const fresh = new Date(Date.now() - TTL_DAYS * 86400000).toISOString();
+    const { data: cached } = await supabase.from("post_previews").select("*").in("url", all);
+    const now = Date.now();
     const out: Record<string, Preview> = {};
-    const todo: string[] = [];
-    for (const u of clean) {
-      const c = (cached || []).find((x) => x.url === u);
-      if (c && c.fetched_at > fresh && (c.status === "ok" || c.status === "unavailable")) out[u] = c as Preview;
-      else todo.push(u);
+    const todo: Hint[] = [];
+    for (const u of all) {
+      const c = (cached || []).find((x) => x.url === u) as (Preview & { fetched_at: string }) | undefined;
+      const age = c ? now - new Date(c.fetched_at).getTime() : Infinity;
+      const valid = c && ((c.status === "ok" && age < OK_TTL_MS) || (c.status !== "ok" && age < MISS_TTL_MS));
+      // A cached hit that still points at an expiring CDN link is re-resolved so it gets a durable copy.
+      if (valid && !(c!.status === "ok" && c!.image_url && isExpiringCdn(c!.image_url) && !isVideoFile(c!.image_url))) out[u] = c as Preview;
+      else todo.push(hints.get(u)!);
     }
-    // Resolve misses with modest concurrency; failures are cached as unavailable
-    // so a stubborn Instagram permalink is not re-fetched on every page view.
-    const results = await Promise.all(todo.slice(0, 12).map((u) => resolve(supabase, u)));
-    for (const p of results) {
-      out[p.url] = p;
-      await supabase.from("post_previews").upsert({ ...p, fetched_at: new Date().toISOString() }, { onConflict: "url" });
+    const results: Preview[] = [];
+    for (let i = 0; i < todo.length; i += CONCURRENCY) {
+      results.push(...(await Promise.all(todo.slice(i, i + CONCURRENCY).map((h) => resolve(supabase, h)))));
+    }
+    if (results.length > 0) {
+      const stamp = new Date().toISOString();
+      await supabase.from("post_previews").upsert(results.map((p) => ({ ...p, fetched_at: stamp })), { onConflict: "url" });
+      for (const p of results) out[p.url] = p;
     }
     return json({ previews: out });
   } catch (err) {
