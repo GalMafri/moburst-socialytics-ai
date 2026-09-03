@@ -228,3 +228,10 @@
   :where(.t-secondary) { color: #e5e7eb; }
   :where(.t-label) { color: #b1b7c1; }
 }
+
+/* Motion is optional: entrance and hover choreography stops when the OS asks for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-up, .stagger-children > * { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .hover-lift, .hover-lift:hover, .press-effect:active { transform: none !important; }
+  .glass, .glass-inner, .hover-lift, .press-effect { transition: none !important; }
+}

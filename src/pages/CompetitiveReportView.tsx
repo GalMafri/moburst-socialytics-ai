@@ -90,7 +90,7 @@ function Seg({ active, onClick, children }: { active: boolean; onClick: () => vo
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`px-3 py-1.5 rounded-[9px] t-body font-medium transition-colors ${active ? "bg-[rgba(255,255,255,0.12)] text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+      className={`px-3 py-1.5 rounded-[9px] t-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(185,224,69,0.45)] ${active ? "bg-[rgba(255,255,255,0.12)] text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
     >
       {children}
     </button>
