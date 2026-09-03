@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 import { FileText, TrendingUp, BarChart3, AlertCircle } from "lucide-react";
 
 // Defense-in-depth: even when RLS returns extra/stale clients (e.g. client_users
@@ -123,10 +124,7 @@ export function ClientDashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="t-h1">{displayName}</h2>
-        <p className="text-muted-foreground t-body">Your social media intelligence dashboard</p>
-      </div>
+      <PageHeader title={displayName} description="Your social media intelligence dashboard" />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card

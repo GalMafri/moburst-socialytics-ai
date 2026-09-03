@@ -95,7 +95,7 @@ export default function Auth() {
               { icon: BarChart3, title: "Performance Analytics", desc: "Monitor cross-platform social media metrics" },
               { icon: Zap, title: "AI Recommendations", desc: "Get AI-powered content strategy insights" },
             ].map((f) => (
-              <div key={f.title} className="flex items-start gap-3 glass-inner p-3">
+              <div key={f.title} className="flex items-start gap-3 glass-inner p-4">
                 <div className="mt-1 p-2 rounded-lg bg-[rgba(185,224,69,0.1)]">
                   <f.icon className="h-4 w-4 text-[#b9e045]" />
                 </div>

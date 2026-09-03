@@ -7,7 +7,7 @@ export default function Index() {
   const { isClient } = useAuth();
 
   return (
-    <AppLayout title="Dashboard">
+    <AppLayout>
       {isClient ? <ClientDashboard /> : <AdminDashboard />}
     </AppLayout>
   );

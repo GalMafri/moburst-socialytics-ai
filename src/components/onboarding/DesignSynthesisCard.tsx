@@ -85,7 +85,7 @@ export function DesignSynthesisCard({
 
   return (
     <Card>
-      <CardContent className="pt-6 space-y-3">
+      <CardContent className="pt-5 space-y-3">
         <div className="flex items-center justify-between">
           <Label className="t-body font-semibold flex items-center gap-2">
             <Sparkles className="h-4 w-4" /> Brand design language

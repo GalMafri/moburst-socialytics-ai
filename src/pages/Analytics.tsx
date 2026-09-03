@@ -1,4 +1,5 @@
 import { DateRange, formatRange, isValidRange, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate } from "@/lib/dateRange";
+import { StatCard } from "@/components/ui/stat-card";
 import { PostVisual, usePostPreviews } from "@/components/competitive/PostVisual";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useParams, useNavigate } from "react-router-dom";
@@ -21,12 +22,8 @@ import {
   Share2,
   TrendingUp,
   TrendingDown,
-  Minus,
   Lightbulb,
-  Info,
   Sparkles,
-  Globe,
-  Languages,
   Crosshair,
   ExternalLink,
 } from "lucide-react";
@@ -282,7 +279,14 @@ export default function Analytics() {
   const pdfFilename = `${client?.name || "client"}_analytics_${range}_${new Date().toISOString().split("T")[0]}`;
 
   return (
-    <AppLayout title={title}>
+    <AppLayout
+      title={title}
+      description={[
+        "Live Sprout performance for the selected window, trends from the monthly reports, and the competitive view.",
+        client?.geo ? `Market: ${client.geo}` : null,
+        client?.language ? `Language: ${client.language}` : null,
+      ].filter(Boolean).join(" · ")}
+    >
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -333,30 +337,6 @@ export default function Analytics() {
         </div>
 
         <div ref={exportRef} className="space-y-6">
-        {/* Guidance text */}
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.04)]">
-          <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-          <div className="space-y-1">
-            <p className="t-secondary">
-              Track your social media performance over time. Each report generates a snapshot of your metrics — the more
-              reports you run, the richer your trend data becomes.
-            </p>
-            {client && (client.geo || client.language) && (
-              <div className="flex items-center gap-3 t-secondary">
-                {client.geo && (
-                  <span className="flex items-center gap-1">
-                    <Globe className="h-3 w-3" /> {client.geo}
-                  </span>
-                )}
-                {client.language && (
-                  <span className="flex items-center gap-1">
-                    <Languages className="h-3 w-3" /> {client.language}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
 
         {isLoading ? (
           <Loading label="Loading analytics" />
@@ -490,7 +470,7 @@ export default function Analytics() {
                 )}
 
                 {/* Single report CTA — encourage running more analyses */}
-                {filtered.length === 1 && (
+                {(reports?.length ?? 0) === 1 && (
                   <Card className="border-dashed">
                     <CardContent className="pt-5 pb-4 px-5 text-center space-y-2">
                       <div className="flex items-center justify-center gap-2 text-muted-foreground">
@@ -907,42 +887,8 @@ function mergeSproutChunks(chunks: any[], window: DateRange) {
 }
 
 /* ─── Summary Card with optional MoM change ─── */
-function SummaryCard({
-  icon,
-  label,
-  value,
-  change,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  change?: number;
-}) {
-  return (
-    <Card>
-      <CardContent className="pt-4 pb-3 px-4 space-y-1">
-        <div className="flex items-center gap-1.5 text-muted-foreground t-label">
-          {icon}
-          {label}
-        </div>
-        <div className="text-xl font-bold">{value}</div>
-        {change != null && change !== 0 && (
-          <div
-            className={`flex items-center gap-1 t-label font-medium ${change > 0 ? "text-[#10b981]" : "text-destructive"}`}
-          >
-            {change > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-            {change > 0 ? "+" : ""}
-            {change}% MoM
-          </div>
-        )}
-        {change != null && change === 0 && (
-          <div className="flex items-center gap-1 t-label font-medium">
-            <Minus className="h-3 w-3" /> 0% MoM
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
+function SummaryCard({ icon, label, value, change }: { icon: React.ReactNode; label: string; value: string; change?: number }) {
+  return <StatCard icon={icon} label={label} value={value} delta={change != null ? { percent: change, label: "vs prev." } : undefined} />;
 }
 
 /* ─── Single-value metric bar (for when there's only 1 report) ─── */
@@ -1051,7 +997,7 @@ function LiveSproutSection({
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2">
               {posts.slice(0, 6).map((p: any, i: number) => (
-                <div key={i} className="flex gap-4 glass-inner p-3">
+                <div key={i} className="flex gap-4 glass-inner p-4">
                   <PostVisual url={p.permalink} preview={p.permalink ? previews[p.permalink] : null} mediaType={p.post_type} platform={p.network_type} className="w-28 shrink-0" compact />
                   <div className="flex-1 min-w-0 space-y-2">
                     <div className="flex items-center justify-between gap-2">

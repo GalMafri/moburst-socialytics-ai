@@ -6,6 +6,7 @@
 // hidden here too; endorsed gaps are listed first.
 
 import { useNavigate } from "react-router-dom";
+import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -23,15 +24,7 @@ import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
 
 function Tile({ label, value, sub, accent = false }: { label: string; value: string; sub?: string; accent?: boolean }) {
-  return (
-    <Card className={accent ? "glass-accent" : ""}>
-      <CardContent className="pt-4 pb-4 space-y-2">
-        <p className="t-label uppercase tracking-wider">{label}</p>
-        <p className="t-stat">{value}</p>
-        {sub && <p className="t-secondary">{sub}</p>}
-      </CardContent>
-    </Card>
-  );
+  return <StatCard label={label} value={value} sub={sub} accent={accent} />;
 }
 
 export function CompetitiveSnapshot({

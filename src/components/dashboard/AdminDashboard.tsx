@@ -2,6 +2,8 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { StatCard } from "@/components/ui/stat-card";
+import { PageHeader } from "@/components/ui/page-header";
 import { ClickableCard } from "@/components/ui/clickable-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Loading } from "@/components/ui/loading";
@@ -14,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, Search, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair } from "lucide-react";
+import { Plus, Search, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair, Users, Settings } from "lucide-react";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
@@ -116,19 +118,35 @@ export function AdminDashboard() {
     return matchesSearch && (showArchived ? isArchived : !isArchived);
   });
 
+  const active = (clients ?? []).filter((c: any) => !c.archived_at);
+  const allReports = (clients ?? []).flatMap((c: any) => c.reports ?? []);
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const reportsThisMonth = allReports.filter((r: any) => new Date(r.created_at) >= monthStart).length;
+  const runningNow = allReports.filter((r: any) => r.status === "running").length;
+  const completedReports = allReports.filter((r: any) => r.status === "completed").length;
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="t-h1">Clients</h2>
-          <p className="text-muted-foreground t-body">{clients?.length ?? 0} clients configured</p>
+      <PageHeader
+        title="Clients"
+        description={`${active.length} active ${active.length === 1 ? "client" : "clients"}. Open a client for its setup, analytics and competitive view, or run this month's report.`}
+        actions={
+          canManageClients ? (
+            <Button onClick={() => navigate("/clients/new/setup")}>
+              <Plus className="h-4 w-4 mr-2" /> Add Client
+            </Button>
+          ) : undefined
+        }
+      />
+
+      {!isLoading && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 stagger-children">
+          <StatCard label="Active clients" value={active.length} icon={<Users className="h-3.5 w-3.5" />} />
+          <StatCard label="Completed reports" value={completedReports} icon={<BarChart3 className="h-3.5 w-3.5" />} />
+          <StatCard label="Reports this month" value={reportsThisMonth} icon={<Calendar className="h-3.5 w-3.5" />} />
+          <StatCard label="Running now" value={runningNow} icon={<Play className="h-3.5 w-3.5" />} sub={runningNow ? "analysis in progress" : undefined} />
         </div>
-        {canManageClients && (
-          <Button onClick={() => navigate("/clients/new/setup")}>
-            <Plus className="h-4 w-4 mr-2" /> Add Client
-          </Button>
-        )}
-      </div>
+      )}
 
       <div className="flex items-center gap-3">
         <div className="relative max-w-sm flex-1">
@@ -186,15 +204,22 @@ export function AdminDashboard() {
                     </div>
                     <div className="flex items-center gap-1">
                       {client.logo_url && <img src={client.logo_url} alt="" className="h-8 w-8 rounded object-cover" />}
-                      {canDelete && (
-                        <DropdownMenu>
+                      <DropdownMenu>
                           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="More actions">
                               <MoreVertical className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                            {(client as any).archived_at ? (
+                            {canRunAnalysis && (
+                              <DropdownMenuItem onClick={() => navigate(`/clients/${client.id}/competitive`)}>
+                                <Crosshair className="h-4 w-4 mr-2" /> Competitive analysis
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem onClick={() => navigate(`/clients/${client.id}/setup`)}>
+                              <Settings className="h-4 w-4 mr-2" /> Client setup
+                            </DropdownMenuItem>
+                            {canDelete && ((client as any).archived_at ? (
                               <>
                                 <DropdownMenuItem onClick={() => restoreMutation.mutate(client.id)}>
                                   <RotateCcw className="h-4 w-4 mr-2" /> Restore
@@ -213,10 +238,9 @@ export function AdminDashboard() {
                               <DropdownMenuItem onClick={() => archiveMutation.mutate(client.id)}>
                                 <Archive className="h-4 w-4 mr-2" /> Archive Client
                               </DropdownMenuItem>
-                            )}
+                            ))}
                           </DropdownMenuContent>
                         </DropdownMenu>
-                      )}
                     </div>
                   </div>
                 </CardHeader>
@@ -238,7 +262,7 @@ export function AdminDashboard() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-8 px-2.5"
+                        className="h-9 px-3"
                         title="Analytics"
                         aria-label="Analytics"
                         onClick={(e) => {
@@ -246,26 +270,13 @@ export function AdminDashboard() {
                           navigate(`/clients/${client.id}/analytics`);
                         }}
                       >
-                        <BarChart3 className="h-3.5 w-3.5" /><span className="ml-1.5 hidden 2xl:inline">Analytics</span>
+                        <BarChart3 className="h-3.5 w-3.5" /><span className="ml-1.5">Analytics</span>
                       </Button>
                       {canRunAnalysis && (
                         <>
                           <Button
                             size="sm"
-                            variant="outline"
-                            className="h-8 px-2.5"
-                            title="Competitive analysis"
-                            aria-label="Competitive analysis"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/clients/${client.id}/competitive`);
-                            }}
-                          >
-                            <Crosshair className="h-3.5 w-3.5" /><span className="ml-1.5 hidden 2xl:inline">Competitive</span>
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="h-8 px-2.5"
+                            className="h-9 px-3"
                             title="Run monthly report"
                             aria-label="Run monthly report"
                             onClick={(e) => {

@@ -72,7 +72,7 @@ export function DesignReferencesUpload({
 
   return (
     <Card>
-      <CardContent className="pt-6 space-y-4">
+      <CardContent className="pt-5 space-y-4">
         <Label className="t-body font-semibold">Design References</Label>
         <p className="t-secondary">
           Upload example social posts, ads, or designs. These will be used as visual style references when generating new designs.

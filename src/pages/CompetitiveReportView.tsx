@@ -8,6 +8,7 @@
 // by_channel data, so the filter only appears when it can do something.
 
 import { useMemo, useRef, useState } from "react";
+import { StatCard } from "@/components/ui/stat-card";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -76,15 +77,7 @@ function HeatStrip({ counts, keys, labelEvery = 1, size = "h-6 w-6", color = ACC
 }
 
 function Kpi({ label, value, sub, accent = false }: { label: string; value: string; sub?: string; accent?: boolean }) {
-  return (
-    <Card className={accent ? "glass-accent" : ""}>
-      <CardContent className="pt-5 pb-4">
-        <p className="t-label uppercase tracking-wider">{label}</p>
-        <p className="t-stat mt-2">{value}</p>
-        {sub && <p className="t-secondary mt-2">{sub}</p>}
-      </CardContent>
-    </Card>
-  );
+  return <StatCard label={label} value={value} sub={sub} accent={accent} />;
 }
 
 function Chip({ children }: { children: React.ReactNode }) {
@@ -224,7 +217,7 @@ export default function CompetitiveReportView() {
   };
 
   const postCard = (p: TopPost, key: string) => (
-    <div key={key} className="glass-inner p-3 space-y-2.5">
+    <div key={key} className="glass-inner p-4 space-y-2.5">
       <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} maxHeight="26rem" />
       <p className="t-body line-clamp-2 min-h-[3rem]">{p.text || "(no caption)"}</p>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
@@ -270,7 +263,7 @@ export default function CompetitiveReportView() {
         </div>
 
         {report.status === "failed" && (
-          <Card><CardContent className="pt-6 text-destructive break-words">{String(rd.error || "The run failed before producing a report.")}</CardContent></Card>
+          <Card><CardContent className="pt-5 text-destructive break-words">{String(rd.error || "The run failed before producing a report.")}</CardContent></Card>
         )}
 
         {/* Platform filter */}

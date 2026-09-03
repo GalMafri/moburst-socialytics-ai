@@ -1,4 +1,5 @@
 import { useNavigate, useParams } from "react-router-dom";
+import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -514,25 +515,20 @@ function MetricsCards({ changes, previousMonth }: { changes: Record<string, any>
   ];
   const fmt = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 10_000 ? `${(v / 1_000).toFixed(1)}K` : v.toLocaleString());
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 stagger-children">
       {metrics.map(({ key, label, icon: Icon }) => {
         const d = changes[key];
         if (!d) return null;
-        const pct = typeof d.percent === "number" ? d.percent : 0;
-        const tone = pct > 10 ? "text-success" : pct < -10 ? "text-destructive" : "text-muted-foreground";
+        const pct = typeof d.percent === "number" ? d.percent : null;
         const prev = previousMonth?.[key];
         return (
-          <Card key={key}>
-            <CardContent className="pt-4 pb-4 px-4 space-y-2">
-              <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><Icon className="h-3.5 w-3.5" /> {label}</p>
-              <p className="t-stat">{fmt(Number(d.current ?? 0))}</p>
-              <p className={`t-label font-medium flex items-center gap-1 ${tone}`}>
-                {pct > 0 ? <TrendingUp className="h-3.5 w-3.5" /> : pct < 0 ? <TrendingDown className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
-                {pct > 0 ? "+" : ""}{pct.toFixed(0)}%
-                {prev != null && <span className="text-muted-foreground font-normal">vs {fmt(Number(prev))}</span>}
-              </p>
-            </CardContent>
-          </Card>
+          <StatCard
+            key={key}
+            label={label}
+            icon={<Icon className="h-3.5 w-3.5" />}
+            value={fmt(Number(d.current ?? 0))}
+            delta={{ percent: pct, previous: prev != null ? fmt(Number(prev)) : undefined }}
+          />
         );
       })}
     </div>

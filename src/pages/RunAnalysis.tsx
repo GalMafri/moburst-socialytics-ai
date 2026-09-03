@@ -527,7 +527,7 @@ export default function RunAnalysis() {
 
         {/* Run button */}
         <Card>
-          <CardContent className="pt-6 text-center space-y-6">
+          <CardContent className="pt-5 text-center space-y-6">
             {!running && !error && currentStep < 0 && (
               <>
                 <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!profiles || profiles.length === 0}>

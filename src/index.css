@@ -86,9 +86,9 @@
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 700px 600px at 8% 90%, rgba(185,224,69,0.06) 0%, transparent 60%),
-    radial-gradient(ellipse 500px 500px at 90% 10%, rgba(16,185,129,0.04) 0%, transparent 60%),
-    radial-gradient(ellipse 400px 400px at 50% 50%, rgba(139,92,246,0.03) 0%, transparent 70%);
+    radial-gradient(ellipse 900px 700px at 8% 90%, rgba(185,224,69,0.16) 0%, transparent 60%),
+    radial-gradient(ellipse 700px 600px at 90% 10%, rgba(16,185,129,0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 600px 500px at 55% 45%, rgba(139,92,246,0.08) 0%, transparent 70%);
 }
 
 /* ── Glass Surface System ── */

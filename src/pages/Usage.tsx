@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -86,38 +87,14 @@ function fmtDate(v: string | null) {
   return new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
 }
 
-function Tile({
-  label,
-  value,
-  hint,
-  icon: Icon,
-  tone,
-}: {
-  label: string;
-  value: number | string;
-  hint?: string;
-  icon: typeof Users;
-  tone?: "warn";
-}) {
+function Tile({ label, value, hint, icon: Icon, tone }: { label: string; value: number | string; hint?: string; icon: typeof Users; tone?: "warn" }) {
   return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="t-label uppercase tracking-wider text-muted-foreground">{label}</p>
-            <p
-              className={`mt-1 text-3xl font-semibold tabular-nums ${
-                tone === "warn" ? "text-rose-400" : "text-foreground"
-              }`}
-            >
-              {value}
-            </p>
-            {hint && <p className="mt-1 t-secondary">{hint}</p>}
-          </div>
-          <Icon className={`h-5 w-5 shrink-0 ${tone === "warn" ? "text-rose-400" : "text-muted-foreground"}`} />
-        </div>
-      </CardContent>
-    </Card>
+    <StatCard
+      label={label}
+      icon={<Icon className="h-3.5 w-3.5" />}
+      value={tone === "warn" ? <span className="text-rose-400">{value}</span> : value}
+      sub={hint}
+    />
   );
 }
 
@@ -206,7 +183,7 @@ export default function Usage() {
     return (
       <AppLayout title="User Analytics">
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-5">
             <p className="t-body font-medium">Sign in to view usage</p>
             <p className="mt-1 t-secondary">
               Open this tool from the Moburst portal so it can sign you in, then come
@@ -222,7 +199,7 @@ export default function Usage() {
     return (
       <AppLayout title="User Analytics">
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-5">
             <p className="t-body text-rose-400">Could not load usage data.</p>
             <p className="mt-1 t-secondary">{(users.error as Error).message}</p>
           </CardContent>
@@ -235,7 +212,7 @@ export default function Usage() {
     return (
       <AppLayout title="User Analytics">
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-5">
             <p className="t-secondary">
               No usage data visible. This page is limited to admin accounts.
             </p>

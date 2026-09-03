@@ -284,7 +284,7 @@ export default function CompetitiveRun() {
       <AppLayout title={`Competitive: ${client.name}`}>
         <div className="max-w-4xl mx-auto">
           <Card>
-            <CardContent className="pt-6 text-center space-y-4">
+            <CardContent className="pt-5 text-center space-y-4">
               <Crosshair className="h-8 w-8 mx-auto text-muted-foreground" />
               <p className="t-secondary">
                 No confirmed competitor set for this client yet. Review and confirm a top 3 first.
@@ -369,7 +369,7 @@ export default function CompetitiveRun() {
 
         {/* Run */}
         <Card>
-          <CardContent className="pt-6 text-center space-y-6">
+          <CardContent className="pt-5 text-center space-y-6">
             {!running && !error && currentStep < 0 && (
               <>
                 <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!rangeOk}>
