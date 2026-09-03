@@ -952,8 +952,8 @@ function LiveSproutSection({
   return (
     <div className="space-y-6">
       <div>
-        <p className="t-secondary mb-2 flex items-center gap-1.5">
-          <BarChart3 className="h-3 w-3" />
+        <p className="glass-inner px-4 py-2 mb-3 inline-flex items-center gap-2 t-body">
+          <BarChart3 className="h-4 w-4" />
           {data.previous_range
             ? <>Sprout data for {rangeLabel} · compared with the {data.previous_range.days} days before ({formatRange(data.previous_range)})</>
             : <>Live Sprout totals for {rangeLabel}: every day from {formatRange(data.range)} added up{data.chunks > 1 ? ` across ${data.chunks} requests` : ""}</>}

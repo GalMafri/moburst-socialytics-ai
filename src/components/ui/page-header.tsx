@@ -21,7 +21,7 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap items-end justify-between gap-x-6 gap-y-4", className)}>
+    <div className={cn("glass p-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-4", className)}>
       <div className="min-w-0 space-y-1.5">
         {back}
         <h1 className="t-h1">{title}</h1>

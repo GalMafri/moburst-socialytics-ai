@@ -17,7 +17,7 @@
     --secondary: 220 12% 16%;
     --secondary-foreground: 0 0% 90%;
     --muted: 222 10% 16%;
-    --muted-foreground: 220 13% 85%;
+    --muted-foreground: 220 14% 96%;
     --accent: 222 10% 16%;
     --accent-foreground: 0 0% 95%;
     --destructive: 0 70% 50%;
@@ -77,7 +77,7 @@
   background-image: url("/images/bg-main.png");
   background-size: cover;
   background-position: center bottom;
-  opacity: 0.75;
+  opacity: 0.9;
 }
 .intercept-bg::after {
   content: "";
@@ -86,9 +86,9 @@
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 900px 700px at 8% 90%, rgba(185,224,69,0.16) 0%, transparent 60%),
-    radial-gradient(ellipse 700px 600px at 90% 10%, rgba(16,185,129,0.12) 0%, transparent 60%),
-    radial-gradient(ellipse 600px 500px at 55% 45%, rgba(139,92,246,0.08) 0%, transparent 70%);
+    radial-gradient(ellipse 900px 700px at 8% 90%, rgba(185,224,69,0.22) 0%, transparent 60%),
+    radial-gradient(ellipse 700px 600px at 90% 10%, rgba(16,185,129,0.16) 0%, transparent 60%),
+    radial-gradient(ellipse 600px 500px at 55% 45%, rgba(139,92,246,0.10) 0%, transparent 70%);
 }
 
 /* ── Glass Surface System ── */
@@ -216,16 +216,16 @@
   .t-h1 { font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.5px; }
   .t-h2 { font-size: 20px; line-height: 26px; font-weight: 700; letter-spacing: -0.5px; }
   .t-h3 { font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.3px; }
-  .t-body { font-size: 15px; line-height: 24px; letter-spacing: -0.2px; }
-  .t-secondary { font-size: 15px; line-height: 24px; letter-spacing: -0.2px; }
+  .t-body { font-size: 16px; line-height: 24px; letter-spacing: -0.2px; }
+  .t-secondary { font-size: 16px; line-height: 24px; letter-spacing: -0.2px; }
   p.t-body:not(.flex):not(.truncate), p.t-secondary:not(.flex):not(.truncate), li.t-body { max-width: 72ch; }
   .t-label { font-size: 13px; line-height: 18px; letter-spacing: 0.1px; }
-  .t-badge { font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: -0.2px; }
+  .t-badge { font-size: 13px; line-height: 18px; font-weight: 700; letter-spacing: -0.2px; }
   /* Long-form AI passages: bigger, looser, capped at a readable measure. */
   .t-prose { font-size: 16px; line-height: 26px; letter-spacing: -0.1px; max-width: 72ch; }
   :where(.t-stat, .t-h1, .t-h2, .t-h3, .t-prose) { color: #ffffff; }
   /* Secondary sentences stay light (#d1d5db, 12.6:1). Grey (#b1b7c1, 9.6:1) is for short labels only. */
-  :where(.t-secondary) { color: #e5e7eb; }
+  :where(.t-secondary) { color: #ffffff; }
   :where(.t-label) { color: #b1b7c1; }
 }
 

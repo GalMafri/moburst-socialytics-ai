@@ -270,7 +270,7 @@ export default function ReportView() {
     <AppLayout>
       <div className="w-full space-y-6" ref={reportContentRef}>
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="glass p-5 flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-1.5">
             <h1 className="t-h1">{clientName}: monthly report</h1>
             <p className="t-secondary flex items-center gap-2 flex-wrap">
@@ -313,8 +313,7 @@ export default function ReportView() {
 
                 {(insights.length > 0 || summary) && (
                   <Section title="Key insights">
-                    <Card>
-                      <CardContent className="pt-5 space-y-5">
+                    <div className="space-y-5">
                         {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
                         {insights.length > 0 && (
                           <ol className="columns-[38rem] gap-x-10 space-y-3">
@@ -334,14 +333,13 @@ export default function ReportView() {
                             </div>
                           </div>
                         )}
-                      </CardContent>
-                    </Card>
+                    </div>
                   </Section>
                 )}
 
                 {monthComparison?.current_month && (
                   <Section title="Period-over-period performance" description="Current period in green, previous period in purple.">
-                    <Card><CardContent className="pt-5"><PerformanceChart comparison={monthComparison} /></CardContent></Card>
+                    <PerformanceChart comparison={monthComparison} />
                   </Section>
                 )}
 
@@ -362,8 +360,7 @@ export default function ReportView() {
                 {pillars && (
                   <div id="report-pillars">
                     <Section title="Content pillar alignment" description="Which pillars the month served, and which need attention.">
-                      <Card>
-                        <CardContent className="pt-5 space-y-5">
+                      <div className="space-y-5">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             {pillars.well_represented?.length > 0 && (
                               <div className="space-y-2">
@@ -386,8 +383,7 @@ export default function ReportView() {
                               </ul>
                             </div>
                           )}
-                        </CardContent>
-                      </Card>
+                      </div>
                     </Section>
                   </div>
                 )}
@@ -476,7 +472,7 @@ export default function ReportView() {
 
           {/* ── COMPETITIVE ── */}
           <TabsContent value="competitive" className="space-y-6">
-            <Section title="How the field compares" description="The latest competitive analysis for this client. Endorsed gaps feed the next report's calendar.">
+            <Section flat title="How the field compares" description="The latest competitive analysis for this client. Endorsed gaps feed the next report's calendar.">
               <CompetitiveSnapshot clientId={report.client_id} takeaways={aiAnalysis?.competitive_takeaways} />
             </Section>
           </TabsContent>
@@ -487,18 +483,30 @@ export default function ReportView() {
 }
 
 /* ─── Layout primitives: one type scale for the whole report ─── */
-function Section({ title, description, action, children }: { title: string; description?: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="space-y-4">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h2 className="t-h2">{title}</h2>
-          {description && <p className="t-secondary mt-0.5">{description}</p>}
-        </div>
-        {action}
+function Section({ title, description, action, children, flat = false }: { title: string; description?: string; action?: React.ReactNode; children: React.ReactNode; flat?: boolean }) {
+  const header = (
+    <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="space-y-1">
+        <h2 className="t-h2">{title}</h2>
+        {description && <p className="t-secondary">{description}</p>}
       </div>
-      {children}
-    </section>
+      {action}
+    </div>
+  );
+  // flat: the header gets its own glass band and the children stand below it (for grids of cards).
+  if (flat) {
+    return (
+      <section className="space-y-4">
+        <div className="glass p-5">{header}</div>
+        {children}
+      </section>
+    );
+  }
+  return (
+    <Card>
+      <CardHeader>{header}</CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }
 
@@ -692,8 +700,8 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
   const changes = platform.changes || null;
   const ai = platform.ai || null;
   return (
-    <Card>
-      <CardHeader className="pb-3 space-y-1.5">
+    <div className="glass-inner p-5">
+      <div className="pb-3 space-y-1.5">
         <div className="flex items-center justify-between gap-2">
           <PlatformBadge platform={prettyPlatformName(platform.network)} size="sm" />
           {typeof platform.post_count === "number" && platform.post_count > 0 && (
@@ -712,8 +720,8 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
             {formatNumbersInText(ai.headline)}
           </CardDescription>
         )}
-      </CardHeader>
-      <CardContent className="space-y-4">
+      </div>
+      <div className="space-y-4">
         <div className="grid grid-cols-3 gap-x-3 gap-y-3">
           {metrics.map(({ key, label, icon: Icon }) => {
             const value = Number(cur[key] ?? 0);
@@ -770,8 +778,8 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
             </ul>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 

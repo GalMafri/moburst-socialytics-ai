@@ -241,7 +241,7 @@ export default function CompetitiveReportView() {
 
         {/* Hero */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="space-y-2">
+          <div className="glass p-5 space-y-2">
             <Button variant="ghost" size="sm" className="-ml-2" onClick={() => navigate(isMoburstStaff ? `/clients/${clientId}/competitive/run` : "/")}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Back
             </Button>
@@ -263,12 +263,12 @@ export default function CompetitiveReportView() {
         </div>
 
         {report.status === "failed" && (
-          <Card><CardContent className="pt-5 text-destructive break-words">{String(rd.error || "The run failed before producing a report.")}</CardContent></Card>
+          <Card><CardContent className="text-destructive break-words">{String(rd.error || "The run failed before producing a report.")}</CardContent></Card>
         )}
 
         {/* Platform filter */}
         {hasChannels && (
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="glass px-5 py-3 flex items-center gap-3 flex-wrap">
             <span className="t-label uppercase tracking-wider">Platform</span>
             <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)]">
               <Seg active={effectivePlat === "all"} onClick={() => setPlat("all")}>All platforms</Seg>
@@ -296,25 +296,22 @@ export default function CompetitiveReportView() {
 
         {/* Executive summary */}
         {ai.executive_summary && (
-          <section className="space-y-4">
-            <div className="space-y-1">
-              <h2 className="t-h2 flex items-center gap-2">Executive summary</h2>
-            </div>
             <Card className="glass-elevated">
+              <CardHeader>
+                <CardTitle className="t-h3 flex items-center gap-2">Executive summary</CardTitle>
+              </CardHeader>
               <CardContent><Prose text={ai.executive_summary} className="t-body whitespace-pre-line" /></CardContent>
             </Card>
-          </section>
         )}
 
         {/* Scorecard */}
         {scorecard?.dimensions?.length > 0 && (
-          <section className="space-y-4">
-            <div className="space-y-1">
-              <h2 className="t-h2 flex items-center gap-2"><Gauge className="h-5 w-5" /> Where {clientName} stands</h2>
-              <p className="t-secondary">Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</p>
-            </div>
             <Card>
-              <CardContent className="pt-5 space-y-5">
+              <CardHeader>
+                <CardTitle className="t-h3 flex items-center gap-2"><Gauge className="h-5 w-5" /> Where {clientName} stands</CardTitle>
+                <CardDescription>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
                 {scorecard.dimensions.map((d: any, i: number) => (
                   <div key={i} className="space-y-2">
                     <div className="flex justify-between items-baseline gap-4">
@@ -330,13 +327,12 @@ export default function CompetitiveReportView() {
                 ))}
               </CardContent>
             </Card>
-          </section>
         )}
 
         {/* The field */}
         {companies.length > 0 && (
           <section className="space-y-4">
-            <div>
+            <div className="glass p-5">
               <h2 className="t-h2">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
               <p className="t-secondary">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
             </div>
@@ -401,13 +397,12 @@ export default function CompetitiveReportView() {
 
         {/* Posting rhythm */}
         {ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0) && (
-          <section className="space-y-4">
-            <div className="space-y-1">
-              <h2 className="t-h2 flex items-center gap-2"><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</h2>
-              <p className="t-secondary">{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</p>
-            </div>
             <Card>
-              <CardContent className="pt-5 space-y-6">
+              <CardHeader>
+                <CardTitle className="t-h3 flex items-center gap-2"><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</CardTitle>
+                <CardDescription>{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.post_count > 0).map(({ c, b }) => (
                   <div key={c.company_id} className="space-y-2">
                     <div className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
@@ -437,14 +432,13 @@ export default function CompetitiveReportView() {
                 )}
               </CardContent>
             </Card>
-          </section>
         )}
 
         {/* Gaps */}
         {(gaps.length > 0 || hiddenGaps.length > 0) && (
           <section className="space-y-4">
             <div className="flex items-end justify-between gap-4 flex-wrap">
-              <div>
+              <div className="glass p-5">
                 <h2 className="t-h2 flex items-center gap-2"><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
                 <p className="t-secondary">
                   {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
@@ -462,7 +456,7 @@ export default function CompetitiveReportView() {
                 const v = verdictFor(g.gap);
                 return (
                   <Card key={i} className={v === "up" ? "glass-accent" : ""}>
-                    <CardContent className="pt-5 space-y-3">
+                    <CardContent className="space-y-3">
                       <div className="flex items-start gap-3">
                         <span className="flex-shrink-0 h-8 w-8 rounded-full bg-primary text-primary-foreground t-body font-bold flex items-center justify-center">{i + 1}</span>
                         <div className="min-w-0 space-y-1">
@@ -495,13 +489,12 @@ export default function CompetitiveReportView() {
               })}
             </div>
             {isMoburstStaff && showHidden && hiddenGaps.length > 0 && (
-              <section className="space-y-4">
-                <div className="space-y-1">
-                  <h2 className="t-h2 flex items-center gap-2">Hidden suggestions</h2>
-                  <p className="t-secondary">Excluded from future runs and from the monthly report brief.</p>
-                </div>
                 <Card>
-                  <CardContent className="pt-5 space-y-2">
+                  <CardHeader>
+                    <CardTitle className="t-h3 flex items-center gap-2">Hidden suggestions</CardTitle>
+                    <CardDescription>Excluded from future runs and from the monthly report brief.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
                     {hiddenGaps.map((g: any, i: number) => (
                       <div key={i} className="flex items-center justify-between gap-3 t-body">
                         <span className="text-muted-foreground line-through">{g.gap}</span>
@@ -510,20 +503,18 @@ export default function CompetitiveReportView() {
                     ))}
                   </CardContent>
                 </Card>
-              </section>
             )}
           </section>
         )}
 
         {/* Winner teardown */}
         {Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0 && (
-          <section className="space-y-4">
-            <div className="space-y-1">
-              <h2 className="t-h2 flex items-center gap-2"><Trophy className="h-5 w-5" /> What wins for them</h2>
-              <p className="t-secondary">The repeatable pattern behind each competitor's best posts, with the posts that prove it.</p>
-            </div>
             <Card>
-              <CardContent className="pt-5 grid gap-4 md:grid-cols-3">
+              <CardHeader>
+                <CardTitle className="t-h3 flex items-center gap-2"><Trophy className="h-5 w-5" /> What wins for them</CardTitle>
+                <CardDescription>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-3">
                 {ai.winner_teardown.map((w: any, i: number) => {
                   const examples: Array<{ url: string; post?: TopPost }> = (w.example_post_urls || []).slice(0, 3).map((u: string) => ({ url: u, post: allPosts.get(u) }));
                   return (
@@ -552,18 +543,16 @@ export default function CompetitiveReportView() {
                 })}
               </CardContent>
             </Card>
-          </section>
         )}
 
         {/* Mood boards */}
         {ordered.some((c) => moodPosts(c).length > 0) && (
-          <section className="space-y-4">
-            <div className="space-y-1">
-              <h2 className="t-h2 flex items-center gap-2"><Images className="h-5 w-5" /> Mood boards</h2>
-              <p className="t-secondary">The creative each company actually ran in the period, side by side. Click any tile to open the post.</p>
-            </div>
             <Card>
-              <CardContent className="pt-5 space-y-6">
+              <CardHeader>
+                <CardTitle className="t-h3 flex items-center gap-2"><Images className="h-5 w-5" /> Mood boards</CardTitle>
+                <CardDescription>The creative each company actually ran in the period, side by side. Click any tile to open the post.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
                 {ordered.map((c) => {
                   const posts = moodPosts(c);
                   if (!posts.length) return null;
@@ -578,18 +567,16 @@ export default function CompetitiveReportView() {
                 })}
               </CardContent>
             </Card>
-          </section>
         )}
 
         {/* Top posts */}
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
-          <section className="space-y-4">
-            <div className="space-y-1">
-              <h2 className="t-h2 flex items-center gap-2"><Layers className="h-5 w-5" /> Top 5 posts per company</h2>
-              <p className="t-secondary">Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</p>
-            </div>
             <Card>
-              <CardContent className="pt-5 space-y-8">
+              <CardHeader>
+                <CardTitle className="t-h3 flex items-center gap-2"><Layers className="h-5 w-5" /> Top 5 posts per company</CardTitle>
+                <CardDescription>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
                   <div key={c.company_id} className="space-y-3">
                     <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
@@ -600,7 +587,6 @@ export default function CompetitiveReportView() {
                 ))}
               </CardContent>
             </Card>
-          </section>
         )}
       </div>
     </AppLayout>
