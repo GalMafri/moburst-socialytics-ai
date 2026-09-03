@@ -934,7 +934,7 @@ function TrendsSection({
 
   return (
     <section className="space-y-6">
-      <div className="flex items-start gap-3 pb-4 border-b">
+      <div className="glass p-5 flex items-start gap-3">
         <div className="h-11 w-11 rounded-[12px] flex items-center justify-center shrink-0" style={{ backgroundColor: `${platformColor}22` }}>
           <PlatformIcon platform={platform} className="h-5 w-5" />
         </div>

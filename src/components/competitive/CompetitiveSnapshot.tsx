@@ -94,7 +94,7 @@ export function CompetitiveSnapshot({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="glass px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
         <p className="t-secondary">
           {rivals.length} competitors{rd.landscape?.name ? ` · ${rd.landscape.name}` : ""}{period ? ` · ${period}` : ""} · analyzed {new Date(latest.created_at).toLocaleDateString()}
         </p>
