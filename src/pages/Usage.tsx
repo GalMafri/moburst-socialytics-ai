@@ -197,7 +197,7 @@ export default function Usage() {
 
   if (users.error) {
     return (
-      <AppLayout title="User Analytics">
+      <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature.">
         <Card>
           <CardContent className="p-5">
             <p className="t-body text-rose-400">Could not load usage data.</p>
@@ -210,7 +210,7 @@ export default function Usage() {
 
   if (rows.length === 0) {
     return (
-      <AppLayout title="User Analytics">
+      <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature.">
         <Card>
           <CardContent className="p-5">
             <p className="t-secondary">
@@ -225,7 +225,7 @@ export default function Usage() {
   const idlePct = summary.total ? Math.round((summary.idle / summary.total) * 100) : 0;
 
   return (
-    <AppLayout title="User Analytics">
+    <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature.">
       <div className="space-y-6">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Tile label="Provisioned" value={summary.total} hint={`${summary.producing} have produced something`} icon={Users} />
