@@ -73,6 +73,47 @@ function competitiveDigest(report: any, feedback: any[]): Record<string, unknown
   };
 }
 
+// Milestone 4: keep each client's competitor feed under a week old. One
+// RivalIQ call per client, at most ten clients per daily run, so the weekly
+// refresh never competes with the monthly pulls for the hourly budget.
+async function refreshStaleFeeds(supabase: any, now: Date, dryRun: boolean, secret: string) {
+  const out: unknown[] = [];
+  try {
+    const { data: sets } = await supabase
+      .from("competitor_sets")
+      .select("client_id, status, clients!inner(id, name, archived_at)")
+      .in("status", ["confirmed", "analyzing", "complete", "failed"]);
+    const clientIds = [...new Set((sets || []).filter((s: any) => !s.clients?.archived_at).map((s: any) => s.client_id as string))].slice(0, 25);
+    if (clientIds.length === 0) return out;
+    const { data: snaps } = await supabase
+      .from("rivaliq_snapshots")
+      .select("client_id, fetched_at")
+      .eq("endpoint", "feed")
+      .in("client_id", clientIds)
+      .order("fetched_at", { ascending: false });
+    const latest = new Map<string, string>();
+    for (const s of snaps || []) if (!latest.has(s.client_id)) latest.set(s.client_id, s.fetched_at);
+    const stale = clientIds.filter((id) => { const f = latest.get(id); return !f || now.getTime() - new Date(f).getTime() > 6 * 86400000; }).slice(0, 10);
+    for (const clientId of stale) {
+      if (dryRun) { out.push({ client_id: clientId, status: "would refresh feed" }); continue; }
+      try {
+        const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/refresh-competitor-feed`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret },
+          body: JSON.stringify({ client_id: clientId }),
+        });
+        const j = await r.json().catch(() => ({}));
+        out.push({ client_id: clientId, status: r.ok ? "refreshed" : "error", posts: j.posts, alerts: j.alerts, error: j.error });
+      } catch (e) {
+        out.push({ client_id: clientId, status: "error", error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  } catch (e) {
+    out.push({ status: "error", error: e instanceof Error ? e.message : String(e) });
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const secret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
@@ -90,7 +131,8 @@ Deno.serve(async (req) => {
       .eq("is_active", true)
       .lte("next_run_at", now.toISOString());
     if (dueErr) throw dueErr;
-    if (!due || due.length === 0) return json({ message: "No schedules due", triggered: 0 });
+    const feeds = await refreshStaleFeeds(supabase, now, dryRun, secret);
+    if (!due || due.length === 0) return json({ message: "No schedules due", triggered: 0, feeds });
 
     const { data: settings } = await supabase.from("app_settings").select("key, value").in("key", ["n8n_webhook_url", "competitive_n8n_webhook_url"]);
     const socialUrl = settings?.find((s) => s.key === "n8n_webhook_url")?.value;
@@ -168,7 +210,7 @@ Deno.serve(async (req) => {
         results.push({ client: client?.name || schedule.client_id, kind: schedule.report_kind, status: "error", error: msg });
       }
     }
-    return json({ triggered: results.length, dry_run: dryRun, results });
+    return json({ triggered: results.length, dry_run: dryRun, results, feeds });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }

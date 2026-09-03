@@ -12,6 +12,16 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Only the n8n workflow may write reports: it sends the shared secret.
+    // Anyone who knew a report id could overwrite it before this check.
+    const secret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
+    if (!secret || req.headers.get("X-Socialytics-Secret") !== secret) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { report_id, status, report_data, gamma_url, duration_minutes } =
       await req.json();
 

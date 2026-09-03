@@ -30,7 +30,7 @@ const STEPS = [
   "Analyzing content and engagement patterns...",
   "Building mood boards...",
   "Identifying gaps and opportunities...",
-  "Assembling the deck...",
+  "Writing the report...",
 ];
 
 const MAX_POLL_DURATION_MS = 15 * 60 * 1000; // RivalIQ runs are slower than Sprout runs
@@ -376,7 +376,7 @@ export default function CompetitiveRun() {
                   <Play className="h-5 w-5" /> Run Competitive Analysis
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  Pulls Rival IQ data for {rangeOk ? formatRange(range) : "the selected period"}, breaks content down by platform, finds the gaps, and assembles a deck.
+                  Pulls Rival IQ data for {rangeOk ? formatRange(range) : "the selected period"}, breaks content down by platform and finds the gaps. The finished report exports to PDF.
                 </p>
               </>
             )}
@@ -460,17 +460,6 @@ export default function CompetitiveRun() {
                       ) : null}
                       {r.status !== "running" && (
                         <span className="text-xs underline underline-offset-2">View report</span>
-                      )}
-                      {r.gamma_url && (
-                        <a
-                          onClick={(e) => e.stopPropagation()}
-                          href={r.gamma_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs underline underline-offset-2"
-                        >
-                          Open deck
-                        </a>
                       )}
                     </div>
                   </div>

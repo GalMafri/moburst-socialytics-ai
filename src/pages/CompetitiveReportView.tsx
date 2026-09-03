@@ -7,7 +7,7 @@
 // top posts. Reports run before per-platform aggregation existed have no
 // by_channel data, so the filter only appears when it can do something.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -22,7 +22,8 @@ import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { partitionGaps, useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
-import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw } from "lucide-react";
+import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
+import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images } from "lucide-react";
 
 type TopPost = {
   engagement: number; engagement_rate: number; est_impressions?: number; reach?: number; views: number;
@@ -118,6 +119,7 @@ export default function CompetitiveReportView() {
   const { toast } = useToast();
   const [plat, setPlat] = useState("all");
   const [showHidden, setShowHidden] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
   const { rows: feedback, verdictFor, vote } = useInsightFeedback(clientId);
 
   const { data: report, isLoading } = useQuery({
@@ -197,6 +199,16 @@ export default function CompetitiveReportView() {
   const { visible: gaps, hidden: hiddenGaps } = partitionGaps<any>(gapsForPlatform, feedback);
   const schedule = ai.recommended_schedule;
 
+  // Every creative a company ran in the period (all channels, or the filtered
+  // one), for the mood board grids.
+  const moodPosts = (c: Company): TopPost[] => {
+    const seen = new Set<string>();
+    const out: TopPost[] = [];
+    const lists = [bucketFor(c, effectivePlat).top_posts || [], ...(effectivePlat === "all" ? Object.values(c.by_channel || {}).map((b) => b.top_posts || []) : [])];
+    for (const list of lists) for (const p of list) { const k = p.url || p.text; if (!k || seen.has(k)) continue; seen.add(k); out.push(p); }
+    return out.slice(0, 16);
+  };
+
   const castVote = async (g: any, verdict: "up" | "down") => {
     try {
       await vote({ gapText: g.gap, platform: g.platform || null, verdict, reportId: report.id });
@@ -231,7 +243,7 @@ export default function CompetitiveReportView() {
 
   return (
     <AppLayout title={`Competitive: ${clientName}`}>
-      <div className="max-w-6xl mx-auto space-y-8">
+      <div ref={printRef} className="max-w-6xl mx-auto space-y-8">
 
         {/* Hero */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -249,11 +261,10 @@ export default function CompetitiveReportView() {
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}><History className="h-4 w-4 mr-2" /> All runs</Button>
-            {report.gamma_url && (
-              <Button variant="outline" asChild>
-                <a href={report.gamma_url} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4 mr-2" /> Open deck</a>
-              </Button>
+            {isMoburstStaff && (
+              <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/feed`)}><Rss className="h-4 w-4 mr-2" /> Latest posts</Button>
             )}
+            <ExportPdfButton contentRef={printRef} filename={`${clientName.replace(/[^a-z0-9]+/gi, "_")}_competitive_${period ? period.replace(/[^a-z0-9]+/gi, "_") : report.id.slice(0, 8)}`} title={`${clientName} vs. the field${period ? ` (${period})` : ""}`} />
           </div>
         </div>
 
@@ -528,6 +539,30 @@ export default function CompetitiveReportView() {
                         </div>
                       </div>
                     )}
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Mood boards */}
+        {ordered.some((c) => moodPosts(c).length > 0) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2"><Images className="h-5 w-5" /> Mood boards</CardTitle>
+              <CardDescription>The creative each company actually ran in the period, side by side. Click any tile to open the post.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {ordered.map((c) => {
+                const posts = moodPosts(c);
+                if (!posts.length) return null;
+                return (
+                  <div key={c.company_id} className="space-y-2">
+                    <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
+                    <div className="grid gap-2 grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
+                      {posts.map((p, i) => <PostVisual key={i} url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} compact />)}
+                    </div>
                   </div>
                 );
               })}

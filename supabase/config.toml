@@ -114,3 +114,8 @@ verify_jwt = false
 # caller's JWT itself and checks client access through RLS.
 [functions.sprout-analytics]
 verify_jwt = false
+
+# Weekly competitor feed + trend detection. Staff JWT or the shared secret
+# (scheduler); checks happen inside the function.
+[functions.refresh-competitor-feed]
+verify_jwt = false

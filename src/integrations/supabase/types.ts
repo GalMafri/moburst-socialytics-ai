@@ -273,6 +273,65 @@ export type Database = {
         }
         Relationships: []
       }
+      competitive_alerts: {
+        Row: {
+          client_id: string
+          companies: string[]
+          confidence: number
+          created_at: string
+          id: string
+          platforms: string[]
+          post_count: number
+          post_urls: string[]
+          status: string
+          summary: string | null
+          topic: string
+          topic_key: string
+          window_end: string
+          window_start: string
+        }
+        Insert: {
+          client_id: string
+          companies?: string[]
+          confidence?: number
+          created_at?: string
+          id?: string
+          platforms?: string[]
+          post_count?: number
+          post_urls?: string[]
+          status?: string
+          summary?: string | null
+          topic: string
+          topic_key: string
+          window_end: string
+          window_start: string
+        }
+        Update: {
+          client_id?: string
+          companies?: string[]
+          confidence?: number
+          created_at?: string
+          id?: string
+          platforms?: string[]
+          post_count?: number
+          post_urls?: string[]
+          status?: string
+          summary?: string | null
+          topic?: string
+          topic_key?: string
+          window_end?: string
+          window_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitive_alerts_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       competitive_insight_feedback: {
         Row: {
           client_id: string

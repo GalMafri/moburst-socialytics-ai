@@ -188,11 +188,6 @@ export default function AllReports() {
                             <TableCell className="text-sm text-muted-foreground">{rd.landscape?.name || "—"}</TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
-                                {r.gamma_url && (
-                                  <Button size="sm" variant="outline" asChild>
-                                    <a href={r.gamma_url} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5 mr-1" /> Deck</a>
-                                  </Button>
-                                )}
                                 <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.client_id}/competitive/reports`)}>All runs</Button>
                                 {r.status !== "running" && (
                                   <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.client_id}/competitive/reports/${r.id}`)}>

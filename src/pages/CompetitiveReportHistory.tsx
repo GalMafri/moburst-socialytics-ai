@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatRange } from "@/lib/dateRange";
-import { ArrowLeft, Crosshair, ExternalLink, Eye, Loader2, Play } from "lucide-react";
+import { ArrowLeft, Crosshair, Eye, Loader2, Play, Rss } from "lucide-react";
 
 export default function CompetitiveReportHistory() {
   const { id } = useParams();
@@ -55,6 +55,7 @@ export default function CompetitiveReportHistory() {
           </Button>
           {isMoburstStaff && (
             <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive/feed`)}><Rss className="h-4 w-4 mr-1" /> Competitor feed</Button>
               <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive`)}><Crosshair className="h-4 w-4 mr-1" /> Competitor set</Button>
               <Button size="sm" onClick={() => navigate(`/clients/${id}/competitive/run`)}><Play className="h-4 w-4 mr-1" /> New analysis</Button>
             </div>
@@ -99,11 +100,6 @@ export default function CompetitiveReportHistory() {
                         <TableCell className="text-sm text-muted-foreground">{r.duration_minutes ? `${r.duration_minutes}m` : "—"}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
-                            {r.gamma_url && (
-                              <Button size="sm" variant="outline" asChild>
-                                <a href={r.gamma_url} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5 mr-1" /> Deck</a>
-                              </Button>
-                            )}
                             {!running && (
                               <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${id}/competitive/reports/${r.id}`)}>
                                 <Eye className="h-4 w-4 mr-1" /> View
