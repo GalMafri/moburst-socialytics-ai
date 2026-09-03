@@ -8,16 +8,23 @@ import { cn } from "@/lib/utils";
  */
 export function splitHeadline(text: string): { headline: string; body: string } {
   const t = String(text || "").trim();
-  // First sentence boundary: ". " followed by an uppercase letter or digit, or a colon early on.
+  // 1. A short lead-in before a colon ("Channel mix remains the clearest gap: …").
   const colon = t.indexOf(": ");
-  if (colon > 8 && colon < 80) return { headline: t.slice(0, colon), body: t.slice(colon + 2).trim() };
-  const m = t.match(/^(.{20,160}?[.!?])\s+(?=[A-Z0-9"“])/);
+  if (colon > 8 && colon < 90) return { headline: t.slice(0, colon), body: t.slice(colon + 2).trim() };
+  // 2. A first sentence of reasonable length.
+  const m = t.match(/^(.{20,110}?[.!?])\s+(?=[A-Z0-9"“])/);
   if (m) return { headline: m[1], body: t.slice(m[0].length).trim() };
-  if (t.length <= 140) return { headline: t, body: "" };
-  // Long single sentence: break at the first comma or semicolon after 60 chars.
-  const k = t.slice(60).search(/[,;]\s/);
-  if (k >= 0 && 60 + k < 150) return { headline: t.slice(0, 60 + k), body: t.slice(60 + k + 1).trim() };
-  return { headline: t, body: "" };
+  if (t.length <= 110) return { headline: t, body: "" };
+  // 3. A long sentence: break at the first clause boundary between 40 and 110 characters.
+  const clause = t.slice(40, 110).search(/[,;:]\s|\s(?:but|while|which|so|because|and)\s/);
+  if (clause >= 0) {
+    const cut = 40 + clause;
+    const sep = t[cut] === " " ? cut : cut + 1;
+    return { headline: t.slice(0, cut).replace(/[,;:]$/, ""), body: t.slice(sep).trim().replace(/^[,;:]\s*/, "") };
+  }
+  // 4. Otherwise cut at the last word boundary before 100 characters.
+  const space = t.lastIndexOf(" ", 100);
+  return space > 40 ? { headline: t.slice(0, space), body: t.slice(space + 1) } : { headline: t, body: "" };
 }
 
 const METRIC = /(?:[-+−]?\d[\d,.]*\s?%|\$\d[\d,.]*[KMB]?|\b\d[\d,.]*[KMB]\b|\b\d{1,3}(?:,\d{3})+\b|\b\d+(?:\.\d+)?x\b)/g;
