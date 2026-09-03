@@ -62,7 +62,7 @@ export default function Settings() {
       <div className="max-w-4xl mx-auto space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Integration Settings</CardTitle>
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Integration Settings</CardTitle>
             <CardDescription>Configure external service connections</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -73,7 +73,7 @@ export default function Settings() {
                 onChange={(e) => setWebhookUrl(e.target.value)}
                 placeholder="https://your-n8n-instance.com/webhook/socialytics-report"
               />
-              <p className="text-xs text-muted-foreground">The full URL of your n8n webhook that handles report generation</p>
+              <p className="text-[14px] text-[#9ca3af]">The full URL of your n8n webhook that handles report generation</p>
             </div>
             <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
               {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
@@ -86,11 +86,11 @@ export default function Settings() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Sprout Social</CardTitle>
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Sprout Social</CardTitle>
             <CardDescription>OAuth2 credentials are managed as backend secrets</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[15px] text-[#9ca3af]">
               The Sprout Social access token is stored securely as a backend secret (SPROUT_SOCIAL_ACCESS_TOKEN).
               Contact your administrator to update these credentials.
             </p>

@@ -342,7 +342,7 @@ export default function ClientSetup() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold">{isNew ? "Create New Client" : "Client Configuration"}</h2>
-            <p className="text-sm text-muted-foreground">Configure client details and social media settings</p>
+            <p className="text-[15px] text-[#9ca3af]">Configure client details and social media settings</p>
           </div>
           <div className="flex items-center gap-2">
             {!isNew && (
@@ -380,7 +380,7 @@ export default function ClientSetup() {
           <TabsContent value="info" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Basic Information</CardTitle>
+                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Basic Information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -443,7 +443,7 @@ export default function ClientSetup() {
                       Research Brand
                     </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[14px] text-[#9ca3af]">
                     Enter the client's website to automatically extract brand colors and visual style.
                   </p>
                 </div>
@@ -476,20 +476,20 @@ export default function ClientSetup() {
                       <SelectItem value="Pacific/Auckland">Auckland (NZST/NZDT)</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[14px] text-[#9ca3af]">
                     Used for scheduling content calendar posting times.
                   </p>
                 </div>
 
                 {form.brand_identity && (
                   <div className="space-y-4 rounded-lg border p-4 bg-[rgba(255,255,255,0.02)]">
-                    <Label className="text-sm font-semibold">Brand Identity</Label>
+                    <Label className="text-[15px] font-semibold">Brand Identity</Label>
 
                     {/* Colors */}
                     <div className="grid grid-cols-3 gap-3">
                       {(["primary_color", "secondary_color", "accent_color"] as const).map((key) => (
                         <div key={key} className="space-y-1">
-                          <Label className="text-xs capitalize">{key.replace(/_/g, " ")}</Label>
+                          <Label className="text-[13px] capitalize">{key.replace(/_/g, " ")}</Label>
                           <div className="flex items-center gap-2">
                             <div
                               className="h-8 w-8 rounded border shrink-0"
@@ -504,7 +504,7 @@ export default function ClientSetup() {
                                 }))
                               }
                               placeholder="#000000"
-                              className="h-8 text-xs font-mono"
+                              className="h-8 text-[13px] font-mono"
                             />
                           </div>
                         </div>
@@ -514,7 +514,7 @@ export default function ClientSetup() {
                     {/* Font + Visual Style */}
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <Label className="text-xs">Font Family</Label>
+                        <Label className="text-[13px]">Font Family</Label>
                         <Input
                           value={form.brand_identity?.font_family || ""}
                           onChange={(e) =>
@@ -528,7 +528,7 @@ export default function ClientSetup() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Visual Style</Label>
+                        <Label className="text-[13px]">Visual Style</Label>
                         <Input
                           value={form.brand_identity?.visual_style || ""}
                           onChange={(e) =>
@@ -546,7 +546,7 @@ export default function ClientSetup() {
                     {/* Tone of Voice + Background Style */}
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <Label className="text-xs">Tone of Voice</Label>
+                        <Label className="text-[13px]">Tone of Voice</Label>
                         <Input
                           value={form.brand_identity?.tone_of_voice || ""}
                           onChange={(e) =>
@@ -560,7 +560,7 @@ export default function ClientSetup() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Background Style</Label>
+                        <Label className="text-[13px]">Background Style</Label>
                         <Input
                           value={form.brand_identity?.background_style || ""}
                           onChange={(e) =>
@@ -577,7 +577,7 @@ export default function ClientSetup() {
 
                     {/* Design Elements */}
                     <div className="space-y-1">
-                      <Label className="text-xs">Design Elements</Label>
+                      <Label className="text-[13px]">Design Elements</Label>
                       <Input
                         value={form.brand_identity?.design_elements || ""}
                         onChange={(e) =>
@@ -593,7 +593,7 @@ export default function ClientSetup() {
 
                     {/* Logo Description */}
                     <div className="space-y-1">
-                      <Label className="text-xs">Logo Description</Label>
+                      <Label className="text-[13px]">Logo Description</Label>
                       <Input
                         value={form.brand_identity?.logo_description || ""}
                         onChange={(e) =>
@@ -609,7 +609,7 @@ export default function ClientSetup() {
 
                     {/* Debug: Color Sources */}
                     {brandDebug?.structured_colors && brandDebug.structured_colors.length > 0 && (
-                      <details className="text-xs">
+                      <details className="text-[13px]">
                         <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
                           Source code colors found ({brandDebug.structured_colors.length}) — click to expand
                         </summary>
@@ -621,14 +621,14 @@ export default function ClientSetup() {
                               <span className="text-muted-foreground">— {c.source}</span>
                               <Badge
                                 variant={c.confidence === "high" ? "default" : "outline"}
-                                className="text-xs h-4"
+                                className="text-[13px] h-4"
                               >
                                 {c.confidence}
                               </Badge>
                             </div>
                           ))}
                           {brandDebug.log && (
-                            <div className="mt-2 pt-2 border-t text-xs text-muted-foreground space-y-0.5">
+                            <div className="mt-2 pt-2 border-t text-[14px] text-[#9ca3af] space-y-0.5">
                               {brandDebug.log.map((l: string, i: number) => (
                                 <div key={i}>{l}</div>
                               ))}
@@ -642,7 +642,7 @@ export default function ClientSetup() {
 
                 <div className="space-y-2">
                   <Label>Primary Platforms</Label>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[14px] text-[#9ca3af]">
                     Select ALL platforms the client is active on or wants to grow on. This determines which platforms
                     receive content recommendations and calendar posts.
                   </p>
@@ -659,7 +659,7 @@ export default function ClientSetup() {
                         >
                           <Badge
                             variant={active ? "default" : "outline"}
-                            className="cursor-pointer text-sm py-1.5 px-3"
+                            className="cursor-pointer text-[15px] py-1.5 px-3"
                           >
                             {p}
                           </Badge>
@@ -683,7 +683,7 @@ export default function ClientSetup() {
                         >
                           <Badge
                             variant={active ? "default" : "outline"}
-                            className="cursor-pointer text-sm py-1.5 px-3"
+                            className="cursor-pointer text-[15px] py-1.5 px-3"
                           >
                             {g.label}
                           </Badge>
@@ -707,7 +707,7 @@ export default function ClientSetup() {
                         >
                           <Badge
                             variant={active ? "default" : "outline"}
-                            className="cursor-pointer text-sm py-1.5 px-3"
+                            className="cursor-pointer text-[15px] py-1.5 px-3"
                           >
                             {l.label}
                           </Badge>
@@ -715,7 +715,7 @@ export default function ClientSetup() {
                       );
                     })}
                   </div>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[14px] text-[#9ca3af]">
                     AI-generated copy will target these languages. Trends will include posts matching any selected
                     language.
                   </p>
@@ -727,7 +727,7 @@ export default function ClientSetup() {
           <TabsContent value="sprout" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Sprout Social Profiles</CardTitle>
+                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Sprout Social Profiles</CardTitle>
                 <CardDescription>Select the Sprout Social profiles that belong to this client</CardDescription>
               </CardHeader>
               <CardContent>
@@ -743,19 +743,19 @@ export default function ClientSetup() {
           <TabsContent value="strategy" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Content Strategy</CardTitle>
+                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Content Strategy</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="space-y-3">
                   <Label>Content Pillars</Label>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[14px] text-[#9ca3af]">
                     Define your content pillars with descriptions to guide content strategy
                   </p>
                   <div className="space-y-3">
                     {form.content_pillars.map((pillar, index) => (
                       <div key={index} className="p-3 rounded-md border bg-card space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="font-medium text-sm">{pillar.name}</span>
+                          <span className="font-medium text-[15px]">{pillar.name}</span>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -770,7 +770,7 @@ export default function ClientSetup() {
                           onChange={(e) => updatePillarDescription(index, e.target.value)}
                           placeholder={`Describe what "${pillar.name}" content looks like — topics, tone, examples...`}
                           rows={2}
-                          className="text-sm"
+                          className="text-[15px]"
                         />
                       </div>
                     ))}
@@ -790,7 +790,7 @@ export default function ClientSetup() {
 
                 <div className="space-y-2">
                   <Label>Social Keywords</Label>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[14px] text-[#9ca3af]">
                     Add multi-word phrases used for TikTok/Instagram trend search. Enter one phrase at a time — do not
                     use commas.
                     <br />
@@ -798,7 +798,7 @@ export default function ClientSetup() {
                   </p>
                   <div className="flex flex-wrap gap-2 mb-2">
                     {form.social_keywords.map((k) => (
-                      <Badge key={k} variant="outline" className="gap-1.5 pr-1 text-sm py-1">
+                      <Badge key={k} variant="outline" className="gap-1.5 pr-1 text-[15px] py-1">
                         {k}
                         <button
                           type="button"
@@ -841,7 +841,7 @@ export default function ClientSetup() {
           <TabsContent value="competitors" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Competitive Context</CardTitle>
+                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Competitive Context</CardTitle>
                 <CardDescription>
                   Who does the account team think this client competes with? These notes are fed
                   into AI competitor identification and weighed heavily.
@@ -856,7 +856,7 @@ export default function ClientSetup() {
                     value={form.competitor_seed_notes}
                     onChange={(e) => setForm((f) => ({ ...f, competitor_seed_notes: e.target.value }))}
                   />
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[14px] text-[#9ca3af]">
                     Saved with the client. Remember to hit Save before running identification.
                   </p>
                 </div>
@@ -872,7 +872,7 @@ export default function ClientSetup() {
           <TabsContent value="brief" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Client Brief</CardTitle>
+                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Client Brief</CardTitle>
                 <CardDescription>
                   Brand voice, target audience, campaign objectives, and content restrictions
                 </CardDescription>
@@ -880,7 +880,7 @@ export default function ClientSetup() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Brand Voice Preset</Label>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[14px] text-[#9ca3af]">
                     Select a tone that best matches this client's brand voice.
                   </p>
                   <div className="flex flex-wrap gap-2">
@@ -952,7 +952,7 @@ export default function ClientSetup() {
                     onChange={(e) => setForm((f) => ({ ...f, brief_file_id: e.target.value }))}
                     placeholder="e.g., 1BxiMVs0XRA5nFMdKvBdBZjgmUii3ObRy2CmEkTzOQ5s"
                   />
-                  <div className="bg-[rgba(255,255,255,0.03)] rounded-md p-3 text-xs text-muted-foreground space-y-1.5">
+                  <div className="bg-[rgba(255,255,255,0.03)] rounded-md p-3 text-[14px] text-[#9ca3af] space-y-1.5">
                     <p className="font-medium text-foreground flex items-center gap-1">
                       <Info className="h-3 w-3" /> How to find your Google Doc ID:
                     </p>
@@ -976,7 +976,7 @@ export default function ClientSetup() {
             {voiceLearnings && voiceLearnings.length > 0 && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Learned Voice Preferences</CardTitle>
+                  <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Learned Voice Preferences</CardTitle>
                   <CardDescription>
                     These patterns were learned from post edits. The AI will apply them to future content.
                   </CardDescription>
@@ -990,14 +990,14 @@ export default function ClientSetup() {
                       >
                         <div className="flex-1 space-y-1">
                           <div className="flex items-center gap-2">
-                            <Badge variant="secondary" className="text-xs">
+                            <Badge variant="secondary" className="text-[13px]">
                               {learning.pattern_type}
                             </Badge>
-                            <span className="text-xs text-muted-foreground">
+                            <span className="text-[14px] text-[#9ca3af]">
                               {Math.round((learning.confidence || 0) * 100)}% confidence
                             </span>
                           </div>
-                          <p className="text-sm leading-relaxed">{learning.pattern_description}</p>
+                          <p className="text-[15px] leading-6">{learning.pattern_description}</p>
                         </div>
                         <Button
                           variant="ghost"
@@ -1105,7 +1105,7 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
+        <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
           <CalendarClock className="h-4 w-4" /> Monthly schedules
         </CardTitle>
         <CardDescription>
@@ -1121,8 +1121,8 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
             <div key={kind} className="flex items-start justify-between gap-4 rounded-[12px] p-4 bg-[rgba(255,255,255,0.04)]">
               <div className="space-y-1">
                 <Label>{label}</Label>
-                <p className="text-xs text-muted-foreground">{description}</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-[14px] text-[#9ca3af]">{description}</p>
+                <p className="text-[14px] text-[#9ca3af]">
                   {active && row?.next_run_at ? `Next run ${new Date(row.next_run_at).toLocaleDateString()}` : "Paused"}
                   {row?.last_run_at ? ` · Last run ${new Date(row.last_run_at).toLocaleDateString()}${last?.status ? ` (${last.status})` : ""}` : ""}
                 </p>
@@ -1221,7 +1221,7 @@ function SproutProfileSelector({
 
   if (fetching) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+      <div className="flex items-center gap-2 text-[15px] text-[#9ca3af] py-4">
         <Loader2 className="h-4 w-4 animate-spin" />
         Loading Sprout Social profiles...
       </div>
@@ -1231,7 +1231,7 @@ function SproutProfileSelector({
   if (allProfiles.length === 0) {
     return (
       <div className="space-y-3">
-        <p className="text-sm text-muted-foreground">Could not load profiles.</p>
+        <p className="text-[15px] text-[#9ca3af]">Could not load profiles.</p>
         <Button variant="outline" size="sm" onClick={fetchProfiles}>
           <RefreshCw className="h-4 w-4 mr-2" /> Retry
         </Button>
@@ -1242,7 +1242,7 @@ function SproutProfileSelector({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[15px] text-[#9ca3af]">
           {selectedProfiles.length} of {allProfiles.length} profiles selected
         </p>
         <Button variant="ghost" size="sm" onClick={fetchProfiles}>
@@ -1265,12 +1265,12 @@ function SproutProfileSelector({
             >
               <Checkbox checked={isSelected} onCheckedChange={() => toggleProfile(profile)} />
               <div className="flex-1 min-w-0">
-                <span className="font-medium text-sm">{profile.name}</span>
+                <span className="font-medium text-[15px]">{profile.name}</span>
                 {profile.native_name && (
-                  <span className="text-muted-foreground text-xs ml-1.5">@{profile.native_name}</span>
+                  <span className="text-muted-foreground text-[13px] ml-1.5">@{profile.native_name}</span>
                 )}
               </div>
-              <Badge variant={isSelected ? "default" : "secondary"} className="text-xs shrink-0 gap-1">
+              <Badge variant={isSelected ? "default" : "secondary"} className="text-[13px] shrink-0 gap-1">
                 {platformIcon[profile.network_display] || "🌐"} {profile.network_display}
               </Badge>
             </div>

@@ -93,7 +93,7 @@ export function UserDetail({
         <SheetHeader className="mb-4">
           <SheetTitle className="text-left">
             {name || email}
-            <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{email}</span>
+            <span className="mt-0.5 block text-[13px] font-normal text-muted-foreground">{email}</span>
           </SheetTitle>
         </SheetHeader>
 
@@ -107,10 +107,10 @@ export function UserDetail({
           <div className="mb-6 grid grid-cols-2 gap-x-6 gap-y-1 rounded-md border border-border p-4 sm:grid-cols-3">
             {detail.data.map((d) => (
               <div key={d.metric} className="py-1">
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                <div className="text-[12px] uppercase tracking-wide text-muted-foreground">
                   {d.metric}
                 </div>
-                <div className={`text-sm font-medium tabular-nums ${TONE[d.tone] ?? TONE.plain}`}>
+                <div className={`text-[15px] font-medium tabular-nums ${TONE[d.tone] ?? TONE.plain}`}>
                   {d.value}
                 </div>
               </div>
@@ -118,12 +118,12 @@ export function UserDetail({
           </div>
         )}
 
-        <h3 className="mb-2 text-sm font-semibold">
-          Activity{rows.length > 0 && <span className="ml-2 text-xs font-normal text-muted-foreground">{rows.length} entries</span>}
+        <h3 className="mb-2 text-[15px] font-semibold">
+          Activity{rows.length > 0 && <span className="ml-2 text-[13px] font-normal text-muted-foreground">{rows.length} entries</span>}
         </h3>
 
         {!timeline.isLoading && rows.length === 0 && (
-          <p className="py-6 text-sm text-muted-foreground">
+          <p className="py-6 text-[15px] text-[#9ca3af]">
             This person has never done anything in the product. They exist as an account and
             nothing more.
           </p>
@@ -142,22 +142,22 @@ export function UserDetail({
                   }`}
                 />
                 {newDay && (
-                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <div className="mb-1 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
                     {t.date}
                   </div>
                 )}
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span className="text-xs tabular-nums text-muted-foreground">{t.time}</span>
+                  <span className="text-[13px] tabular-nums text-muted-foreground">{t.time}</span>
                   <Badge variant="outline" className={`${KIND_STYLE[r.kind] ?? ""} text-[10px]`}>
                     {r.kind}
                   </Badge>
-                  <span className="text-sm">{r.label}</span>
+                  <span className="text-[15px]">{r.label}</span>
                   {r.status === "failed" && (
-                    <span className="text-xs font-medium text-rose-400">failed</span>
+                    <span className="text-[13px] font-medium text-rose-400">failed</span>
                   )}
                 </div>
                 {(r.client_name || r.detail) && (
-                  <div className="mt-0.5 text-xs text-muted-foreground">
+                  <div className="mt-0.5 text-[14px] text-[#9ca3af]">
                     {[r.client_name, r.detail].filter(Boolean).join(" · ")}
                   </div>
                 )}

@@ -66,7 +66,7 @@ export function ClientDashboard() {
   if (isLoading) {
     return (
       <Card className="p-12 text-center">
-        <p className="text-sm text-muted-foreground">Loading your dashboard…</p>
+        <p className="text-[15px] text-[#9ca3af]">Loading your dashboard…</p>
       </Card>
     );
   }
@@ -76,7 +76,7 @@ export function ClientDashboard() {
       <Card className="p-12 text-center">
         <AlertCircle className="h-10 w-10 mx-auto text-destructive mb-3" />
         <h3 className="font-semibold mb-2">Couldn't load client data</h3>
-        <p className="text-sm text-muted-foreground mb-4">
+        <p className="text-[15px] text-[#9ca3af] mb-4">
           {error instanceof Error ? error.message : "Unknown error"}
         </p>
       </Card>
@@ -89,12 +89,12 @@ export function ClientDashboard() {
     return (
       <Card className="p-12 text-center">
         <h3 className="font-semibold mb-2">No client access yet</h3>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[15px] text-[#9ca3af]">
           {rlsReturnedZero
             ? "No clients are linked to your account yet. Ask your Moburst account manager to confirm your company is set up correctly in the Hub and linked to a client in this tool."
             : "Your Hub company doesn't match any client in this tool. Ask your account manager to fix the mapping in Settings → Hub Company Mapping."}
         </p>
-        <div className="mt-4 p-3 rounded-lg bg-[rgba(255,255,255,0.03)] text-xs text-muted-foreground text-left max-w-sm mx-auto">
+        <div className="mt-4 p-3 rounded-lg bg-[rgba(255,255,255,0.03)] text-[14px] text-[#9ca3af] text-left max-w-sm mx-auto">
           <div>
             Your Hub company:{" "}
             <code className="text-foreground">{user?.company || "(not set)"}</code>
@@ -125,7 +125,7 @@ export function ClientDashboard() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold">{displayName}</h2>
-        <p className="text-muted-foreground text-sm">Your social media intelligence dashboard</p>
+        <p className="text-muted-foreground text-[15px]">Your social media intelligence dashboard</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -134,18 +134,18 @@ export function ClientDashboard() {
           onClick={() => latestReport && navigate(`/clients/${clientId}/reports/${latestReport.id}`)}
         >
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-accent" />
               Latest Report
             </CardTitle>
           </CardHeader>
           <CardContent>
             {latestReport ? (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[15px] text-[#9ca3af]">
                 Generated on {new Date(latestReport.created_at).toLocaleDateString()}
               </p>
             ) : (
-              <p className="text-sm text-muted-foreground">No reports available yet</p>
+              <p className="text-[15px] text-[#9ca3af]">No reports available yet</p>
             )}
           </CardContent>
         </Card>
@@ -155,13 +155,13 @@ export function ClientDashboard() {
           onClick={() => navigate(`/clients/${clientId}/reports`)}
         >
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
               <FileText className="h-4 w-4 text-accent" />
               Report History
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">View all past reports and analyses</p>
+            <p className="text-[15px] text-[#9ca3af]">View all past reports and analyses</p>
           </CardContent>
         </Card>
 
@@ -170,13 +170,13 @@ export function ClientDashboard() {
           onClick={() => navigate(`/clients/${clientId}/analytics`)}
         >
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
               <BarChart3 className="h-4 w-4 text-accent" />
               Analytics
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">Performance metrics and trend insights</p>
+            <p className="text-[15px] text-[#9ca3af]">Performance metrics and trend insights</p>
           </CardContent>
         </Card>
       </div>

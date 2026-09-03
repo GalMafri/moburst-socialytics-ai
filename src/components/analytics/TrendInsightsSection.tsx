@@ -72,10 +72,10 @@ function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base flex items-center gap-2">
+        <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
           <PlatformIcon platform={platformKey} className="h-5 w-5" />
           <span style={{ color }}>{platform}</span> Trend Analysis
-          <Badge variant="secondary" className="text-xs ml-auto">
+          <Badge variant="secondary" className="text-[13px] ml-auto">
             Cumulative
           </Badge>
         </CardTitle>
@@ -84,7 +84,7 @@ function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram
         {/* Overview */}
         {data.overview && (
           <div>
-            <p className="text-sm text-muted-foreground leading-relaxed">{data.overview}</p>
+            <p className="text-[15px] text-[#9ca3af] leading-relaxed">{data.overview}</p>
           </div>
         )}
 
@@ -92,12 +92,12 @@ function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {data.top_themes && data.top_themes.length > 0 && (
             <div className="space-y-2">
-              <h4 className="text-sm font-medium flex items-center gap-1.5">
+              <h4 className="text-[15px] font-medium flex items-center gap-1.5">
                 <TrendingUp className="h-3.5 w-3.5" /> Top Themes
               </h4>
               <ul className="space-y-1.5">
                 {data.top_themes.map((theme, i) => (
-                  <li key={i} className="text-xs text-muted-foreground leading-relaxed flex gap-2">
+                  <li key={i} className="text-[14px] text-[#9ca3af] leading-relaxed flex gap-2">
                     <span className="text-foreground font-medium shrink-0">{i + 1}.</span>
                     {theme}
                   </li>
@@ -108,12 +108,12 @@ function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram
 
           {data.top_hashtags && data.top_hashtags.length > 0 && (
             <div className="space-y-2">
-              <h4 className="text-sm font-medium flex items-center gap-1.5">
+              <h4 className="text-[15px] font-medium flex items-center gap-1.5">
                 <Hash className="h-3.5 w-3.5" /> Top Hashtags
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {data.top_hashtags.map((tag, i) => (
-                  <Badge key={i} variant="outline" className="text-xs">
+                  <Badge key={i} variant="outline" className="text-[13px]">
                     #{tag}
                   </Badge>
                 ))}
@@ -125,12 +125,12 @@ function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram
         {/* Opportunities */}
         {data.opportunities_for_client && data.opportunities_for_client.length > 0 && (
           <div className="space-y-2">
-            <h4 className="text-sm font-medium flex items-center gap-1.5">
+            <h4 className="text-[15px] font-medium flex items-center gap-1.5">
               <Target className="h-3.5 w-3.5" /> Opportunities
             </h4>
             <div className="space-y-2">
               {data.opportunities_for_client.map((opp, i) => (
-                <div key={i} className="text-xs text-muted-foreground bg-[rgba(255,255,255,0.04)] p-2.5 rounded-md leading-relaxed">
+                <div key={i} className="text-[14px] text-[#9ca3af] bg-[rgba(255,255,255,0.04)] p-2.5 rounded-md leading-relaxed">
                   {opp}
                 </div>
               ))}
@@ -141,12 +141,12 @@ function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram
         {/* Key Takeaways */}
         {data.key_takeaways && data.key_takeaways.length > 0 && (
           <div className="space-y-2">
-            <h4 className="text-sm font-medium flex items-center gap-1.5">
+            <h4 className="text-[15px] font-medium flex items-center gap-1.5">
               <Lightbulb className="h-3.5 w-3.5" /> Key Takeaways
             </h4>
             <div className="space-y-2">
               {data.key_takeaways.map((t, i) => (
-                <div key={i} className="text-xs text-muted-foreground leading-relaxed flex gap-2">
+                <div key={i} className="text-[14px] text-[#9ca3af] leading-relaxed flex gap-2">
                   <span className="text-foreground font-medium shrink-0">•</span>
                   {t}
                 </div>
@@ -158,10 +158,10 @@ function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram
         {/* Successful Formats */}
         {data.successful_formats && data.successful_formats.length > 0 && (
           <div className="space-y-2">
-            <h4 className="text-sm font-medium">What's Working</h4>
+            <h4 className="text-[15px] font-medium">What's Working</h4>
             <div className="flex flex-wrap gap-1.5">
               {data.successful_formats.map((f, i) => (
-                <Badge key={i} variant="secondary" className="text-xs">
+                <Badge key={i} variant="secondary" className="text-[13px]">
                   {f}
                 </Badge>
               ))}
@@ -181,7 +181,7 @@ export function TrendInsightsSection({ reports }: Props) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-semibold">Trend Analysis</h3>
+      <h3 className="text-[20px] leading-7 font-semibold tracking-[-0.5px]">Trend Analysis</h3>
       {tiktokTrends && <PlatformTrendCard platform="TikTok" data={tiktokTrends} />}
       {igTrends && <PlatformTrendCard platform="Instagram" data={igTrends} />}
     </div>

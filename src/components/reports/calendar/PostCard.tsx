@@ -76,7 +76,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
             <span className="text-sm font-semibold tracking-[-0.2px]">
               {activeGen.type === "design" ? "Generating designs" : "Generating videos"}
             </span>
-            <span className="text-xs text-[#9ca3af] tracking-[-0.2px]">
+            <span className="text-[13px] text-[#9ca3af] tracking-[-0.2px]">
               {activeGen.completed}/{activeGen.total} complete
             </span>
           </div>
@@ -84,7 +84,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
 
         {/* Just-completed pulse — quick visual cue */}
         {genJustCompleted && (
-          <div className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#10b981] text-white text-xs font-bold tracking-[-0.2px] animate-pulse">
+          <div className="absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#10b981] text-white text-[13px] font-bold tracking-[-0.2px] animate-pulse">
             {activeGen.type === "design" ? (
               <Sparkles className="h-3 w-3" />
             ) : (
@@ -101,7 +101,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         {post.format && (
           <Badge
             variant="outline"
-            className="text-xs font-bold tracking-[-0.2px] py-0.5 px-2 border-white/15 rounded-full"
+            className="text-[13px] font-bold tracking-[-0.2px] py-0.5 px-2 border-white/15 rounded-full"
           >
             {post.format}
           </Badge>
@@ -109,13 +109,13 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         {post.language && (
           <Badge
             variant="secondary"
-            className="text-xs font-bold tracking-[-0.2px] py-0.5 px-2 uppercase rounded-full"
+            className="text-[13px] font-bold tracking-[-0.2px] py-0.5 px-2 uppercase rounded-full"
           >
             {post.language}
           </Badge>
         )}
         {post.posting_time && (
-          <span className="text-xs text-muted-foreground tracking-[-0.5px] flex items-center gap-1 ml-auto">
+          <span className="text-[14px] text-[#9ca3af] tracking-[-0.5px] flex items-center gap-1 ml-auto">
             <Clock className="h-3.5 w-3.5" /> {post.posting_time}
           </span>
         )}
@@ -124,7 +124,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
       {/* Pillar */}
       {post.pillar && (
         <div>
-          <Badge className="bg-accent text-accent-foreground text-xs font-bold tracking-[-0.2px] py-1 px-2.5 rounded-full">
+          <Badge className="bg-accent text-accent-foreground text-[13px] font-bold tracking-[-0.2px] py-1 px-2.5 rounded-full">
             {post.pillar}
           </Badge>
         </div>
@@ -140,7 +140,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
       {/* Status (or in-flight pill) */}
       <div className="pt-3 border-t border-white/[0.06]">
         {isGenerating ? (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[rgba(185,224,69,0.10)] text-[#b9e045] text-xs font-bold tracking-[-0.2px]">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[rgba(185,224,69,0.10)] text-[#b9e045] text-[13px] font-bold tracking-[-0.2px]">
             <Loader2 className="h-3 w-3 animate-spin" />
             Generating {activeGen.completed}/{activeGen.total}
           </span>

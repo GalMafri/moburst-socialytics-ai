@@ -50,7 +50,7 @@ function SegmentedGroup({
 }) {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="text-[11px] font-medium uppercase tracking-wider text-[#9ca3af] shrink-0">
+      <span className="text-[12px] font-medium uppercase tracking-wider text-[#9ca3af] shrink-0">
         {label}
       </span>
       <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] backdrop-blur-xl border border-[rgba(255,255,255,0.07)] shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.03)]">

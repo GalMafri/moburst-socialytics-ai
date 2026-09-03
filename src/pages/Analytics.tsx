@@ -443,7 +443,7 @@ export default function Analytics() {
                           <Sparkles className="h-4 w-4 text-primary" />
                         </div>
                         <div className="space-y-1">
-                          <h4 className="text-sm font-semibold">Key Takeaway</h4>
+                          <h4 className="text-[15px] font-semibold">Key Takeaway</h4>
                           <p className="text-[15px] text-[#9ca3af] leading-relaxed">
                             {formatNumbersInText(latestAISummary)}
                           </p>
@@ -487,7 +487,7 @@ export default function Analytics() {
                 {!viewWindow && comparison && Object.keys(comparison.changes).length > 0 && (
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-base">
+                      <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">
                         Month-over-Month{" "}
                         <span className="font-normal text-muted-foreground text-[15px]">(latest report)</span>
                       </CardTitle>
@@ -505,7 +505,7 @@ export default function Analytics() {
                             <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-[rgba(255,255,255,0.04)]">
                               <div className="flex-1">
                                 <div className="text-[14px] text-[#9ca3af]">{label}</div>
-                                <div className="text-lg font-semibold">{fmtVal(current)}</div>
+                                <div className="text-[20px] leading-7 font-semibold tracking-[-0.5px]">{fmtVal(current)}</div>
                                 {previous > 0 && (
                                   <div className="text-[14px] text-[#9ca3af]">prev: {fmtVal(previous)}</div>
                                 )}
@@ -536,9 +536,9 @@ export default function Analytics() {
                 {chartData.length >= 1 && chartData.some((d) => d.impressions > 0 || d.reactions > 0) && (
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-base">
+                      <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">
                         Performance Over Time
-                        <span className="font-normal text-muted-foreground text-sm ml-2">
+                        <span className="font-normal text-muted-foreground text-[15px] ml-2">
                           ({filtered.length} report{filtered.length !== 1 ? "s" : ""})
                         </span>
                       </CardTitle>
@@ -709,7 +709,7 @@ export default function Analytics() {
                 {chartData.length > 1 && chartData.some((d) => d.engagement_rate > 0) && (
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-base">Engagement Rate Trend</CardTitle>
+                      <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Engagement Rate Trend</CardTitle>
                       <p className="text-[14px] text-[#9ca3af]">
                         (Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.
                       </p>
@@ -776,7 +776,7 @@ export default function Analytics() {
             {/* Recent reports table */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Report History</CardTitle>
+                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Report History</CardTitle>
                 <p className="text-[14px] text-[#9ca3af]">
                   {filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to
                   view full details.
@@ -938,7 +938,7 @@ function LiveSproutSection({
       {Array.isArray(data.by_profile) && data.by_profile.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">By profile <span className="font-normal text-muted-foreground text-[15px]">({rangeLabel})</span></CardTitle>
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">By profile <span className="font-normal text-muted-foreground text-[15px]">({rangeLabel})</span></CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -963,7 +963,7 @@ function LiveSproutSection({
       {posts.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Top posts <span className="font-normal text-muted-foreground text-[15px]">({rangeLabel}, by impressions)</span></CardTitle>
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Top posts <span className="font-normal text-muted-foreground text-[15px]">({rangeLabel}, by impressions)</span></CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2">

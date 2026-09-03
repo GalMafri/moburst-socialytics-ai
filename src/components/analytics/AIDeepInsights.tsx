@@ -134,9 +134,9 @@ export function AIDeepInsights({ reports, chartData }: Props) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
+        <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
           <Lightbulb className="h-4 w-4" /> AI-Powered Insights
-          <Badge variant="secondary" className="text-xs ml-auto">
+          <Badge variant="secondary" className="text-[13px] ml-auto">
             Cumulative Analysis
           </Badge>
         </CardTitle>
@@ -144,7 +144,7 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       <CardContent>
         <div className="space-y-3">
           {insights.map((ins, i) => (
-            <div key={i} className="flex items-start gap-3 text-sm">
+            <div key={i} className="flex items-start gap-3 text-[15px]">
               {ins.type === "up" ? (
                 <TrendingUp className="h-4 w-4 shrink-0 mt-0.5" style={{ color: "hsl(142 76% 36%)" }} />
               ) : ins.type === "down" ? (

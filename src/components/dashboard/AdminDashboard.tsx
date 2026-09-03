@@ -121,7 +121,7 @@ export function AdminDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Clients</h2>
-          <p className="text-muted-foreground text-sm">{clients?.length ?? 0} clients configured</p>
+          <p className="text-muted-foreground text-[15px]">{clients?.length ?? 0} clients configured</p>
         </div>
         {canManageClients && (
           <Button onClick={() => navigate("/clients/new/setup")}>
@@ -179,9 +179,9 @@ export function AdminDashboard() {
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <CardTitle className="text-base">{client.name}</CardTitle>
+                      <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">{client.name}</CardTitle>
                       {(client as any).archived_at && (
-                        <Badge variant="secondary" className="text-xs">Archived</Badge>
+                        <Badge variant="secondary" className="text-[13px]">Archived</Badge>
                       )}
                     </div>
                     <div className="flex items-center gap-1">
@@ -221,19 +221,19 @@ export function AdminDashboard() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 text-[15px] text-[#9ca3af]">
                     <Calendar className="h-3.5 w-3.5" />
                     {lastReport
                       ? `Last report: ${new Date(lastReport.created_at).toLocaleDateString()}`
                       : "No reports yet"}
                   </div>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 text-[15px] text-[#9ca3af]">
                     {client.primary_platforms?.slice(0, 3).map((p: string) => (
                       <PlatformBadge key={p} platform={p} size="sm" />
                     ))}
                   </div>
                   <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">{reportCount} reports</span>
+                    <span className="text-[14px] text-[#9ca3af] whitespace-nowrap">{reportCount} reports</span>
                     <div className="flex gap-1.5 flex-wrap justify-end">
                       <Button
                         size="sm"
@@ -319,7 +319,7 @@ export function AdminDashboard() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="confirm-name" className="text-sm">
+            <Label htmlFor="confirm-name" className="text-[15px]">
               Confirm by typing <span className="font-mono">{deleteTarget?.name}</span>
             </Label>
             <Input

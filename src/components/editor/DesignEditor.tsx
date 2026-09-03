@@ -235,7 +235,7 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
             </div>
 
             {overlays.length === 0 && (
-              <p className="text-xs text-muted-foreground">Click "Add Text" to place text on the design. Drag to position.</p>
+              <p className="text-[14px] text-[#9ca3af]">Click "Add Text" to place text on the design. Drag to position.</p>
             )}
 
             {overlays.map((ov) => (
@@ -247,7 +247,7 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
                 onClick={() => setSelectedOverlay(ov.id)}
               >
                 <div className="w-4 h-4 rounded-full border shrink-0" style={{ backgroundColor: ov.color }} />
-                <span className="truncate flex-1 text-xs">{ov.text}</span>
+                <span className="truncate flex-1 text-[13px]">{ov.text}</span>
                 <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={(e) => { e.stopPropagation(); removeOverlay(ov.id); }}>
                   <Trash2 className="h-3 w-3 text-destructive" />
                 </Button>
@@ -275,17 +275,17 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
                     </div>
                   )}
                   <div className="flex items-center gap-1">
-                    <Label className="text-xs text-muted-foreground">Color</Label>
+                    <Label className="text-[14px] text-[#9ca3af]">Color</Label>
                     <Input type="color" value={selectedOv.color} onChange={(e) => updateOverlay(selectedOv.id, { color: e.target.value })} className="h-7 w-8 p-0.5 cursor-pointer" />
                   </div>
                   <div className="flex items-center gap-1">
-                    <Label className="text-xs text-muted-foreground">Size</Label>
-                    <Input type="number" min={12} max={72} value={selectedOv.fontSize} onChange={(e) => updateOverlay(selectedOv.id, { fontSize: Number(e.target.value) })} className="h-7 w-16 text-xs" />
+                    <Label className="text-[14px] text-[#9ca3af]">Size</Label>
+                    <Input type="number" min={12} max={72} value={selectedOv.fontSize} onChange={(e) => updateOverlay(selectedOv.id, { fontSize: Number(e.target.value) })} className="h-7 w-16 text-[13px]" />
                   </div>
                   <div className="flex items-center gap-1">
-                    <Label className="text-xs text-muted-foreground">Weight</Label>
+                    <Label className="text-[14px] text-[#9ca3af]">Weight</Label>
                     <Select value={selectedOv.fontWeight} onValueChange={(v) => updateOverlay(selectedOv.id, { fontWeight: v as any })}>
-                      <SelectTrigger className="h-7 w-20 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="h-7 w-20 text-[13px]"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="normal">Normal</SelectItem>
                         <SelectItem value="bold">Bold</SelectItem>
@@ -293,7 +293,7 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
                     </Select>
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground">Drag text on the image to reposition. Brand colors shown as swatches.</p>
+                <p className="text-[14px] text-[#9ca3af]">Drag text on the image to reposition. Brand colors shown as swatches.</p>
               </div>
             )}
           </div>

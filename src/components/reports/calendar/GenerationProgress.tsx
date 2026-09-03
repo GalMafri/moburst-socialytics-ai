@@ -78,7 +78,7 @@ export function GenerationProgress() {
                     ? `Cancelled · ${successCount} of ${g.total} kept`
                     : `Generating ${g.total} ${g.type === "design" ? "design" : "video"}${g.total === 1 ? "" : "s"}…`}
                 </p>
-                <p className="text-xs text-[#9ca3af] tracking-[-0.2px] truncate mt-0.5">
+                <p className="text-[13px] text-[#9ca3af] tracking-[-0.2px] truncate mt-0.5">
                   {g.postLabel}
                 </p>
               </div>
@@ -113,7 +113,7 @@ export function GenerationProgress() {
                 role="progressbar"
               />
             </div>
-            <p className="mt-1.5 text-[11px] uppercase tracking-wider text-[#9ca3af]">
+            <p className="mt-1.5 text-[12px] uppercase tracking-wider text-[#9ca3af]">
               {g.completed}/{g.total} complete
               {g.failed > 0 && ` · ${g.failed} failed`}
             </p>

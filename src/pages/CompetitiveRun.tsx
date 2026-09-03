@@ -303,7 +303,7 @@ export default function CompetitiveRun() {
         {/* Confirmed set summary */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Confirmed Top 3</CardTitle>
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Confirmed Top 3</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {(selectedCompetitors || []).map((c: any) => (
@@ -328,7 +328,7 @@ export default function CompetitiveRun() {
         {/* Period */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Period to analyze</CardTitle>
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Period to analyze</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex gap-1.5 flex-wrap">
@@ -430,7 +430,7 @@ export default function CompetitiveRun() {
         {pastRuns && pastRuns.length > 0 && (
           <Card>
             <CardHeader className="flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-base">Recent Runs</CardTitle>
+              <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Recent Runs</CardTitle>
               <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${id}/competitive/reports`)}>
                 <History className="h-4 w-4 mr-1" /> All runs
               </Button>

@@ -422,10 +422,10 @@ export default function RunAnalysis() {
         {/* Client summary */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Configuration Summary</CardTitle>
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Configuration Summary</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="grid grid-cols-2 gap-4 text-[15px]">
               <div>
                 <span className="text-muted-foreground">Platforms:</span> {client.primary_platforms?.join(", ")}
               </div>
@@ -447,7 +447,7 @@ export default function RunAnalysis() {
               </div>
             </div>
             {profiles && profiles.length === 0 && (
-              <p className="text-xs text-destructive font-medium">
+              <p className="text-[13px] text-destructive font-medium">
                 No Sprout profiles assigned! Add profiles in Client Setup before running analysis.
               </p>
             )}
@@ -457,7 +457,7 @@ export default function RunAnalysis() {
         {/* Date range selection */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
               <CalendarDays className="h-4 w-4" /> Report Date Range
             </CardTitle>
           </CardHeader>
@@ -483,7 +483,7 @@ export default function RunAnalysis() {
                 />
               </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-2">
+            <p className="text-[14px] text-[#9ca3af] mt-2">
               Defaults to current month. The comparison period is automatically calculated as the same number of days
               immediately before the start date.
             </p>
@@ -493,7 +493,7 @@ export default function RunAnalysis() {
         {/* Trend Analysis Options */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
               <TrendingUp className="h-4 w-4" /> Trend Analysis
             </CardTitle>
           </CardHeader>
@@ -501,7 +501,7 @@ export default function RunAnalysis() {
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label>Include Trend Analysis</Label>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-[14px] text-[#9ca3af]">
                   Scrape TikTok and Instagram for trending content in your niche
                 </p>
               </div>
@@ -512,13 +512,13 @@ export default function RunAnalysis() {
               />
             </div>
             {!hasKeywords && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
+              <p className="text-[13px] text-amber-600 dark:text-amber-400">
                 No social keywords configured for this client. Trend analysis requires keywords to be set in Client
                 Setup under "Content Strategy". The report will include performance analysis and content calendar only.
               </p>
             )}
             {hasKeywords && skipTrends && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-[14px] text-[#9ca3af]">
                 Trend analysis will be skipped. The report will focus on performance metrics and content calendar only.
               </p>
             )}
@@ -533,14 +533,14 @@ export default function RunAnalysis() {
                 <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!profiles || profiles.length === 0}>
                   <Play className="h-5 w-5" /> Run Full Analysis
                 </Button>
-                <p className="text-xs text-muted-foreground">This typically takes 3-7 minutes</p>
+                <p className="text-[14px] text-[#9ca3af]">This typically takes 3-7 minutes</p>
               </>
             )}
 
             {running && (
               <div className="space-y-4">
                 {STEPS.map((step, i) => (
-                  <div key={i} className="flex items-center gap-3 text-sm">
+                  <div key={i} className="flex items-center gap-3 text-[15px]">
                     {i < currentStep ? (
                       <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
                     ) : i === currentStep ? (
@@ -551,7 +551,7 @@ export default function RunAnalysis() {
                     <span className={i <= currentStep ? "text-foreground" : "text-muted-foreground"}>{step}</span>
                   </div>
                 ))}
-                <p className="text-xs text-muted-foreground mt-2">
+                <p className="text-[14px] text-[#9ca3af] mt-2">
                   Polling for results... {reportId ? `(Report: ${reportId.slice(0, 8)}...)` : ""}
                 </p>
               </div>
@@ -570,7 +570,7 @@ export default function RunAnalysis() {
                   <XCircle className="h-6 w-6" />
                   <span className="font-medium">Analysis issue</span>
                 </div>
-                <p className="text-sm text-muted-foreground">{error}</p>
+                <p className="text-[15px] text-[#9ca3af]">{error}</p>
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -590,7 +590,7 @@ export default function RunAnalysis() {
         {pastReports && pastReports.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Recent Analyses</CardTitle>
+              <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Recent Analyses</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
@@ -608,9 +608,9 @@ export default function RunAnalysis() {
                       >
                         {r.status}
                       </Badge>
-                      <span className="text-sm">{new Date(r.created_at).toLocaleString()}</span>
+                      <span className="text-[15px]">{new Date(r.created_at).toLocaleString()}</span>
                     </div>
-                    {r.duration_minutes && <span className="text-xs text-muted-foreground">{r.duration_minutes}m</span>}
+                    {r.duration_minutes && <span className="text-[14px] text-[#9ca3af]">{r.duration_minutes}m</span>}
                   </div>
                 ))}
               </div>

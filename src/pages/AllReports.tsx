@@ -88,7 +88,7 @@ export default function AllReports() {
           <TabsContent value="social">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">All monthly reports</CardTitle>
+                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">All monthly reports</CardTitle>
               </CardHeader>
               <CardContent>
                 {isLoading ? (
@@ -156,7 +156,7 @@ export default function AllReports() {
           <TabsContent value="competitive">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">All competitive analyses</CardTitle>
+                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">All competitive analyses</CardTitle>
               </CardHeader>
               <CardContent>
                 {competitiveLoading ? (

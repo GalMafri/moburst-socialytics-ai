@@ -143,7 +143,7 @@ export function PostPanel({
               {post.format && (
                 <Badge
                   variant="outline"
-                  className="text-xs font-bold tracking-[-0.2px] py-0.5 px-2 rounded-full border-white/15"
+                  className="text-[13px] font-bold tracking-[-0.2px] py-0.5 px-2 rounded-full border-white/15"
                 >
                   {post.format}
                 </Badge>
@@ -178,7 +178,7 @@ export function PostPanel({
                       ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
                       : "No designs yet"}
                   </p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-[15px] text-[#9ca3af]">
                     {imageTiles.length > 0
                       ? "Click any design to preview at full size. Star your favorites."
                       : "Generate brand-aligned variants to get started."}
@@ -208,10 +208,10 @@ export function PostPanel({
               ) : (
                 <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
                   <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-[15px] text-[#9ca3af]">
                     No designs generated for this post yet.
                   </p>
-                  <p className="text-sm text-muted-foreground/70">
+                  <p className="text-[15px] text-[#9ca3af]/70">
                     Click "Design" above to generate 2–6 brand-aligned variants.
                   </p>
                 </div>
@@ -227,7 +227,7 @@ export function PostPanel({
                       ? `${videoTiles.length} video${videoTiles.length === 1 ? "" : "s"}`
                       : "No videos yet"}
                   </p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-[15px] text-[#9ca3af]">
                     {videoTiles.length > 0
                       ? "Click any video to preview at full size."
                       : "Generate 2–3 video variants — takes ~30–120s each."}
@@ -257,7 +257,7 @@ export function PostPanel({
               ) : (
                 <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
                   <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-[15px] text-[#9ca3af]">
                     No videos generated for this post yet.
                   </p>
                 </div>
@@ -267,7 +267,7 @@ export function PostPanel({
             {/* Schedule tab — hidden for clients */}
             {!isClient && (
               <TabsContent value="schedule" className="mt-4 space-y-3">
-                <p className="text-sm text-muted-foreground">
+                <p className="text-[15px] text-[#9ca3af]">
                   Schedule this post to your Sprout profile. Make sure design and copy are
                   finalized first.
                 </p>
@@ -288,7 +288,7 @@ export function PostPanel({
                     />
                   </>
                 ) : (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-[15px] text-[#9ca3af]">
                     Cannot schedule — missing client or report context.
                   </p>
                 )}
@@ -368,7 +368,7 @@ function MediaTileCard({
       </button>
 
       <div className="flex items-center justify-between px-2 py-1.5 bg-[rgba(0,0,0,0.4)]">
-        <span className="text-xs text-muted-foreground uppercase tracking-wide">
+        <span className="text-[14px] text-[#9ca3af] uppercase tracking-wide">
           #{index + 1}
         </span>
         <div className="flex items-center gap-1">

@@ -640,7 +640,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           <div className="space-y-4">
             {/* Brand context indicator */}
             {brandColors.length > 0 && (
-              <div className="flex items-center gap-3 text-xs text-muted-foreground rounded-lg bg-[rgba(255,255,255,0.03)] px-3 py-2">
+              <div className="flex items-center gap-3 text-[14px] text-[#9ca3af] rounded-lg bg-[rgba(255,255,255,0.03)] px-3 py-2">
                 <span className="font-medium">Brand:</span>
                 <div className="flex items-center gap-1.5">
                   {brandColors.map((color, i) => (
@@ -675,9 +675,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                   className="flex-1"
                   aria-label="Number of design variants"
                 />
-                <span className="text-sm font-medium w-8 text-center">{variantCount}</span>
+                <span className="text-[15px] font-medium w-8 text-center">{variantCount}</span>
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-[14px] text-[#9ca3af]">
                 {isCarousel
                   ? `Each variant = a complete ${slideCount}-slide carousel using a different creative angle. ${variantCount * slideCount} images total.`
                   : "More variants = more options to pick from. Generation runs in parallel."}
@@ -710,7 +710,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                   >
                     <Plus className="h-3 w-3" />
                   </Button>
-                  <span className="text-xs text-muted-foreground">slides</span>
+                  <span className="text-[14px] text-[#9ca3af]">slides</span>
                 </div>
               </div>
             )}
@@ -725,7 +725,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 </Label>
                 <div className="space-y-1 max-h-40 overflow-y-auto">
                   {angles.map((a, i) => (
-                    <label key={i} className="flex items-start gap-2 text-xs cursor-pointer">
+                    <label key={i} className="flex items-start gap-2 text-[13px] cursor-pointer">
                       <input
                         type="checkbox"
                         checked={selectedAngleIdxs.includes(i)}
@@ -749,7 +749,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             )}
 
             {fetchingAngles && (
-              <p className="text-xs text-muted-foreground">Fetching angle suggestions…</p>
+              <p className="text-[14px] text-[#9ca3af]">Fetching angle suggestions…</p>
             )}
 
             {/* Editable prompt */}
@@ -765,7 +765,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 value={editablePrompt}
                 onChange={(e) => setEditablePrompt(e.target.value)}
                 rows={5}
-                className="text-sm"
+                className="text-[15px]"
               />
             </div>
 
@@ -783,7 +783,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             {loading && (
               <div className="flex flex-col items-center justify-center py-6 space-y-3">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <p className="text-sm text-muted-foreground text-center">
+                <p className="text-[15px] text-[#9ca3af] text-center">
                   {cancelRef.current
                     ? "Cancelling — finishing current request…"
                     : isCarousel
@@ -812,7 +812,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             {variantUrls.length > 0 && !loading && (
               <div className="space-y-3">
                 {!isCarousel && (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-[14px] text-[#9ca3af]">
                     Tap a variant to mark it as a favorite. Favorites are saved with the post; the rest stay in the variant history.
                   </p>
                 )}
@@ -833,7 +833,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                         </div>
                       )}
                       {url === "FAILED" && (
-                        <div className="absolute inset-0 flex items-center justify-center text-xs text-destructive p-2 text-center">
+                        <div className="absolute inset-0 flex items-center justify-center text-[13px] text-destructive p-2 text-center">
                           Failed
                         </div>
                       )}
@@ -846,7 +846,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                         </div>
                       )}
                       {!isCarousel && angles[selectedAngleIdxs[i]] && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs px-2 py-1 truncate">
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[13px] px-2 py-1 truncate">
                           {angles[selectedAngleIdxs[i]].label}
                         </div>
                       )}
@@ -885,7 +885,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 </div>
 
                 {revisedPrompt && (
-                  <p className="text-xs text-muted-foreground italic">Refined prompt: {revisedPrompt}</p>
+                  <p className="text-[14px] text-[#9ca3af] italic">Refined prompt: {revisedPrompt}</p>
                 )}
 
                 <div className="flex flex-wrap gap-2">

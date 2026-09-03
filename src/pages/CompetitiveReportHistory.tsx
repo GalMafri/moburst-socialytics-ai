@@ -64,7 +64,7 @@ export default function CompetitiveReportHistory() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Competitive analysis history</CardTitle>
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Competitive analysis history</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (

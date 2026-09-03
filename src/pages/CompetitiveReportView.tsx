@@ -463,7 +463,7 @@ export default function CompetitiveReportView() {
                   <Card key={i} className={v === "up" ? "glass-accent" : ""}>
                     <CardContent className="pt-5 space-y-3">
                       <div className="flex items-start gap-3">
-                        <span className="flex-shrink-0 h-8 w-8 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center">{i + 1}</span>
+                        <span className="flex-shrink-0 h-8 w-8 rounded-full bg-primary text-primary-foreground text-[15px] font-bold flex items-center justify-center">{i + 1}</span>
                         <div className="min-w-0 space-y-1">
                           <p className="text-[18px] leading-7 font-semibold">{g.gap}</p>
                           <div className="flex gap-1.5 flex-wrap">
@@ -495,7 +495,7 @@ export default function CompetitiveReportView() {
             </div>
             {isMoburstStaff && showHidden && hiddenGaps.length > 0 && (
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-base">Hidden suggestions</CardTitle><CardDescription>Excluded from future runs and from the monthly report brief.</CardDescription></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Hidden suggestions</CardTitle><CardDescription>Excluded from future runs and from the monthly report brief.</CardDescription></CardHeader>
                 <CardContent className="space-y-2">
                   {hiddenGaps.map((g: any, i: number) => (
                     <div key={i} className="flex items-center justify-between gap-3 text-[15px]">

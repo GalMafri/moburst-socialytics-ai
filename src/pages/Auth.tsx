@@ -50,16 +50,16 @@ export default function Auth() {
                   <AlertCircle className="h-6 w-6 text-[#ef4444]" />
                 </div>
               </div>
-              <h2 className="text-2xl font-bold tracking-tight text-white">Sign-in failed</h2>
+              <h2 className="text-[28px] leading-8 font-bold tracking-[-0.5px] text-white">Sign-in failed</h2>
               <p className="text-[#9ca3af]">{authError}</p>
-              <p className="text-xs text-[#6b7280] pt-2">
+              <p className="text-[13px] text-[#6b7280] pt-2">
                 Open this tool from the Moburst Hub Dashboard. If you're already there,
                 ask a Hub admin to confirm your tool assignment.
               </p>
             </>
           ) : (
             <>
-              <h2 className="text-2xl font-bold tracking-tight text-white">Sign in to continue</h2>
+              <h2 className="text-[28px] leading-8 font-bold tracking-[-0.5px] text-white">Sign in to continue</h2>
               <p className="text-[#9ca3af]">
                 This tool signs you in through the Moburst portal. Open it there and you
                 will come straight back to the page you were trying to reach.
@@ -67,19 +67,19 @@ export default function Auth() {
               <div className="pt-2">
                 <a
                   href={PORTAL_URL}
-                  className="inline-flex items-center justify-center rounded-lg bg-[#b9e045] px-4 py-2 text-sm font-semibold text-black transition-opacity hover:opacity-90"
+                  className="inline-flex items-center justify-center rounded-lg bg-[#b9e045] px-4 py-2 text-[15px] font-semibold text-black transition-opacity hover:opacity-90"
                 >
                   Open the Moburst portal
                 </a>
               </div>
             {reason === "no-role" && (
-              <p className="text-xs text-amber-500 pt-2">
+              <p className="text-[13px] text-amber-500 pt-2">
                 You are signed in, but this tool has no role assigned to your account.
                 A portal admin needs to grant you access to it.
               </p>
             )}
             {reason === "ready" && (
-              <p className="text-xs text-amber-500 pt-2">
+              <p className="text-[13px] text-amber-500 pt-2">
                 A session was found but could not be restored. Reload the page, and if
                 it persists, open the tool from the portal once.
               </p>
@@ -101,14 +101,14 @@ export default function Auth() {
                 </div>
                 <div>
                   <p className="font-medium text-white">{f.title}</p>
-                  <p className="text-sm text-[#9ca3af]">{f.desc}</p>
+                  <p className="text-[15px] text-[#9ca3af]">{f.desc}</p>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        <p className="text-xs text-[#6b7280] pt-4">Powered by Moburst</p>
+        <p className="text-[13px] text-[#6b7280] pt-4">Powered by Moburst</p>
       </div>
     </div>
   );

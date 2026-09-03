@@ -73,8 +73,8 @@ export function DesignReferencesUpload({
   return (
     <Card>
       <CardContent className="pt-6 space-y-4">
-        <Label className="text-sm font-semibold">Design References</Label>
-        <p className="text-xs text-muted-foreground">
+        <Label className="text-[15px] font-semibold">Design References</Label>
+        <p className="text-[14px] text-[#9ca3af]">
           Upload example social posts, ads, or designs. These will be used as visual style references when generating new designs.
         </p>
 
@@ -107,7 +107,7 @@ export function DesignReferencesUpload({
             ) : (
               <Image className="h-4 w-4 text-muted-foreground" />
             )}
-            <span className="text-sm text-muted-foreground">
+            <span className="text-[15px] text-[#9ca3af]">
               {uploading ? "Uploading..." : "Upload design references (PNG, JPG)"}
             </span>
           </div>

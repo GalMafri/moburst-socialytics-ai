@@ -48,7 +48,7 @@ export default function ReportHistory() {
       <div className="w-full space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Report History</CardTitle>
+            <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Report History</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (

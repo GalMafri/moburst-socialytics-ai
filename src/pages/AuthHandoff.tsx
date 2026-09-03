@@ -18,7 +18,7 @@ const AuthHandoff = () => {
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-4 text-muted-foreground">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-current border-t-transparent" />
-        <p className="text-sm">Signing you in…</p>
+        <p className="text-[15px]">Signing you in…</p>
       </div>
     </div>
   );

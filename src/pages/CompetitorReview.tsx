@@ -380,7 +380,7 @@ export default function CompetitorReview() {
               </DialogDescription>
             </DialogHeader>
             {landscapesError ? (
-              <p className="text-sm text-destructive">{landscapesError}</p>
+              <p className="text-[15px] text-destructive">{landscapesError}</p>
             ) : landscapes === null ? (
               <Loading label="Reading RivalIQ landscapes" />
             ) : landscapes.length === 0 ? (
@@ -416,7 +416,7 @@ export default function CompetitorReview() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <CardTitle className="text-base flex items-center gap-2">
+                <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
                   <Crosshair className="h-4 w-4" /> Competitor Set
                   {currentSet && (
                     <Badge variant={currentSet.status === "confirmed" ? "default" : "secondary"}>
@@ -458,7 +458,7 @@ export default function CompetitorReview() {
         {selected.length > 0 && (
           <Card className="border-[#b9e045]/30">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
+              <CardTitle className="text-[18px] leading-7 tracking-[-0.5px] flex items-center gap-2">
                 <Trophy className="h-4 w-4 text-[#b9e045]" /> Top 3 for deep analysis
               </CardTitle>
             </CardHeader>
@@ -504,7 +504,7 @@ export default function CompetitorReview() {
         {currentSet && (competitors?.length ?? 0) > 0 ? (
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Candidates</CardTitle>
+              <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Candidates</CardTitle>
               <CardDescription>
                 {competitors!.length} proposed · click a row's star slot to select it into the top 3
               </CardDescription>
@@ -591,7 +591,7 @@ export default function CompetitorReview() {
         {(isDraft || !currentSet) && (
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Add manually</CardTitle>
+              <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">Add manually</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">

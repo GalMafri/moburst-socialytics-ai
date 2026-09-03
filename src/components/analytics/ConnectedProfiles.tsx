@@ -32,9 +32,9 @@ export function ConnectedProfiles({ profiles }: Props) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">
+        <CardTitle className="text-[18px] leading-7 tracking-[-0.5px]">
           Connected Profiles{" "}
-          <span className="font-normal text-muted-foreground text-sm">({profiles.length} profiles)</span>
+          <span className="font-normal text-muted-foreground text-[15px]">({profiles.length} profiles)</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
