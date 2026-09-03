@@ -651,12 +651,12 @@ function postPlatformKey(post: any): string {
 /* ─── Platform Performance Card (mirrors the aggregate MetricsCards styling) ─── */
 function PlatformPerformanceCard({ platform }: { platform: any }) {
   const metrics = [
-    { key: "impressions", label: "Impressions", icon: Eye },
-    { key: "reactions", label: "Reactions", icon: Heart },
-    { key: "link_clicks", label: "Link Clicks", icon: MousePointerClick },
-    { key: "video_views", label: "Video Views", icon: Video },
-    { key: "comments", label: "Comments", icon: MessageCircle },
-    { key: "shares", label: "Shares", icon: Share2 },
+    { key: "impressions", label: "Impressions", short: "Impr.", icon: Eye },
+    { key: "reactions", label: "Reactions", short: "Reacts", icon: Heart },
+    { key: "link_clicks", label: "Link Clicks", short: "Clicks", icon: MousePointerClick },
+    { key: "video_views", label: "Video Views", short: "Views", icon: Video },
+    { key: "comments", label: "Comments", short: "Comm.", icon: MessageCircle },
+    { key: "shares", label: "Shares", short: "Shares", icon: Share2 },
   ];
   const cur = platform.current || {};
   const prev = platform.previous || null;
@@ -686,7 +686,7 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
       </div>
       <div className="space-y-4">
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-x-3 gap-y-3">
-          {metrics.map(({ key, label, icon: Icon }) => {
+          {metrics.map(({ key, label, short, icon: Icon }) => {
             const value = Number(cur[key] ?? 0);
             const ch = changes?.[key];
             const pct = typeof ch?.percent === "number" ? ch.percent : null;
@@ -695,7 +695,7 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
             const tone = isNew || (pct != null && pct > 0) ? "text-success" : pct != null && pct < 0 ? "text-destructive" : "text-[#b1b7c1]";
             return (
               <div key={key} className="min-w-0" title={`${label}: ${value.toLocaleString()}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}% vs previous period)` : ""}`}>
-                <p className="t-label uppercase tracking-wider truncate flex items-center gap-1"><Icon className="h-3 w-3 flex-shrink-0" /> {label}</p>
+                <p className="t-label flex items-center gap-1 whitespace-nowrap"><Icon className="h-3 w-3 flex-shrink-0" aria-hidden /> <span aria-label={label}>{short}</span></p>
                 <p className="t-body font-semibold tabular-nums">{compactNumber(value)}</p>
                 {(pct != null || isNew) && (
                   <p className={`t-label font-semibold ${tone}`}>{isNew ? "New" : `${pct > 0 ? "+" : ""}${pct}%`}</p>
