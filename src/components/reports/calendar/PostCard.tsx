@@ -51,7 +51,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       {/* Thumbnail / empty state / generating overlay — 16:10. */}
-      <div className="relative w-full aspect-[16/10] rounded-[10px] overflow-hidden">
+      <div className={`relative w-full rounded-[10px] overflow-hidden ${thumb && !isGenerating ? "aspect-[16/10]" : "h-16"}`}>
         {thumb && !isGenerating ? (
           <div className="w-full h-full bg-black">
             {isVideo ? (
@@ -62,9 +62,9 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
           </div>
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-[rgba(255,255,255,0.04)] border border-dashed border-white/10 group-hover:border-primary/40 transition-colors">
-            <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
-              <ImagePlus className="h-5 w-5" />
-              <span className="text-sm tracking-[-0.5px]">No design yet</span>
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <ImagePlus className="h-4 w-4" />
+              <span className="t-label">No design yet</span>
             </div>
           </div>
         )}

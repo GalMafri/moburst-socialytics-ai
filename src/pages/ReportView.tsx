@@ -343,7 +343,7 @@ export default function ReportView() {
         </div>
 
         <Tabs value={tab} onValueChange={setTab} className="space-y-6">
-          <TabsList className="w-full sm:w-auto overflow-x-auto justify-start">
+          <TabsList className="h-auto flex-wrap justify-start">
             <TabsTrigger value="overview" className="gap-1.5 flex-shrink-0"><BarChart3 className="h-4 w-4" /> Overview</TabsTrigger>
             {hasContent && <TabsTrigger value="content" className="gap-1.5 flex-shrink-0"><Sparkles className="h-4 w-4" /> Content Ideas</TabsTrigger>}
             {hasTrends && <TabsTrigger value="trends" className="gap-1.5 flex-shrink-0"><TrendingUp className="h-4 w-4" /> Trends</TabsTrigger>}

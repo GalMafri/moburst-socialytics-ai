@@ -218,6 +218,7 @@ export default function CompetitiveReportView() {
     }
   };
 
+  const hasContent = (p: TopPost) => !!(p.url || p.text || p.image);
   const postCard = (p: TopPost, key: string) => (
     <div key={key} className="glass-inner p-4 space-y-2.5 h-full flex flex-col">
       <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} maxHeight="26rem" />
@@ -574,7 +575,7 @@ export default function CompetitiveReportView() {
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {ordered.map((c) => {
-                  const posts = moodPosts(c);
+                  const posts = moodPosts(c).filter(hasContent);
                   if (!posts.length) return null;
                   return (
                     <div key={c.company_id} className="space-y-2">
@@ -599,7 +600,10 @@ export default function CompetitiveReportView() {
                   <div key={c.company_id} className="space-y-3">
                     <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
                     <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5 items-start">
-                      {b.top_posts.slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}
+                      {b.top_posts.filter(hasContent).slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}
+                      {b.top_posts.filter((p) => !hasContent(p)).length > 0 && (
+                        <p className="t-label col-span-full">{b.top_posts.filter((p) => !hasContent(p)).length} X {b.top_posts.filter((p) => !hasContent(p)).length === 1 ? "post is" : "posts are"} counted in the totals only: RivalIQ sends no link, caption or image for X.</p>
+                      )}
                     </div>
                   </div>
                 ))}

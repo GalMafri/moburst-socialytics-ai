@@ -1,7 +1,10 @@
 import { useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { StatCard } from "@/components/ui/stat-card";
+import { InsightGrid } from "@/components/ui/insight-card";
+import { Section } from "@/components/ui/section";
 import { Badge } from "@/components/ui/badge";
-import { Lightbulb, TrendingUp, TrendingDown, BarChart3, Calendar, FileText } from "lucide-react";
+import { Eye, Heart, Percent, ListChecks } from "lucide-react";
 
 interface Props {
   reports: any[];
@@ -129,34 +132,52 @@ export function AIDeepInsights({ reports, chartData }: Props) {
     return result;
   }, [reports, chartData]);
 
-  if (insights.length === 0) return null;
-
+  // Facts as tiles, movements as cards, coverage as chips. Nothing here is AI-written: it is
+  // computed from the reports in the window, so it is labelled that way.
+  const facts = useMemo(() => {
+    if (chartData.length === 0) return null;
+    const bestImpr = chartData.reduce((b, d) => (d.impressions > b.impressions ? d : b));
+    const bestEng = chartData.reduce((b, d) => (d.engagements > b.engagements ? d : b));
+    const totalImpr = chartData.reduce((t, d) => t + d.impressions, 0);
+    const totalEng = chartData.reduce((t, d) => t + d.engagements, 0);
+    let recs = 0, tiktok = 0, ig = 0;
+    for (const r of reports) {
+      const rd = Array.isArray(r.report_data) ? r.report_data[0] : r.report_data;
+      recs += rd?.data_counts?.total_recommendations || 0;
+      if (rd?.ai_analysis?.tiktok_trends_analysis) tiktok++;
+      if (rd?.ai_analysis?.instagram_trends_analysis) ig++;
+    }
+    return { bestImpr, bestEng, avgRate: totalImpr > 0 ? (totalEng / totalImpr) * 100 : 0, recs, tiktok, ig };
+  }, [reports, chartData]);
+  const compact = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 10_000 ? `${(v / 1_000).toFixed(1)}K` : v.toLocaleString());
+  const trends = insights.filter((x) => x.type !== "neutral").map((x) => x.text);
+  if (!facts) return null;
+  const n = reports.length;
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="t-h3 flex items-center gap-2">
-          <Lightbulb className="h-4 w-4" /> AI-Powered Insights
-          <Badge variant="secondary" className="t-label ml-auto">
-            Cumulative Analysis
-          </Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {insights.map((ins, i) => (
-            <div key={i} className="flex items-start gap-3 t-body">
-              {ins.type === "up" ? (
-                <TrendingUp className="h-4 w-4 shrink-0 mt-0.5" style={{ color: "hsl(142 76% 36%)" }} />
-              ) : ins.type === "down" ? (
-                <TrendingDown className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-              ) : (
-                <BarChart3 className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-              )}
-              <span>{ins.text}</span>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+    <Section
+      title="Across the reports in this window"
+      description={`Computed from ${n} ${n === 1 ? "report" : "reports"}: peaks, the average engagement rate, and how much the reports produced.`}
+    >
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label="Peak impressions" icon={<Eye className="h-3.5 w-3.5" />} value={compact(facts.bestImpr.impressions)} sub={`on ${facts.bestImpr.date}`} />
+        <StatCard label="Peak engagement" icon={<Heart className="h-3.5 w-3.5" />} value={compact(facts.bestEng.engagements)} sub={`on ${facts.bestEng.date}`} />
+        <StatCard label="Avg engagement rate" icon={<Percent className="h-3.5 w-3.5" />} value={`${facts.avgRate.toFixed(2)}%`} sub="engagements over impressions" />
+        <StatCard label="Recommendations" icon={<ListChecks className="h-3.5 w-3.5" />} value={facts.recs} sub={`across ${n} ${n === 1 ? "report" : "reports"}`} />
+      </div>
+      {(trends.length > 0 || facts.tiktok > 0 || facts.ig > 0) && (
+        <Card>
+          <CardContent className="pt-5 space-y-4">
+            {trends.length > 0 && <InsightGrid items={trends} numbered={false} />}
+            {(facts.tiktok > 0 || facts.ig > 0) && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="t-label uppercase tracking-wider">Trend analysis in</span>
+                {facts.tiktok > 0 && <Badge variant="outline">TikTok · {facts.tiktok} {facts.tiktok === 1 ? "report" : "reports"}</Badge>}
+                {facts.ig > 0 && <Badge variant="outline">Instagram · {facts.ig} {facts.ig === 1 ? "report" : "reports"}</Badge>}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </Section>
   );
 }
