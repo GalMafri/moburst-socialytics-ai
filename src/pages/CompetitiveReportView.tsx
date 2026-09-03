@@ -219,16 +219,16 @@ export default function CompetitiveReportView() {
   };
 
   const postCard = (p: TopPost, key: string) => (
-    <div key={key} className="glass-inner p-4 space-y-2.5">
+    <div key={key} className="glass-inner p-4 space-y-2.5 h-full flex flex-col">
       <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} maxHeight="26rem" />
-      <p className="t-body line-clamp-2 min-h-[3rem]">{p.text || "(no caption)"}</p>
+      <p className={`t-body line-clamp-2 min-h-[3rem] ${p.text ? "" : "text-[#b1b7c1]"}`}>{p.text || (normalizePlatform(p.channel) === "x" || normalizePlatform(p.channel) === "twitter" ? "X posts arrive from RivalIQ without a caption or link." : "No caption provided.")}</p>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <Stat label="Est. impressions" value={p.est_impressions ? fmt(p.est_impressions) : "–"} />
+        <Stat label="Est. impr." value={p.est_impressions ? fmt(p.est_impressions) : "–"} />
         <Stat label="Engagements" value={fmt(p.engagement)} />
         <Stat label="Eng. rate" value={p.engagement_rate ? pct(p.engagement_rate) : "–"} />
         <Stat label={p.views ? "Views" : "Reach"} value={p.views ? fmt(p.views) : p.reach ? fmt(p.reach) : "–"} />
       </div>
-      <div className="flex items-center justify-between gap-2 t-secondary">
+      <div className="flex items-center justify-between gap-2 t-secondary mt-auto">
         {(p.applause || p.conversation || p.amplification) ? (
           <span title="Likes and reactions · comments · shares">{fmt(p.applause || 0)} likes · {fmt(p.conversation || 0)} comments · {fmt(p.amplification || 0)} shares</span>
         ) : <span />}
@@ -421,11 +421,13 @@ export default function CompetitiveReportView() {
 
         {/* Posting rhythm */}
         {ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0) && (
-            <Section id="rhythm" index={4} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description={<>{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</>}>
+            <Section id="rhythm" index={4} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description="When each company posts, by weekday and by hour (UTC), against the schedule we recommend.">
             <Card>
               <CardContent className="pt-5 space-y-6">
+                {ai.posting_time_insights?.summary && <Prose text={ai.posting_time_insights.summary} />}
+                <div className="grid gap-6 xl:grid-cols-2">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.post_count > 0).map(({ c, b }) => (
-                  <div key={c.company_id} className="space-y-2">
+                  <div key={c.company_id} className="space-y-2 glass-inner p-4">
                     <div className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
                     <div className="flex flex-wrap gap-8">
                       <div><p className="t-secondary mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} /></div>
@@ -433,6 +435,7 @@ export default function CompetitiveReportView() {
                     </div>
                   </div>
                 ))}
+                </div>
 
                 {schedule && (schedule.by_weekday || schedule.by_hour) && (
                   <div className="glass-inner p-4 space-y-3">
@@ -478,18 +481,18 @@ export default function CompetitiveReportView() {
                 const v = verdictFor(g.gap);
                 return (
                   <Card key={i} className={v === "up" ? "glass-accent" : ""}>
-                    <CardContent className="space-y-3">
+                    <CardContent className="pt-5 space-y-3">
                       <div className="flex items-start gap-3">
-                        <span className="flex-shrink-0 h-8 w-8 rounded-full bg-primary text-primary-foreground t-body font-bold flex items-center justify-center">{i + 1}</span>
-                        <div className="min-w-0 space-y-1">
-                          <p className="t-h3">{g.gap}</p>
+                        <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
+                        <div className="min-w-0 space-y-1.5">
+                          <p className="t-body font-semibold text-white">{g.gap}</p>
                           <div className="flex gap-1.5 flex-wrap">
                             {g.platform && <Badge variant="outline">{g.platform === "all" ? "All platforms" : platformLabel(g.platform)}</Badge>}
                             {v === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                           </div>
                         </div>
                       </div>
-                      {g.why_it_matters && <p className="t-prose">{g.why_it_matters}</p>}
+                      {g.why_it_matters && <p className="t-body">{g.why_it_matters}</p>}
                       {g.suggested_play && (
                         <div className="glass-accent p-3 t-body">
                           <span className="font-semibold">The play: </span>{g.suggested_play}

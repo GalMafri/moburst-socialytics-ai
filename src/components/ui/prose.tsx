@@ -28,7 +28,7 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
           const body = m ? p.slice(m[0].length) : p;
           return (
             <article key={i} className="glass-inner p-4 space-y-2 min-w-0">
-              {title && <h3 className="t-body font-semibold text-white">{title}</h3>}
+              {title && <h3 className="t-label uppercase tracking-wider">{title}</h3>}
               <div className="t-body">{title ? body : <Paragraph text={p} />}</div>
             </article>
           );

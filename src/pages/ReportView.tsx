@@ -294,9 +294,6 @@ export default function ReportView() {
     const plat = platformLabelOf(best.network_type || best.platform || "");
     return `The best post reached ${compactNumber(Number(best.impressions ?? 0))} impressions${plat ? ` on ${plat}` : ""}${best.engagement != null ? ` with ${compactNumber(Number(best.engagement))} engagements` : ""}. Ranked by impressions and by engagement, with a platform filter.`;
   })();
-  const pillarsLine = pillars
-    ? `${(pillars.well_represented || []).length} pillars well represented, ${(pillars.underrepresented || []).length} need attention, ${pillarRecs.length} recommendations.`
-    : undefined;
   type Action = { source: "Competitors" | "Performance" | "Trends"; title: string; detail?: string; tab?: string; anchor?: string; href?: string };
   const actions: Action[] = [];
   for (const g of endorsedGaps.slice(0, 2)) actions.push({ source: "Competitors", title: g.gap, detail: g.suggested_play, href: `/clients/${report.client_id}/competitive/reports/${latestCompetitive!.id}` });
@@ -315,6 +312,9 @@ export default function ReportView() {
   const insights: string[] = aiAnalysis?.sprout_performance_analysis?.key_insights || [];
   const summary: string | null = aiAnalysis?.sprout_performance_analysis?.month_over_month_summary || null;
   const pillars = aiAnalysis?.sprout_performance_analysis?.pillar_alignment;
+  const pillarsLine = pillars
+    ? `${(pillars.well_represented || []).length} pillars well represented, ${(pillars.underrepresented || []).length} need attention, ${pillarRecs.length} recommendations.`
+    : undefined;
 
   return (
     <AppLayout>
