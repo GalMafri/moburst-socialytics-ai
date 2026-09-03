@@ -25,7 +25,7 @@ import { partitionGaps, useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { Prose } from "@/components/ui/prose";
-import { Section } from "@/components/ui/section";
+import { Section, SectionNav } from "@/components/ui/section";
 import { RankedBars } from "@/components/ui/bars";
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images } from "lucide-react";
 
@@ -283,6 +283,19 @@ export default function CompetitiveReportView() {
           <p className="t-secondary">Per-platform breakdowns are produced for runs from September 2, 2026 onward. Re-run the analysis to get them for this client.</p>
         )}
 
+        <SectionNav
+          items={[
+            ai.executive_summary ? { id: "summary", label: "Summary" } : null,
+            scorecard ? { id: "scorecard", label: "Scorecard" } : null,
+            companies.length > 0 ? { id: "field", label: "The field" } : null,
+            ai.posting_time_insights ? { id: "rhythm", label: "Posting rhythm" } : null,
+            gaps.length > 0 || hiddenGaps.length > 0 ? { id: "gaps", label: "Gaps" } : null,
+            (ai.winner_teardown || []).length > 0 ? { id: "wins", label: "What wins" } : null,
+            { id: "moodboards", label: "Mood boards" },
+            { id: "posts", label: "Top posts" },
+          ].filter(Boolean) as { id: string; label: string }[]}
+        />
+
         {/* KPI tiles */}
         {meB && (
           <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
@@ -298,7 +311,7 @@ export default function CompetitiveReportView() {
 
         {/* Executive summary */}
         {ai.executive_summary && (
-            <Section title={<>Executive summary</>}>
+            <Section id="summary" index={1} title={<>Executive summary</>}>
             <Card className="glass-elevated">
               <CardContent><Prose text={ai.executive_summary} className="t-body whitespace-pre-line" /></CardContent>
             </Card>
@@ -307,7 +320,7 @@ export default function CompetitiveReportView() {
 
         {/* Scorecard */}
         {scorecard?.dimensions?.length > 0 && (
-            <Section title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</>}>
+            <Section id="scorecard" index={2} title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</>}>
             <Card>
               <CardContent className="pt-5 space-y-5">
                 {scorecard.dimensions.map((d: any, i: number) => (
@@ -330,9 +343,9 @@ export default function CompetitiveReportView() {
 
         {/* The field */}
         {companies.length > 0 && (
-          <section className="space-y-4">
-            <div className="glass p-5">
-              <h2 className="t-h2">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
+          <section id="field" className="space-y-4 scroll-mt-28">
+            <div className="glass px-5 py-4">
+              <h2 className="t-h2 flex items-center gap-3"><span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">03</span><span>The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</span></h2>
               <p className="t-secondary">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
             </div>
             <Card>
@@ -408,7 +421,7 @@ export default function CompetitiveReportView() {
 
         {/* Posting rhythm */}
         {ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0) && (
-            <Section title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description={<>{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</>}>
+            <Section id="rhythm" index={4} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description={<>{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</>}>
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.post_count > 0).map(({ c, b }) => (
@@ -445,10 +458,10 @@ export default function CompetitiveReportView() {
 
         {/* Gaps */}
         {(gaps.length > 0 || hiddenGaps.length > 0) && (
-          <section className="space-y-4">
+          <section id="gaps" className="space-y-4 scroll-mt-28">
             <div className="flex items-end justify-between gap-4 flex-wrap">
-              <div className="glass p-5">
-                <h2 className="t-h2 flex items-center gap-2"><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
+              <div className="glass px-5 py-4">
+                <h2 className="t-h2 flex items-center gap-3"><span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">05</span><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
                 <p className="t-secondary">
                   {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
                 </p>
@@ -518,7 +531,7 @@ export default function CompetitiveReportView() {
 
         {/* Winner teardown */}
         {Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0 && (
-            <Section title={<><Trophy className="h-5 w-5" /> What wins for them</>} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
+            <Section id="wins" index={6} title={<><Trophy className="h-5 w-5" /> What wins for them</>} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
             <Card>
               <CardContent className="pt-5 grid gap-4 md:grid-cols-3">
                 {ai.winner_teardown.map((w: any, i: number) => {
@@ -554,7 +567,7 @@ export default function CompetitiveReportView() {
 
         {/* Mood boards */}
         {ordered.some((c) => moodPosts(c).length > 0) && (
-            <Section title={<><Images className="h-5 w-5" /> Mood boards</>} description={<>The creative each company actually ran in the period, side by side. Click any tile to open the post.</>}>
+            <Section id="moodboards" index={7} title={<><Images className="h-5 w-5" /> Mood boards</>} description={<>The creative each company actually ran in the period, side by side. Click any tile to open the post.</>}>
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {ordered.map((c) => {
@@ -576,7 +589,7 @@ export default function CompetitiveReportView() {
 
         {/* Top posts */}
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
-            <Section title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</>}>
+            <Section id="posts" index={8} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</>}>
             <Card>
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (

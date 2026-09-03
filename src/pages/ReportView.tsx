@@ -685,46 +685,21 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
         )}
       </div>
       <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-x-3 gap-y-3">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-x-3 gap-y-3">
           {metrics.map(({ key, label, icon: Icon }) => {
             const value = Number(cur[key] ?? 0);
             const ch = changes?.[key];
-            const pct = ch?.percent;
-            // A zero baseline isn't "+100% growth" — surface it as "New" instead.
-            const isNew =
-              ch != null && Number(ch.previous ?? prev?.[key] ?? 0) === 0 && value > 0;
-            const color =
-              pct == null
-                ? "text-muted-foreground"
-                : pct > 10
-                  ? "text-success"
-                  : pct < -10
-                    ? "text-destructive"
-                    : "text-warning";
+            const pct = typeof ch?.percent === "number" ? ch.percent : null;
+            // A zero baseline isn't "+100% growth": surface it as "New" instead.
+            const isNew = ch != null && Number(ch.previous ?? prev?.[key] ?? 0) === 0 && value > 0;
+            const tone = isNew || (pct != null && pct > 0) ? "text-success" : pct != null && pct < 0 ? "text-destructive" : "text-[#b1b7c1]";
             return (
-              <div key={key} className="space-y-0.5">
-                <div className="flex items-center gap-1 t-secondary">
-                  <Icon className="h-3 w-3 flex-shrink-0" /> {label}
-                </div>
-                <p className="text-base font-bold tracking-tight">{value.toLocaleString()}</p>
-                {(pct != null || isNew) &&
-                  (isNew ? (
-                    <div className="flex items-center gap-0.5 t-label font-medium text-success">
-                      <TrendingUp className="h-2.5 w-2.5" /> New
-                    </div>
-                  ) : (
-                    <div className={`flex items-center gap-0.5 t-label font-medium ${color}`}>
-                      {pct > 0 ? (
-                        <TrendingUp className="h-2.5 w-2.5" />
-                      ) : pct < 0 ? (
-                        <TrendingDown className="h-2.5 w-2.5" />
-                      ) : (
-                        <Minus className="h-2.5 w-2.5" />
-                      )}
-                      {pct > 0 ? "+" : ""}
-                      {pct}%
-                    </div>
-                  ))}
+              <div key={key} className="min-w-0" title={`${label}: ${value.toLocaleString()}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}% vs previous period)` : ""}`}>
+                <p className="t-label uppercase tracking-wider truncate flex items-center gap-1"><Icon className="h-3 w-3 flex-shrink-0" /> {label}</p>
+                <p className="t-body font-semibold tabular-nums">{compactNumber(value)}</p>
+                {(pct != null || isNew) && (
+                  <p className={`t-label font-semibold ${tone}`}>{isNew ? "New" : `${pct > 0 ? "+" : ""}${pct}%`}</p>
+                )}
               </div>
             );
           })}
@@ -896,58 +871,53 @@ function TrendsSection({
   const takeaways: string[] = analysis?.key_takeaways || [];
 
   return (
-    <section className="space-y-6">
-      <div className="glass p-5 flex items-start gap-3">
-        <div className="h-11 w-11 rounded-[12px] flex items-center justify-center shrink-0" style={{ backgroundColor: `${platformColor}22` }}>
-          <PlatformIcon platform={platform} className="h-5 w-5" />
-        </div>
-        <div className="min-w-0">
-          <h3 className="t-h3">{title}</h3>
-          {analysis?.overview && <Prose text={analysis.overview} className="t-secondary mt-1" />}
-        </div>
-      </div>
+    <section className="space-y-8">
+      <Section
+        title={<><span className="h-8 w-8 rounded-[10px] flex items-center justify-center shrink-0" style={{ backgroundColor: `${platformColor}22` }}><PlatformIcon platform={platform} className="h-4 w-4" /></span>{title}</>}
+        description={analysis?.overview ? undefined : "Trending content and what it means for the client."}
+      >
+        {analysis?.overview && <Card><CardContent className="pt-5"><Prose text={analysis.overview} columns={false} /></CardContent></Card>}
+      </Section>
 
       {(analysis?.top_themes?.length > 0 || analysis?.top_hashtags?.length > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {analysis.top_themes?.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-[#b1b7c1]" /> Top themes</CardTitle></CardHeader>
-              <CardContent><div className="flex flex-wrap gap-2">{analysis.top_themes.map((t: string, i: number) => <Badge key={t} variant="secondary" className="px-3 py-1 t-body"><span className="mr-1.5 t-badge text-[#b1b7c1]">{i + 1}</span>{t}</Badge>)}</div></CardContent>
-            </Card>
-          )}
-          {analysis.top_hashtags?.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><span className="text-[18px]">#</span> Trending hashtags</CardTitle></CardHeader>
-              <CardContent><div className="flex flex-wrap gap-2">{analysis.top_hashtags.map((h: string) => <Badge key={h} variant="outline" className="px-3 py-1 t-body">{h.startsWith("#") ? h : `#${h}`}</Badge>)}</div></CardContent>
-            </Card>
-          )}
-        </div>
+        <Section title="Themes and hashtags" description="What the trending posts are about, and the tags carrying them.">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {analysis.top_themes?.length > 0 && (
+              <Card><CardContent className="pt-5 space-y-3">
+                <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Top themes</p>
+                <div className="flex flex-wrap gap-2">{analysis.top_themes.map((t: string, i: number) => <Badge key={t} variant="secondary" className="px-3 py-1 t-body"><span className="mr-1.5 t-badge text-[#b1b7c1]">{i + 1}</span>{t}</Badge>)}</div>
+              </CardContent></Card>
+            )}
+            {analysis.top_hashtags?.length > 0 && (
+              <Card><CardContent className="pt-5 space-y-3">
+                <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><span className="text-[14px] font-bold">#</span> Trending hashtags</p>
+                <div className="flex flex-wrap gap-2">{analysis.top_hashtags.map((h: string) => <Badge key={h} variant="outline" className="px-3 py-1 t-body">{h.startsWith("#") ? h : `#${h}`}</Badge>)}</div>
+              </CardContent></Card>
+            )}
+          </div>
+        </Section>
       )}
 
       {formats.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><Sparkles className="h-4 w-4 text-[#b1b7c1]" /> What is working</CardTitle></CardHeader>
-          <CardContent><InsightGrid items={formats} numbered={false} /></CardContent>
-        </Card>
+        <Section title={<><Sparkles className="h-5 w-5" /> What is working</>} description="Formats that keep winning in this space right now.">
+          <InsightGrid items={formats} numbered={false} />
+        </Section>
       )}
 
       {opportunities.length > 0 && (
-        <Card className="bg-primary/5 border-primary/20">
-          <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><Target className="h-4 w-4 text-primary" /> Opportunities for {clientName || "your brand"}</CardTitle></CardHeader>
-          <CardContent><InsightGrid items={opportunities} numbered={true} /></CardContent>
-        </Card>
+        <Section title={<><Target className="h-5 w-5 text-primary" /> Opportunities for {clientName || "your brand"}</>} description="Where the trend meets the client's strengths.">
+          <InsightGrid items={opportunities} numbered={true} />
+        </Section>
       )}
 
       {takeaways.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><Lightbulb className="h-4 w-4 text-warning" /> Key takeaways</CardTitle></CardHeader>
-          <CardContent><InsightGrid items={takeaways} numbered={false} /></CardContent>
-        </Card>
+        <Section title={<><Lightbulb className="h-5 w-5 text-warning" /> Key takeaways</>}>
+          <InsightGrid items={takeaways} numbered={false} />
+        </Section>
       )}
 
       {shown.length > 0 && (
-        <div className="space-y-4">
-          <h4 className="t-h3">Trending posts</h4>
+        <Section title="Trending posts" description="The posts driving the trend, with the creative and the numbers behind each.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {shown.map((post: any, i: number) => {
               const sl = post.engagement_score != null ? getScoreLabel(post.engagement_score, platform) : null;
@@ -982,7 +952,7 @@ function TrendsSection({
               );
             })}
           </div>
-        </div>
+        </Section>
       )}
     </section>
   );
