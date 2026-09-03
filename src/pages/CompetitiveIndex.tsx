@@ -36,11 +36,8 @@ export default function CompetitiveIndex() {
   });
 
   return (
-    <AppLayout title="Competitive Analysis">
+    <AppLayout title="Competitive Analysis" description="Identify and confirm each client's top competitors, run the RivalIQ deep analysis, and open the results.">
       <div className="w-full space-y-4">
-        <p className="t-secondary">
-          Identify and confirm each client's top competitors, run the RivalIQ deep analysis, and open the results.
-        </p>
         {isLoading ? (
           <Loading label="Loading clients" />
         ) : !data?.length ? (

@@ -273,7 +273,7 @@ export default function CompetitiveRun() {
 
   if (!client || setLoading) {
     return (
-      <AppLayout title="Competitive Analysis" width="max-w-4xl">
+      <AppLayout title="Competitive Analysis" width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
         <Loading label="Loading" />
       </AppLayout>
     );
@@ -281,7 +281,7 @@ export default function CompetitiveRun() {
 
   if (!confirmedSet) {
     return (
-      <AppLayout title={`Competitive: ${client.name}`}>
+      <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
         <div className="max-w-4xl mx-auto">
           <Card>
             <CardContent className="pt-5 text-center space-y-4">
@@ -298,7 +298,7 @@ export default function CompetitiveRun() {
   }
 
   return (
-    <AppLayout title={`Competitive: ${client.name}`}>
+    <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Confirmed set summary */}
         <Card>

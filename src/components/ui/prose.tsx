@@ -7,13 +7,35 @@ import { cn } from "@/lib/utils";
  * bolded, and inline enumerations such as "(1) … (2) …" or "1) … 2) …"
  * become a list. Text is 16px/26px white at a 72ch measure (see .t-prose).
  */
-export function Prose({ text, className, columns = true }: { text: string | null | undefined; className?: string; columns?: boolean }) {
+const LEAD = /^([A-Z][^.:;!?]{1,42}):\s+(?=\S)/;
+
+export function Prose({ text, className, columns = true, cards = true }: { text: string | null | undefined; className?: string; columns?: boolean; cards?: boolean }) {
   if (!text) return null;
   const flow = columns && String(text).length > 600;
   const paragraphs = String(text)
     .split(/\n{2,}|\n(?=\s*(?:[-•*]|\d+[.)]))/)
     .map((p) => p.trim())
     .filter(Boolean);
+  // Labelled paragraphs ("Scope: …", "Key opportunity: …") read best as a grid of
+  // titled cards rather than a wall of text. Requires three or more of them.
+  const leads = paragraphs.map((p) => p.match(LEAD));
+  if (cards && paragraphs.length >= 3 && leads.filter(Boolean).length >= Math.ceil(paragraphs.length * 0.75)) {
+    return (
+      <div className={cn("grid gap-3 md:grid-cols-2 xl:grid-cols-3", className)}>
+        {paragraphs.map((p, i) => {
+          const m = leads[i];
+          const title = m ? m[1] : null;
+          const body = m ? p.slice(m[0].length) : p;
+          return (
+            <article key={i} className="glass-inner p-4 space-y-2 min-w-0">
+              {title && <h3 className="t-body font-semibold text-white">{title}</h3>}
+              <div className="t-body">{title ? body : <Paragraph text={p} />}</div>
+            </article>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div className={cn("t-prose", flow ? "max-w-none columns-[38rem] gap-x-10 [&>*]:break-inside-avoid [&>*+*]:mt-3" : "space-y-3", className)}>
       {paragraphs.map((p, i) => (

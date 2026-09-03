@@ -52,6 +52,7 @@ import { PostVisual, usePostPreviews, type PostPreview } from "@/components/comp
 import { useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
+import { InsightGrid } from "@/components/ui/insight-card";
 import {
   parseCsv,
   stripVoicePreset,
@@ -330,21 +331,12 @@ export default function ReportView() {
                 <Card><CardContent className="pt-5 space-y-5">
                     {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
                     {insights.length > 0 && (
-                      <ol className="columns-[38rem] gap-x-10 space-y-3">
-                        {insights.map((t, i) => (
-                          <li key={i} className="flex gap-3 t-prose break-inside-avoid">
-                            <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-body font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
-                            <span>{formatNumbersInText(t)}</span>
-                          </li>
-                        ))}
-                      </ol>
+                    <InsightGrid items={insights.map((t) => formatNumbersInText(t))} />
                     )}
                     {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
                       <div className="pt-4 border-t space-y-2">
                         <p className="t-label uppercase tracking-wider">Top performing content types</p>
-                        <ul className="space-y-2">
-                          {aiAnalysis.sprout_performance_analysis.top_performing_content.map((c: string, i: number) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{c}</span></li>)}
-                        </ul>
+                        <InsightGrid items={aiAnalysis.sprout_performance_analysis.top_performing_content} numbered={false} />
                       </div>
                     )}
                 </CardContent></Card>
@@ -934,48 +926,21 @@ function TrendsSection({
       {formats.length > 0 && (
         <Card>
           <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><Sparkles className="h-4 w-4 text-[#b1b7c1]" /> What is working</CardTitle></CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {formats.map((f, i) => (
-                <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-[rgba(255,255,255,0.03)]">
-                  <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary/10 text-primary t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
-                  <p className="t-prose">{f}</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
+          <CardContent><InsightGrid items={formats} numbered={false} /></CardContent>
         </Card>
       )}
 
       {opportunities.length > 0 && (
         <Card className="bg-primary/5 border-primary/20">
           <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><Target className="h-4 w-4 text-primary" /> Opportunities for {clientName || "your brand"}</CardTitle></CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {opportunities.map((o, i) => (
-                <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-background border">
-                  <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
-                  <p className="t-prose pt-0.5">{o}</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
+          <CardContent><InsightGrid items={opportunities} numbered={true} /></CardContent>
         </Card>
       )}
 
       {takeaways.length > 0 && (
         <Card>
           <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><Lightbulb className="h-4 w-4 text-warning" /> Key takeaways</CardTitle></CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {takeaways.map((t, i) => (
-                <div key={i} className="flex items-start gap-3 p-2">
-                  <span className="flex-shrink-0 mt-1 text-warning">✦</span>
-                  <p className="t-prose">{t}</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
+          <CardContent><InsightGrid items={takeaways} numbered={false} /></CardContent>
         </Card>
       )}
 

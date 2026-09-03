@@ -19,6 +19,7 @@ import { platformLabel } from "@/components/competitive/PostVisual";
 import { insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
 import { Prose } from "@/components/ui/prose";
+import { InsightGrid } from "@/components/ui/insight-card";
 import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
@@ -129,14 +130,7 @@ export function CompetitiveSnapshot({
             <h3 className="t-h3">How this report used the competitive picture</h3>
             <p className="t-secondary">Written by the report synthesis with the competitor analysis in hand.</p>
           </div>
-          <ol className="space-y-3">
-            {takeaways.map((t, i) => (
-              <li key={i} className="flex gap-3 t-prose">
-                <span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary text-primary-foreground t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
-                <span>{t}</span>
-              </li>
-            ))}
-          </ol>
+          <InsightGrid items={takeaways} />
         </div>
       )}
 

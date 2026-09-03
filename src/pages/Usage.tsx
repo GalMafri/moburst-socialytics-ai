@@ -162,7 +162,7 @@ export default function Usage() {
 
   if (users.isLoading) {
     return (
-      <AppLayout title="User Analytics">
+      <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature. Select anyone to see their full history.">
         <div className="flex items-center justify-center py-24">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
@@ -352,10 +352,6 @@ export default function Usage() {
           </TabsContent>
 
           <TabsContent value="people" className="space-y-4">
-            <p className="t-secondary">
-              Select anyone to see their full history: what they ran, for which client, how
-              long it took, and what failed.
-            </p>
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="t-h3">Per user</CardTitle>
