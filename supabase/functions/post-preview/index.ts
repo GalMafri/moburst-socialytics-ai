@@ -24,7 +24,9 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const OK_TTL_MS = 30 * 86400000;
 const MISS_TTL_MS = 60 * 60000;
 const BUCKET = "generated-media";
-const FOLDER = "post-thumbnails";
+// Object names carry the byte length, and the folder is versioned: the storage
+// CDN caches by path for up to an hour, so a path must never change content.
+const FOLDER = "post-thumbnails/v2";
 const MAX_PER_CALL = 40;
 const CONCURRENCY = 8;
 
@@ -74,8 +76,7 @@ async function persist(supabase: Db, sourceUrl: string, postUrl: string): Promis
     const bytes = new Uint8Array(await r.arrayBuffer());
     if (bytes.length === 0 || bytes.length > 8_000_000) return null;
     const ext = ct.includes("png") ? "png" : ct.includes("webp") ? "webp" : "jpg";
-    const path = `${FOLDER}/${await sha1(postUrl)}.${ext}`;
-    await supabase.storage.from(BUCKET).remove([path]).catch(() => null);
+    const path = `${FOLDER}/${await sha1(postUrl)}-${bytes.length}.${ext}`;
     const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, { contentType: ct, upsert: true, cacheControl: "31536000" });
     if (error) return null;
     return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl || null;
@@ -99,8 +100,7 @@ async function persistVideoHead(supabase: Db, sourceUrl: string, postUrl: string
     if (!ct.startsWith("video/")) return null;
     const bytes = new Uint8Array(await r.arrayBuffer());
     if (bytes.length < 10_000 || bytes.length > 2_100_000) return null;
-    const path = `${FOLDER}/${await sha1(postUrl)}.mp4`;
-    await supabase.storage.from(BUCKET).remove([path]).catch(() => null);
+    const path = `${FOLDER}/${await sha1(postUrl)}-${bytes.length}.mp4`;
     const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, { contentType: "video/mp4", upsert: true, cacheControl: "31536000" });
     if (error) return null;
     return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl || null;
