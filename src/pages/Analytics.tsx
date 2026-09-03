@@ -982,9 +982,9 @@ function LiveSproutSection({
                     {p.network && <PlatformBadge platform={p.network} size="sm" />}
                   </div>
                   <div className="grid grid-cols-3 gap-2 t-body">
-                    <div><p className="font-semibold">{fmtVal(p.impressions || 0)}</p><p className="t-secondary uppercase tracking-wider">Impr.</p></div>
-                    <div><p className="font-semibold">{fmtVal(p.reactions || 0)}</p><p className="t-secondary uppercase tracking-wider">Reactions</p></div>
-                    <div><p className="font-semibold">{fmtVal(p.video_views || 0)}</p><p className="t-secondary uppercase tracking-wider">Views</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.impressions || 0)}</p><p className="t-label uppercase tracking-wider">Impr.</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.reactions || 0)}</p><p className="t-label uppercase tracking-wider">Reactions</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.video_views || 0)}</p><p className="t-label uppercase tracking-wider">Views</p></div>
                   </div>
                 </div>
               ))}
