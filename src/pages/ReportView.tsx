@@ -302,125 +302,151 @@ export default function ReportView() {
 
           {/* ── OVERVIEW ── every original section, in its original order, plus the
               competitive strip and the actions list near the top. */}
-          <TabsContent value="overview" className="space-y-8">
-            {monthComparison?.changes && (
-              <MetricsCards changes={monthComparison.changes} previousMonth={monthComparison.previous_month} />
-            )}
+          <TabsContent value="overview">
+            {/* Composition: numbers, then the story and the evidence in the main column;
+                what to do about it and where the client sits against the field in the rail. */}
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] items-start">
+              <div className="min-w-0 space-y-8">
+                {monthComparison?.changes && (
+                  <MetricsCards changes={monthComparison.changes} previousMonth={monthComparison.previous_month} />
+                )}
 
-            {latestCompetitive && compMe && (
-              <button type="button" onClick={() => setTab("competitive")} className="w-full text-left glass-accent px-4 py-3 flex items-center justify-between gap-4 hover:bg-[rgba(185,224,69,0.12)] transition-colors">
-                <span className="t-body">
-                  <span className="font-semibold">Against the field:</span>{" "}
-                  {compScore != null ? `benchmark ${compScore}/100` : "benchmark pending"}
-                  {compTotal ? ` · ${Math.round((compMe.post_count / compTotal) * 100)}% share of voice` : ""}
-                  {compMe.cadence_per_week != null ? ` · ${compMe.cadence_per_week} posts a week` : ""}
-                </span>
-                <span className="t-secondary flex items-center gap-1 shrink-0">Competitive <ArrowRight className="h-4 w-4" /></span>
-              </button>
-            )}
-
-            {actions.length > 0 && (
-              <Section title="Where to act next" description="Every recommendation in this report that asks for a decision, with the evidence one click away.">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {actions.map((a, i) => <ActionCard key={i} action={a} onOpen={() => openAction(a)} />)}
-                </div>
-              </Section>
-            )}
-
-            {monthComparison?.current_month && (
-              <Section title="Period-over-period performance" description="Current period in green, previous period in purple.">
-                <Card><CardContent className="pt-5"><PerformanceChart comparison={monthComparison} /></CardContent></Card>
-              </Section>
-            )}
-
-            {platformBreakdown.length > 0 && (
-              <Section title="Performance by platform" description={platformBreakdown.some((p) => p.changes) ? "How each connected account performed this period, with change against the previous period." : "How each connected account performed this period."}>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-                  {platformBreakdown.map((p, i) => <PlatformPerformanceCard key={`${p.network}-${i}`} platform={p} />)}
-                </div>
-              </Section>
-            )}
-
-            {(insights.length > 0 || summary) && (
-              <Section title="Key insights">
-                <Card>
-                  <CardContent className="pt-5 space-y-5">
-                    {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
-                    {insights.length > 0 && (
-                      <ol className="columns-[38rem] gap-x-10 space-y-3">
-                        {insights.map((t, i) => (
-                          <li key={i} className="flex gap-3 t-prose break-inside-avoid">
-                            <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-body font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
-                            <span>{formatNumbersInText(t)}</span>
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                    {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
-                      <div className="pt-4 border-t space-y-2">
-                        <p className="t-label uppercase tracking-wider">Top performing content types</p>
-                        <div className="flex flex-wrap gap-2">
-                          {aiAnalysis.sprout_performance_analysis.top_performing_content.map((c: string, i: number) => <Badge key={i} variant="secondary" className="t-label">{c}</Badge>)}
-                        </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </Section>
-            )}
-
-            {sproutPerformance?.top_posts?.length > 0 && (
-              <Section title="Top posts" description="By impressions and by engagement, with a platform filter.">
-                <TopPostsSection posts={sproutPerformance.top_posts} />
-              </Section>
-            )}
-
-            {pillars && (
-              <div id="report-pillars">
-                <Section title="Content pillar alignment" description="Which pillars the month served, and which need attention.">
-                  <Card>
-                    <CardContent className="pt-5 space-y-5">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {pillars.well_represented?.length > 0 && (
-                          <div className="space-y-2">
-                            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
-                            <div className="flex flex-wrap gap-1.5">{pillars.well_represented.map((p: string) => <Badge key={p} variant="secondary" className="t-label">{p}</Badge>)}</div>
+                {(insights.length > 0 || summary) && (
+                  <Section title="Key insights">
+                    <Card>
+                      <CardContent className="pt-5 space-y-5">
+                        {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
+                        {insights.length > 0 && (
+                          <ol className="columns-[38rem] gap-x-10 space-y-3">
+                            {insights.map((t, i) => (
+                              <li key={i} className="flex gap-3 t-prose break-inside-avoid">
+                                <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-body font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                                <span>{formatNumbersInText(t)}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                        {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
+                          <div className="pt-4 border-t space-y-2">
+                            <p className="t-label uppercase tracking-wider">Top performing content types</p>
+                            <div className="flex flex-wrap gap-2">
+                              {aiAnalysis.sprout_performance_analysis.top_performing_content.map((c: string, i: number) => <Badge key={i} variant="secondary" className="t-label">{c}</Badge>)}
+                            </div>
                           </div>
                         )}
-                        {pillars.underrepresented?.length > 0 && (
-                          <div className="space-y-2">
-                            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-warning" /> Needs attention</p>
-                            <div className="flex flex-wrap gap-1.5">{pillars.underrepresented.map((p: string) => <Badge key={p} variant="outline" className="t-label">{p}</Badge>)}</div>
+                      </CardContent>
+                    </Card>
+                  </Section>
+                )}
+
+                {monthComparison?.current_month && (
+                  <Section title="Period-over-period performance" description="Current period in green, previous period in purple.">
+                    <Card><CardContent className="pt-5"><PerformanceChart comparison={monthComparison} /></CardContent></Card>
+                  </Section>
+                )}
+
+                {platformBreakdown.length > 0 && (
+                  <Section title="Performance by platform" description={platformBreakdown.some((p) => p.changes) ? "How each connected account performed this period, with change against the previous period." : "How each connected account performed this period."}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {platformBreakdown.map((p, i) => <PlatformPerformanceCard key={`${p.network}-${i}`} platform={p} />)}
+                    </div>
+                  </Section>
+                )}
+
+                {sproutPerformance?.top_posts?.length > 0 && (
+                  <Section title="Top posts" description="By impressions and by engagement, with a platform filter.">
+                    <TopPostsSection posts={sproutPerformance.top_posts} />
+                  </Section>
+                )}
+
+                {pillars && (
+                  <div id="report-pillars">
+                    <Section title="Content pillar alignment" description="Which pillars the month served, and which need attention.">
+                      <Card>
+                        <CardContent className="pt-5 space-y-5">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {pillars.well_represented?.length > 0 && (
+                              <div className="space-y-2">
+                                <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
+                                <div className="flex flex-wrap gap-1.5">{pillars.well_represented.map((p: string) => <Badge key={p} variant="secondary" className="t-label">{p}</Badge>)}</div>
+                              </div>
+                            )}
+                            {pillars.underrepresented?.length > 0 && (
+                              <div className="space-y-2">
+                                <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-warning" /> Needs attention</p>
+                                <div className="flex flex-wrap gap-1.5">{pillars.underrepresented.map((p: string) => <Badge key={p} variant="outline" className="t-label">{p}</Badge>)}</div>
+                              </div>
+                            )}
+                          </div>
+                          {pillarRecs.length > 0 && (
+                            <div className="pt-4 border-t space-y-2">
+                              <p className="t-label uppercase tracking-wider">Recommendations</p>
+                              <ul className="space-y-2">
+                                {pillarRecs.map((r, i) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{r}</span></li>)}
+                              </ul>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </Section>
+                  </div>
+                )}
+              </div>
+
+              <aside className="min-w-0 space-y-6">
+                {latestCompetitive && compMe && (
+                  <Card className="glass-accent">
+                    <CardContent className="pt-5 space-y-4">
+                      <p className="t-label uppercase tracking-wider">Against the field</p>
+                      <dl className="space-y-3">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <dt className="t-body">Benchmark score</dt>
+                          <dd className="t-h3 tabular-nums">{compScore != null ? `${compScore}/100` : "pending"}</dd>
+                        </div>
+                        {compTotal ? (
+                          <div className="flex items-baseline justify-between gap-3">
+                            <dt className="t-body">Share of voice</dt>
+                            <dd className="t-h3 tabular-nums">{Math.round((compMe.post_count / compTotal) * 100)}%</dd>
+                          </div>
+                        ) : null}
+                        {compMe.cadence_per_week != null && (
+                          <div className="flex items-baseline justify-between gap-3">
+                            <dt className="t-body">Posts a week</dt>
+                            <dd className="t-h3 tabular-nums">{compMe.cadence_per_week}</dd>
                           </div>
                         )}
-                      </div>
-                      {pillarRecs.length > 0 && (
-                        <div className="pt-4 border-t space-y-2">
-                          <p className="t-label uppercase tracking-wider">Recommendations</p>
-                          <ul className="space-y-2">
-                            {pillarRecs.map((r, i) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{r}</span></li>)}
-                          </ul>
-                        </div>
-                      )}
+                      </dl>
+                      <Button variant="outline" size="sm" className="w-full" onClick={() => setTab("competitive")}>
+                        Open the competitive view <ArrowRight className="h-4 w-4 ml-1" />
+                      </Button>
                     </CardContent>
                   </Card>
-                </Section>
-              </div>
-            )}
+                )}
 
-            {rd?.data_counts && (
-              <Card>
-                <CardContent className="py-4">
-                  <div className="flex flex-wrap gap-6 t-secondary">
-                    <span>{rd.data_counts.sprout_top_posts ?? 0} Sprout posts analyzed</span>
-                    <span>{rd.data_counts.tiktok_trends ?? 0} TikTok trends</span>
-                    <span>{rd.data_counts.instagram_trends ?? 0} Instagram trends</span>
-                    <span>{rd.data_counts.total_recommendations ?? 0} recommendations generated</span>
-                    {latestCompetitive && <span>Latest competitive analysis included</span>}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                {actions.length > 0 && (
+                  <Section title="Where to act next" description="Every recommendation in this report that asks for a decision, with the evidence one click away.">
+                    <div className="space-y-3">
+                      {actions.map((a, i) => <ActionCard key={i} action={a} onOpen={() => openAction(a)} />)}
+                    </div>
+                  </Section>
+                )}
+
+                {rd?.data_counts && (
+                  <Card>
+                    <CardContent className="pt-5 space-y-3">
+                      <p className="t-label uppercase tracking-wider">In this report</p>
+                      <ul className="space-y-2 t-body">
+                        <li className="flex justify-between gap-3"><span>Sprout posts analyzed</span><span className="font-semibold tabular-nums">{rd.data_counts.sprout_top_posts ?? 0}</span></li>
+                        <li className="flex justify-between gap-3"><span>TikTok trends</span><span className="font-semibold tabular-nums">{rd.data_counts.tiktok_trends ?? 0}</span></li>
+                        <li className="flex justify-between gap-3"><span>Instagram trends</span><span className="font-semibold tabular-nums">{rd.data_counts.instagram_trends ?? 0}</span></li>
+                        <li className="flex justify-between gap-3"><span>Recommendations</span><span className="font-semibold tabular-nums">{rd.data_counts.total_recommendations ?? 0}</span></li>
+                        {latestCompetitive && <li className="t-secondary">Latest competitive analysis included</li>}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                )}
+              </aside>
+            </div>
           </TabsContent>
 
           {/* ── CONTENT IDEAS ── */}
@@ -500,7 +526,7 @@ function MetricsCards({ changes, previousMonth }: { changes: Record<string, any>
   ];
   const fmt = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 10_000 ? `${(v / 1_000).toFixed(1)}K` : v.toLocaleString());
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 stagger-children">
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 stagger-children">
       {metrics.map(({ key, label, icon: Icon }) => {
         const d = changes[key];
         if (!d) return null;
