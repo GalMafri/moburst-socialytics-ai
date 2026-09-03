@@ -639,6 +639,7 @@ function postPlatformKey(post: any): string {
 
 /* ─── Platform Performance Card (mirrors the aggregate MetricsCards styling) ─── */
 function PlatformPerformanceCard({ platform }: { platform: any }) {
+  const [more, setMore] = useState(false);
   const metrics = [
     { key: "impressions", label: "Impressions", icon: Eye },
     { key: "reactions", label: "Reactions", icon: Heart },
@@ -719,18 +720,20 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
           })}
         </div>
         {Array.isArray(ai?.insights) && ai.insights.length > 0 && (
-          <div className="pt-3 border-t">
+          <div className="pt-3 border-t space-y-2">
             <ul className="space-y-1.5">
-              {ai.insights.slice(0, 3).map((t: string, i: number) => (
-                <li
-                  key={i}
-                  className="text-xs leading-relaxed text-muted-foreground flex gap-2"
-                >
+              {ai.insights.slice(0, more ? 3 : 1).map((t: string, i: number) => (
+                <li key={i} className="text-[14px] leading-6 text-muted-foreground flex gap-2">
                   <span className="text-primary flex-shrink-0">•</span>
                   <span>{formatNumbersInText(t)}</span>
                 </li>
               ))}
             </ul>
+            {ai.insights.length > 1 && (
+              <button type="button" onClick={() => setMore((v) => !v)} className="text-[13px] text-primary hover:underline inline-flex items-center gap-1">
+                {more ? "Show less" : `${ai.insights.length - 1} more`} <ChevronDown className={`h-3.5 w-3.5 transition-transform ${more ? "rotate-180" : ""}`} />
+              </button>
+            )}
           </div>
         )}
       </CardContent>

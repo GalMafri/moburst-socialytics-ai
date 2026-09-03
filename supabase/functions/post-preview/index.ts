@@ -24,6 +24,9 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 // Facebook and LinkedIn serve their Open Graph tags (and Facebook its crawler
 // image host) to link-preview crawlers only.
 const CRAWLER_UA = "Twitterbot/1.0";
+// Facebook answers its own crawler with an image on lookaside.fbsbx.com, which
+// is fetchable server-side; the scontent links it gives other crawlers are not.
+const FB_CRAWLER_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)";
 const OK_TTL_MS = 30 * 86400000;
 const MISS_TTL_MS = 60 * 60000;
 const BUCKET = "generated-media";
@@ -77,8 +80,9 @@ async function persist(supabase: Db, sourceUrl: string, postUrl: string): Promis
   try {
     // Facebook's crawler image host only answers link-preview crawlers.
     const crawlerFirst = /lookaside\.fbsbx\.com|media\.licdn\.com/i.test(sourceUrl);
-    let r = await fetch(sourceUrl, { headers: { "User-Agent": crawlerFirst ? CRAWLER_UA : UA, Accept: "image/*" } });
-    if (!r.ok) r = await fetch(sourceUrl, { headers: { "User-Agent": crawlerFirst ? UA : CRAWLER_UA, Accept: "image/*" } });
+    const first = /lookaside\.fbsbx\.com/i.test(sourceUrl) ? FB_CRAWLER_UA : crawlerFirst ? CRAWLER_UA : UA;
+    let r = await fetch(sourceUrl, { headers: { "User-Agent": first, Accept: "image/*" } });
+    if (!r.ok) r = await fetch(sourceUrl, { headers: { "User-Agent": first === UA ? CRAWLER_UA : UA, Accept: "image/*" } });
     if (!r.ok) return null;
     const ct = (r.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
     if (!ct.startsWith("image/")) return null;
@@ -144,7 +148,8 @@ async function ogPreview(url: string, userAgent: string = UA): Promise<Partial<P
   const meta = (prop: string) => {
     const re = new RegExp(`<meta[^>]+(?:property|name)=["']${prop}["'][^>]*content=["']([^"']+)["']`, "i");
     const re2 = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["']${prop}["']`, "i");
-    return (html.match(re) || html.match(re2))?.[1] || null;
+    const raw = (html.match(re) || html.match(re2))?.[1] || null;
+    return raw ? raw.replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/&quot;/g, '"') : null;
   };
   const rawImage = meta("og:image") || meta("twitter:image");
   const image = rawImage && !isGenericPlaceholder(rawImage) ? rawImage : null;
@@ -223,7 +228,7 @@ async function resolve(supabase: Db, hint: Hint): Promise<Preview> {
       const durable = isExpiringCdn(image) ? await persist(supabase, image, url) : null;
       return { ...base, media_type: media_type === "unknown" ? "image" : media_type, image_url: durable || image, title, status: "ok" };
     }
-    const og = await ogPreview(url, platform === "facebook" || platform === "linkedin" ? CRAWLER_UA : UA);
+    const og = await ogPreview(url, platform === "facebook" ? FB_CRAWLER_UA : platform === "linkedin" ? CRAWLER_UA : UA);
     if (og.status === "ok" && og.image_url) {
       const durable = isExpiringCdn(og.image_url) ? await persist(supabase, og.image_url, url) : null;
       return { ...base, ...og, image_url: durable || og.image_url } as Preview;
