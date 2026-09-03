@@ -75,7 +75,7 @@ async function persist(supabase: Db, sourceUrl: string, postUrl: string): Promis
     if (bytes.length === 0 || bytes.length > 8_000_000) return null;
     const ext = ct.includes("png") ? "png" : ct.includes("webp") ? "webp" : "jpg";
     const path = `${FOLDER}/${await sha1(postUrl)}.${ext}`;
-    const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, { contentType: ct, upsert: true });
+    const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, { contentType: ct, upsert: true, cacheControl: "31536000" });
     if (error) return null;
     return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl || null;
   } catch {
@@ -86,18 +86,19 @@ async function persist(supabase: Db, sourceUrl: string, postUrl: string): Promis
 /**
  * Instagram serves Reels as signed video files that browsers cannot load
  * cross-site. The opening bytes (progressive MP4, index first) are enough for
- * a first frame, so that slice is copied into the bucket and served from there.
+ * a first frame, so a 700KB slice is copied into the bucket and served from
+ * there with a long cache lifetime (the object name is a hash of the post URL).
  */
 async function persistVideoHead(supabase: Db, sourceUrl: string, postUrl: string): Promise<string | null> {
   try {
-    const r = await fetch(sourceUrl, { headers: { "User-Agent": UA, Range: "bytes=0-1999999" } });
+    const r = await fetch(sourceUrl, { headers: { "User-Agent": UA, Range: "bytes=0-699999" } });
     if (!(r.status === 200 || r.status === 206)) return null;
     const ct = (r.headers.get("content-type") || "video/mp4").split(";")[0].trim();
     if (!ct.startsWith("video/")) return null;
     const bytes = new Uint8Array(await r.arrayBuffer());
-    if (bytes.length < 10_000 || bytes.length > 2_100_000) return null;
+    if (bytes.length < 10_000 || bytes.length > 750_000) return null;
     const path = `${FOLDER}/${await sha1(postUrl)}.mp4`;
-    const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, { contentType: "video/mp4", upsert: true });
+    const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, { contentType: "video/mp4", upsert: true, cacheControl: "31536000" });
     if (error) return null;
     return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl || null;
   } catch {
