@@ -9,7 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -17,17 +17,17 @@ import { Loading } from "@/components/ui/loading";
 import { platformLabel } from "@/components/competitive/PostVisual";
 import { insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
-import { Crosshair, ArrowRight, Lightbulb, Clock, ThumbsUp, History } from "lucide-react";
+import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
 
 function Tile({ label, value, sub, accent = false }: { label: string; value: string; sub?: string; accent?: boolean }) {
   return (
     <Card className={accent ? "glass-accent" : ""}>
-      <CardContent className="pt-4 pb-3">
+      <CardContent className="pt-4 pb-4 space-y-2">
         <p className="text-[12px] uppercase tracking-wider text-muted-foreground">{label}</p>
-        <p className="text-2xl font-bold tracking-tight mt-0.5">{value}</p>
-        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+        <p className="text-[28px] font-bold tracking-tight leading-none">{value}</p>
+        {sub && <p className="text-[13px] text-muted-foreground">{sub}</p>}
       </CardContent>
     </Card>
   );
@@ -71,7 +71,7 @@ export function CompetitiveSnapshot({
         title="No competitive analysis yet"
         description={
           isMoburstStaff
-            ? "Confirm a competitor set and run the RivalIQ analysis; its results will appear here and inform the next monthly report."
+            ? "Confirm a competitor set and run the RivalIQ analysis. Its results appear here and shape the next monthly report."
             : "Your account team has not run a competitive analysis for this period yet."
         }
         action={
@@ -99,18 +99,17 @@ export function CompetitiveSnapshot({
   const period = rd.period?.start ? formatRange(rd.period) : latest.date_range_start ? formatRange({ start: latest.date_range_start, end: latest.date_range_end }) : "";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap text-sm text-muted-foreground">
-          <Badge>competitive</Badge>
-          {rd.landscape?.name && <span>RivalIQ · {rd.landscape.name}</span>}
-          {period && <span>{period}</span>}
-          <span>{rivals.length} competitors</span>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>
-            <History className="h-4 w-4 mr-1" /> All runs
-          </Button>
+        <p className="text-[13px] text-muted-foreground">
+          {rivals.length} competitors{rd.landscape?.name ? ` · ${rd.landscape.name}` : ""}{period ? ` · ${period}` : ""} · analyzed {new Date(latest.created_at).toLocaleDateString()}
+        </p>
+        <div className="flex gap-2 flex-wrap">
+          {isMoburstStaff && (
+            <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive/feed`)}>
+              <Rss className="h-4 w-4 mr-1" /> Latest competitor posts
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive/reports/${latest.id}`)}>
             Full competitive report <ArrowRight className="h-4 w-4 ml-1" />
           </Button>
@@ -119,66 +118,49 @@ export function CompetitiveSnapshot({
 
       {me && (
         <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-          <Tile accent label="Benchmark score" value={score != null ? `${score}` : "–"} sub="out of 100" />
+          <Tile accent label="Benchmark score" value={score != null ? `${score}` : "–"} sub="out of 100 against the set" />
           <Tile label="Share of voice" value={share == null ? "–" : `${share}%`} sub={`${me.post_count} of ${totalPosts} posts`} />
-          <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`set avg ${avg((c) => c.cadence_per_week).toFixed(1)}/wk`} />
-          <Tile label="Engagement rate" value={pct(me.engagement_rate_avg)} sub={`set avg ${pct(avg((c) => c.engagement_rate_avg))}`} />
+          <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`set average ${avg((c) => c.cadence_per_week).toFixed(1)}/wk`} />
+          <Tile label="Engagement rate" value={pct(me.engagement_rate_avg)} sub={`set average ${pct(avg((c) => c.engagement_rate_avg))}`} />
         </div>
       )}
 
-      {Array.isArray(takeaways) && takeaways.length > 0 && (
-        <Card className="glass-elevated">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">How this report used the competitive picture</CardTitle>
-            <CardDescription>Written by the report synthesis with the competitor analysis in hand.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {takeaways.map((t, i) => (
-              <div key={i} className="flex gap-3 text-[15px] leading-6">
-                <span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
-                <p>{t}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+      {ai.executive_summary && <p className="text-[15px] leading-6">{ai.executive_summary}</p>}
 
-      {ai.executive_summary && (
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-base">Where {me?.name || "the client"} stands</CardTitle></CardHeader>
-          <CardContent className="text-[15px] leading-7">{ai.executive_summary}</CardContent>
-        </Card>
+      {Array.isArray(takeaways) && takeaways.length > 0 && (
+        <div className="rounded-[12px] p-4 bg-[rgba(185,224,69,0.08)] border border-[rgba(185,224,69,0.25)] space-y-2">
+          <p className="text-[12px] uppercase tracking-wider text-muted-foreground">What this report took from the competitors</p>
+          <ol className="space-y-2">
+            {takeaways.slice(0, 4).map((t, i) => (
+              <li key={i} className="flex gap-3 text-[15px] leading-6">
+                <span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary text-primary-foreground text-[12px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
       )}
 
       {gaps.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><Lightbulb className="h-4 w-4" /> Top gaps to fill</CardTitle>
-            <CardDescription>Endorsed gaps feed the next monthly report and its content calendar.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <div className="space-y-2">
+          <p className="text-[12px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Gaps to fill</p>
+          <div className="grid gap-3 md:grid-cols-3">
             {gaps.map((g, i) => (
-              <div key={i} className="flex gap-3">
-                <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
-                <div className="min-w-0">
-                  <p className="font-medium leading-snug flex items-center gap-2 flex-wrap">
-                    {g.gap}
-                    {g.platform && g.platform !== "all" && <Badge variant="outline" className="text-[11px]">{platformLabel(g.platform)}</Badge>}
-                    {verdictFor(g.gap) === "up" && <Badge className="text-[11px] gap-1"><ThumbsUp className="h-3 w-3" /> endorsed</Badge>}
-                  </p>
-                  {g.suggested_play && <p className="text-sm text-muted-foreground mt-0.5"><span className="text-[#b9e045]">Play: </span>{g.suggested_play}</p>}
+              <div key={i} className="rounded-[12px] p-4 bg-[rgba(255,255,255,0.04)] space-y-2">
+                <div className="flex gap-1.5 flex-wrap">
+                  {g.platform && g.platform !== "all" && <Badge variant="outline" className="text-[11px]">{platformLabel(g.platform)}</Badge>}
+                  {verdictFor(g.gap) === "up" && <Badge className="text-[11px] gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                 </div>
+                <p className="text-[15px] leading-6 font-medium">{g.gap}</p>
+                {g.suggested_play && <p className="text-[14px] leading-6 text-muted-foreground line-clamp-3">{g.suggested_play}</p>}
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       {ai.posting_time_insights?.empty_airtime && (
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><Clock className="h-4 w-4" /> Empty airtime</CardTitle></CardHeader>
-          <CardContent className="text-[15px] leading-6">{ai.posting_time_insights.empty_airtime}</CardContent>
-        </Card>
+        <p className="text-[14px] leading-6 text-muted-foreground"><span className="text-foreground font-medium">Empty airtime: </span>{ai.posting_time_insights.empty_airtime}</p>
       )}
     </div>
   );
