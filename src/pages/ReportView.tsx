@@ -569,7 +569,7 @@ function MetricsCards({ changes, previousMonth }: { changes: Record<string, any>
   ];
   const fmt = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 10_000 ? `${(v / 1_000).toFixed(1)}K` : v.toLocaleString());
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 stagger-children">
+    <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4 stagger-children">
       {metrics.map(({ key, label, icon: Icon }) => {
         const d = changes[key];
         if (!d) return null;

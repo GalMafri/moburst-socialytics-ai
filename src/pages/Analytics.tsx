@@ -402,7 +402,7 @@ export default function Analytics() {
                       <BarChart3 className="h-3 w-3" />
                       Latest report snapshot{latestReport ? ` for ${formatRange(reportPeriod(latestReport as any))}` : ""}. The all-time totals above cover every tracked day.
                     </p>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-3">
                       <SummaryCard
                         icon={<Eye className="h-3.5 w-3.5" />}
                         label="Impressions"
@@ -933,7 +933,7 @@ function LiveSproutSection({
             ? <>Sprout data for {rangeLabel} · compared with the {data.previous_range.days} days before ({formatRange(data.previous_range)})</>
             : <>Live Sprout totals, {rangeLabel}: every day in the window added up{data.chunks > 1 ? ` across ${data.chunks} requests` : ""}</>}
         </p>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-3">
           <SummaryCard icon={<Eye className="h-3.5 w-3.5" />} label="Impressions" value={metric("impressions")} change={pct("impressions")} />
           <SummaryCard icon={<Heart className="h-3.5 w-3.5" />} label="Reactions" value={metric("reactions")} change={pct("reactions")} />
           <SummaryCard icon={<MousePointerClick className="h-3.5 w-3.5" />} label="Link Clicks" value={metric("post_link_clicks")} change={pct("post_link_clicks")} />

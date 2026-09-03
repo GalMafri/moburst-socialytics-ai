@@ -102,8 +102,8 @@ function Seg({ active, onClick, children }: { active: boolean; onClick: () => vo
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="t-body font-semibold truncate">{value}</p>
-      <p className="t-label uppercase tracking-wider truncate">{label}</p>
+      <p className="t-body font-semibold leading-tight">{value}</p>
+      <p className="t-label uppercase tracking-wider leading-tight leading-tight">{label}</p>
     </div>
   );
 }
@@ -299,7 +299,7 @@ export default function CompetitiveReportView() {
 
         {/* KPI tiles */}
         {meB && (
-          <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-4 grid-cols-2 md:grid-cols-3 2xl:grid-cols-5">
             <Kpi accent label="Benchmark score" value={scorecard ? `${scorecard.client_score}` : "–"} sub="out of 100 vs. the set" />
             <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} posts`} />
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`set avg ${avg((b) => b.cadence_per_week).toFixed(1)}/wk`} />
