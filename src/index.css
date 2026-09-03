@@ -222,7 +222,8 @@
   .t-label { font-size: 13px; line-height: 18px; letter-spacing: 0.1px; }
   .t-badge { font-size: 13px; line-height: 18px; font-weight: 700; letter-spacing: -0.2px; }
   /* Long-form AI passages: bigger, looser, capped at a readable measure. */
-  .t-prose { font-size: 15px; line-height: 25px; letter-spacing: -0.1px; max-width: 72ch; }
+  .t-prose { font-size: 15px; line-height: 25px; letter-spacing: -0.1px; }
+  :where(.t-prose) { max-width: 72ch; }
   :where(.t-stat, .t-h1, .t-h2, .t-h3, .t-prose) { color: #ffffff; }
   /* Secondary sentences stay light (#d1d5db, 12.6:1). Grey (#b1b7c1, 9.6:1) is for short labels only. */
   :where(.t-secondary) { color: #ffffff; }
