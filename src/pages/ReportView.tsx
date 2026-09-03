@@ -1021,7 +1021,7 @@ function TrendsSection({
                         </div>
                         <p className="t-body line-clamp-4">{post.caption}</p>
                         {Array.isArray(post.hashtags) && post.hashtags.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">{post.hashtags.slice(0, 6).map((h: string) => <span key={h} className="t-label !text-primary">{h.startsWith("#") ? h : `#${h}`}</span>)}</div>
+                          <div className="flex flex-wrap gap-1.5">{post.hashtags.slice(0, 6).map((h: string) => <span key={h} className="t-label text-primary">{h.startsWith("#") ? h : `#${h}`}</span>)}</div>
                         )}
                         <div className="flex items-center gap-4 t-secondary">
                           {post.views != null && <span className="flex items-center gap-1"><Eye className="h-3.5 w-3.5" />{Number(post.views).toLocaleString()}</span>}

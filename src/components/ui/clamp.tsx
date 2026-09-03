@@ -12,7 +12,7 @@ export function Clamp({ text, lines = 3, className = "" }: { text: string; lines
     <div className={className}>
       <p className={open || !long ? "" : clampClass}>{text}</p>
       {long && (
-        <button type="button" onClick={() => setOpen((v) => !v)} className="mt-2 inline-flex items-center gap-1 rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.05)] px-3 py-1 t-label !text-white hover:bg-[rgba(255,255,255,0.10)]">
+        <button type="button" onClick={() => setOpen((v) => !v)} className="mt-2 inline-flex items-center gap-1 rounded-full border border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.05)] px-3 py-1 t-label text-white hover:bg-[rgba(255,255,255,0.10)]">
           {open ? "Show less" : "Show more"} <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       )}

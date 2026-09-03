@@ -207,14 +207,19 @@
 
 /* ── Intercept type ramp (moburst-ai-product-design). Use these instead of ad hoc sizes. ── */
 @layer utilities {
-  /* Type ramp. Four sizes on any page: stat 30, page title 24, section/card title 20/18, text 15. Labels 13. */
-  .t-stat { font-size: 30px; line-height: 36px; font-weight: 700; letter-spacing: -0.5px; color: #ffffff; }
-  .t-h1 { font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.5px; color: #ffffff; }
-  .t-h2 { font-size: 20px; line-height: 26px; font-weight: 700; letter-spacing: -0.5px; color: #ffffff; }
-  .t-h3 { font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.3px; color: #ffffff; }
+  /* Type ramp. Four sizes on any page: stat 30, page title 24, section/card title 20/18, text 15. Labels 13.
+     Colours are set through :where() so they have zero specificity: any Tailwind colour class
+     (text-primary, text-destructive, text-[#10b981]) wins regardless of CSS order. */
+  .t-stat { font-size: 30px; line-height: 36px; font-weight: 700; letter-spacing: -0.5px; }
+  .t-h1 { font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.5px; }
+  .t-h2 { font-size: 20px; line-height: 26px; font-weight: 700; letter-spacing: -0.5px; }
+  .t-h3 { font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.3px; }
   .t-body { font-size: 15px; line-height: 22px; letter-spacing: -0.2px; }
-  /* Secondary sentences stay light (#d1d5db, 12.6:1). Grey (#b1b7c1, 9.6:1) is for short labels only. */
-  .t-secondary { font-size: 15px; line-height: 22px; letter-spacing: -0.2px; color: #d1d5db; }
-  .t-label { font-size: 13px; line-height: 18px; letter-spacing: 0.1px; color: #b1b7c1; }
+  .t-secondary { font-size: 15px; line-height: 22px; letter-spacing: -0.2px; }
+  .t-label { font-size: 13px; line-height: 18px; letter-spacing: 0.1px; }
   .t-badge { font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: -0.2px; }
+  :where(.t-stat, .t-h1, .t-h2, .t-h3) { color: #ffffff; }
+  /* Secondary sentences stay light (#d1d5db, 12.6:1). Grey (#b1b7c1, 9.6:1) is for short labels only. */
+  :where(.t-secondary) { color: #d1d5db; }
+  :where(.t-label) { color: #b1b7c1; }
 }
