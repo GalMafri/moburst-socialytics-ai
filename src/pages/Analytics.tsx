@@ -547,21 +547,9 @@ export default function Analytics() {
 
                 {/* Performance Over Time — Per-metric line charts */}
                 {chartData.length >= 1 && chartData.some((d) => d.impressions > 0 || d.reactions > 0) && (
+                  <Section title={<>Performance Over Time <span className="font-normal text-muted-foreground t-body ml-2"> ({filtered.length} report{filtered.length !== 1 ? "s" : ""}) </span></>} description={<>{chartData.length === 1 ? "Showing your latest snapshot. Run more analyses to see trend lines." : "Each data point represents one analysis run. Hover over points for exact values."}</>}>
                   <Card>
-                    <CardHeader>
-                      <CardTitle className="t-h3">
-                        Performance Over Time
-                        <span className="font-normal text-muted-foreground t-body ml-2">
-                          ({filtered.length} report{filtered.length !== 1 ? "s" : ""})
-                        </span>
-                      </CardTitle>
-                      <p className="t-secondary">
-                        {chartData.length === 1
-                          ? "Showing your latest snapshot. Run more analyses to see trend lines."
-                          : "Each data point represents one analysis run. Hover over points for exact values."}
-                      </p>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
+                    <CardContent className="pt-5 space-y-6">
                       {/* Impressions chart (separate — it dominates if combined) */}
                       {chartData.some((d) => d.impressions > 0) && (
                         <div>
@@ -716,6 +704,7 @@ export default function Analytics() {
                       )}
                     </CardContent>
                   </Card>
+                  </Section>
                 )}
 
                 {/* Engagement rate trend */}
