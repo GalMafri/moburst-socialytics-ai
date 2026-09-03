@@ -25,6 +25,7 @@ import { partitionGaps, useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { Prose } from "@/components/ui/prose";
+import { Section } from "@/components/ui/section";
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images } from "lucide-react";
 
 type TopPost = {
@@ -296,22 +297,18 @@ export default function CompetitiveReportView() {
 
         {/* Executive summary */}
         {ai.executive_summary && (
+            <Section title={<>Executive summary</>}>
             <Card className="glass-elevated">
-              <CardHeader>
-                <CardTitle className="t-h3 flex items-center gap-2">Executive summary</CardTitle>
-              </CardHeader>
               <CardContent><Prose text={ai.executive_summary} className="t-body whitespace-pre-line" /></CardContent>
             </Card>
+            </Section>
         )}
 
         {/* Scorecard */}
         {scorecard?.dimensions?.length > 0 && (
+            <Section title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</>}>
             <Card>
-              <CardHeader>
-                <CardTitle className="t-h3 flex items-center gap-2"><Gauge className="h-5 w-5" /> Where {clientName} stands</CardTitle>
-                <CardDescription>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-5">
+              <CardContent className="pt-5 space-y-5">
                 {scorecard.dimensions.map((d: any, i: number) => (
                   <div key={i} className="space-y-2">
                     <div className="flex justify-between items-baseline gap-4">
@@ -327,6 +324,7 @@ export default function CompetitiveReportView() {
                 ))}
               </CardContent>
             </Card>
+            </Section>
         )}
 
         {/* The field */}
@@ -397,12 +395,9 @@ export default function CompetitiveReportView() {
 
         {/* Posting rhythm */}
         {ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0) && (
+            <Section title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description={<>{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</>}>
             <Card>
-              <CardHeader>
-                <CardTitle className="t-h3 flex items-center gap-2"><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</CardTitle>
-                <CardDescription>{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="pt-5 space-y-6">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.post_count > 0).map(({ c, b }) => (
                   <div key={c.company_id} className="space-y-2">
                     <div className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
@@ -432,6 +427,7 @@ export default function CompetitiveReportView() {
                 )}
               </CardContent>
             </Card>
+            </Section>
         )}
 
         {/* Gaps */}
@@ -509,12 +505,9 @@ export default function CompetitiveReportView() {
 
         {/* Winner teardown */}
         {Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0 && (
+            <Section title={<><Trophy className="h-5 w-5" /> What wins for them</>} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
             <Card>
-              <CardHeader>
-                <CardTitle className="t-h3 flex items-center gap-2"><Trophy className="h-5 w-5" /> What wins for them</CardTitle>
-                <CardDescription>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-3">
+              <CardContent className="pt-5 grid gap-4 md:grid-cols-3">
                 {ai.winner_teardown.map((w: any, i: number) => {
                   const examples: Array<{ url: string; post?: TopPost }> = (w.example_post_urls || []).slice(0, 3).map((u: string) => ({ url: u, post: allPosts.get(u) }));
                   return (
@@ -543,16 +536,14 @@ export default function CompetitiveReportView() {
                 })}
               </CardContent>
             </Card>
+            </Section>
         )}
 
         {/* Mood boards */}
         {ordered.some((c) => moodPosts(c).length > 0) && (
+            <Section title={<><Images className="h-5 w-5" /> Mood boards</>} description={<>The creative each company actually ran in the period, side by side. Click any tile to open the post.</>}>
             <Card>
-              <CardHeader>
-                <CardTitle className="t-h3 flex items-center gap-2"><Images className="h-5 w-5" /> Mood boards</CardTitle>
-                <CardDescription>The creative each company actually ran in the period, side by side. Click any tile to open the post.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="pt-5 space-y-6">
                 {ordered.map((c) => {
                   const posts = moodPosts(c);
                   if (!posts.length) return null;
@@ -567,16 +558,14 @@ export default function CompetitiveReportView() {
                 })}
               </CardContent>
             </Card>
+            </Section>
         )}
 
         {/* Top posts */}
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
+            <Section title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</>}>
             <Card>
-              <CardHeader>
-                <CardTitle className="t-h3 flex items-center gap-2"><Layers className="h-5 w-5" /> Top 5 posts per company</CardTitle>
-                <CardDescription>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-8">
+              <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
                   <div key={c.company_id} className="space-y-3">
                     <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
@@ -587,6 +576,7 @@ export default function CompetitiveReportView() {
                 ))}
               </CardContent>
             </Card>
+            </Section>
         )}
       </div>
     </AppLayout>

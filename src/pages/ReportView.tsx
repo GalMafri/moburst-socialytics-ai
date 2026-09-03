@@ -51,6 +51,7 @@ import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapsho
 import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
 import { useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { Prose } from "@/components/ui/prose";
+import { Section, SectionNav } from "@/components/ui/section";
 import {
   parseCsv,
   stripVoicePreset,
@@ -302,147 +303,142 @@ export default function ReportView() {
 
           {/* ── OVERVIEW ── every original section, in its original order, plus the
               competitive strip and the actions list near the top. */}
-          <TabsContent value="overview">
-            {/* Composition: numbers, then the story and the evidence in the main column;
-                what to do about it and where the client sits against the field in the rail. */}
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] items-start">
-              <div className="min-w-0 space-y-8">
-                {monthComparison?.changes && (
-                  <MetricsCards changes={monthComparison.changes} previousMonth={monthComparison.previous_month} />
-                )}
+          <TabsContent value="overview" className="space-y-8">
+            {/* Reading order follows the report convention: numbers, the story, the field,
+                then detail, and the recommendations to close. The nav jumps to any of them. */}
+            <SectionNav
+              items={[
+                monthComparison?.changes ? { id: "glance", label: "At a glance" } : null,
+                insights.length > 0 || summary ? { id: "highlights", label: "Highlights" } : null,
+                latestCompetitive && compMe ? { id: "field", label: "Against the field" } : null,
+                monthComparison?.current_month ? { id: "period", label: "Period over period" } : null,
+                platformBreakdown.length > 0 ? { id: "platforms", label: "By platform" } : null,
+                sproutPerformance?.top_posts?.length > 0 ? { id: "posts", label: "Top posts" } : null,
+                pillars ? { id: "pillars", label: "Pillars" } : null,
+                actions.length > 0 ? { id: "actions", label: "Where to act next" } : null,
+              ].filter(Boolean) as { id: string; label: string }[]}
+            />
 
-                {(insights.length > 0 || summary) && (
-                  <Section title="Key insights">
-                    <div className="space-y-5">
-                        {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
-                        {insights.length > 0 && (
-                          <ol className="columns-[38rem] gap-x-10 space-y-3">
-                            {insights.map((t, i) => (
-                              <li key={i} className="flex gap-3 t-prose break-inside-avoid">
-                                <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-body font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
-                                <span>{formatNumbersInText(t)}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        )}
-                        {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
-                          <div className="pt-4 border-t space-y-2">
-                            <p className="t-label uppercase tracking-wider">Top performing content types</p>
-                            <ul className="space-y-2">
-                              {aiAnalysis.sprout_performance_analysis.top_performing_content.map((c: string, i: number) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{c}</span></li>)}
-                            </ul>
-                          </div>
-                        )}
-                    </div>
-                  </Section>
-                )}
+            {monthComparison?.changes && (
+              <Section id="glance" title="At a glance" description="This period against the one before it.">
+                <MetricsCards changes={monthComparison.changes} previousMonth={monthComparison.previous_month} />
+              </Section>
+            )}
 
-                {monthComparison?.current_month && (
-                  <Section title="Period-over-period performance" description="Current period in green, previous period in purple.">
-                    <PerformanceChart comparison={monthComparison} />
-                  </Section>
-                )}
-
-                {platformBreakdown.length > 0 && (
-                  <Section title="Performance by platform" description={platformBreakdown.some((p) => p.changes) ? "How each connected account performed this period, with change against the previous period." : "How each connected account performed this period."}>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {platformBreakdown.map((p, i) => <PlatformPerformanceCard key={`${p.network}-${i}`} platform={p} />)}
-                    </div>
-                  </Section>
-                )}
-
-                {sproutPerformance?.top_posts?.length > 0 && (
-                  <Section title="Top posts" description="By impressions and by engagement, with a platform filter.">
-                    <TopPostsSection posts={sproutPerformance.top_posts} />
-                  </Section>
-                )}
-
-                {pillars && (
-                  <div id="report-pillars">
-                    <Section title="Content pillar alignment" description="Which pillars the month served, and which need attention.">
-                      <div className="space-y-5">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {pillars.well_represented?.length > 0 && (
-                              <div className="space-y-2">
-                                <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
-                                <div className="flex flex-wrap gap-1.5">{pillars.well_represented.map((p: string) => <Badge key={p} variant="secondary" className="t-label">{p}</Badge>)}</div>
-                              </div>
-                            )}
-                            {pillars.underrepresented?.length > 0 && (
-                              <div className="space-y-2">
-                                <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-warning" /> Needs attention</p>
-                                <div className="flex flex-wrap gap-1.5">{pillars.underrepresented.map((p: string) => <Badge key={p} variant="outline" className="t-label">{p}</Badge>)}</div>
-                              </div>
-                            )}
-                          </div>
-                          {pillarRecs.length > 0 && (
-                            <div className="pt-4 border-t space-y-2">
-                              <p className="t-label uppercase tracking-wider">Recommendations</p>
-                              <ul className="space-y-2">
-                                {pillarRecs.map((r, i) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{r}</span></li>)}
-                              </ul>
-                            </div>
-                          )}
+            {(insights.length > 0 || summary) && (
+              <Section id="highlights" title="Highlights" description="What happened this period and why, written from the numbers.">
+                <Card><CardContent className="pt-5 space-y-5">
+                    {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
+                    {insights.length > 0 && (
+                      <ol className="columns-[38rem] gap-x-10 space-y-3">
+                        {insights.map((t, i) => (
+                          <li key={i} className="flex gap-3 t-prose break-inside-avoid">
+                            <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-body font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                            <span>{formatNumbersInText(t)}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                    {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
+                      <div className="pt-4 border-t space-y-2">
+                        <p className="t-label uppercase tracking-wider">Top performing content types</p>
+                        <ul className="space-y-2">
+                          {aiAnalysis.sprout_performance_analysis.top_performing_content.map((c: string, i: number) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{c}</span></li>)}
+                        </ul>
                       </div>
-                    </Section>
-                  </div>
-                )}
-              </div>
+                    )}
+                </CardContent></Card>
+              </Section>
+            )}
 
-              <aside className="min-w-0 space-y-6">
-                {latestCompetitive && compMe && (
-                  <Card className="glass-accent">
-                    <CardContent className="pt-5 space-y-4">
-                      <p className="t-label uppercase tracking-wider">Against the field</p>
-                      <dl className="space-y-3">
-                        <div className="flex items-baseline justify-between gap-3">
-                          <dt className="t-body">Benchmark score</dt>
-                          <dd className="t-h3 tabular-nums">{compScore != null ? `${compScore}/100` : "pending"}</dd>
-                        </div>
-                        {compTotal ? (
-                          <div className="flex items-baseline justify-between gap-3">
-                            <dt className="t-body">Share of voice</dt>
-                            <dd className="t-h3 tabular-nums">{Math.round((compMe.post_count / compTotal) * 100)}%</dd>
-                          </div>
-                        ) : null}
-                        {compMe.cadence_per_week != null && (
-                          <div className="flex items-baseline justify-between gap-3">
-                            <dt className="t-body">Posts a week</dt>
-                            <dd className="t-h3 tabular-nums">{compMe.cadence_per_week}</dd>
+            {latestCompetitive && compMe && (
+              <Section id="field" title="Against the field" description="The latest competitive analysis, in three numbers.">
+                <Card className="glass-accent">
+                  <CardContent className="pt-5 flex items-center justify-between gap-6 flex-wrap">
+                    <dl className="flex items-center gap-10 flex-wrap">
+                      <div><dt className="t-label uppercase tracking-wider">Benchmark score</dt><dd className="t-stat tabular-nums">{compScore != null ? `${compScore}/100` : "pending"}</dd></div>
+                      {compTotal ? <div><dt className="t-label uppercase tracking-wider">Share of voice</dt><dd className="t-stat tabular-nums">{Math.round((compMe.post_count / compTotal) * 100)}%</dd></div> : null}
+                      {compMe.cadence_per_week != null && <div><dt className="t-label uppercase tracking-wider">Posts a week</dt><dd className="t-stat tabular-nums">{compMe.cadence_per_week}</dd></div>}
+                    </dl>
+                    <Button variant="outline" onClick={() => setTab("competitive")}>Open the competitive view <ArrowRight className="h-4 w-4 ml-1" /></Button>
+                  </CardContent>
+                </Card>
+              </Section>
+            )}
+
+            {monthComparison?.current_month && (
+              <Section id="period" title="Period-over-period performance" description="Current period in green, previous period in purple.">
+                <Card><CardContent className="pt-5"><PerformanceChart comparison={monthComparison} /></CardContent></Card>
+              </Section>
+            )}
+
+            {platformBreakdown.length > 0 && (
+              <Section id="platforms" title="Performance by platform" description={platformBreakdown.some((p) => p.changes) ? "How each connected account performed this period, with change against the previous period." : "How each connected account performed this period."}>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {platformBreakdown.map((p, i) => <PlatformPerformanceCard key={`${p.network}-${i}`} platform={p} />)}
+                </div>
+              </Section>
+            )}
+
+            {sproutPerformance?.top_posts?.length > 0 && (
+              <Section id="posts" title="Top posts" description="By impressions and by engagement, with a platform filter.">
+                <Card><CardContent className="pt-5"><TopPostsSection posts={sproutPerformance.top_posts} /></CardContent></Card>
+              </Section>
+            )}
+
+            {pillars && (
+              <div id="report-pillars">
+                <Section id="pillars" title="Content pillar alignment" description="Which pillars the month served, and which need attention.">
+                  <Card><CardContent className="pt-5 space-y-5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {pillars.well_represented?.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
+                            <div className="flex flex-wrap gap-1.5">{pillars.well_represented.map((p: string) => <Badge key={p} variant="secondary" className="t-label">{p}</Badge>)}</div>
                           </div>
                         )}
-                      </dl>
-                      <Button variant="outline" size="sm" className="w-full" onClick={() => setTab("competitive")}>
-                        Open the competitive view <ArrowRight className="h-4 w-4 ml-1" />
-                      </Button>
-                    </CardContent>
-                  </Card>
-                )}
+                        {pillars.underrepresented?.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-warning" /> Needs attention</p>
+                            <div className="flex flex-wrap gap-1.5">{pillars.underrepresented.map((p: string) => <Badge key={p} variant="outline" className="t-label">{p}</Badge>)}</div>
+                          </div>
+                        )}
+                      </div>
+                      {pillarRecs.length > 0 && (
+                        <div className="pt-4 border-t space-y-2">
+                          <p className="t-label uppercase tracking-wider">Recommendations</p>
+                          <ul className="space-y-2">
+                            {pillarRecs.map((r, i) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{r}</span></li>)}
+                          </ul>
+                        </div>
+                      )}
+                  </CardContent></Card>
+                </Section>
+              </div>
+            )}
 
-                {actions.length > 0 && (
-                  <Section title="Where to act next" description="Every recommendation in this report that asks for a decision, with the evidence one click away.">
-                    <div className="space-y-3">
-                      {actions.map((a, i) => <ActionCard key={i} action={a} onOpen={() => openAction(a)} />)}
-                    </div>
-                  </Section>
-                )}
+            {actions.length > 0 && (
+              <Section id="actions" title="Where to act next" description="Every recommendation in this report that asks for a decision, with the evidence one click away.">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {actions.map((a, i) => <ActionCard key={i} action={a} onOpen={() => openAction(a)} />)}
+                </div>
+              </Section>
+            )}
 
-                {rd?.data_counts && (
-                  <Card>
-                    <CardContent className="pt-5 space-y-3">
-                      <p className="t-label uppercase tracking-wider">In this report</p>
-                      <ul className="space-y-2 t-body">
-                        <li className="flex justify-between gap-3"><span>Sprout posts analyzed</span><span className="font-semibold tabular-nums">{rd.data_counts.sprout_top_posts ?? 0}</span></li>
-                        <li className="flex justify-between gap-3"><span>TikTok trends</span><span className="font-semibold tabular-nums">{rd.data_counts.tiktok_trends ?? 0}</span></li>
-                        <li className="flex justify-between gap-3"><span>Instagram trends</span><span className="font-semibold tabular-nums">{rd.data_counts.instagram_trends ?? 0}</span></li>
-                        <li className="flex justify-between gap-3"><span>Recommendations</span><span className="font-semibold tabular-nums">{rd.data_counts.total_recommendations ?? 0}</span></li>
-                        {latestCompetitive && <li className="t-secondary">Latest competitive analysis included</li>}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                )}
-              </aside>
-            </div>
+            {rd?.data_counts && (
+              <Card>
+                <CardContent className="pt-5 flex items-center gap-8 flex-wrap">
+                  <p className="t-label uppercase tracking-wider">In this report</p>
+                  <ul className="flex items-center gap-6 flex-wrap t-body">
+                    <li className="flex items-center gap-2"><span>Sprout posts analyzed</span><span className="font-semibold tabular-nums">{rd.data_counts.sprout_top_posts ?? 0}</span></li>
+                    <li className="flex items-center gap-2"><span>TikTok trends</span><span className="font-semibold tabular-nums">{rd.data_counts.tiktok_trends ?? 0}</span></li>
+                    <li className="flex items-center gap-2"><span>Instagram trends</span><span className="font-semibold tabular-nums">{rd.data_counts.instagram_trends ?? 0}</span></li>
+                    <li className="flex items-center gap-2"><span>Recommendations</span><span className="font-semibold tabular-nums">{rd.data_counts.total_recommendations ?? 0}</span></li>
+                    {latestCompetitive && <li className="t-secondary">Latest competitive analysis included</li>}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           {/* ── CONTENT IDEAS ── */}
@@ -472,7 +468,7 @@ export default function ReportView() {
 
           {/* ── COMPETITIVE ── */}
           <TabsContent value="competitive" className="space-y-6">
-            <Section flat title="How the field compares" description="The latest competitive analysis for this client. Endorsed gaps feed the next report's calendar.">
+            <Section title="How the field compares" description="The latest competitive analysis for this client. Endorsed gaps feed the next report's calendar.">
               <CompetitiveSnapshot clientId={report.client_id} takeaways={aiAnalysis?.competitive_takeaways} />
             </Section>
           </TabsContent>
@@ -483,32 +479,6 @@ export default function ReportView() {
 }
 
 /* ─── Layout primitives: one type scale for the whole report ─── */
-function Section({ title, description, action, children, flat = false }: { title: string; description?: string; action?: React.ReactNode; children: React.ReactNode; flat?: boolean }) {
-  const header = (
-    <div className="flex items-start justify-between gap-4 flex-wrap">
-      <div className="space-y-1">
-        <h2 className="t-h2">{title}</h2>
-        {description && <p className="t-secondary">{description}</p>}
-      </div>
-      {action}
-    </div>
-  );
-  // flat: the header gets its own glass band and the children stand below it (for grids of cards).
-  if (flat) {
-    return (
-      <section className="space-y-4">
-        <div className="glass p-5">{header}</div>
-        {children}
-      </section>
-    );
-  }
-  return (
-    <Card>
-      <CardHeader>{header}</CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
-  );
-}
 
 function ActionCard({ action, onOpen }: { action: { source: string; title: string; detail?: string; href?: string }; onOpen: () => void }) {
   const icon = action.source === "Competitors" ? <Crosshair className="h-3.5 w-3.5" /> : action.source === "Trends" ? <TrendingUp className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />;
@@ -534,7 +504,7 @@ function MetricsCards({ changes, previousMonth }: { changes: Record<string, any>
   ];
   const fmt = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 10_000 ? `${(v / 1_000).toFixed(1)}K` : v.toLocaleString());
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 stagger-children">
+    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 stagger-children">
       {metrics.map(({ key, label, icon: Icon }) => {
         const d = changes[key];
         if (!d) return null;
@@ -700,7 +670,7 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
   const changes = platform.changes || null;
   const ai = platform.ai || null;
   return (
-    <div className="glass-inner p-5">
+    <div className="glass p-5">
       <div className="pb-3 space-y-1.5">
         <div className="flex items-center justify-between gap-2">
           <PlatformBadge platform={prettyPlatformName(platform.network)} size="sm" />

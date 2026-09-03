@@ -1,5 +1,6 @@
 import { DateRange, formatRange, isValidRange, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate } from "@/lib/dateRange";
 import { StatCard } from "@/components/ui/stat-card";
+import { Section } from "@/components/ui/section";
 import { PostVisual, usePostPreviews } from "@/components/competitive/PostVisual";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useParams, useNavigate } from "react-router-dom";
@@ -501,14 +502,9 @@ export default function Analytics() {
 
                 {/* Month-over-month comparison from latest report */}
                 {!viewWindow && comparison && Object.keys(comparison.changes).length > 0 && (
+                  <Section title={<>Month-over-Month{" "} <span className="font-normal text-muted-foreground t-body">(latest report)</span></>}>
                   <Card>
-                    <CardHeader>
-                      <CardTitle className="t-h3">
-                        Month-over-Month{" "}
-                        <span className="font-normal text-muted-foreground t-body">(latest report)</span>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
+                    <CardContent className="pt-5">
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                         {Object.entries(comparison.changes).map(([key, val]: [string, any]) => {
                           const pct = typeof val?.percent === "number" ? val.percent : 0;
@@ -546,6 +542,7 @@ export default function Analytics() {
                       </div>
                     </CardContent>
                   </Card>
+                  </Section>
                 )}
 
                 {/* Performance Over Time — Per-metric line charts */}
@@ -723,14 +720,9 @@ export default function Analytics() {
 
                 {/* Engagement rate trend */}
                 {chartData.length > 1 && chartData.some((d) => d.engagement_rate > 0) && (
+                  <Section title={<>Engagement Rate Trend</>} description={<>(Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.</>}>
                   <Card>
-                    <CardHeader>
-                      <CardTitle className="t-h3">Engagement Rate Trend</CardTitle>
-                      <p className="t-secondary">
-                        (Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.
-                      </p>
-                    </CardHeader>
-                    <CardContent>
+                    <CardContent className="pt-5">
                       <div className="h-56">
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={chartData}>
@@ -771,6 +763,7 @@ export default function Analytics() {
                       </div>
                     </CardContent>
                   </Card>
+                  </Section>
                 )}
 
                 {/* Connected profiles */}
@@ -790,15 +783,9 @@ export default function Analytics() {
             </Tabs>
 
             {/* Recent reports table */}
+            <Section title={<>Report History</>} description={<>{filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to view full details.</>}>
             <Card>
-              <CardHeader>
-                <CardTitle className="t-h3">Report History</CardTitle>
-                <p className="t-secondary">
-                  {filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to
-                  view full details.
-                </p>
-              </CardHeader>
-              <CardContent>
+              <CardContent className="pt-5">
                 <div className="space-y-2">
                   {[...filtered].reverse().map((r: any) => {
                     const rawRd = r.report_data;
@@ -833,6 +820,7 @@ export default function Analytics() {
                 </div>
               </CardContent>
             </Card>
+            </Section>
           </>
         )}
         </div>
@@ -971,11 +959,9 @@ function LiveSproutSection({
       </div>
 
       {Array.isArray(data.by_profile) && data.by_profile.length > 0 && (
+        <Section title={<>By profile <span className="font-normal text-muted-foreground t-body">({rangeLabel})</span></>}>
         <Card>
-          <CardHeader>
-            <CardTitle className="t-h3">By profile <span className="font-normal text-muted-foreground t-body">({rangeLabel})</span></CardTitle>
-          </CardHeader>
-          <CardContent>
+          <CardContent className="pt-5">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {data.by_profile.map((p: any) => (
                 <div key={p.profile_id} className="glass-inner p-4 space-y-2">
@@ -993,14 +979,13 @@ function LiveSproutSection({
             </div>
           </CardContent>
         </Card>
+        </Section>
       )}
 
       {posts.length > 0 && (
+        <Section title={<>Top posts <span className="font-normal text-muted-foreground t-body">({rangeLabel}, by impressions)</span></>}>
         <Card>
-          <CardHeader>
-            <CardTitle className="t-h3">Top posts <span className="font-normal text-muted-foreground t-body">({rangeLabel}, by impressions)</span></CardTitle>
-          </CardHeader>
-          <CardContent>
+          <CardContent className="pt-5">
             <div className="grid gap-4 md:grid-cols-2">
               {posts.slice(0, 6).map((p: any, i: number) => (
                 <div key={i} className="flex gap-4 glass-inner p-4">
@@ -1028,6 +1013,7 @@ function LiveSproutSection({
             </div>
           </CardContent>
         </Card>
+        </Section>
       )}
     </div>
   );

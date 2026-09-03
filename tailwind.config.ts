@@ -99,7 +99,7 @@ export default {
   		},
   		fontSize: {
   			xs: ["13px", { lineHeight: "18px" }],
-  			sm: ["16px", { lineHeight: "24px" }],
+  			sm: ["15px", { lineHeight: "22px" }],
   			base: ["16px", { lineHeight: "24px" }],
   		},
   		fontFamily: {
