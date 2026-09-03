@@ -383,7 +383,7 @@ export default function ReportView() {
             )}
 
             {monthComparison?.current_month && (
-              <Section id="period" index={4} title="Period-over-period performance" description="Current period in green, previous period in purple.">
+              <Section id="period" index={4} title="Period-over-period performance" description="Each metric on its own scale: this period in green, the previous period in grey.">
                 <Card><CardContent className="pt-5"><PerformanceChart comparison={monthComparison} /></CardContent></Card>
               </Section>
             )}

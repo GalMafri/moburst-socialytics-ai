@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /** Emphasis palette: the subject in the accent, context in the de-emphasis gray. Text never wears the data colour. */
-export const SERIES = { accent: "#b9e045", muted: "rgba(255,255,255,0.28)" } as const;
+export const SERIES = { accent: "#b9e045", muted: "rgba(255,255,255,0.18)" } as const;
 
 export function compactNumber(v: number): string {
   if (!Number.isFinite(v)) return "0";
