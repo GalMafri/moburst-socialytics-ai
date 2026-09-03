@@ -236,7 +236,7 @@ export default function CompetitiveReportView() {
   );
 
   return (
-    <AppLayout title={`Competitive: ${clientName}`}>
+    <AppLayout>
       <div ref={printRef} className="w-full space-y-8">
 
         {/* Hero */}
