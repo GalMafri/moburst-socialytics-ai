@@ -260,6 +260,43 @@ export default function ReportView() {
     }
     return best;
   })();
+  // One-line takeaways for the section bands, computed from the data so every section states its point.
+  const pctOf = (v: any) => (typeof v?.percent === "number" && Number.isFinite(v.percent) ? (v.percent as number) : null);
+  const metricName = (k: string) => k.replace(/_/g, " ");
+  const glanceLine = (() => {
+    const ch = monthComparison?.changes || {};
+    const ps = Object.values<any>(ch).map(pctOf).filter((p): p is number => p != null);
+    if (!ps.length) return "This period against the one before it.";
+    const up = ps.filter((p) => p > 0).length, down = ps.filter((p) => p < 0).length;
+    return `${up} of ${ps.length} metrics rose and ${down} fell against the previous period${hero ? `; ${hero.label.toLowerCase()} moved most at ${hero.pct > 0 ? "+" : ""}${Math.round(hero.pct)}%` : ""}.`;
+  })();
+  const periodLine = (() => {
+    const ch = monthComparison?.changes || {};
+    const movers = Object.entries<any>(ch).map(([k, v]) => ({ k, p: pctOf(v), c: Number(v?.current ?? 0), prev: Number(v?.previous ?? 0) })).filter((m) => m.p != null).sort((a, b) => Math.abs(b.p!) - Math.abs(a.p!));
+    if (!movers.length) return "Each metric on its own scale: this period in green, the previous period in grey.";
+    const flat = movers.filter((m) => m.p === 0).map((m) => metricName(m.k));
+    const top = movers.slice(0, 2).map((m) => `${metricName(m.k)} ${m.p! > 0 ? "+" : ""}${Math.round(m.p!)}% (${compactNumber(m.c)} vs ${compactNumber(m.prev)})`);
+    return `${top.join(" and ")}${flat.length ? `; ${flat.join(", ")} held flat` : ""}. This period in green, the previous period in grey.`;
+  })();
+  const platformLine = (() => {
+    if (!platformBreakdown.length) return undefined;
+    const imp = platformBreakdown.map((p: any) => ({ n: platformLabelOf(p.network), v: Number(p.current?.impressions ?? 0) }));
+    const eng = platformBreakdown.map((p: any) => ({ n: platformLabelOf(p.network), v: Number(p.current?.reactions ?? 0) + Number(p.current?.comments ?? 0) + Number(p.current?.shares ?? 0) }));
+    const share = (rows: { n: string; v: number }[]) => { const t = rows.reduce((a, r) => a + r.v, 0); const best = [...rows].sort((a, b) => b.v - a.v)[0]; return t > 0 && best ? { n: best.n, pct: Math.round((best.v / t) * 100) } : null; };
+    const a = share(imp), b = share(eng);
+    if (!a && !b) return undefined;
+    return `${a ? `${a.n} carries ${a.pct}% of impressions` : ""}${a && b ? "; " : ""}${b ? `${b.n} carries ${b.pct}% of engagements` : ""}. Every connected account below, with change against the previous period.`;
+  })();
+  const postsLine = (() => {
+    const posts: any[] = sproutPerformance?.top_posts || [];
+    const best = [...posts].sort((x, y) => Number(y.impressions ?? 0) - Number(x.impressions ?? 0))[0];
+    if (!best) return undefined;
+    const plat = platformLabelOf(best.network_type || best.platform || "");
+    return `The best post reached ${compactNumber(Number(best.impressions ?? 0))} impressions${plat ? ` on ${plat}` : ""}${best.engagement != null ? ` with ${compactNumber(Number(best.engagement))} engagements` : ""}. Ranked by impressions and by engagement, with a platform filter.`;
+  })();
+  const pillarsLine = pillars
+    ? `${(pillars.well_represented || []).length} pillars well represented, ${(pillars.underrepresented || []).length} need attention, ${pillarRecs.length} recommendations.`
+    : undefined;
   type Action = { source: "Competitors" | "Performance" | "Trends"; title: string; detail?: string; tab?: string; anchor?: string; href?: string };
   const actions: Action[] = [];
   for (const g of endorsedGaps.slice(0, 2)) actions.push({ source: "Competitors", title: g.gap, detail: g.suggested_play, href: `/clients/${report.client_id}/competitive/reports/${latestCompetitive!.id}` });
@@ -322,17 +359,17 @@ export default function ReportView() {
               items={[
                 monthComparison?.changes ? { id: "glance", label: "At a glance" } : null,
                 insights.length > 0 || summary ? { id: "highlights", label: "Highlights" } : null,
+                actions.length > 0 ? { id: "actions", label: "Where to act next" } : null,
                 latestCompetitive && compMe ? { id: "field", label: "Against the field" } : null,
                 monthComparison?.current_month ? { id: "period", label: "Period over period" } : null,
                 platformBreakdown.length > 0 ? { id: "platforms", label: "By platform" } : null,
                 sproutPerformance?.top_posts?.length > 0 ? { id: "posts", label: "Top posts" } : null,
                 pillars ? { id: "pillars", label: "Pillars" } : null,
-                actions.length > 0 ? { id: "actions", label: "Where to act next" } : null,
               ].filter(Boolean) as { id: string; label: string }[]}
             />
 
             {monthComparison?.changes && (
-              <Section id="glance" index={1} title="At a glance" description="This period against the one before it.">
+              <Section id="glance" index={1} title="At a glance" description={glanceLine}>
                 <MetricsCards changes={monthComparison.changes} previousMonth={monthComparison.previous_month} />
               </Section>
             )}
@@ -367,8 +404,16 @@ export default function ReportView() {
               </Section>
             )}
 
+            {actions.length > 0 && (
+              <Section id="actions" index={3} title="Where to act next" description={`${actions.length} recommendations from this report${(() => { const c: Record<string, number> = {}; for (const a of actions) c[a.source] = (c[a.source] || 0) + 1; const parts = Object.entries(c).map(([k, n]) => `${n} from ${k === "Competitors" ? "the competitive analysis" : k === "Trends" ? "the trends" : "performance"}`); return parts.length ? `: ${parts.join(", ")}` : ""; })()}. Each one opens its evidence.`}>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {actions.map((a, i) => <ActionCard key={i} action={a} onOpen={() => openAction(a)} />)}
+                </div>
+              </Section>
+            )}
+
             {latestCompetitive && compMe && (
-              <Section id="field" index={3} title="Against the field" description="The latest competitive analysis, in three numbers.">
+              <Section id="field" index={4} title="Against the field" description="The latest competitive analysis, in three numbers.">
                 <Card className="glass-accent">
                   <CardContent className="pt-5 flex items-center justify-between gap-6 flex-wrap">
                     <dl className="flex items-center gap-10 flex-wrap">
@@ -383,13 +428,13 @@ export default function ReportView() {
             )}
 
             {monthComparison?.current_month && (
-              <Section id="period" index={4} title="Period-over-period performance" description="Each metric on its own scale: this period in green, the previous period in grey.">
+              <Section id="period" index={5} title="Period-over-period performance" description={periodLine}>
                 <Card><CardContent className="pt-5"><PerformanceChart comparison={monthComparison} /></CardContent></Card>
               </Section>
             )}
 
             {platformBreakdown.length > 0 && (
-              <Section id="platforms" index={5} className="[&>*:not(:first-child)]:mt-4" title="Performance by platform" description={platformBreakdown.some((p) => p.changes) ? "How each connected account performed this period, with change against the previous period." : "How each connected account performed this period."}>
+              <Section id="platforms" index={6} className="[&>*:not(:first-child)]:mt-4" title="Performance by platform" description={platformLine || "How each connected account performed this period."}>
                 <Card>
                   <CardContent className="pt-5 grid gap-8 lg:grid-cols-2">
                     <div className="space-y-3">
@@ -409,14 +454,14 @@ export default function ReportView() {
             )}
 
             {sproutPerformance?.top_posts?.length > 0 && (
-              <Section id="posts" index={6} title="Top posts" description="By impressions and by engagement, with a platform filter.">
+              <Section id="posts" index={7} title="Top posts" description={postsLine || "By impressions and by engagement, with a platform filter."}>
                 <Card><CardContent className="pt-5"><TopPostsSection posts={sproutPerformance.top_posts} /></CardContent></Card>
               </Section>
             )}
 
             {pillars && (
               <div id="report-pillars">
-                <Section id="pillars" index={7} title="Content pillar alignment" description="Which pillars the month served, and which need attention.">
+                <Section id="pillars" index={8} title="Content pillar alignment" description={pillarsLine}>
                   <Card><CardContent className="pt-5 space-y-5">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {pillars.well_represented?.length > 0 && (
@@ -443,14 +488,6 @@ export default function ReportView() {
                   </CardContent></Card>
                 </Section>
               </div>
-            )}
-
-            {actions.length > 0 && (
-              <Section id="actions" index={8} title="Where to act next" description="Every recommendation in this report that asks for a decision, with the evidence one click away.">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {actions.map((a, i) => <ActionCard key={i} action={a} onOpen={() => openAction(a)} />)}
-                </div>
-              </Section>
             )}
 
             {rd?.data_counts && (
@@ -511,11 +548,11 @@ export default function ReportView() {
 function ActionCard({ action, onOpen }: { action: { source: string; title: string; detail?: string; href?: string }; onOpen: () => void }) {
   const icon = action.source === "Competitors" ? <Crosshair className="h-3.5 w-3.5" /> : action.source === "Trends" ? <TrendingUp className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />;
   return (
-    <button type="button" onClick={onOpen} className="text-left glass-inner p-4 space-y-2 group">
-      <span className="inline-flex items-center gap-1.5 t-label uppercase tracking-wider">{icon} {action.source}</span>
-      <p className="t-body font-medium">{action.title}</p>
+    <button type="button" onClick={onOpen} className="text-left glass-inner p-4 pl-5 space-y-2.5 group border-l-2 border-l-[#b9e045] flex flex-col">
+      <span className="inline-flex items-center gap-1.5 t-label uppercase tracking-wider">{icon} Recommendation · {action.source}</span>
+      <p className="t-body font-semibold text-white">{action.title}</p>
       {action.detail && <p className="t-body">{action.detail}</p>}
-      <span className="t-body text-primary inline-flex items-center gap-1 opacity-80 group-hover:opacity-100">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open Trends" : "Open Competitive"} <ArrowRight className="h-3.5 w-3.5" /></span>
+      <span className="mt-auto inline-flex items-center gap-1 t-label !text-white rounded-full border border-[rgba(255,255,255,0.16)] px-3 py-1 group-hover:bg-[rgba(255,255,255,0.08)]">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open Trends" : "Open Competitive"} <ArrowRight className="h-3.5 w-3.5" /></span>
     </button>
   );
 }

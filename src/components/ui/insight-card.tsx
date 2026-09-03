@@ -57,7 +57,6 @@ export function InsightCard({
   footer?: ReactNode;
 }) {
   const { headline, body } = splitHeadline(text);
-  const metrics = extractMetrics(text);
   return (
     <article className={cn("glass-inner p-4 flex flex-col gap-3 min-w-0", accent && "border-[rgba(185,224,69,0.35)]", className)}>
       <div className="flex items-start gap-3">
@@ -71,16 +70,7 @@ export function InsightCard({
           {body && <p className="t-body">{body}</p>}
         </div>
       </div>
-      {(metrics.length > 0 || footer) && (
-        <div className="flex items-center justify-between gap-3 flex-wrap mt-auto">
-          <div className="flex flex-wrap gap-1.5">
-            {metrics.map((m) => (
-              <span key={m} className="inline-flex items-center px-2 py-0.5 rounded-full bg-[rgba(185,224,69,0.12)] text-[#b9e045] t-badge tabular-nums">{m}</span>
-            ))}
-          </div>
-          {footer}
-        </div>
-      )}
+      {footer && <div className="flex items-center justify-end gap-3 mt-auto">{footer}</div>}
     </article>
   );
 }
