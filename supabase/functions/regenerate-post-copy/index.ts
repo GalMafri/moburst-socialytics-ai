@@ -5,6 +5,7 @@ const corsHeaders = {
 };
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { competitiveBrief } from "../_shared/competitive/brief.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -56,9 +57,11 @@ Deno.serve(async (req) => {
       console.error("Voice learnings query failed (table may not exist):", e);
     }
 
+    const competitive = await competitiveBrief(supabase, client_id, platform).catch(() => "");
     const prompt = `Rewrite this social media post copy with a fresh take. Keep the same strategic angle and concept, but create completely new wording.
 
 PLATFORM: ${platform || "general"}
+${competitive ? `\n${competitive}\n` : ""}
 CONTENT PILLAR: ${pillar || "general"}
 CONCEPT: ${effectiveConcept}
 CURRENT COPY (rewrite this): ${current_copy}

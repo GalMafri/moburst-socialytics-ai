@@ -938,9 +938,11 @@ function TrendsSection({
   posts: any[];
   platform: string;
 }) {
-  if (!analysis && !posts?.length) return null;
   const validPosts = (posts || []).filter((p: any) => !p._empty && p.url);
   const platformColor = getPlatformColor(platform);
+  // Trend posts come from the scrapers without media; resolve the creative per URL.
+  const { previews } = usePostPreviews(validPosts.slice(0, 6).map((p: any) => p.url));
+  if (!analysis && !posts?.length) return null;
 
   return (
     <div className="space-y-6">
@@ -1085,6 +1087,16 @@ function TrendsSection({
             {validPosts.slice(0, 6).map((post: any, i: number) => (
               <Card key={i} className="overflow-hidden">
                 <CardContent className="pt-5 space-y-3">
+                  <div className="flex gap-4">
+                    <PostVisual
+                      url={post.url}
+                      preview={previews[post.url]}
+                      mediaType={post.type || (platform.toLowerCase().includes("tiktok") ? "video" : null)}
+                      platform={platform}
+                      className="w-28 shrink-0"
+                      compact
+                    />
+                    <div className="flex-1 min-w-0 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div
@@ -1149,6 +1161,8 @@ function TrendsSection({
                         View <ExternalLink className="h-3 w-3" />
                       </a>
                     )}
+                  </div>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

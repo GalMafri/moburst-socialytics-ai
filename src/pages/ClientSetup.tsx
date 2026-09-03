@@ -1049,60 +1049,42 @@ export default function ClientSetup() {
 function ReportScheduleManager({ clientId }: { clientId: string }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const KINDS = [
+    { kind: "social", label: "Monthly social report", description: "Sprout performance, trends and the content calendar for the previous calendar month." },
+    { kind: "competitive", label: "Monthly competitive analysis", description: "RivalIQ landscape pull for the previous calendar month. Needs a confirmed competitor set and is skipped otherwise." },
+  ] as const;
 
-  const { data: schedule, isLoading } = useQuery({
-    queryKey: ["report-schedule", clientId],
+  const { data: schedules, isLoading } = useQuery({
+    queryKey: ["report-schedules", clientId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("report_schedules")
-        .select("*")
-        .eq("client_id", clientId)
-        .maybeSingle();
+      const { data, error } = await supabase.from("report_schedules").select("*").eq("client_id", clientId);
       if (error) throw error;
-      return data;
+      return data || [];
     },
   });
 
-  const [frequency, setFrequency] = useState<string>("monthly");
-  const [isActive, setIsActive] = useState(false);
-
-  useEffect(() => {
-    if (schedule) {
-      setFrequency(schedule.frequency || "monthly");
-      setIsActive(schedule.is_active ?? false);
-    }
-  }, [schedule]);
-
-  const computeNextRun = (freq: string): string => {
+  // Next 7th of the month at 07:00 UTC, which is when the daily scheduler fires.
+  const nextRun = () => {
     const now = new Date();
-    if (freq === "weekly") {
-      const next = new Date(now);
-      next.setDate(now.getDate() + ((7 - now.getDay()) % 7) || 7);
-      next.setHours(9, 0, 0, 0);
-      return next.toISOString();
-    } else if (freq === "biweekly") {
-      const next = new Date(now);
-      next.setDate(now.getDate() + 14);
-      next.setHours(9, 0, 0, 0);
-      return next.toISOString();
-    } else {
-      // monthly - 1st of next month
-      const next = new Date(now.getFullYear(), now.getMonth() + 1, 1, 9, 0, 0);
-      return next.toISOString();
-    }
+    let next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 7, 7, 0, 0));
+    if (next <= now) next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 7, 7, 0, 0));
+    return next.toISOString();
   };
 
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const payload = {
+  const toggle = useMutation({
+    mutationFn: async ({ kind, active }: { kind: string; active: boolean }) => {
+      const existing = (schedules || []).find((s: any) => (s.report_kind || "social") === kind);
+      const payload: any = {
         client_id: clientId,
-        frequency,
-        is_active: isActive,
-        next_run_at: isActive ? computeNextRun(frequency) : null,
+        report_kind: kind,
+        frequency: "monthly",
+        run_day_of_month: 7,
+        range_mode: "previous_month",
+        is_active: active,
+        next_run_at: active ? nextRun() : null,
       };
-
-      if (schedule) {
-        const { error } = await supabase.from("report_schedules").update(payload).eq("id", schedule.id);
+      if (existing) {
+        const { error } = await supabase.from("report_schedules").update(payload).eq("id", existing.id);
         if (error) throw error;
       } else {
         const { error } = await supabase.from("report_schedules").insert(payload);
@@ -1110,7 +1092,7 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["report-schedule", clientId] });
+      queryClient.invalidateQueries({ queryKey: ["report-schedules", clientId] });
       toast({ title: "Schedule saved" });
     },
     onError: (err: any) => {
@@ -1118,58 +1100,37 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
     },
   });
 
-  if (isLoading) return <Loading label="Loading schedule" />;
+  if (isLoading) return <Loading label="Loading schedules" />;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
-          <CalendarClock className="h-4 w-4" /> Report Schedule
+          <CalendarClock className="h-4 w-4" /> Monthly schedules
         </CardTitle>
         <CardDescription>
-          Automatically run reports on a recurring schedule. The report will use the default date range (current month).
+          Both reports run automatically on the 7th of each month at 07:00 UTC and cover the previous calendar month. The competitive analysis runs first so the social report can use it.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <Label>Enable Scheduled Reports</Label>
-            <p className="text-xs text-muted-foreground">Reports will run automatically at the configured frequency</p>
-          </div>
-          <Switch checked={isActive} onCheckedChange={setIsActive} />
-        </div>
-
-        <div className="space-y-2">
-          <Label>Frequency</Label>
-          <Select value={frequency} onValueChange={setFrequency}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="weekly">Weekly</SelectItem>
-              <SelectItem value="biweekly">Bi-weekly</SelectItem>
-              <SelectItem value="monthly">Monthly (Recommended)</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {schedule?.next_run_at && isActive && (
-          <div className="text-sm text-muted-foreground">
-            Next scheduled run:{" "}
-            <span className="font-medium text-foreground">{new Date(schedule.next_run_at).toLocaleDateString()}</span>
-          </div>
-        )}
-
-        {schedule?.last_run_at && (
-          <div className="text-sm text-muted-foreground">
-            Last run: {new Date(schedule.last_run_at).toLocaleDateString()}
-          </div>
-        )}
-
-        <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="gap-2">
-          {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          Save Schedule
-        </Button>
+      <CardContent className="space-y-4">
+        {KINDS.map(({ kind, label, description }) => {
+          const row: any = (schedules || []).find((s: any) => (s.report_kind || "social") === kind);
+          const active = !!row?.is_active;
+          const last: any = row?.last_result || null;
+          return (
+            <div key={kind} className="flex items-start justify-between gap-4 rounded-[12px] p-4 bg-[rgba(255,255,255,0.04)]">
+              <div className="space-y-1">
+                <Label>{label}</Label>
+                <p className="text-xs text-muted-foreground">{description}</p>
+                <p className="text-xs text-muted-foreground">
+                  {active && row?.next_run_at ? `Next run ${new Date(row.next_run_at).toLocaleDateString()}` : "Paused"}
+                  {row?.last_run_at ? ` · Last run ${new Date(row.last_run_at).toLocaleDateString()}${last?.status ? ` (${last.status})` : ""}` : ""}
+                </p>
+              </div>
+              <Switch checked={active} disabled={toggle.isPending} onCheckedChange={(v) => toggle.mutate({ kind, active: v })} />
+            </div>
+          );
+        })}
       </CardContent>
     </Card>
   );

@@ -51,7 +51,7 @@ function youtubeId(url: string): string | null {
 }
 
 const isVideoFile = (u: string) => /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(u);
-const isExpiringCdn = (u: string) => /cdninstagram\.com|fbcdn\.net|scontent[-.]/i.test(u);
+const isExpiringCdn = (u: string) => /cdninstagram\.com|fbcdn\.net|scontent[-.]|lookaside\.fbsbx\.com|media\.licdn\.com/i.test(u);
 
 function mediaTypeOf(t: string | null | undefined): string {
   const s = String(t || "").toLowerCase();
@@ -109,8 +109,30 @@ async function persistVideoHead(supabase: Db, sourceUrl: string, postUrl: string
   }
 }
 
-async function ogPreview(url: string): Promise<Partial<Preview>> {
-  const resp = await fetch(url, { headers: { "User-Agent": UA, Accept: "text/html" }, redirect: "follow" });
+/**
+ * Instagram exposes the full-size creative of any public post, photo or Reel,
+ * behind a redirect at /p/<shortcode>/media/?size=l. The target is a signed
+ * CDN link, so it is copied into the bucket right away.
+ */
+function instagramShortcode(url: string): string | null {
+  const m = url.match(/instagram\.com\/(?:[^/]+\/)?(?:p|reel|reels|tv)\/([A-Za-z0-9_-]{5,})/i);
+  return m ? m[1] : null;
+}
+
+async function instagramMedia(supabase: Db, url: string): Promise<string | null> {
+  const code = instagramShortcode(url);
+  if (!code) return null;
+  const r = await fetch(`https://www.instagram.com/p/${code}/media/?size=l`, { headers: { "User-Agent": UA }, redirect: "manual" });
+  const target = r.headers.get("location");
+  if (!(r.status >= 300 && r.status < 400) || !target || !/^https?:\/\//i.test(target)) return null;
+  return (await persist(supabase, target, url)) || target;
+}
+
+// Facebook and LinkedIn serve their Open Graph tags to link-preview crawlers only.
+const CRAWLER_UA = "Twitterbot/1.0";
+
+async function ogPreview(url: string, userAgent: string = UA): Promise<Partial<Preview>> {
+  const resp = await fetch(url, { headers: { "User-Agent": userAgent, Accept: "text/html" }, redirect: "follow" });
   if (!resp.ok) return { status: "unavailable" };
   const html = (await resp.text()).slice(0, 400_000);
   const meta = (prop: string) => {
@@ -168,6 +190,15 @@ async function resolve(supabase: Db, hint: Hint): Promise<Preview> {
     let image = hint.image || null;
     let media_type = mediaTypeOf(hint.media_type);
     let title: string | null = null;
+    if (platform === "instagram") {
+      // A poster image beats a video slice: lighter, and it covers Reels
+      // that RivalIQ has no creative for.
+      const poster = await instagramMedia(supabase, url).catch(() => null);
+      if (poster) {
+        const kind = media_type !== "unknown" ? media_type : (/\/(reel|reels|tv)\//i.test(url) || (image && isVideoFile(image)) ? "video" : "image");
+        return { ...base, media_type: kind, image_url: poster, title, status: "ok" };
+      }
+    }
     if (!image) {
       const hit = await rivaliqLookup(supabase, url).catch(() => null);
       if (hit) { image = hit.image; media_type = hit.media_type; title = hit.title; }
@@ -181,7 +212,7 @@ async function resolve(supabase: Db, hint: Hint): Promise<Preview> {
       const durable = isExpiringCdn(image) ? await persist(supabase, image, url) : null;
       return { ...base, media_type: media_type === "unknown" ? "image" : media_type, image_url: durable || image, title, status: "ok" };
     }
-    const og = await ogPreview(url);
+    const og = await ogPreview(url, platform === "facebook" || platform === "linkedin" ? CRAWLER_UA : UA);
     if (og.status === "ok" && og.image_url) {
       const durable = isExpiringCdn(og.image_url) ? await persist(supabase, og.image_url, url) : null;
       return { ...base, ...og, image_url: durable || og.image_url } as Preview;

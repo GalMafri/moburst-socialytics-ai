@@ -5,6 +5,7 @@ const corsHeaders = {
 };
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { competitiveBrief } from "../_shared/competitive/brief.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -63,6 +64,10 @@ Deno.serve(async (req) => {
       console.error("Voice learnings query failed (table may not exist):", e);
     }
 
+    // The competitive picture (endorsed gaps, winning patterns, rejected ideas)
+    // so a one-off post pulls in the same direction as the monthly plan.
+    const competitive = await competitiveBrief(supabase, client_id, platform).catch(() => "");
+
     const prompt = `You are a social media strategist creating a single post for a brand.
 
 BRAND: ${client?.name || "Unknown"}
@@ -73,7 +78,7 @@ BRAND VOICE: ${brandIdentity?.tone_of_voice || "Professional"}
 
 LEARNED VOICE PREFERENCES:
 ${voiceLearningsText}
-
+${competitive ? `\n${competitive}\nWhere the request allows, make the post act on an endorsed gap and say which one in "pillar" or "concept".\n` : ""}
 CREATIVE TYPE: ${creative_type || "AI decides based on topic and platform"}
 
 USER REQUEST: ${topic}
