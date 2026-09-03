@@ -173,6 +173,40 @@ export default function CompetitiveFeed() {
       }
     >
       <div className="w-full space-y-8">
+
+        {isLoading ? (
+          <Loading label="Loading the feed" />
+        ) : !snapshot ? (
+          <EmptyState
+            icon={Rss}
+            title="No competitor feed yet"
+            description="Pull the last week of posts for this client's RivalIQ landscape. The weekly scheduler keeps it fresh afterwards."
+            action={canRunAnalysis ? <Button onClick={() => refresh.mutate()} disabled={refresh.isPending}>Pull the last 7 days</Button> : undefined}
+          />
+        ) : (
+          <>
+            {/* Trends */}
+            {(alerts || []).length > 0 && (
+              <Card className="glass-elevated">
+                <CardHeader>
+                  <CardTitle className="t-h3 flex items-center gap-2"><TrendingUp className="h-5 w-5" /> Trends this week</CardTitle>
+                  <CardDescription>Topics two or more companies posted about inside the window. Confidence rises with more companies, more posts and tighter timing.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-2">
+                  {(alerts || []).map((a: any) => {
+                    const examples: FeedPost[] = (a.post_urls || []).map((u: string) => byUrl.get(u)).filter(Boolean).slice(0, 3);
+                    const conf = Math.round(Number(a.confidence) * 100);
+                    return (
+                      <div key={a.id} className="glass-inner p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1 min-w-0">
+                            <p className="font-semibold leading-snug">{a.topic}</p>
+                            <div className="flex gap-1.5 flex-wrap">
+                              <Badge variant={conf >= 75 ? "default" : "secondary"}>{conf}% confidence</Badge>
+                              {(a.companies || []).map((c: string) => <Badge key={c} variant="outline">{c}</Badge>)}
+                              {(a.platforms || []).map((p: string) => <Badge key={p} variant="outline">{platformLabel(p)}</Badge>)}
+                              {a.status === "drafted" && <Badge>drafted</Badge>}
+                            </div>
                           </div>
                           {canRunAnalysis && (
                             <Button size="sm" variant="ghost" className="shrink-0" onClick={() => dismiss.mutate(a.id)} aria-label="Dismiss"><X className="h-4 w-4" /></Button>
