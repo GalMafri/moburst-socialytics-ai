@@ -53,7 +53,34 @@ async function ogPreview(url: string): Promise<Partial<Preview>> {
   return { image_url: image, media_type: video ? "video" : "image", title, status: "ok" };
 }
 
-async function resolve(url: string): Promise<Preview> {
+/**
+ * RivalIQ already fetched the creative for every company in a landscape,
+ * including the client. Its raw socialposts responses are cached in
+ * rivaliq_snapshots, so a client's Instagram, Facebook or LinkedIn post can be
+ * matched by permalink there instead of scraping a login-walled page.
+ */
+async function rivaliqLookup(supabase: ReturnType<typeof createClient>, url: string): Promise<Partial<Preview> | null> {
+  const variants = [...new Set([url, url.replace(/\/+$/, ""), url.endsWith("/") ? url : url + "/"])];
+  for (const v of variants) {
+    const { data } = await supabase
+      .from("rivaliq_snapshots")
+      .select("payload")
+      .eq("endpoint", "socialposts")
+      .contains("payload", { socialPosts: [{ postLink: v }] })
+      .order("fetched_at", { ascending: false })
+      .limit(1);
+    const posts: any[] = (data?.[0] as any)?.payload?.socialPosts || [];
+    const post = posts.find((p) => p?.postLink === v);
+    if (post?.image || post?.imageLarge) {
+      const t = String(post.type || "").toLowerCase();
+      const media_type = t.includes("video") || t.includes("reel") ? "video" : t.includes("carousel") || t.includes("album") ? "carousel" : "image";
+      return { image_url: post.imageLarge || post.image, media_type, title: post.message ? String(post.message).slice(0, 140) : null, status: "ok" };
+    }
+  }
+  return null;
+}
+
+async function resolve(supabase: ReturnType<typeof createClient>, url: string): Promise<Preview> {
   const platform = platformOf(url);
   const base: Preview = { url, platform, media_type: "unknown", image_url: null, title: null, status: "unavailable" };
   try {
@@ -68,6 +95,8 @@ async function resolve(url: string): Promise<Preview> {
         if (j.thumbnail_url) return { ...base, media_type: "video", image_url: j.thumbnail_url, title: j.title || null, status: "ok" };
       }
     }
+    const fromRivaliq = await rivaliqLookup(supabase, url).catch(() => null);
+    if (fromRivaliq) return { ...base, ...fromRivaliq } as Preview;
     const og = await ogPreview(url);
     return { ...base, ...og, media_type: og.media_type || base.media_type } as Preview;
   } catch {
@@ -100,7 +129,7 @@ Deno.serve(async (req) => {
     }
     // Resolve misses with modest concurrency; failures are cached as unavailable
     // so a stubborn Instagram permalink is not re-fetched on every page view.
-    const results = await Promise.all(todo.slice(0, 12).map(resolve));
+    const results = await Promise.all(todo.slice(0, 12).map((u) => resolve(supabase, u)));
     for (const p of results) {
       out[p.url] = p;
       await supabase.from("post_previews").upsert({ ...p, fetched_at: new Date().toISOString() }, { onConflict: "url" });
