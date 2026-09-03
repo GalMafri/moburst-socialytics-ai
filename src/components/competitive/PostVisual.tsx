@@ -222,7 +222,9 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
       )}
     </>
   );
-  const base = `group relative block w-full overflow-hidden rounded-[12px] bg-[rgba(255,255,255,0.04)] ${className}`;
+  // Callers that pass a width class keep it; everyone else gets the full column.
+  const width = /(^|\s)(w-|max-w-|flex-)/.test(className) ? "" : "w-full";
+  const base = `group relative block ${width} overflow-hidden rounded-[12px] bg-[rgba(255,255,255,0.04)] ${className}`;
   const style: React.CSSProperties = { aspectRatio: String(ratio), maxHeight, marginInline: "auto" };
   if (url) {
     return (
