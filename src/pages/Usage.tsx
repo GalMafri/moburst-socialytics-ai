@@ -181,7 +181,7 @@ export default function Usage() {
 
   if (notSignedIn) {
     return (
-      <AppLayout title="User Analytics">
+      <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature.">
         <Card>
           <CardContent className="p-5">
             <p className="t-body font-medium">Sign in to view usage</p>
@@ -415,7 +415,7 @@ export default function Usage() {
           onClose={() => setSelected(null)}
         />
 
-        <p className="t-secondary">
+        <p className="glass-inner px-4 py-3 t-secondary">
           Counts come from work the product recorded. Rows written before Aug 2026 mostly carry no
           author, so historical per-user figures understate real usage; totals per client were always
           complete. Page views and report opens are not tracked, so a user with zero actions may still

@@ -391,7 +391,7 @@ export default function Analytics() {
                     data={allTimeQuery.data}
                     isLoading={allTimeQuery.isLoading}
                     error={allTimeQuery.error as Error | null}
-                    rangeLabel={`All time (${formatRange(allTimeWindow)})`}
+                    rangeLabel={`All time · ${formatRange(allTimeWindow)}`}
                     fmtVal={fmtVal}
                   />
                 )}
@@ -800,9 +800,7 @@ export default function Analytics() {
                             </span>
                           )}
                         </div>
-                        {r.duration_minutes && (
-                          <span className="t-secondary">{r.duration_minutes}m</span>
-                        )}
+                        {r.duration_minutes ? <span className="t-secondary">{r.duration_minutes}m</span> : null}
                       </button>
                     );
                   })}
@@ -887,11 +885,9 @@ function MetricBarSingle({
   color: string;
 }) {
   return (
-    <div className="p-3 rounded-lg bg-[rgba(255,255,255,0.03)] space-y-1.5">
-      <p className="t-secondary">{label}</p>
-      <p className="text-lg font-bold" style={{ color }}>
-        {fmtVal(value)}
-      </p>
+    <div className="glass-inner p-4 pl-5 space-y-1 border-l-2" style={{ borderLeftColor: color }}>
+      <p className="t-label uppercase tracking-wider">{label}</p>
+      <p className="t-h3">{fmtVal(value)}</p>
     </div>
   );
 }
@@ -935,7 +931,7 @@ function LiveSproutSection({
           <BarChart3 className="h-4 w-4" />
           {data.previous_range
             ? <>Sprout data for {rangeLabel} · compared with the {data.previous_range.days} days before ({formatRange(data.previous_range)})</>
-            : <>Live Sprout totals for {rangeLabel}: every day from {formatRange(data.range)} added up{data.chunks > 1 ? ` across ${data.chunks} requests` : ""}</>}
+            : <>Live Sprout totals, {rangeLabel}: every day in the window added up{data.chunks > 1 ? ` across ${data.chunks} requests` : ""}</>}
         </p>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <SummaryCard icon={<Eye className="h-3.5 w-3.5" />} label="Impressions" value={metric("impressions")} change={pct("impressions")} />

@@ -141,7 +141,7 @@ export function CalendarFilters({ filters, onChange, availablePlatforms, availab
 
   return (
     <div className="print:hidden">
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+      <div className="glass px-5 py-3 flex flex-wrap items-center gap-x-6 gap-y-3">
         {/* Day */}
         <SegmentedGroup label="Day">
           <Segment active={filters.day === "all"} onClick={() => onChange({ ...filters, day: "all" })}>

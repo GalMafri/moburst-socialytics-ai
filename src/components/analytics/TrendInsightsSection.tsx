@@ -181,7 +181,6 @@ export function TrendInsightsSection({ reports }: Props) {
 
   return (
     <div className="space-y-4">
-      <h3 className="t-h3">Trend Analysis</h3>
       {tiktokTrends && <PlatformTrendCard platform="TikTok" data={tiktokTrends} />}
       {igTrends && <PlatformTrendCard platform="Instagram" data={igTrends} />}
     </div>

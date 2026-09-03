@@ -107,8 +107,8 @@ export function CalendarKanban({
         return (
           <section key={dayName} className="space-y-5 animate-slide-up">
             {/* Day header — typography only, no chrome */}
-            <div className="flex items-baseline gap-3 flex-wrap">
-              <h3 className="text-[20px] font-bold leading-6 tracking-[-0.5px] text-foreground">
+            <div className="glass px-5 py-3 flex items-baseline gap-3 flex-wrap">
+              <h3 className="t-h2">
                 {dayName}
               </h3>
               {dayEntry?.date_label && (
