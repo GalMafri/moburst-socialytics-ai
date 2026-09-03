@@ -285,6 +285,12 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
 
     .pdf-root a { color: #b9e045 !important; }
 
+    /* Sticky chrome has no place on paper: the section nav becomes an ordinary row, and
+       nothing may pin itself over the content that follows it. */
+    nav[aria-label="Sections"], .sticky { position: static !important; top: auto !important; }
+    nav[aria-label="Sections"] { break-inside: avoid; margin-bottom: 16px; }
+    section, article, .glass, .glass-inner, .glass-accent { break-inside: avoid; }
+    .animate-slide-up, .stagger-children > * { animation: none !important; opacity: 1 !important; transform: none !important; }
     @media print {
       html, body, .pdf-root {
         background: #0b0c10 !important;

@@ -236,3 +236,10 @@
   .hover-lift, .hover-lift:hover, .press-effect:active { transform: none !important; }
   .glass, .glass-inner, .hover-lift, .press-effect { transition: none !important; }
 }
+
+/* Print and PDF export: no sticky chrome, no entrance animation, no card split across pages. */
+@media print {
+  nav[aria-label="Sections"], .sticky { position: static !important; top: auto !important; }
+  section, article, .glass, .glass-inner, .glass-accent { break-inside: avoid; }
+  .animate-slide-up, .stagger-children > * { animation: none !important; opacity: 1 !important; transform: none !important; }
+}
