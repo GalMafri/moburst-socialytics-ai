@@ -21,6 +21,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
+// Facebook and LinkedIn serve their Open Graph tags (and Facebook its crawler
+// image host) to link-preview crawlers only.
+const CRAWLER_UA = "Twitterbot/1.0";
 const OK_TTL_MS = 30 * 86400000;
 const MISS_TTL_MS = 60 * 60000;
 const BUCKET = "generated-media";
@@ -69,7 +72,10 @@ async function sha1(s: string): Promise<string> {
 /** Copy an expiring image into the public bucket; returns the durable URL or null. */
 async function persist(supabase: Db, sourceUrl: string, postUrl: string): Promise<string | null> {
   try {
-    const r = await fetch(sourceUrl, { headers: { "User-Agent": UA, Accept: "image/*" } });
+    // Facebook's crawler image host only answers link-preview crawlers.
+    const crawlerFirst = /lookaside\.fbsbx\.com|media\.licdn\.com/i.test(sourceUrl);
+    let r = await fetch(sourceUrl, { headers: { "User-Agent": crawlerFirst ? CRAWLER_UA : UA, Accept: "image/*" } });
+    if (!r.ok) r = await fetch(sourceUrl, { headers: { "User-Agent": crawlerFirst ? UA : CRAWLER_UA, Accept: "image/*" } });
     if (!r.ok) return null;
     const ct = (r.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
     if (!ct.startsWith("image/")) return null;
@@ -127,9 +133,6 @@ async function instagramMedia(supabase: Db, url: string): Promise<string | null>
   if (!(r.status >= 300 && r.status < 400) || !target || !/^https?:\/\//i.test(target)) return null;
   return (await persist(supabase, target, url)) || target;
 }
-
-// Facebook and LinkedIn serve their Open Graph tags to link-preview crawlers only.
-const CRAWLER_UA = "Twitterbot/1.0";
 
 async function ogPreview(url: string, userAgent: string = UA): Promise<Partial<Preview>> {
   const resp = await fetch(url, { headers: { "User-Agent": userAgent, Accept: "text/html" }, redirect: "follow" });
