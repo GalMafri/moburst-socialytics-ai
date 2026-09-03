@@ -23,6 +23,7 @@ import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@
 import { partitionGaps, useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
+import { Clamp } from "@/components/ui/clamp";
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images } from "lucide-react";
 
 type TopPost = {
@@ -78,9 +79,9 @@ function Kpi({ label, value, sub, accent = false }: { label: string; value: stri
   return (
     <Card className={accent ? "glass-accent" : ""}>
       <CardContent className="pt-5 pb-4">
-        <p className="text-[13px] uppercase tracking-wider text-muted-foreground">{label}</p>
-        <p className="text-3xl font-bold tracking-tight mt-1">{value}</p>
-        {sub && <p className="text-sm text-muted-foreground mt-1">{sub}</p>}
+        <p className="text-[12px] uppercase tracking-wider text-muted-foreground">{label}</p>
+        <p className="text-[28px] font-bold tracking-tight leading-none mt-2">{value}</p>
+        {sub && <p className="text-[13px] text-muted-foreground mt-2">{sub}</p>}
       </CardContent>
     </Card>
   );
@@ -251,7 +252,7 @@ export default function CompetitiveReportView() {
             <Button variant="ghost" size="sm" className="-ml-2" onClick={() => navigate(isMoburstStaff ? `/clients/${clientId}/competitive/run` : "/")}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Back
             </Button>
-            <h2 className="text-3xl font-bold tracking-tight">{clientName} vs. the field</h2>
+            <h2 className="text-2xl font-bold tracking-tight">{clientName} vs. the field</h2>
             <div className="flex items-center gap-2 flex-wrap text-sm text-muted-foreground">
               <Badge variant={report.status === "complete" ? "default" : report.status === "failed" ? "destructive" : "secondary"}>{report.status}</Badge>
               {period && <Chip>{period}{rd.period?.days ? ` · ${rd.period.days} days` : ""}</Chip>}
@@ -304,7 +305,7 @@ export default function CompetitiveReportView() {
         {ai.executive_summary && (
           <Card className="glass-elevated">
             <CardHeader><CardTitle className="text-lg">Executive summary</CardTitle></CardHeader>
-            <CardContent className="text-[15px] leading-7 whitespace-pre-line">{ai.executive_summary}</CardContent>
+            <CardContent><Clamp text={ai.executive_summary} lines={4} className="text-[15px] leading-7 whitespace-pre-line" /></CardContent>
           </Card>
         )}
 
@@ -337,8 +338,8 @@ export default function CompetitiveReportView() {
         {companies.length > 0 && (
           <section className="space-y-4">
             <div>
-              <h3 className="text-xl font-bold tracking-tight">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
-              <p className="text-sm text-muted-foreground">Volume, engagement and reach for every company in the landscape. Averages are per post; impressions for competitors are RivalIQ estimates.</p>
+              <h3 className="text-lg font-semibold tracking-tight">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
+              <p className="text-[13px] text-muted-foreground">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {ordered.map((c) => {
@@ -424,14 +425,14 @@ export default function CompetitiveReportView() {
                     {schedule.by_weekday && <div><p className="text-xs text-muted-foreground mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} color={RECOMMEND} /></div>}
                     {schedule.by_hour && <div><p className="text-xs text-muted-foreground mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" color={RECOMMEND} /></div>}
                   </div>
-                  {schedule.rationale && <p className="text-[15px] leading-6">{schedule.rationale}</p>}
+                  {schedule.rationale && <Clamp text={schedule.rationale} lines={3} className="text-[15px] leading-6" />}
                 </div>
               )}
 
               {ai.posting_time_insights?.empty_airtime && (
                 <div className="rounded-[12px] p-4 bg-[rgba(185,224,69,0.08)] border border-[rgba(185,224,69,0.25)]">
-                  <p className="text-sm font-semibold mb-1">Empty airtime</p>
-                  <p className="text-[15px] leading-6">{ai.posting_time_insights.empty_airtime}</p>
+                  <p className="text-[12px] uppercase tracking-wider text-muted-foreground mb-1">Empty airtime</p>
+                  <Clamp text={ai.posting_time_insights.empty_airtime} lines={3} className="text-[15px] leading-6" />
                 </div>
               )}
             </CardContent>
@@ -443,7 +444,7 @@ export default function CompetitiveReportView() {
           <section className="space-y-4">
             <div className="flex items-end justify-between gap-4 flex-wrap">
               <div>
-                <h3 className="text-xl font-bold tracking-tight flex items-center gap-2"><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
+                <h3 className="text-lg font-semibold tracking-tight flex items-center gap-2"><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
                 <p className="text-sm text-muted-foreground">
                   {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
                 </p>

@@ -17,6 +17,7 @@ import { Loading } from "@/components/ui/loading";
 import { platformLabel } from "@/components/competitive/PostVisual";
 import { insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
+import { Clamp } from "@/components/ui/clamp";
 import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
@@ -125,7 +126,7 @@ export function CompetitiveSnapshot({
         </div>
       )}
 
-      {ai.executive_summary && <p className="text-[15px] leading-6">{ai.executive_summary}</p>}
+      {ai.executive_summary && <Clamp text={ai.executive_summary} lines={3} className="text-[15px] leading-6" />}
 
       {Array.isArray(takeaways) && takeaways.length > 0 && (
         <div className="rounded-[12px] p-4 bg-[rgba(185,224,69,0.08)] border border-[rgba(185,224,69,0.25)] space-y-2">
@@ -160,7 +161,10 @@ export function CompetitiveSnapshot({
       )}
 
       {ai.posting_time_insights?.empty_airtime && (
-        <p className="text-[14px] leading-6 text-muted-foreground"><span className="text-foreground font-medium">Empty airtime: </span>{ai.posting_time_insights.empty_airtime}</p>
+        <div className="space-y-1">
+          <p className="text-[12px] uppercase tracking-wider text-muted-foreground">Empty airtime</p>
+          <Clamp text={ai.posting_time_insights.empty_airtime} lines={2} className="text-[14px] leading-6 text-muted-foreground" />
+        </div>
       )}
     </div>
   );

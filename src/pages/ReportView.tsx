@@ -49,6 +49,7 @@ import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
 import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
 import { useInsightFeedback } from "@/hooks/useInsightFeedback";
+import { Clamp } from "@/components/ui/clamp";
 import {
   parseCsv,
   stripVoicePreset,
@@ -453,21 +454,6 @@ function Section({ title, description, action, children }: { title: string; desc
       </div>
       {children}
     </section>
-  );
-}
-
-function Clamp({ text, lines = 3, className = "" }: { text: string; lines?: number; className?: string }) {
-  const [open, setOpen] = useState(false);
-  const long = text.length > lines * 110;
-  return (
-    <div className={className}>
-      <p className={open || !long ? "" : lines === 2 ? "line-clamp-2" : lines === 4 ? "line-clamp-4" : "line-clamp-3"}>{text}</p>
-      {long && (
-        <button type="button" onClick={() => setOpen((v) => !v)} className="text-[13px] text-primary hover:underline mt-1 inline-flex items-center gap-1">
-          {open ? "Show less" : "Show more"} <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
-        </button>
-      )}
-    </div>
   );
 }
 
