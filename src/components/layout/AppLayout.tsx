@@ -15,11 +15,13 @@ export function AppLayout({
   children,
   title,
   description,
+  meta,
   actions,
 }: {
   children: ReactNode;
   title?: ReactNode;
   description?: ReactNode;
+  meta?: ReactNode;
   actions?: ReactNode;
 }) {
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -51,7 +53,7 @@ export function AppLayout({
           </div>
         </header>
         <main className="relative z-10 flex-1 p-[32px] space-y-6">
-          {title && <PageHeader title={title} description={description} actions={actions} />}
+          {title && <PageHeader title={title} description={description} meta={meta} actions={actions} />}
           {children}
         </main>
       </SidebarInset>

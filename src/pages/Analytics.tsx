@@ -281,11 +281,15 @@ export default function Analytics() {
   return (
     <AppLayout
       title={title}
-      description={[
-        "Live Sprout performance for the selected window, trends from the monthly reports, and the competitive view.",
-        client?.geo ? `Market: ${client.geo}` : null,
-        client?.language ? `Language: ${client.language}` : null,
-      ].filter(Boolean).join(" · ")}
+      description="Live Sprout performance for the selected window, trends from the monthly reports, and the competitive view."
+      meta={
+        client && (client.geo || client.language) ? (
+          <>
+            {client.geo && <Badge variant="outline">Market: {client.geo}</Badge>}
+            {client.language && <Badge variant="outline">Language: {client.language}</Badge>}
+          </>
+        ) : undefined
+      }
     >
       <div className="space-y-6">
         {/* Header */}

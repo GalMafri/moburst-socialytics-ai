@@ -267,28 +267,8 @@ export default function ReportView() {
   const pillars = aiAnalysis?.sprout_performance_analysis?.pillar_alignment;
 
   return (
-    <AppLayout title={`Report: ${clientName}`}>
+    <AppLayout>
       <div className="w-full space-y-6" ref={reportContentRef}>
-        {/* Presentation deck. Hidden for the client role and when the deck is not ready. */}
-        {!isClient && gammaUrl && (
-          <Card className="border-primary/30 bg-primary/5">
-            <CardContent className="py-4 flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-lg flex items-center justify-center bg-primary/10">
-                  <ExternalLink className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="t-body font-medium">Interactive presentation</p>
-                  <p className="t-secondary">The full deck for this report, ready to share.</p>
-                </div>
-              </div>
-              <Button onClick={() => window.open(gammaUrl, "_blank")}>
-                <ExternalLink className="h-4 w-4 mr-2" /> Open presentation
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
         {/* Header */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-1.5">
@@ -302,6 +282,11 @@ export default function ReportView() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            {!isClient && gammaUrl && (
+              <Button onClick={() => window.open(gammaUrl, "_blank")}>
+                <ExternalLink className="h-4 w-4 mr-2" /> Open presentation
+              </Button>
+            )}
             <ExportPdfButton contentRef={reportContentRef} filename={`${clientName}-report-${new Date(report.created_at).toISOString().slice(0, 10)}`} />
             <ReportActions report={report} />
           </div>
