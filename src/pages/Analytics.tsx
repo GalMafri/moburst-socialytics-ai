@@ -1,4 +1,4 @@
-import { PRESET_LABELS, presetRange, isValidRange, formatRange, rangesOverlap, reportPeriod, type DateRange } from "@/lib/dateRange";
+import { DateRange, formatRange, isValidRange, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate } from "@/lib/dateRange";
 import { PostVisual, usePostPreviews } from "@/components/competitive/PostVisual";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useParams, useNavigate } from "react-router-dom";
@@ -104,6 +104,33 @@ export default function Analytics() {
     retry: 1,
   });
   const liveData = viewWindow ? liveQuery.data : null;
+
+  // "All time" is answered live as well: every day from the first period we
+  // have tracked for this client through today, fetched in year-sized chunks
+  // (the function answers at most a year per call) and added up.
+  const allTimeWindow = useMemo<DateRange | null>(() => {
+    if (range !== "all" || !reports) return null;
+    const today = toISODate(new Date());
+    const starts = reports.map((r: any) => reportPeriod(r).start).filter(Boolean).sort();
+    const start = starts[0] || toISODate(new Date(Date.now() - 365 * 86400000));
+    return start <= today ? { start, end: today } : { start: today, end: today };
+  }, [range, reports]);
+  const allTimeQuery = useQuery({
+    queryKey: ["sprout-analytics-all", id, allTimeWindow?.start, allTimeWindow?.end],
+    queryFn: async () => {
+      const chunks: any[] = [];
+      for (const w of chunkWindow(allTimeWindow!)) {
+        const { data, error } = await supabase.functions.invoke("sprout-analytics", { body: { client_id: id, start: w.start, end: w.end } });
+        if (error) throw new Error((error as any)?.message || "Could not load Sprout data");
+        if ((data as any)?.error) throw new Error((data as any).error);
+        chunks.push(data);
+      }
+      return mergeSproutChunks(chunks, allTimeWindow!);
+    },
+    enabled: !!id && !!allTimeWindow,
+    staleTime: 10 * 60 * 1000,
+    retry: 1,
+  });
 
   // Helper: extract totals from sprout_performance with flexible key lookup
   function extractTotals(sp: any): {
@@ -372,18 +399,21 @@ export default function Analytics() {
                     fmtVal={fmtVal}
                   />
                 )}
+                {range === "all" && allTimeWindow && (
+                  <LiveSproutSection
+                    data={allTimeQuery.data}
+                    isLoading={allTimeQuery.isLoading}
+                    error={allTimeQuery.error as Error | null}
+                    rangeLabel={`All time (${formatRange(allTimeWindow)})`}
+                    fmtVal={fmtVal}
+                  />
+                )}
                 {/* Summary cards — latest report metrics (All Time view) */}
                 {viewWindow ? null : latestTotals ? (
                   <div>
                     <p className="t-secondary mb-2 flex items-center gap-1.5">
                       <BarChart3 className="h-3 w-3" />
-                      Latest Report Metrics —{" "}
-                      {latestReport &&
-                        new Date((latestReport as any).created_at).toLocaleDateString("en-US", {
-                          month: "long",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
+                      Latest report snapshot{latestReport ? ` for ${formatRange(reportPeriod(latestReport as any))}` : ""}. The all-time totals above cover every tracked day.
                     </p>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                       <SummaryCard
@@ -825,6 +855,57 @@ export default function Analytics() {
   );
 }
 
+/* ─── All-time helpers: split a long window into ≤366-day chunks and add the answers up ─── */
+const SPROUT_METRIC_KEYS = ["impressions", "reactions", "post_link_clicks", "video_views", "comments", "shares"] as const;
+function chunkWindow(w: DateRange, maxDays = 366): DateRange[] {
+  const out: DateRange[] = [];
+  let s = new Date(`${w.start}T00:00:00Z`);
+  const end = new Date(`${w.end}T00:00:00Z`);
+  while (s <= end) {
+    const e = new Date(Math.min(s.getTime() + (maxDays - 1) * 86400000, end.getTime()));
+    out.push({ start: toISODate(s), end: toISODate(e) });
+    s = new Date(e.getTime() + 86400000);
+  }
+  return out;
+}
+function mergeSproutChunks(chunks: any[], window: DateRange) {
+  const zero = () => Object.fromEntries(SPROUT_METRIC_KEYS.map((k) => [k, 0])) as Record<string, number>;
+  const totals = zero();
+  const byProfile = new Map<string, any>();
+  const posts: any[] = [];
+  const daily: any[] = [];
+  let profiles: any[] = [];
+  let client: any = null;
+  for (const c of chunks) {
+    if (!c) continue;
+    client = client || c.client;
+    if (Array.isArray(c.profiles) && c.profiles.length) profiles = c.profiles;
+    for (const k of SPROUT_METRIC_KEYS) totals[k] += Number(c.totals?.[k] || 0);
+    for (const p of c.by_profile || []) {
+      const cur = byProfile.get(p.profile_id) || { profile_id: p.profile_id, name: p.name, network: p.network, ...zero() };
+      for (const k of SPROUT_METRIC_KEYS) cur[k] += Number(p[k] || 0);
+      byProfile.set(p.profile_id, cur);
+    }
+    posts.push(...(c.top_posts || []));
+    if (Array.isArray(c.daily)) daily.push(...c.daily);
+  }
+  posts.sort((a, b) => Number(b.impressions || 0) - Number(a.impressions || 0));
+  return {
+    client,
+    range: { start: window.start, end: window.end, days: rangeDays(window) },
+    previous_range: null,
+    profiles,
+    totals,
+    previous_totals: null,
+    changes: {},
+    daily,
+    by_profile: [...byProfile.values()],
+    top_posts: posts.slice(0, 20),
+    chunks: chunks.length,
+    fetched_at: new Date().toISOString(),
+  };
+}
+
 /* ─── Summary Card with optional MoM change ─── */
 function SummaryCard({
   icon,
@@ -923,7 +1004,9 @@ function LiveSproutSection({
       <div>
         <p className="t-secondary mb-2 flex items-center gap-1.5">
           <BarChart3 className="h-3 w-3" />
-          Sprout data for {rangeLabel} · compared with the {data.previous_range?.days} days before ({formatRange(data.previous_range)})
+          {data.previous_range
+            ? <>Sprout data for {rangeLabel} · compared with the {data.previous_range.days} days before ({formatRange(data.previous_range)})</>
+            : <>Live Sprout totals for {rangeLabel}: every day from {formatRange(data.range)} added up{data.chunks > 1 ? ` across ${data.chunks} requests` : ""}</>}
         </p>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <SummaryCard icon={<Eye className="h-3.5 w-3.5" />} label="Impressions" value={metric("impressions")} change={pct("impressions")} />
