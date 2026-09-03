@@ -11,7 +11,7 @@
 // are resolved by the post-preview edge function and cached in post_previews;
 // `usePostPreviews` batches that lookup for a whole list of posts.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Play, Layers, Image as ImageIcon, ExternalLink } from "lucide-react";
@@ -132,6 +132,25 @@ export function usePostPreviews(items: Array<string | PreviewHint | null | undef
   return { previews: query.data || {}, isLoading: query.isLoading, error: query.error };
 }
 
+// Video frames load only when the tile is near the viewport, and at most a
+// few at a time. Storage shares its HTTP/2 connection with the Supabase API,
+// and a dozen parallel media streams starve everything else on the page.
+const MAX_CONCURRENT_VIDEO_LOADS = 3;
+let activeVideoLoads = 0;
+const videoLoadQueue: Array<() => void> = [];
+function scheduleVideoLoad(start: () => Promise<void>) {
+  const run = () => {
+    activeVideoLoads += 1;
+    start().finally(() => {
+      activeVideoLoads -= 1;
+      const next = videoLoadQueue.shift();
+      if (next) next();
+    });
+  };
+  if (activeVideoLoads < MAX_CONCURRENT_VIDEO_LOADS) run();
+  else videoLoadQueue.push(run);
+}
+
 type PostVisualProps = {
   url?: string | null;
   /** A thumbnail already known for the post (RivalIQ `image`). */
@@ -172,15 +191,38 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
   const kind = mediaKind(mediaType || preview?.media_type, url);
   const plat = normalizePlatform(platform || preview?.platform || platformFromUrl(url));
   const ratio = (src && measured[src]) || defaultRatio(kind, plat, url);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || !src || !isVideoFile) return;
+    let cancelled = false;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      observer.disconnect();
+      scheduleVideoLoad(() => new Promise<void>((done) => {
+        if (cancelled || !videoRef.current) return done();
+        const v = videoRef.current;
+        const finish = () => { v.removeEventListener("loadeddata", finish); v.removeEventListener("error", finish); done(); };
+        v.addEventListener("loadeddata", finish);
+        v.addEventListener("error", finish);
+        setTimeout(finish, 20000);
+        v.preload = "metadata";
+        v.src = `${src}#t=0.1`;
+        v.load();
+      }));
+    }, { rootMargin: "300px" });
+    observer.observe(el);
+    return () => { cancelled = true; observer.disconnect(); };
+  }, [src, isVideoFile]);
 
   const body = (
     <>
       {src && isVideoFile ? (
         <video
-          src={`${src}#t=0.1`}
+          ref={videoRef}
           muted
           playsInline
-          preload="metadata"
+          preload="none"
           onError={fail}
           onLoadedMetadata={(e) => measure(e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
           className="absolute inset-0 h-full w-full object-cover pointer-events-none"
