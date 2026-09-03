@@ -22,23 +22,29 @@ export function Prose({ text, className }: { text: string | null | undefined; cl
   );
 }
 
-const ENUM_SPLIT = /\s*(?:\((\d{1,2})\)|(?<![\d.])(\d{1,2})\)|(?<![\w])(\d{1,2})\.(?=\s[A-Z]))\s+/;
+// Enumerator candidates: "(1) ", "1) " or "1. " at the start or after whitespace, never
+// glued to a time or number such as "18:00)" or "3.5".
+const ENUM_CANDIDATE = /(^|\s)(?:\((\d{1,2})\)|(\d{1,2})\)|(\d{1,2})\.)(?=\s+\S)/g;
+
+/** Splits "intro (1) a (2) b" into { intro, items } only when the markers run 1, 2, 3… in order. */
+function splitEnumeration(text: string): { intro: string; items: string[] } | null {
+  const marks: { index: number; end: number; n: number }[] = [];
+  for (const m of text.matchAll(ENUM_CANDIDATE)) {
+    const n = Number(m[2] ?? m[3] ?? m[4]);
+    marks.push({ index: m.index! + m[1].length, end: m.index! + m[0].length, n });
+  }
+  const seq = marks.filter((m, i) => m.n === i + 1);
+  if (seq.length < 2 || seq.length !== marks.length) return null;
+  const intro = text.slice(0, seq[0].index).trim();
+  const items = seq.map((m, i) => text.slice(m.end, i + 1 < seq.length ? seq[i + 1].index : undefined).trim()).filter(Boolean);
+  return items.length >= 2 ? { intro, items } : null;
+}
 
 function Paragraph({ text }: { text: string }) {
-  // Inline enumeration: "(1) … (2) …" / "1) … 2) …" / "1. … 2. …" with at least two items.
-  const parts = text.split(ENUM_SPLIT).filter((s) => s !== undefined);
-  const items: string[] = [];
-  let intro = "";
-  for (let i = 0; i < parts.length; i++) {
-    const s = parts[i];
-    if (/^\d{1,2}$/.test(s)) {
-      const body = (parts[i + 1] || "").trim();
-      if (body) items.push(body);
-      i++;
-    } else if (items.length === 0 && s.trim()) {
-      intro += s;
-    }
-  }
+  // Inline enumeration: "(1) … (2) …" / "1) … 2) …" / "1. … 2. …" with at least two items in order.
+  const enumerated = splitEnumeration(text);
+  const items = enumerated?.items ?? [];
+  const intro = enumerated?.intro ?? "";
   if (items.length >= 2) {
     return (
       <div className="space-y-2">

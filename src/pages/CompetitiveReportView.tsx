@@ -296,42 +296,48 @@ export default function CompetitiveReportView() {
 
         {/* Executive summary */}
         {ai.executive_summary && (
-          <Card className="glass-elevated">
-            <CardHeader><CardTitle className="text-lg">Executive summary</CardTitle></CardHeader>
-            <CardContent><Prose text={ai.executive_summary} className="t-body whitespace-pre-line" /></CardContent>
-          </Card>
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="t-h2 flex items-center gap-2">Executive summary</h2>
+            </div>
+            <Card className="glass-elevated">
+              <CardContent><Prose text={ai.executive_summary} className="t-body whitespace-pre-line" /></CardContent>
+            </Card>
+          </section>
         )}
 
         {/* Scorecard */}
         {scorecard?.dimensions?.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="t-h3 flex items-center gap-2"><Gauge className="h-5 w-5" /> Where {clientName} stands</CardTitle>
-              <CardDescription>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              {scorecard.dimensions.map((d: any, i: number) => (
-                <div key={i} className="space-y-2">
-                  <div className="flex justify-between items-baseline gap-4">
-                    <span className="font-medium">{d.dimension}</span>
-                    <span className="t-secondary whitespace-nowrap">{d.client} <span className="opacity-60">vs</span> {d.competitor_avg}</span>
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="t-h2 flex items-center gap-2"><Gauge className="h-5 w-5" /> Where {clientName} stands</h2>
+              <p className="t-secondary">Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</p>
+            </div>
+            <Card>
+              <CardContent className="pt-5 space-y-5">
+                {scorecard.dimensions.map((d: any, i: number) => (
+                  <div key={i} className="space-y-2">
+                    <div className="flex justify-between items-baseline gap-4">
+                      <span className="font-medium">{d.dimension}</span>
+                      <span className="t-secondary whitespace-nowrap">{d.client} <span className="opacity-60">vs</span> {d.competitor_avg}</span>
+                    </div>
+                    <div className="relative h-3 rounded-full bg-[rgba(255,255,255,0.06)]">
+                      <div className="absolute left-0 top-0 h-3 rounded-full" style={{ width: `${Math.min(100, d.client || 0)}%`, backgroundColor: `rgb(${ACCENT})` }} />
+                      <div className="absolute top-[-4px] h-5 w-[3px] rounded bg-white/80" style={{ left: `${Math.min(100, d.competitor_avg || 0)}%` }} title="competitor average" />
+                    </div>
+                    {d.note && <p className="t-secondary">{d.note}</p>}
                   </div>
-                  <div className="relative h-3 rounded-full bg-[rgba(255,255,255,0.06)]">
-                    <div className="absolute left-0 top-0 h-3 rounded-full" style={{ width: `${Math.min(100, d.client || 0)}%`, backgroundColor: `rgb(${ACCENT})` }} />
-                    <div className="absolute top-[-4px] h-5 w-[3px] rounded bg-white/80" style={{ left: `${Math.min(100, d.competitor_avg || 0)}%` }} title="competitor average" />
-                  </div>
-                  {d.note && <p className="t-secondary">{d.note}</p>}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                ))}
+              </CardContent>
+            </Card>
+          </section>
         )}
 
         {/* The field */}
         {companies.length > 0 && (
           <section className="space-y-4">
             <div>
-              <h3 className="t-h2">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
+              <h2 className="t-h2">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
               <p className="t-secondary">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
@@ -395,41 +401,43 @@ export default function CompetitiveReportView() {
 
         {/* Posting rhythm */}
         {ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="t-h3 flex items-center gap-2"><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</CardTitle>
-              <CardDescription className="t-body">{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.post_count > 0).map(({ c, b }) => (
-                <div key={c.company_id} className="space-y-2">
-                  <div className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
-                  <div className="flex flex-wrap gap-8">
-                    <div><p className="t-secondary mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} /></div>
-                    <div><p className="t-secondary mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" /></div>
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="t-h2 flex items-center gap-2"><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</h2>
+              <p className="t-secondary">{ai.posting_time_insights?.summary || "When each company posts, by weekday and by hour (UTC)."}</p>
+            </div>
+            <Card>
+              <CardContent className="pt-5 space-y-6">
+                {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.post_count > 0).map(({ c, b }) => (
+                  <div key={c.company_id} className="space-y-2">
+                    <div className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
+                    <div className="flex flex-wrap gap-8">
+                      <div><p className="t-secondary mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} /></div>
+                      <div><p className="t-secondary mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" /></div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
 
-              {schedule && (schedule.by_weekday || schedule.by_hour) && (
-                <div className="glass-inner p-4 space-y-3">
-                  <div className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-4 w-4" /> Recommended schedule for {clientName}</div>
-                  <div className="flex flex-wrap gap-8">
-                    {schedule.by_weekday && <div><p className="t-secondary mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} color={RECOMMEND} /></div>}
-                    {schedule.by_hour && <div><p className="t-secondary mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" color={RECOMMEND} /></div>}
+                {schedule && (schedule.by_weekday || schedule.by_hour) && (
+                  <div className="glass-inner p-4 space-y-3">
+                    <div className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-4 w-4" /> Recommended schedule for {clientName}</div>
+                    <div className="flex flex-wrap gap-8">
+                      {schedule.by_weekday && <div><p className="t-secondary mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} color={RECOMMEND} /></div>}
+                      {schedule.by_hour && <div><p className="t-secondary mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" color={RECOMMEND} /></div>}
+                    </div>
+                    {schedule.rationale && <Prose text={schedule.rationale} className="t-body" />}
                   </div>
-                  {schedule.rationale && <Prose text={schedule.rationale} className="t-body" />}
-                </div>
-              )}
+                )}
 
-              {ai.posting_time_insights?.empty_airtime && (
-                <div className="glass-accent p-4">
-                  <p className="t-label uppercase tracking-wider mb-1">Empty airtime</p>
-                  <Prose text={ai.posting_time_insights.empty_airtime} className="t-body" />
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                {ai.posting_time_insights?.empty_airtime && (
+                  <div className="glass-accent p-4">
+                    <p className="t-label uppercase tracking-wider mb-1">Empty airtime</p>
+                    <Prose text={ai.posting_time_insights.empty_airtime} className="t-body" />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </section>
         )}
 
         {/* Gaps */}
@@ -437,7 +445,7 @@ export default function CompetitiveReportView() {
           <section className="space-y-4">
             <div className="flex items-end justify-between gap-4 flex-wrap">
               <div>
-                <h3 className="t-h2 flex items-center gap-2"><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
+                <h2 className="t-h2 flex items-center gap-2"><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
                 <p className="t-secondary">
                   {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
                 </p>
@@ -487,101 +495,112 @@ export default function CompetitiveReportView() {
               })}
             </div>
             {isMoburstStaff && showHidden && hiddenGaps.length > 0 && (
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="t-h3">Hidden suggestions</CardTitle><CardDescription>Excluded from future runs and from the monthly report brief.</CardDescription></CardHeader>
-                <CardContent className="space-y-2">
-                  {hiddenGaps.map((g: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between gap-3 t-body">
-                      <span className="text-muted-foreground line-through">{g.gap}</span>
-                      <Button size="sm" variant="ghost" onClick={() => castVote(g, "down")}><RotateCcw className="h-3.5 w-3.5 mr-1" /> Restore</Button>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
+              <section className="space-y-4">
+                <div className="space-y-1">
+                  <h2 className="t-h2 flex items-center gap-2">Hidden suggestions</h2>
+                  <p className="t-secondary">Excluded from future runs and from the monthly report brief.</p>
+                </div>
+                <Card>
+                  <CardContent className="pt-5 space-y-2">
+                    {hiddenGaps.map((g: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between gap-3 t-body">
+                        <span className="text-muted-foreground line-through">{g.gap}</span>
+                        <Button size="sm" variant="ghost" onClick={() => castVote(g, "down")}><RotateCcw className="h-3.5 w-3.5 mr-1" /> Restore</Button>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </section>
             )}
           </section>
         )}
 
         {/* Winner teardown */}
         {Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="t-h3 flex items-center gap-2"><Trophy className="h-5 w-5" /> What wins for them</CardTitle>
-              <CardDescription>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-3">
-              {ai.winner_teardown.map((w: any, i: number) => {
-                const examples: Array<{ url: string; post?: TopPost }> = (w.example_post_urls || []).slice(0, 3).map((u: string) => ({ url: u, post: allPosts.get(u) }));
-                return (
-                  <div key={i} className="glass-inner p-4 space-y-3">
-                    <p className="t-label uppercase tracking-wider">{w.competitor}</p>
-                    <p className="font-semibold leading-snug">{w.pattern}</p>
-                    <p className="t-prose">{w.evidence}</p>
-                    {examples.length > 0 && (
-                      <div className="space-y-2 pt-1">
-                        <div className={`grid gap-2 items-start ${examples.length === 1 ? "grid-cols-1" : examples.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
-                          {examples.map((ex, j) => (
-                            <PostVisual key={j} url={ex.url} image={ex.post?.image} preview={previews[ex.url]} mediaType={ex.post?.media_type} platform={ex.post?.channel} compact />
-                          ))}
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="t-h2 flex items-center gap-2"><Trophy className="h-5 w-5" /> What wins for them</h2>
+              <p className="t-secondary">The repeatable pattern behind each competitor's best posts, with the posts that prove it.</p>
+            </div>
+            <Card>
+              <CardContent className="pt-5 grid gap-4 md:grid-cols-3">
+                {ai.winner_teardown.map((w: any, i: number) => {
+                  const examples: Array<{ url: string; post?: TopPost }> = (w.example_post_urls || []).slice(0, 3).map((u: string) => ({ url: u, post: allPosts.get(u) }));
+                  return (
+                    <div key={i} className="glass-inner p-4 space-y-3">
+                      <p className="t-label uppercase tracking-wider">{w.competitor}</p>
+                      <p className="font-semibold leading-snug">{w.pattern}</p>
+                      <p className="t-prose">{w.evidence}</p>
+                      {examples.length > 0 && (
+                        <div className="space-y-2 pt-1">
+                          <div className={`grid gap-2 items-start ${examples.length === 1 ? "grid-cols-1" : examples.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+                            {examples.map((ex, j) => (
+                              <PostVisual key={j} url={ex.url} image={ex.post?.image} preview={previews[ex.url]} mediaType={ex.post?.media_type} platform={ex.post?.channel} compact />
+                            ))}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {examples.map((ex, j) => (
+                              <Button key={j} size="sm" variant="outline" className="h-7 t-label" asChild>
+                                <a href={ex.url} target="_blank" rel="noreferrer"><ExternalLink className="h-3 w-3 mr-1" /> Post {j + 1}{ex.post ? ` · ${fmt(ex.post.engagement)} eng.` : ""}</a>
+                              </Button>
+                            ))}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {examples.map((ex, j) => (
-                            <Button key={j} size="sm" variant="outline" className="h-7 t-label" asChild>
-                              <a href={ex.url} target="_blank" rel="noreferrer"><ExternalLink className="h-3 w-3 mr-1" /> Post {j + 1}{ex.post ? ` · ${fmt(ex.post.engagement)} eng.` : ""}</a>
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </section>
         )}
 
         {/* Mood boards */}
         {ordered.some((c) => moodPosts(c).length > 0) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="t-h3 flex items-center gap-2"><Images className="h-5 w-5" /> Mood boards</CardTitle>
-              <CardDescription>The creative each company actually ran in the period, side by side. Click any tile to open the post.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {ordered.map((c) => {
-                const posts = moodPosts(c);
-                if (!posts.length) return null;
-                return (
-                  <div key={c.company_id} className="space-y-2">
-                    <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
-                    <div className="grid gap-2 grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
-                      {posts.map((p, i) => <PostVisual key={i} url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} compact />)}
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="t-h2 flex items-center gap-2"><Images className="h-5 w-5" /> Mood boards</h2>
+              <p className="t-secondary">The creative each company actually ran in the period, side by side. Click any tile to open the post.</p>
+            </div>
+            <Card>
+              <CardContent className="pt-5 space-y-6">
+                {ordered.map((c) => {
+                  const posts = moodPosts(c);
+                  if (!posts.length) return null;
+                  return (
+                    <div key={c.company_id} className="space-y-2">
+                      <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
+                      <div className="grid gap-2 grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
+                        {posts.map((p, i) => <PostVisual key={i} url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} compact />)}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </section>
         )}
 
         {/* Top posts */}
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="t-h3 flex items-center gap-2"><Layers className="h-5 w-5" /> Top 5 posts per company</CardTitle>
-              <CardDescription>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-8">
-              {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
-                <div key={c.company_id} className="space-y-3">
-                  <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
-                  <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5 items-start">
-                    {b.top_posts.slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h2 className="t-h2 flex items-center gap-2"><Layers className="h-5 w-5" /> Top 5 posts per company</h2>
+              <p className="t-secondary">Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</p>
+            </div>
+            <Card>
+              <CardContent className="pt-5 space-y-8">
+                {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
+                  <div key={c.company_id} className="space-y-3">
+                    <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
+                    <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5 items-start">
+                      {b.top_posts.slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                ))}
+              </CardContent>
+            </Card>
+          </section>
         )}
       </div>
     </AppLayout>

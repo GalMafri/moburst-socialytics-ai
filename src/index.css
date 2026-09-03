@@ -216,8 +216,9 @@
   .t-h1 { font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.5px; }
   .t-h2 { font-size: 20px; line-height: 26px; font-weight: 700; letter-spacing: -0.5px; }
   .t-h3 { font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.3px; }
-  .t-body { font-size: 15px; line-height: 22px; letter-spacing: -0.2px; }
-  .t-secondary { font-size: 15px; line-height: 22px; letter-spacing: -0.2px; }
+  .t-body { font-size: 15px; line-height: 24px; letter-spacing: -0.2px; }
+  .t-secondary { font-size: 15px; line-height: 24px; letter-spacing: -0.2px; }
+  p.t-body:not(.flex):not(.truncate), p.t-secondary:not(.flex):not(.truncate), li.t-body { max-width: 72ch; }
   .t-label { font-size: 13px; line-height: 18px; letter-spacing: 0.1px; }
   .t-badge { font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: -0.2px; }
   /* Long-form AI passages: bigger, looser, capped at a readable measure. */

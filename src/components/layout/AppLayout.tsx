@@ -52,9 +52,11 @@ export function AppLayout({
             <p className="t-label">{today}</p>
           </div>
         </header>
-        <main className="relative z-10 flex-1 p-[32px] space-y-6">
-          {title && <PageHeader title={title} description={description} meta={meta} actions={actions} />}
-          {children}
+        <main className="relative z-10 flex-1 p-[32px]">
+          <div className="mx-auto w-full max-w-[1440px] space-y-6">
+            {title && <PageHeader title={title} description={description} meta={meta} actions={actions} />}
+            {children}
+          </div>
         </main>
       </SidebarInset>
     </SidebarProvider>
