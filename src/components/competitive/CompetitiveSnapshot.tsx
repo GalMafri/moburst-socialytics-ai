@@ -18,7 +18,7 @@ import { Loading } from "@/components/ui/loading";
 import { platformLabel } from "@/components/competitive/PostVisual";
 import { insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
-import { Clamp } from "@/components/ui/clamp";
+import { Prose } from "@/components/ui/prose";
 import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
@@ -120,15 +120,18 @@ export function CompetitiveSnapshot({
       )}
 
       {ai.executive_summary && (
-        <Card><CardContent className="pt-5"><Clamp text={ai.executive_summary} lines={3} className="t-body" /></CardContent></Card>
+        <Card><CardContent className="pt-5"><Prose text={ai.executive_summary} /></CardContent></Card>
       )}
 
       {Array.isArray(takeaways) && takeaways.length > 0 && (
-        <div className="glass-accent p-4 space-y-2">
-          <p className="t-label uppercase tracking-wider">What this report took from the competitors</p>
-          <ol className="space-y-2">
-            {takeaways.slice(0, 4).map((t, i) => (
-              <li key={i} className="flex gap-3 t-body">
+        <div className="glass-accent p-5 space-y-3">
+          <div>
+            <h3 className="t-h3">How this report used the competitive picture</h3>
+            <p className="t-secondary">Written by the report synthesis with the competitor analysis in hand.</p>
+          </div>
+          <ol className="space-y-3">
+            {takeaways.map((t, i) => (
+              <li key={i} className="flex gap-3 t-prose">
                 <span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary text-primary-foreground t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
                 <span>{t}</span>
               </li>
@@ -148,7 +151,7 @@ export function CompetitiveSnapshot({
                   {verdictFor(g.gap) === "up" && <Badge className="t-label gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                 </div>
                 <p className="t-body font-medium">{g.gap}</p>
-                {g.suggested_play && <p className="t-secondary line-clamp-3">{g.suggested_play}</p>}
+                {g.suggested_play && <p className="t-body"><span className="text-[#b9e045] font-semibold">Play: </span>{g.suggested_play}</p>}
               </div>
             ))}
           </div>
@@ -158,7 +161,7 @@ export function CompetitiveSnapshot({
       {ai.posting_time_insights?.empty_airtime && (
         <Card><CardContent className="pt-5 space-y-1">
           <p className="t-label uppercase tracking-wider">Empty airtime</p>
-          <Clamp text={ai.posting_time_insights.empty_airtime} lines={2} className="t-secondary" />
+          <Prose text={ai.posting_time_insights.empty_airtime} className="t-secondary" />
         </CardContent></Card>
       )}
     </div>

@@ -17,7 +17,7 @@
     --secondary: 220 12% 16%;
     --secondary-foreground: 0 0% 90%;
     --muted: 222 10% 16%;
-    --muted-foreground: 218 11% 73%;
+    --muted-foreground: 220 13% 85%;
     --accent: 222 10% 16%;
     --accent-foreground: 0 0% 95%;
     --destructive: 0 70% 50%;
@@ -220,8 +220,10 @@
   .t-secondary { font-size: 15px; line-height: 22px; letter-spacing: -0.2px; }
   .t-label { font-size: 13px; line-height: 18px; letter-spacing: 0.1px; }
   .t-badge { font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: -0.2px; }
-  :where(.t-stat, .t-h1, .t-h2, .t-h3) { color: #ffffff; }
+  /* Long-form AI passages: bigger, looser, capped at a readable measure. */
+  .t-prose { font-size: 16px; line-height: 26px; letter-spacing: -0.1px; max-width: 72ch; }
+  :where(.t-stat, .t-h1, .t-h2, .t-h3, .t-prose) { color: #ffffff; }
   /* Secondary sentences stay light (#d1d5db, 12.6:1). Grey (#b1b7c1, 9.6:1) is for short labels only. */
-  :where(.t-secondary) { color: #d1d5db; }
+  :where(.t-secondary) { color: #e5e7eb; }
   :where(.t-label) { color: #b1b7c1; }
 }

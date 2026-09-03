@@ -50,7 +50,7 @@ import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
 import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
 import { useInsightFeedback } from "@/hooks/useInsightFeedback";
-import { Clamp } from "@/components/ui/clamp";
+import { Prose } from "@/components/ui/prose";
 import {
   parseCsv,
   stripVoicePreset,
@@ -345,11 +345,11 @@ export default function ReportView() {
               <Section title="Key insights">
                 <Card>
                   <CardContent className="pt-5 space-y-5">
-                    {summary && <Clamp text={formatNumbersInText(summary)} lines={3} className="t-secondary" />}
+                    {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
                     {insights.length > 0 && (
                       <ol className="space-y-3">
                         {insights.map((t, i) => (
-                          <li key={i} className="flex gap-3 t-body">
+                          <li key={i} className="flex gap-3 t-prose">
                             <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-body font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
                             <span>{formatNumbersInText(t)}</span>
                           </li>
@@ -482,7 +482,7 @@ function ActionCard({ action, onOpen }: { action: { source: string; title: strin
     <button type="button" onClick={onOpen} className="text-left glass-inner p-4 space-y-2 group">
       <span className="inline-flex items-center gap-1.5 t-label uppercase tracking-wider">{icon} {action.source}</span>
       <p className="t-body font-medium">{action.title}</p>
-      {action.detail && <p className="t-secondary line-clamp-2">{action.detail}</p>}
+      {action.detail && <p className="t-body">{action.detail}</p>}
       <span className="t-body text-primary inline-flex items-center gap-1 opacity-80 group-hover:opacity-100">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open Trends" : "Open Competitive"} <ArrowRight className="h-3.5 w-3.5" /></span>
     </button>
   );
@@ -653,7 +653,6 @@ function postPlatformKey(post: any): string {
 
 /* ─── Platform Performance Card (mirrors the aggregate MetricsCards styling) ─── */
 function PlatformPerformanceCard({ platform }: { platform: any }) {
-  const [more, setMore] = useState(false);
   const metrics = [
     { key: "impressions", label: "Impressions", icon: Eye },
     { key: "reactions", label: "Reactions", icon: Heart },
@@ -736,18 +735,13 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
         {Array.isArray(ai?.insights) && ai.insights.length > 0 && (
           <div className="pt-3 border-t space-y-2">
             <ul className="space-y-1.5">
-              {ai.insights.slice(0, more ? 3 : 1).map((t: string, i: number) => (
-                <li key={i} className="t-secondary flex gap-2">
+              {ai.insights.map((t: string, i: number) => (
+                <li key={i} className="t-body flex gap-2">
                   <span className="text-primary flex-shrink-0">•</span>
                   <span>{formatNumbersInText(t)}</span>
                 </li>
               ))}
             </ul>
-            {ai.insights.length > 1 && (
-              <button type="button" onClick={() => setMore((v) => !v)} className="t-body text-primary hover:underline inline-flex items-center gap-1">
-                {more ? "Show less" : `${ai.insights.length - 1} more`} <ChevronDown className={`h-3.5 w-3.5 transition-transform ${more ? "rotate-180" : ""}`} />
-              </button>
-            )}
           </div>
         )}
       </CardContent>
@@ -912,7 +906,7 @@ function TrendsSection({
         </div>
         <div className="min-w-0">
           <h3 className="t-h3">{title}</h3>
-          {analysis?.overview && <Clamp text={analysis.overview} lines={3} className="t-secondary mt-1" />}
+          {analysis?.overview && <Prose text={analysis.overview} className="t-secondary mt-1" />}
         </div>
       </div>
 
@@ -941,7 +935,7 @@ function TrendsSection({
               {formats.map((f, i) => (
                 <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-[rgba(255,255,255,0.03)]">
                   <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary/10 text-primary t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
-                  <p className="t-body">{f}</p>
+                  <p className="t-prose">{f}</p>
                 </div>
               ))}
             </div>
@@ -957,7 +951,7 @@ function TrendsSection({
               {opportunities.map((o, i) => (
                 <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-background border">
                   <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
-                  <p className="t-body pt-0.5">{o}</p>
+                  <p className="t-prose pt-0.5">{o}</p>
                 </div>
               ))}
             </div>
@@ -973,7 +967,7 @@ function TrendsSection({
               {takeaways.map((t, i) => (
                 <div key={i} className="flex items-start gap-3 p-2">
                   <span className="flex-shrink-0 mt-1 text-warning">✦</span>
-                  <p className="t-body">{t}</p>
+                  <p className="t-prose">{t}</p>
                 </div>
               ))}
             </div>

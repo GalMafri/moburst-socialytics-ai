@@ -24,7 +24,7 @@ import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@
 import { partitionGaps, useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
-import { Clamp } from "@/components/ui/clamp";
+import { Prose } from "@/components/ui/prose";
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images } from "lucide-react";
 
 type TopPost = {
@@ -298,7 +298,7 @@ export default function CompetitiveReportView() {
         {ai.executive_summary && (
           <Card className="glass-elevated">
             <CardHeader><CardTitle className="text-lg">Executive summary</CardTitle></CardHeader>
-            <CardContent><Clamp text={ai.executive_summary} lines={4} className="t-body whitespace-pre-line" /></CardContent>
+            <CardContent><Prose text={ai.executive_summary} className="t-body whitespace-pre-line" /></CardContent>
           </Card>
         )}
 
@@ -418,14 +418,14 @@ export default function CompetitiveReportView() {
                     {schedule.by_weekday && <div><p className="t-secondary mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} color={RECOMMEND} /></div>}
                     {schedule.by_hour && <div><p className="t-secondary mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" color={RECOMMEND} /></div>}
                   </div>
-                  {schedule.rationale && <Clamp text={schedule.rationale} lines={3} className="t-body" />}
+                  {schedule.rationale && <Prose text={schedule.rationale} className="t-body" />}
                 </div>
               )}
 
               {ai.posting_time_insights?.empty_airtime && (
                 <div className="glass-accent p-4">
                   <p className="t-label uppercase tracking-wider mb-1">Empty airtime</p>
-                  <Clamp text={ai.posting_time_insights.empty_airtime} lines={3} className="t-body" />
+                  <Prose text={ai.posting_time_insights.empty_airtime} className="t-body" />
                 </div>
               )}
             </CardContent>
@@ -465,7 +465,7 @@ export default function CompetitiveReportView() {
                           </div>
                         </div>
                       </div>
-                      {g.why_it_matters && <p className="t-secondary">{g.why_it_matters}</p>}
+                      {g.why_it_matters && <p className="t-prose">{g.why_it_matters}</p>}
                       {g.suggested_play && (
                         <div className="glass-accent p-3 t-body">
                           <span className="font-semibold">The play: </span>{g.suggested_play}
@@ -516,7 +516,7 @@ export default function CompetitiveReportView() {
                   <div key={i} className="glass-inner p-4 space-y-3">
                     <p className="t-label uppercase tracking-wider">{w.competitor}</p>
                     <p className="font-semibold leading-snug">{w.pattern}</p>
-                    <p className="t-secondary">{w.evidence}</p>
+                    <p className="t-prose">{w.evidence}</p>
                     {examples.length > 0 && (
                       <div className="space-y-2 pt-1">
                         <div className={`grid gap-2 items-start ${examples.length === 1 ? "grid-cols-1" : examples.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
