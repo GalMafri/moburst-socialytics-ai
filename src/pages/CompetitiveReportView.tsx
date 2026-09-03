@@ -26,6 +26,7 @@ import { formatRange } from "@/lib/dateRange";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { Prose } from "@/components/ui/prose";
 import { Section } from "@/components/ui/section";
+import { RankedBars } from "@/components/ui/bars";
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images } from "lucide-react";
 
 type TopPost = {
@@ -334,6 +335,18 @@ export default function CompetitiveReportView() {
               <h2 className="t-h2">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
               <p className="t-secondary">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
             </div>
+            <Card>
+              <CardContent className="pt-5 grid gap-8 lg:grid-cols-2">
+                <div className="space-y-3">
+                  <p className="t-label uppercase tracking-wider">Posts per week</p>
+                  <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => v.toFixed(1)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: c.name, value: Number(bucketFor(c, effectivePlat).cadence_per_week || 0), emphasized: !!c.is_client }))} />
+                </div>
+                <div className="space-y-3">
+                  <p className="t-label uppercase tracking-wider">Engagement rate</p>
+                  <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => pct(v)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: c.name, value: Number(bucketFor(c, effectivePlat).engagement_rate_avg || 0), emphasized: !!c.is_client }))} />
+                </div>
+              </CardContent>
+            </Card>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {ordered.map((c) => {
                 const b = bucketFor(c, effectivePlat);

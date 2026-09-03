@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
  */
 export function Section({
   id,
+  index,
   title,
   description,
   action,
@@ -15,6 +16,8 @@ export function Section({
   className,
 }: {
   id?: string;
+  /** Chapter number shown before the title (01, 02, …). */
+  index?: number;
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
@@ -25,7 +28,10 @@ export function Section({
     <section id={id} className={cn("space-y-4 scroll-mt-28", className)}>
       <div className="glass px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
         <div className="space-y-1 min-w-0">
-          <h2 className="t-h2 flex items-center gap-2">{title}</h2>
+          <h2 className="t-h2 flex items-center gap-3">
+            {index != null && <span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">{String(index).padStart(2, "0")}</span>}
+            <span className="flex items-center gap-2">{title}</span>
+          </h2>
           {description && <p className="t-secondary">{description}</p>}
         </div>
         {action && <div className="flex items-center gap-2 shrink-0">{action}</div>}

@@ -53,6 +53,7 @@ import { useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
 import { InsightGrid } from "@/components/ui/insight-card";
+import { CompareBars, RankedBars, compactNumber } from "@/components/ui/bars";
 import {
   parseCsv,
   stripVoicePreset,
@@ -249,6 +250,16 @@ export default function ReportView() {
     ...(aiAnalysis?.tiktok_trends_analysis?.opportunities_for_client || []),
     ...(aiAnalysis?.instagram_trends_analysis?.opportunities_for_client || []),
   ];
+  const hero = (() => {
+    const ch = monthComparison?.changes || {};
+    let best: { label: string; pct: number } | null = null;
+    for (const [k, v] of Object.entries<any>(ch)) {
+      const pct = typeof v?.percent === "number" ? v.percent : null;
+      if (pct == null || !Number.isFinite(pct)) continue;
+      if (!best || Math.abs(pct) > Math.abs(best.pct)) best = { label: k.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()), pct };
+    }
+    return best;
+  })();
   type Action = { source: "Competitors" | "Performance" | "Trends"; title: string; detail?: string; tab?: string; anchor?: string; href?: string };
   const actions: Action[] = [];
   for (const g of endorsedGaps.slice(0, 2)) actions.push({ source: "Competitors", title: g.gap, detail: g.suggested_play, href: `/clients/${report.client_id}/competitive/reports/${latestCompetitive!.id}` });
@@ -321,15 +332,28 @@ export default function ReportView() {
             />
 
             {monthComparison?.changes && (
-              <Section id="glance" title="At a glance" description="This period against the one before it.">
+              <Section id="glance" index={1} title="At a glance" description="This period against the one before it.">
                 <MetricsCards changes={monthComparison.changes} previousMonth={monthComparison.previous_month} />
               </Section>
             )}
 
             {(insights.length > 0 || summary) && (
-              <Section id="highlights" title="Highlights" description="What happened this period and why, written from the numbers.">
+              <Section id="highlights" index={2} title="Highlights" description="What happened this period and why, written from the numbers.">
                 <Card><CardContent className="pt-5 space-y-5">
-                    {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
+                    {(hero || summary) && (
+                      <div className="grid gap-6 md:grid-cols-[auto_1fr] items-start">
+                        {hero && (
+                          <div className="min-w-[12rem]">
+                            <p className="t-label uppercase tracking-wider">Biggest move</p>
+                            <p className={`text-[48px] leading-[52px] font-bold tracking-[-1px] ${hero.pct > 0 ? "text-success" : hero.pct < 0 ? "text-destructive" : "text-white"}`}>
+                              {hero.pct > 0 ? "+" : ""}{Math.round(hero.pct)}%
+                            </p>
+                            <p className="t-body">{hero.label} vs the previous period</p>
+                          </div>
+                        )}
+                        {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" columns={false} />}
+                      </div>
+                    )}
                     {insights.length > 0 && (
                     <InsightGrid items={insights.map((t) => formatNumbersInText(t))} />
                     )}
@@ -344,7 +368,7 @@ export default function ReportView() {
             )}
 
             {latestCompetitive && compMe && (
-              <Section id="field" title="Against the field" description="The latest competitive analysis, in three numbers.">
+              <Section id="field" index={3} title="Against the field" description="The latest competitive analysis, in three numbers.">
                 <Card className="glass-accent">
                   <CardContent className="pt-5 flex items-center justify-between gap-6 flex-wrap">
                     <dl className="flex items-center gap-10 flex-wrap">
@@ -359,13 +383,25 @@ export default function ReportView() {
             )}
 
             {monthComparison?.current_month && (
-              <Section id="period" title="Period-over-period performance" description="Current period in green, previous period in purple.">
+              <Section id="period" index={4} title="Period-over-period performance" description="Current period in green, previous period in purple.">
                 <Card><CardContent className="pt-5"><PerformanceChart comparison={monthComparison} /></CardContent></Card>
               </Section>
             )}
 
             {platformBreakdown.length > 0 && (
-              <Section id="platforms" title="Performance by platform" description={platformBreakdown.some((p) => p.changes) ? "How each connected account performed this period, with change against the previous period." : "How each connected account performed this period."}>
+              <Section id="platforms" index={5} className="[&>*:not(:first-child)]:mt-4" title="Performance by platform" description={platformBreakdown.some((p) => p.changes) ? "How each connected account performed this period, with change against the previous period." : "How each connected account performed this period."}>
+                <Card>
+                  <CardContent className="pt-5 grid gap-8 lg:grid-cols-2">
+                    <div className="space-y-3">
+                      <p className="t-label uppercase tracking-wider">Impressions by platform</p>
+                      <RankedBars rows={platformBreakdown.map((p: any, i: number) => ({ key: `${p.network}-${i}`, name: platformLabelOf(p.network), label: <><PlatformBadge platform={p.network} size="sm" /></>, value: Number(p.current?.impressions ?? 0) }))} />
+                    </div>
+                    <div className="space-y-3">
+                      <p className="t-label uppercase tracking-wider">Engagements by platform</p>
+                      <RankedBars rows={platformBreakdown.map((p: any, i: number) => ({ key: `${p.network}-${i}`, name: platformLabelOf(p.network), label: <><PlatformBadge platform={p.network} size="sm" /></>, value: Number(p.current?.reactions ?? 0) + Number(p.current?.comments ?? 0) + Number(p.current?.shares ?? 0) }))} />
+                    </div>
+                  </CardContent>
+                </Card>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {platformBreakdown.map((p, i) => <PlatformPerformanceCard key={`${p.network}-${i}`} platform={p} />)}
                 </div>
@@ -373,14 +409,14 @@ export default function ReportView() {
             )}
 
             {sproutPerformance?.top_posts?.length > 0 && (
-              <Section id="posts" title="Top posts" description="By impressions and by engagement, with a platform filter.">
+              <Section id="posts" index={6} title="Top posts" description="By impressions and by engagement, with a platform filter.">
                 <Card><CardContent className="pt-5"><TopPostsSection posts={sproutPerformance.top_posts} /></CardContent></Card>
               </Section>
             )}
 
             {pillars && (
               <div id="report-pillars">
-                <Section id="pillars" title="Content pillar alignment" description="Which pillars the month served, and which need attention.">
+                <Section id="pillars" index={7} title="Content pillar alignment" description="Which pillars the month served, and which need attention.">
                   <Card><CardContent className="pt-5 space-y-5">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {pillars.well_represented?.length > 0 && (
@@ -410,7 +446,7 @@ export default function ReportView() {
             )}
 
             {actions.length > 0 && (
-              <Section id="actions" title="Where to act next" description="Every recommendation in this report that asks for a decision, with the evidence one click away.">
+              <Section id="actions" index={8} title="Where to act next" description="Every recommendation in this report that asks for a decision, with the evidence one click away.">
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {actions.map((a, i) => <ActionCard key={i} action={a} onOpen={() => openAction(a)} />)}
                 </div>
@@ -517,57 +553,22 @@ function MetricsCards({ changes, previousMonth }: { changes: Record<string, any>
 }
 
 /* ─── Performance Chart (per-metric mini bars) ─── */
+function platformLabelOf(n: string): string {
+  const k = String(n || "").toLowerCase();
+  const map: Record<string, string> = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", linkedin: "LinkedIn", youtube: "YouTube", twitter: "X", x: "X", threads: "Threads", pinterest: "Pinterest" };
+  return map[k] || (n ? n[0].toUpperCase() + n.slice(1) : "");
+}
+
 function PerformanceChart({ comparison }: { comparison: any }) {
-  const metrics = Object.keys(comparison.current_month || {}).map((key) => {
-    const current = comparison.current_month[key] ?? 0;
-    const previous = comparison.previous_month?.[key] ?? 0;
-    const max = Math.max(current, previous, 1);
-    return { key, label: key.replace(/_/g, " "), current, previous, max };
-  });
-
-  const fmtVal = (v: number) => {
-    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-    return v.toLocaleString();
-  };
-
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-      {metrics.map(({ key, label, current, previous, max }) => (
-        <div key={key} className="space-y-2">
-          <p className="t-label font-medium capitalize">{label}</p>
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-5 rounded bg-[rgba(255,255,255,0.04)] overflow-hidden">
-                <div
-                  className="h-full rounded bg-[hsl(var(--chart-1))]"
-                  style={{ width: `${Math.max((current / max) * 100, 2)}%` }}
-                />
-              </div>
-              <span className="t-label font-semibold w-14 text-right">{fmtVal(current)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-3.5 rounded bg-[rgba(255,255,255,0.04)] overflow-hidden">
-                <div
-                  className="h-full rounded bg-[hsl(var(--chart-4))] opacity-60"
-                  style={{ width: `${Math.max((previous / max) * 100, 2)}%` }}
-                />
-              </div>
-              <span className="t-secondary w-14 text-right">{fmtVal(previous)}</span>
-            </div>
-          </div>
-        </div>
-      ))}
-      <div className="col-span-full flex items-center gap-4 t-secondary pt-1">
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-[hsl(var(--chart-1))]" /> Current Period
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-[hsl(var(--chart-4))] opacity-60" /> Previous Period
-        </span>
-      </div>
-    </div>
-  );
+  const order = ["impressions", "video_views", "reactions", "link_clicks", "comments", "shares"];
+  const keys = Object.keys(comparison.current_month || {}).sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
+  const items = keys.map((key) => ({
+    key,
+    label: key.replace(/_/g, " "),
+    current: Number(comparison.current_month?.[key] ?? 0),
+    previous: Number(comparison.previous_month?.[key] ?? 0),
+  }));
+  return <CompareBars items={items} currentLabel="Current period" previousLabel="Previous period" />;
 }
 
 /* ─── Post Card ─── */

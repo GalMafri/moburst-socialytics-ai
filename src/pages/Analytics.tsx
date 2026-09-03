@@ -561,22 +561,22 @@ export default function Analytics() {
                               label="Impressions"
                               value={chartData[0].impressions}
                               fmtVal={fmtVal}
-                              color="hsl(221 83% 53%)"
+                              color="#b9e045"
                             />
                           ) : (
                             <div className="h-48">
                               <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={chartData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                  <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
                                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
                                   <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any) => [Number(v).toLocaleString(), "Impressions"]} />
                                   <Line
                                     type="monotone"
                                     dataKey="impressions"
-                                    stroke="hsl(221 83% 53%)"
+                                    stroke="#b9e045"
                                     strokeWidth={2}
-                                    dot={{ r: 3 }}
+                                    dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Impressions"
                                   />
                                 </LineChart>
@@ -598,32 +598,32 @@ export default function Analytics() {
                                 label="Reactions"
                                 value={chartData[0].reactions}
                                 fmtVal={fmtVal}
-                                color="hsl(142 76% 36%)"
+                                color="#3987e5"
                               />
                               <MetricBarSingle
                                 label="Link Clicks"
                                 value={chartData[0].link_clicks}
                                 fmtVal={fmtVal}
-                                color="hsl(38 92% 50%)"
+                                color="#d95926"
                               />
                               <MetricBarSingle
                                 label="Comments"
                                 value={chartData[0].comments}
                                 fmtVal={fmtVal}
-                                color="hsl(280 70% 55%)"
+                                color="#199e70"
                               />
                               <MetricBarSingle
                                 label="Shares"
                                 value={chartData[0].shares}
                                 fmtVal={fmtVal}
-                                color="hsl(340 65% 50%)"
+                                color="#c98500"
                               />
                             </div>
                           ) : (
                             <div className="h-48">
                               <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={chartData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                  <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
                                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
                                   <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any, name: any) => [Number(v).toLocaleString(), name]} />
@@ -631,33 +631,33 @@ export default function Analytics() {
                                   <Line
                                     type="monotone"
                                     dataKey="reactions"
-                                    stroke="hsl(142 76% 36%)"
+                                    stroke="#3987e5"
                                     strokeWidth={2}
-                                    dot={{ r: 2 }}
+                                    dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Reactions"
                                   />
                                   <Line
                                     type="monotone"
                                     dataKey="link_clicks"
-                                    stroke="hsl(38 92% 50%)"
+                                    stroke="#d95926"
                                     strokeWidth={2}
-                                    dot={{ r: 2 }}
+                                    dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Link Clicks"
                                   />
                                   <Line
                                     type="monotone"
                                     dataKey="comments"
-                                    stroke="hsl(280 70% 55%)"
+                                    stroke="#199e70"
                                     strokeWidth={2}
-                                    dot={{ r: 2 }}
+                                    dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Comments"
                                   />
                                   <Line
                                     type="monotone"
                                     dataKey="shares"
-                                    stroke="hsl(340 65% 50%)"
+                                    stroke="#c98500"
                                     strokeWidth={2}
-                                    dot={{ r: 2 }}
+                                    dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Shares"
                                   />
                                 </LineChart>
@@ -678,22 +678,22 @@ export default function Analytics() {
                               label="Video Views"
                               value={chartData[0].video_views}
                               fmtVal={fmtVal}
-                              color="hsl(280 70% 55%)"
+                              color="#199e70"
                             />
                           ) : (
                             <div className="h-40">
                               <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={chartData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                  <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
                                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
                                   <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any) => [Number(v).toLocaleString(), "Video Views"]} />
                                   <Line
                                     type="monotone"
                                     dataKey="video_views"
-                                    stroke="hsl(280 70% 55%)"
+                                    stroke="#199e70"
                                     strokeWidth={2}
-                                    dot={{ r: 3 }}
+                                    dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
                                     name="Video Views"
                                   />
                                 </LineChart>
@@ -715,7 +715,7 @@ export default function Analytics() {
                       <div className="h-56">
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={chartData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                            <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
                             <XAxis
                               dataKey="date"
                               tick={{ fontSize: 12 }}
@@ -742,7 +742,7 @@ export default function Analytics() {
                             <Line
                               type="monotone"
                               dataKey="engagement_rate"
-                              stroke="hsl(38 92% 50%)"
+                              stroke="#d95926"
                               strokeWidth={2}
                               dot={{ r: 3 }}
                               name="Engagement Rate"

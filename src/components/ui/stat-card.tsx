@@ -49,7 +49,7 @@ export function StatCard({
           {icon}
           <span className="truncate">{label}</span>
         </p>
-        <p className="t-stat tabular-nums">{value}</p>
+        <p className="t-stat">{value}</p>
         {(pct != null || delta?.previous || sub) && (
           <div className="flex items-center gap-2 flex-wrap">
             {pct != null && DeltaIcon && (
