@@ -170,7 +170,7 @@ export default function CompetitiveReportView() {
   if (isLoading) return <AppLayout><Loading label="Loading report" /></AppLayout>;
   if (!report) {
     return (
-      <AppLayout title="Competitive Report">
+      <AppLayout>
         <EmptyState icon={Crosshair} title="Report not available" description="It may still be running, or you may not have access to it." />
       </AppLayout>
     );
