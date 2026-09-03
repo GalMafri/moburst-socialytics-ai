@@ -337,30 +337,25 @@ export default function ClientSetup() {
   if (!canManageClients) return <Navigate to="/" replace />;
 
   return (
-    <AppLayout title={isNew ? "New Client" : `${form.name || "Client"} Setup`}
-      description="Client details, social profiles, brand assets, competitors and report schedules.">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {!isNew && (
-              <Button onClick={() => navigate(`/clients/${id}/analyze`)}>
-                <Play className="h-4 w-4 mr-2" /> Run Report
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              onClick={() => saveMutation.mutate()}
-              disabled={saveMutation.isPending || !form.name}
-            >
-              {saveMutation.isPending ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4 mr-2" />
-              )}
-              Save
+    <AppLayout
+      title={isNew ? "New Client" : `${form.name || "Client"} Setup`}
+      description="Client details, social profiles, brand assets, competitors and report schedules."
+      width="max-w-5xl"
+      actions={
+        <>
+          {!isNew && (
+            <Button onClick={() => navigate(`/clients/${id}/analyze`)}>
+              <Play className="h-4 w-4 mr-2" /> Run Report
             </Button>
-          </div>
-        </div>
+          )}
+          <Button variant="outline" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name}>
+            {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+            Save
+          </Button>
+        </>
+      }
+    >
+      <div className="max-w-5xl mx-auto space-y-6">
 
         <Tabs defaultValue="info">
           {/* On mobile (<sm), tabs scroll horizontally to keep labels readable.

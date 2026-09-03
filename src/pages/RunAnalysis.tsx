@@ -411,7 +411,7 @@ export default function RunAnalysis() {
 
   if (!client)
     return (
-      <AppLayout title="Run Analysis"
+      <AppLayout title="Run Analysis" width="max-w-4xl"
       description="Check the configuration, choose the period and start the monthly report.">
         <Loading label="Loading" />
       </AppLayout>

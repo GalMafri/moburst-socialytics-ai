@@ -278,10 +278,60 @@ export default function Analytics() {
   const exportRef = useRef<HTMLDivElement>(null);
   const pdfFilename = `${client?.name || "client"}_analytics_${range}_${new Date().toISOString().split("T")[0]}`;
 
+  const toolbar = (
+    <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex gap-1 flex-wrap items-center">
+        {(["7d", "30d", "90d", "all", "custom"] as TimeRange[]).map((r) => (
+          <Button
+            key={r}
+            variant={range === r ? "default" : "outline"}
+            size="sm"
+            onClick={() => setRange(r)}
+            aria-pressed={range === r}
+          >
+            {r === "all" ? "All Time" : r === "custom" ? "Custom" : r}
+          </Button>
+        ))}
+        {range === "custom" && (
+          <div className="flex items-center gap-1.5 ml-1">
+            <input
+              type="date"
+              aria-label="Start date"
+              value={custom.start}
+              max={custom.end}
+              onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            />
+            <span className="t-secondary">to</span>
+            <input
+              type="date"
+              aria-label="End date"
+              value={custom.end}
+              min={custom.start}
+              onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            />
+          </div>
+        )}
+      </div>
+      <ExportPdfButton
+        contentRef={exportRef}
+        filename={pdfFilename}
+        title={`${client?.name || "Client"} — Analytics (${rangeLabel})`}
+      />
+    </div>
+  );
+
   return (
     <AppLayout
       title={title}
       description="Live Sprout performance for the selected window, trends from the monthly reports, and the competitive view."
+      back={
+        <Button variant="ghost" size="sm" className="-ml-2 mb-1" onClick={() => navigate(`/clients/${id}/setup`)}>
+          <ArrowLeft className="h-4 w-4 mr-1" /> Back to Client
+        </Button>
+      }
+      actions={toolbar}
       meta={
         client && (client.geo || client.language) ? (
           <>
@@ -292,54 +342,6 @@ export default function Analytics() {
       }
     >
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${id}/setup`)}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> Back to Client
-          </Button>
-          <div className="flex items-center gap-2">
-            <div className="flex gap-1 flex-wrap items-center">
-              {(["7d", "30d", "90d", "all", "custom"] as TimeRange[]).map((r) => (
-                <Button
-                  key={r}
-                  variant={range === r ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setRange(r)}
-                  aria-pressed={range === r}
-                >
-                  {r === "all" ? "All Time" : r === "custom" ? "Custom" : r}
-                </Button>
-              ))}
-              {range === "custom" && (
-                <div className="flex items-center gap-1.5 ml-1">
-                  <input
-                    type="date"
-                    aria-label="Start date"
-                    value={custom.start}
-                    max={custom.end}
-                    onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))}
-                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                  />
-                  <span className="t-secondary">to</span>
-                  <input
-                    type="date"
-                    aria-label="End date"
-                    value={custom.end}
-                    min={custom.start}
-                    onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))}
-                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                  />
-                </div>
-              )}
-            </div>
-            <ExportPdfButton
-              contentRef={exportRef}
-              filename={pdfFilename}
-              title={`${client?.name || "Client"} — Analytics (${rangeLabel})`}
-            />
-          </div>
-        </div>
-
         <div ref={exportRef} className="space-y-6">
 
         {isLoading ? (

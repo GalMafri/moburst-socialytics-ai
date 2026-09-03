@@ -328,9 +328,9 @@ export default function ReportView() {
                         {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
                           <div className="pt-4 border-t space-y-2">
                             <p className="t-label uppercase tracking-wider">Top performing content types</p>
-                            <div className="flex flex-wrap gap-2">
-                              {aiAnalysis.sprout_performance_analysis.top_performing_content.map((c: string, i: number) => <Badge key={i} variant="secondary" className="t-label">{c}</Badge>)}
-                            </div>
+                            <ul className="space-y-2">
+                              {aiAnalysis.sprout_performance_analysis.top_performing_content.map((c: string, i: number) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{c}</span></li>)}
+                            </ul>
                           </div>
                         )}
                     </div>

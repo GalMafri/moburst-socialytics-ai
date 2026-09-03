@@ -58,7 +58,7 @@ export default function Settings() {
   if (!isAdmin) return <Navigate to="/" replace />;
 
   return (
-    <AppLayout title="Settings"
+    <AppLayout title="Settings" width="max-w-4xl"
       description="Workspace integrations and the webhook that runs the monthly analysis.">
       <div className="max-w-4xl mx-auto space-y-6">
         <Card>

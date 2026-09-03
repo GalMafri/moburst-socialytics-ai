@@ -273,7 +273,7 @@ export default function CompetitiveRun() {
 
   if (!client || setLoading) {
     return (
-      <AppLayout title="Competitive Analysis">
+      <AppLayout title="Competitive Analysis" width="max-w-4xl">
         <Loading label="Loading" />
       </AppLayout>
     );

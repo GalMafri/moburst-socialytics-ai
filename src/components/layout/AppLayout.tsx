@@ -17,12 +17,17 @@ export function AppLayout({
   description,
   meta,
   actions,
+  back,
+  width = "max-w-[1440px]",
 }: {
   children: ReactNode;
   title?: ReactNode;
   description?: ReactNode;
   meta?: ReactNode;
   actions?: ReactNode;
+  back?: ReactNode;
+  /** Tailwind max-width class for the whole column (header and content share it). */
+  width?: string;
 }) {
   const { isAuthenticated, isLoading, user } = useAuth();
   const firstName = (user?.name || "").trim().split(/\s+/)[0] || "";
@@ -53,8 +58,8 @@ export function AppLayout({
           </div>
         </header>
         <main className="relative z-10 flex-1 p-[32px]">
-          <div className="mx-auto w-full max-w-[1440px] space-y-6">
-            {title && <PageHeader title={title} description={description} meta={meta} actions={actions} />}
+          <div className={`mx-auto w-full ${width} space-y-6`}>
+            {title && <PageHeader title={title} description={description} meta={meta} actions={actions} back={back} />}
             {children}
           </div>
         </main>

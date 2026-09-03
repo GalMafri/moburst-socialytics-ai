@@ -240,8 +240,8 @@ export default function CompetitiveReportView() {
       <div ref={printRef} className="w-full space-y-8">
 
         {/* Hero */}
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="glass p-5 space-y-2">
+        <div className="glass p-5 flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-2">
             <Button variant="ghost" size="sm" className="-ml-2" onClick={() => navigate(isMoburstStaff ? `/clients/${clientId}/competitive/run` : "/")}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Back
             </Button>
