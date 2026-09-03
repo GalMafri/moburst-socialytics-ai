@@ -217,8 +217,8 @@ Deno.serve(async (req) => {
       const c = (cached || []).find((x) => x.url === u) as (Preview & { fetched_at: string }) | undefined;
       const age = c ? now - new Date(c.fetched_at).getTime() : Infinity;
       const valid = c && ((c.status === "ok" && age < OK_TTL_MS) || (c.status !== "ok" && age < MISS_TTL_MS));
-      // A cached hit that still points at an expiring CDN link is re-resolved so it gets a durable copy.
-      if (valid && !(c!.status === "ok" && c!.image_url && isExpiringCdn(c!.image_url) && !isVideoFile(c!.image_url))) out[u] = c as Preview;
+      // A cached hit that still points at an expiring CDN link (image or video) is re-resolved so it gets a durable copy.
+      if (valid && !(c!.status === "ok" && c!.image_url && isExpiringCdn(c!.image_url))) out[u] = c as Preview;
       else todo.push(hints.get(u)!);
     }
     const results: Preview[] = [];
