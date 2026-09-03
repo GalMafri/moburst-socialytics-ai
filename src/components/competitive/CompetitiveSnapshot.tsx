@@ -28,7 +28,7 @@ function Tile({ label, value, sub, accent = false }: { label: string; value: str
       <CardContent className="pt-4 pb-4 space-y-2">
         <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">{label}</p>
         <p className="text-[30px] leading-[36px] font-bold tracking-[-0.5px]">{value}</p>
-        {sub && <p className="text-[14px] text-[#9ca3af]">{sub}</p>}
+        {sub && <p className="text-[15px] text-[#9ca3af]">{sub}</p>}
       </CardContent>
     </Card>
   );
@@ -102,7 +102,7 @@ export function CompetitiveSnapshot({
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-[14px] text-[#9ca3af]">
+        <p className="text-[15px] text-[#9ca3af]">
           {rivals.length} competitors{rd.landscape?.name ? ` · ${rd.landscape.name}` : ""}{period ? ` · ${period}` : ""} · analyzed {new Date(latest.created_at).toLocaleDateString()}
         </p>
         <div className="flex gap-2 flex-wrap">

@@ -269,7 +269,7 @@ export default function ReportView() {
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-1.5">
             <h2 className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{clientName}: monthly report</h2>
-            <p className="text-[14px] text-[#9ca3af] flex items-center gap-2 flex-wrap">
+            <p className="text-[15px] text-[#9ca3af] flex items-center gap-2 flex-wrap">
               <span>{rd?.report_period?.current_month?.start} to {rd?.report_period?.current_month?.end}</span>
               <span className="opacity-50">·</span>
               <span>Generated {new Date(report.created_at).toLocaleDateString()}</span>
@@ -310,7 +310,7 @@ export default function ReportView() {
                   {compTotal ? ` · ${Math.round((compMe.post_count / compTotal) * 100)}% share of voice` : ""}
                   {compMe.cadence_per_week != null ? ` · ${compMe.cadence_per_week} posts a week` : ""}
                 </span>
-                <span className="text-[14px] text-[#9ca3af] flex items-center gap-1 shrink-0">Market <ArrowRight className="h-4 w-4" /></span>
+                <span className="text-[15px] text-[#9ca3af] flex items-center gap-1 shrink-0">Market <ArrowRight className="h-4 w-4" /></span>
               </button>
             )}
 
@@ -353,7 +353,7 @@ export default function ReportView() {
             )}
 
             {rd?.data_counts && (
-              <p className="text-[13px] text-[#9ca3af]">
+              <p className="text-[14px] text-[#9ca3af]">
                 Based on {rd.data_counts.sprout_top_posts ?? 0} client posts, {rd.data_counts.tiktok_trends ?? 0} TikTok and {rd.data_counts.instagram_trends ?? 0} Instagram trend posts{latestCompetitive ? ", and the latest competitive analysis" : ""}.
               </p>
             )}
@@ -448,7 +448,7 @@ function Section({ title, description, action, children }: { title: string; desc
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-[20px] leading-7 font-semibold tracking-[-0.5px]">{title}</h3>
-          {description && <p className="text-[14px] text-[#9ca3af] mt-0.5">{description}</p>}
+          {description && <p className="text-[15px] text-[#9ca3af] mt-0.5">{description}</p>}
         </div>
         {action}
       </div>
@@ -543,12 +543,12 @@ function PerformanceChart({ comparison }: { comparison: any }) {
                   style={{ width: `${Math.max((previous / max) * 100, 2)}%` }}
                 />
               </div>
-              <span className="text-[13px] text-[#9ca3af] w-14 text-right">{fmtVal(previous)}</span>
+              <span className="text-[14px] text-[#9ca3af] w-14 text-right">{fmtVal(previous)}</span>
             </div>
           </div>
         </div>
       ))}
-      <div className="col-span-full flex items-center gap-4 text-[13px] text-[#9ca3af] pt-1">
+      <div className="col-span-full flex items-center gap-4 text-[14px] text-[#9ca3af] pt-1">
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-sm bg-[hsl(var(--chart-1))]" /> Current Period
         </span>
@@ -579,12 +579,12 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
           <div className="flex-1 min-w-0 space-y-2.5">
         <div className="flex items-center justify-between">
           <PlatformBadge platform={post.network_type || post.platform} size="sm" />
-          <span className="text-[13px] text-[#9ca3af]">
+          <span className="text-[14px] text-[#9ca3af]">
             {post.posted_at && new Date(post.posted_at).toLocaleDateString()}
           </span>
         </div>
         <p className="text-[15px] leading-6 line-clamp-3">{post.text || post.content}</p>
-        <div className="flex items-center gap-4 text-[13px] text-[#9ca3af] pt-1">
+        <div className="flex items-center gap-4 text-[14px] text-[#9ca3af] pt-1">
           <span className="flex items-center gap-1">
             <Eye className="h-3 w-3" />
             {(post.impressions ?? 0).toLocaleString()}
@@ -658,13 +658,13 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
         <div className="flex items-center justify-between gap-2">
           <PlatformBadge platform={prettyPlatformName(platform.network)} size="sm" />
           {typeof platform.post_count === "number" && platform.post_count > 0 && (
-            <span className="text-[13px] text-[#9ca3af] whitespace-nowrap">
+            <span className="text-[14px] text-[#9ca3af] whitespace-nowrap">
               {platform.post_count} {platform.post_count === 1 ? "post" : "posts"}
             </span>
           )}
         </div>
         {Array.isArray(platform.profile_names) && platform.profile_names.length > 0 && (
-          <p className="text-[13px] text-[#9ca3af] truncate">
+          <p className="text-[14px] text-[#9ca3af] truncate">
             {platform.profile_names.join(", ")}
           </p>
         )}
@@ -693,7 +693,7 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
                     : "text-warning";
             return (
               <div key={key} className="space-y-0.5">
-                <div className="flex items-center gap-1 text-[13px] text-[#9ca3af]">
+                <div className="flex items-center gap-1 text-[14px] text-[#9ca3af]">
                   <Icon className="h-3 w-3 flex-shrink-0" /> {label}
                 </div>
                 <p className="text-base font-bold tracking-tight">{value.toLocaleString()}</p>
@@ -954,7 +954,7 @@ function TrendsSection({
                     {sl && <Badge variant="outline" className="text-[12px]" style={{ color: sl.color, borderColor: `${sl.color}55` }} title={getScoreExplanation(platform)}>{sl.label}</Badge>}
                   </div>
                   <p className="text-[15px] leading-6 line-clamp-3">{post.caption}</p>
-                  <div className="flex items-center gap-3 text-[13px] text-[#9ca3af]">
+                  <div className="flex items-center gap-3 text-[14px] text-[#9ca3af]">
                     {post.views != null && <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{Number(post.views).toLocaleString()}</span>}
                     {post.likes != null && <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{Number(post.likes).toLocaleString()}</span>}
                     {post.comments != null && <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{Number(post.comments).toLocaleString()}</span>}

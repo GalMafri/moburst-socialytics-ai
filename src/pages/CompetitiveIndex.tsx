@@ -70,7 +70,7 @@ export default function CompetitiveIndex() {
                       <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${c.id}/competitive/feed`)}><Rss className="h-3.5 w-3.5 mr-1" /> Feed</Button>
                     )}
                   </div>
-                  {c.report && <p className="text-[13px] text-[#9ca3af]">Last run {new Date(c.report.created_at).toLocaleString()}</p>}
+                  {c.report && <p className="text-[14px] text-[#9ca3af]">Last run {new Date(c.report.created_at).toLocaleString()}</p>}
                 </CardContent>
               </Card>
             ))}

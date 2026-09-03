@@ -67,7 +67,7 @@ function HeatStrip({ counts, keys, labelEvery = 1, size = "h-6 w-6", color = ACC
         return (
           <div key={k} className="flex flex-col items-center gap-1" title={`${k}: ${v} post${v === 1 ? "" : "s"}`}>
             <div className={`${size} rounded-[6px]`} style={{ backgroundColor: `rgba(${color},${v ? 0.18 + 0.82 * (v / max) : 0.06})` }} />
-            {i % labelEvery === 0 && <span className="text-[13px] text-[#9ca3af] leading-none">{k}</span>}
+            {i % labelEvery === 0 && <span className="text-[14px] text-[#9ca3af] leading-none">{k}</span>}
           </div>
         );
       })}
@@ -81,7 +81,7 @@ function Kpi({ label, value, sub, accent = false }: { label: string; value: stri
       <CardContent className="pt-5 pb-4">
         <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">{label}</p>
         <p className="text-[30px] leading-[36px] font-bold tracking-[-0.5px] mt-2">{value}</p>
-        {sub && <p className="text-[14px] text-[#9ca3af] mt-2">{sub}</p>}
+        {sub && <p className="text-[15px] text-[#9ca3af] mt-2">{sub}</p>}
       </CardContent>
     </Card>
   );
@@ -233,7 +233,7 @@ export default function CompetitiveReportView() {
         <Stat label="Eng. rate" value={p.engagement_rate ? pct(p.engagement_rate) : "–"} />
         <Stat label={p.views ? "Views" : "Reach"} value={p.views ? fmt(p.views) : p.reach ? fmt(p.reach) : "–"} />
       </div>
-      <div className="flex items-center justify-between gap-2 text-[13px] text-[#9ca3af]">
+      <div className="flex items-center justify-between gap-2 text-[14px] text-[#9ca3af]">
         {(p.applause || p.conversation || p.amplification) ? (
           <span title="Likes and reactions · comments · shares">{fmt(p.applause || 0)} likes · {fmt(p.conversation || 0)} comments · {fmt(p.amplification || 0)} shares</span>
         ) : <span />}
@@ -339,7 +339,7 @@ export default function CompetitiveReportView() {
           <section className="space-y-4">
             <div>
               <h3 className="text-[20px] leading-7 font-semibold tracking-[-0.5px]">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
-              <p className="text-[14px] text-[#9ca3af]">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
+              <p className="text-[15px] text-[#9ca3af]">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {ordered.map((c) => {
@@ -360,12 +360,12 @@ export default function CompetitiveReportView() {
                         <p className="text-[15px] text-[#9ca3af]">No posts in this period{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}.</p>
                       ) : (
                         <div className="grid grid-cols-3 gap-3">
-                          <div><p className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{b.post_count}</p><p className="text-[13px] text-[#9ca3af]">posts</p></div>
-                          <div><p className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{b.cadence_per_week}</p><p className="text-[13px] text-[#9ca3af]">per week</p></div>
-                          <div><p className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{pct(b.engagement_rate_avg)}</p><p className="text-[13px] text-[#9ca3af]">eng. rate</p></div>
-                          <div><p className="text-[24px] leading-7 font-bold tracking-[-0.5px]">{fmt(b.engagement_avg)}</p><p className="text-[13px] text-[#9ca3af]">avg engagements</p></div>
-                          <div><p className="text-[24px] leading-7 font-bold tracking-[-0.5px]">{b.impressions_avg ? fmt(b.impressions_avg) : fmt(b.post_count ? b.impressions_total / b.post_count : 0)}</p><p className="text-[13px] text-[#9ca3af]">avg est. impressions</p></div>
-                          <div><p className="text-[24px] leading-7 font-bold tracking-[-0.5px]">{fmt(b.views_total)}</p><p className="text-[13px] text-[#9ca3af]">video views</p></div>
+                          <div><p className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{b.post_count}</p><p className="text-[14px] text-[#9ca3af]">posts</p></div>
+                          <div><p className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{b.cadence_per_week}</p><p className="text-[14px] text-[#9ca3af]">per week</p></div>
+                          <div><p className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{pct(b.engagement_rate_avg)}</p><p className="text-[14px] text-[#9ca3af]">eng. rate</p></div>
+                          <div><p className="text-[24px] leading-7 font-bold tracking-[-0.5px]">{fmt(b.engagement_avg)}</p><p className="text-[14px] text-[#9ca3af]">avg engagements</p></div>
+                          <div><p className="text-[24px] leading-7 font-bold tracking-[-0.5px]">{b.impressions_avg ? fmt(b.impressions_avg) : fmt(b.post_count ? b.impressions_total / b.post_count : 0)}</p><p className="text-[14px] text-[#9ca3af]">avg est. impressions</p></div>
+                          <div><p className="text-[24px] leading-7 font-bold tracking-[-0.5px]">{fmt(b.views_total)}</p><p className="text-[14px] text-[#9ca3af]">video views</p></div>
                         </div>
                       )}
                       {effectivePlat === "all" && (
@@ -412,8 +412,8 @@ export default function CompetitiveReportView() {
                 <div key={c.company_id} className="space-y-2">
                   <div className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
                   <div className="flex flex-wrap gap-8">
-                    <div><p className="text-[13px] text-[#9ca3af] mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} /></div>
-                    <div><p className="text-[13px] text-[#9ca3af] mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" /></div>
+                    <div><p className="text-[14px] text-[#9ca3af] mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} /></div>
+                    <div><p className="text-[14px] text-[#9ca3af] mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" /></div>
                   </div>
                 </div>
               ))}
@@ -422,8 +422,8 @@ export default function CompetitiveReportView() {
                 <div className="rounded-[12px] p-4 space-y-3 border" style={{ backgroundColor: `rgba(${RECOMMEND},0.08)`, borderColor: `rgba(${RECOMMEND},0.3)` }}>
                   <div className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-4 w-4" /> Recommended schedule for {clientName}</div>
                   <div className="flex flex-wrap gap-8">
-                    {schedule.by_weekday && <div><p className="text-[13px] text-[#9ca3af] mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} color={RECOMMEND} /></div>}
-                    {schedule.by_hour && <div><p className="text-[13px] text-[#9ca3af] mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" color={RECOMMEND} /></div>}
+                    {schedule.by_weekday && <div><p className="text-[14px] text-[#9ca3af] mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} color={RECOMMEND} /></div>}
+                    {schedule.by_hour && <div><p className="text-[14px] text-[#9ca3af] mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" color={RECOMMEND} /></div>}
                   </div>
                   {schedule.rationale && <Clamp text={schedule.rationale} lines={3} className="text-[16px] leading-[26px]" />}
                 </div>

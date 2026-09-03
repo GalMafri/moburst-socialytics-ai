@@ -125,7 +125,7 @@ export default function AllReports() {
                                   <ExternalLink className="h-3.5 w-3.5" /> View
                                 </Button>
                               ) : (
-                                <span className="text-[13px] text-[#9ca3af]">Coming soon</span>
+                                <span className="text-[14px] text-[#9ca3af]">Coming soon</span>
                               )}
                             </TableCell>
                           )}

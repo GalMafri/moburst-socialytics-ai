@@ -285,7 +285,7 @@ export default function Analytics() {
                     onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))}
                     className="h-8 rounded-md border border-input bg-background px-2 text-sm"
                   />
-                  <span className="text-[13px] text-[#9ca3af]">to</span>
+                  <span className="text-[14px] text-[#9ca3af]">to</span>
                   <input
                     type="date"
                     aria-label="End date"
@@ -315,7 +315,7 @@ export default function Analytics() {
               reports you run, the richer your trend data becomes.
             </p>
             {client && (client.geo || client.language) && (
-              <div className="flex items-center gap-3 text-[13px] text-[#9ca3af]">
+              <div className="flex items-center gap-3 text-[14px] text-[#9ca3af]">
                 {client.geo && (
                   <span className="flex items-center gap-1">
                     <Globe className="h-3 w-3" /> {client.geo}
@@ -375,7 +375,7 @@ export default function Analytics() {
                 {/* Summary cards — latest report metrics (All Time view) */}
                 {viewWindow ? null : latestTotals ? (
                   <div>
-                    <p className="text-[13px] text-[#9ca3af] mb-2 flex items-center gap-1.5">
+                    <p className="text-[14px] text-[#9ca3af] mb-2 flex items-center gap-1.5">
                       <BarChart3 className="h-3 w-3" />
                       Latest Report Metrics —{" "}
                       {latestReport &&
@@ -448,7 +448,7 @@ export default function Analytics() {
                             {formatNumbersInText(latestAISummary)}
                           </p>
                           {topContentInsight && (
-                            <p className="text-[13px] text-[#9ca3af]/80 pt-1 border-t border-[rgba(255,255,255,0.04)] mt-2">
+                            <p className="text-[14px] text-[#9ca3af]/80 pt-1 border-t border-[rgba(255,255,255,0.04)] mt-2">
                               <Lightbulb className="h-3 w-3 inline mr-1" />
                               {formatNumbersInText(topContentInsight)}
                             </p>
@@ -467,7 +467,7 @@ export default function Analytics() {
                         <TrendingUp className="h-4 w-4" />
                         <span className="text-[15px] font-medium">Want to see trends over time?</span>
                       </div>
-                      <p className="text-[13px] text-[#9ca3af]">
+                      <p className="text-[14px] text-[#9ca3af]">
                         You have 1 report. Run more analyses to unlock trend charts, engagement rate tracking, and
                         richer insights.
                       </p>
@@ -504,10 +504,10 @@ export default function Analytics() {
                           return (
                             <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-[rgba(255,255,255,0.04)]">
                               <div className="flex-1">
-                                <div className="text-[13px] text-[#9ca3af]">{label}</div>
+                                <div className="text-[14px] text-[#9ca3af]">{label}</div>
                                 <div className="text-lg font-semibold">{fmtVal(current)}</div>
                                 {previous > 0 && (
-                                  <div className="text-[13px] text-[#9ca3af]">prev: {fmtVal(previous)}</div>
+                                  <div className="text-[14px] text-[#9ca3af]">prev: {fmtVal(previous)}</div>
                                 )}
                               </div>
                               <div className="text-right">
@@ -542,7 +542,7 @@ export default function Analytics() {
                           ({filtered.length} report{filtered.length !== 1 ? "s" : ""})
                         </span>
                       </CardTitle>
-                      <p className="text-[13px] text-[#9ca3af]">
+                      <p className="text-[14px] text-[#9ca3af]">
                         {chartData.length === 1
                           ? "Showing your latest snapshot. Run more analyses to see trend lines."
                           : "Each data point represents one analysis run. Hover over points for exact values."}
@@ -710,7 +710,7 @@ export default function Analytics() {
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-base">Engagement Rate Trend</CardTitle>
-                      <p className="text-[13px] text-[#9ca3af]">
+                      <p className="text-[14px] text-[#9ca3af]">
                         (Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.
                       </p>
                     </CardHeader>
@@ -777,7 +777,7 @@ export default function Analytics() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Report History</CardTitle>
-                <p className="text-[13px] text-[#9ca3af]">
+                <p className="text-[14px] text-[#9ca3af]">
                   {filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to
                   view full details.
                 </p>
@@ -803,13 +803,13 @@ export default function Analytics() {
                           <Badge variant="default">{r.status}</Badge>
                           <span className="text-[15px]">{new Date(r.created_at).toLocaleString()}</span>
                           {hasMetrics && (
-                            <span className="text-[13px] text-[#9ca3af]">
+                            <span className="text-[14px] text-[#9ca3af]">
                               {fmtVal(totals.impressions)} impr · {fmtVal(totalEng)} eng
                             </span>
                           )}
                         </div>
                         {r.duration_minutes && (
-                          <span className="text-[13px] text-[#9ca3af]">{r.duration_minutes}m</span>
+                          <span className="text-[14px] text-[#9ca3af]">{r.duration_minutes}m</span>
                         )}
                       </button>
                     );
@@ -878,7 +878,7 @@ function MetricBarSingle({
 }) {
   return (
     <div className="p-3 rounded-lg bg-[rgba(255,255,255,0.03)] space-y-1.5">
-      <p className="text-[13px] text-[#9ca3af]">{label}</p>
+      <p className="text-[14px] text-[#9ca3af]">{label}</p>
       <p className="text-lg font-bold" style={{ color }}>
         {fmtVal(value)}
       </p>
@@ -921,7 +921,7 @@ function LiveSproutSection({
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-[13px] text-[#9ca3af] mb-2 flex items-center gap-1.5">
+        <p className="text-[14px] text-[#9ca3af] mb-2 flex items-center gap-1.5">
           <BarChart3 className="h-3 w-3" />
           Sprout data for {rangeLabel} · compared with the {data.previous_range?.days} days before ({formatRange(data.previous_range)})
         </p>
@@ -949,9 +949,9 @@ function LiveSproutSection({
                     {p.network && <PlatformBadge platform={p.network} size="sm" />}
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-[15px]">
-                    <div><p className="font-semibold">{fmtVal(p.impressions || 0)}</p><p className="text-[13px] text-[#9ca3af] uppercase tracking-wider">Impr.</p></div>
-                    <div><p className="font-semibold">{fmtVal(p.reactions || 0)}</p><p className="text-[13px] text-[#9ca3af] uppercase tracking-wider">Reactions</p></div>
-                    <div><p className="font-semibold">{fmtVal(p.video_views || 0)}</p><p className="text-[13px] text-[#9ca3af] uppercase tracking-wider">Views</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.impressions || 0)}</p><p className="text-[14px] text-[#9ca3af] uppercase tracking-wider">Impr.</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.reactions || 0)}</p><p className="text-[14px] text-[#9ca3af] uppercase tracking-wider">Reactions</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.video_views || 0)}</p><p className="text-[14px] text-[#9ca3af] uppercase tracking-wider">Views</p></div>
                   </div>
                 </div>
               ))}
@@ -973,10 +973,10 @@ function LiveSproutSection({
                   <div className="flex-1 min-w-0 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       {p.network_type ? <PlatformBadge platform={p.network_type} size="sm" /> : <span />}
-                      <span className="text-[13px] text-[#9ca3af]">{p.posted_at ? new Date(p.posted_at).toLocaleDateString() : ""}</span>
+                      <span className="text-[14px] text-[#9ca3af]">{p.posted_at ? new Date(p.posted_at).toLocaleDateString() : ""}</span>
                     </div>
                     <p className="text-[15px] leading-6 line-clamp-3">{p.text || "(no caption)"}</p>
-                    <div className="flex items-center gap-4 text-[13px] text-[#9ca3af]">
+                    <div className="flex items-center gap-4 text-[14px] text-[#9ca3af]">
                       <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{fmtVal(p.impressions || 0)}</span>
                       <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{fmtVal(p.reactions || 0)}</span>
                       <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{fmtVal(p.comments || 0)}</span>

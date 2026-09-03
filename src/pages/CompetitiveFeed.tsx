@@ -252,12 +252,12 @@ export default function CompetitiveFeed() {
                 {visible.map((p, i) => (
                   <div key={`${p.postLink || i}`} className="rounded-[12px] p-3 bg-[rgba(255,255,255,0.04)] space-y-2.5">
                     <PostVisual url={p.postLink} image={p.image} preview={p.postLink ? previews[p.postLink] : null} mediaType={p.type} platform={p.channel} />
-                    <div className="flex items-center justify-between gap-2 text-[13px] text-[#9ca3af]">
+                    <div className="flex items-center justify-between gap-2 text-[14px] text-[#9ca3af]">
                       <span className="font-medium text-foreground truncate">{p.companyName}</span>
                       <span>{p.publishedAt ? new Date(p.publishedAt).toLocaleDateString() : ""}</span>
                     </div>
                     <p className="text-[15px] leading-6 line-clamp-3 min-h-[4.5rem]">{p.message || "(no caption)"}</p>
-                    <div className="flex gap-2 flex-wrap text-[13px] text-[#9ca3af]">
+                    <div className="flex gap-2 flex-wrap text-[14px] text-[#9ca3af]">
                       <span>{fmt(p.engagementTotal)} eng.</span>
                       {p.estimatedImpressions ? <span>· {fmt(p.estimatedImpressions)} est. impr.</span> : null}
                       {p.views ? <span>· {fmt(p.views)} views</span> : null}

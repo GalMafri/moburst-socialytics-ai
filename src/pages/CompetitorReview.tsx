@@ -394,10 +394,10 @@ export default function CompetitorReview() {
                         {l.name}
                         {l.is_match && <Badge>matches {client?.name}</Badge>}
                       </div>
-                      <div className="text-[13px] text-[#9ca3af]">
+                      <div className="text-[14px] text-[#9ca3af]">
                         Focus: {l.focus_company || "?"} · {l.companies.filter((c: any) => !c.is_focus).length} competitors
                       </div>
-                      <div className="text-[13px] text-[#9ca3af] truncate">
+                      <div className="text-[14px] text-[#9ca3af] truncate">
                         {l.companies.filter((c: any) => !c.is_focus).map((c: any) => c.name).join(", ")}
                       </div>
                     </div>
@@ -447,7 +447,7 @@ export default function CompetitorReview() {
           </CardHeader>
           {client.competitor_seed_notes ? (
             <CardContent className="pt-0">
-              <p className="text-[13px] text-[#9ca3af]">
+              <p className="text-[14px] text-[#9ca3af]">
                 <span className="font-medium">Account team notes fed to the AI:</span> {client.competitor_seed_notes}
               </p>
             </CardContent>
@@ -533,12 +533,12 @@ export default function CompetitorReview() {
                             href={c.website_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="text-[13px] text-[#9ca3af] hover:text-foreground underline-offset-2 hover:underline"
+                            className="text-[14px] text-[#9ca3af] hover:text-foreground underline-offset-2 hover:underline"
                           >
                             {c.website_url.replace(/^https?:\/\/(www\.)?/, "")}
                           </a>
                         )}
-                        {c.rationale && <p className="text-[13px] text-[#9ca3af] mt-1">{c.rationale}</p>}
+                        {c.rationale && <p className="text-[14px] text-[#9ca3af] mt-1">{c.rationale}</p>}
                         <div className="flex gap-1 mt-2 flex-wrap">
                           {compHandles.length > 0 ? (
                             compHandles.map((h) => (
