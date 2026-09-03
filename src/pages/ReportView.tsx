@@ -347,9 +347,9 @@ export default function ReportView() {
                   <CardContent className="pt-5 space-y-5">
                     {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
                     {insights.length > 0 && (
-                      <ol className="space-y-3">
+                      <ol className="columns-[38rem] gap-x-10 space-y-3">
                         {insights.map((t, i) => (
-                          <li key={i} className="flex gap-3 t-prose">
+                          <li key={i} className="flex gap-3 t-prose break-inside-avoid">
                             <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-body font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
                             <span>{formatNumbersInText(t)}</span>
                           </li>

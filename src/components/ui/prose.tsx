@@ -7,14 +7,15 @@ import { cn } from "@/lib/utils";
  * bolded, and inline enumerations such as "(1) … (2) …" or "1) … 2) …"
  * become a list. Text is 16px/26px white at a 72ch measure (see .t-prose).
  */
-export function Prose({ text, className }: { text: string | null | undefined; className?: string }) {
+export function Prose({ text, className, columns = true }: { text: string | null | undefined; className?: string; columns?: boolean }) {
   if (!text) return null;
+  const flow = columns && String(text).length > 600;
   const paragraphs = String(text)
     .split(/\n{2,}|\n(?=\s*(?:[-•*]|\d+[.)]))/)
     .map((p) => p.trim())
     .filter(Boolean);
   return (
-    <div className={cn("t-prose space-y-3", className)}>
+    <div className={cn("t-prose", flow ? "max-w-none columns-[38rem] gap-x-10 [&>*]:break-inside-avoid [&>*+*]:mt-3" : "space-y-3", className)}>
       {paragraphs.map((p, i) => (
         <Paragraph key={i} text={p} />
       ))}
