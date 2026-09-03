@@ -26,9 +26,9 @@ function Tile({ label, value, sub, accent = false }: { label: string; value: str
   return (
     <Card className={accent ? "glass-accent" : ""}>
       <CardContent className="pt-4 pb-4 space-y-2">
-        <p className="text-[12px] uppercase tracking-wider text-muted-foreground">{label}</p>
-        <p className="text-[28px] font-bold tracking-tight leading-none">{value}</p>
-        {sub && <p className="text-[13px] text-muted-foreground">{sub}</p>}
+        <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">{label}</p>
+        <p className="text-[30px] leading-[36px] font-bold tracking-[-0.5px]">{value}</p>
+        {sub && <p className="text-[14px] text-[#9ca3af]">{sub}</p>}
       </CardContent>
     </Card>
   );
@@ -102,7 +102,7 @@ export function CompetitiveSnapshot({
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-[13px] text-muted-foreground">
+        <p className="text-[14px] text-[#9ca3af]">
           {rivals.length} competitors{rd.landscape?.name ? ` · ${rd.landscape.name}` : ""}{period ? ` · ${period}` : ""} · analyzed {new Date(latest.created_at).toLocaleDateString()}
         </p>
         <div className="flex gap-2 flex-wrap">
@@ -126,14 +126,14 @@ export function CompetitiveSnapshot({
         </div>
       )}
 
-      {ai.executive_summary && <Clamp text={ai.executive_summary} lines={3} className="text-[15px] leading-6" />}
+      {ai.executive_summary && <Clamp text={ai.executive_summary} lines={3} className="text-[16px] leading-[26px]" />}
 
       {Array.isArray(takeaways) && takeaways.length > 0 && (
         <div className="rounded-[12px] p-4 bg-[rgba(185,224,69,0.08)] border border-[rgba(185,224,69,0.25)] space-y-2">
-          <p className="text-[12px] uppercase tracking-wider text-muted-foreground">What this report took from the competitors</p>
+          <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">What this report took from the competitors</p>
           <ol className="space-y-2">
             {takeaways.slice(0, 4).map((t, i) => (
-              <li key={i} className="flex gap-3 text-[15px] leading-6">
+              <li key={i} className="flex gap-3 text-[16px] leading-[26px]">
                 <span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary text-primary-foreground text-[12px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
                 <span>{t}</span>
               </li>
@@ -144,16 +144,16 @@ export function CompetitiveSnapshot({
 
       {gaps.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[12px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Gaps to fill</p>
+          <p className="text-[12px] uppercase tracking-wider text-[#9ca3af] flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Gaps to fill</p>
           <div className="grid gap-3 md:grid-cols-3">
             {gaps.map((g, i) => (
               <div key={i} className="rounded-[12px] p-4 bg-[rgba(255,255,255,0.04)] space-y-2">
                 <div className="flex gap-1.5 flex-wrap">
-                  {g.platform && g.platform !== "all" && <Badge variant="outline" className="text-[11px]">{platformLabel(g.platform)}</Badge>}
-                  {verdictFor(g.gap) === "up" && <Badge className="text-[11px] gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
+                  {g.platform && g.platform !== "all" && <Badge variant="outline" className="text-[12px]">{platformLabel(g.platform)}</Badge>}
+                  {verdictFor(g.gap) === "up" && <Badge className="text-[12px] gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                 </div>
-                <p className="text-[15px] leading-6 font-medium">{g.gap}</p>
-                {g.suggested_play && <p className="text-[14px] leading-6 text-muted-foreground line-clamp-3">{g.suggested_play}</p>}
+                <p className="text-[16px] leading-[26px] font-medium">{g.gap}</p>
+                {g.suggested_play && <p className="text-[15px] leading-6 text-[#9ca3af] line-clamp-3">{g.suggested_play}</p>}
               </div>
             ))}
           </div>
@@ -162,8 +162,8 @@ export function CompetitiveSnapshot({
 
       {ai.posting_time_insights?.empty_airtime && (
         <div className="space-y-1">
-          <p className="text-[12px] uppercase tracking-wider text-muted-foreground">Empty airtime</p>
-          <Clamp text={ai.posting_time_insights.empty_airtime} lines={2} className="text-[14px] leading-6 text-muted-foreground" />
+          <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">Empty airtime</p>
+          <Clamp text={ai.posting_time_insights.empty_airtime} lines={2} className="text-[15px] leading-6 text-[#9ca3af]" />
         </div>
       )}
     </div>

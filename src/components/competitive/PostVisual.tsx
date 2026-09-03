@@ -234,7 +234,7 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] text-muted-foreground">
           {kind === "video" ? <Play className="h-7 w-7" /> : kind === "carousel" ? <Layers className="h-7 w-7" /> : <ImageIcon className="h-7 w-7" />}
-          {!compact && <span className="text-xs">{url ? `Open on ${platformLabel(plat)}` : "No link"}</span>}
+          {!compact && <span className="text-[13px]">{url ? `Open on ${platformLabel(plat)}` : "No link"}</span>}
         </div>
       )}
       {src && kind === "video" && (
@@ -243,7 +243,7 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
         </span>
       )}
       {!compact && (
-        <div className="absolute top-2 left-2 right-2 flex items-center justify-between gap-2 text-[11px] font-medium">
+        <div className="absolute top-2 left-2 right-2 flex items-center justify-between gap-2 text-[12px] font-medium">
           {plat ? <span className="px-2 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-sm">{platformLabel(plat)}</span> : <span />}
           <span className="px-2 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-sm inline-flex items-center gap-1">
             {kind === "video" ? <Play className="h-3 w-3" /> : kind === "carousel" ? <Layers className="h-3 w-3" /> : <ImageIcon className="h-3 w-3" />}

@@ -48,7 +48,7 @@ export default function CompetitiveReportHistory() {
 
   return (
     <AppLayout title={`Competitive reports: ${client?.name ?? "Client"}`}>
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <Button variant="ghost" size="sm" onClick={() => navigate(isMoburstStaff ? "/competitive" : "/")}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Back
@@ -88,16 +88,16 @@ export default function CompetitiveReportHistory() {
                     const period = rd.period?.start ? formatRange(rd.period) : r.date_range_start ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "—";
                     return (
                       <TableRow key={r.id} className={running ? "animate-pulse" : ""}>
-                        <TableCell className="text-sm">{new Date(r.created_at).toLocaleString()}</TableCell>
+                        <TableCell className="text-[15px]">{new Date(r.created_at).toLocaleString()}</TableCell>
                         <TableCell>
                           <Badge variant={r.status === "complete" ? "default" : running ? "secondary" : "destructive"} className="gap-1">
                             {running && <Loader2 className="h-3 w-3 animate-spin" />}
                             {r.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{period}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{rd.landscape?.name || "—"}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{r.duration_minutes ? `${r.duration_minutes}m` : "—"}</TableCell>
+                        <TableCell className="text-[15px] text-[#9ca3af]">{period}</TableCell>
+                        <TableCell className="text-[15px] text-[#9ca3af]">{rd.landscape?.name || "—"}</TableCell>
+                        <TableCell className="text-[15px] text-[#9ca3af]">{r.duration_minutes ? `${r.duration_minutes}m` : "—"}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             {!running && (

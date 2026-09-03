@@ -59,7 +59,7 @@ export default function Settings() {
 
   return (
     <AppLayout title="Settings">
-      <div className="max-w-2xl mx-auto space-y-6">
+      <div className="max-w-4xl mx-auto space-y-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Integration Settings</CardTitle>

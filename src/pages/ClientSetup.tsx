@@ -338,7 +338,7 @@ export default function ClientSetup() {
 
   return (
     <AppLayout title={isNew ? "New Client" : `${form.name || "Client"} Setup`}>
-      <div className="max-w-3xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold">{isNew ? "Create New Client" : "Client Configuration"}</h2>

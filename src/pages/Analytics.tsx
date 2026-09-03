@@ -285,7 +285,7 @@ export default function Analytics() {
                     onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))}
                     className="h-8 rounded-md border border-input bg-background px-2 text-sm"
                   />
-                  <span className="text-xs text-muted-foreground">to</span>
+                  <span className="text-[13px] text-[#9ca3af]">to</span>
                   <input
                     type="date"
                     aria-label="End date"
@@ -310,12 +310,12 @@ export default function Analytics() {
         <div className="flex items-start gap-2 p-3 rounded-lg bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.04)]">
           <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
           <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[15px] text-[#9ca3af]">
               Track your social media performance over time. Each report generates a snapshot of your metrics — the more
               reports you run, the richer your trend data becomes.
             </p>
             {client && (client.geo || client.language) && (
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <div className="flex items-center gap-3 text-[13px] text-[#9ca3af]">
                 {client.geo && (
                   <span className="flex items-center gap-1">
                     <Globe className="h-3 w-3" /> {client.geo}
@@ -338,7 +338,7 @@ export default function Analytics() {
             <div className="space-y-3">
               <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto" />
               <h3 className="font-semibold">No completed reports yet</h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[15px] text-[#9ca3af]">
                 Run your first analysis to start tracking performance trends.
               </p>
               <Button onClick={() => navigate(`/clients/${id}/analyze`)} className="gap-2">
@@ -375,7 +375,7 @@ export default function Analytics() {
                 {/* Summary cards — latest report metrics (All Time view) */}
                 {viewWindow ? null : latestTotals ? (
                   <div>
-                    <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <p className="text-[13px] text-[#9ca3af] mb-2 flex items-center gap-1.5">
                       <BarChart3 className="h-3 w-3" />
                       Latest Report Metrics —{" "}
                       {latestReport &&
@@ -444,11 +444,11 @@ export default function Analytics() {
                         </div>
                         <div className="space-y-1">
                           <h4 className="text-sm font-semibold">Key Takeaway</h4>
-                          <p className="text-sm text-muted-foreground leading-relaxed">
+                          <p className="text-[15px] text-[#9ca3af] leading-relaxed">
                             {formatNumbersInText(latestAISummary)}
                           </p>
                           {topContentInsight && (
-                            <p className="text-xs text-muted-foreground/80 pt-1 border-t border-[rgba(255,255,255,0.04)] mt-2">
+                            <p className="text-[13px] text-[#9ca3af]/80 pt-1 border-t border-[rgba(255,255,255,0.04)] mt-2">
                               <Lightbulb className="h-3 w-3 inline mr-1" />
                               {formatNumbersInText(topContentInsight)}
                             </p>
@@ -465,9 +465,9 @@ export default function Analytics() {
                     <CardContent className="pt-5 pb-4 px-5 text-center space-y-2">
                       <div className="flex items-center justify-center gap-2 text-muted-foreground">
                         <TrendingUp className="h-4 w-4" />
-                        <span className="text-sm font-medium">Want to see trends over time?</span>
+                        <span className="text-[15px] font-medium">Want to see trends over time?</span>
                       </div>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-[13px] text-[#9ca3af]">
                         You have 1 report. Run more analyses to unlock trend charts, engagement rate tracking, and
                         richer insights.
                       </p>
@@ -489,7 +489,7 @@ export default function Analytics() {
                     <CardHeader>
                       <CardTitle className="text-base">
                         Month-over-Month{" "}
-                        <span className="font-normal text-muted-foreground text-sm">(latest report)</span>
+                        <span className="font-normal text-muted-foreground text-[15px]">(latest report)</span>
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
@@ -504,16 +504,16 @@ export default function Analytics() {
                           return (
                             <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-[rgba(255,255,255,0.04)]">
                               <div className="flex-1">
-                                <div className="text-xs text-muted-foreground">{label}</div>
+                                <div className="text-[13px] text-[#9ca3af]">{label}</div>
                                 <div className="text-lg font-semibold">{fmtVal(current)}</div>
                                 {previous > 0 && (
-                                  <div className="text-xs text-muted-foreground">prev: {fmtVal(previous)}</div>
+                                  <div className="text-[13px] text-[#9ca3af]">prev: {fmtVal(previous)}</div>
                                 )}
                               </div>
                               <div className="text-right">
                                 <Badge
                                   variant={isUp ? "default" : isDown ? "destructive" : "secondary"}
-                                  className="text-xs"
+                                  className="text-[13px]"
                                 >
                                   {isUp ? (
                                     <TrendingUp className="h-3 w-3 mr-1 inline" />
@@ -542,7 +542,7 @@ export default function Analytics() {
                           ({filtered.length} report{filtered.length !== 1 ? "s" : ""})
                         </span>
                       </CardTitle>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-[13px] text-[#9ca3af]">
                         {chartData.length === 1
                           ? "Showing your latest snapshot. Run more analyses to see trend lines."
                           : "Each data point represents one analysis run. Hover over points for exact values."}
@@ -552,7 +552,7 @@ export default function Analytics() {
                       {/* Impressions chart (separate — it dominates if combined) */}
                       {chartData.some((d) => d.impressions > 0) && (
                         <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                          <p className="text-[13px] font-medium text-[#9ca3af] mb-2 flex items-center gap-1.5">
                             <Eye className="h-3 w-3" /> Impressions
                           </p>
                           {chartData.length === 1 ? (
@@ -588,7 +588,7 @@ export default function Analytics() {
                       {/* Engagement metrics (all on same scale) */}
                       {chartData.some((d) => d.reactions > 0 || d.link_clicks > 0 || d.comments > 0) && (
                         <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                          <p className="text-[13px] font-medium text-[#9ca3af] mb-2 flex items-center gap-1.5">
                             <Heart className="h-3 w-3" /> Engagement Metrics
                           </p>
                           {chartData.length === 1 ? (
@@ -669,7 +669,7 @@ export default function Analytics() {
                       {/* Video Views (separate if significant) */}
                       {chartData.some((d) => d.video_views > 0) && (
                         <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                          <p className="text-[13px] font-medium text-[#9ca3af] mb-2 flex items-center gap-1.5">
                             <Play className="h-3 w-3" /> Video Views
                           </p>
                           {chartData.length === 1 ? (
@@ -710,7 +710,7 @@ export default function Analytics() {
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-base">Engagement Rate Trend</CardTitle>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-[13px] text-[#9ca3af]">
                         (Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.
                       </p>
                     </CardHeader>
@@ -777,7 +777,7 @@ export default function Analytics() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Report History</CardTitle>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-[13px] text-[#9ca3af]">
                   {filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to
                   view full details.
                 </p>
@@ -801,15 +801,15 @@ export default function Analytics() {
                       >
                         <div className="flex items-center gap-3">
                           <Badge variant="default">{r.status}</Badge>
-                          <span className="text-sm">{new Date(r.created_at).toLocaleString()}</span>
+                          <span className="text-[15px]">{new Date(r.created_at).toLocaleString()}</span>
                           {hasMetrics && (
-                            <span className="text-xs text-muted-foreground">
+                            <span className="text-[13px] text-[#9ca3af]">
                               {fmtVal(totals.impressions)} impr · {fmtVal(totalEng)} eng
                             </span>
                           )}
                         </div>
                         {r.duration_minutes && (
-                          <span className="text-xs text-muted-foreground">{r.duration_minutes}m</span>
+                          <span className="text-[13px] text-[#9ca3af]">{r.duration_minutes}m</span>
                         )}
                       </button>
                     );
@@ -840,14 +840,14 @@ function SummaryCard({
   return (
     <Card>
       <CardContent className="pt-4 pb-3 px-4 space-y-1">
-        <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
+        <div className="flex items-center gap-1.5 text-muted-foreground text-[13px]">
           {icon}
           {label}
         </div>
         <div className="text-xl font-bold">{value}</div>
         {change != null && change !== 0 && (
           <div
-            className={`flex items-center gap-1 text-xs font-medium ${change > 0 ? "text-[#10b981]" : "text-destructive"}`}
+            className={`flex items-center gap-1 text-[13px] font-medium ${change > 0 ? "text-[#10b981]" : "text-destructive"}`}
           >
             {change > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
             {change > 0 ? "+" : ""}
@@ -855,7 +855,7 @@ function SummaryCard({
           </div>
         )}
         {change != null && change === 0 && (
-          <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+          <div className="flex items-center gap-1 text-[13px] font-medium text-[#9ca3af]">
             <Minus className="h-3 w-3" /> 0% MoM
           </div>
         )}
@@ -878,7 +878,7 @@ function MetricBarSingle({
 }) {
   return (
     <div className="p-3 rounded-lg bg-[rgba(255,255,255,0.03)] space-y-1.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-[13px] text-[#9ca3af]">{label}</p>
       <p className="text-lg font-bold" style={{ color }}>
         {fmtVal(value)}
       </p>
@@ -907,7 +907,7 @@ function LiveSproutSection({
   if (error) {
     return (
       <Card>
-        <CardContent className="pt-5 text-sm text-muted-foreground">
+        <CardContent className="pt-5 text-[15px] text-[#9ca3af]">
           Live Sprout data is not available for this window: {error.message}
         </CardContent>
       </Card>
@@ -921,7 +921,7 @@ function LiveSproutSection({
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
+        <p className="text-[13px] text-[#9ca3af] mb-2 flex items-center gap-1.5">
           <BarChart3 className="h-3 w-3" />
           Sprout data for {rangeLabel} · compared with the {data.previous_range?.days} days before ({formatRange(data.previous_range)})
         </p>
@@ -938,7 +938,7 @@ function LiveSproutSection({
       {Array.isArray(data.by_profile) && data.by_profile.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">By profile <span className="font-normal text-muted-foreground text-sm">({rangeLabel})</span></CardTitle>
+            <CardTitle className="text-base">By profile <span className="font-normal text-muted-foreground text-[15px]">({rangeLabel})</span></CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -948,10 +948,10 @@ function LiveSproutSection({
                     <span className="font-medium truncate">{p.name}</span>
                     {p.network && <PlatformBadge platform={p.network} size="sm" />}
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-sm">
-                    <div><p className="font-semibold">{fmtVal(p.impressions || 0)}</p><p className="text-[11px] text-muted-foreground uppercase tracking-wider">Impr.</p></div>
-                    <div><p className="font-semibold">{fmtVal(p.reactions || 0)}</p><p className="text-[11px] text-muted-foreground uppercase tracking-wider">Reactions</p></div>
-                    <div><p className="font-semibold">{fmtVal(p.video_views || 0)}</p><p className="text-[11px] text-muted-foreground uppercase tracking-wider">Views</p></div>
+                  <div className="grid grid-cols-3 gap-2 text-[15px]">
+                    <div><p className="font-semibold">{fmtVal(p.impressions || 0)}</p><p className="text-[13px] text-[#9ca3af] uppercase tracking-wider">Impr.</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.reactions || 0)}</p><p className="text-[13px] text-[#9ca3af] uppercase tracking-wider">Reactions</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.video_views || 0)}</p><p className="text-[13px] text-[#9ca3af] uppercase tracking-wider">Views</p></div>
                   </div>
                 </div>
               ))}
@@ -963,7 +963,7 @@ function LiveSproutSection({
       {posts.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Top posts <span className="font-normal text-muted-foreground text-sm">({rangeLabel}, by impressions)</span></CardTitle>
+            <CardTitle className="text-base">Top posts <span className="font-normal text-muted-foreground text-[15px]">({rangeLabel}, by impressions)</span></CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2">
@@ -973,17 +973,17 @@ function LiveSproutSection({
                   <div className="flex-1 min-w-0 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       {p.network_type ? <PlatformBadge platform={p.network_type} size="sm" /> : <span />}
-                      <span className="text-xs text-muted-foreground">{p.posted_at ? new Date(p.posted_at).toLocaleDateString() : ""}</span>
+                      <span className="text-[13px] text-[#9ca3af]">{p.posted_at ? new Date(p.posted_at).toLocaleDateString() : ""}</span>
                     </div>
-                    <p className="text-sm leading-relaxed line-clamp-3">{p.text || "(no caption)"}</p>
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <p className="text-[15px] leading-6 line-clamp-3">{p.text || "(no caption)"}</p>
+                    <div className="flex items-center gap-4 text-[13px] text-[#9ca3af]">
                       <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{fmtVal(p.impressions || 0)}</span>
                       <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{fmtVal(p.reactions || 0)}</span>
                       <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{fmtVal(p.comments || 0)}</span>
                       <span className="flex items-center gap-1"><Share2 className="h-3 w-3" />{fmtVal(p.shares || 0)}</span>
                     </div>
                     {p.permalink && (
-                      <a href={p.permalink} target="_blank" rel="noopener" className="text-xs text-primary hover:underline flex items-center gap-1">
+                      <a href={p.permalink} target="_blank" rel="noopener" className="text-[13px] text-primary hover:underline flex items-center gap-1">
                         View Original <ExternalLink className="h-3 w-3" />
                       </a>
                     )}

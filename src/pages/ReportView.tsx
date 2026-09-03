@@ -264,12 +264,12 @@ export default function ReportView() {
 
   return (
     <AppLayout title={`Report: ${clientName}`}>
-      <div className="w-full max-w-6xl mx-auto px-4 lg:px-6 space-y-6" ref={reportContentRef}>
+      <div className="w-full space-y-6" ref={reportContentRef}>
         {/* Header */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-1.5">
-            <h2 className="text-2xl font-bold tracking-tight">{clientName}: monthly report</h2>
-            <p className="text-[13px] text-muted-foreground flex items-center gap-2 flex-wrap">
+            <h2 className="text-[28px] leading-8 font-bold tracking-[-0.5px]">{clientName}: monthly report</h2>
+            <p className="text-[14px] text-[#9ca3af] flex items-center gap-2 flex-wrap">
               <span>{rd?.report_period?.current_month?.start} to {rd?.report_period?.current_month?.end}</span>
               <span className="opacity-50">·</span>
               <span>Generated {new Date(report.created_at).toLocaleDateString()}</span>
@@ -304,24 +304,24 @@ export default function ReportView() {
 
             {latestCompetitive && compMe && (
               <button type="button" onClick={() => setTab("market")} className="w-full text-left rounded-[12px] px-4 py-3 bg-[rgba(185,224,69,0.08)] border border-[rgba(185,224,69,0.25)] flex items-center justify-between gap-4 hover:bg-[rgba(185,224,69,0.12)] transition-colors">
-                <span className="text-[15px] leading-6">
+                <span className="text-[16px] leading-[26px]">
                   <span className="font-semibold">Against the field:</span>{" "}
                   {compScore != null ? `benchmark ${compScore}/100` : "benchmark pending"}
                   {compTotal ? ` · ${Math.round((compMe.post_count / compTotal) * 100)}% share of voice` : ""}
                   {compMe.cadence_per_week != null ? ` · ${compMe.cadence_per_week} posts a week` : ""}
                 </span>
-                <span className="text-[13px] text-muted-foreground flex items-center gap-1 shrink-0">Market <ArrowRight className="h-4 w-4" /></span>
+                <span className="text-[14px] text-[#9ca3af] flex items-center gap-1 shrink-0">Market <ArrowRight className="h-4 w-4" /></span>
               </button>
             )}
 
             {(insights.length > 0 || summary) && (
               <Section title="The month in three points" description={summary ? undefined : "What moved and why."}>
-                {summary && <Clamp text={formatNumbersInText(summary)} lines={3} className="text-[15px] leading-6 text-muted-foreground" />}
+                {summary && <Clamp text={formatNumbersInText(summary)} lines={3} className="text-[16px] leading-[26px] text-[#9ca3af]" />}
                 {insights.length > 0 && (
                   <ol className="space-y-3">
                     {insights.map((t, i) => (
-                      <li key={i} className="flex gap-3 text-[15px] leading-6">
-                        <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground text-[13px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                      <li key={i} className="flex gap-3 text-[16px] leading-[26px]">
+                        <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground text-[14px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
                         <span>{formatNumbersInText(t)}</span>
                       </li>
                     ))}
@@ -353,7 +353,7 @@ export default function ReportView() {
             )}
 
             {rd?.data_counts && (
-              <p className="text-[12px] text-muted-foreground">
+              <p className="text-[13px] text-[#9ca3af]">
                 Based on {rd.data_counts.sprout_top_posts ?? 0} client posts, {rd.data_counts.tiktok_trends ?? 0} TikTok and {rd.data_counts.instagram_trends ?? 0} Instagram trend posts{latestCompetitive ? ", and the latest competitive analysis" : ""}.
               </p>
             )}
@@ -369,7 +369,7 @@ export default function ReportView() {
 
             {platformBreakdown.length > 0 && (
               <Section title="By platform" description={platformBreakdown.some((p) => p.changes) ? "Each connected account, with the change against the previous period." : "Each connected account this period."}>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
                   {platformBreakdown.map((p, i) => <PlatformPerformanceCard key={`${p.network}-${i}`} platform={p} />)}
                 </div>
               </Section>
@@ -386,20 +386,20 @@ export default function ReportView() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {aiAnalysis.sprout_performance_analysis.pillar_alignment.well_represented?.length > 0 && (
                     <div className="space-y-2">
-                      <p className="text-[12px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
+                      <p className="text-[12px] uppercase tracking-wider text-[#9ca3af] flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
                       <div className="flex flex-wrap gap-1.5">{aiAnalysis.sprout_performance_analysis.pillar_alignment.well_represented.map((p: string) => <Badge key={p} variant="secondary">{p}</Badge>)}</div>
                     </div>
                   )}
                   {aiAnalysis.sprout_performance_analysis.pillar_alignment.underrepresented?.length > 0 && (
                     <div className="space-y-2">
-                      <p className="text-[12px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-warning" /> Needs attention</p>
+                      <p className="text-[12px] uppercase tracking-wider text-[#9ca3af] flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-warning" /> Needs attention</p>
                       <div className="flex flex-wrap gap-1.5">{aiAnalysis.sprout_performance_analysis.pillar_alignment.underrepresented.map((p: string) => <Badge key={p} variant="outline">{p}</Badge>)}</div>
                     </div>
                   )}
                 </div>
                 {pillarRecs.length > 0 && (
                   <ul className="space-y-2 pt-2">
-                    {pillarRecs.slice(0, 4).map((r, i) => <li key={i} className="text-[15px] leading-6 flex gap-2"><span className="text-primary">•</span><span>{r}</span></li>)}
+                    {pillarRecs.slice(0, 4).map((r, i) => <li key={i} className="text-[16px] leading-[26px] flex gap-2"><span className="text-primary">•</span><span>{r}</span></li>)}
                   </ul>
                 )}
               </Section>
@@ -447,8 +447,8 @@ function Section({ title, description, action, children }: { title: string; desc
     <section className="space-y-4">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
-          {description && <p className="text-[13px] text-muted-foreground mt-0.5">{description}</p>}
+          <h3 className="text-[20px] leading-7 font-semibold tracking-[-0.5px]">{title}</h3>
+          {description && <p className="text-[14px] text-[#9ca3af] mt-0.5">{description}</p>}
         </div>
         {action}
       </div>
@@ -461,10 +461,10 @@ function ActionCard({ action, onOpen }: { action: { source: string; title: strin
   const icon = action.source === "Competitors" ? <Crosshair className="h-3.5 w-3.5" /> : action.source === "Trends" ? <TrendingUp className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />;
   return (
     <button type="button" onClick={onOpen} className="text-left rounded-[12px] p-4 bg-[rgba(255,255,255,0.04)] hover:bg-[rgba(255,255,255,0.07)] transition-colors space-y-2 group">
-      <span className="inline-flex items-center gap-1.5 text-[12px] uppercase tracking-wider text-muted-foreground">{icon} {action.source}</span>
-      <p className="text-[15px] leading-6 font-medium">{action.title}</p>
-      {action.detail && <p className="text-[14px] leading-6 text-muted-foreground line-clamp-2">{action.detail}</p>}
-      <span className="text-[13px] text-primary inline-flex items-center gap-1 opacity-80 group-hover:opacity-100">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the numbers" : "See the evidence"} <ArrowRight className="h-3.5 w-3.5" /></span>
+      <span className="inline-flex items-center gap-1.5 text-[12px] uppercase tracking-wider text-[#9ca3af]">{icon} {action.source}</span>
+      <p className="text-[16px] leading-[26px] font-medium">{action.title}</p>
+      {action.detail && <p className="text-[15px] leading-6 text-[#9ca3af] line-clamp-2">{action.detail}</p>}
+      <span className="text-[14px] text-primary inline-flex items-center gap-1 opacity-80 group-hover:opacity-100">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the numbers" : "See the evidence"} <ArrowRight className="h-3.5 w-3.5" /></span>
     </button>
   );
 }
@@ -491,8 +491,8 @@ function MetricsCards({ changes, previousMonth }: { changes: Record<string, any>
         return (
           <Card key={key}>
             <CardContent className="pt-4 pb-4 px-4 space-y-2">
-              <p className="text-[12px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><Icon className="h-3.5 w-3.5" /> {label}</p>
-              <p className="text-[28px] font-bold tracking-tight leading-none">{fmt(Number(d.current ?? 0))}</p>
+              <p className="text-[12px] uppercase tracking-wider text-[#9ca3af] flex items-center gap-1.5"><Icon className="h-3.5 w-3.5" /> {label}</p>
+              <p className="text-[30px] leading-[36px] font-bold tracking-[-0.5px]">{fmt(Number(d.current ?? 0))}</p>
               <p className={`text-[13px] font-medium flex items-center gap-1 ${tone}`}>
                 {pct > 0 ? <TrendingUp className="h-3.5 w-3.5" /> : pct < 0 ? <TrendingDown className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
                 {pct > 0 ? "+" : ""}{pct.toFixed(0)}%
@@ -525,7 +525,7 @@ function PerformanceChart({ comparison }: { comparison: any }) {
     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
       {metrics.map(({ key, label, current, previous, max }) => (
         <div key={key} className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground capitalize">{label}</p>
+          <p className="text-[13px] font-medium text-[#9ca3af] capitalize">{label}</p>
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
               <div className="flex-1 h-5 rounded bg-[rgba(255,255,255,0.04)] overflow-hidden">
@@ -534,7 +534,7 @@ function PerformanceChart({ comparison }: { comparison: any }) {
                   style={{ width: `${Math.max((current / max) * 100, 2)}%` }}
                 />
               </div>
-              <span className="text-xs font-semibold w-14 text-right">{fmtVal(current)}</span>
+              <span className="text-[13px] font-semibold w-14 text-right">{fmtVal(current)}</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="flex-1 h-3.5 rounded bg-[rgba(255,255,255,0.04)] overflow-hidden">
@@ -543,12 +543,12 @@ function PerformanceChart({ comparison }: { comparison: any }) {
                   style={{ width: `${Math.max((previous / max) * 100, 2)}%` }}
                 />
               </div>
-              <span className="text-xs text-muted-foreground w-14 text-right">{fmtVal(previous)}</span>
+              <span className="text-[13px] text-[#9ca3af] w-14 text-right">{fmtVal(previous)}</span>
             </div>
           </div>
         </div>
       ))}
-      <div className="col-span-full flex items-center gap-4 text-xs text-muted-foreground pt-1">
+      <div className="col-span-full flex items-center gap-4 text-[13px] text-[#9ca3af] pt-1">
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-sm bg-[hsl(var(--chart-1))]" /> Current Period
         </span>
@@ -579,12 +579,12 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
           <div className="flex-1 min-w-0 space-y-2.5">
         <div className="flex items-center justify-between">
           <PlatformBadge platform={post.network_type || post.platform} size="sm" />
-          <span className="text-xs text-muted-foreground">
+          <span className="text-[13px] text-[#9ca3af]">
             {post.posted_at && new Date(post.posted_at).toLocaleDateString()}
           </span>
         </div>
-        <p className="text-sm leading-relaxed line-clamp-3">{post.text || post.content}</p>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground pt-1">
+        <p className="text-[15px] leading-6 line-clamp-3">{post.text || post.content}</p>
+        <div className="flex items-center gap-4 text-[13px] text-[#9ca3af] pt-1">
           <span className="flex items-center gap-1">
             <Eye className="h-3 w-3" />
             {(post.impressions ?? 0).toLocaleString()}
@@ -607,7 +607,7 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
             href={post.permalink || post.url}
             target="_blank"
             rel="noopener"
-            className="text-xs text-primary hover:underline flex items-center gap-1 pt-1"
+            className="text-[13px] text-primary hover:underline flex items-center gap-1 pt-1"
           >
             View Original <ExternalLink className="h-3 w-3" />
           </a>
@@ -658,13 +658,13 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
         <div className="flex items-center justify-between gap-2">
           <PlatformBadge platform={prettyPlatformName(platform.network)} size="sm" />
           {typeof platform.post_count === "number" && platform.post_count > 0 && (
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
+            <span className="text-[13px] text-[#9ca3af] whitespace-nowrap">
               {platform.post_count} {platform.post_count === 1 ? "post" : "posts"}
             </span>
           )}
         </div>
         {Array.isArray(platform.profile_names) && platform.profile_names.length > 0 && (
-          <p className="text-xs text-muted-foreground truncate">
+          <p className="text-[13px] text-[#9ca3af] truncate">
             {platform.profile_names.join(", ")}
           </p>
         )}
@@ -693,17 +693,17 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
                     : "text-warning";
             return (
               <div key={key} className="space-y-0.5">
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 text-[13px] text-[#9ca3af]">
                   <Icon className="h-3 w-3 flex-shrink-0" /> {label}
                 </div>
                 <p className="text-base font-bold tracking-tight">{value.toLocaleString()}</p>
                 {(pct != null || isNew) &&
                   (isNew ? (
-                    <div className="flex items-center gap-0.5 text-[11px] font-medium text-success">
+                    <div className="flex items-center gap-0.5 text-[12px] font-medium text-success">
                       <TrendingUp className="h-2.5 w-2.5" /> New
                     </div>
                   ) : (
-                    <div className={`flex items-center gap-0.5 text-[11px] font-medium ${color}`}>
+                    <div className={`flex items-center gap-0.5 text-[12px] font-medium ${color}`}>
                       {pct > 0 ? (
                         <TrendingUp className="h-2.5 w-2.5" />
                       ) : pct < 0 ? (
@@ -723,14 +723,14 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
           <div className="pt-3 border-t space-y-2">
             <ul className="space-y-1.5">
               {ai.insights.slice(0, more ? 3 : 1).map((t: string, i: number) => (
-                <li key={i} className="text-[14px] leading-6 text-muted-foreground flex gap-2">
+                <li key={i} className="text-[15px] leading-6 text-[#9ca3af] flex gap-2">
                   <span className="text-primary flex-shrink-0">•</span>
                   <span>{formatNumbersInText(t)}</span>
                 </li>
               ))}
             </ul>
             {ai.insights.length > 1 && (
-              <button type="button" onClick={() => setMore((v) => !v)} className="text-[13px] text-primary hover:underline inline-flex items-center gap-1">
+              <button type="button" onClick={() => setMore((v) => !v)} className="text-[14px] text-primary hover:underline inline-flex items-center gap-1">
                 {more ? "Show less" : `${ai.insights.length - 1} more`} <ChevronDown className={`h-3.5 w-3.5 transition-transform ${more ? "rotate-180" : ""}`} />
               </button>
             )}
@@ -774,7 +774,7 @@ function TopPostsSection({ posts }: { posts: any[] }) {
           </div>
         )}
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
         {ranked.map((post: any, i: number) => <PostCard key={`${mode}-${i}`} post={post} preview={previews[post.permalink || post.url]} />)}
       </div>
     </div>
@@ -894,8 +894,8 @@ function TrendsSection({
           <PlatformIcon platform={platform} className="h-5 w-5" />
         </div>
         <div className="min-w-0">
-          <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
-          {analysis?.overview && <Clamp text={analysis.overview} lines={2} className="text-[14px] leading-6 text-muted-foreground" />}
+          <h3 className="text-[20px] leading-7 font-semibold tracking-[-0.5px]">{title}</h3>
+          {analysis?.overview && <Clamp text={analysis.overview} lines={2} className="text-[15px] leading-6 text-[#9ca3af]" />}
         </div>
       </div>
 
@@ -908,10 +908,10 @@ function TrendsSection({
 
       {opportunities.length > 0 && (
         <div className="rounded-[12px] p-4 bg-[rgba(185,224,69,0.08)] border border-[rgba(185,224,69,0.25)] space-y-2">
-          <p className="text-[12px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><Target className="h-3.5 w-3.5" /> Opportunities for {clientName || "the brand"}</p>
+          <p className="text-[12px] uppercase tracking-wider text-[#9ca3af] flex items-center gap-1.5"><Target className="h-3.5 w-3.5" /> Opportunities for {clientName || "the brand"}</p>
           <ol className="space-y-2">
             {opportunities.slice(0, 3).map((o, i) => (
-              <li key={i} className="flex gap-3 text-[15px] leading-6"><span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary text-primary-foreground text-[12px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span><span>{o}</span></li>
+              <li key={i} className="flex gap-3 text-[16px] leading-[26px]"><span className="flex-shrink-0 h-6 w-6 rounded-full bg-primary text-primary-foreground text-[12px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span><span>{o}</span></li>
             ))}
           </ol>
         </div>
@@ -919,21 +919,21 @@ function TrendsSection({
 
       {(formats.length > 0 || takeaways.length > 0) && (
         <div>
-          <button type="button" onClick={() => setMore((v) => !v)} className="text-[13px] text-primary hover:underline inline-flex items-center gap-1">
+          <button type="button" onClick={() => setMore((v) => !v)} className="text-[14px] text-primary hover:underline inline-flex items-center gap-1">
             {more ? "Hide" : "Show"} what is working and the takeaways <ChevronDown className={`h-3.5 w-3.5 transition-transform ${more ? "rotate-180" : ""}`} />
           </button>
           {more && (
             <div className="grid gap-4 md:grid-cols-2 mt-3">
               {formats.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-[12px] uppercase tracking-wider text-muted-foreground">What is working</p>
-                  <ul className="space-y-1.5">{formats.slice(0, 4).map((f, i) => <li key={i} className="text-[14px] leading-6 flex gap-2"><span className="text-primary">•</span><span>{f}</span></li>)}</ul>
+                  <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">What is working</p>
+                  <ul className="space-y-1.5">{formats.slice(0, 4).map((f, i) => <li key={i} className="text-[15px] leading-6 flex gap-2"><span className="text-primary">•</span><span>{f}</span></li>)}</ul>
                 </div>
               )}
               {takeaways.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-[12px] uppercase tracking-wider text-muted-foreground">Takeaways</p>
-                  <ul className="space-y-1.5">{takeaways.slice(0, 4).map((t, i) => <li key={i} className="text-[14px] leading-6 flex gap-2"><span className="text-primary">•</span><span>{t}</span></li>)}</ul>
+                  <p className="text-[12px] uppercase tracking-wider text-[#9ca3af]">Takeaways</p>
+                  <ul className="space-y-1.5">{takeaways.slice(0, 4).map((t, i) => <li key={i} className="text-[15px] leading-6 flex gap-2"><span className="text-primary">•</span><span>{t}</span></li>)}</ul>
                 </div>
               )}
             </div>
@@ -950,11 +950,11 @@ function TrendsSection({
                 <PostVisual url={post.url} preview={previews[post.url]} mediaType={post.type || (platform.toLowerCase().includes("tiktok") ? "video" : null)} platform={platform} className="w-28 shrink-0" compact />
                 <div className="flex-1 min-w-0 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[13px] font-medium truncate">@{post.author}</span>
-                    {sl && <Badge variant="outline" className="text-[11px]" style={{ color: sl.color, borderColor: `${sl.color}55` }} title={getScoreExplanation(platform)}>{sl.label}</Badge>}
+                    <span className="text-[15px] font-medium truncate">@{post.author}</span>
+                    {sl && <Badge variant="outline" className="text-[12px]" style={{ color: sl.color, borderColor: `${sl.color}55` }} title={getScoreExplanation(platform)}>{sl.label}</Badge>}
                   </div>
-                  <p className="text-[14px] leading-6 line-clamp-3">{post.caption}</p>
-                  <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
+                  <p className="text-[15px] leading-6 line-clamp-3">{post.caption}</p>
+                  <div className="flex items-center gap-3 text-[13px] text-[#9ca3af]">
                     {post.views != null && <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{Number(post.views).toLocaleString()}</span>}
                     {post.likes != null && <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{Number(post.likes).toLocaleString()}</span>}
                     {post.comments != null && <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{Number(post.comments).toLocaleString()}</span>}

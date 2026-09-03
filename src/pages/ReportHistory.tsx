@@ -45,7 +45,7 @@ export default function ReportHistory() {
 
   return (
     <AppLayout title={`Reports: ${client?.name ?? "Client"}`}>
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Report History</CardTitle>
@@ -71,7 +71,7 @@ export default function ReportHistory() {
                     const isRunning = r.status === "running";
                     return (
                       <TableRow key={r.id} className={isRunning ? "animate-pulse" : ""}>
-                        <TableCell className="text-sm">{new Date(r.created_at).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-[15px]">{new Date(r.created_at).toLocaleDateString()}</TableCell>
                         <TableCell>
                           <Badge
                             variant={r.status === "completed" ? "default" : r.status === "running" ? "secondary" : "destructive"}
@@ -81,12 +81,12 @@ export default function ReportHistory() {
                             {r.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="text-[15px] text-[#9ca3af]">
                           {r.date_range_start && r.date_range_end
                             ? `${r.date_range_start} — ${r.date_range_end}`
                             : "—"}
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="text-[15px] text-[#9ca3af]">
                           {r.duration_minutes ? `${r.duration_minutes}m` : "—"}
                         </TableCell>
                         {!isClient && (
@@ -96,7 +96,7 @@ export default function ReportHistory() {
                                 <ExternalLink className="h-3.5 w-3.5" /> View
                               </Button>
                             ) : (
-                              <span className="text-xs text-muted-foreground/70">—</span>
+                              <span className="text-[13px] text-[#9ca3af]/70">—</span>
                             )}
                           </TableCell>
                         )}

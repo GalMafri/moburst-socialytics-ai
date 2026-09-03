@@ -418,7 +418,7 @@ export default function RunAnalysis() {
 
   return (
     <AppLayout title={`Analyze: ${client.name}`}>
-      <div className="max-w-2xl mx-auto space-y-6">
+      <div className="max-w-4xl mx-auto space-y-6">
         {/* Client summary */}
         <Card>
           <CardHeader>

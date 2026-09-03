@@ -282,11 +282,11 @@ export default function CompetitiveRun() {
   if (!confirmedSet) {
     return (
       <AppLayout title={`Competitive: ${client.name}`}>
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-4xl mx-auto">
           <Card>
             <CardContent className="pt-6 text-center space-y-4">
               <Crosshair className="h-8 w-8 mx-auto text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[15px] text-[#9ca3af]">
                 No confirmed competitor set for this client yet. Review and confirm a top 3 first.
               </p>
               <Button onClick={() => navigate(`/clients/${id}/competitive`)}>Go to competitor review</Button>
@@ -299,7 +299,7 @@ export default function CompetitiveRun() {
 
   return (
     <AppLayout title={`Competitive: ${client.name}`}>
-      <div className="max-w-2xl mx-auto space-y-6">
+      <div className="max-w-4xl mx-auto space-y-6">
         {/* Confirmed set summary */}
         <Card>
           <CardHeader>
@@ -307,15 +307,15 @@ export default function CompetitiveRun() {
           </CardHeader>
           <CardContent className="space-y-2">
             {(selectedCompetitors || []).map((c: any) => (
-              <div key={c.id} className="flex items-center gap-3 text-sm">
+              <div key={c.id} className="flex items-center gap-3 text-[15px]">
                 <Badge>#{c.selected_rank}</Badge>
                 <span className="font-medium">{c.name}</span>
-                <span className="text-xs text-muted-foreground ml-auto">
+                <span className="text-[13px] text-[#9ca3af] ml-auto">
                   {(c.competitor_handles || []).filter((h: any) => h.is_active).length} handles
                 </span>
               </div>
             ))}
-            <p className="text-xs text-muted-foreground pt-1">
+            <p className="text-[13px] text-[#9ca3af] pt-1">
               Confirmed {confirmedSet.confirmed_at ? new Date(confirmedSet.confirmed_at).toLocaleDateString() : ""}
               {" · "}
               <button className="underline underline-offset-2" onClick={() => navigate(`/clients/${id}/competitive`)}>
@@ -347,17 +347,17 @@ export default function CompetitiveRun() {
             </div>
             {preset === "custom" && (
               <div className="flex items-end gap-3 flex-wrap">
-                <label className="text-xs text-muted-foreground">
+                <label className="text-[13px] text-[#9ca3af]">
                   <span className="block mb-1">Start</span>
                   <Input type="date" value={custom.start} max={custom.end} disabled={running} onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))} className="w-44" />
                 </label>
-                <label className="text-xs text-muted-foreground">
+                <label className="text-[13px] text-[#9ca3af]">
                   <span className="block mb-1">End</span>
                   <Input type="date" value={custom.end} min={custom.start} disabled={running} onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))} className="w-44" />
                 </label>
               </div>
             )}
-            <p className="text-sm text-muted-foreground">
+            <p className="text-[15px] text-[#9ca3af]">
               {rangeOk ? (
                 <>{formatRange(range)} · {rangeDays(range)} days of posts from every company in the landscape.</>
               ) : (
@@ -375,7 +375,7 @@ export default function CompetitiveRun() {
                 <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!rangeOk}>
                   <Play className="h-5 w-5" /> Run Competitive Analysis
                 </Button>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-[13px] text-[#9ca3af]">
                   Pulls Rival IQ data for {rangeOk ? formatRange(range) : "the selected period"}, breaks content down by platform and finds the gaps. The finished report exports to PDF.
                 </p>
               </>
@@ -384,7 +384,7 @@ export default function CompetitiveRun() {
             {running && (
               <div className="space-y-4">
                 {STEPS.map((step, i) => (
-                  <div key={i} className="flex items-center gap-3 text-sm">
+                  <div key={i} className="flex items-center gap-3 text-[15px]">
                     {i < currentStep ? (
                       <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
                     ) : i === currentStep ? (
@@ -395,7 +395,7 @@ export default function CompetitiveRun() {
                     <span className={i <= currentStep ? "text-foreground" : "text-muted-foreground"}>{step}</span>
                   </div>
                 ))}
-                <p className="text-xs text-muted-foreground mt-2">
+                <p className="text-[13px] text-[#9ca3af] mt-2">
                   Polling for results... {reportId ? `(Run: ${reportId.slice(0, 8)}...)` : ""}
                 </p>
               </div>
@@ -414,7 +414,7 @@ export default function CompetitiveRun() {
                   <XCircle className="h-6 w-6" />
                   <span className="font-medium">Analysis issue</span>
                 </div>
-                <p className="text-sm text-muted-foreground">{error}</p>
+                <p className="text-[15px] text-[#9ca3af]">{error}</p>
                 <Button
                   variant="outline"
                   onClick={() => { setError(null); setCurrentStep(-1); setReportId(null); }}
@@ -449,17 +449,17 @@ export default function CompetitiveRun() {
                       >
                         {r.status}
                       </Badge>
-                      <span className="text-sm">{new Date(r.created_at).toLocaleString()}</span>
+                      <span className="text-[15px]">{new Date(r.created_at).toLocaleString()}</span>
                       {r.date_range_start && (
-                        <span className="text-xs text-muted-foreground hidden sm:inline">{formatRange({ start: r.date_range_start, end: r.date_range_end })}</span>
+                        <span className="text-[13px] text-[#9ca3af] hidden sm:inline">{formatRange({ start: r.date_range_start, end: r.date_range_end })}</span>
                       )}
                     </div>
                     <div className="flex items-center gap-3">
                       {r.duration_minutes ? (
-                        <span className="text-xs text-muted-foreground">{r.duration_minutes}m</span>
+                        <span className="text-[13px] text-[#9ca3af]">{r.duration_minutes}m</span>
                       ) : null}
                       {r.status !== "running" && (
-                        <span className="text-xs underline underline-offset-2">View report</span>
+                        <span className="text-[14px] underline underline-offset-2">View report</span>
                       )}
                     </div>
                   </div>

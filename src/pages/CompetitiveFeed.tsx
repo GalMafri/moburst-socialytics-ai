@@ -28,7 +28,7 @@ const fmt = (n: number | null | undefined) => (n == null ? "–" : Math.round(Nu
 
 function Seg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button type="button" onClick={onClick} aria-pressed={active} className={`px-3 py-1.5 rounded-[9px] text-[13px] font-medium transition-colors ${active ? "bg-[rgba(255,255,255,0.12)] text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+    <button type="button" onClick={onClick} aria-pressed={active} className={`px-3 py-1.5 rounded-[9px] text-[14px] font-medium transition-colors ${active ? "bg-[rgba(255,255,255,0.12)] text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
       {children}
     </button>
   );
@@ -156,14 +156,14 @@ export default function CompetitiveFeed() {
 
   return (
     <AppLayout title={`Competitor feed: ${clientName}`}>
-      <div className="max-w-6xl mx-auto space-y-8">
+      <div className="w-full space-y-8">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-2">
             <Button variant="ghost" size="sm" className="-ml-2" onClick={() => navigate(`/clients/${id}/competitive/reports`)}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Competitive reports
             </Button>
-            <h2 className="text-3xl font-bold tracking-tight">What the field posted this week</h2>
-            <p className="text-sm text-muted-foreground">
+            <h2 className="text-[30px] leading-[36px] font-bold tracking-[-0.5px]">What the field posted this week</h2>
+            <p className="text-[15px] text-[#9ca3af]">
               {snapshot ? <>Pulled {new Date(snapshot.fetched_at).toLocaleString()}{payload.window ? ` · ${payload.window.start} to ${payload.window.end}` : ""}{payload.truncated ? " · capped at 100 posts" : ""}</> : "No pull yet for this client."}
             </p>
           </div>
@@ -189,7 +189,7 @@ export default function CompetitiveFeed() {
             {(alerts || []).length > 0 && (
               <Card className="glass-elevated">
                 <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2"><TrendingUp className="h-5 w-5" /> Trends this week</CardTitle>
+                  <CardTitle className="text-[20px] leading-7 tracking-[-0.5px] flex items-center gap-2"><TrendingUp className="h-5 w-5" /> Trends this week</CardTitle>
                   <CardDescription>Topics two or more companies posted about inside the window. Confidence rises with more companies, more posts and tighter timing.</CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4 md:grid-cols-2">
@@ -212,7 +212,7 @@ export default function CompetitiveFeed() {
                             <Button size="sm" variant="ghost" className="shrink-0" onClick={() => dismiss.mutate(a.id)} aria-label="Dismiss"><X className="h-4 w-4" /></Button>
                           )}
                         </div>
-                        {a.summary && <p className="text-sm leading-6 text-muted-foreground">{a.summary}</p>}
+                        {a.summary && <p className="text-[15px] leading-6 text-[#9ca3af]">{a.summary}</p>}
                         {examples.length > 0 && (
                           <div className="grid grid-cols-3 gap-2 items-start">
                             {examples.map((p, i) => <PostVisual key={i} url={p.postLink} image={p.image} preview={p.postLink ? previews[p.postLink] : null} mediaType={p.type} platform={p.channel} compact />)}
@@ -232,12 +232,12 @@ export default function CompetitiveFeed() {
 
             {/* Filters */}
             <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Company</span>
+              <span className="text-[12px] font-medium uppercase tracking-wider text-[#9ca3af]">Company</span>
               <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)] flex-wrap">
                 <Seg active={company === "all"} onClick={() => setCompany("all")}>All</Seg>
                 {companies.map((c) => <Seg key={c} active={company === c} onClick={() => setCompany(c)}>{c}</Seg>)}
               </div>
-              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground ml-2">Platform</span>
+              <span className="text-[12px] font-medium uppercase tracking-wider text-[#9ca3af] ml-2">Platform</span>
               <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)] flex-wrap">
                 <Seg active={plat === "all"} onClick={() => setPlat("all")}>All</Seg>
                 {platforms.map((p) => <Seg key={p} active={plat === p} onClick={() => setPlat(p)}>{platformLabel(p)}</Seg>)}
@@ -246,28 +246,28 @@ export default function CompetitiveFeed() {
 
             {/* Posts */}
             {visible.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No posts match these filters.</p>
+              <p className="text-[15px] text-[#9ca3af]">No posts match these filters.</p>
             ) : (
               <div className="grid gap-4 grid-cols-2 md:grid-cols-3 xl:grid-cols-4 items-start">
                 {visible.map((p, i) => (
                   <div key={`${p.postLink || i}`} className="rounded-[12px] p-3 bg-[rgba(255,255,255,0.04)] space-y-2.5">
                     <PostVisual url={p.postLink} image={p.image} preview={p.postLink ? previews[p.postLink] : null} mediaType={p.type} platform={p.channel} />
-                    <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between gap-2 text-[13px] text-[#9ca3af]">
                       <span className="font-medium text-foreground truncate">{p.companyName}</span>
                       <span>{p.publishedAt ? new Date(p.publishedAt).toLocaleDateString() : ""}</span>
                     </div>
-                    <p className="text-[13px] leading-5 line-clamp-3 min-h-[3.75rem]">{p.message || "(no caption)"}</p>
-                    <div className="flex gap-2 flex-wrap text-[11px] text-muted-foreground">
+                    <p className="text-[15px] leading-6 line-clamp-3 min-h-[4.5rem]">{p.message || "(no caption)"}</p>
+                    <div className="flex gap-2 flex-wrap text-[13px] text-[#9ca3af]">
                       <span>{fmt(p.engagementTotal)} eng.</span>
                       {p.estimatedImpressions ? <span>· {fmt(p.estimatedImpressions)} est. impr.</span> : null}
                       {p.views ? <span>· {fmt(p.views)} views</span> : null}
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       {p.postLink ? (
-                        <a href={p.postLink} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline inline-flex items-center gap-1">Open <ExternalLink className="h-3 w-3" /></a>
+                        <a href={p.postLink} target="_blank" rel="noreferrer" className="text-[13px] text-primary hover:underline inline-flex items-center gap-1">Open <ExternalLink className="h-3 w-3" /></a>
                       ) : <span />}
                       {canRunAnalysis && (
-                        <Button size="sm" variant="outline" className="h-7 text-xs" disabled={draft.isPending} onClick={() => draft.mutate({ topic: topicFor(p), platform: platformLabel(p.channel) })}>
+                        <Button size="sm" variant="outline" className="h-7 text-[13px]" disabled={draft.isPending} onClick={() => draft.mutate({ topic: topicFor(p), platform: platformLabel(p.channel) })}>
                           <Sparkles className="h-3 w-3 mr-1" /> Draft our take
                         </Button>
                       )}

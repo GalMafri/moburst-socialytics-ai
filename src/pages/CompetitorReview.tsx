@@ -369,7 +369,7 @@ export default function CompetitorReview() {
 
   return (
     <AppLayout title={`Competitors: ${client.name}`}>
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
         <Dialog open={importOpen} onOpenChange={setImportOpen}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
@@ -384,20 +384,20 @@ export default function CompetitorReview() {
             ) : landscapes === null ? (
               <Loading label="Reading RivalIQ landscapes" />
             ) : landscapes.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No landscapes on the RivalIQ account.</p>
+              <p className="text-[15px] text-[#9ca3af]">No landscapes on the RivalIQ account.</p>
             ) : (
               <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
                 {landscapes.map((l: any) => (
                   <div key={l.id} className="p-3 rounded-md bg-[rgba(255,255,255,0.04)] flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium flex items-center gap-2">
+                      <div className="text-[15px] font-medium flex items-center gap-2">
                         {l.name}
                         {l.is_match && <Badge>matches {client?.name}</Badge>}
                       </div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-[13px] text-[#9ca3af]">
                         Focus: {l.focus_company || "?"} · {l.companies.filter((c: any) => !c.is_focus).length} competitors
                       </div>
-                      <div className="text-xs text-muted-foreground truncate">
+                      <div className="text-[13px] text-[#9ca3af] truncate">
                         {l.companies.filter((c: any) => !c.is_focus).map((c: any) => c.name).join(", ")}
                       </div>
                     </div>
@@ -447,7 +447,7 @@ export default function CompetitorReview() {
           </CardHeader>
           {client.competitor_seed_notes ? (
             <CardContent className="pt-0">
-              <p className="text-xs text-muted-foreground">
+              <p className="text-[13px] text-[#9ca3af]">
                 <span className="font-medium">Account team notes fed to the AI:</span> {client.competitor_seed_notes}
               </p>
             </CardContent>
@@ -466,7 +466,7 @@ export default function CompetitorReview() {
               {selected.map((c) => (
                 <div key={c.id} className="flex items-center gap-3 p-2 rounded-md bg-[rgba(255,255,255,0.04)]">
                   <Badge className="shrink-0">#{c.selected_rank}</Badge>
-                  <span className="font-medium text-sm">{c.name}</span>
+                  <span className="font-medium text-[15px]">{c.name}</span>
                   <span className="flex gap-1 ml-auto">
                     {(handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active).map((h) => (
                       <PlatformBadge key={h.id} platform={h.platform} size="sm" />
@@ -522,7 +522,7 @@ export default function CompetitorReview() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm">{c.name}</span>
+                          <span className="font-medium text-[15px]">{c.name}</span>
                           {c.source === "manual" && <Badge variant="outline">manual</Badge>}
                           {typeof c.similarity_score === "number" && (
                             <Badge variant="secondary">{Math.round(c.similarity_score * 100)}% match</Badge>
@@ -533,12 +533,12 @@ export default function CompetitorReview() {
                             href={c.website_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                            className="text-[13px] text-[#9ca3af] hover:text-foreground underline-offset-2 hover:underline"
                           >
                             {c.website_url.replace(/^https?:\/\/(www\.)?/, "")}
                           </a>
                         )}
-                        {c.rationale && <p className="text-xs text-muted-foreground mt-1">{c.rationale}</p>}
+                        {c.rationale && <p className="text-[13px] text-[#9ca3af] mt-1">{c.rationale}</p>}
                         <div className="flex gap-1 mt-2 flex-wrap">
                           {compHandles.length > 0 ? (
                             compHandles.map((h) => (
@@ -547,7 +547,7 @@ export default function CompetitorReview() {
                               </a>
                             ))
                           ) : (
-                            <span className="text-xs text-amber-500/80">no handles detected yet</span>
+                            <span className="text-[13px] text-amber-500/80">no handles detected yet</span>
                           )}
                         </div>
                       </div>
