@@ -54,7 +54,7 @@ export function GenerationProgress() {
                     : isFail
                     ? "bg-[rgba(239,68,68,0.10)] text-red-400"
                     : isCancelled
-                    ? "bg-[rgba(255,255,255,0.06)] text-[#9ca3af]"
+                    ? "bg-[rgba(255,255,255,0.06)] text-[#b1b7c1]"
                     : "bg-[rgba(185,224,69,0.10)] text-[#b9e045]"
                 }`}
               >
@@ -87,7 +87,7 @@ export function GenerationProgress() {
                   type="button"
                   onClick={() => dismissGeneration(g.postKey)}
                   aria-label="Dismiss"
-                  className="shrink-0 rounded-full p-1 text-[#9ca3af] hover:text-white hover:bg-[rgba(255,255,255,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="shrink-0 rounded-full p-1 text-[#b1b7c1] hover:text-white hover:bg-[rgba(255,255,255,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>

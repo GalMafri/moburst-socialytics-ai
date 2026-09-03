@@ -148,7 +148,7 @@ export function UserDetail({
                 )}
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                   <span className="t-label tabular-nums text-muted-foreground">{t.time}</span>
-                  <Badge variant="outline" className={`${KIND_STYLE[r.kind] ?? ""} text-[10px]`}>
+                  <Badge variant="outline" className={`${KIND_STYLE[r.kind] ?? ""} text-[12px]`}>
                     {r.kind}
                   </Badge>
                   <span className="t-body">{r.label}</span>

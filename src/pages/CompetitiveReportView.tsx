@@ -338,7 +338,7 @@ export default function CompetitiveReportView() {
         {companies.length > 0 && (
           <section className="space-y-4">
             <div>
-              <h3 className="t-h3">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
+              <h3 className="t-h2">The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
               <p className="t-secondary">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
@@ -444,7 +444,7 @@ export default function CompetitiveReportView() {
           <section className="space-y-4">
             <div className="flex items-end justify-between gap-4 flex-wrap">
               <div>
-                <h3 className="t-h3 flex items-center gap-2"><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
+                <h3 className="t-h2 flex items-center gap-2"><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h3>
                 <p className="t-secondary">
                   {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
                 </p>

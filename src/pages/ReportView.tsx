@@ -480,7 +480,7 @@ function Section({ title, description, action, children }: { title: string; desc
     <section className="space-y-4">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="t-h3">{title}</h3>
+          <h2 className="t-h2">{title}</h2>
           {description && <p className="t-secondary mt-0.5">{description}</p>}
         </div>
         {action}
@@ -803,13 +803,13 @@ function TopPostsSection({ posts }: { posts: any[] }) {
         </div>
       )}
       <div className="space-y-4">
-        <h4 className="t-h3 flex items-center gap-2"><Eye className="h-4 w-4 text-[#9ca3af]" /> Top posts by impressions</h4>
+        <h4 className="t-h3 flex items-center gap-2"><Eye className="h-4 w-4 text-[#b1b7c1]" /> Top posts by impressions</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {byImpressions.map((post: any, i: number) => <PostCard key={`imp-${i}`} post={post} preview={previews[post.permalink || post.url]} />)}
         </div>
       </div>
       <div className="space-y-4">
-        <h4 className="t-h3 flex items-center gap-2"><Heart className="h-4 w-4 text-[#9ca3af]" /> Top posts by engagement</h4>
+        <h4 className="t-h3 flex items-center gap-2"><Heart className="h-4 w-4 text-[#b1b7c1]" /> Top posts by engagement</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {byEngagement.map((post: any, i: number) => <PostCard key={`eng-${i}`} post={post} preview={previews[post.permalink || post.url]} />)}
         </div>
@@ -839,7 +839,7 @@ function FilterChip({
         ${
           active
             ? "bg-[rgba(255,255,255,0.08)] text-white backdrop-blur-sm shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06),0_2px_8px_rgba(0,0,0,0.2)]"
-            : "text-[#9ca3af] hover:text-white"
+            : "text-[#b1b7c1] hover:text-white"
         }`}
     >
       {children}
@@ -939,14 +939,14 @@ function TrendsSection({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {analysis.top_themes?.length > 0 && (
             <Card>
-              <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-[#9ca3af]" /> Top themes</CardTitle></CardHeader>
-              <CardContent><div className="flex flex-wrap gap-2">{analysis.top_themes.map((t: string, i: number) => <Badge key={t} variant="secondary" className="px-3 py-1 t-body"><span className="mr-1.5 t-badge text-[#9ca3af]">{i + 1}</span>{t}</Badge>)}</div></CardContent>
+              <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-[#b1b7c1]" /> Top themes</CardTitle></CardHeader>
+              <CardContent><div className="flex flex-wrap gap-2">{analysis.top_themes.map((t: string, i: number) => <Badge key={t} variant="secondary" className="px-3 py-1 t-body"><span className="mr-1.5 t-badge text-[#b1b7c1]">{i + 1}</span>{t}</Badge>)}</div></CardContent>
             </Card>
           )}
           {analysis.top_hashtags?.length > 0 && (
             <Card>
               <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><span className="text-[18px]">#</span> Trending hashtags</CardTitle></CardHeader>
-              <CardContent><div className="flex flex-wrap gap-2">{analysis.top_hashtags.map((h: string) => <Badge key={h} variant="outline" className="px-3 py-1 t-body font-mono">{h.startsWith("#") ? h : `#${h}`}</Badge>)}</div></CardContent>
+              <CardContent><div className="flex flex-wrap gap-2">{analysis.top_hashtags.map((h: string) => <Badge key={h} variant="outline" className="px-3 py-1 t-body">{h.startsWith("#") ? h : `#${h}`}</Badge>)}</div></CardContent>
             </Card>
           )}
         </div>
@@ -954,7 +954,7 @@ function TrendsSection({
 
       {formats.length > 0 && (
         <Card>
-          <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><Sparkles className="h-4 w-4 text-[#9ca3af]" /> What is working</CardTitle></CardHeader>
+          <CardHeader className="pb-3"><CardTitle className="t-h3 flex items-center gap-2"><Sparkles className="h-4 w-4 text-[#b1b7c1]" /> What is working</CardTitle></CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {formats.map((f, i) => (
@@ -1021,7 +1021,7 @@ function TrendsSection({
                         </div>
                         <p className="t-body line-clamp-4">{post.caption}</p>
                         {Array.isArray(post.hashtags) && post.hashtags.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">{post.hashtags.slice(0, 6).map((h: string) => <span key={h} className="t-label font-mono text-primary">{h.startsWith("#") ? h : `#${h}`}</span>)}</div>
+                          <div className="flex flex-wrap gap-1.5">{post.hashtags.slice(0, 6).map((h: string) => <span key={h} className="t-label !text-primary">{h.startsWith("#") ? h : `#${h}`}</span>)}</div>
                         )}
                         <div className="flex items-center gap-4 t-secondary">
                           {post.views != null && <span className="flex items-center gap-1"><Eye className="h-3.5 w-3.5" />{Number(post.views).toLocaleString()}</span>}

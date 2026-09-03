@@ -47,7 +47,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="text-[#9ca3af]/70 uppercase text-[11px] tracking-wider">Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel className="text-[#b1b7c1]/70 uppercase text-[12px] tracking-wider">Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {/* Switch Tool — only for gOS (moburst.ai) sessions; never shown
@@ -57,7 +57,7 @@ export function AppSidebar() {
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
-                    className="h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] text-[#9ca3af] opacity-80 transition-all hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]"
+                    className="h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] text-[#b1b7c1] opacity-80 transition-all hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]"
                   >
                     <a href={PORTAL_URL}>
                       <ExternalLink className="h-[24px] w-[24px]" />
@@ -76,7 +76,7 @@ export function AppSidebar() {
                       className={`h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] transition-all ${
                         isActive
                           ? "nav-active text-white"
-                          : "text-[#9ca3af] opacity-80 hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]"
+                          : "text-[#b1b7c1] opacity-80 hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]"
                       }`}
                     >
                       <item.icon className="h-[24px] w-[24px]" />
@@ -101,7 +101,7 @@ export function AppSidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium text-white truncate">{user.name}</div>
-              <div className="text-xs text-[#9ca3af] truncate">{user.email}</div>
+              <div className="text-xs text-[#b1b7c1] truncate">{user.email}</div>
             </div>
           </div>
         )}

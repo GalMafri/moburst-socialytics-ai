@@ -11,7 +11,7 @@ export function AppLayout({ children, title }: { children: ReactNode; title?: st
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0b0c10]">
-        <div className="animate-pulse text-[#9ca3af]">Loading...</div>
+        <div className="animate-pulse text-[#b1b7c1]">Loading...</div>
       </div>
     );
   }
@@ -23,9 +23,9 @@ export function AppLayout({ children, title }: { children: ReactNode; title?: st
       <AppSidebar />
       <SidebarInset className="intercept-bg">
         <header className="relative z-10 flex h-[80px] items-center gap-4 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(11,12,16,0.5)] backdrop-blur-[60px] px-[32px]">
-          <SidebarTrigger className="text-[#9ca3af] hover:text-white" />
+          <SidebarTrigger className="text-[#b1b7c1] hover:text-white" />
           <Separator orientation="vertical" className="h-5" />
-          {title && <h1 className="text-[20px] font-bold text-white tracking-[-0.5px] leading-[24px]">{title}</h1>}
+          {title && <h1 className="t-h1">{title}</h1>}
         </header>
         <main className="relative z-10 flex-1 p-[32px]">{children}</main>
       </SidebarInset>

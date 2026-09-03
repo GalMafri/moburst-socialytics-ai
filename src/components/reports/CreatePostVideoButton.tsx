@@ -663,7 +663,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                               alt={`Variant ${i + 1} seed`}
                               className="w-full h-full object-cover"
                             />
-                            <span className="absolute bottom-0 right-0 bg-black/70 text-white text-[10px] font-bold px-1">
+                            <span className="absolute bottom-0 right-0 bg-black/70 text-white text-[12px] font-bold px-1">
                               V{i + 1}
                             </span>
                           </button>

@@ -13,7 +13,7 @@ export function StaffOnlyRoute({ children }: { children: ReactNode }) {
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0b0c10]">
-        <div className="animate-pulse text-[#9ca3af]">Loading...</div>
+        <div className="animate-pulse text-[#b1b7c1]">Loading...</div>
       </div>
     );
   }

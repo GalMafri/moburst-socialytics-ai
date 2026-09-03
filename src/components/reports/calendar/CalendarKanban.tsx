@@ -112,12 +112,12 @@ export function CalendarKanban({
                 {dayName}
               </h3>
               {dayEntry?.date_label && (
-                <span className="text-sm text-[#9ca3af] tracking-[-0.5px]">
+                <span className="text-sm text-[#b1b7c1] tracking-[-0.5px]">
                   {dayEntry.date_label}
                 </span>
               )}
               <span
-                className="t-label font-medium tracking-wider uppercase text-[#9ca3af] ml-auto"
+                className="t-label font-medium tracking-wider uppercase text-[#b1b7c1] ml-auto"
                 aria-live="polite"
               >
                 {posts.length === 0 ? "No posts" : `${posts.length} post${posts.length === 1 ? "" : "s"}`}

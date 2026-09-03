@@ -869,11 +869,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                         })();
                         return (
                           <>
-                            <span className="absolute top-1 left-1 bg-black/70 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+                            <span className="absolute top-1 left-1 bg-black/70 text-white text-[12px] font-bold px-1.5 py-0.5 rounded">
                               V{variantIdx + 1} · S{slideIdx}/{slideCount}
                             </span>
                             {variantLabelObj && (
-                              <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-2 py-1 truncate">
+                              <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[12px] px-2 py-1 truncate">
                                 {variantLabelObj.label}
                               </div>
                             )}

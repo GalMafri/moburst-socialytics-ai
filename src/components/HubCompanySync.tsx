@@ -243,7 +243,7 @@ export function HubCompanySync() {
                           ) : null}
                           <span
                             className={`t-body ${
-                              c.hub_company_name ? "text-white" : "italic text-[#6b7280]"
+                              c.hub_company_name ? "text-white" : "italic text-[#b1b7c1]"
                             } truncate`}
                           >
                             {c.hub_company_name || "— not set —"}

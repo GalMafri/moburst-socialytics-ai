@@ -17,7 +17,7 @@
     --secondary: 220 12% 16%;
     --secondary-foreground: 0 0% 90%;
     --muted: 222 10% 16%;
-    --muted-foreground: 218 11% 65%;
+    --muted-foreground: 218 11% 73%;
     --accent: 222 10% 16%;
     --accent-foreground: 0 0% 95%;
     --destructive: 0 70% 50%;
@@ -27,7 +27,7 @@
     --ring: 72 75% 57%;
     --radius: 1.25rem;
     --sidebar-background: 228 23% 5%;
-    --sidebar-foreground: 218 11% 65%;
+    --sidebar-foreground: 218 11% 73%;
     --sidebar-primary: 72 75% 57%;
     --sidebar-primary-foreground: 0 0% 0%;
     --sidebar-accent: 220 12% 16%;
@@ -207,11 +207,14 @@
 
 /* ── Intercept type ramp (moburst-ai-product-design). Use these instead of ad hoc sizes. ── */
 @layer utilities {
-  .t-stat { font-size: 30px; line-height: 36px; font-weight: 700; letter-spacing: -0.5px; }
-  .t-h1 { font-size: 20px; line-height: 24px; font-weight: 700; letter-spacing: -0.5px; }
-  .t-h3 { font-size: 18px; line-height: 28px; font-weight: 600; letter-spacing: -0.5px; }
-  .t-body { font-size: 14px; line-height: 20px; letter-spacing: -0.5px; }
-  .t-secondary { font-size: 14px; line-height: 20px; letter-spacing: -0.5px; color: #9ca3af; }
-  .t-label { font-size: 12px; line-height: 16px; letter-spacing: 0.1px; color: #9ca3af; }
+  /* Type ramp. Four sizes on any page: stat 30, page title 24, section/card title 20/18, text 15. Labels 13. */
+  .t-stat { font-size: 30px; line-height: 36px; font-weight: 700; letter-spacing: -0.5px; color: #ffffff; }
+  .t-h1 { font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.5px; color: #ffffff; }
+  .t-h2 { font-size: 20px; line-height: 26px; font-weight: 700; letter-spacing: -0.5px; color: #ffffff; }
+  .t-h3 { font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.3px; color: #ffffff; }
+  .t-body { font-size: 15px; line-height: 22px; letter-spacing: -0.2px; }
+  /* Secondary sentences stay light (#d1d5db, 12.6:1). Grey (#b1b7c1, 9.6:1) is for short labels only. */
+  .t-secondary { font-size: 15px; line-height: 22px; letter-spacing: -0.2px; color: #d1d5db; }
+  .t-label { font-size: 13px; line-height: 18px; letter-spacing: 0.1px; color: #b1b7c1; }
   .t-badge { font-size: 12px; line-height: 16px; font-weight: 700; letter-spacing: -0.2px; }
 }

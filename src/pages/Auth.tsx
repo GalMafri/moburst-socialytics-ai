@@ -51,8 +51,8 @@ export default function Auth() {
                 </div>
               </div>
               <h2 className="t-h1 text-white">Sign-in failed</h2>
-              <p className="text-[#9ca3af]">{authError}</p>
-              <p className="t-label text-[#6b7280] pt-2">
+              <p className="text-[#b1b7c1]">{authError}</p>
+              <p className="t-label text-[#b1b7c1] pt-2">
                 Open this tool from the Moburst Hub Dashboard. If you're already there,
                 ask a Hub admin to confirm your tool assignment.
               </p>
@@ -60,7 +60,7 @@ export default function Auth() {
           ) : (
             <>
               <h2 className="t-h1 text-white">Sign in to continue</h2>
-              <p className="text-[#9ca3af]">
+              <p className="text-[#b1b7c1]">
                 This tool signs you in through the Moburst portal. Open it there and you
                 will come straight back to the page you were trying to reach.
               </p>
@@ -108,7 +108,7 @@ export default function Auth() {
           </div>
         )}
 
-        <p className="t-label text-[#6b7280] pt-4">Powered by Moburst</p>
+        <p className="t-label text-[#b1b7c1] pt-4">Powered by Moburst</p>
       </div>
     </div>
   );

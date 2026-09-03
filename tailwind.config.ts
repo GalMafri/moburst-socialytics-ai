@@ -97,6 +97,11 @@ export default {
   			'accordion-down': 'accordion-down 0.2s ease-out',
   			'accordion-up': 'accordion-up 0.2s ease-out'
   		},
+  		fontSize: {
+  			xs: ["13px", { lineHeight: "18px" }],
+  			sm: ["15px", { lineHeight: "22px" }],
+  			base: ["16px", { lineHeight: "24px" }],
+  		},
   		fontFamily: {
   			sans: [
   				'Geist',

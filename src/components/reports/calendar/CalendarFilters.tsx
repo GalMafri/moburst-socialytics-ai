@@ -65,7 +65,7 @@ function SegmentedGroup({
  *   active:  bg-[rgba(255,255,255,0.08)] text-white
  *            shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06),0_2px_8px_rgba(0,0,0,0.2)]
  *            backdrop-blur-sm
- *   inactive: text-[#9ca3af] hover:text-white
+ *   inactive: text-[#b1b7c1] hover:text-white
  *
  * The active state is the elevated subtle-white overlay — NOT the lime primary
  * accent (which is reserved for primary action buttons per the design system).
@@ -92,7 +92,7 @@ function Segment({
         ${
           active
             ? "bg-[rgba(255,255,255,0.08)] text-white backdrop-blur-sm shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06),0_2px_8px_rgba(0,0,0,0.2)]"
-            : "text-[#9ca3af] hover:text-white"
+            : "text-[#b1b7c1] hover:text-white"
         }`}
     >
       {children}
