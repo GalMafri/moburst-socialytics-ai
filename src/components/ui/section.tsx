@@ -155,13 +155,16 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
       data-print="hide"
       className={cn(
         // Under xl: a plain row at the top of the report, in the flow.
-        "flex gap-1 flex-nowrap overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        // The overflow rules carry ! because .glass sets `overflow: hidden`
+        // outside a layer, which otherwise wins over these and clips whatever
+        // does not fit into a rail nobody can scroll.
+        "flex gap-1 flex-nowrap !overflow-x-auto !overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         // xl and up: the rail. Sticky only within its own column, so it stays
         // beside the reader without ever crossing the content.
-        "xl:flex-col xl:gap-0.5 xl:overflow-x-visible xl:overflow-y-auto",
+        "xl:flex-col xl:gap-0.5 xl:!overflow-x-hidden xl:!overflow-y-auto",
         "xl:sticky xl:top-[88px] xl:self-start xl:max-h-[calc(100vh-7rem)]",
         "glass p-2",
-        "print:static print:overflow-visible print:flex-wrap print:flex-row",
+        "print:static print:!overflow-visible print:flex-wrap print:flex-row",
         className,
       )}
     >
