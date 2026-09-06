@@ -122,8 +122,14 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
       ref={navRef}
       aria-label="Sections"
       className={cn(
-        "glass px-3 py-2 flex gap-1 flex-nowrap overflow-x-auto sticky top-[88px] z-20",
-        "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:static print:overflow-visible print:flex-wrap",
+        "px-3 py-2 flex gap-1 flex-nowrap overflow-x-auto sticky top-[88px] z-30",
+        // Deliberately NOT .glass. Content scrolls underneath this bar, and at
+        // .glass's 20% black the text behind it read straight through — lines of
+        // the report showing through the nav. This is near-opaque with a shadow
+        // so it reads as a layer sitting above the page, not a window onto it.
+        "rounded-[16px] border border-[rgba(255,255,255,0.10)] bg-[rgba(11,12,16,0.97)]",
+        "backdrop-blur-[60px] shadow-[0_10px_28px_rgba(0,0,0,0.55)]",
+        "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:static print:overflow-visible print:flex-wrap print:shadow-none",
         className,
       )}
     >
