@@ -42,14 +42,18 @@ export function Section({
 }
 
 /**
- * Section navigation for long reports: a rail down the left of the report.
+ * Section navigation for long pages: a rail down the left, in `AppLayout`'s own
+ * left column, so it starts level with the page header and every card on the
+ * page keeps one left edge. It is always in reach and never covers a word.
  *
  * It sat across the top before and followed the scroll, which meant it passed
- * over the report as you read — the wrong trade for a reader. In its own column
- * it is always in reach and never covers a word. It holds its place beside the
- * content on wide screens; below that there is no room for a column, so it
- * becomes a plain row at the top of the report that scrolls away with
- * everything else rather than floating over it.
+ * over the report as you read; then it sat in a column inside the content,
+ * which pushed the whole page right of its own header. Below xl there is no
+ * room for a column at all, so it becomes a plain row above the page that
+ * scrolls away with everything else.
+ *
+ * Give it the full running order. It drops the sections that are not on the
+ * page and keeps up as tabs change and queries land.
  */
 export function SectionNav({ items, className }: { items: { id: string; label: string }[]; className?: string }) {
   const [active, setActive] = useState<string | null>(null);
@@ -135,7 +139,9 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
   }, [active]);
 
   const visible = presentIds === null ? items : items.filter((it) => presentIds.split("|").includes(it.id));
-  if (visible.length === 0) return null;
+  // One link to the only section on the page helps nobody; the column it sits
+  // in stays reserved by the layout either way, so nothing shifts.
+  if (visible.length < 2) return null;
 
   const go = (e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
     const el = document.getElementById(id);
@@ -154,20 +160,19 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
       // Navigation chrome, not report content: the PDF export drops it.
       data-print="hide"
       className={cn(
-        // Under xl: a plain row at the top of the report, in the flow.
-        // The overflow rules carry ! because .glass sets `overflow: hidden`
-        // outside a layer, which otherwise wins over these and clips whatever
-        // does not fit into a rail nobody can scroll.
-        "flex gap-1 flex-nowrap !overflow-x-auto !overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-        // xl and up: the rail. Sticky only within its own column, so it stays
-        // beside the reader without ever crossing the content.
-        "xl:flex-col xl:gap-0.5 xl:!overflow-x-hidden xl:!overflow-y-auto",
-        "xl:sticky xl:top-[88px] xl:self-start xl:max-h-[calc(100vh-7rem)]",
-        "glass p-2",
+        // Under xl there is no room for a column, so it is a plain row above the
+        // page, in the flow. The overflow rules carry ! because .glass sets
+        // `overflow: hidden` outside a layer, which otherwise wins over them and
+        // clips whatever does not fit into a rail nobody can scroll.
+        "glass flex gap-1 flex-nowrap p-2 !overflow-x-auto !overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        // xl and up: the rail proper. The column around it does the sticking.
+        "xl:flex-col xl:gap-0.5 xl:p-3 xl:!overflow-x-hidden xl:!overflow-y-auto",
+        "xl:max-h-[calc(100vh-9rem)]",
         "print:static print:!overflow-visible print:flex-wrap print:flex-row",
         className,
       )}
     >
+      <p className="hidden xl:block t-label uppercase tracking-[0.14em] px-3 pt-1 pb-2.5">On this page</p>
       {visible.map((it) => {
         const on = active === it.id;
         return (
@@ -179,11 +184,14 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
             onClick={(e) => go(e, it.id)}
             className={cn(
               "px-3 py-1.5 rounded-[8px] t-body whitespace-nowrap shrink-0 transition-colors",
-              "xl:whitespace-normal xl:text-left xl:border-l-2",
+              "xl:w-full xl:py-2 xl:rounded-[10px] xl:whitespace-normal xl:text-left xl:border-l-2",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(185,224,69,0.45)]",
               on
-                ? "bg-[rgba(185,224,69,0.14)] text-white xl:border-l-[#b9e045]"
-                : "text-white hover:bg-[rgba(255,255,255,0.08)] xl:border-l-transparent",
+                // The lime edge marks where you are; the fill is the same one
+                // the sidebar uses for its active item, so the two rails read
+                // as the same kind of thing.
+                ? "bg-[rgba(255,255,255,0.06)] text-white shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06)] xl:border-l-[#b9e045]"
+                : "text-[#9ca3af] hover:text-white hover:bg-[rgba(255,255,255,0.03)] xl:border-l-transparent",
             )}
           >
             {it.label}

@@ -19,6 +19,7 @@ export function AppLayout({
   meta,
   actions,
   back,
+  nav,
   width = "max-w-[1440px]",
 }: {
   children: ReactNode;
@@ -27,6 +28,13 @@ export function AppLayout({
   meta?: ReactNode;
   actions?: ReactNode;
   back?: ReactNode;
+  /**
+   * Section rail for long pages (usually a `SectionNav`). It becomes the page's
+   * own left column, running from the top beside the header, so the header and
+   * every card below it keep one left edge. Pass it on every tab of a page that
+   * has it on any tab, or the whole page shifts sideways when the tab changes.
+   */
+  nav?: ReactNode;
   /** Tailwind max-width class for the whole column (header and content share it). */
   width?: string;
 }) {
@@ -66,9 +74,21 @@ export function AppLayout({
           </div>
         </header>
         <main className="relative z-10 flex-1 p-[32px]">
-          <div className={`mx-auto w-full ${width} space-y-6`}>
-            {title && <PageHeader title={title} description={description} meta={meta} actions={actions} back={back} />}
-            {children}
+          <div className={`mx-auto w-full ${width}`}>
+            {nav ? (
+              <div className="grid gap-6 xl:grid-cols-[236px_minmax(0,1fr)] items-start">
+                <div className="xl:sticky xl:top-[112px]">{nav}</div>
+                <div className="space-y-6 min-w-0">
+                  {title && <PageHeader title={title} description={description} meta={meta} actions={actions} back={back} />}
+                  {children}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {title && <PageHeader title={title} description={description} meta={meta} actions={actions} back={back} />}
+                {children}
+              </div>
+            )}
           </div>
         </main>
       </SidebarInset>

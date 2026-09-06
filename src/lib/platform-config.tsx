@@ -14,7 +14,9 @@ export const PLATFORM_COLORS: Record<string, string> = {
   threads: "#000000",
 };
 
-// For dark mode where black logos won't be visible
+// The app is dark everywhere (ThemeProvider is forcedTheme="dark"), and three
+// of these brands are black, which is invisible on it. These are the colours
+// those three use on their own dark surfaces.
 const PLATFORM_COLORS_DARK: Record<string, string> = {
   tiktok: "#25F4EE",
   x: "#FFFFFF",
@@ -61,7 +63,7 @@ export function prettyPlatformName(input?: string | null): string {
   return map[key] || (input ? String(input) : "");
 }
 
-export function getPlatformColor(platform: string, isDark = false): string {
+export function getPlatformColor(platform: string, isDark = true): string {
   const key = normalizePlatformKey(platform);
   if (isDark && PLATFORM_COLORS_DARK[key]) return PLATFORM_COLORS_DARK[key];
   return PLATFORM_COLORS[key] || "hsl(var(--primary))";

@@ -184,10 +184,12 @@ export function ContentIdeasTab({
           </div>
         )}
 
-        <WeeklyHighlights
-          aiAnalysis={aiAnalysis}
-          sproutMonthSummary={sproutPerformance?.month_comparison?.summary || null}
-        />
+        <div id="ideas-week" className="scroll-mt-[156px]">
+          <WeeklyHighlights
+            aiAnalysis={aiAnalysis}
+            sproutMonthSummary={sproutPerformance?.month_comparison?.summary || null}
+          />
+        </div>
 
         <CalendarFilters
           filters={filters}
@@ -196,20 +198,22 @@ export function ContentIdeasTab({
           availableLanguages={availableLanguages}
         />
 
-        <CalendarKanban
-          contentCalendar={contentCalendar}
-          postIterations={postIterations as any}
-          scheduledPosts={scheduledPosts as any}
-          filters={filters}
-          onCardClick={(post) => {
-            // Direct card clicks should show the most recent variant group
-            // (the heuristic path) — clear any group filter set by the
-            // floating "View" button.
-            setActivePost(post);
-            setActiveGroupId(null);
-          }}
-          onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
-        />
+        <div id="ideas-calendar" className="scroll-mt-[156px]">
+          <CalendarKanban
+            contentCalendar={contentCalendar}
+            postIterations={postIterations as any}
+            scheduledPosts={scheduledPosts as any}
+            filters={filters}
+            onCardClick={(post) => {
+              // Direct card clicks should show the most recent variant group
+              // (the heuristic path) — clear any group filter set by the
+              // floating "View" button.
+              setActivePost(post);
+              setActiveGroupId(null);
+            }}
+            onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
+          />
+        </div>
 
         <PostPanel
           open={!!activePost}

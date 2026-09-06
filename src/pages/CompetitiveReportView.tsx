@@ -333,8 +333,23 @@ export default function CompetitiveReportView() {
     </div>
   );
 
+  // The running order for the rail. It drops whatever this report does not
+  // have, so every section can be listed unconditionally.
+  const navItems = [
+    { id: "summary", label: "Summary" },
+    { id: "changes", label: "Since last report" },
+    { id: "scorecard", label: "Scorecard" },
+    { id: "field", label: "The field" },
+    { id: "audience", label: "Audience" },
+    { id: "rhythm", label: "Posting rhythm" },
+    { id: "gaps", label: "Gaps" },
+    { id: "wins", label: "What wins" },
+    { id: "moodboards", label: "Mood boards" },
+    { id: "posts", label: "Top posts" },
+  ];
+
   return (
-    <AppLayout>
+    <AppLayout nav={<SectionNav items={navItems} />}>
       <div ref={printRef} className="w-full space-y-8">
 
         {/* Hero */}
@@ -380,23 +395,6 @@ export default function CompetitiveReportView() {
           <p className="t-secondary">Per-platform breakdowns are produced for runs from September 2, 2026 onward. Re-run the analysis to get them for this client.</p>
         )}
 
-        {/* The rail sits in its own column so it is always in reach and never crosses the report. */}
-        <div className="grid gap-6 xl:grid-cols-[210px_minmax(0,1fr)] items-start">
-        <SectionNav
-          items={[
-            ai.executive_summary ? { id: "summary", label: "Summary" } : null,
-            previous ? { id: "changes", label: "Since last report" } : null,
-            scorecard ? { id: "scorecard", label: "Scorecard" } : null,
-            companies.length > 0 ? { id: "field", label: "The field" } : null,
-            hasMetrics ? { id: "audience", label: "Audience" } : null,
-            ai.posting_time_insights ? { id: "rhythm", label: "Posting rhythm" } : null,
-            gaps.length > 0 || hiddenGaps.length > 0 ? { id: "gaps", label: "Gaps" } : null,
-            (ai.winner_teardown || []).length > 0 ? { id: "wins", label: "What wins" } : null,
-            { id: "moodboards", label: "Mood boards" },
-            { id: "posts", label: "Top posts" },
-          ].filter(Boolean) as { id: string; label: string }[]}
-        />
-        <div className="space-y-8 min-w-0">
 
         {/* KPI tiles */}
         {meB && (
@@ -418,7 +416,7 @@ export default function CompetitiveReportView() {
         {ai.executive_summary && (
             <Section id="summary" index={next()} title={<>Executive summary</>}>
             <Card className="glass-elevated">
-              <CardContent><Prose text={ai.executive_summary} className="t-body whitespace-pre-line" /></CardContent>
+              <CardContent className="pt-5"><Prose text={ai.executive_summary} /></CardContent>
             </Card>
             </Section>
         )}
@@ -787,8 +785,6 @@ export default function CompetitiveReportView() {
             </Card>
             </Section>
         )}
-        </div>
-        </div>
       </div>
     </AppLayout>
   );

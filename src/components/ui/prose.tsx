@@ -9,7 +9,10 @@ import { reflowParagraph } from "@/lib/prose";
  * become a list, and a long paragraph in a column flow is regrouped on sentence
  * boundaries so it can fill the columns. Text is 15px/25px white (see .t-prose).
  */
-const LEAD = /^([A-Z][^.:;!?]{1,42}):\s+(?=\S)/;
+// A lead-in such as "Cadence:" or "Engagement efficiency (RivalIQ rate per
+// post):". Long enough to keep the parenthetical some of these carry — a label
+// that runs long simply wraps in its column.
+const LEAD = /^([A-Z][^.:;!?]{1,64}):\s+(?=\S)/;
 
 export function Prose({ text, className, columns = true, cards = true }: { text: string | null | undefined; className?: string; columns?: boolean; cards?: boolean }) {
   if (!text) return null;
@@ -21,24 +24,33 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
     .split(/\n{2,}|\n(?=\s*(?:[-•*]|\d+[.)]))/)
     .map((p) => p.trim())
     .filter(Boolean);
-  // Labelled paragraphs ("Scope: …", "Key opportunity: …") read best as a grid of
-  // titled cards rather than a wall of text. Requires three or more of them.
+  // Labelled paragraphs ("Scope: …", "Cadence: …") are a briefing, so they are
+  // laid out as one: the label in its own narrow column, the passage beside it,
+  // a hairline between rows.
+  //
+  // They used to be a grid of cards, which is what a wall of text looks like
+  // when you put boxes around it: the cards in a row all stretched to the
+  // tallest, so a two-line note sat in a six-line box, and a passage whose
+  // lead-in did not match came out untitled beside titled neighbours. A list
+  // has no such rows to fill.
   const leads = paragraphs.map((p) => p.match(LEAD));
-  if (cards && paragraphs.length >= 3 && leads.filter(Boolean).length >= Math.ceil(paragraphs.length * 0.75)) {
+  if (cards && paragraphs.length >= 2 && leads.filter(Boolean).length >= Math.ceil(paragraphs.length * 0.75)) {
     return (
-      <div className={cn("grid gap-3 md:grid-cols-2 xl:grid-cols-3", className)}>
+      <dl className={cn("divide-y divide-[rgba(255,255,255,0.06)]", className)}>
         {paragraphs.map((p, i) => {
           const m = leads[i];
           const title = m ? m[1] : null;
           const body = m ? p.slice(m[0].length) : p;
           return (
-            <article key={i} className="glass-inner p-4 space-y-2 min-w-0">
-              {title && <h3 className="t-label uppercase tracking-wider">{title}</h3>}
-              <div className="t-body">{title ? body : <Paragraph text={p} />}</div>
-            </article>
+            <div key={i} className="grid gap-1 py-4 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)] md:gap-8">
+              {title && <dt className="t-label uppercase tracking-wider md:pt-[3px]">{title}</dt>}
+              <dd className={cn("t-body min-w-0", !title && "md:col-span-2")}>
+                {title ? body : <Paragraph text={p} />}
+              </dd>
+            </div>
           );
         })}
-      </div>
+      </dl>
     );
   }
   // In a column flow a slab of prose has to be broken on sentence boundaries or

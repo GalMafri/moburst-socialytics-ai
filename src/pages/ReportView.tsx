@@ -316,8 +316,46 @@ export default function ReportView() {
     ? `${(pillars.well_represented || []).length} pillars well represented, ${(pillars.underrepresented || []).length} need attention, ${pillarRecs.length} recommendations.`
     : undefined;
 
+  // One running order per tab. Every section is listed unconditionally: the rail
+  // drops the ones this report does not have, and returns nothing at all when a
+  // tab has fewer than two — the layout keeps the column either way, so the page
+  // never shifts sideways when you change tab.
+  const navItems =
+    tab === "overview"
+      ? [
+          { id: "glance", label: "At a glance" },
+          { id: "highlights", label: "Highlights" },
+          { id: "actions", label: "Where to act next" },
+          { id: "field", label: "Against the field" },
+          { id: "period", label: "Period over period" },
+          { id: "platforms", label: "By platform" },
+          { id: "posts", label: "Top posts" },
+          { id: "pillars", label: "Pillars" },
+        ]
+      : tab === "content"
+        ? [
+            { id: "ideas-week", label: "This week" },
+            { id: "ideas-calendar", label: "Calendar" },
+          ]
+        : tab === "trends"
+          ? [
+              { id: "tiktok-overview", label: "TikTok trends" },
+              { id: "tiktok-themes", label: "TikTok themes" },
+              { id: "tiktok-formats", label: "TikTok formats" },
+              { id: "tiktok-opportunities", label: "TikTok opportunities" },
+              { id: "tiktok-takeaways", label: "TikTok takeaways" },
+              { id: "tiktok-posts", label: "TikTok posts" },
+              { id: "instagram-overview", label: "Instagram trends" },
+              { id: "instagram-themes", label: "Instagram themes" },
+              { id: "instagram-formats", label: "Instagram formats" },
+              { id: "instagram-opportunities", label: "Instagram opportunities" },
+              { id: "instagram-takeaways", label: "Instagram takeaways" },
+              { id: "instagram-posts", label: "Instagram posts" },
+            ]
+          : [{ id: "field-compare", label: "How the field compares" }];
+
   return (
-    <AppLayout>
+    <AppLayout nav={<SectionNav items={navItems} />}>
       <div className="w-full space-y-6" ref={reportContentRef}>
         {/* Header */}
         <div className="glass p-5 flex items-start justify-between gap-4 flex-wrap">
@@ -355,21 +393,6 @@ export default function ReportView() {
           <TabsContent value="overview" className="space-y-8">
             {/* Reading order follows the report convention: numbers, the story, the field,
                 then detail, and the recommendations to close. The nav jumps to any of them. */}
-            {/* The rail keeps its own column, so it never crosses the report as you read. */}
-            <div className="grid gap-6 xl:grid-cols-[210px_minmax(0,1fr)] items-start">
-            <SectionNav
-              items={[
-                monthComparison?.changes ? { id: "glance", label: "At a glance" } : null,
-                insights.length > 0 || summary ? { id: "highlights", label: "Highlights" } : null,
-                actions.length > 0 ? { id: "actions", label: "Where to act next" } : null,
-                latestCompetitive && compMe ? { id: "field", label: "Against the field" } : null,
-                monthComparison?.current_month ? { id: "period", label: "Period over period" } : null,
-                platformBreakdown.length > 0 ? { id: "platforms", label: "By platform" } : null,
-                sproutPerformance?.top_posts?.length > 0 ? { id: "posts", label: "Top posts" } : null,
-                pillars ? { id: "pillars", label: "Pillars" } : null,
-              ].filter(Boolean) as { id: string; label: string }[]}
-            />
-            <div className="space-y-8 min-w-0">
 
             {monthComparison?.changes && (
               <Section id="glance" index={1} title="At a glance" description={glanceLine}>
@@ -507,8 +530,6 @@ export default function ReportView() {
                 </CardContent>
               </Card>
             )}
-            </div>
-            </div>
           </TabsContent>
 
           {/* ── CONTENT IDEAS ── */}
@@ -530,36 +551,15 @@ export default function ReportView() {
 
           {/* ── TRENDS ── */}
           {hasTrends && (
-            <TabsContent value="trends">
-              {/* Same rail as the overview: its own column, never over the text. */}
-              <div className="grid gap-6 xl:grid-cols-[210px_minmax(0,1fr)] items-start">
-                <SectionNav
-                  items={[
-                    { id: "tiktok-overview", label: "TikTok trends" },
-                    { id: "tiktok-themes", label: "TikTok themes" },
-                    { id: "tiktok-formats", label: "TikTok formats" },
-                    { id: "tiktok-opportunities", label: "TikTok opportunities" },
-                    { id: "tiktok-takeaways", label: "TikTok takeaways" },
-                    { id: "tiktok-posts", label: "TikTok posts" },
-                    { id: "instagram-overview", label: "Instagram trends" },
-                    { id: "instagram-themes", label: "Instagram themes" },
-                    { id: "instagram-formats", label: "Instagram formats" },
-                    { id: "instagram-opportunities", label: "Instagram opportunities" },
-                    { id: "instagram-takeaways", label: "Instagram takeaways" },
-                    { id: "instagram-posts", label: "Instagram posts" },
-                  ]}
-                />
-                <div className="space-y-10 min-w-0">
-                  <TrendsSection title="TikTok trends" analysis={aiAnalysis?.tiktok_trends_analysis} posts={tiktokTrends?.posts} platform="tiktok" clientName={clientName} />
-                  <TrendsSection title="Instagram trends" analysis={aiAnalysis?.instagram_trends_analysis} posts={instagramTrends?.posts} platform="instagram" clientName={clientName} />
-                </div>
-              </div>
+            <TabsContent value="trends" className="space-y-10">
+              <TrendsSection title="TikTok trends" analysis={aiAnalysis?.tiktok_trends_analysis} posts={tiktokTrends?.posts} platform="tiktok" clientName={clientName} />
+              <TrendsSection title="Instagram trends" analysis={aiAnalysis?.instagram_trends_analysis} posts={instagramTrends?.posts} platform="instagram" clientName={clientName} />
             </TabsContent>
           )}
 
           {/* ── COMPETITIVE ── */}
           <TabsContent value="competitive" className="space-y-6">
-            <Section title="How the field compares" description="The latest competitive analysis for this client. Endorsed gaps feed the next report's calendar.">
+            <Section id="field-compare" title="How the field compares" description="The latest competitive analysis for this client. Endorsed gaps feed the next report's calendar.">
               <CompetitiveSnapshot clientId={report.client_id} takeaways={aiAnalysis?.competitive_takeaways} />
             </Section>
           </TabsContent>

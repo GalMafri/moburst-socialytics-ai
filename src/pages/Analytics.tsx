@@ -323,8 +323,32 @@ export default function Analytics() {
     </div>
   );
 
+  // One running order per tab. The rail drops what this client has no data for.
+  const navItems =
+    view === "performance"
+      ? [
+          { id: "live-by-profile", label: "By profile" },
+          { id: "live-top-posts", label: "Top posts" },
+          { id: "mom", label: "Month-over-month" },
+          { id: "over-time", label: "Performance over time" },
+          { id: "engagement-rate", label: "Engagement rate" },
+          { id: "profiles", label: "Connected profiles" },
+          { id: "insights", label: "AI insights" },
+          { id: "history", label: "Report history" },
+        ]
+      : view === "trends"
+        ? [
+            { id: "trends", label: "Trends" },
+            { id: "history", label: "Report history" },
+          ]
+        : [
+            { id: "competitive", label: "Competitive" },
+            { id: "history", label: "Report history" },
+          ];
+
   return (
     <AppLayout
+      nav={<SectionNav items={navItems} />}
       title={title}
       description="Live Sprout performance for the selected window, trends from the monthly reports, and the competitive view."
       back={
@@ -362,35 +386,6 @@ export default function Analytics() {
           </Card>
         ) : (
           <>
-          {/* The rail sits in its own column so it is always in reach and never
-              crosses the page. It lists the running order for the open tab; the
-              rail itself drops anything that has no data to show. */}
-          <div className="grid gap-6 xl:grid-cols-[210px_minmax(0,1fr)] items-start">
-            <SectionNav
-              items={
-                view === "performance"
-                  ? [
-                      { id: "live-by-profile", label: "By profile" },
-                      { id: "live-top-posts", label: "Top posts" },
-                      { id: "mom", label: "Month-over-month" },
-                      { id: "over-time", label: "Performance over time" },
-                      { id: "engagement-rate", label: "Engagement rate" },
-                      { id: "profiles", label: "Connected profiles" },
-                      { id: "insights", label: "AI insights" },
-                      { id: "history", label: "Report history" },
-                    ]
-                  : view === "trends"
-                    ? [
-                        { id: "trends", label: "Trends" },
-                        { id: "history", label: "Report history" },
-                      ]
-                    : [
-                        { id: "competitive", label: "Competitive" },
-                        { id: "history", label: "Report history" },
-                      ]
-              }
-            />
-            <div className="space-y-6 min-w-0">
             {/* View segmentation */}
             <Tabs value={view} onValueChange={(v) => setView(v as AnalyticsView)}>
               <TabsList className="grid w-full grid-cols-3 max-w-md">
@@ -846,8 +841,6 @@ export default function Analytics() {
               </CardContent>
             </Card>
             </Section>
-            </div>
-          </div>
           </>
         )}
         </div>
