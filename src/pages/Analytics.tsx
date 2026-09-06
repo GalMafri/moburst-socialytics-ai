@@ -343,7 +343,11 @@ export default function Analytics() {
             { id: "history", label: "Report history" },
           ]
         : [
-            { id: "competitive", label: "Competitive" },
+            { id: "snapshot-numbers", label: "The numbers" },
+            { id: "snapshot-summary", label: "Summary" },
+            { id: "snapshot-takeaways", label: "What the report used" },
+            { id: "snapshot-gaps", label: "Gaps to fill" },
+            { id: "snapshot-airtime", label: "Empty airtime" },
             { id: "history", label: "Report history" },
           ];
 

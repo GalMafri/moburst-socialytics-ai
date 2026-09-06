@@ -111,8 +111,10 @@ export function CompetitiveSnapshot({
         </div>
       </div>
 
+      {/* Ids so the page rail can jump here: this block is the whole
+          Competitive tab on both the monthly report and Analytics. */}
       {me && (
-        <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <div id="snapshot-numbers" className="grid gap-3 grid-cols-2 lg:grid-cols-4 scroll-mt-[156px]">
           <Tile accent label="Benchmark score" value={score != null ? `${score}` : "–"} sub="out of 100 against the set" />
           <Tile label="Share of voice" value={share == null ? "–" : `${share}%`} sub={`${me.post_count} of ${totalPosts} posts`} />
           <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`set average ${avg((c) => c.cadence_per_week).toFixed(1)}/wk`} />
@@ -121,11 +123,11 @@ export function CompetitiveSnapshot({
       )}
 
       {ai.executive_summary && (
-        <Card><CardContent className="pt-5"><Prose text={ai.executive_summary} /></CardContent></Card>
+        <Card id="snapshot-summary" className="scroll-mt-[156px]"><CardContent className="pt-5"><Prose text={ai.executive_summary} /></CardContent></Card>
       )}
 
       {Array.isArray(takeaways) && takeaways.length > 0 && (
-        <div className="glass-accent p-5 space-y-3">
+        <div id="snapshot-takeaways" className="glass-accent p-5 space-y-3 scroll-mt-[156px]">
           <div>
             <h3 className="t-h3">How this report used the competitive picture</h3>
             <p className="t-secondary">Written by the report synthesis with the competitor analysis in hand.</p>
@@ -135,7 +137,7 @@ export function CompetitiveSnapshot({
       )}
 
       {gaps.length > 0 && (
-        <Card><CardContent className="pt-5 space-y-3">
+        <Card id="snapshot-gaps" className="scroll-mt-[156px]"><CardContent className="pt-5 space-y-3">
           <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Gaps to fill</p>
           <div className="grid gap-3 md:grid-cols-3">
             {gaps.map((g, i) => (
@@ -153,7 +155,7 @@ export function CompetitiveSnapshot({
       )}
 
       {ai.posting_time_insights?.empty_airtime && (
-        <Card><CardContent className="pt-5 space-y-1">
+        <Card id="snapshot-airtime" className="scroll-mt-[156px]"><CardContent className="pt-5 space-y-1">
           <p className="t-label uppercase tracking-wider">Empty airtime</p>
           <Prose text={ai.posting_time_insights.empty_airtime} className="t-secondary" />
         </CardContent></Card>

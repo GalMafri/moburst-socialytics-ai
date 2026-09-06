@@ -352,7 +352,14 @@ export default function ReportView() {
               { id: "instagram-takeaways", label: "Instagram takeaways" },
               { id: "instagram-posts", label: "Instagram posts" },
             ]
-          : [{ id: "field-compare", label: "How the field compares" }];
+          : [
+              { id: "field-compare", label: "How the field compares" },
+              { id: "snapshot-numbers", label: "The numbers" },
+              { id: "snapshot-summary", label: "Summary" },
+              { id: "snapshot-takeaways", label: "What the report used" },
+              { id: "snapshot-gaps", label: "Gaps to fill" },
+              { id: "snapshot-airtime", label: "Empty airtime" },
+            ];
 
   return (
     <AppLayout nav={<SectionNav items={navItems} />}>
