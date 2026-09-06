@@ -185,7 +185,12 @@ export function AdminDashboard() {
       ) : filtered && filtered.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((client: any) => {
-            const lastReport = client.reports?.[0];
+            // PostgREST returns an embedded resource in no particular order, so
+            // pick the newest row here rather than trusting reports[0].
+            const lastReport = (client.reports ?? []).reduce(
+              (newest: any, r: any) => (!newest || new Date(r.created_at) > new Date(newest.created_at) ? r : newest),
+              null,
+            );
             const reportCount = client.reports?.length ?? 0;
             return (
               <ClickableCard
@@ -257,7 +262,7 @@ export function AdminDashboard() {
                     ))}
                   </div>
                   <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
-                    <span className="t-secondary whitespace-nowrap">{reportCount} reports</span>
+                    <span className="t-secondary whitespace-nowrap">{reportCount} report{reportCount === 1 ? "" : "s"}</span>
                     <div className="flex gap-1.5 flex-wrap justify-end">
                       <Button
                         size="sm"

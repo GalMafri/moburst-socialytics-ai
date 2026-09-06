@@ -331,7 +331,7 @@ export default function ReportView() {
               {rd?.context?.languages?.length > 0 && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Languages className="h-3.5 w-3.5" />{(Array.isArray(rd.context.languages) ? rd.context.languages : [rd.context.languages]).join(", ")}</span></>)}
             </p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div data-print="hide" className="flex items-center gap-2 flex-wrap">
             {!isClient && gammaUrl && (
               <Button onClick={() => window.open(gammaUrl, "_blank")}>
                 <ExternalLink className="h-4 w-4 mr-2" /> Open presentation

@@ -252,12 +252,13 @@ export function HubCompanySync() {
                             size="icon"
                             variant="ghost"
                             className="h-7 w-7 shrink-0"
+                            aria-label={`Edit the hub company name for ${c.name}`}
                             onClick={() => {
                               setEditingId(c.id);
                               setEditingValue(c.hub_company_name || c.name);
                             }}
                           >
-                            <Pencil className="h-3 w-3" />
+                            <Pencil className="h-3 w-3" aria-hidden />
                           </Button>
                         </div>
                       )}

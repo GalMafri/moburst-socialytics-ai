@@ -465,8 +465,9 @@ export default function RunAnalysis() {
           <CardContent>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Start Date</Label>
+                <Label htmlFor="range-start">Start Date</Label>
                 <Input
+                  id="range-start"
                   type="date"
                   value={dateRangeStart}
                   onChange={(e) => setDateRangeStart(e.target.value)}
@@ -474,8 +475,9 @@ export default function RunAnalysis() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>End Date</Label>
+                <Label htmlFor="range-end">End Date</Label>
                 <Input
+                  id="range-end"
                   type="date"
                   value={dateRangeEnd}
                   onChange={(e) => setDateRangeEnd(e.target.value)}
@@ -501,12 +503,13 @@ export default function RunAnalysis() {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label>Include Trend Analysis</Label>
+                <Label htmlFor="include-trends">Include Trend Analysis</Label>
                 <p className="t-secondary">
                   Scrape TikTok and Instagram for trending content in your niche
                 </p>
               </div>
               <Switch
+                id="include-trends"
                 checked={!skipTrends}
                 onCheckedChange={(checked) => setSkipTrends(!checked)}
                 disabled={!hasKeywords}

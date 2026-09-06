@@ -33,6 +33,12 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   // ── 1. Clone + expand all tab panels ──
   const content = contentRef.current.cloneNode(true) as HTMLElement;
 
+  // On-screen controls have no meaning on paper: navigation, export, filter
+  // chips and feedback toggles all print as dead buttons. Anything the page
+  // marks data-print="hide" is dropped from the clone; the surrounding copy
+  // (a filter's "showing Instagram only" line, for instance) is kept.
+  content.querySelectorAll('[data-print="hide"]').forEach((el) => el.remove());
+
   content.querySelectorAll('[role="tabpanel"]').forEach((panel) => {
     const el = panel as HTMLElement;
     el.style.display = "block";

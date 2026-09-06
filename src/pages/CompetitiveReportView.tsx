@@ -75,15 +75,21 @@ function bucketFor(c: Company, plat: string): Bucket {
   return entry ? entry[1] : EMPTY;
 }
 
-function HeatStrip({ counts, keys, labelEvery = 1, size = "h-6 w-6", color = ACCENT }: { counts: Record<string, number>; keys: string[]; labelEvery?: number; size?: string; color?: string }) {
+/**
+ * Heat cells for a set of buckets (weekdays, hours). The track is a grid capped
+ * at `cell` px rather than a row of fixed-width boxes, so a 24-hour strip shrinks
+ * to fit its card instead of running past the edge and being clipped by the glass
+ * surface on laptop widths.
+ */
+function HeatStrip({ counts, keys, labelEvery = 1, cell = 24, color = ACCENT }: { counts: Record<string, number>; keys: string[]; labelEvery?: number; cell?: number; color?: string }) {
   const max = Math.max(1, ...keys.map((k) => Number(counts?.[k]) || 0));
   return (
-    <div className="flex gap-[3px]">
+    <div className="grid gap-[3px] w-full min-w-0" style={{ gridTemplateColumns: `repeat(${keys.length}, minmax(0, ${cell}px))` }}>
       {keys.map((k, i) => {
         const v = Number(counts?.[k]) || 0;
         return (
-          <div key={k} className="flex flex-col items-center gap-1" title={`${k}: ${v} post${v === 1 ? "" : "s"}`}>
-            <div className={`${size} rounded-[6px]`} style={{ backgroundColor: `rgba(${color},${v ? 0.18 + 0.82 * (v / max) : 0.06})` }} />
+          <div key={k} className="flex flex-col items-center gap-1 min-w-0" title={`${k}: ${v} post${v === 1 ? "" : "s"}`}>
+            <div className="h-6 w-full rounded-[6px]" style={{ backgroundColor: `rgba(${color},${v ? 0.18 + 0.82 * (v / max) : 0.06})` }} />
             {i % labelEvery === 0 && <span className="t-secondary leading-none">{k}</span>}
           </div>
         );
@@ -125,15 +131,24 @@ function Stat({ label, value }: { label: string; value: string }) {
 const deltaPct = (v: Both | null | undefined): number | null => (v && v.previous != null && v.previous > 0 ? ((v.current - v.previous) / v.previous) * 100 : null);
 const fmtDelta = (pctChange: number) => `${pctChange > 0 ? "+" : pctChange < 0 ? "-" : ""}${Math.abs(pctChange) >= 100 ? Math.round(Math.abs(pctChange)) : Math.abs(pctChange).toFixed(1).replace(/\.0$/, "")}%`;
 
-/** A period total with its change against the previous period, coloured by sign. */
-function MetricRow({ label, value, format = compactNumber }: { label: string; value: Both | null | undefined; format?: (v: number) => string }) {
+/**
+ * A period total with its change against the previous period.
+ *
+ * Only the client's own rows carry a sign colour. A competitor's engagement
+ * halving is not bad news for the client, so colouring it red would read the
+ * wrong way round; competitor movement stays neutral, as it does on the change
+ * cards. A change that rounds to zero wears no colour either.
+ */
+function MetricRow({ label, value, format = compactNumber, signed = false }: { label: string; value: Both | null | undefined; format?: (v: number) => string; signed?: boolean }) {
   if (!value) return <Stat label={label} value="–" />;
   const change = deltaPct(value);
+  const rounded = change == null ? null : Number(fmtDelta(change).replace(/[+%]/g, ""));
+  const tone = !signed || !rounded ? "text-[#b1b7c1]" : change! > 0 ? "text-success" : "text-destructive";
   return (
     <div className="min-w-0">
       <p className="t-body font-semibold leading-tight">
         {format(value.current)}
-        {change != null && <span className={`t-label ml-1.5 ${change > 0 ? "text-success" : change < 0 ? "text-destructive" : ""}`}>{fmtDelta(change)}</span>}
+        {change != null && <span className={`t-label ml-1.5 ${tone}`}>{fmtDelta(change)}</span>}
       </p>
       <p className="t-label uppercase tracking-wider leading-tight">{label}</p>
     </div>
@@ -321,7 +336,7 @@ export default function CompetitiveReportView() {
         {/* Hero */}
         <div className="glass p-5 flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-2">
-            <Button variant="ghost" size="sm" className="-ml-2" onClick={() => navigate(isMoburstStaff ? `/clients/${clientId}/competitive/run` : "/")}>
+            <Button data-print="hide" variant="ghost" size="sm" className="-ml-2" onClick={() => navigate(isMoburstStaff ? `/clients/${clientId}/competitive/run` : "/")}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Back
             </Button>
             <h1 className="t-h1">{clientName} vs. the field</h1>
@@ -330,9 +345,10 @@ export default function CompetitiveReportView() {
               {period && <Chip>{period}{rd.period?.days ? ` · ${rd.period.days} days` : ""}</Chip>}
               {rd.landscape?.name && <Chip>RivalIQ · {rd.landscape.name}</Chip>}
               {rivals.length > 0 && <Chip>{rivals.length} competitors</Chip>}
+              {effectivePlat !== "all" && <Chip>{platformLabel(effectivePlat)} only</Chip>}
             </div>
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div data-print="hide" className="flex gap-2 flex-wrap">
             <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}><History className="h-4 w-4 mr-2" /> All runs</Button>
             {isMoburstStaff && (
               <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/feed`)}><Rss className="h-4 w-4 mr-2" /> Latest posts</Button>
@@ -347,7 +363,7 @@ export default function CompetitiveReportView() {
 
         {/* Platform filter */}
         {hasChannels && (
-          <div className="glass px-5 py-3 flex items-center gap-3 flex-wrap">
+          <div data-print="hide" className="glass px-5 py-3 flex items-center gap-3 flex-wrap">
             <span className="t-label uppercase tracking-wider">Platform</span>
             <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)]">
               <Seg active={effectivePlat === "all"} onClick={() => setPlat("all")}>All platforms</Seg>
@@ -544,10 +560,10 @@ export default function CompetitiveReportView() {
                           {c.is_client && <span className="t-label !text-[#b9e045] ml-2">client</span>}
                         </p>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-3">
-                          <MetricRow label="Followers" value={m.audience} />
-                          <MetricRow label="Engagement" value={m.engagement} />
-                          <MetricRow label="Est. impressions" value={m.impressions} />
-                          <MetricRow label="Posts" value={m.posts} format={(v) => String(Math.round(v))} />
+                          <MetricRow label="Followers" value={m.audience} signed={c.is_client} />
+                          <MetricRow label="Engagement" value={m.engagement} signed={c.is_client} />
+                          <MetricRow label="Est. impressions" value={m.impressions} signed={c.is_client} />
+                          <MetricRow label="Posts" value={m.posts} format={(v) => String(Math.round(v))} signed={c.is_client} />
                         </div>
                         {nets.length > 0 && (
                           <div className="flex flex-wrap gap-1.5">
@@ -576,9 +592,9 @@ export default function CompetitiveReportView() {
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.post_count > 0).map(({ c, b }) => (
                   <div key={c.company_id} className="space-y-2 glass-inner p-4">
                     <div className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
-                    <div className="flex flex-wrap gap-8">
-                      <div><p className="t-secondary mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} /></div>
-                      <div><p className="t-secondary mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" /></div>
+                    <div className="flex flex-wrap gap-x-8 gap-y-4">
+                      <div className="min-w-0 shrink-0"><p className="t-secondary mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} cell={28} /></div>
+                      <div className="min-w-0 grow basis-[420px]"><p className="t-secondary mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} cell={20} /></div>
                     </div>
                   </div>
                 ))}
@@ -587,9 +603,9 @@ export default function CompetitiveReportView() {
                 {schedule && (schedule.by_weekday || schedule.by_hour) && (
                   <div className="glass-inner p-4 space-y-3">
                     <div className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-4 w-4" /> Recommended schedule for {clientName}</div>
-                    <div className="flex flex-wrap gap-8">
-                      {schedule.by_weekday && <div><p className="t-secondary mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} color={RECOMMEND} /></div>}
-                      {schedule.by_hour && <div><p className="t-secondary mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} size="h-6 w-5" color={RECOMMEND} /></div>}
+                    <div className="flex flex-wrap gap-x-8 gap-y-4">
+                      {schedule.by_weekday && <div className="min-w-0 shrink-0"><p className="t-secondary mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} cell={28} color={RECOMMEND} /></div>}
+                      {schedule.by_hour && <div className="min-w-0 grow basis-[420px]"><p className="t-secondary mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} cell={20} color={RECOMMEND} /></div>}
                     </div>
                     {schedule.rationale && <Prose text={schedule.rationale} className="t-body" />}
                   </div>
@@ -612,12 +628,12 @@ export default function CompetitiveReportView() {
             <div className="flex items-end justify-between gap-4 flex-wrap">
               <div className="glass px-5 py-4 flex-1 min-w-0">
                 <h2 className="t-h2 flex items-center gap-3"><span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">{String(next()).padStart(2, "0")}</span><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
-                <p className="t-secondary">
+                <p className="t-secondary" data-print={isMoburstStaff ? "hide" : undefined}>
                   {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
                 </p>
               </div>
               {isMoburstStaff && hiddenGaps.length > 0 && (
-                <Button variant="ghost" size="sm" onClick={() => setShowHidden((v) => !v)}>
+                <Button data-print="hide" variant="ghost" size="sm" onClick={() => setShowHidden((v) => !v)}>
                   <Eye className="h-4 w-4 mr-1" /> {showHidden ? "Hide" : "Show"} {hiddenGaps.length} hidden suggestion{hiddenGaps.length === 1 ? "" : "s"}
                 </Button>
               )}
@@ -646,7 +662,7 @@ export default function CompetitiveReportView() {
                         </div>
                       )}
                       {isMoburstStaff && (
-                        <div className="flex items-center gap-2 pt-1">
+                        <div data-print="hide" className="flex items-center gap-2 pt-1">
                           <Button size="sm" variant={v === "up" ? "default" : "outline"} onClick={() => castVote(g, "up")} aria-pressed={v === "up"}>
                             <ThumbsUp className="h-4 w-4 mr-1.5" /> {v === "up" ? "Implementing" : "Implement"}
                           </Button>
