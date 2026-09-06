@@ -6,20 +6,16 @@ import { reflowParagraph } from "@/lib/prose";
  * Renders AI-written passages in full, structured for reading instead of
  * truncated: paragraphs split on blank lines, a short "Label:" lead-in is
  * bolded, and inline enumerations such as "(1) … (2) …" or "1) … 2) …"
- * become a list, and a long paragraph in a column flow is regrouped on sentence
- * boundaries so it can fill the columns. Text is 15px/25px white (see .t-prose).
+ * become a list, and a slab of a paragraph is regrouped on sentence boundaries
+ * so it has somewhere to breathe. Text is 15px/25px white (see .t-prose).
  */
 // A lead-in such as "Cadence:" or "Engagement efficiency (RivalIQ rate per
 // post):". Long enough to keep the parenthetical some of these carry — a label
 // that runs long simply wraps in its column.
 const LEAD = /^([A-Z][^.:;!?]{1,64}):\s+(?=\S)/;
 
-export function Prose({ text, className, columns = true, cards = true }: { text: string | null | undefined; className?: string; columns?: boolean; cards?: boolean }) {
+export function Prose({ text, className, cards = true }: { text: string | null | undefined; className?: string; cards?: boolean }) {
   if (!text) return null;
-  // Short passages used to sit at a capped measure on a full-width card, which
-  // left a third of the card empty beside them. They flow into columns too now;
-  // the floor is where a passage has enough lines to make a column worth having.
-  const flow = columns && String(text).length > 280;
   const paragraphs = String(text)
     .split(/\n{2,}|\n(?=\s*(?:[-•*]|\d+[.)]))/)
     .map((p) => p.trim())
@@ -85,12 +81,15 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
       </dl>
     );
   }
-  // In a column flow a slab of prose has to be broken on sentence boundaries or
-  // it cannot move between columns: it fills the first one and leaves the rest
-  // of the card empty. No words change, only where the paragraphs fall.
-  const blocks = flow ? paragraphs.flatMap((p) => reflowParagraph(p)) : paragraphs;
+  // One column, at a measure you can read. These passages used to flow into
+  // CSS columns to fill the width of the card, but a paragraph cut into three
+  // equal stacks is not a layout — you read down, up, down, up, for what was
+  // written as one thought. A slab is still broken on sentence boundaries, so
+  // it arrives as paragraphs rather than a block: no words change, only where
+  // the breaks fall.
+  const blocks = paragraphs.flatMap((p) => reflowParagraph(p));
   return (
-    <div className={cn("t-prose", flow ? cn("max-w-none columns-[21rem] gap-x-10 [&>*+*]:mt-3", blocks.length > 1 && "[&>*]:break-inside-avoid") : "space-y-3", className)}>
+    <div className={cn("t-prose space-y-3", className)}>
       {blocks.map((p, i) => (
         <Paragraph key={i} text={p} />
       ))}

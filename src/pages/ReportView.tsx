@@ -414,7 +414,7 @@ export default function ReportView() {
                             <p className="t-body">{hero.label} vs the previous period</p>
                           </div>
                         )}
-                        {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" columns={false} />}
+                        {summary && <Prose text={formatNumbersInText(summary)} className="t-secondary" />}
                       </div>
                     )}
                     {insights.length > 0 && (

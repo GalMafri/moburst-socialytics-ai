@@ -36,7 +36,10 @@ export function Section({
             {index != null && <span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">{String(index).padStart(2, "0")}</span>}
             <span className="flex items-center gap-2">{title}</span>
           </h2>
-          {description && <p className="t-secondary min-w-0">{description}</p>}
+          {/* The 72ch cap that keeps body copy readable makes a one-line caption
+              wrap in the middle of a 1,400px band and read as cut off. A line of
+              context beside a title is a caption, not copy: it gets the width. */}
+          {description && <p className="t-secondary min-w-0 !max-w-[120ch]">{description}</p>}
         </div>
         {action && <div className="flex items-center gap-2 shrink-0">{action}</div>}
       </div>
