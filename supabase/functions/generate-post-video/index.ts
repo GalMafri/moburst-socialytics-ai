@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildVideoPrompt } from "../_shared/design-prompts/buildVideoPrompt.ts";
+import { videoAspectRatio } from "../_shared/design-prompts/aspect.ts";
 import { brandFootingAdvice, footingOf, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
 import { correctionFor, validateDesignImage, verdictIsDirty } from "../_shared/design-prompts/validateImage.ts";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
@@ -11,15 +12,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-function getAspectRatio(platform?: string, format?: string): string {
-  const fmt = (format || "").toLowerCase();
-  const plat = (platform || "").toLowerCase();
 
-  if (fmt.includes("story") || fmt.includes("reel") || plat === "tiktok") return "9:16";
-  if (plat === "linkedin" || fmt.includes("article")) return "16:9";
-  if (plat === "youtube") return "16:9";
-  return "9:16";
-}
 
 // Try multiple Veo model names in order of preference
 // Verified live 2026-09-06 against models.list: these are the video models the
@@ -61,10 +54,13 @@ async function generateSeedImage(args: {
 }): Promise<{ base64: string; mimeType: string } | null> {
   try {
     const seedPrompt = buildImagePrompt({
+      noText: true,
       basePrompt:
         args.basePrompt +
         "\n\nThis still will be used as the OPENING FRAME of a short social-media video — " +
-        "compose for motion. Place the subject so it can move or transform without falling off frame.",
+        "compose for motion. Place the subject so it can move or transform without falling off frame. " +
+        "It is a photographic frame, not a title card or a thumbnail: depict the scene itself and " +
+        "render no words anywhere in it.",
       platform: args.platform,
       format: args.format,
       brandIdentity: args.brandIdentity,
@@ -243,7 +239,7 @@ serve(async (req) => {
       throw new Error("Gemini API key not configured");
     }
 
-    const aspectRatio = getAspectRatio(platform, format);
+    const aspectRatio = videoAspectRatio(platform, format);
 
     // ── Step 1: Generate a brand-aligned anchor still via Gemini 3.1 Flash Image.
     // This still becomes Veo's `image` seed — without it, Veo only has the text

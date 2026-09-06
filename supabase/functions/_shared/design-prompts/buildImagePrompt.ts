@@ -31,6 +31,13 @@ export interface BuildImagePromptInput {
     index: number;
     total: number;
   };
+  /**
+   * Forbid every rendered word. Set when the still is a video's anchor frame:
+   * Veo treats the seed as ground truth, so a headline burned into it is stuck
+   * on screen for the whole clip, and the video prompt's own "no text overlays"
+   * rule cannot remove what the seed already contains.
+   */
+  noText?: boolean;
 }
 
 const HEX_RE = /#[0-9A-Fa-f]{3,8}\b/g;
@@ -209,7 +216,12 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
   sections.push(
     `## Constraints\n` +
       `- No company logos, brand wordmarks, or watermarks — the client adds those later.\n` +
-      `- No invented company names or brand text — only use text that appears in the creative direction.\n` +
+      (input.noText
+        ? `- **Render NO text of any kind.** No headline, no caption, no title card, no subtitle, ` +
+          `no label, no signage, no lettering on props or walls, no numbers. The words in the brief ` +
+          `describe what to DEPICT — they are never to be written on the image. A frame with any ` +
+          `readable word in it is a failed frame.\n`
+        : `- No invented company names or brand text — only use text that appears in the creative direction.\n`) +
       `- No hex color codes, RGB values, or any technical color notation visible as text in the image.\n` +
       `- No stock-photo cliché or template-generator look.`,
   );

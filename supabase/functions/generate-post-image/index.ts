@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
+import { imageAspectRatio } from "../_shared/design-prompts/aspect.ts";
 import { brandFootingAdvice, footingOf, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
 
 const corsHeaders = {
@@ -9,14 +10,7 @@ const corsHeaders = {
 };
 
 /** Map platform + format → Gemini native aspect ratio */
-function getAspectRatio(platform?: string, format?: string): string {
-  if (!platform) return "1:1";
-  const p = (platform + " " + (format || "")).toLowerCase();
-  if (p.includes("story") || p.includes("reel") || p.includes("tiktok")) return "9:16";
-  if (p.includes("linkedin") || p.includes("article")) return "16:9";
-  if (p.includes("pinterest")) return "2:3";
-  return "1:1";
-}
+
 
 /**
  * Ask Claude Haiku vision whether the image is a single composition or a
@@ -225,7 +219,7 @@ Deno.serve(async (req) => {
     }
 
     // ── Build the design prompt ──
-    const aspectRatio = getAspectRatio(platform, format);
+    const aspectRatio = imageAspectRatio(platform, format);
     const designPrompt = buildImagePrompt({
       basePrompt: prompt,
       platform,
