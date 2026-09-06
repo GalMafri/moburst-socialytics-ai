@@ -389,7 +389,7 @@ export default function CompetitorReview() {
             ) : (
               <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
                 {landscapes.map((l: any) => (
-                  <div key={l.id} className="p-3 rounded-md bg-[rgba(255,255,255,0.04)] flex items-start justify-between gap-3">
+                  <div key={l.id} className="glass-inner p-4 flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="t-body font-medium flex items-center gap-2">
                         {l.name}
@@ -465,7 +465,7 @@ export default function CompetitorReview() {
             </CardHeader>
             <CardContent className="space-y-2">
               {selected.map((c) => (
-                <div key={c.id} className="flex items-center gap-3 p-2 rounded-md bg-[rgba(255,255,255,0.04)]">
+                <div key={c.id} className="glass-inner flex items-center gap-3 p-3">
                   <Badge className="shrink-0">#{c.selected_rank}</Badge>
                   <span className="font-medium t-body">{c.name}</span>
                   <span className="flex gap-1 ml-auto">

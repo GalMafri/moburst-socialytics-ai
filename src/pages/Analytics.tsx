@@ -540,7 +540,7 @@ export default function Analytics() {
                           const current = val?.current ?? 0;
                           const previous = val?.previous ?? comparison.previous?.[key] ?? 0;
                           return (
-                            <div key={key} className="flex items-center gap-3 p-3 rounded-md bg-[rgba(255,255,255,0.04)]">
+                            <div key={key} className="glass-inner flex items-center gap-3 p-3">
                               <div className="flex-1">
                                 <div className="t-secondary">{label}</div>
                                 <div className="t-h3">{fmtVal(current)}</div>
@@ -821,7 +821,7 @@ export default function Analytics() {
                       <button
                         key={r.id}
                         type="button"
-                        className="w-full text-left flex items-center justify-between p-3 rounded-md bg-[rgba(255,255,255,0.04)] hover:bg-[rgba(255,255,255,0.06)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        className="glass-inner w-full text-left flex items-center justify-between p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                         onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}
                         aria-label={`Open report from ${new Date(r.created_at).toLocaleString()}`}
                       >

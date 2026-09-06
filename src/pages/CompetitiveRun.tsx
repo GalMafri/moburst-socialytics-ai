@@ -440,7 +440,7 @@ export default function CompetitiveRun() {
                 {pastRuns.map((r: any) => (
                   <div
                     key={r.id}
-                    className={`flex items-center justify-between p-3 rounded-md bg-[rgba(255,255,255,0.04)] ${r.status !== "running" ? "cursor-pointer hover:bg-[rgba(255,255,255,0.06)]" : ""}`}
+                    className={`glass-inner flex items-center justify-between p-3 ${r.status !== "running" ? "cursor-pointer" : ""}`}
                     onClick={() => r.status !== "running" && navigate(`/clients/${id}/competitive/reports/${r.id}`)}
                   >
                     <div className="flex items-center gap-3">
