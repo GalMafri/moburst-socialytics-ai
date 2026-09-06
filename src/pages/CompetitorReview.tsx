@@ -72,19 +72,24 @@ function LandscapeRow({
   onImport: (id: string) => void;
 }) {
   const rivals = (landscape.companies || []).filter((c: any) => !c.is_focus);
+  const empty = rivals.length === 0;
   return (
     <div className="glass-inner p-4 flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <p className="t-body font-medium text-white">
-          {rivals.length > 0 ? rivals.map((c: any) => c.name).join(", ") : "No competitors in this landscape"}
-        </p>
-        <p className="t-label mt-1">
-          {rivals.length} competitor{rivals.length === 1 ? "" : "s"} · focus {landscape.focus_company || "unknown"} · RivalIQ set “{landscape.name}”
+        <p className="t-body font-medium text-white">{landscape.name}</p>
+        <p className="t-secondary mt-0.5">
+          {empty ? "No competitors in this set" : rivals.map((c: any) => c.name).join(", ")}
         </p>
       </div>
-      <Button size="sm" onClick={() => onImport(landscape.id)} disabled={!!importingId} className="shrink-0">
+      <Button
+        size="sm"
+        onClick={() => onImport(landscape.id)}
+        disabled={!!importingId || empty}
+        title={empty ? "This set has no competitors to import" : undefined}
+        className="shrink-0"
+      >
         {importingId === landscape.id ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
-        Import
+        Import {empty ? "" : rivals.length}
       </Button>
     </div>
   );
@@ -206,6 +211,20 @@ export default function CompetitorReview() {
   // client as its focus company; anything else is another client's work.
   const landscapeMatches = (landscapes || []).filter((l: any) => l.is_match);
   const landscapeOthers = (landscapes || []).filter((l: any) => !l.is_match);
+  /**
+   * Other clients' sets, gathered under the client they belong to.
+   *
+   * Flat, the list read as a jumble: two of the rows were Bader Law's and
+   * looked like a duplicate rather than two sets that client tracks, and
+   * nothing said who any of the others were for.
+   */
+  const landscapesByFocus = Object.entries(
+    landscapeOthers.reduce((acc: Record<string, any[]>, l: any) => {
+      const key = l.focus_company || "No focus company set";
+      (acc[key] ||= []).push(l);
+      return acc;
+    }, {}),
+  ).sort(([a], [b]) => a.localeCompare(b));
 
   const importLandscape = async (landscapeId: string) => {
     setImportingId(landscapeId);
@@ -468,7 +487,10 @@ export default function CompetitorReview() {
                 <div className="space-y-2">
                   {landscapeMatches.length > 0 ? (
                     <>
-                      <p className="t-label uppercase tracking-wider">Tracked for {client?.name || "this client"}</p>
+                      <p className="t-label uppercase tracking-wider">
+                        Tracked for {client?.name || "this client"} · {landscapeMatches.length} set
+                        {landscapeMatches.length === 1 ? "" : "s"} in RivalIQ
+                      </p>
                       {landscapeMatches.map((l: any) => (
                         <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
                       ))}
@@ -500,15 +522,25 @@ export default function CompetitorReview() {
                   <div className="space-y-2">
                     {!showOtherLandscapes ? (
                       <Button variant="ghost" size="sm" onClick={() => setShowOtherLandscapes(true)}>
-                        Show {landscapeOthers.length} landscape{landscapeOthers.length === 1 ? "" : "s"} tracked for other clients
+                        Show {landscapeOthers.length} set{landscapeOthers.length === 1 ? "" : "s"} tracked for other clients
                       </Button>
                     ) : (
-                      <>
+                      <div className="space-y-4">
                         <p className="t-label uppercase tracking-wider">Tracked for other clients</p>
-                        {landscapeOthers.map((l: any) => (
-                          <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
+                        {landscapesByFocus.map(([focus, sets]) => (
+                          <div key={focus} className="space-y-2">
+                            <p className="t-body font-medium text-white">
+                              {focus}
+                              <span className="t-label ml-2">
+                                {(sets as any[]).length} set{(sets as any[]).length === 1 ? "" : "s"} in RivalIQ
+                              </span>
+                            </p>
+                            {(sets as any[]).map((l: any) => (
+                              <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
+                            ))}
+                          </div>
                         ))}
-                      </>
+                      </div>
                     )}
                   </div>
                 )}
