@@ -139,9 +139,12 @@ Deno.serve(async (req) => {
     const competitiveUrl = settings?.find((s) => s.key === "competitive_n8n_webhook_url")?.value;
 
     const results: unknown[] = [];
-    // RivalIQ allows one concurrent call per account, so competitive runs fired in
-    // the same minute are spaced out: the n8n workflow waits stagger_seconds first.
+    // Runs fired in the same minute are spaced out: each n8n workflow waits
+    // stagger_seconds before its first external call. RivalIQ allows one concurrent
+    // call per account (competitive, 150 s apart); the social pipeline shares Sprout,
+    // Apify and Gamma quotas across clients (180 s apart).
     let competitiveIndex = 0;
+    let socialIndex = 0;
     for (const schedule of due) {
       const client = schedule.clients;
       if (!client || client.archived_at) { results.push({ schedule: schedule.id, status: "skipped", reason: "client archived or missing" }); continue; }
@@ -203,6 +206,7 @@ Deno.serve(async (req) => {
           date_range_start: range.start, date_range_end: range.end, skip_trends: false, timezone: client.timezone || "UTC",
           competitive_context: competitiveDigest(compReport, feedback || []),
           scheduled: true,
+          stagger_seconds: socialIndex++ * 180,
         };
         const r = await fetch(socialUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
         if (!r.ok) throw new Error(`social webhook ${r.status}`);
