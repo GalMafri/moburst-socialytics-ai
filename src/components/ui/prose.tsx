@@ -13,7 +13,10 @@ const LEAD = /^([A-Z][^.:;!?]{1,42}):\s+(?=\S)/;
 
 export function Prose({ text, className, columns = true, cards = true }: { text: string | null | undefined; className?: string; columns?: boolean; cards?: boolean }) {
   if (!text) return null;
-  const flow = columns && String(text).length > 600;
+  // Short passages used to sit at a capped measure on a full-width card, which
+  // left a third of the card empty beside them. They flow into columns too now;
+  // the floor is where a passage has enough lines to make a column worth having.
+  const flow = columns && String(text).length > 280;
   const paragraphs = String(text)
     .split(/\n{2,}|\n(?=\s*(?:[-•*]|\d+[.)]))/)
     .map((p) => p.trim())
@@ -43,7 +46,7 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
   // of the card empty. No words change, only where the paragraphs fall.
   const blocks = flow ? paragraphs.flatMap((p) => reflowParagraph(p)) : paragraphs;
   return (
-    <div className={cn("t-prose", flow ? cn("max-w-none columns-[26rem] gap-x-10 [&>*+*]:mt-3", blocks.length > 1 && "[&>*]:break-inside-avoid") : "space-y-3", className)}>
+    <div className={cn("t-prose", flow ? cn("max-w-none columns-[21rem] gap-x-10 [&>*+*]:mt-3", blocks.length > 1 && "[&>*]:break-inside-avoid") : "space-y-3", className)}>
       {blocks.map((p, i) => (
         <Paragraph key={i} text={p} />
       ))}

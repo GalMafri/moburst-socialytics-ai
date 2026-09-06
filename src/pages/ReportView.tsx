@@ -913,7 +913,7 @@ function TrendsSection({
         title={<><span className="h-8 w-8 rounded-[10px] flex items-center justify-center shrink-0" style={{ backgroundColor: `${platformColor}22` }}><PlatformIcon platform={platform} className="h-4 w-4" /></span>{title}</>}
         description={analysis?.overview ? undefined : "Trending content and what it means for the client."}
       >
-        {analysis?.overview && <Card><CardContent className="pt-5"><Prose text={analysis.overview} columns={false} /></CardContent></Card>}
+        {analysis?.overview && <Card><CardContent className="pt-5"><Prose text={analysis.overview} /></CardContent></Card>}
       </Section>
 
       {(analysis?.top_themes?.length > 0 || analysis?.top_hashtags?.length > 0) && (
