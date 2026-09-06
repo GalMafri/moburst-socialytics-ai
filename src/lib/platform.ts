@@ -32,3 +32,19 @@ export function platformLabel(value: string | null | undefined): string {
   const key = normalizePlatform(value);
   return PLATFORM_LABELS[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : "Post");
 }
+
+/**
+ * Whether a planned post is meant to be a moving clip rather than a still.
+ * Drives which generator a post opens on: a "Reel" recommendation asks for a
+ * video, and offering only the image designer there quietly produces the wrong
+ * asset. Kept beside the other platform helpers so it stays free of the
+ * Supabase client and can be unit tested.
+ */
+export function isVideoFormat(format: string | null | undefined, platform?: string | null): boolean {
+  const f = String(format || "").toLowerCase();
+  if (/\b(video|reel|reels|short|shorts|igtv|clip|tiktok)\b/.test(f)) return true;
+  // A story is a still unless it says otherwise; TikTok and YouTube are not.
+  const p = normalizePlatform(platform);
+  if (!f && (p === "tiktok" || p === "youtube")) return true;
+  return false;
+}

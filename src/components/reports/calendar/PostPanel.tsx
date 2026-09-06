@@ -16,6 +16,7 @@ import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignBut
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
 import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
+import { isVideoFormat } from "@/lib/platform";
 import { useState } from "react";
 
 interface Iteration {
@@ -120,6 +121,11 @@ export function PostPanel({
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewIsVideo, setPreviewIsVideo] = useState(false);
+  // A post planned as a Reel opens on the tab that makes one. The Design tab
+  // only ever produced stills, so clicking it on a video recommendation handed
+  // back the wrong asset with nothing to say so.
+  const plannedVideo = isVideoFormat(post?.format, post?.platform);
+  const [tab, setTab] = useState<string>("copy");
   if (!post) return null;
 
   const imageTiles = tilesFromIterations(postIterations, (u) => !isVideoUrl(u));
@@ -156,11 +162,14 @@ export function PostPanel({
             </SheetTitle>
           </SheetHeader>
 
-          <Tabs defaultValue="copy" className="mt-4">
+          <Tabs value={tab} onValueChange={setTab} className="mt-4">
             <TabsList className={`grid ${isClient ? "grid-cols-3" : "grid-cols-4"}`}>
               <TabsTrigger value="copy">Copy</TabsTrigger>
-              <TabsTrigger value="design">Design</TabsTrigger>
-              <TabsTrigger value="video">Video</TabsTrigger>
+              <TabsTrigger value="design">{plannedVideo ? "Cover" : "Design"}</TabsTrigger>
+              <TabsTrigger value="video" className="gap-1.5">
+                Video
+                {plannedVideo && <span className="h-1.5 w-1.5 rounded-full bg-[#b9e045]" aria-hidden />}
+              </TabsTrigger>
               {!isClient && <TabsTrigger value="schedule">Schedule</TabsTrigger>}
             </TabsList>
 
@@ -171,6 +180,16 @@ export function PostPanel({
 
             {/* Design tab */}
             <TabsContent value="design" className="mt-4 space-y-4">
+              {plannedVideo && (
+                <div className="glass-inner p-4 flex items-start justify-between gap-3 flex-wrap">
+                  <p className="t-body min-w-0">
+                    This post is planned as a <span className="font-semibold text-white">{post.format}</span>. Designs here are stills, useful as a cover frame; the clip itself is generated on the Video tab.
+                  </p>
+                  <Button size="sm" variant="outline" className="shrink-0" onClick={() => setTab("video")}>
+                    Go to Video
+                  </Button>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold">
