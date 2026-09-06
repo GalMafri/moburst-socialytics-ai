@@ -27,12 +27,16 @@ export function Section({
   return (
     <section id={id} className={cn("space-y-4 scroll-mt-[156px]", className)}>
       <div className="glass px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
-        <div className="space-y-1 min-w-0">
-          <h2 className="t-h2 flex items-center gap-3">
+        {/* The line of context sits beside the title on a wide band rather than
+            under it. Body text is capped at 72ch, so stacked it wrapped after
+            half the band and left the header looking cut short with a field of
+            empty glass beside it. */}
+        <div className="min-w-0 flex flex-col gap-1 lg:flex-row lg:items-baseline lg:gap-6">
+          <h2 className="t-h2 flex items-center gap-3 lg:shrink-0">
             {index != null && <span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">{String(index).padStart(2, "0")}</span>}
             <span className="flex items-center gap-2">{title}</span>
           </h2>
-          {description && <p className="t-secondary">{description}</p>}
+          {description && <p className="t-secondary min-w-0">{description}</p>}
         </div>
         {action && <div className="flex items-center gap-2 shrink-0">{action}</div>}
       </div>
