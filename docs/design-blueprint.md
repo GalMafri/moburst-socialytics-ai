@@ -18,9 +18,12 @@ staff use live analytics for any date range, the competitor feed and alerts, and
 1. **Inverted pyramid.** The most important numbers first, the story and its drivers next, granular
    detail last. A reader should get the headline within five seconds.
 2. **One reading path.** Single column of content, sections stacked in a fixed order, with a
-   section rail down the left to jump between them. The rail is navigation, never content: it
-   holds its own column beside the report and never floats over the text. Below `xl` there is no
-   room for a column, so it becomes a plain row at the top that scrolls away with the page.
+   section rail down the left to jump between them. The rail is navigation, never content: it is
+   `AppLayout`'s own left column (pass `nav`), so it starts level with the page header and the
+   header and every card below it keep one left edge — never a column wedged inside the content,
+   which pushes the page right of its own header. Pass it on every tab of a page that has it on
+   any tab, so nothing shifts sideways when the tab changes. Below `xl` there is no room for a
+   column, so it becomes a plain row at the top that scrolls away with the page.
 3. **Nothing is hidden.** AI passages render in full. Long text is made readable by structure (bold
    lead-ins, numbered items, 15px at a 65 to 72 character measure, columns on wide cards), never by
    truncation.
@@ -39,9 +42,9 @@ staff use live analytics for any date range, the competitor feed and alerts, and
 |---|---|---|
 | Page header | `PageHeader` via `AppLayout` props (`title`, `description`, `meta`, `actions`, `back`, `width`) | Title row |
 | Section | `Section` (`src/components/ui/section.tsx`) | Band with title and one line; content below |
-| Section nav | `SectionNav` | Left rail that jumps to sections on long reports; drops sections that have no data |
+| Section nav | `SectionNav` | Left rail that jumps to sections on long pages; drops sections that have no data, and shows nothing at all below two |
 | KPI strip | `StatCard` grid | Six metrics with sign-coloured deltas |
-| Passage | `Prose` | Any AI-written text; columns when long |
+| Passage | `Prose` | Any AI-written text; a briefing list when its paragraphs are labelled, columns when long |
 | Action | `ActionCard` | One recommendation, source-tagged, one link |
 
 ## Monthly report: composition and why
