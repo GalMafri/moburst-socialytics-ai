@@ -101,3 +101,22 @@ describe("withoutUrls", () => {
     expect(withoutUrls(s)).toBe(s);
   });
 });
+
+describe("extractMetrics", () => {
+  it("pulls the figures an insight turns on", async () => {
+    const { extractMetrics } = await import("../components/ui/insight-card");
+    expect(
+      extractMetrics("Impressions fell 88% to 492,800 while engagement rate held at 1.34%."),
+    ).toEqual(["88%", "492,800", "1.34%"]);
+  });
+
+  it("stops at three and never repeats one", async () => {
+    const { extractMetrics } = await import("../components/ui/insight-card");
+    expect(extractMetrics("5% then 5% then 12% then 20% then 30%")).toEqual(["5%", "12%", "20%"]);
+  });
+
+  it("finds nothing in a sentence with no figures", async () => {
+    const { extractMetrics } = await import("../components/ui/insight-card");
+    expect(extractMetrics("Community content continues to outperform promotional posts.")).toEqual([]);
+  });
+});

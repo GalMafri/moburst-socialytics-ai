@@ -24,16 +24,28 @@ staff use live analytics for any date range, the competitor feed and alerts, and
    which pushes the page right of its own header. Pass it on every tab of a page that has it on
    any tab, so nothing shifts sideways when the tab changes. Below `xl` there is no room for a
    column, so it becomes a plain row at the top that scrolls away with the page.
-3. **Nothing is hidden.** AI passages render in full. Long text is made readable by structure (bold
-   lead-ins, numbered items, 15px at a 65 to 72 character measure, columns on wide cards), never by
-   truncation.
-4. **One section pattern.** Title and one line of context on a slim glass band; the content in cards
+   The rail is a spine, not a panel: a hairline with a dot per section, no fill and no card, in
+   `AppLayout`'s own 180px column, and the page widens to 1660 to pay for it rather than taking
+   the width out of the report.
+
+3. **Numbers as numbers.** Where a passage recites figures the report already holds, render the
+   figures: a stat beside the sentence, a row of posts with their engagement, a peak read off the
+   same counts the chart draws. Prose earns its place when it makes a claim, not when it reads a
+   table aloud. Hiding a wall behind a toggle is not a fix.
+
+4. **Nothing is hidden.** A passage that makes a claim renders in full, made readable by structure
+   (bold lead-ins, numbered items, figures in white, 15px at a 65 to 90 character measure), never by
+   truncation and never behind a control. A passage that only reads the page's own figures aloud is
+   replaced by those figures — that is rule 3, and it is not the same as hiding it. Verbatim source
+   text a reader can open at its source (a post caption) may be clamped, because the full text is
+   one click away.
+5. **One section pattern.** Title and one line of context on a slim glass band; the content in cards
    below it (owner).
-5. **One title row per screen.** Title, context line, meta chips and the actions, on a glass card that
+6. **One title row per screen.** Title, context line, meta chips and the actions, on a glass card that
    shares the content column's width. The top bar carries the greeting and the date only.
-6. **One text size for sentences: 15px** (owner). 13px for labels and badges. Headings 24 / 20 / 18,
+7. **One text size for sentences: 15px** (owner). 13px for labels and badges. Headings 24 / 20 / 18,
    stats 30. Sentences are white; grey (#b1b7c1) only for labels.
-7. **One primary action per screen.** Green for the main action, outline for secondary, the rest in
+8. **One primary action per screen.** Green for the main action, outline for secondary, the rest in
    a menu.
 
 ## Building blocks
@@ -42,6 +54,7 @@ staff use live analytics for any date range, the competitor feed and alerts, and
 |---|---|---|
 | Page header | `PageHeader` via `AppLayout` props (`title`, `description`, `meta`, `actions`, `back`, `width`) | Title row |
 | Section | `Section` (`src/components/ui/section.tsx`) | Band with title and one line; content below |
+| Overlay | `Dialog`, `Sheet`, `AlertDialog` | The card's material over an 85% scrim, never a flat panel; menus and selects stay near-opaque |
 | Section nav | `SectionNav` | Left rail that jumps to sections on long pages; drops sections that have no data, and shows nothing at all below two |
 | KPI strip | `StatCard` grid | Six metrics with sign-coloured deltas |
 | Passage | `Prose` | Any AI-written text; a briefing list when its paragraphs are labelled, columns when long |

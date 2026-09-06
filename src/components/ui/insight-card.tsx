@@ -57,6 +57,10 @@ export function InsightCard({
   footer?: ReactNode;
 }) {
   const { headline, body } = splitHeadline(text);
+  // The figures the insight turns on, as chips under the headline. The card
+  // promised these from the day it was written and never drew them, so an
+  // insight arrived as a paragraph with its numbers buried in the third line.
+  const metrics = extractMetrics(text);
   return (
     <article className={cn("glass-inner p-4 flex flex-col gap-3 min-w-0", accent && "border-[rgba(185,224,69,0.35)]", className)}>
       <div className="flex items-start gap-3">
@@ -67,6 +71,15 @@ export function InsightCard({
         <div className="min-w-0 space-y-1.5">
           {label && <p className="t-label uppercase tracking-wider">{label}</p>}
           <h3 className="t-body font-semibold text-white leading-snug">{headline}</h3>
+          {metrics.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {metrics.map((m) => (
+                <span key={m} className="t-label !text-white tabular-nums rounded-[8px] px-2 py-0.5 bg-[rgba(255,255,255,0.06)]">
+                  {m}
+                </span>
+              ))}
+            </div>
+          )}
           {body && <p className="t-body">{body}</p>}
         </div>
       </div>
@@ -78,8 +91,11 @@ export function InsightCard({
 /** A responsive grid of InsightCards. */
 export function InsightGrid({ items, numbered = true, label, icon, className }: { items: string[]; numbered?: boolean; label?: string; icon?: ReactNode; className?: string }) {
   if (!items?.length) return null;
+  // Three columns is right for one-line insights and wrong for paragraphs: a
+  // 330-character insight in a 369px column is seven lines. Long ones get two.
+  const longest = items.reduce((n, t) => Math.max(n, String(t || "").length), 0);
   return (
-    <div className={cn("grid gap-3 md:grid-cols-2 xl:grid-cols-3", className)}>
+    <div className={cn("grid gap-3 md:grid-cols-2", longest <= 240 && "xl:grid-cols-3", className)}>
       {items.map((t, i) => (
         <InsightCard key={i} text={t} index={numbered ? i + 1 : undefined} icon={icon} label={label} />
       ))}
