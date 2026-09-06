@@ -9,9 +9,13 @@
 //     identification down;
 //   * reading `content[0].text` was fine until a response led with a
 //     non-text block, which produced "No JSON in model response" while the
-//     model had in fact answered.
-// So: a rejected sampling parameter is dropped and the call retried, and every
-// text block is concatenated. Neither depends on which model is current.
+//     model had in fact answered;
+//   * a trailing assistant turn ("JSON prefill") shaped replies for years and
+//     is refused by Claude 5 — "This model does not support assistant message
+//     prefill. The conversation must end with a user message."
+// So: a rejected parameter is dropped and the call retried, a refused prefill
+// is folded into the user turn as an instruction and the call retried, and
+// every text block is read. None of it depends on which model is current.
 
 /** Parameters the request cannot lose. Anything else is negotiable. */
 const ESSENTIAL = new Set(["model", "messages", "system", "max_tokens", "tools", "tool_choice"]);
@@ -34,6 +38,35 @@ export function rejectedParam(message: string): string | null {
     if (m && !ESSENTIAL.has(m[1])) return m[1];
   }
   return null;
+}
+
+/**
+ * Errors that mean "this model will not take an assistant turn at the end".
+ * Claude 5 refuses the JSON prefill trick that shaped replies on Claude 4.
+ */
+const PREFILL_REJECTED =
+  /(assistant\s+message\s+prefill|prefill(?:ing)?\s+is\s+not\s+supported|must\s+end\s+with\s+a\s+user\s+message|final\s+message\s+must\s+be\s+from\s+the\s+user)/i;
+
+export type Message = { role: string; content: unknown };
+
+/**
+ * Folds a trailing assistant turn into the user turn as an instruction.
+ *
+ * A prefill is a way of saying "your reply starts like this". Where the model
+ * will not accept one, asking for the same thing in words keeps the shape
+ * without the parameter, and the caller's parser still sees what it expects.
+ */
+export function foldPrefill(messages: Message[]): Message[] {
+  if (messages.length < 2) return messages;
+  const last = messages[messages.length - 1];
+  if (last?.role !== "assistant" || typeof last.content !== "string") return messages;
+  const rest = messages.slice(0, -1);
+  const user = rest[rest.length - 1];
+  if (!user || user.role !== "user" || typeof user.content !== "string") return rest;
+  return [
+    ...rest.slice(0, -1),
+    { role: "user", content: `${user.content}\n\nBegin your reply with exactly: ${last.content}` },
+  ];
 }
 
 export type AnthropicResult = { text: string; stopReason: string; raw: unknown };
@@ -77,11 +110,21 @@ export async function anthropicMessages(args: {
     }
 
     const detail = await resp.text().catch(() => "");
-    const bad = resp.status === 400 ? rejectedParam(detail) : null;
-    if (bad && bad in body) {
-      delete body[bad];
-      args.onDropped?.(bad);
-      continue;
+    if (resp.status === 400) {
+      const bad = rejectedParam(detail);
+      if (bad && bad in body) {
+        delete body[bad];
+        args.onDropped?.(bad);
+        continue;
+      }
+      if (PREFILL_REJECTED.test(detail) && Array.isArray(body.messages)) {
+        const folded = foldPrefill(body.messages as Message[]);
+        if (folded.length !== (body.messages as Message[]).length) {
+          body.messages = folded;
+          args.onDropped?.("assistant prefill");
+          continue;
+        }
+      }
     }
     throw new Error(`Anthropic API error ${resp.status}: ${detail.slice(0, 300)}`);
   }

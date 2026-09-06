@@ -66,6 +66,22 @@ const HOURS = Array.from({ length: 24 }, (_, i) => String(i));
 const ACCENT = "185,224,69";
 const RECOMMEND = "120,190,255";
 
+/**
+ * The busiest key in a set of counts, with its share of the total.
+ *
+ * The analysis writes this out in prose — "extremely concentrated at 18:00
+ * UTC: 30/54 posts (56%)" — for a grid the page is already drawing. Reading it
+ * off the same counts puts the number where the grid is, and it stays true
+ * when the platform filter changes, which a sentence written once does not.
+ */
+function peakOf(counts: Record<string, number> | undefined): { key: string; count: number; share: number } | null {
+  const entries = Object.entries(counts || {}).filter(([, n]) => Number(n) > 0);
+  if (entries.length === 0) return null;
+  const total = entries.reduce((s, [, n]) => s + Number(n), 0);
+  const [key, count] = entries.reduce((best, e) => (Number(e[1]) > Number(best[1]) ? e : best));
+  return { key, count: Number(count), share: total ? Number(count) / total : 0 };
+}
+
 const fmt = (n: number | null | undefined) => (n == null ? "–" : Math.round(n).toLocaleString());
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
 
@@ -125,28 +141,6 @@ function Stat({ label, value }: { label: string; value: string }) {
       <p className="t-body font-semibold leading-tight">{value}</p>
       <p className="t-label uppercase tracking-wider leading-tight">{label}</p>
     </div>
-  );
-}
-
-/**
- * The evidence behind a winning pattern, folded away until asked for.
- *
- * A native details/summary: no state, and it prints open. The passage lives
- * inside the summary because a details' other children are hidden when it is
- * closed, and `group-open` is what expands it.
- */
-function Evidence({ text }: { text?: string | null }) {
-  if (!text) return null;
-  return (
-    <details className="group">
-      <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer">
-        <span className="t-label !text-[#b9e045] group-open:hidden">Show the evidence</span>
-        <span className="t-label !text-[#9ca3af] hidden group-open:inline">Hide the evidence</span>
-        <div className="hidden group-open:block mt-2 print:!block">
-          <Prose text={text} cards={false} />
-        </div>
-      </summary>
-    </details>
   );
 }
 
@@ -650,17 +644,39 @@ export default function CompetitiveReportView() {
             <Section id="rhythm" index={next()} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description="When each company posts, by weekday and by hour (UTC), against the schedule we recommend.">
             <Card>
               <CardContent className="pt-5 space-y-6">
-                {ai.posting_time_insights?.summary && <Prose text={ai.posting_time_insights.summary} />}
+                {/* No summary paragraph here: the analysis wrote out each
+                    company's peak hour and its share, which is what the grids
+                    below draw. The number now sits on the grid it describes. */}
                 <div className="grid gap-6 xl:grid-cols-2">
-                {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.post_count > 0).map(({ c, b }) => (
-                  <div key={c.company_id} className="space-y-2 glass-inner p-4">
+                {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.post_count > 0).map(({ c, b }) => {
+                  const peakHour = peakOf(b.by_hour);
+                  const peakDay = peakOf(b.by_weekday);
+                  return (
+                  <div key={c.company_id} className="space-y-3 glass-inner p-4">
                     <div className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
+                    {(peakHour || peakDay) && (
+                      <div className="flex flex-wrap gap-x-8 gap-y-2">
+                        {peakHour && (
+                          <div>
+                            <p className="t-h3 tabular-nums text-white">{peakHour.key.padStart(2, "0")}:00 <span className="t-label">UTC</span></p>
+                            <p className="t-label">peak hour · {Math.round(peakHour.share * 100)}% of posts</p>
+                          </div>
+                        )}
+                        {peakDay && (
+                          <div>
+                            <p className="t-h3 text-white">{peakDay.key}</p>
+                            <p className="t-label">busiest day · {peakDay.count} post{peakDay.count === 1 ? "" : "s"}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-x-8 gap-y-4">
                       <div className="min-w-0 shrink-0"><p className="t-secondary mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} cell={28} /></div>
                       <div className="min-w-0 grow basis-[420px]"><p className="t-secondary mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} cell={20} /></div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 </div>
 
                 {schedule && (schedule.by_weekday || schedule.by_hour) && (
@@ -771,31 +787,51 @@ export default function CompetitiveReportView() {
                   return (
                     <div key={i} className="glass-inner p-4 space-y-3">
                       <p className="t-label uppercase tracking-wider">{w.competitor}</p>
-                      {/* The pattern is the point of the tile, so it is the only
-                          thing set at full strength. It used to be five lines of
-                          bold over five lines of body, which is two walls. */}
+                      {/* The pattern is the claim, and the only prose here. */}
                       <p className="t-body text-white leading-[1.55]">{w.pattern}</p>
-                      {/* The evidence behind it is folded away: it is the numbers
-                          for the posts shown underneath, worth having, not worth
-                          reading four times over on one screen. Prose drops the
-                          links it cites — they are those tiles. */}
-                      <Evidence text={w.evidence} />
+                      {/* The proof, as the numbers rather than a paragraph
+                          reciting them. The analysis used to write out "hit
+                          41,317 engagements … 3,000 comments … 261 shares" for
+                          posts the report already holds in full, which is a
+                          wall of text saying what a row of figures says. */}
                       {examples.length > 0 && (
-                        <div className={`grid gap-2 items-start pt-1 ${examples.length === 1 ? "grid-cols-1" : examples.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+                        <div className="space-y-2 pt-1">
                           {examples.map((ex, j) => (
-                            // Each figure keeps its own number and count under
-                            // its own picture. As a row of tiles over a row of
-                            // buttons there was nothing to say which was which.
-                            <figure key={j} className="space-y-1.5 min-w-0">
-                              <PostVisual url={ex.url} image={ex.post?.image} preview={previews[ex.url]} mediaType={ex.post?.media_type} platform={ex.post?.channel} compact />
-                              <figcaption className="t-label flex items-start gap-1 min-w-0">
-                                <ExternalLink className="h-3 w-3 mt-[3px] shrink-0" />
-                                <span className="min-w-0">
-                                  Post {j + 1}
-                                  {ex.post ? <><span className="block !text-white tabular-nums">{fmt(ex.post.engagement)} eng.</span></> : null}
+                            <a
+                              key={j}
+                              href={ex.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="group flex gap-3 rounded-[10px] p-1.5 -m-1.5 hover:bg-[rgba(255,255,255,0.04)] transition-colors"
+                            >
+                              <PostVisual
+                                url={null}
+                                image={ex.post?.image}
+                                preview={previews[ex.url]}
+                                mediaType={ex.post?.media_type}
+                                platform={ex.post?.channel}
+                                className="w-16 shrink-0"
+                                compact
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="flex items-baseline gap-2 flex-wrap">
+                                  <span className="t-body font-semibold text-white tabular-nums">{ex.post ? fmt(ex.post.engagement) : "–"}</span>
+                                  <span className="t-label">engagements</span>
+                                  {ex.post?.engagement_rate ? <span className="t-label">· {pct(ex.post.engagement_rate)} ER</span> : null}
                                 </span>
-                              </figcaption>
-                            </figure>
+                                <span className="t-label block mt-0.5">
+                                  {ex.post?.channel ? platformLabel(ex.post.channel) : "Post"}
+                                  {ex.post?.media_type ? ` · ${ex.post.media_type}` : ""}
+                                  {ex.post?.likely_boosted ? " · likely boosted" : ""}
+                                </span>
+                                {ex.post && (ex.post.applause || ex.post.conversation || ex.post.amplification) ? (
+                                  <span className="t-label block mt-0.5 tabular-nums">
+                                    {fmt(ex.post.applause || 0)} likes · {fmt(ex.post.conversation || 0)} comments · {fmt(ex.post.amplification || 0)} shares
+                                  </span>
+                                ) : null}
+                              </span>
+                              <ExternalLink className="h-3.5 w-3.5 shrink-0 text-[#6b7280] group-hover:text-white transition-colors" />
+                            </a>
                           ))}
                         </div>
                       )}

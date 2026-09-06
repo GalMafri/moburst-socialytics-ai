@@ -29,3 +29,32 @@ describe("rejectedParam", () => {
     expect(rejectedParam("Your API key is invalid")).toBeNull();
   });
 });
+
+describe("foldPrefill", () => {
+  it("turns a trailing assistant turn into an instruction on the user turn", async () => {
+    const { foldPrefill } = await import("../../supabase/functions/_shared/anthropic");
+    const out = foldPrefill([
+      { role: "user", content: "Identify competitors." },
+      { role: "assistant", content: '{"competitors":[' },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].role).toBe("user");
+    expect(out[0].content).toBe('Identify competitors.\n\nBegin your reply with exactly: {"competitors":[');
+  });
+
+  it("leaves a conversation that already ends with the user alone", async () => {
+    const { foldPrefill } = await import("../../supabase/functions/_shared/anthropic");
+    const messages = [{ role: "user", content: "Hello" }];
+    expect(foldPrefill(messages)).toBe(messages);
+  });
+
+  it("drops a trailing assistant turn it cannot fold", async () => {
+    const { foldPrefill } = await import("../../supabase/functions/_shared/anthropic");
+    const out = foldPrefill([
+      { role: "assistant", content: "earlier" },
+      { role: "assistant", content: "{" },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toBe("earlier");
+  });
+});
