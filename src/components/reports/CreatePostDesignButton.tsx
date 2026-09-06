@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { DesignEditor } from "@/components/editor/DesignEditor";
 import type { ClientContext } from "@/lib/clientContext";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
+import { brandWarning, correctionFor, noBrandFootingError, verdictIsDirty, verdictSummary } from "@/lib/designGuard";
 
 export interface BrandIdentity {
   primary_color?: string;
@@ -65,6 +66,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const effectiveDesignReferences = clientContext?.design_references ?? designReferences ?? [];
   const effectiveBrandBookFilePath = clientContext?.brand_book_file_path ?? brandBookFilePath ?? null;
   const isCarousel = isCarouselFormat(post.format);
+  const footingWarning = brandWarning(clientContext);
   const generation = useGenerationContext();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -271,6 +273,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           design_references: effectiveDesignReferences.length > 0 ? effectiveDesignReferences : undefined,
           brand_book_file_path: effectiveBrandBookFilePath || undefined,
           client_context: clientContext || undefined,
+          client_id: clientId || clientContext?.client_id || undefined,
+          client_name: clientContext?.client_name || undefined,
           post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
           variant_angle: angle.instruction || undefined,
         },
@@ -293,8 +297,48 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         continue;
       }
       const r = results[i];
+      const refusal = r.status === "fulfilled" ? noBrandFootingError(r.value.data) : null;
+      if (refusal) {
+        toast({ title: "Nothing to design from", description: refusal, variant: "destructive" });
+        setVariantUrls((prev) => {
+          const next = [...prev];
+          next[i] = "FAILED";
+          return next;
+        });
+        generation.progressGeneration(postKey, { failed: true });
+        continue;
+      }
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.image_url) {
-        const dataUrl = r.value.data.image_url;
+        let dataUrl = r.value.data.image_url;
+        // Single designs get the same review the carousel slides get: an
+        // invented wordmark or broken lettering on a client's post is worse
+        // than a plain one, and it is cheap to catch and regenerate once.
+        try {
+          const { data: verdict } = await supabase.functions.invoke("validate-design-output", {
+            body: { image_data: dataUrl },
+          });
+          if (verdictIsDirty(verdict)) {
+            toast({ title: "Refining design", description: `Caught ${verdictSummary(verdict)} — regenerating.` });
+            const { data: retry } = await supabase.functions.invoke("generate-post-image", {
+              body: {
+                prompt: (editablePrompt || defaultPrompt) + correctionFor(verdict),
+                platform: post.platform,
+                format: post.format,
+                brand_context: effectiveBrandIdentity || undefined,
+                design_references: effectiveDesignReferences.length > 0 ? effectiveDesignReferences : undefined,
+                brand_book_file_path: effectiveBrandBookFilePath || undefined,
+                client_context: clientContext || undefined,
+                client_id: clientId || clientContext?.client_id || undefined,
+                client_name: clientContext?.client_name || undefined,
+                post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
+                variant_angle: angleInstructions[i].instruction || undefined,
+              },
+            });
+            if (retry?.image_url) dataUrl = retry.image_url;
+          }
+        } catch {
+          // Review or retry failed — keep the original rather than lose it.
+        }
         // Upload to persistent storage.
         const uploadedUrl = await uploadVariantToStorage(dataUrl, i);
         // Update the slot.
@@ -468,6 +512,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               design_references: effectiveDesignReferences.length > 0 ? effectiveDesignReferences : undefined,
               brand_book_file_path: effectiveBrandBookFilePath || undefined,
               client_context: clientContext || undefined,
+              client_id: clientId || clientContext?.client_id || undefined,
+              client_name: clientContext?.client_name || undefined,
               post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
               slide_context: { index: s, total: slides },
               variant_angle: variantAngle.instruction || undefined,
@@ -500,10 +546,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               const { data: validation } = await supabase.functions.invoke("validate-design-output", {
                 body: { image_data: data.image_url },
               });
-              if (validation?.has_hex_codes) {
-                toast({ title: "Refining design..." });
-                const retryPrompt = perSlidePrompt +
-                  "\n\nCRITICAL: The previous generation contained visible hex color codes as text. Do NOT render any hex codes, color codes, RGB values, or technical color notation as readable text anywhere in the image. Colors should be applied visually only.";
+              if (verdictIsDirty(validation)) {
+                toast({ title: "Refining design", description: `Caught ${verdictSummary(validation)} — regenerating.` });
+                const retryPrompt = perSlidePrompt + correctionFor(validation);
                 const { data: retryData } = await supabase.functions.invoke("generate-post-image", {
                   body: {
                     prompt: retryPrompt,
@@ -513,6 +558,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                     design_references: effectiveDesignReferences.length > 0 ? effectiveDesignReferences : undefined,
                     brand_book_file_path: effectiveBrandBookFilePath || undefined,
                     client_context: clientContext || undefined,
+                    client_id: clientId || clientContext?.client_id || undefined,
+                    client_name: clientContext?.client_name || undefined,
                     post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
                     slide_context: { index: s, total: slides },
                     variant_angle: variantAngle.instruction || undefined,
@@ -638,6 +685,14 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           </DialogHeader>
 
           <div className="space-y-4">
+            {/* What this client can actually be designed for. Shown before the
+                generate button so nobody spends a run to discover the gap. */}
+            {footingWarning && (
+              <div className="glass-inner p-3 border-[rgba(245,158,11,0.35)]">
+                <p className="t-body">{footingWarning}</p>
+              </div>
+            )}
+
             {/* Brand context indicator */}
             {brandColors.length > 0 && (
               <div className="flex items-center gap-3 t-secondary rounded-lg bg-[rgba(255,255,255,0.03)] px-3 py-2">

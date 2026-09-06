@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
+import { footingOf, noBrandFootingMessage, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -144,24 +145,47 @@ Deno.serve(async (req) => {
       design_references,              // legacy
       brand_book_file_path,           // legacy
       client_context,                 // new — full structured context
+      client_id,                      // new — lets the function read the brand itself
+      client_name,
       post,                           // new — post-level brief
       slide_context,                  // new — { index, total } for carousels
       variant_angle,                  // new — creative angle override (Phase 6)
     } = await req.json();
 
-    // Backward compat: resolve from client_context if present, else legacy fields.
-    const resolvedBrand = client_context?.brand_identity ?? brand_context ?? null;
-    const resolvedRefs: string[] = client_context?.design_references ?? design_references ?? [];
-    const resolvedBrandBookPath: string | null =
-      client_context?.brand_book_file_path ?? brand_book_file_path ?? null;
-    const resolvedSynthesis = client_context?.design_style_synthesis ?? null;
-    const resolvedPillars = client_context?.content_pillars ?? [];
-    const resolvedBriefText: string | null = client_context?.brief_text ?? null;
-    const resolvedBrandNotes: string | null = client_context?.brand_notes ?? null;
-    const resolvedLanguages: string[] = client_context?.languages ?? [];
-    const resolvedGeo: string[] = client_context?.geo ?? [];
+    if (!prompt) {
+      return jsonResp({ error: "prompt is required" }, 400);
+    }
 
-    console.log("[generate-post-image] context received:", {
+    // Resolve the brand from the caller, falling back to the client row. A call
+    // that arrives without context used to generate a perfectly generic image
+    // and say nothing about it.
+    const brandDb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const brand = await resolveBrandContext({
+      supabase: brandDb,
+      clientId: client_id,
+      clientContext: client_context,
+      legacy: {
+        brandIdentity: brand_context,
+        designReferences: design_references,
+        brandBookPath: brand_book_file_path,
+      },
+    });
+    const footing = footingOf(brand);
+
+    const resolvedBrand = brand.brandIdentity;
+    const resolvedRefs: string[] = brand.designReferences;
+    const resolvedBrandBookPath: string | null = brand.brandBookPath;
+    const resolvedSynthesis = brand.synthesis;
+    const resolvedPillars = brand.pillars;
+    const resolvedBriefText: string | null = brand.briefText;
+    const resolvedBrandNotes: string | null = brand.brandNotes;
+    const resolvedLanguages: string[] = brand.languages;
+    const resolvedGeo: string[] = brand.geo;
+
+    console.log("[generate-post-image] brand resolved:", {
+      source: brand.source,
+      footing: footing.strong ? "strong" : footing.weak ? "weak" : "none",
+      gaps: footing.reasons,
       has_brand: !!resolvedBrand,
       ref_count: resolvedRefs.length,
       has_brand_book: !!resolvedBrandBookPath,
@@ -170,8 +194,12 @@ Deno.serve(async (req) => {
       has_brief: !!resolvedBriefText,
     });
 
-    if (!prompt) {
-      return jsonResp({ error: "prompt is required" }, 400);
+    // Nothing to design from: stop rather than ship stock art that looks finished.
+    if (footing.none) {
+      return jsonResp(
+        { error: noBrandFootingMessage(client_name), code: "no_brand_footing", gaps: footing.reasons },
+        422,
+      );
     }
 
     // ── Get Gemini API key (try env, then app_settings) ──

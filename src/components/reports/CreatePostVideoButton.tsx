@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import type { ClientContext } from "@/lib/clientContext";
 import { Slider } from "@/components/ui/slider";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
+import { brandWarning, noBrandFootingError } from "@/lib/designGuard";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -87,6 +88,7 @@ type VariantSlot = string | null | "FAILED";
 export function CreatePostVideoButton({ post, clientContext, brandIdentity, clientId, onVideoGenerated }: CreatePostVideoButtonProps) {
   const effectiveBrandIdentity = clientContext?.brand_identity ?? brandIdentity ?? null;
   const generation = useGenerationContext();
+  const footingWarning = brandWarning(clientContext);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   // Legacy: holds the URL of whatever variant is currently being trimmed.
@@ -322,6 +324,8 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
           format: post.format,
           brandIdentity: effectiveBrandIdentity,
           client_context: clientContext || undefined,
+          client_id: clientId || clientContext?.client_id || undefined,
+          client_name: clientContext?.client_name || undefined,
           post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
           variant_angle: angle.instruction || undefined,
         },
@@ -344,6 +348,16 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
         continue;
       }
       const r = results[i];
+      const refusal = r.status === "fulfilled" ? noBrandFootingError(r.value.data) : null;
+      if (refusal) {
+        toast({ title: "Nothing to design from", description: refusal, variant: "destructive" });
+        setVariantUrls((prev) => {
+          const next = [...prev];
+          if (next[i] === null) next[i] = "FAILED";
+          return next;
+        });
+        continue;
+      }
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.video_url) {
         const rawUrl = r.value.data.video_url;
         const seedUrl: string | null = r.value.data.seed_image_url || null;
@@ -424,6 +438,13 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
           </DialogHeader>
 
           <div className="space-y-4">
+            {/* The anchor frame is generated from the client's brand, so a
+                client with nothing on file gets generic footage. Say so first. */}
+            {footingWarning && (
+              <div className="glass-inner p-3 border-[rgba(245,158,11,0.35)]">
+                <p className="t-body">{footingWarning}</p>
+              </div>
+            )}
             {/* Platform & format info */}
             <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="outline">{spec.aspect}</Badge>

@@ -2,6 +2,8 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildVideoPrompt } from "../_shared/design-prompts/buildVideoPrompt.ts";
+import { footingOf, noBrandFootingMessage, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
+import { correctionFor, validateDesignImage, verdictIsDirty } from "../_shared/design-prompts/validateImage.ts";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 
 const corsHeaders = {
@@ -175,21 +177,11 @@ serve(async (req) => {
       format,
       brandIdentity,
       client_context,
+      client_id,
+      client_name,
       post,
       variant_angle,
     } = await req.json();
-
-    const resolvedBrand = client_context?.brand_identity ?? brandIdentity ?? null;
-    const resolvedRefs = client_context?.design_references ?? [];
-    const resolvedBrandBookPath = client_context?.brand_book_file_path ?? null;
-    const resolvedSynthesis = client_context?.design_style_synthesis ?? null;
-
-    console.log("[generate-post-video] context received:", {
-      has_brand: !!resolvedBrand,
-      ref_count: resolvedRefs.length,
-      has_brand_book: !!resolvedBrandBookPath,
-      has_synthesis: !!resolvedSynthesis,
-    });
 
     if (!prompt) {
       return new Response(JSON.stringify({ error: "prompt is required" }), {
@@ -201,6 +193,38 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Same guarantee the still generator makes: resolve the brand from the
+    // caller, fall back to the client row, and refuse rather than animate
+    // generic stock footage for a client with nothing to design from.
+    const brand = await resolveBrandContext({
+      supabase,
+      clientId: client_id,
+      clientContext: client_context,
+      legacy: { brandIdentity },
+    });
+    const footing = footingOf(brand);
+    const resolvedBrand = brand.brandIdentity;
+    const resolvedRefs = brand.designReferences;
+    const resolvedBrandBookPath = brand.brandBookPath;
+    const resolvedSynthesis = brand.synthesis;
+
+    console.log("[generate-post-video] brand resolved:", {
+      source: brand.source,
+      footing: footing.strong ? "strong" : footing.weak ? "weak" : "none",
+      gaps: footing.reasons,
+      has_brand: !!resolvedBrand,
+      ref_count: resolvedRefs.length,
+      has_brand_book: !!resolvedBrandBookPath,
+      has_synthesis: !!resolvedSynthesis,
+    });
+
+    if (footing.none) {
+      return new Response(
+        JSON.stringify({ error: noBrandFootingMessage(client_name), code: "no_brand_footing", gaps: footing.reasons }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     let geminiKey = Deno.env.get("GEMINI_API_KEY");
     if (!geminiKey) {
@@ -224,7 +248,7 @@ serve(async (req) => {
     // With it, Veo animates from a frame that already encodes the brand's
     // palette, composition, typography, and design references.
     console.log("[generate-post-video] generating brand-aligned seed image…");
-    const seedImage = await generateSeedImage({
+    let seedImage = await generateSeedImage({
       geminiKey,
       supabase,
       basePrompt: prompt,
@@ -240,6 +264,32 @@ serve(async (req) => {
     });
     if (seedImage) {
       console.log("[generate-post-video] seed image ready — Veo will animate from brand-aligned frame");
+      // Veo treats the seed as visual ground truth, so an invented wordmark or
+      // broken lettering on the anchor frame is carried through every frame of
+      // the clip. Checking costs a couple of seconds against a Veo call that
+      // costs minutes and real money, so it is worth one regeneration.
+      const verdict = await validateDesignImage(`data:${seedImage.mimeType};base64,${seedImage.base64}`);
+      if (verdictIsDirty(verdict)) {
+        console.warn("[generate-post-video] seed failed review, regenerating once:", verdict);
+        const retry = await generateSeedImage({
+          geminiKey,
+          supabase,
+          basePrompt: prompt + correctionFor(verdict),
+          platform,
+          format,
+          brandIdentity: resolvedBrand,
+          synthesis: resolvedSynthesis,
+          designReferences: resolvedRefs,
+          brandBookPath: resolvedBrandBookPath,
+          post,
+          variantAngle: variant_angle || null,
+          aspectRatio,
+        });
+        if (retry) {
+          seedImage = retry;
+          console.log("[generate-post-video] seed regenerated after review");
+        }
+      }
     } else {
       console.warn(
         "[generate-post-video] seed image generation failed — falling back to text-only Veo. Output will be less brand-aligned.",
