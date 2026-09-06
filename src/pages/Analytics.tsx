@@ -338,7 +338,8 @@ export default function Analytics() {
         ]
       : view === "trends"
         ? [
-            { id: "trends", label: "Trends" },
+            { id: "trends-tiktok", label: "TikTok trends" },
+            { id: "trends-instagram", label: "Instagram trends" },
             { id: "history", label: "Report history" },
           ]
         : [

@@ -70,7 +70,8 @@ function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram
   const color = getPlatformColor(platformKey);
 
   return (
-    <Card>
+    // The id lets the page rail jump straight to a platform.
+    <Card id={`trends-${platformKey}`} className="scroll-mt-[156px]">
       <CardHeader className="pb-3">
         <CardTitle className="t-h3 flex items-center gap-2">
           <PlatformIcon platform={platformKey} className="h-5 w-5" />

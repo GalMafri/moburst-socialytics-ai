@@ -44,7 +44,9 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
           return (
             <div key={i} className="grid gap-1 py-4 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)] md:gap-8">
               {title && <dt className="t-label uppercase tracking-wider md:pt-[3px]">{title}</dt>}
-              <dd className={cn("t-body min-w-0", !title && "md:col-span-2")}>
+              {/* Capped so a long passage keeps a readable measure instead of
+                  running the full width of the card. */}
+              <dd className={cn("t-body min-w-0 max-w-[78ch]", !title && "md:col-span-2")}>
                 {title ? body : <Paragraph text={p} />}
               </dd>
             </div>
