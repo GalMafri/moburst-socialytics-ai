@@ -350,7 +350,9 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       const r = results[i];
       const advice = r.status === "fulfilled" ? brandAdviceFrom(r.value.data) : null;
       if (advice && i === 0) {
-        toast({ title: "Generated without brand references", description: advice });
+        // sonner in this file, not the shadcn useToast used by the design button:
+        // the message is the first argument, options the second.
+        toast("Generated without brand references", { description: advice });
       }
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.video_url) {
         const rawUrl = r.value.data.video_url;
