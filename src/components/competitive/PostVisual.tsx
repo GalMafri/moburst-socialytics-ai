@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Play, Layers, Image as ImageIcon, ExternalLink } from "lucide-react";
+import { Play, Layers, Image as ImageIcon, ExternalLink, ImageOff } from "lucide-react";
 import { normalizePlatform, platformLabel } from "@/lib/platform";
 
 // Re-exported so existing imports keep working; the helpers live in src/lib/platform.ts.
@@ -130,6 +130,13 @@ type PostVisualProps = {
   compact?: boolean;
   /** Tailwind aspect class for the fixed frame. Defaults to 4:5; compact tiles default to square. */
   frame?: string;
+  /**
+   * How the creative sits in the frame. Large grid tiles keep the creative's own
+   * format ("contain"); a small side thumbnail fills the frame ("cover"),
+   * because a 1200x628 LinkedIn image contained in a 112px square is a sliver
+   * of picture surrounded by blur. Compact tiles default to cover.
+   */
+  fit?: "cover" | "contain";
   /** Kept for callers; the fixed frame already bounds the height. */
   maxHeight?: string;
 };
@@ -139,7 +146,7 @@ type PostVisualProps = {
  * keeps its own format inside the frame; a labelled placeholder takes the
  * frame when no creative could be resolved.
  */
-export function PostVisual({ url, image, preview, mediaType, platform, className = "", compact = false, frame }: PostVisualProps) {
+export function PostVisual({ url, image, preview, mediaType, platform, className = "", compact = false, frame, fit }: PostVisualProps) {
   // Sources in order of preference: the resolved preview first (a durable copy
   // in our storage when the original is an expiring CDN link), then the
   // creative the report already carries. A source that fails to load hands
@@ -158,6 +165,7 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
   const kind = mediaKind(mediaType || preview?.media_type, url);
   const plat = normalizePlatform(platform || preview?.platform || platformFromUrl(url));
   const aspect = frame || (compact ? "aspect-square" : "aspect-[4/5]");
+  const objectFit = (fit || (compact ? "cover" : "contain")) === "cover" ? "object-cover" : "object-contain";
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const el = videoRef.current;
@@ -194,7 +202,7 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
           playsInline
           preload="none"
           onError={fail}
-          className="absolute inset-0 h-full w-full object-contain pointer-events-none"
+          className={`absolute inset-0 h-full w-full ${objectFit} pointer-events-none`}
         />
       ) : src ? (
         <img
@@ -203,12 +211,16 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
           loading="lazy"
           referrerPolicy="no-referrer"
           onError={fail}
-          className="absolute inset-0 h-full w-full object-contain"
+          className={`absolute inset-0 h-full w-full ${objectFit}`}
         />
       ) : (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] text-muted-foreground">
-          {kind === "video" ? <Play className="h-7 w-7" /> : kind === "carousel" ? <Layers className="h-7 w-7" /> : <ImageIcon className="h-7 w-7" />}
-          {!compact && <span className="t-label">{url ? `Open on ${platformLabel(plat)}` : "No link"}</span>}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-2 text-center bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] text-muted-foreground">
+          {kind === "video" ? <Play className="h-7 w-7" /> : kind === "carousel" ? <Layers className="h-7 w-7" /> : <ImageOff className="h-6 w-6" />}
+          {!compact && (
+            <span className="t-label">
+              {!url ? "No link" : plat ? `No preview from ${platformLabel(plat)}` : "No preview"}
+            </span>
+          )}
         </div>
       )}
       {src && kind === "video" && (

@@ -621,7 +621,7 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
             image={post.image_url || post.media_url || post.thumbnail_url || null}
             mediaType={post.post_type || post.media_type || post.content_type}
             platform={post.network_type || post.platform}
-            className="w-28 shrink-0"
+            className="w-28 shrink-0 self-start"
             compact
           />
           <div className="flex-1 min-w-0 space-y-2.5">
@@ -962,7 +962,7 @@ function TrendsSection({
                 <Card key={i} className="overflow-hidden">
                   <CardContent className="pt-5">
                     <div className="flex gap-4">
-                      <PostVisual url={post.url} preview={previews[post.url]} mediaType={post.type || (platform.toLowerCase().includes("tiktok") ? "video" : null)} platform={platform} className="w-32 shrink-0" compact />
+                      <PostVisual url={post.url} preview={previews[post.url]} mediaType={post.type || (platform.toLowerCase().includes("tiktok") ? "video" : null)} platform={platform} className="w-32 shrink-0 self-start" compact />
                       <div className="flex-1 min-w-0 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0">
