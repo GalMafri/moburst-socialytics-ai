@@ -39,8 +39,14 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
       <dl className={cn("divide-y divide-[rgba(255,255,255,0.06)]", className)}>
         {paragraphs.map((p, i) => {
           const m = leads[i];
-          const title = m ? m[1] : null;
-          const body = m ? p.slice(m[0].length) : p;
+          // A parenthetical belongs in the passage, not in the label column,
+          // where "Engagement efficiency (RivalIQ engagement rate per post)"
+          // wraps to four lines beside two lines of text.
+          const full = m ? m[1] : null;
+          const cut = full ? full.indexOf(" (") : -1;
+          const title = full ? (cut > 0 ? full.slice(0, cut) : full) : null;
+          const aside = full && cut > 0 ? `${full.slice(cut + 1)} ` : "";
+          const body = m ? aside + p.slice(m[0].length) : p;
           return (
             <div key={i} className="grid gap-1.5 py-5 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,168px)_minmax(0,1fr)] md:gap-8">
               {title && (
