@@ -69,6 +69,10 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
   const navRef = useRef<HTMLElement>(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  // While a click is scrolling the page to a section, the section under the
+  // reading line is every section in between. Without this the dot walked the
+  // whole list on the way down, once per frame, which is the stutter you see.
+  const lockedRef = useRef<string | null>(null);
   const key = items.map((it) => it.id).join("|");
 
   useEffect(() => {
@@ -82,6 +86,14 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
     // section happens to cover the most pixels.
     const pick = () => {
       if (nodes.length === 0) return;
+      // A click owns the highlight until its scroll lands, and the lock lifts
+      // itself once the target is where it was going.
+      const locked = lockedRef.current;
+      if (locked) {
+        const target = nodes.find((n) => n.id === locked);
+        if (!target || Math.abs(target.getBoundingClientRect().top - 156) < 4) lockedRef.current = null;
+        return;
+      }
       const line = 156;
       let current = nodes[0].id;
       for (const n of nodes) {
@@ -91,6 +103,18 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
       const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
       if (atBottom) current = nodes[nodes.length - 1].id;
       setActive(current);
+    };
+
+    // One read per frame at most: `pick` measures every section, and running
+    // that on each of the scroll events a smooth scroll fires is a layout pass
+    // per event on a page full of blurred glass.
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        pick();
+      });
     };
 
     const wire = () => {
@@ -118,28 +142,45 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
       });
     });
     mutations.observe(document.body, { childList: true, subtree: true });
-    window.addEventListener("scroll", pick, { passive: true });
-    window.addEventListener("resize", pick);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    // Chrome fires this when the smooth scroll settles; the distance check in
+    // `pick` covers the browsers that do not.
+    const onScrollEnd = () => {
+      lockedRef.current = null;
+    };
+    window.addEventListener("scrollend", onScrollEnd);
     return () => {
       if (queued) cancelAnimationFrame(queued);
+      if (frame) cancelAnimationFrame(frame);
       mutations.disconnect();
       observer?.disconnect();
-      window.removeEventListener("scroll", pick);
-      window.removeEventListener("resize", pick);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("scrollend", onScrollEnd);
     };
   }, [key]);
 
-  // Keep the active item in view when the rail itself has had to scroll.
+  // Keep the active item in view when the rail itself has had to scroll — but
+  // only when the item is actually out of sight, and instantly. Animating the
+  // rail while the page is animating underneath it was the second half of the
+  // stutter.
   useEffect(() => {
     if (!active || !navRef.current) return;
-    const el = navRef.current.querySelector<HTMLElement>(`[data-section="${active}"]`);
     const bar = navRef.current;
+    const el = bar.querySelector<HTMLElement>(`[data-section="${active}"]`);
     if (!el) return;
     const overflowsY = bar.scrollHeight > bar.clientHeight + 1;
     const overflowsX = bar.scrollWidth > bar.clientWidth + 1;
-    if (!overflowsY && !overflowsX) return;
-    if (overflowsY) bar.scrollTo({ top: el.offsetTop - bar.clientHeight / 2 + el.offsetHeight / 2, behavior: "smooth" });
-    else bar.scrollTo({ left: el.offsetLeft - bar.clientWidth / 2 + el.offsetWidth / 2, behavior: "smooth" });
+    if (overflowsY) {
+      const top = el.offsetTop - bar.scrollTop;
+      if (top >= 0 && top + el.offsetHeight <= bar.clientHeight) return;
+      bar.scrollTop = el.offsetTop - bar.clientHeight / 2 + el.offsetHeight / 2;
+    } else if (overflowsX) {
+      const left = el.offsetLeft - bar.scrollLeft;
+      if (left >= 0 && left + el.offsetWidth <= bar.clientWidth) return;
+      bar.scrollLeft = el.offsetLeft - bar.clientWidth / 2 + el.offsetWidth / 2;
+    }
   }, [active]);
 
   const visible = presentIds === null ? items : items.filter((it) => presentIds.split("|").includes(it.id));
@@ -152,8 +193,14 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
     if (!el) return;
     e.preventDefault();
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    lockedRef.current = id;
+    // The last section on a page cannot always reach the reading line, so the
+    // lock has a deadline as well as the two ways of lifting itself.
+    window.setTimeout(() => {
+      if (lockedRef.current === id) lockedRef.current = null;
+    }, 1200);
     setActive(id);
+    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
     history.replaceState(null, "", `#${id}`);
   };
 
