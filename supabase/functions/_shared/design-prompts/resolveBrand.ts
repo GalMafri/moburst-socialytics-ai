@@ -145,16 +145,24 @@ export async function resolveBrandContext(args: {
 }
 
 /**
- * The message shown when a client has nothing to generate from. Generating
- * anyway produces stock art wearing none of the client's design tokens, which
- * is worse than not generating: it looks finished and ships off-brand.
+ * Advice shown when a client has little or nothing to design from. Generation
+ * still runs — a designer would rather have a rough draft than a refusal — but
+ * the result cannot carry design tokens the client has never given us, so the
+ * caller surfaces this alongside it.
  */
-export function noBrandFootingMessage(clientName?: string | null): string {
-  const who = clientName ? `${clientName} has` : "This client has";
+export function brandFootingAdvice(footing: BrandFooting, clientName?: string | null): string | null {
+  if (footing.strong) return null;
+  const who = clientName || "This client";
+  if (footing.none) {
+    return (
+      `${who} has no brand material on file, so this design is generic rather than on-brand. ` +
+      `Upload design references in the client's onboarding (Client Setup → Brief → Design References) ` +
+      `and run "Brand design language" — every later generation then follows the real look.`
+    );
+  }
   return (
-    `${who} no brand material to design from — no design references, no brand book, ` +
-    `no synthesized design language and no brand identity fields. Generating now would ` +
-    `produce generic stock art rather than something on-brand. Add design references or a ` +
-    `brand book in Client Setup, run "Brand design language", then try again.`
+    `${who} has only written brand notes — no design references — so this design follows the ` +
+    `description but cannot match the real look. Upload design references in the client's ` +
+    `onboarding (Client Setup → Brief → Design References) for on-brand output.`
   );
 }

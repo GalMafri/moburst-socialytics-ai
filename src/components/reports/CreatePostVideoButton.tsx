@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import type { ClientContext } from "@/lib/clientContext";
 import { Slider } from "@/components/ui/slider";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
-import { brandWarning, noBrandFootingError } from "@/lib/designGuard";
+import { brandAdviceFrom, brandWarning } from "@/lib/designGuard";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -348,15 +348,9 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
         continue;
       }
       const r = results[i];
-      const refusal = r.status === "fulfilled" ? noBrandFootingError(r.value.data) : null;
-      if (refusal) {
-        toast({ title: "Nothing to design from", description: refusal, variant: "destructive" });
-        setVariantUrls((prev) => {
-          const next = [...prev];
-          if (next[i] === null) next[i] = "FAILED";
-          return next;
-        });
-        continue;
+      const advice = r.status === "fulfilled" ? brandAdviceFrom(r.value.data) : null;
+      if (advice && i === 0) {
+        toast({ title: "Generated without brand references", description: advice });
       }
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.video_url) {
         const rawUrl = r.value.data.video_url;

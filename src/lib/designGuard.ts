@@ -1,8 +1,9 @@
 // Client-side mirror of the brand checks the generators run server-side, so a
 // designer sees the problem before spending a generation rather than after.
 //
-// The server is still the authority: it refuses a generation with no footing
-// and returns code "no_brand_footing". This is the earlier, friendlier warning.
+// Nothing here blocks a generation: a thin brand still produces a usable draft.
+// The generators return the same advice as brand_advice on the response, so the
+// point is made before the run and again on the result.
 
 import type { ClientContext } from "@/lib/clientContext";
 
@@ -55,9 +56,9 @@ export function brandWarning(ctx: ClientContext | null | undefined): string | nu
   if (f.strong) return null;
   const name = ctx?.client_name || "This client";
   if (f.none) {
-    return `${name} has nothing to design from (${f.gaps.join(", ")}). Add design references or a brand book in Client Setup and run "Brand design language" — generating now would return generic stock art.`;
+    return `${name} has no brand material on file, so designs will be generic rather than on-brand. Upload design references in the client's onboarding (Client Setup → Brief → Design References) and run "Brand design language".`;
   }
-  return `${name} has no design references, brand book or synthesized design language — only written brand notes. Designs will follow the description but cannot match the real look. Add references in Client Setup for on-brand output.`;
+  return `${name} has only written brand notes — no design references — so designs follow the description but cannot match the real look. Upload design references in the client's onboarding (Client Setup → Brief → Design References).`;
 }
 
 export interface DesignVerdict {
@@ -106,8 +107,11 @@ export function correctionFor(v: DesignVerdict): string {
   return `\n\nCRITICAL CORRECTIONS — the previous attempt failed review:\n- ${notes.join("\n- ")}`;
 }
 
-/** The server's refusal, surfaced as-is when it comes back. */
-export function noBrandFootingError(payload: unknown): string | null {
-  const p = payload as { code?: string; error?: string } | null;
-  return p && p.code === "no_brand_footing" && p.error ? p.error : null;
+/**
+ * Advice the generators return alongside a design when the client's brand
+ * material is thin. Generation is never blocked on it.
+ */
+export function brandAdviceFrom(payload: unknown): string | null {
+  const p = payload as { brand_advice?: string | null } | null;
+  return p && typeof p.brand_advice === "string" && p.brand_advice.trim() ? p.brand_advice : null;
 }

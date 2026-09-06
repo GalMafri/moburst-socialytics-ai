@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
-import { footingOf, noBrandFootingMessage, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
+import { brandFootingAdvice, footingOf, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -194,13 +194,10 @@ Deno.serve(async (req) => {
       has_brief: !!resolvedBriefText,
     });
 
-    // Nothing to design from: stop rather than ship stock art that looks finished.
-    if (footing.none) {
-      return jsonResp(
-        { error: noBrandFootingMessage(client_name), code: "no_brand_footing", gaps: footing.reasons },
-        422,
-      );
-    }
+    // Thin or missing brand material does not stop the run — a draft beats a
+    // refusal — but the caller is told so nobody mistakes generic art for
+    // on-brand work, and is pointed at the fix.
+    const brandAdvice = brandFootingAdvice(footing, client_name);
 
     // ── Get Gemini API key (try env, then app_settings) ──
     let geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
@@ -471,6 +468,8 @@ Deno.serve(async (req) => {
       was_retried: wasRetried,
       validation_layout: validationLayout,
       validation_reason: validationReason,
+      brand_footing: footing.strong ? "strong" : footing.weak ? "weak" : "none",
+      brand_advice: brandAdvice,
     });
   } catch (err: any) {
     return jsonResp({ error: err.message }, 500);

@@ -2,7 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildVideoPrompt } from "../_shared/design-prompts/buildVideoPrompt.ts";
-import { footingOf, noBrandFootingMessage, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
+import { brandFootingAdvice, footingOf, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
 import { correctionFor, validateDesignImage, verdictIsDirty } from "../_shared/design-prompts/validateImage.ts";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 
@@ -22,10 +22,12 @@ function getAspectRatio(platform?: string, format?: string): string {
 }
 
 // Try multiple Veo model names in order of preference
+// Verified live 2026-09-06 against models.list: these are the video models the
+// key can reach. veo-3-generate-preview and veo-2.0-generate-001 were also in
+// this list and no longer exist, so every run ended on their 404.
 const VEO_MODELS = [
   "veo-3.1-generate-preview",
-  "veo-3-generate-preview",
-  "veo-2.0-generate-001",
+  "veo-3.1-fast-generate-preview",
 ];
 
 /**
@@ -219,12 +221,8 @@ serve(async (req) => {
       has_synthesis: !!resolvedSynthesis,
     });
 
-    if (footing.none) {
-      return new Response(
-        JSON.stringify({ error: noBrandFootingMessage(client_name), code: "no_brand_footing", gaps: footing.reasons }),
-        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+    // Thin brand material is reported, not fatal — see generate-post-image.
+    const brandAdvice = brandFootingAdvice(footing, client_name);
 
     let geminiKey = Deno.env.get("GEMINI_API_KEY");
     if (!geminiKey) {
@@ -310,9 +308,11 @@ serve(async (req) => {
       hasSeedImage: !!seedImage,
     });
 
-    // Try each Veo model until one works
+    // Try each Veo model until one works. Every failure is kept: the loop used
+    // to overwrite a single lastError, so a real failure on the first model was
+    // replaced by the last model's "not found" and the true cause was invisible.
     let operationName: string | null = null;
-    let lastError = "";
+    const modelErrors: Array<{ model: string; status: number; error: string }> = [];
 
     for (const model of VEO_MODELS) {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`;
@@ -354,17 +354,20 @@ serve(async (req) => {
           break;
         }
       } else {
-        lastError = await response.text();
-        console.error(`Veo model ${model} failed: ${lastError}`);
+        const body = await response.text().catch(() => "");
+        modelErrors.push({ model, status: response.status, error: body.slice(0, 400) });
+        console.error(`Veo model ${model} failed (${response.status}): ${body.slice(0, 400)}`);
       }
     }
 
     if (!operationName) {
+      const detail = modelErrors
+        .map((e) => `${e.model} → ${e.status}: ${e.error.replace(/\s+/g, " ").slice(0, 200)}`)
+        .join(" | ");
+      console.error("[generate-post-video] every Veo model failed:", JSON.stringify(modelErrors));
       throw new Error(
-        `Video generation failed. None of the Veo models are available for your API key. ` +
-        `Make sure your Gemini API key has access to Veo video generation models. ` +
-        `You can check availability at https://aistudio.google.com/models/veo-3. ` +
-        `Last error: ${lastError.slice(0, 200)}`
+        `Video generation failed — no Veo model accepted the request ` +
+        `(seed image ${seedImage ? "was" : "was NOT"} attached). ${detail}`,
       );
     }
 
@@ -416,6 +419,8 @@ serve(async (req) => {
               video_url: authenticatedUrl,
               seed_image_url: seedPreview,
               seed_used: !!seedImage,
+              brand_footing: footing.strong ? "strong" : footing.weak ? "weak" : "none",
+              brand_advice: brandAdvice,
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );

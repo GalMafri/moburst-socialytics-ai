@@ -12,7 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { DesignEditor } from "@/components/editor/DesignEditor";
 import type { ClientContext } from "@/lib/clientContext";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
-import { brandWarning, correctionFor, noBrandFootingError, verdictIsDirty, verdictSummary } from "@/lib/designGuard";
+import { brandAdviceFrom, brandWarning, correctionFor, verdictIsDirty, verdictSummary } from "@/lib/designGuard";
 
 export interface BrandIdentity {
   primary_color?: string;
@@ -297,16 +297,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         continue;
       }
       const r = results[i];
-      const refusal = r.status === "fulfilled" ? noBrandFootingError(r.value.data) : null;
-      if (refusal) {
-        toast({ title: "Nothing to design from", description: refusal, variant: "destructive" });
-        setVariantUrls((prev) => {
-          const next = [...prev];
-          next[i] = "FAILED";
-          return next;
-        });
-        generation.progressGeneration(postKey, { failed: true });
-        continue;
+      // Thin brand material is advice, not a failure: the draft still lands,
+      // and the note says how to make the next one on-brand.
+      const advice = r.status === "fulfilled" ? brandAdviceFrom(r.value.data) : null;
+      if (advice && i === 0) {
+        toast({ title: "Generated without brand references", description: advice });
       }
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.image_url) {
         let dataUrl = r.value.data.image_url;

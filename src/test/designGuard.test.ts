@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   brandFooting,
   brandWarning,
+  brandAdviceFrom,
   correctionFor,
-  noBrandFootingError,
   verdictIsDirty,
   verdictSummary,
 } from "@/lib/designGuard";
@@ -71,16 +71,23 @@ describe("brandWarning", () => {
     expect(brandWarning(ctx({ design_references: ["a.png"] }))).toBeNull();
   });
 
-  it("names the client and tells them where to fix it", () => {
-    const w = brandWarning(ctx({ client_name: "MyRxProfile" }));
+  it("names the client and points at onboarding", () => {
+    const w = brandWarning(ctx({ client_name: "MyRxProfile" }))!;
     expect(w).toContain("MyRxProfile");
-    expect(w).toContain("Client Setup");
+    expect(w).toContain("Design References");
+    expect(w).toContain("onboarding");
   });
 
   it("distinguishes weak footing from none", () => {
     const weak = brandWarning(ctx({ brand_identity: { visual_style: "Clean" } as any }))!;
     expect(weak).toContain("cannot match the real look");
-    expect(weak).not.toContain("generic stock art");
+    expect(weak).not.toContain("no brand material on file");
+  });
+
+  it("never threatens to block a generation", () => {
+    for (const c of [base, ctx({ brand_identity: { visual_style: "Clean" } as any })]) {
+      expect(brandWarning(c)!.toLowerCase()).not.toMatch(/refus|cannot generate|blocked/);
+    }
   });
 });
 
@@ -109,12 +116,13 @@ describe("verdict handling", () => {
   });
 });
 
-describe("noBrandFootingError", () => {
-  it("surfaces the server refusal", () => {
-    expect(noBrandFootingError({ code: "no_brand_footing", error: "X has no brand material" })).toBe("X has no brand material");
+describe("brandAdviceFrom", () => {
+  it("surfaces advice returned with a design", () => {
+    expect(brandAdviceFrom({ brand_advice: "Upload design references" })).toBe("Upload design references");
   });
-  it("ignores anything else", () => {
-    expect(noBrandFootingError({ error: "boom" })).toBeNull();
-    expect(noBrandFootingError(null)).toBeNull();
+  it("is null when the brand was fine", () => {
+    expect(brandAdviceFrom({ brand_advice: null })).toBeNull();
+    expect(brandAdviceFrom({ image_url: "x" })).toBeNull();
+    expect(brandAdviceFrom(null)).toBeNull();
   });
 });
