@@ -620,7 +620,9 @@ export default function CompetitiveReportView() {
                 )}
 
                 {ai.posting_time_insights?.empty_airtime && (
-                  <div className="glass-accent p-4">
+                  // The callout hugs its text. Stretched to the full card it held a
+                  // readable measure beside 680px of empty accent panel.
+                  <div className="glass-accent p-4 w-fit max-w-full">
                     <p className="t-label uppercase tracking-wider mb-1">Empty airtime</p>
                     <Prose text={ai.posting_time_insights.empty_airtime} className="t-body" />
                   </div>
