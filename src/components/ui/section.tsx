@@ -25,7 +25,7 @@ export function Section({
   className?: string;
 }) {
   return (
-    <section id={id} className={cn("space-y-4 scroll-mt-28", className)}>
+    <section id={id} className={cn("space-y-4 scroll-mt-[156px]", className)}>
       <div className="glass px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
         <div className="space-y-1 min-w-0">
           <h2 className="t-h2 flex items-center gap-3">
@@ -59,21 +59,23 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
     const nodes = items.map((it) => document.getElementById(it.id)).filter((n): n is HTMLElement => !!n);
     if (nodes.length === 0) return;
 
-    // The section whose top is nearest to just below the sticky bar wins, so the
-    // highlight changes as a heading passes under it rather than when a section
-    // happens to occupy the most pixels.
+    // The reading line is the bottom of the sticky bar itself, not a magic
+    // number: the active section is the last one whose heading has passed under
+    // it. Measuring the bar means the highlight stays correct whether the bar is
+    // one row or has grown, and it matches where a clicked section comes to rest.
     const pick = () => {
-      const line = 140;
-      let best: { id: string; d: number } | null = null;
+      const bar = navRef.current?.getBoundingClientRect();
+      const line = (bar ? bar.bottom : 142) + 12;
+      let current = nodes[0]?.id ?? null;
       for (const n of nodes) {
-        const top = n.getBoundingClientRect().top;
-        const d = top - line;
-        // Prefer the last section that has passed the line; fall back to the
-        // first one below it when the reader is still above every section.
-        const score = d <= 0 ? -d : d + 10000;
-        if (!best || score < best.d) best = { id: n.id, d: score };
+        if (n.getBoundingClientRect().top <= line) current = n.id;
+        else break;
       }
-      if (best) setActive(best.id);
+      // At the very bottom the last section may never reach the line, so the
+      // final scroll position always resolves to the final section.
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      if (atBottom) current = nodes[nodes.length - 1].id;
+      if (current) setActive(current);
     };
 
     pick();
