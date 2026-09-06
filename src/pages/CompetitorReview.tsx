@@ -466,21 +466,33 @@ export default function CompetitorReview() {
               // own heading; the rest are a deliberate second step.
               <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
                 <div className="space-y-2">
-                  <p className="t-label uppercase tracking-wider">
-                    {landscapeMatches.length > 0
-                      ? `Tracked for ${client?.name || "this client"}`
-                      : `Nothing in RivalIQ is tracked against ${client?.name || "this client"} yet`}
-                  </p>
                   {landscapeMatches.length > 0 ? (
-                    landscapeMatches.map((l: any) => (
-                      <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
-                    ))
+                    <>
+                      <p className="t-label uppercase tracking-wider">Tracked for {client?.name || "this client"}</p>
+                      {landscapeMatches.map((l: any) => (
+                        <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
+                      ))}
+                    </>
                   ) : (
-                    <p className="t-secondary">
-                      A landscape counts as this client's when its focus company is {client?.name || "the client"}.
-                      Set that up in RivalIQ, import a set from another client below, or identify competitors from the
-                      client's own brief instead.
-                    </p>
+                    <div className="glass-inner p-4 space-y-3">
+                      <p className="t-body text-white">
+                        RivalIQ has no set with {client?.name || "this client"} as its focus company.
+                      </p>
+                      <p className="t-secondary">
+                        Either build one in RivalIQ and come back, or let the app propose competitors from this
+                        client's website and brief — you review the list before anything is tracked.
+                      </p>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setImportOpen(false);
+                          identify();
+                        }}
+                        disabled={identifying}
+                      >
+                        <Search className="h-3.5 w-3.5 mr-1" /> Propose competitors instead
+                      </Button>
+                    </div>
                   )}
                 </div>
 

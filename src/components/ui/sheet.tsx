@@ -29,7 +29,7 @@ const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = SheetPrimitive.Overlay.displayName;
 
 const sheetVariants = cva(
-  "fixed z-50 gap-4 bg-[rgba(15,18,25,0.92)] backdrop-blur-2xl border-[rgba(255,255,255,0.05)] p-6 shadow-lg transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
+  "fixed z-50 gap-4 bg-[rgba(10,11,15,0.94)] [backdrop-filter:blur(60px)_saturate(1.4)] border-[rgba(255,255,255,0.08)] p-6 shadow-lg transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
   {
     variants: {
       side: {
@@ -89,7 +89,7 @@ const SheetDescription = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Description>,
   React.ComponentPropsWithoutRef<typeof SheetPrimitive.Description>
 >(({ className, ...props }, ref) => (
-  <SheetPrimitive.Description ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
+  <SheetPrimitive.Description ref={ref} className={cn("text-sm text-[#d1d5db]", className)} {...props} />
 ));
 SheetDescription.displayName = SheetPrimitive.Description.displayName;
 
