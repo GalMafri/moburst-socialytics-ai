@@ -192,8 +192,6 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       border-top-color: rgba(255, 255, 255, 0.14) !important;
       background: rgba(26, 29, 35, 0.85) !important;
       border-radius: 20px !important;
-      break-inside: avoid;
-      page-break-inside: avoid;
       margin-bottom: 12px;
     }
 
@@ -295,7 +293,15 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
        nothing may pin itself over the content that follows it. */
     nav[aria-label="Sections"], .sticky { position: static !important; top: auto !important; }
     nav[aria-label="Sections"] { break-inside: avoid; margin-bottom: 16px; }
-    section, article, .glass, .glass-inner, .glass-accent { break-inside: avoid; }
+
+    /* Keep whole only what can fit on a page. A section or a full report card is
+       taller than any sheet, and asking to keep one whole makes the engine push
+       it to a fresh page and then split it anyway, wasting the page it left. So
+       the repeating units are protected and the containers are free to flow. */
+    article, .glass-inner, .glass-accent { break-inside: avoid; page-break-inside: avoid; }
+    section, .pdf-root > .glass, [data-slot="card"] { break-inside: auto; page-break-inside: auto; }
+    /* A heading never ends a page on its own. */
+    h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
     .animate-slide-up, .stagger-children > * { animation: none !important; opacity: 1 !important; transform: none !important; }
     @media print {
       html, body, .pdf-root {
