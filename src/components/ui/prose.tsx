@@ -45,12 +45,17 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
           const full = m ? m[1] : null;
           const cut = full ? full.indexOf(" (") : -1;
           const title = full ? (cut > 0 ? full.slice(0, cut) : full) : null;
-          const aside = full && cut > 0 ? `${full.slice(cut + 1)} ` : "";
-          const body = m ? aside + p.slice(m[0].length) : p;
+          const aside = full && cut > 0 ? full.slice(cut + 2).replace(/\)\s*$/, "") : "";
+          const body = m ? p.slice(m[0].length) : p;
           return (
             <div key={i} className="grid gap-1.5 py-5 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,168px)_minmax(0,1fr)] md:gap-8">
               {title && (
-                <dt className="t-label uppercase tracking-wider !text-white/85 font-semibold md:pt-[3px]">{title}</dt>
+                <dt className="t-label uppercase tracking-wider !text-white/85 font-semibold md:pt-[3px]">
+                  {title}
+                  {aside && (
+                    <span className="block normal-case tracking-normal font-normal !text-[#6b7280]">{aside}</span>
+                  )}
+                </dt>
               )}
               {/* Capped so a long passage keeps a readable measure instead of
                   running the full width of the card. 66ch measures ~88 real
