@@ -54,6 +54,42 @@ type HandleRow = {
   is_active: boolean;
 };
 
+/**
+ * One importable landscape.
+ *
+ * The competitors are the headline, because they are what the import brings
+ * in; the landscape's own name ("TIER 2 FIRMS") is the agency's filing label
+ * in RivalIQ and means nothing to someone reading this screen, so it sits
+ * underneath with the focus company.
+ */
+function LandscapeRow({
+  landscape,
+  importingId,
+  onImport,
+}: {
+  landscape: any;
+  importingId: string | null;
+  onImport: (id: string) => void;
+}) {
+  const rivals = (landscape.companies || []).filter((c: any) => !c.is_focus);
+  return (
+    <div className="glass-inner p-4 flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <p className="t-body font-medium text-white">
+          {rivals.length > 0 ? rivals.map((c: any) => c.name).join(", ") : "No competitors in this landscape"}
+        </p>
+        <p className="t-label mt-1">
+          {rivals.length} competitor{rivals.length === 1 ? "" : "s"} · focus {landscape.focus_company || "unknown"} · RivalIQ set “{landscape.name}”
+        </p>
+      </div>
+      <Button size="sm" onClick={() => onImport(landscape.id)} disabled={!!importingId} className="shrink-0">
+        {importingId === landscape.id ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
+        Import
+      </Button>
+    </div>
+  );
+}
+
 export default function CompetitorReview() {
   const { id: clientId } = useParams();
   const navigate = useNavigate();
@@ -68,6 +104,7 @@ export default function CompetitorReview() {
   const [importOpen, setImportOpen] = useState(false);
   const [landscapes, setLandscapes] = useState<any[] | null>(null);
   const [landscapesError, setLandscapesError] = useState<string | null>(null);
+  const [showOtherLandscapes, setShowOtherLandscapes] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
 
   const { data: client } = useQuery({
@@ -161,7 +198,13 @@ export default function CompetitorReview() {
       return;
     }
     setLandscapes(data?.landscapes || []);
+    setShowOtherLandscapes(false);
   };
+
+  // Whose set is it? A landscape belongs to this client when RivalIQ has the
+  // client as its focus company; anything else is another client's work.
+  const landscapeMatches = (landscapes || []).filter((l: any) => l.is_match);
+  const landscapeOthers = (landscapes || []).filter((l: any) => !l.is_match);
 
   const importLandscape = async (landscapeId: string) => {
     setImportingId(landscapeId);
@@ -374,10 +417,11 @@ export default function CompetitorReview() {
         <Dialog open={importOpen} onOpenChange={setImportOpen}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Import a RivalIQ landscape</DialogTitle>
+              <DialogTitle>Import competitors from RivalIQ</DialogTitle>
               <DialogDescription>
-                Landscapes whose focus company is this client are listed first. Importing creates a new draft set
-                with the landscape's companies and their tracked handles; the top 3 are pre-selected for you to adjust.
+                A RivalIQ landscape is a set the agency already tracks. Importing one creates a new draft
+                for {client?.name || "this client"} with its companies and their handles; the top 3 are pre-selected
+                for you to adjust.
               </DialogDescription>
             </DialogHeader>
             {landscapesError ? (
@@ -387,27 +431,46 @@ export default function CompetitorReview() {
             ) : landscapes.length === 0 ? (
               <p className="t-secondary">No landscapes on the RivalIQ account.</p>
             ) : (
-              <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
-                {landscapes.map((l: any) => (
-                  <div key={l.id} className="glass-inner p-4 flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="t-body font-medium flex items-center gap-2">
-                        {l.name}
-                        {l.is_match && <Badge>matches {client?.name}</Badge>}
-                      </div>
-                      <div className="t-secondary">
-                        Focus: {l.focus_company || "?"} · {l.companies.filter((c: any) => !c.is_focus).length} competitors
-                      </div>
-                      <div className="t-secondary truncate">
-                        {l.companies.filter((c: any) => !c.is_focus).map((c: any) => c.name).join(", ")}
-                      </div>
-                    </div>
-                    <Button size="sm" onClick={() => importLandscape(l.id)} disabled={!!importingId}>
-                      {importingId === l.id ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
-                      Import
-                    </Button>
+              // Every landscape on the account used to be one flat list, so a
+              // client with none of their own was offered other clients' sets
+              // with no explanation. The client's own come first under their
+              // own heading; the rest are a deliberate second step.
+              <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
+                <div className="space-y-2">
+                  <p className="t-label uppercase tracking-wider">
+                    {landscapeMatches.length > 0
+                      ? `Tracked for ${client?.name || "this client"}`
+                      : `Nothing in RivalIQ is tracked against ${client?.name || "this client"} yet`}
+                  </p>
+                  {landscapeMatches.length > 0 ? (
+                    landscapeMatches.map((l: any) => (
+                      <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
+                    ))
+                  ) : (
+                    <p className="t-secondary">
+                      A landscape counts as this client's when its focus company is {client?.name || "the client"}.
+                      Set that up in RivalIQ, import a set from another client below, or identify competitors from the
+                      client's own brief instead.
+                    </p>
+                  )}
+                </div>
+
+                {landscapeOthers.length > 0 && (
+                  <div className="space-y-2">
+                    {!showOtherLandscapes ? (
+                      <Button variant="ghost" size="sm" onClick={() => setShowOtherLandscapes(true)}>
+                        Show {landscapeOthers.length} landscape{landscapeOthers.length === 1 ? "" : "s"} tracked for other clients
+                      </Button>
+                    ) : (
+                      <>
+                        <p className="t-label uppercase tracking-wider">Tracked for other clients</p>
+                        {landscapeOthers.map((l: any) => (
+                          <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
+                        ))}
+                      </>
+                    )}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </DialogContent>
