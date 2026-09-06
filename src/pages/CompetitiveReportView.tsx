@@ -415,7 +415,10 @@ export default function CompetitiveReportView() {
         {/* Executive summary */}
         {ai.executive_summary && (
             <Section id="summary" index={next()} title={<>Executive summary</>}>
-            <Card className="glass-elevated">
+            {/* Plain card: glass-elevated is the opaque grey surface used for
+                things that float (the user chip, the progress card), and it
+                read as a different material next to every other section. */}
+            <Card>
               <CardContent className="pt-5"><Prose text={ai.executive_summary} /></CardContent>
             </Card>
             </Section>
