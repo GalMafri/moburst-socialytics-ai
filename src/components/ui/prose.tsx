@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { reflowParagraph } from "@/lib/prose";
 
 /**
  * Renders AI-written passages in full, structured for reading instead of
  * truncated: paragraphs split on blank lines, a short "Label:" lead-in is
  * bolded, and inline enumerations such as "(1) … (2) …" or "1) … 2) …"
- * become a list. Text is 16px/26px white at a 72ch measure (see .t-prose).
+ * become a list, and a long paragraph in a column flow is regrouped on sentence
+ * boundaries so it can fill the columns. Text is 15px/25px white (see .t-prose).
  */
 const LEAD = /^([A-Z][^.:;!?]{1,42}):\s+(?=\S)/;
 
@@ -36,9 +38,13 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
       </div>
     );
   }
+  // In a column flow a slab of prose has to be broken on sentence boundaries or
+  // it cannot move between columns: it fills the first one and leaves the rest
+  // of the card empty. No words change, only where the paragraphs fall.
+  const blocks = flow ? paragraphs.flatMap((p) => reflowParagraph(p)) : paragraphs;
   return (
-    <div className={cn("t-prose", flow ? "max-w-none columns-[38rem] gap-x-10 [&>*]:break-inside-avoid [&>*+*]:mt-3" : "space-y-3", className)}>
-      {paragraphs.map((p, i) => (
+    <div className={cn("t-prose", flow ? cn("max-w-none columns-[26rem] gap-x-10 [&>*+*]:mt-3", blocks.length > 1 && "[&>*]:break-inside-avoid") : "space-y-3", className)}>
+      {blocks.map((p, i) => (
         <Paragraph key={i} text={p} />
       ))}
     </div>
