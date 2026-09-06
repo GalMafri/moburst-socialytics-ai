@@ -30,6 +30,11 @@ const VEO_MODELS = [
   "veo-3.1-fast-generate-preview",
 ];
 
+// Most to least permissive. "allow_all" is deliberately absent: the API answers
+// "allow_all for personGeneration is currently not supported" (verified live
+// 2026-09-06), and it being hardcoded is what silently broke video generation.
+const PERSON_GENERATION = ["allow_adult", "dont_allow"];
+
 /**
  * Generate a brand-aligned anchor still via Gemini 3.1 Flash Image, using
  * the FULL multimodal context (design references + brand book + brief).
@@ -329,35 +334,50 @@ serve(async (req) => {
         };
       }
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": geminiKey,
-        },
-        body: JSON.stringify({
-          instances: [instance],
-          parameters: {
-            aspectRatio,
-            durationSeconds: 8,
-            resolution: "720p",
-            personGeneration: "allow_all",
+      // personGeneration is the parameter most likely to be tightened by Google
+      // without notice — "allow_all" was accepted for months and then was not,
+      // which is what broke video generation. Try the permissive value we are
+      // entitled to, and step down once if the API rejects it rather than
+      // failing the whole run over one parameter.
+      let started = false;
+      for (const personGeneration of PERSON_GENERATION) {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": geminiKey,
           },
-        }),
-      });
+          body: JSON.stringify({
+            instances: [instance],
+            parameters: {
+              aspectRatio,
+              durationSeconds: 8,
+              resolution: "720p",
+              personGeneration,
+            },
+          }),
+        });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.name) {
-          operationName = data.name;
-          console.log(`Veo operation started with model ${model}: ${operationName}`);
-          break;
+        if (response.ok) {
+          const data = await response.json();
+          if (data.name) {
+            operationName = data.name;
+            console.log(`Veo operation started with ${model} (personGeneration=${personGeneration}): ${operationName}`);
+            started = true;
+            break;
+          }
+          modelErrors.push({ model: `${model}/${personGeneration}`, status: 200, error: "no operation name in response" });
+          continue;
         }
-      } else {
+
         const body = await response.text().catch(() => "");
-        modelErrors.push({ model, status: response.status, error: body.slice(0, 400) });
-        console.error(`Veo model ${model} failed (${response.status}): ${body.slice(0, 400)}`);
+        modelErrors.push({ model: `${model}/${personGeneration}`, status: response.status, error: body.slice(0, 400) });
+        console.error(`Veo ${model} (personGeneration=${personGeneration}) failed (${response.status}): ${body.slice(0, 400)}`);
+        // Only a personGeneration complaint is worth stepping down for; any
+        // other failure is about this model and the next value will not help.
+        if (!/persongeneration/i.test(body)) break;
       }
+      if (started) break;
     }
 
     if (!operationName) {
