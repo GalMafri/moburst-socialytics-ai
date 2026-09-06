@@ -128,6 +128,26 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** One figure in a company tile. `exact` goes in the tooltip when the shown value is rounded. */
+function TileStat({ value, label, exact }: { value: string; label: string; exact?: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="t-h1 tabular-nums truncate" title={exact && exact !== value ? exact : undefined}>{value}</p>
+      <p className="t-secondary">{label}</p>
+    </div>
+  );
+}
+
+/** A labelled note in a company tile: the label over the passage, not inside it. */
+function TileNote({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="t-label uppercase tracking-wider !text-white/70 font-semibold">{label}</dt>
+      <dd className="t-body mt-0.5">{text}</dd>
+    </div>
+  );
+}
+
 const deltaPct = (v: Both | null | undefined): number | null => (v && v.previous != null && v.previous > 0 ? ((v.current - v.previous) / v.previous) * 100 : null);
 const fmtDelta = (pctChange: number) => `${pctChange > 0 ? "+" : pctChange < 0 ? "-" : ""}${Math.abs(pctChange) >= 100 ? Math.round(Math.abs(pctChange)) : Math.abs(pctChange).toFixed(1).replace(/\.0$/, "")}%`;
 
@@ -501,13 +521,19 @@ export default function CompetitiveReportView() {
                       {b.post_count === 0 ? (
                         <p className="t-secondary">No posts in this period{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}.</p>
                       ) : (
+                        // Compact figures: "3,044,225" ran straight out of a
+                        // third of a card. The exact number is on the tile.
                         <div className="grid grid-cols-3 gap-3">
-                          <div><p className="t-h1">{b.post_count}</p><p className="t-secondary">posts</p></div>
-                          <div><p className="t-h1">{b.cadence_per_week}</p><p className="t-secondary">per week</p></div>
-                          <div><p className="t-h1">{pct(b.engagement_rate_avg)}</p><p className="t-secondary">eng. rate</p></div>
-                          <div><p className="t-h1">{fmt(b.engagement_avg)}</p><p className="t-secondary">avg engagements</p></div>
-                          <div><p className="t-h1">{b.impressions_avg ? fmt(b.impressions_avg) : fmt(b.post_count ? b.impressions_total / b.post_count : 0)}</p><p className="t-secondary">avg est. impressions</p></div>
-                          <div><p className="t-h1">{fmt(b.views_total)}</p><p className="t-secondary">video views</p></div>
+                          <TileStat value={String(b.post_count)} label="posts" />
+                          <TileStat value={String(b.cadence_per_week)} label="per week" />
+                          <TileStat value={pct(b.engagement_rate_avg)} label="eng. rate" />
+                          <TileStat value={compactNumber(b.engagement_avg || 0)} exact={fmt(b.engagement_avg)} label="avg engagements" />
+                          <TileStat
+                            value={compactNumber(b.impressions_avg || (b.post_count ? b.impressions_total / b.post_count : 0))}
+                            exact={fmt(b.impressions_avg || (b.post_count ? b.impressions_total / b.post_count : 0))}
+                            label="avg est. impressions"
+                          />
+                          <TileStat value={compactNumber(b.views_total || 0)} exact={fmt(b.views_total)} label="video views" />
                         </div>
                       )}
                       {effectivePlat === "all" && (
@@ -521,12 +547,15 @@ export default function CompetitiveReportView() {
                         </div>
                       )}
                       {(platformNote || breakdown) && (
-                        <div className="t-body space-y-1.5 border-t border-[rgba(255,255,255,0.06)] pt-3">
-                          {platformNote && <p><span className="text-muted-foreground">{platformLabel(effectivePlat)}: </span>{platformNote}</p>}
-                          {breakdown?.copy_style && <p><span className="text-muted-foreground">Copy: </span>{breakdown.copy_style}</p>}
-                          {breakdown?.design_look && <p><span className="text-muted-foreground">Look: </span>{breakdown.design_look}</p>}
-                          {breakdown?.content_type_mix && <p><span className="text-muted-foreground">Mix: </span>{breakdown.content_type_mix}</p>}
-                        </div>
+                        // Three run-on sentences with "Copy:" and "Look:" buried
+                        // at the head of each is a wall in a column this narrow.
+                        // The label stands over the passage it belongs to.
+                        <dl className="space-y-3 border-t border-[rgba(255,255,255,0.06)] pt-3">
+                          {platformNote && <TileNote label={platformLabel(effectivePlat)} text={platformNote} />}
+                          {breakdown?.copy_style && <TileNote label="Copy" text={breakdown.copy_style} />}
+                          {breakdown?.design_look && <TileNote label="Look" text={breakdown.design_look} />}
+                          {breakdown?.content_type_mix && <TileNote label="Mix" text={breakdown.content_type_mix} />}
+                        </dl>
                       )}
                       {b.top_hashtags?.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 items-center">
@@ -721,21 +750,27 @@ export default function CompetitiveReportView() {
                     <div key={i} className="glass-inner p-4 space-y-3">
                       <p className="t-label uppercase tracking-wider">{w.competitor}</p>
                       <p className="font-semibold leading-snug">{w.pattern}</p>
-                      <p className="t-prose">{w.evidence}</p>
+                      {/* Through Prose: it drops the links this passage cites —
+                          they are the tiles below it — and breaks a slab on
+                          sentence boundaries so it arrives as paragraphs. */}
+                      <Prose text={w.evidence} cards={false} />
                       {examples.length > 0 && (
-                        <div className="space-y-2 pt-1">
-                          <div className={`grid gap-2 items-start ${examples.length === 1 ? "grid-cols-1" : examples.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
-                            {examples.map((ex, j) => (
-                              <PostVisual key={j} url={ex.url} image={ex.post?.image} preview={previews[ex.url]} mediaType={ex.post?.media_type} platform={ex.post?.channel} compact />
-                            ))}
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {examples.map((ex, j) => (
-                              <Button key={j} size="sm" variant="outline" className="h-7 t-label" asChild>
-                                <a href={ex.url} target="_blank" rel="noreferrer"><ExternalLink className="h-3 w-3 mr-1" /> Post {j + 1}{ex.post ? ` · ${fmt(ex.post.engagement)} eng.` : ""}</a>
-                              </Button>
-                            ))}
-                          </div>
+                        <div className={`grid gap-2 items-start pt-1 ${examples.length === 1 ? "grid-cols-1" : examples.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+                          {examples.map((ex, j) => (
+                            // Each figure keeps its own number and count under
+                            // its own picture. As a row of tiles over a row of
+                            // buttons there was nothing to say which was which.
+                            <figure key={j} className="space-y-1.5 min-w-0">
+                              <PostVisual url={ex.url} image={ex.post?.image} preview={previews[ex.url]} mediaType={ex.post?.media_type} platform={ex.post?.channel} compact />
+                              <figcaption className="t-label flex items-start gap-1 min-w-0">
+                                <ExternalLink className="h-3 w-3 mt-[3px] shrink-0" />
+                                <span className="min-w-0">
+                                  Post {j + 1}
+                                  {ex.post ? <><span className="block !text-white tabular-nums">{fmt(ex.post.engagement)} eng.</span></> : null}
+                                </span>
+                              </figcaption>
+                            </figure>
+                          ))}
                         </div>
                       )}
                     </div>

@@ -75,3 +75,29 @@ describe("reflowParagraph", () => {
     expect(blocks.join(" ").replace(/\s+/g, " ")).toBe(EXEC_SUMMARY.replace(/\s+/g, " "));
   });
 });
+
+describe("withoutUrls", () => {
+  it("removes a cited link and closes the gap", async () => {
+    const { withoutUrls } = await import("../lib/prose");
+    expect(
+      withoutUrls(
+        "Instagram's top post hit 41,317 engagements with a 0.0824 engagement rate (https://www.instagram.com/reel/DaT12VAOWPf/). Multiple other Reels exceeded 14K.",
+      ),
+    ).toBe(
+      "Instagram's top post hit 41,317 engagements with a 0.0824 engagement rate. Multiple other Reels exceeded 14K.",
+    );
+  });
+
+  it("removes a bare link mid-sentence", async () => {
+    const { withoutUrls } = await import("../lib/prose");
+    expect(withoutUrls("Top IG Reel https://www.instagram.com/reel/Dak5DK2iIbI/ reached 70 engagements.")).toBe(
+      "Top IG Reel reached 70 engagements.",
+    );
+  });
+
+  it("leaves a passage with no links alone", async () => {
+    const { withoutUrls } = await import("../lib/prose");
+    const s = "Posting discipline is tight: 50% of IG posts (8/16) publish at 15:00 UTC.";
+    expect(withoutUrls(s)).toBe(s);
+  });
+});

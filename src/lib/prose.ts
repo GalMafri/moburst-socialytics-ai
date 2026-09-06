@@ -64,3 +64,22 @@ export function reflowParagraph(paragraph: string, { min = 420, target = 260 } =
   const grouped = groupSentences(sentences, target);
   return grouped.length > 1 ? grouped : [paragraph];
 }
+
+/**
+ * Drops the raw links an analysis carries inline.
+ *
+ * These passages cite their evidence as bare URLs — "…hit 41,317 engagements
+ * (https://www.instagram.com/reel/DaT12VAOWPf/)" — which is a line and a half
+ * of unreadable text for something the page already offers as a thumbnail you
+ * can click. The punctuation left behind is tidied up so the sentence still
+ * reads.
+ */
+export function withoutUrls(text: string): string {
+  return text
+    .replace(/\s*\((?:see\s+)?https?:\/\/[^\s)]+\)/gi, "")
+    .replace(/\s*https?:\/\/[^\s)]+/gi, "")
+    .replace(/\(\s*[;,]?\s*\)/g, "")
+    .replace(/\s+([.,;:])/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}

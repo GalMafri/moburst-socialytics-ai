@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { reflowParagraph } from "@/lib/prose";
+import { reflowParagraph, withoutUrls } from "@/lib/prose";
 
 /**
  * Renders AI-written passages in full, structured for reading instead of
@@ -16,7 +16,10 @@ const LEAD = /^([A-Z][^.:;!?]{1,64}):\s+(?=\S)/;
 
 export function Prose({ text, className, cards = true }: { text: string | null | undefined; className?: string; cards?: boolean }) {
   if (!text) return null;
-  const paragraphs = String(text)
+  // Cited links are dropped: nothing here renders a URL as a link, so they sit
+  // in the middle of a sentence as a line of unreadable characters, and where a
+  // passage cites posts the page shows those posts as tiles anyway.
+  const paragraphs = withoutUrls(String(text))
     .split(/\n{2,}|\n(?=\s*(?:[-•*]|\d+[.)]))/)
     .map((p) => p.trim())
     .filter(Boolean);
