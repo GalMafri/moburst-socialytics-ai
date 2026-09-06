@@ -35,7 +35,11 @@ export function AppLayout({
    * has it on any tab, or the whole page shifts sideways when the tab changes.
    */
   nav?: ReactNode;
-  /** Tailwind max-width class for the whole column (header and content share it). */
+  /**
+   * Tailwind max-width class for the whole column (header and content share
+   * it). A page with a `nav` widens past this on its own, so the rail comes
+   * out of the margin rather than out of the report.
+   */
   width?: string;
 }) {
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -74,9 +78,14 @@ export function AppLayout({
           </div>
         </header>
         <main className="relative z-10 flex-1 p-[32px]">
-          <div className={`mx-auto w-full ${width}`}>
+          {/* A page with a rail is allowed the rail's width on top of the usual
+              column, so the report keeps the width it had. Taking it out of the
+              1440 instead cost the content a fifth of its measure and left a
+              tall empty column beside it, since the rail is only ever as long
+              as its own list. */}
+          <div className={`mx-auto w-full ${nav ? "max-w-[1660px]" : width}`}>
             {nav ? (
-              <div className="grid gap-6 xl:grid-cols-[236px_minmax(0,1fr)] items-start">
+              <div className="grid gap-5 xl:grid-cols-[180px_minmax(0,1fr)] items-start">
                 <div className="xl:sticky xl:top-[112px]">{nav}</div>
                 <div className="space-y-6 min-w-0">
                   {title && <PageHeader title={title} description={description} meta={meta} actions={actions} back={back} />}

@@ -25,36 +25,43 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
     .map((p) => p.trim())
     .filter(Boolean);
   // Labelled paragraphs ("Scope: …", "Cadence: …") are a briefing, so they are
-  // laid out as one: the label in its own narrow column, the passage beside it,
-  // a hairline between rows.
+  // laid out as one: the figure the passage turns on pulled out at stat size
+  // with its label under it, the passage beside it, a hairline between rows.
   //
   // They used to be a grid of cards, which is what a wall of text looks like
   // when you put boxes around it: the cards in a row all stretched to the
-  // tallest, so a two-line note sat in a six-line box, and a passage whose
-  // lead-in did not match came out untitled beside titled neighbours. A list
-  // has no such rows to fill.
+  // tallest, so a two-line note sat in a six-line box. Then a plain label
+  // column, which still read as a slab, because these passages are numbers
+  // carried in sentences and nothing in them stood up.
   const leads = paragraphs.map((p) => p.match(LEAD));
   if (cards && paragraphs.length >= 2 && leads.filter(Boolean).length >= Math.ceil(paragraphs.length * 0.75)) {
     return (
       <dl className={cn("divide-y divide-[rgba(255,255,255,0.06)]", className)}>
         {paragraphs.map((p, i) => {
           const m = leads[i];
-          // A parenthetical belongs in the passage, not in the label column,
-          // where "Engagement efficiency (RivalIQ engagement rate per post)"
-          // wraps to four lines beside two lines of text.
+          // A parenthetical belongs under the label, not in it, where
+          // "Engagement efficiency (RivalIQ engagement rate per post)" wraps to
+          // four lines beside two lines of text.
           const full = m ? m[1] : null;
           const cut = full ? full.indexOf(" (") : -1;
           const title = full ? (cut > 0 ? full.slice(0, cut) : full) : null;
           const aside = full && cut > 0 ? full.slice(cut + 2).replace(/\)\s*$/, "") : "";
           const body = m ? p.slice(m[0].length) : p;
+          const lead = title ? leadFigure(body) : null;
           return (
-            <div key={i} className="grid gap-1.5 py-5 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,168px)_minmax(0,1fr)] md:gap-8">
+            <div key={i} className="grid gap-2 py-5 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,150px)_minmax(0,1fr)] md:gap-8">
               {title && (
-                <dt className="t-label uppercase tracking-wider !text-white/85 font-semibold md:pt-[3px]">
-                  {title}
-                  {aside && (
-                    <span className="block normal-case tracking-normal font-normal !text-[#6b7280]">{aside}</span>
+                <dt className="min-w-0">
+                  {lead && (
+                    <p className="text-[28px] leading-[32px] font-bold tracking-[-0.5px] tabular-nums text-white">
+                      {lead.value}
+                      {lead.unit && <span className="text-[15px] font-medium tracking-normal text-[#9ca3af]"> {lead.unit}</span>}
+                    </p>
                   )}
+                  <p className={cn("t-label uppercase tracking-wider !text-white/85 font-semibold", lead ? "mt-1.5" : "md:pt-[3px]")}>
+                    {title}
+                  </p>
+                  {aside && <p className="t-label !text-[#6b7280]">{aside}</p>}
                 </dt>
               )}
               {/* Capped so a long passage keeps a readable measure instead of
@@ -62,7 +69,7 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
                   characters a line here, since `ch` is the width of a zero and
                   Geist's average glyph is narrower than that. */}
               <dd className={cn("t-body min-w-0 max-w-[66ch] leading-[1.65]", !title && "md:col-span-2")}>
-                {title ? <Figures text={body} /> : <Paragraph text={p} />}
+                {title ? body : <Paragraph text={p} />}
               </dd>
             </div>
           );
@@ -137,31 +144,41 @@ function Paragraph({ text }: { text: string }) {
 }
 
 /**
- * Figures inside a passage, set in white so the eye can land on them.
- *
- * These summaries are mostly numbers carried in sentences ("54 posts in-period
- * (12.6 posts/week)"), and at one weight and one colour the whole thing reads
- * as a slab. Dates are matched whole so a day does not come apart into three
- * highlighted pieces.
+ * A figure inside a passage: a whole date, or a number with its sign, decimals
+ * and any %/K/M/B suffix. Dates are matched whole so a day does not come apart
+ * into three pieces.
  */
 const FIGURE = /(\d{4}-\d{2}-\d{2}|[+\-−]?\d[\d,]*(?:\.\d+)?\s?(?:%|[KMB]\b)?)/g;
 
-function Figures({ text }: { text: string }): ReactNode {
-  const parts = text.split(FIGURE);
-  if (parts.length === 1) return text;
-  return (
-    <>
-      {parts.map((part, i) =>
-        i % 2 === 1 ? (
-          <span key={i} className="text-white font-medium tabular-nums">
-            {part}
-          </span>
-        ) : (
-          part
-        ),
-      )}
-    </>
-  );
+/**
+ * The figure a passage turns on, for the stat beside it.
+ *
+ * The first one that is neither a date nor a bare year, since these passages
+ * open on the period they cover ("2026-07-01 to 2026-07-31 (30 days), 226
+ * posts…") and the date is never the point. The word after it comes along when
+ * it reads as a unit, so "30" arrives as "30 days".
+ */
+const UNIT_STOPWORDS = new Set([
+  "to", "of", "vs", "and", "in", "on", "at", "from", "the", "a", "per", "with", "for", "by",
+  "is", "was", "across", "over", "under", "than", "up", "down", "while", "but", "against",
+]);
+/** Words that describe the count rather than name it: the unit is the next one. */
+const UNIT_QUALIFIERS = new Set(["total", "overall", "average", "avg", "combined", "net", "new"]);
+
+export function leadFigure(text: string): { value: string; unit: string } | null {
+  for (const m of text.matchAll(FIGURE)) {
+    const value = m[1].trim();
+    if (!value || /^\d{4}-\d{2}-\d{2}$/.test(value)) continue;
+    if (/^\d{4}$/.test(value) && Number(value) > 1900 && Number(value) < 2100) continue;
+    const after = text
+      .slice((m.index ?? 0) + m[1].length)
+      .match(/^\s*([A-Za-z][A-Za-z/-]{1,11})(?:\s+([A-Za-z][A-Za-z/-]{1,11}))?\b/);
+    let word = after?.[1] ?? "";
+    if (UNIT_QUALIFIERS.has(word.toLowerCase())) word = after?.[2] ?? "";
+    const unit = word && !UNIT_STOPWORDS.has(word.toLowerCase()) ? word : "";
+    return { value, unit };
+  }
+  return null;
 }
 
 /** "Volume/cadence: the rest" → bold "Volume/cadence:" followed by the rest. */

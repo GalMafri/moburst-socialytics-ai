@@ -168,18 +168,19 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
         // shed the card and scroll at that width.
         "flex gap-1 flex-nowrap p-2 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         "rounded-[20px] border border-[rgba(255,255,255,0.08)] border-t-[rgba(255,255,255,0.14)] bg-[rgba(0,0,0,0.20)] backdrop-blur-[60px]",
-        // xl and up: the rail proper — no card. Navigation should be quieter
-        // than the content it points at; as a glass panel it competed with the
-        // report and hugged its own items into a stubby box halfway down a long
-        // page. It is a list against a hairline instead, and the column around
-        // it does the sticking.
-        "xl:flex-col xl:gap-0 xl:p-0 xl:rounded-none xl:border-0 xl:bg-transparent xl:backdrop-blur-none",
+        // xl and up: the rail proper — no card, and a spine rather than a
+        // panel. Navigation should be quieter and narrower than the content it
+        // points at; as a glass panel it competed with the report and reserved
+        // a column far wider than the little it holds. The line down the left
+        // carries a dot per section, lime at the one you are reading.
+        "xl:flex-col xl:gap-0 xl:p-0 xl:pl-[18px] xl:rounded-none xl:border-0 xl:bg-transparent xl:backdrop-blur-none",
+        "xl:relative xl:before:content-[''] xl:before:absolute xl:before:left-[3px] xl:before:top-2 xl:before:bottom-2 xl:before:w-px xl:before:bg-[rgba(255,255,255,0.10)]",
         "xl:overflow-x-hidden xl:overflow-y-auto xl:max-h-[calc(100vh-9rem)]",
         "print:static print:overflow-visible print:flex-wrap print:flex-row",
         className,
       )}
     >
-      <p className="hidden xl:block t-label uppercase tracking-[0.14em] pb-3">On this page</p>
+      <p className="hidden xl:block t-label uppercase tracking-[0.14em] pb-3 pl-0">On this page</p>
       {visible.map((it) => {
         const on = active === it.id;
         return (
@@ -191,14 +192,14 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
             onClick={(e) => go(e, it.id)}
             className={cn(
               "px-3 py-1.5 rounded-[8px] t-body whitespace-nowrap shrink-0 transition-colors",
-              // The hairline runs down the list and the lime segment marks the
-              // place, the way a margin marks a page. No fill, no box.
-              "xl:w-full xl:rounded-none xl:py-[7px] xl:pl-4 xl:pr-2 xl:whitespace-normal xl:text-left",
-              "xl:border-l-2 xl:hover:bg-transparent",
+              // A dot on the spine per section, lime where you are.
+              "xl:w-full xl:rounded-none xl:py-[7px] xl:px-0 xl:whitespace-normal xl:text-left",
+              "xl:relative xl:hover:bg-transparent",
+              "xl:before:content-[''] xl:before:absolute xl:before:-left-[18px] xl:before:top-[14px] xl:before:h-[7px] xl:before:w-[7px] xl:before:rounded-full",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(185,224,69,0.45)]",
               on
-                ? "bg-[rgba(255,255,255,0.06)] text-white xl:bg-transparent xl:font-medium xl:border-l-[#b9e045]"
-                : "text-[#9ca3af] hover:text-white hover:bg-[rgba(255,255,255,0.03)] xl:border-l-[rgba(255,255,255,0.10)]",
+                ? "bg-[rgba(255,255,255,0.06)] text-white xl:bg-transparent xl:font-semibold xl:before:bg-[#b9e045] xl:before:shadow-[0_0_0_4px_rgba(185,224,69,0.14)]"
+                : "text-[#9ca3af] hover:text-white hover:bg-[rgba(255,255,255,0.03)] xl:before:bg-[rgba(255,255,255,0.18)]",
             )}
           >
             {it.label}
