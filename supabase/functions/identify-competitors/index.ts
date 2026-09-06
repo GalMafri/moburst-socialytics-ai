@@ -15,6 +15,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
+import { anthropicMessages } from "../_shared/anthropic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -102,19 +103,17 @@ async function proposeCompetitors(args: {
   // 2026-09-02 while the model had in fact answered.
   const PREFILL = '{"competitors":[';
   const callModel = async (maxTokens: number) => {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": args.anthropicKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
+    // Through the shared client: it drops a sampling parameter the model no
+    // longer accepts and retries, rather than failing the run. `temperature: 0`
+    // was a hard 400 on Claude 5 and is kept here because it is right for this
+    // task on any model that still takes it.
+    return await anthropicMessages({
+      apiKey: args.anthropicKey,
+      onDropped: (param) => console.log(`identify-competitors: model refused "${param}", retried without it`),
+      body: {
         model: "claude-sonnet-5",
         max_tokens: maxTokens,
-        // No temperature: Claude 5 rejects it outright ("temperature is
-        // deprecated for this model", HTTP 400). The JSON prefill below is what
-        // keeps the shape steady, which is what the 0 was for.
+        temperature: 0,
         system:
           "You are a competitive intelligence analyst for a social media marketing agency. " +
           "You identify DIRECT competitors: companies a customer would genuinely consider instead, " +
@@ -133,18 +132,8 @@ async function proposeCompetitors(args: {
           },
           { role: "assistant", content: PREFILL },
         ],
-      }),
+      },
     });
-    if (!resp.ok) {
-      const t = await resp.text().catch(() => "");
-      throw new Error(`Anthropic API error ${resp.status}: ${t.slice(0, 200)}`);
-    }
-    const data = await resp.json();
-    const text = (data.content || [])
-      .filter((b: { type?: string }) => b?.type === "text")
-      .map((b: { text?: string }) => b.text || "")
-      .join("\n");
-    return { text, stopReason: String(data.stop_reason || "") };
   };
 
   const extract = (raw: string): { competitors?: ProposedCompetitor[] } | null => {
