@@ -3,7 +3,7 @@
 // movements worth a sentence come out, the client's first, biggest move first.
 // Cadence is per week so periods of different lengths compare fairly.
 
-import { normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
+import { normalizePlatform, platformLabel } from "@/lib/platform";
 
 export type MixEntry = { key: string; count: number };
 export type CompanyStats = {
@@ -117,14 +117,19 @@ export function reportPeriod(r: ReportLike | null | undefined): Period | null {
   return start && end ? { start: String(start), end: String(end) } : null;
 }
 
-/** The newest earlier report on the same landscape whose period sits before this one. */
+/**
+ * The report on the same landscape covering the latest period that sits before this
+ * one. Ordered by period, not by creation date, so a month filled in later still
+ * serves as the baseline for the month after it.
+ */
 export function pickComparableReport<T extends ReportLike>(current: T, candidates: T[]): T | null {
   const landscape = String(current?.report_data?.landscape?.id ?? "");
   const cur = reportPeriod(current);
-  for (const c of candidates) {
-    if (String(c?.report_data?.landscape?.id ?? "") !== landscape) continue;
-    if (comparablePeriods(reportPeriod(c), cur)) return c;
-  }
+  const ordered = candidates
+    .map((c) => ({ c, p: reportPeriod(c) }))
+    .filter((x) => x.p && String(x.c?.report_data?.landscape?.id ?? "") === landscape)
+    .sort((a, b) => Date.parse(b.p!.start) - Date.parse(a.p!.start));
+  for (const { c, p } of ordered) if (comparablePeriods(p, cur)) return c;
   return null;
 }
 

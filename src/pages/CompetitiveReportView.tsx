@@ -170,8 +170,8 @@ export default function CompetitiveReportView() {
     enabled: !!clientId,
   });
 
-  // Change detection: the newest earlier complete report on the same landscape whose
-  // period sits before this one is the baseline for "Since the last report".
+  // Change detection: the complete report on the same landscape covering the latest
+  // period before this one is the baseline for "Since the last report".
   const { data: priorReports } = useQuery({
     queryKey: ["competitive-report-prior", clientId, report?.id],
     queryFn: async () => {
@@ -180,13 +180,13 @@ export default function CompetitiveReportView() {
         .select("id, created_at, date_range_start, date_range_end, report_data")
         .eq("client_id", clientId!)
         .eq("status", "complete")
-        .lt("created_at", report!.created_at)
+        .neq("id", report!.id)
         .order("created_at", { ascending: false })
-        .limit(6);
+        .limit(12);
       if (error) throw error;
       return data || [];
     },
-    enabled: !!clientId && !!report?.created_at,
+    enabled: !!clientId && !!report?.id,
   });
 
   const rd: any = report?.report_data || {};

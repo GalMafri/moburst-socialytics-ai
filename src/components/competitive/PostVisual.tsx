@@ -15,6 +15,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Play, Layers, Image as ImageIcon, ExternalLink } from "lucide-react";
+import { normalizePlatform, platformLabel } from "@/lib/platform";
+
+// Re-exported so existing imports keep working; the helpers live in src/lib/platform.ts.
+export { normalizePlatform, platformLabel };
 
 export type MediaKind = "video" | "carousel" | "image" | "text";
 
@@ -27,36 +31,6 @@ export type PostPreview = {
   status: "ok" | "unavailable" | "miss" | "pending" | "error";
 };
 
-const PLATFORM_LABELS: Record<string, string> = {
-  instagram: "Instagram",
-  tiktok: "TikTok",
-  facebook: "Facebook",
-  linkedin: "LinkedIn",
-  youtube: "YouTube",
-  x: "X",
-  twitter: "X",
-  pinterest: "Pinterest",
-  threads: "Threads",
-};
-
-export function normalizePlatform(value: string | null | undefined): string {
-  const v = String(value || "").toLowerCase().trim();
-  if (!v) return "";
-  if (v.includes("insta")) return "instagram";
-  if (v.includes("tik")) return "tiktok";
-  if (v.includes("face") || v === "fb") return "facebook";
-  if (v.includes("linked")) return "linkedin";
-  if (v.includes("you")) return "youtube";
-  if (v === "x" || v.includes("twitter")) return "x";
-  if (v.includes("pin")) return "pinterest";
-  if (v.includes("thread")) return "threads";
-  return v;
-}
-
-export function platformLabel(value: string | null | undefined): string {
-  const key = normalizePlatform(value);
-  return PLATFORM_LABELS[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : "Post");
-}
 
 export function platformFromUrl(url: string | null | undefined): string {
   const u = String(url || "").toLowerCase();
