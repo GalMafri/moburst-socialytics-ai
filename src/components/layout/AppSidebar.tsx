@@ -34,14 +34,15 @@ export function AppSidebar() {
   ];
 
   return (
-    <Sidebar>
-      <SidebarHeader className="flex items-center justify-center h-[90px] border-b border-[rgba(255,255,255,0.05)] px-4 py-5">
-        <div className="cursor-pointer transition-opacity hover:opacity-80" onClick={() => navigate("/")}>
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="flex items-center justify-center h-[90px] border-b border-[rgba(255,255,255,0.05)] px-4 py-5 group-data-[collapsible=icon]:px-2">
+        <div className="cursor-pointer transition-opacity hover:opacity-80" onClick={() => navigate("/")} role="link" aria-label="Socialytics home">
           <img
             src="/images/logo-dark.png"
             alt="Socialytics by Moburst"
-            className="h-10 w-auto max-w-[200px] object-contain"
+            className="h-10 w-auto max-w-[200px] object-contain group-data-[collapsible=icon]:hidden"
           />
+          <img src="/images/icon-192.png" alt="" className="hidden h-8 w-8 rounded-[8px] object-contain group-data-[collapsible=icon]:block" />
         </div>
       </SidebarHeader>
 
@@ -57,6 +58,7 @@ export function AppSidebar() {
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
+                    tooltip="Switch Tool"
                     className="h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] text-[#b1b7c1] opacity-80 transition-all hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]"
                   >
                     <a href={PORTAL_URL}>
@@ -72,6 +74,7 @@ export function AppSidebar() {
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
                       isActive={isActive}
+                      tooltip={item.label}
                       onClick={() => navigate(item.href)}
                       className={`h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] transition-all ${
                         isActive
@@ -90,16 +93,16 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="p-4 space-y-2 border-t border-[rgba(255,255,255,0.05)]">
+      <SidebarFooter className="p-4 space-y-2 border-t border-[rgba(255,255,255,0.05)] group-data-[collapsible=icon]:p-2">
         {user && (
-          <div className="glass-elevated px-3 py-2 flex items-center gap-3">
+          <div className="glass-elevated px-3 py-2 flex items-center gap-3 group-data-[collapsible=icon]:px-1 group-data-[collapsible=icon]:justify-center" title={`${user.name || ""} ${user.email || ""}`.trim()}>
             <div className="relative">
               <div className="h-8 w-8 rounded-full bg-[#b9e045] flex items-center justify-center text-black text-sm font-bold">
                 {user.name?.charAt(0)?.toUpperCase() || "U"}
               </div>
               <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10b981] border-2 border-[#1a1d23]" />
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
               <div className="text-sm font-medium text-white truncate">{user.name}</div>
               <div className="text-xs text-[#b1b7c1] truncate">{user.email}</div>
             </div>

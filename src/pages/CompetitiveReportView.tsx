@@ -26,13 +26,26 @@ import { formatRange } from "@/lib/dateRange";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
-import { RankedBars } from "@/components/ui/bars";
-import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images } from "lucide-react";
+import { RankedBars, compactNumber } from "@/components/ui/bars";
+import { ChangeCards } from "@/components/competitive/ChangeCards";
+import { companiesFromReport, diffCompanies, pickComparableReport, reportPeriod as periodOf } from "@/lib/competitiveChanges";
+import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images, Users } from "lucide-react";
 
 type TopPost = {
   engagement: number; engagement_rate: number; est_impressions?: number; reach?: number; views: number;
   applause?: number; conversation?: number; amplification?: number;
   text: string; url: string | null; image?: string | null; created: string | null; media_type: string; channel: string;
+  /** RivalIQ's paid-promotion signal, Facebook posts only. */
+  likely_boosted?: boolean;
+};
+/** A RivalIQ period total with the previous equal-length period beside it. */
+type Both = { current: number; previous: number | null };
+type RivalIQMetrics = {
+  period?: { start: string; end: string };
+  previous_period?: { start: string; end: string } | null;
+  audience?: Both; engagement?: Both; estimated_impressions?: Both; posts?: Both; engagement_rate_per_post?: Both; likely_boosted_facebook_posts?: Both;
+  by_network?: Record<string, { followers?: Both; posts?: Both; engagement?: Both; impressions?: Both; views?: Both; rate?: Both; likely_boosted?: Both }>;
+  daily?: Array<{ date: string; posts: number; engagement: number; audience: number }>;
 };
 type Bucket = {
   post_count: number; cadence_per_week: number; engagement_avg: number; engagement_rate_avg: number; impressions_avg?: number;
@@ -44,6 +57,7 @@ type Bucket = {
 type Company = Bucket & {
   company_id: string; name: string; url: string | null; is_client: boolean; in_confirmed_top3: boolean;
   channel_mix: Array<{ key: string; count: number }>; by_channel?: Record<string, Bucket>;
+  rivaliq_metrics?: RivalIQMetrics | null;
 };
 
 const EMPTY: Bucket = { post_count: 0, cadence_per_week: 0, engagement_avg: 0, engagement_rate_avg: 0, impressions_avg: 0, views_total: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, top_hashtags: [], media_type_mix: [], top_posts: [] };
@@ -103,7 +117,25 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <p className="t-body font-semibold leading-tight">{value}</p>
-      <p className="t-label uppercase tracking-wider leading-tight leading-tight">{label}</p>
+      <p className="t-label uppercase tracking-wider leading-tight">{label}</p>
+    </div>
+  );
+}
+
+const deltaPct = (v: Both | null | undefined): number | null => (v && v.previous != null && v.previous > 0 ? ((v.current - v.previous) / v.previous) * 100 : null);
+const fmtDelta = (pctChange: number) => `${pctChange > 0 ? "+" : pctChange < 0 ? "-" : ""}${Math.abs(pctChange) >= 100 ? Math.round(Math.abs(pctChange)) : Math.abs(pctChange).toFixed(1).replace(/\.0$/, "")}%`;
+
+/** A period total with its change against the previous period, coloured by sign. */
+function MetricRow({ label, value, format = compactNumber }: { label: string; value: Both | null | undefined; format?: (v: number) => string }) {
+  if (!value) return <Stat label={label} value="–" />;
+  const change = deltaPct(value);
+  return (
+    <div className="min-w-0">
+      <p className="t-body font-semibold leading-tight">
+        {format(value.current)}
+        {change != null && <span className={`t-label ml-1.5 ${change > 0 ? "text-success" : change < 0 ? "text-destructive" : ""}`}>{fmtDelta(change)}</span>}
+      </p>
+      <p className="t-label uppercase tracking-wider leading-tight">{label}</p>
     </div>
   );
 }
@@ -138,9 +170,33 @@ export default function CompetitiveReportView() {
     enabled: !!clientId,
   });
 
+  // Change detection: the newest earlier complete report on the same landscape whose
+  // period sits before this one is the baseline for "Since the last report".
+  const { data: priorReports } = useQuery({
+    queryKey: ["competitive-report-prior", clientId, report?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("competitive_reports")
+        .select("id, created_at, date_range_start, date_range_end, report_data")
+        .eq("client_id", clientId!)
+        .eq("status", "complete")
+        .lt("created_at", report!.created_at)
+        .order("created_at", { ascending: false })
+        .limit(6);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!clientId && !!report?.created_at,
+  });
+
   const rd: any = report?.report_data || {};
   const ai = rd.ai_analysis || {};
   const companies: Company[] = rd.aggregates?.companies || [];
+  const previous = useMemo(() => (report ? pickComparableReport(report as any, (priorReports || []) as any[]) : null), [report, priorReports]);
+  const changes = useMemo(() => (previous ? diffCompanies(companiesFromReport(previous.report_data), companiesFromReport(rd)) : []), [previous, rd]);
+  // Chapter numerals follow the sections actually present: each band takes the next number in render order.
+  let chapter = 0;
+  const next = () => ++chapter;
 
   // Every post the report carries, keyed by URL, for example-post lookups and previews.
   const allPosts = useMemo(() => {
@@ -195,6 +251,23 @@ export default function CompetitiveReportView() {
   const { visible: gaps, hidden: hiddenGaps } = partitionGaps<any>(gapsForPlatform, feedback);
   const schedule = ai.recommended_schedule;
 
+  // RivalIQ's own period totals (runs from 2026-09-06 onward), for the whole
+  // landscape or for the filtered network.
+  const netKey = effectivePlat === "x" ? "twitter" : effectivePlat;
+  const metricsFor = (c: Company) => {
+    const m = c.rivaliq_metrics;
+    if (!m) return null;
+    if (effectivePlat === "all") return { audience: m.audience, engagement: m.engagement, impressions: m.estimated_impressions, posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
+    const n = m.by_network?.[netKey];
+    if (!n) return null;
+    return { audience: n.followers, engagement: n.engagement, impressions: n.impressions, posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
+  };
+  const withMetrics = ordered.map((c) => ({ c, m: metricsFor(c) })).filter((x) => x.m) as { c: Company; m: NonNullable<ReturnType<typeof metricsFor>> }[];
+  const hasMetrics = withMetrics.length > 0;
+  const meM = me ? metricsFor(me) : null;
+  const followersRows = withMetrics.filter((x) => x.m.audience && x.m.audience.current > 0).map((x) => ({ key: x.c.company_id, label: x.c.name, name: x.c.name, value: x.m.audience!.current, emphasized: x.c.is_client }));
+  const previousDays = me?.rivaliq_metrics?.previous_period ? Math.round((Date.parse(me.rivaliq_metrics.previous_period.end) - Date.parse(me.rivaliq_metrics.previous_period.start)) / 86400000) + 1 : null;
+
   // Every creative a company ran in the period (all channels, or the filtered
   // one), for the mood board grids.
   const moodPosts = (c: Company): TopPost[] => {
@@ -233,7 +306,10 @@ export default function CompetitiveReportView() {
         {(p.applause || p.conversation || p.amplification) ? (
           <span title="Likes and reactions · comments · shares">{fmt(p.applause || 0)} likes · {fmt(p.conversation || 0)} comments · {fmt(p.amplification || 0)} shares</span>
         ) : <span />}
-        <span>{p.created ? new Date(p.created).toLocaleDateString() : ""}</span>
+        <span className="flex items-center gap-2">
+          {p.likely_boosted && <Badge variant="secondary" title="RivalIQ estimates this Facebook post was paid promotion">Likely boosted</Badge>}
+          {p.created ? new Date(p.created).toLocaleDateString() : ""}
+        </span>
       </div>
     </div>
   );
@@ -277,7 +353,7 @@ export default function CompetitiveReportView() {
               <Seg active={effectivePlat === "all"} onClick={() => setPlat("all")}>All platforms</Seg>
               {platforms.map((k) => <Seg key={k} active={effectivePlat === k} onClick={() => setPlat(k)}>{platformLabel(k)}</Seg>)}
             </div>
-            {effectivePlat !== "all" && <span className="t-secondary">Field, rhythm, gaps and top posts now show {platformLabel(effectivePlat)} only.</span>}
+            {effectivePlat !== "all" && <span className="t-secondary">Field, audience, rhythm, gaps and top posts now show {platformLabel(effectivePlat)} only.</span>}
           </div>
         )}
         {!hasChannels && companies.length > 0 && (
@@ -287,8 +363,10 @@ export default function CompetitiveReportView() {
         <SectionNav
           items={[
             ai.executive_summary ? { id: "summary", label: "Summary" } : null,
+            previous ? { id: "changes", label: "Since last report" } : null,
             scorecard ? { id: "scorecard", label: "Scorecard" } : null,
             companies.length > 0 ? { id: "field", label: "The field" } : null,
+            hasMetrics ? { id: "audience", label: "Audience" } : null,
             ai.posting_time_insights ? { id: "rhythm", label: "Posting rhythm" } : null,
             gaps.length > 0 || hiddenGaps.length > 0 ? { id: "gaps", label: "Gaps" } : null,
             (ai.winner_teardown || []).length > 0 ? { id: "wins", label: "What wins" } : null,
@@ -299,8 +377,11 @@ export default function CompetitiveReportView() {
 
         {/* KPI tiles */}
         {meB && (
-          <div className="grid gap-4 grid-cols-2 md:grid-cols-3 2xl:grid-cols-5">
+          <div className={`grid gap-4 grid-cols-2 md:grid-cols-3 ${meM?.audience ? "2xl:grid-cols-6" : "2xl:grid-cols-5"}`}>
             <Kpi accent label="Benchmark score" value={scorecard ? `${scorecard.client_score}` : "–"} sub="out of 100 vs. the set" />
+            {meM?.audience && (
+              <StatCard label="Followers" value={compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across networks, per RivalIQ" : `on ${platformLabel(effectivePlat)}, per RivalIQ`} />
+            )}
             <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} posts`} />
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`set avg ${avg((b) => b.cadence_per_week).toFixed(1)}/wk`} />
             <Kpi label="Engagement rate" value={pct(meB.engagement_rate_avg)} sub={`set avg ${pct(avg((b) => b.engagement_rate_avg))}`} />
@@ -312,16 +393,32 @@ export default function CompetitiveReportView() {
 
         {/* Executive summary */}
         {ai.executive_summary && (
-            <Section id="summary" index={1} title={<>Executive summary</>}>
+            <Section id="summary" index={next()} title={<>Executive summary</>}>
             <Card className="glass-elevated">
               <CardContent><Prose text={ai.executive_summary} className="t-body whitespace-pre-line" /></CardContent>
             </Card>
             </Section>
         )}
 
+        {/* Since the last report: movements against the previous comparable report on this landscape */}
+        {previous && (
+          <Section
+            id="changes"
+            index={next()}
+            title={<><History className="h-5 w-5" /> Since the last report</>}
+            description={<>Against the report of {new Date(previous.created_at).toLocaleDateString()} covering {formatRange(periodOf(previous))}. Cadence is per week, so periods of different lengths compare fairly.</>}
+          >
+            {changes.length > 0 ? (
+              <ChangeCards changes={changes} />
+            ) : (
+              <div className="glass-inner p-4"><p className="t-body">No notable movement: cadence, engagement, channels and formats all held for every company.</p></div>
+            )}
+          </Section>
+        )}
+
         {/* Scorecard */}
         {scorecard?.dimensions?.length > 0 && (
-            <Section id="scorecard" index={2} title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</>}>
+            <Section id="scorecard" index={next()} title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</>}>
             <Card>
               <CardContent className="pt-5 space-y-5">
                 {scorecard.dimensions.map((d: any, i: number) => (
@@ -346,7 +443,7 @@ export default function CompetitiveReportView() {
         {companies.length > 0 && (
           <section id="field" className="space-y-4 scroll-mt-28">
             <div className="glass px-5 py-4">
-              <h2 className="t-h2 flex items-center gap-3"><span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">03</span><span>The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</span></h2>
+              <h2 className="t-h2 flex items-center gap-3"><span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">{String(next()).padStart(2, "0")}</span><span>The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</span></h2>
               <p className="t-secondary">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
             </div>
             <Card>
@@ -420,9 +517,58 @@ export default function CompetitiveReportView() {
           </section>
         )}
 
+        {/* Audience and momentum: RivalIQ's own period totals against the previous period */}
+        {hasMetrics && (
+          <Section
+            id="audience"
+            index={next()}
+            title={<><Users className="h-5 w-5" /> Audience and momentum{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</>}
+            description={<>RivalIQ's own totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}: followers, engagement, estimated impressions and posts for every company. "Likely boosted" is RivalIQ's estimate of paid promotion on Facebook.</>}
+          >
+            <Card>
+              <CardContent className="pt-5 space-y-6">
+                {followersRows.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="t-label uppercase tracking-wider">Followers{effectivePlat === "all" ? " across networks" : ""}</p>
+                    <RankedBars rows={followersRows} emphasis legend={{ subject: clientName, others: "Competitors" }} />
+                  </div>
+                )}
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {withMetrics.map(({ c, m }) => {
+                    const nets = Object.entries(m.by_network).filter(([, n]) => n.followers && n.followers.current > 0);
+                    const boosted = m.boosted?.current || 0;
+                    return (
+                      <article key={c.company_id} className={`glass-inner p-4 space-y-3 min-w-0 ${c.is_client ? "border-[rgba(185,224,69,0.35)]" : ""}`}>
+                        <p className="t-body font-semibold text-white">
+                          {c.name}
+                          {c.is_client && <span className="t-label !text-[#b9e045] ml-2">client</span>}
+                        </p>
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+                          <MetricRow label="Followers" value={m.audience} />
+                          <MetricRow label="Engagement" value={m.engagement} />
+                          <MetricRow label="Est. impressions" value={m.impressions} />
+                          <MetricRow label="Posts" value={m.posts} format={(v) => String(Math.round(v))} />
+                        </div>
+                        {nets.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {nets.map(([net, n]) => <Chip key={net}>{platformLabel(net)} <span className="text-muted-foreground ml-1">{compactNumber(n.followers!.current)}</span></Chip>)}
+                          </div>
+                        )}
+                        {boosted > 0 && (
+                          <p className="t-secondary">{boosted} likely boosted Facebook post{boosted === 1 ? "" : "s"} this period{m.boosted?.previous != null ? ` (${m.boosted.previous} before)` : ""}.</p>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </Section>
+        )}
+
         {/* Posting rhythm */}
         {ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0) && (
-            <Section id="rhythm" index={4} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description="When each company posts, by weekday and by hour (UTC), against the schedule we recommend.">
+            <Section id="rhythm" index={next()} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description="When each company posts, by weekday and by hour (UTC), against the schedule we recommend.">
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {ai.posting_time_insights?.summary && <Prose text={ai.posting_time_insights.summary} />}
@@ -465,7 +611,7 @@ export default function CompetitiveReportView() {
           <section id="gaps" className="space-y-4 scroll-mt-28">
             <div className="flex items-end justify-between gap-4 flex-wrap">
               <div className="glass px-5 py-4 flex-1 min-w-0">
-                <h2 className="t-h2 flex items-center gap-3"><span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">05</span><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
+                <h2 className="t-h2 flex items-center gap-3"><span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">{String(next()).padStart(2, "0")}</span><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
                 <p className="t-secondary">
                   {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
                 </p>
@@ -535,7 +681,7 @@ export default function CompetitiveReportView() {
 
         {/* Winner teardown */}
         {Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0 && (
-            <Section id="wins" index={6} title={<><Trophy className="h-5 w-5" /> What wins for them</>} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
+            <Section id="wins" index={next()} title={<><Trophy className="h-5 w-5" /> What wins for them</>} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
             <Card>
               <CardContent className="pt-5 grid gap-4 md:grid-cols-3">
                 {ai.winner_teardown.map((w: any, i: number) => {
@@ -571,7 +717,7 @@ export default function CompetitiveReportView() {
 
         {/* Mood boards */}
         {ordered.some((c) => moodPosts(c).length > 0) && (
-            <Section id="moodboards" index={7} title={<><Images className="h-5 w-5" /> Mood boards</>} description={<>The creative each company actually ran in the period, side by side. Click any tile to open the post.</>}>
+            <Section id="moodboards" index={next()} title={<><Images className="h-5 w-5" /> Mood boards</>} description={<>The creative each company actually ran in the period, side by side. Click any tile to open the post.</>}>
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {ordered.map((c) => {
@@ -593,7 +739,7 @@ export default function CompetitiveReportView() {
 
         {/* Top posts */}
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
-            <Section id="posts" index={8} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</>}>
+            <Section id="posts" index={next()} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</>}>
             <Card>
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (

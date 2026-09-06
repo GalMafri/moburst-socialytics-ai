@@ -72,8 +72,15 @@ order), and dashboard design guidance (inverted pyramid, KPI row, grouped sectio
 last report, and two actions (Analytics, Run); everything else is in the card menu.
 
 **Competitive report.** Title row with run chips and actions, platform filter, KPI strip, then sections
-in reading order: executive summary, scorecard, the field, posting rhythm with the recommended
-schedule, gaps, what wins for them, mood boards, top posts.
+in reading order: executive summary, since the last report (movements against the previous
+comparable report on the same landscape: cadence, engagement, channels entered or left, format
+shifts, companies that went quiet), scorecard, the field, audience and momentum (RivalIQ's own
+period totals per company against the previous period: followers, engagement, estimated
+impressions, posts, likely boosted Facebook posts), posting rhythm with the recommended schedule,
+gaps, what wins for them, mood boards, top posts. Chapter numerals follow the sections present.
+
+**Competitor feed.** Trends this week, since last week (the same movement cards against the
+previous weekly pull, only when the two pulls cover different weeks), filters, posts.
 
 **Analytics.** Title row with market and language chips, back link, range presets and export in the
 header. Performance opens with the live KPI strip for the window, then by-profile and top posts, then

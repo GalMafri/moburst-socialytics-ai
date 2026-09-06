@@ -127,14 +127,16 @@ Deno.serve(async (req) => {
     const end = new Date(Date.now() - DAY);
     const start = new Date(end.getTime() - (days - 1) * DAY);
     const window = { start: iso(start), end: iso(end) };
-    const resp = await rivaliq(`/landscapes/${landscapeId}/socialposts?mainPeriodStart=${window.start}&mainPeriodEnd=${window.end}`, key);
+    // RivalIQ caps socialposts at 100 unless `limit` is sent (verified 2026-09-06: limit=500 returned 357).
+    const PAGE_LIMIT = 500;
+    const resp = await rivaliq(`/landscapes/${landscapeId}/socialposts?mainPeriodStart=${window.start}&mainPeriodEnd=${window.end}&limit=${PAGE_LIMIT}`, key);
     const socialPosts: any[] = Array.isArray(resp?.socialPosts) ? resp.socialPosts : [];
 
     await admin.from("rivaliq_snapshots").insert({
       client_id: clientId,
       landscape_id: landscapeId,
       endpoint: "feed",
-      payload: { window, socialPosts, fetched_at: new Date().toISOString(), truncated: socialPosts.length >= 100 },
+      payload: { window, socialPosts, fetched_at: new Date().toISOString(), truncated: socialPosts.length >= PAGE_LIMIT },
     });
 
     const topics = await detectTopics(client.name, socialPosts, window.start, window.end);
@@ -160,7 +162,7 @@ Deno.serve(async (req) => {
       else console.error("[refresh-competitor-feed] alert upsert failed", error.message);
     }
 
-    return json({ client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= 100, alerts: saved });
+    return json({ client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: saved });
   } catch (err: any) {
     const status = typeof err?.status === "number" ? err.status : 500;
     console.error("[refresh-competitor-feed]", err);

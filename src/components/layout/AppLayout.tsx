@@ -1,6 +1,7 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -32,6 +33,13 @@ export function AppLayout({
   const { isAuthenticated, isLoading, user } = useAuth();
   const firstName = (user?.name || "").trim().split(/\s+/)[0] || "";
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  // The sidebar is a full rail from 1280px up and an icon rail below that, so a
+  // 1024px laptop keeps its content width. The header trigger still toggles it.
+  const wide = useMediaQuery("(min-width: 1280px)");
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => (typeof window === "undefined" ? true : window.innerWidth >= 1280));
+  useEffect(() => {
+    setSidebarOpen(wide);
+  }, [wide]);
 
   if (isLoading) {
     return (
@@ -44,7 +52,7 @@ export function AppLayout({
   if (!isAuthenticated) return <Navigate to="/auth" replace />;
 
   return (
-    <SidebarProvider>
+    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} style={{ "--sidebar-width-icon": "3.5rem" } as React.CSSProperties}>
       <AppSidebar />
       <SidebarInset className="intercept-bg">
         <header className="relative z-10 flex h-[80px] items-center gap-4 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(11,12,16,0.5)] backdrop-blur-[60px] px-[32px]">

@@ -139,6 +139,9 @@ Deno.serve(async (req) => {
     const competitiveUrl = settings?.find((s) => s.key === "competitive_n8n_webhook_url")?.value;
 
     const results: unknown[] = [];
+    // RivalIQ allows one concurrent call per account, so competitive runs fired in
+    // the same minute are spaced out: the n8n workflow waits stagger_seconds first.
+    let competitiveIndex = 0;
     for (const schedule of due) {
       const client = schedule.clients;
       if (!client || client.archived_at) { results.push({ schedule: schedule.id, status: "skipped", reason: "client archived or missing" }); continue; }
@@ -166,6 +169,7 @@ Deno.serve(async (req) => {
             suppressed_insights: (fb || []).map((f) => f.gap_text),
             competitors: (comps || []).map((c: any) => ({ id: c.id, rank: c.selected_rank, name: c.name, website_url: c.website_url, rivaliq_company_id: c.rivaliq_company_id, handles: (c.competitor_handles || []).filter((h: any) => h.is_active).map((h: any) => ({ platform: h.platform, handle: h.handle, url: h.profile_url })) })),
             scheduled: true,
+            stagger_seconds: competitiveIndex++ * 150,
           };
           const r = await fetch(competitiveUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
           if (!r.ok) throw new Error(`competitive webhook ${r.status}`);

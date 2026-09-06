@@ -112,6 +112,9 @@ export default function ClientSetup() {
   const [brandDebug, setBrandDebug] = useState<any>(null);
   const [newKeyword, setNewKeyword] = useState("");
   const [newPillarName, setNewPillarName] = useState("");
+  // Counts design uploads and removals made in this session; the synthesis card
+  // auto-runs only after one of those, never on merely opening the tab.
+  const [designInputsVersion, setDesignInputsVersion] = useState(0);
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -908,7 +911,10 @@ export default function ClientSetup() {
                   brandBookUrl={form.brand_book_url}
                   brandBookFilePath={form.brand_book_file_path}
                   onBrandBookUrlChange={(url) => setForm((f) => ({ ...f, brand_book_url: url }))}
-                  onBrandBookFilePathChange={(path) => setForm((f) => ({ ...f, brand_book_file_path: path }))}
+                  onBrandBookFilePathChange={(path) => {
+                    setForm((f) => ({ ...f, brand_book_file_path: path }));
+                    setDesignInputsVersion((v) => v + 1);
+                  }}
                   onBrandIdentityExtracted={(identity) =>
                     setForm((f) => ({ ...f, brand_identity: { ...f.brand_identity, ...identity } }))
                   }
@@ -918,7 +924,10 @@ export default function ClientSetup() {
                   clientId={isNew ? undefined : id}
                   clientName={form.name}
                   designReferences={form.design_references}
-                  onDesignReferencesChange={(refs) => setForm((f) => ({ ...f, design_references: refs }))}
+                  onDesignReferencesChange={(refs) => {
+                    setForm((f) => ({ ...f, design_references: refs }));
+                    setDesignInputsVersion((v) => v + 1);
+                  }}
                 />
 
                 <DesignSynthesisCard
@@ -926,6 +935,7 @@ export default function ClientSetup() {
                   designReferencesCount={form.design_references.length}
                   hasBrandBook={!!form.brand_book_file_path}
                   existingSynthesis={form.design_style_synthesis}
+                  inputsVersion={designInputsVersion}
                   onSynthesized={(s) => setForm((f) => ({ ...f, design_style_synthesis: s }))}
                 />
                 <div className="space-y-2">

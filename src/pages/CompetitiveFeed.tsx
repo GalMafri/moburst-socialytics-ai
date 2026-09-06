@@ -17,12 +17,17 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { describeInvokeError } from "@/lib/invokeError";
-import { ArrowLeft, RefreshCw, Rss, Sparkles, TrendingUp, X, Loader2, ExternalLink } from "lucide-react";
+import { ChangeCards } from "@/components/competitive/ChangeCards";
+import { aggregatePosts, comparablePeriods, diffCompanies } from "@/lib/competitiveChanges";
+import { ArrowLeft, RefreshCw, Rss, Sparkles, TrendingUp, X, Loader2, ExternalLink, History } from "lucide-react";
 
 type FeedPost = {
   companyId?: string | number; companyName?: string; channel?: string; type?: string; message?: string; publishedAt?: string;
   engagementTotal?: number; engagementRate?: number; estimatedImpressions?: number; views?: number; postLink?: string | null; image?: string | null;
+  /** RivalIQ's paid-promotion signal on Facebook posts: "Likely Boosted", "Not Likely Boosted" or "No Prediction". */
+  facebookLikelyBoosted?: string | boolean | null;
 };
+const isBoosted = (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase() === "likely boosted" : v === true);
 
 const fmt = (n: number | null | undefined) => (n == null ? "–" : Math.round(Number(n)).toLocaleString());
 
@@ -53,7 +58,8 @@ export default function CompetitiveFeed() {
     enabled: !!id,
   });
 
-  const { data: snapshot, isLoading } = useQuery({
+  // The newest pull drives the page; the one before it is the baseline for "Since last week".
+  const { data: snaps, isLoading } = useQuery({
     queryKey: ["competitor-feed", id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -62,13 +68,14 @@ export default function CompetitiveFeed() {
         .eq("client_id", id!)
         .eq("endpoint", "feed")
         .order("fetched_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(2);
       if (error) throw error;
-      return data;
+      return data || [];
     },
     enabled: !!id,
   });
+  const snapshot = snaps?.[0];
+  const prevSnapshot = snaps?.[1];
 
   const { data: alerts } = useQuery({
     queryKey: ["competitive-alerts", id],
@@ -146,6 +153,14 @@ export default function CompetitiveFeed() {
     return [...list].sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime());
   }, [payload.socialPosts]);
   const companies = useMemo(() => Array.from(new Set(posts.map((p) => p.companyName || String(p.companyId || "")).filter(Boolean))), [posts]);
+  // Week-over-week movements, only when the previous pull covers an earlier week rather than the same one.
+  const prevWindow: { start: string; end: string } | null = (prevSnapshot?.payload as any)?.window || null;
+  const changes = useMemo(() => {
+    const prev: any = prevSnapshot?.payload;
+    if (!prev?.window || !payload.window || !comparablePeriods(prev.window, payload.window)) return null;
+    const days = (w: { start: string; end: string }) => Math.max(1, Math.round((Date.parse(w.end) - Date.parse(w.start)) / 86400000) + 1);
+    return diffCompanies(aggregatePosts(prev.socialPosts || [], days(prev.window), client?.name), aggregatePosts(payload.socialPosts || [], days(payload.window), client?.name), 6);
+  }, [prevSnapshot, payload, client?.name]);
   const platforms = useMemo(() => Array.from(new Set(posts.map((p) => normalizePlatform(p.channel)).filter(Boolean))), [posts]);
   const visible = posts.filter((p) => (company === "all" || (p.companyName || String(p.companyId)) === company) && (plat === "all" || normalizePlatform(p.channel) === plat)).slice(0, 60);
   const { previews } = usePostPreviews(visible.map((p) => ({ url: p.postLink, image: p.image || null, mediaType: p.type })));
@@ -230,6 +245,19 @@ export default function CompetitiveFeed() {
               </Card>
             )}
 
+            {/* Since last week */}
+            {changes && prevSnapshot && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="t-h3 flex items-center gap-2"><History className="h-5 w-5" /> Since last week</CardTitle>
+                  <CardDescription>Against the pull of {new Date(prevSnapshot.fetched_at).toLocaleDateString()}{prevWindow ? ` covering ${prevWindow.start} to ${prevWindow.end}` : ""}.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {changes.length > 0 ? <ChangeCards changes={changes} /> : <p className="t-body">No notable movement: cadence, engagement, channels and formats all held.</p>}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Filters */}
             <div className="flex items-center gap-3 flex-wrap">
               <span className="t-label uppercase tracking-wider">Company</span>
@@ -254,7 +282,10 @@ export default function CompetitiveFeed() {
                     <PostVisual url={p.postLink} image={p.image} preview={p.postLink ? previews[p.postLink] : null} mediaType={p.type} platform={p.channel} />
                     <div className="flex items-center justify-between gap-2 t-secondary">
                       <span className="font-medium text-foreground truncate">{p.companyName}</span>
-                      <span>{p.publishedAt ? new Date(p.publishedAt).toLocaleDateString() : ""}</span>
+                      <span className="flex items-center gap-2 shrink-0">
+                        {isBoosted(p.facebookLikelyBoosted) && <Badge variant="secondary" title="RivalIQ estimates this Facebook post was paid promotion">Likely boosted</Badge>}
+                        {p.publishedAt ? new Date(p.publishedAt).toLocaleDateString() : ""}
+                      </span>
                     </div>
                     <p className="t-body line-clamp-3 min-h-[4.5rem]">{p.message || "(no caption)"}</p>
                     <div className="flex gap-2 flex-wrap t-secondary">

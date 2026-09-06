@@ -23,6 +23,12 @@ interface Props {
    * Default true. Pass false from forms that aren't saved yet (e.g., new client).
    */
   autoTrigger?: boolean;
+  /**
+   * Bumped by the parent on every upload or removal made in this session. The
+   * auto-run follows those bumps, and otherwise only fills a missing synthesis,
+   * so opening the tab never re-synthesizes a client that already has one.
+   */
+  inputsVersion?: number;
 }
 
 export function DesignSynthesisCard({
@@ -32,6 +38,7 @@ export function DesignSynthesisCard({
   existingSynthesis,
   onSynthesized,
   autoTrigger = true,
+  inputsVersion = 0,
 }: Props) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,9 +76,12 @@ export function DesignSynthesisCard({
     }
   };
 
-  // Debounced auto-trigger when inputs change
+  // Debounced auto-trigger: after an upload or removal in this session, or once
+  // when the client has inputs but no synthesis yet. Loading a client that is
+  // already synthesized does nothing (each run is a paid model call).
   useEffect(() => {
     if (!autoTrigger || !clientId || !hasInputs) return;
+    if (inputsVersion === 0 && existingSynthesis) return;
     if (timerRef.current) window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(() => {
       run();
@@ -79,9 +89,10 @@ export function DesignSynthesisCard({
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
-    // designReferencesCount + hasBrandBook + clientId + autoTrigger drive the debounce.
+    // inputsVersion (session uploads), hasInputs, clientId and autoTrigger drive the debounce;
+    // existingSynthesis is read, not watched, so a finished run does not schedule another.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [designReferencesCount, hasBrandBook, clientId, autoTrigger]);
+  }, [inputsVersion, hasInputs, clientId, autoTrigger]);
 
   return (
     <Card>
