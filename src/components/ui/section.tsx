@@ -161,18 +161,25 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
       data-print="hide"
       className={cn(
         // Under xl there is no room for a column, so it is a plain row above the
-        // page, in the flow. The overflow rules carry ! because .glass sets
-        // `overflow: hidden` outside a layer, which otherwise wins over them and
-        // clips whatever does not fit into a rail nobody can scroll.
-        "glass flex gap-1 flex-nowrap p-2 !overflow-x-auto !overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-        // xl and up: the rail proper. The column around it does the sticking.
-        "xl:flex-col xl:gap-0.5 xl:p-3 xl:!overflow-x-hidden xl:!overflow-y-auto",
-        "xl:max-h-[calc(100vh-9rem)]",
-        "print:static print:!overflow-visible print:flex-wrap print:flex-row",
+        // page, in the flow, on its own surface so it reads as a control strip.
+        // The surface is written out rather than taken from .glass, because
+        // .glass lives outside a layer: its `overflow: hidden` and its
+        // background would both beat any xl: override, and the rail has to
+        // shed the card and scroll at that width.
+        "flex gap-1 flex-nowrap p-2 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        "rounded-[20px] border border-[rgba(255,255,255,0.08)] border-t-[rgba(255,255,255,0.14)] bg-[rgba(0,0,0,0.20)] backdrop-blur-[60px]",
+        // xl and up: the rail proper — no card. Navigation should be quieter
+        // than the content it points at; as a glass panel it competed with the
+        // report and hugged its own items into a stubby box halfway down a long
+        // page. It is a list against a hairline instead, and the column around
+        // it does the sticking.
+        "xl:flex-col xl:gap-0 xl:p-0 xl:rounded-none xl:border-0 xl:bg-transparent xl:backdrop-blur-none",
+        "xl:overflow-x-hidden xl:overflow-y-auto xl:max-h-[calc(100vh-9rem)]",
+        "print:static print:overflow-visible print:flex-wrap print:flex-row",
         className,
       )}
     >
-      <p className="hidden xl:block t-label uppercase tracking-[0.14em] px-3 pt-1 pb-2.5">On this page</p>
+      <p className="hidden xl:block t-label uppercase tracking-[0.14em] pb-3">On this page</p>
       {visible.map((it) => {
         const on = active === it.id;
         return (
@@ -184,14 +191,14 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
             onClick={(e) => go(e, it.id)}
             className={cn(
               "px-3 py-1.5 rounded-[8px] t-body whitespace-nowrap shrink-0 transition-colors",
-              "xl:w-full xl:py-2 xl:rounded-[10px] xl:whitespace-normal xl:text-left xl:border-l-2",
+              // The hairline runs down the list and the lime segment marks the
+              // place, the way a margin marks a page. No fill, no box.
+              "xl:w-full xl:rounded-none xl:py-[7px] xl:pl-4 xl:pr-2 xl:whitespace-normal xl:text-left",
+              "xl:border-l-2 xl:hover:bg-transparent",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(185,224,69,0.45)]",
               on
-                // The lime edge marks where you are; the fill is the same one
-                // the sidebar uses for its active item, so the two rails read
-                // as the same kind of thing.
-                ? "bg-[rgba(255,255,255,0.06)] text-white shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06)] xl:border-l-[#b9e045]"
-                : "text-[#9ca3af] hover:text-white hover:bg-[rgba(255,255,255,0.03)] xl:border-l-transparent",
+                ? "bg-[rgba(255,255,255,0.06)] text-white xl:bg-transparent xl:font-medium xl:border-l-[#b9e045]"
+                : "text-[#9ca3af] hover:text-white hover:bg-[rgba(255,255,255,0.03)] xl:border-l-[rgba(255,255,255,0.10)]",
             )}
           >
             {it.label}

@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, Search, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair, Users, Settings } from "lucide-react";
+import { Plus, Search, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair, Users, Settings, FileText } from "lucide-react";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
@@ -261,9 +261,38 @@ export function AdminDashboard() {
                       <PlatformBadge key={p} platform={p} size="sm" />
                     ))}
                   </div>
-                  <div className="flex items-center justify-between gap-2 pt-2 flex-wrap">
+                  <div className="space-y-2 pt-2">
                     <span className="t-secondary whitespace-nowrap">{reportCount} report{reportCount === 1 ? "" : "s"}</span>
-                    <div className="flex gap-1.5 flex-wrap justify-end">
+                    {/* Straight to this client's work: the two report shelves,
+                        the analytics view, and a new run. The card itself still
+                        opens setup. */}
+                    <div className="flex gap-1.5 flex-wrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-9 px-3"
+                        title="Monthly reports"
+                        aria-label="Monthly reports"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/clients/${client.id}/reports`);
+                        }}
+                      >
+                        <FileText className="h-3.5 w-3.5" /><span className="ml-1.5">Reports</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-9 px-3"
+                        title="Competitive analyses"
+                        aria-label="Competitive analyses"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/clients/${client.id}/competitive/reports`);
+                        }}
+                      >
+                        <Crosshair className="h-3.5 w-3.5" /><span className="ml-1.5">Competitive</span>
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"

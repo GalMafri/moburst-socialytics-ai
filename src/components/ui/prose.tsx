@@ -42,14 +42,16 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
           const title = m ? m[1] : null;
           const body = m ? p.slice(m[0].length) : p;
           return (
-            <div key={i} className="grid gap-1 py-4 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)] md:gap-8">
-              {title && <dt className="t-label uppercase tracking-wider md:pt-[3px]">{title}</dt>}
+            <div key={i} className="grid gap-1.5 py-5 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,168px)_minmax(0,1fr)] md:gap-8">
+              {title && (
+                <dt className="t-label uppercase tracking-wider !text-white/85 font-semibold md:pt-[3px]">{title}</dt>
+              )}
               {/* Capped so a long passage keeps a readable measure instead of
                   running the full width of the card. 66ch measures ~88 real
                   characters a line here, since `ch` is the width of a zero and
                   Geist's average glyph is narrower than that. */}
-              <dd className={cn("t-body min-w-0 max-w-[66ch]", !title && "md:col-span-2")}>
-                {title ? body : <Paragraph text={p} />}
+              <dd className={cn("t-body min-w-0 max-w-[66ch] leading-[1.65]", !title && "md:col-span-2")}>
+                {title ? <Figures text={body} /> : <Paragraph text={p} />}
               </dd>
             </div>
           );
@@ -121,6 +123,34 @@ function Paragraph({ text }: { text: string }) {
     );
   }
   return <p>{withLead(text)}</p>;
+}
+
+/**
+ * Figures inside a passage, set in white so the eye can land on them.
+ *
+ * These summaries are mostly numbers carried in sentences ("54 posts in-period
+ * (12.6 posts/week)"), and at one weight and one colour the whole thing reads
+ * as a slab. Dates are matched whole so a day does not come apart into three
+ * highlighted pieces.
+ */
+const FIGURE = /(\d{4}-\d{2}-\d{2}|[+\-−]?\d[\d,]*(?:\.\d+)?\s?(?:%|[KMB]\b)?)/g;
+
+function Figures({ text }: { text: string }): ReactNode {
+  const parts = text.split(FIGURE);
+  if (parts.length === 1) return text;
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <span key={i} className="text-white font-medium tabular-nums">
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
 }
 
 /** "Volume/cadence: the rest" → bold "Volume/cadence:" followed by the rest. */

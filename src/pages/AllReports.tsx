@@ -14,11 +14,14 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Eye, ExternalLink, Crosshair, FileText } from "lucide-react";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { formatRange } from "@/lib/dateRange";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function AllReports() {
   const navigate = useNavigate();
   const { isClient, user } = useAuth();
   const [tab, setTab] = useState<"social" | "competitive">("social");
+  /** "all", or a client id. Both tabs follow it. */
+  const [clientFilter, setClientFilter] = useState<string>("all");
 
   // For client role, first get their assigned client IDs
   const { data: clientAccess } = useQuery({
@@ -36,8 +39,23 @@ export default function AllReports() {
 
   const ready = !isClient || (isClient && clientAccess !== undefined);
 
+  // The picker lists every client the viewer can see, not only the ones with a
+  // report in the last 50 rows, so choosing one is how you reach the older ones.
+  const { data: clientOptions } = useQuery({
+    queryKey: ["report-filter-clients", isClient ? clientAccess : "all"],
+    queryFn: async () => {
+      let query = supabase.from("clients").select("id, name").order("name");
+      if (isClient && clientAccess && clientAccess.length > 0) query = query.in("id", clientAccess);
+      else if (isClient) return [];
+      const { data, error } = await query;
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: ready,
+  });
+
   const { data: reports, isLoading } = useQuery({
-    queryKey: ["all-reports", isClient ? clientAccess : "all"],
+    queryKey: ["all-reports", isClient ? clientAccess : "all", clientFilter],
     queryFn: async () => {
       let query = supabase
         .from("reports")
@@ -49,6 +67,9 @@ export default function AllReports() {
       } else if (isClient) {
         return [];
       }
+      // Filtered in the query, not in the page: with a 50-row cap, filtering
+      // what came back would hide a client's older reports entirely.
+      if (clientFilter !== "all") query = query.eq("client_id", clientFilter);
       const { data, error } = await query;
       if (error) throw error;
       return data;
@@ -57,7 +78,7 @@ export default function AllReports() {
   });
 
   const { data: competitive, isLoading: competitiveLoading } = useQuery({
-    queryKey: ["all-competitive-reports", isClient ? clientAccess : "all"],
+    queryKey: ["all-competitive-reports", isClient ? clientAccess : "all", clientFilter],
     queryFn: async () => {
       let query = supabase
         .from("competitive_reports")
@@ -69,6 +90,7 @@ export default function AllReports() {
       } else if (isClient) {
         return [];
       }
+      if (clientFilter !== "all") query = query.eq("client_id", clientFilter);
       const { data, error } = await query;
       if (error) throw error;
       return data;
@@ -76,9 +98,30 @@ export default function AllReports() {
     enabled: ready,
   });
 
+  const filteredClientName = clientOptions?.find((c) => c.id === clientFilter)?.name;
+
   return (
-    <AppLayout title="Reports"
-      description="Every monthly report and competitive analysis across clients, newest first.">
+    <AppLayout
+      title="Reports"
+      description={
+        filteredClientName
+          ? `Every monthly report and competitive analysis for ${filteredClientName}, newest first.`
+          : "Every monthly report and competitive analysis across clients, newest first."
+      }
+      actions={
+        <Select value={clientFilter} onValueChange={setClientFilter}>
+          <SelectTrigger className="w-[220px]" aria-label="Filter by client">
+            <SelectValue placeholder="All clients" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All clients</SelectItem>
+            {(clientOptions ?? []).map((c) => (
+              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      }
+    >
       <div className="w-full">
         <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
           <TabsList className="mb-4">
@@ -89,7 +132,7 @@ export default function AllReports() {
           <TabsContent value="social">
             <Card>
               <CardHeader>
-                <CardTitle className="t-h3">All monthly reports</CardTitle>
+                <CardTitle className="t-h3">{filteredClientName ? `${filteredClientName} — monthly reports` : "All monthly reports"}</CardTitle>
               </CardHeader>
               <CardContent>
                 {isLoading ? (
@@ -146,8 +189,12 @@ export default function AllReports() {
                   </Table>
                 ) : (
                   <EmptyState
-                    title="No reports yet"
-                    description="Reports across all clients will appear here once analyses have been run."
+                    title={filteredClientName ? `No reports for ${filteredClientName}` : "No reports yet"}
+                    description={
+                      filteredClientName
+                        ? "This client has no monthly reports yet. Pick another client, or run an analysis."
+                        : "Reports across all clients will appear here once analyses have been run."
+                    }
                   />
                 )}
               </CardContent>
@@ -157,7 +204,7 @@ export default function AllReports() {
           <TabsContent value="competitive">
             <Card>
               <CardHeader>
-                <CardTitle className="t-h3">All competitive analyses</CardTitle>
+                <CardTitle className="t-h3">{filteredClientName ? `${filteredClientName} — competitive analyses` : "All competitive analyses"}</CardTitle>
               </CardHeader>
               <CardContent>
                 {competitiveLoading ? (
@@ -205,7 +252,7 @@ export default function AllReports() {
                 ) : (
                   <EmptyState
                     icon={Crosshair}
-                    title="No competitive analyses yet"
+                    title={filteredClientName ? `No competitive analyses for ${filteredClientName}` : "No competitive analyses yet"}
                     description="Confirm a competitor set for a client and run the RivalIQ analysis; results will be listed here."
                     action={!isClient ? <Button onClick={() => navigate("/competitive")}>Go to competitive analysis</Button> : undefined}
                   />

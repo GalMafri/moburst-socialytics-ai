@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
-import { FileText, TrendingUp, BarChart3, AlertCircle } from "lucide-react";
+import { FileText, TrendingUp, BarChart3, AlertCircle, Crosshair } from "lucide-react";
 
 // Defense-in-depth: even when RLS returns extra/stale clients (e.g. client_users
 // cache not yet cleaned, or migration to computed is_client_member not applied
@@ -160,6 +160,21 @@ export function ClientDashboard() {
           </CardHeader>
           <CardContent>
             <p className="t-secondary">View all past reports and analyses</p>
+          </CardContent>
+        </Card>
+
+        <Card
+          className="cursor-pointer hover-lift transition-shadow"
+          onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}
+        >
+          <CardHeader>
+            <CardTitle className="t-h3 flex items-center gap-2">
+              <Crosshair className="h-4 w-4 text-accent" />
+              Competitive Analyses
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="t-secondary">How you compare with the rest of the field</p>
           </CardContent>
         </Card>
 
