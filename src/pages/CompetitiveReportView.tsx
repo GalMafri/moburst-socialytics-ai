@@ -380,6 +380,8 @@ export default function CompetitiveReportView() {
           <p className="t-secondary">Per-platform breakdowns are produced for runs from September 2, 2026 onward. Re-run the analysis to get them for this client.</p>
         )}
 
+        {/* The rail sits in its own column so it is always in reach and never crosses the report. */}
+        <div className="grid gap-6 xl:grid-cols-[210px_minmax(0,1fr)] items-start">
         <SectionNav
           items={[
             ai.executive_summary ? { id: "summary", label: "Summary" } : null,
@@ -394,6 +396,7 @@ export default function CompetitiveReportView() {
             { id: "posts", label: "Top posts" },
           ].filter(Boolean) as { id: string; label: string }[]}
         />
+        <div className="space-y-8 min-w-0">
 
         {/* KPI tiles */}
         {meB && (
@@ -784,6 +787,8 @@ export default function CompetitiveReportView() {
             </Card>
             </Section>
         )}
+        </div>
+        </div>
       </div>
     </AppLayout>
   );

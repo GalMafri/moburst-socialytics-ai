@@ -1,6 +1,6 @@
 import { DateRange, formatRange, isValidRange, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate } from "@/lib/dateRange";
 import { StatCard } from "@/components/ui/stat-card";
-import { Section } from "@/components/ui/section";
+import { Section, SectionNav } from "@/components/ui/section";
 import { PostVisual, usePostPreviews } from "@/components/competitive/PostVisual";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useParams, useNavigate } from "react-router-dom";
@@ -362,6 +362,35 @@ export default function Analytics() {
           </Card>
         ) : (
           <>
+          {/* The rail sits in its own column so it is always in reach and never
+              crosses the page. It lists the running order for the open tab; the
+              rail itself drops anything that has no data to show. */}
+          <div className="grid gap-6 xl:grid-cols-[210px_minmax(0,1fr)] items-start">
+            <SectionNav
+              items={
+                view === "performance"
+                  ? [
+                      { id: "live-by-profile", label: "By profile" },
+                      { id: "live-top-posts", label: "Top posts" },
+                      { id: "mom", label: "Month-over-month" },
+                      { id: "over-time", label: "Performance over time" },
+                      { id: "engagement-rate", label: "Engagement rate" },
+                      { id: "profiles", label: "Connected profiles" },
+                      { id: "insights", label: "AI insights" },
+                      { id: "history", label: "Report history" },
+                    ]
+                  : view === "trends"
+                    ? [
+                        { id: "trends", label: "Trends" },
+                        { id: "history", label: "Report history" },
+                      ]
+                    : [
+                        { id: "competitive", label: "Competitive" },
+                        { id: "history", label: "Report history" },
+                      ]
+              }
+            />
+            <div className="space-y-6 min-w-0">
             {/* View segmentation */}
             <Tabs value={view} onValueChange={(v) => setView(v as AnalyticsView)}>
               <TabsList className="grid w-full grid-cols-3 max-w-md">
@@ -384,6 +413,7 @@ export default function Analytics() {
                     error={liveQuery.error as Error | null}
                     rangeLabel={rangeLabel}
                     fmtVal={fmtVal}
+                    idPrefix="live"
                   />
                 )}
                 {range === "all" && allTimeWindow && (
@@ -502,7 +532,7 @@ export default function Analytics() {
 
                 {/* Month-over-month comparison from latest report */}
                 {!viewWindow && comparison && Object.keys(comparison.changes).length > 0 && (
-                  <Section title={<>Month-over-Month{" "} <span className="font-normal text-muted-foreground t-body">(latest report)</span></>}>
+                  <Section id="mom" title={<>Month-over-Month{" "} <span className="font-normal text-muted-foreground t-body">(latest report)</span></>}>
                   <Card>
                     <CardContent className="pt-5">
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -547,7 +577,7 @@ export default function Analytics() {
 
                 {/* Performance Over Time — Per-metric line charts */}
                 {chartData.length >= 1 && chartData.some((d) => d.impressions > 0 || d.reactions > 0) && (
-                  <Section title={<>Performance Over Time <span className="font-normal text-muted-foreground t-body ml-2"> ({filtered.length} report{filtered.length !== 1 ? "s" : ""}) </span></>} description={<>{chartData.length === 1 ? "Showing your latest snapshot. Run more analyses to see trend lines." : "Each data point represents one analysis run. Hover over points for exact values."}</>}>
+                  <Section id="over-time" title={<>Performance Over Time <span className="font-normal text-muted-foreground t-body ml-2"> ({filtered.length} report{filtered.length !== 1 ? "s" : ""}) </span></>} description={<>{chartData.length === 1 ? "Showing your latest snapshot. Run more analyses to see trend lines." : "Each data point represents one analysis run. Hover over points for exact values."}</>}>
                   <Card>
                     <CardContent className="pt-5 space-y-6">
                       {/* Impressions chart (separate — it dominates if combined) */}
@@ -709,7 +739,7 @@ export default function Analytics() {
 
                 {/* Engagement rate trend */}
                 {chartData.length > 1 && chartData.some((d) => d.engagement_rate > 0) && (
-                  <Section title={<>Engagement Rate Trend</>} description={<>(Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.</>}>
+                  <Section id="engagement-rate" title={<>Engagement Rate Trend</>} description={<>(Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.</>}>
                   <Card>
                     <CardContent className="pt-5">
                       <div className="h-56">
@@ -756,23 +786,31 @@ export default function Analytics() {
                 )}
 
                 {/* Connected profiles */}
-                <ConnectedProfiles profiles={platformData} />
+                <div id="profiles" className="scroll-mt-[156px]">
+                  <ConnectedProfiles profiles={platformData} />
+                </div>
 
                 {/* AI-powered cumulative insights */}
-                <AIDeepInsights reports={filtered} chartData={chartData} />
+                <div id="insights" className="scroll-mt-[156px]">
+                  <AIDeepInsights reports={filtered} chartData={chartData} />
+                </div>
               </TabsContent>
 
               <TabsContent value="trends" className="space-y-6 mt-4">
                 {/* Trend analysis (TikTok + Instagram) */}
-                <TrendInsightsSection reports={filtered} />
+                <div id="trends" className="scroll-mt-[156px]">
+                  <TrendInsightsSection reports={filtered} />
+                </div>
               </TabsContent>
               <TabsContent value="competitive" className="space-y-6 mt-4">
-                <CompetitiveSnapshot clientId={id!} />
+                <div id="competitive" className="scroll-mt-[156px]">
+                  <CompetitiveSnapshot clientId={id!} />
+                </div>
               </TabsContent>
             </Tabs>
 
             {/* Recent reports table */}
-            <Section title={<>Report History</>} description={<>{filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to view full details.</>}>
+            <Section id="history" title={<>Report History</>} description={<>{filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to view full details.</>}>
             <Card>
               <CardContent className="pt-5">
                 <div className="space-y-2">
@@ -808,6 +846,8 @@ export default function Analytics() {
               </CardContent>
             </Card>
             </Section>
+            </div>
+          </div>
           </>
         )}
         </div>
@@ -900,12 +940,16 @@ function LiveSproutSection({
   error,
   rangeLabel,
   fmtVal,
+  idPrefix,
 }: {
   data: any;
   isLoading: boolean;
   error: Error | null;
   rangeLabel: string;
   fmtVal: (v: number) => string;
+  /** This block renders twice on the page (window and all-time), so its
+   *  section ids carry a prefix and stay unique for the nav to anchor to. */
+  idPrefix?: string;
 }) {
   const posts: any[] = data?.top_posts || [];
   const { previews } = usePostPreviews(posts.map((p) => p.permalink));
@@ -944,7 +988,7 @@ function LiveSproutSection({
       </div>
 
       {Array.isArray(data.by_profile) && data.by_profile.length > 0 && (
-        <Section title={<>By profile <span className="font-normal text-muted-foreground t-body">({rangeLabel})</span></>}>
+        <Section id={idPrefix ? `${idPrefix}-by-profile` : undefined} title={<>By profile <span className="font-normal text-muted-foreground t-body">({rangeLabel})</span></>}>
         <Card>
           <CardContent className="pt-5">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -968,7 +1012,7 @@ function LiveSproutSection({
       )}
 
       {posts.length > 0 && (
-        <Section title={<>Top posts <span className="font-normal text-muted-foreground t-body">({rangeLabel}, by impressions)</span></>}>
+        <Section id={idPrefix ? `${idPrefix}-top-posts` : undefined} title={<>Top posts <span className="font-normal text-muted-foreground t-body">({rangeLabel}, by impressions)</span></>}>
         <Card>
           <CardContent className="pt-5">
             <div className="grid gap-4 md:grid-cols-2">

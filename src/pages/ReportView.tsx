@@ -355,6 +355,8 @@ export default function ReportView() {
           <TabsContent value="overview" className="space-y-8">
             {/* Reading order follows the report convention: numbers, the story, the field,
                 then detail, and the recommendations to close. The nav jumps to any of them. */}
+            {/* The rail keeps its own column, so it never crosses the report as you read. */}
+            <div className="grid gap-6 xl:grid-cols-[210px_minmax(0,1fr)] items-start">
             <SectionNav
               items={[
                 monthComparison?.changes ? { id: "glance", label: "At a glance" } : null,
@@ -367,6 +369,7 @@ export default function ReportView() {
                 pillars ? { id: "pillars", label: "Pillars" } : null,
               ].filter(Boolean) as { id: string; label: string }[]}
             />
+            <div className="space-y-8 min-w-0">
 
             {monthComparison?.changes && (
               <Section id="glance" index={1} title="At a glance" description={glanceLine}>
@@ -504,6 +507,8 @@ export default function ReportView() {
                 </CardContent>
               </Card>
             )}
+            </div>
+            </div>
           </TabsContent>
 
           {/* ── CONTENT IDEAS ── */}
@@ -525,9 +530,30 @@ export default function ReportView() {
 
           {/* ── TRENDS ── */}
           {hasTrends && (
-            <TabsContent value="trends" className="space-y-10">
-              <TrendsSection title="TikTok trends" analysis={aiAnalysis?.tiktok_trends_analysis} posts={tiktokTrends?.posts} platform="tiktok" clientName={clientName} />
-              <TrendsSection title="Instagram trends" analysis={aiAnalysis?.instagram_trends_analysis} posts={instagramTrends?.posts} platform="instagram" clientName={clientName} />
+            <TabsContent value="trends">
+              {/* Same rail as the overview: its own column, never over the text. */}
+              <div className="grid gap-6 xl:grid-cols-[210px_minmax(0,1fr)] items-start">
+                <SectionNav
+                  items={[
+                    { id: "tiktok-overview", label: "TikTok trends" },
+                    { id: "tiktok-themes", label: "TikTok themes" },
+                    { id: "tiktok-formats", label: "TikTok formats" },
+                    { id: "tiktok-opportunities", label: "TikTok opportunities" },
+                    { id: "tiktok-takeaways", label: "TikTok takeaways" },
+                    { id: "tiktok-posts", label: "TikTok posts" },
+                    { id: "instagram-overview", label: "Instagram trends" },
+                    { id: "instagram-themes", label: "Instagram themes" },
+                    { id: "instagram-formats", label: "Instagram formats" },
+                    { id: "instagram-opportunities", label: "Instagram opportunities" },
+                    { id: "instagram-takeaways", label: "Instagram takeaways" },
+                    { id: "instagram-posts", label: "Instagram posts" },
+                  ]}
+                />
+                <div className="space-y-10 min-w-0">
+                  <TrendsSection title="TikTok trends" analysis={aiAnalysis?.tiktok_trends_analysis} posts={tiktokTrends?.posts} platform="tiktok" clientName={clientName} />
+                  <TrendsSection title="Instagram trends" analysis={aiAnalysis?.instagram_trends_analysis} posts={instagramTrends?.posts} platform="instagram" clientName={clientName} />
+                </div>
+              </div>
             </TabsContent>
           )}
 
@@ -910,6 +936,7 @@ function TrendsSection({
   return (
     <section className="space-y-8">
       <Section
+        id={`${platform}-overview`}
         title={<><span className="h-8 w-8 rounded-[10px] flex items-center justify-center shrink-0" style={{ backgroundColor: `${platformColor}22` }}><PlatformIcon platform={platform} className="h-4 w-4" /></span>{title}</>}
         description={analysis?.overview ? undefined : "Trending content and what it means for the client."}
       >
@@ -917,7 +944,7 @@ function TrendsSection({
       </Section>
 
       {(analysis?.top_themes?.length > 0 || analysis?.top_hashtags?.length > 0) && (
-        <Section title="Themes and hashtags" description="What the trending posts are about, and the tags carrying them.">
+        <Section id={`${platform}-themes`} title="Themes and hashtags" description="What the trending posts are about, and the tags carrying them.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {analysis.top_themes?.length > 0 && (
               <Card><CardContent className="pt-5 space-y-3">
@@ -936,25 +963,25 @@ function TrendsSection({
       )}
 
       {formats.length > 0 && (
-        <Section title={<><Sparkles className="h-5 w-5" /> What is working</>} description="Formats that keep winning in this space right now.">
+        <Section id={`${platform}-formats`} title={<><Sparkles className="h-5 w-5" /> What is working</>} description="Formats that keep winning in this space right now.">
           <InsightGrid items={formats} numbered={false} />
         </Section>
       )}
 
       {opportunities.length > 0 && (
-        <Section title={<><Target className="h-5 w-5 text-primary" /> Opportunities for {clientName || "your brand"}</>} description="Where the trend meets the client's strengths.">
+        <Section id={`${platform}-opportunities`} title={<><Target className="h-5 w-5 text-primary" /> Opportunities for {clientName || "your brand"}</>} description="Where the trend meets the client's strengths.">
           <InsightGrid items={opportunities} numbered={true} />
         </Section>
       )}
 
       {takeaways.length > 0 && (
-        <Section title={<><Lightbulb className="h-5 w-5 text-warning" /> Key takeaways</>}>
+        <Section id={`${platform}-takeaways`} title={<><Lightbulb className="h-5 w-5 text-warning" /> Key takeaways</>}>
           <InsightGrid items={takeaways} numbered={false} />
         </Section>
       )}
 
       {shown.length > 0 && (
-        <Section title="Trending posts" description="The posts driving the trend, with the creative and the numbers behind each.">
+        <Section id={`${platform}-posts`} title="Trending posts" description="The posts driving the trend, with the creative and the numbers behind each.">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {shown.map((post: any, i: number) => {
               const sl = post.engagement_score != null ? getScoreLabel(post.engagement_score, platform) : null;

@@ -42,69 +42,100 @@ export function Section({
 }
 
 /**
- * Sticky in-page navigation for long reports: one chip per section.
+ * Section navigation for long reports: a rail down the left of the report.
  *
- * The chips track where the reader actually is. Without that, a nav on a
- * twelve-thousand-pixel report tells you where you can go but never where you
- * are, so on a long scroll it stops being navigation and becomes decoration.
- * It also stays a single row: wrapping made the bar two or three lines tall,
- * and a sticky bar that tall eats the content it is supposed to help you read.
+ * It sat across the top before and followed the scroll, which meant it passed
+ * over the report as you read — the wrong trade for a reader. In its own column
+ * it is always in reach and never covers a word. It holds its place beside the
+ * content on wide screens; below that there is no room for a column, so it
+ * becomes a plain row at the top of the report that scrolls away with
+ * everything else rather than floating over it.
  */
 export function SectionNav({ items, className }: { items: { id: string; label: string }[]; className?: string }) {
   const [active, setActive] = useState<string | null>(null);
+  // Which of the given sections are actually on the page right now. Several
+  // reports render a section only when it has data, so the rail is told the
+  // full running order and drops what isn't there rather than offering a link
+  // that goes nowhere.
+  const [presentIds, setPresentIds] = useState<string | null>(null);
   const navRef = useRef<HTMLElement>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const key = items.map((it) => it.id).join("|");
 
   useEffect(() => {
-    if (items.length === 0) return;
-    const nodes = items.map((it) => document.getElementById(it.id)).filter((n): n is HTMLElement => !!n);
-    if (nodes.length === 0) return;
+    if (!key) return;
+    let nodes: HTMLElement[] = [];
+    let observer: IntersectionObserver | null = null;
+    let queued = 0;
 
-    // The reading line is the bottom of the sticky bar itself, not a magic
-    // number: the active section is the last one whose heading has passed under
-    // it. Measuring the bar means the highlight stays correct whether the bar is
-    // one row or has grown, and it matches where a clicked section comes to rest.
+    // The active section is the last one whose heading has passed the top of
+    // the reading area, so the highlight follows the eye rather than whichever
+    // section happens to cover the most pixels.
     const pick = () => {
-      const bar = navRef.current?.getBoundingClientRect();
-      const line = (bar ? bar.bottom : 142) + 12;
-      let current = nodes[0]?.id ?? null;
+      if (nodes.length === 0) return;
+      const line = 156;
+      let current = nodes[0].id;
       for (const n of nodes) {
         if (n.getBoundingClientRect().top <= line) current = n.id;
         else break;
       }
-      // At the very bottom the last section may never reach the line, so the
-      // final scroll position always resolves to the final section.
       const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
       if (atBottom) current = nodes[nodes.length - 1].id;
-      if (current) setActive(current);
+      setActive(current);
     };
 
-    pick();
-    const observer = new IntersectionObserver(pick, {
-      rootMargin: "-120px 0px -60% 0px",
-      threshold: [0, 0.25, 0.5, 1],
+    const wire = () => {
+      const found = itemsRef.current
+        .map((it) => document.getElementById(it.id))
+        .filter((n): n is HTMLElement => !!n);
+      const foundKey = found.map((n) => n.id).join("|");
+      if (foundKey === nodes.map((n) => n.id).join("|") && observer) return;
+      nodes = found;
+      setPresentIds(foundKey);
+      observer?.disconnect();
+      observer = new IntersectionObserver(pick, { rootMargin: "-140px 0px -60% 0px", threshold: [0, 0.5, 1] });
+      nodes.forEach((n) => observer!.observe(n));
+      pick();
+    };
+
+    wire();
+    // Sections come and go as a tab changes or a query resolves, so keep the
+    // rail in step with the page instead of with the first render.
+    const mutations = new MutationObserver(() => {
+      if (queued) return;
+      queued = requestAnimationFrame(() => {
+        queued = 0;
+        wire();
+      });
     });
-    nodes.forEach((n) => observer.observe(n));
+    mutations.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("scroll", pick, { passive: true });
     window.addEventListener("resize", pick);
     return () => {
-      observer.disconnect();
+      if (queued) cancelAnimationFrame(queued);
+      mutations.disconnect();
+      observer?.disconnect();
       window.removeEventListener("scroll", pick);
       window.removeEventListener("resize", pick);
     };
-  }, [items]);
+  }, [key]);
 
-  // Keep the active chip visible when the bar itself has to scroll sideways.
+  // Keep the active item in view when the rail itself has had to scroll.
   useEffect(() => {
     if (!active || !navRef.current) return;
-    const chip = navRef.current.querySelector<HTMLElement>(`[data-section="${active}"]`);
-    if (!chip) return;
+    const el = navRef.current.querySelector<HTMLElement>(`[data-section="${active}"]`);
     const bar = navRef.current;
-    if (bar.scrollWidth <= bar.clientWidth + 1) return;
-    const left = chip.offsetLeft - bar.clientWidth / 2 + chip.offsetWidth / 2;
-    bar.scrollTo({ left, behavior: "smooth" });
+    if (!el) return;
+    const overflowsY = bar.scrollHeight > bar.clientHeight + 1;
+    const overflowsX = bar.scrollWidth > bar.clientWidth + 1;
+    if (!overflowsY && !overflowsX) return;
+    if (overflowsY) bar.scrollTo({ top: el.offsetTop - bar.clientHeight / 2 + el.offsetHeight / 2, behavior: "smooth" });
+    else bar.scrollTo({ left: el.offsetLeft - bar.clientWidth / 2 + el.offsetWidth / 2, behavior: "smooth" });
   }, [active]);
 
-  if (items.length === 0) return null;
+  const visible = presentIds === null ? items : items.filter((it) => presentIds.split("|").includes(it.id));
+  if (visible.length === 0) return null;
 
   const go = (e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
     const el = document.getElementById(id);
@@ -113,7 +144,6 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
     setActive(id);
-    // Keep the URL shareable without letting the jump fight the smooth scroll.
     history.replaceState(null, "", `#${id}`);
   };
 
@@ -121,19 +151,21 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
     <nav
       ref={navRef}
       aria-label="Sections"
+      // Navigation chrome, not report content: the PDF export drops it.
+      data-print="hide"
       className={cn(
-        "px-3 py-2 flex gap-1 flex-nowrap overflow-x-auto sticky top-[88px] z-30",
-        // Deliberately NOT .glass. Content scrolls underneath this bar, and at
-        // .glass's 20% black the text behind it read straight through — lines of
-        // the report showing through the nav. This is near-opaque with a shadow
-        // so it reads as a layer sitting above the page, not a window onto it.
-        "rounded-[16px] border border-[rgba(255,255,255,0.10)] bg-[rgba(11,12,16,0.97)]",
-        "backdrop-blur-[60px] shadow-[0_10px_28px_rgba(0,0,0,0.55)]",
-        "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:static print:overflow-visible print:flex-wrap print:shadow-none",
+        // Under xl: a plain row at the top of the report, in the flow.
+        "flex gap-1 flex-nowrap overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        // xl and up: the rail. Sticky only within its own column, so it stays
+        // beside the reader without ever crossing the content.
+        "xl:flex-col xl:gap-0.5 xl:overflow-x-visible xl:overflow-y-auto",
+        "xl:sticky xl:top-[88px] xl:self-start xl:max-h-[calc(100vh-7rem)]",
+        "glass p-2",
+        "print:static print:overflow-visible print:flex-wrap print:flex-row",
         className,
       )}
     >
-      {items.map((it) => {
+      {visible.map((it) => {
         const on = active === it.id;
         return (
           <a
@@ -144,10 +176,11 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
             onClick={(e) => go(e, it.id)}
             className={cn(
               "px-3 py-1.5 rounded-[8px] t-body whitespace-nowrap shrink-0 transition-colors",
+              "xl:whitespace-normal xl:text-left xl:border-l-2",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(185,224,69,0.45)]",
               on
-                ? "bg-[rgba(185,224,69,0.16)] text-white shadow-[inset_0_0_0_1px_rgba(185,224,69,0.45)]"
-                : "text-white hover:bg-[rgba(255,255,255,0.08)]",
+                ? "bg-[rgba(185,224,69,0.14)] text-white xl:border-l-[#b9e045]"
+                : "text-white hover:bg-[rgba(255,255,255,0.08)] xl:border-l-transparent",
             )}
           >
             {it.label}
