@@ -98,6 +98,7 @@ export default function CompetitorReview() {
   const queryClient = useQueryClient();
   const [identifying, setIdentifying] = useState(false);
   const [detecting, setDetecting] = useState(false);
+  const [detectingId, setDetectingId] = useState<string | null>(null);
   const [manualName, setManualName] = useState("");
   const [manualUrl, setManualUrl] = useState("");
   // RivalIQ import: the agency's landscapes are the curated competitor sets.
@@ -270,6 +271,34 @@ export default function CompetitorReview() {
     } finally {
       setIdentifying(false);
       setDetecting(false);
+    }
+  };
+
+  /**
+   * Look again for one competitor's handles.
+   *
+   * A row that says "no handles" is a dead end otherwise: the set-wide
+   * re-detect re-reads every site to fix the one that failed, and a site that
+   * was slow or rendering its footer in JavaScript the first time often
+   * answers on a second pass.
+   */
+  const detectOne = async (competitorId: string) => {
+    setDetectingId(competitorId);
+    try {
+      const { data, error } = await supabase.functions.invoke("detect-competitor-handles", {
+        body: { competitor_id: competitorId, refresh: true },
+      });
+      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
+      refreshAll();
+      const found = (data?.results?.[0]?.detected || []).length;
+      toast({
+        title: found > 0 ? `Found ${found} handle${found === 1 ? "" : "s"}` : "Still nothing on that site",
+        description: found > 0 ? undefined : "Add the handle by hand below, or drop the competitor.",
+      });
+    } catch (err: any) {
+      toast({ title: "Detection failed", description: err.message, variant: "destructive" });
+    } finally {
+      setDetectingId(null);
     }
   };
 
@@ -611,7 +640,19 @@ export default function CompetitorReview() {
                               </a>
                             ))
                           ) : (
-                            <span className="t-label text-amber-500/80">no handles detected yet</span>
+                            <button
+                              type="button"
+                              onClick={() => detectOne(c.id)}
+                              disabled={detectingId === c.id || !isDraft}
+                              className="t-label !text-amber-500/80 hover:!text-white inline-flex items-center gap-1.5 disabled:opacity-60"
+                            >
+                              {detectingId === c.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Search className="h-3 w-3" />
+                              )}
+                              {detectingId === c.id ? "Looking for handles…" : "No handles found — look again"}
+                            </button>
                           )}
                         </div>
                       </div>

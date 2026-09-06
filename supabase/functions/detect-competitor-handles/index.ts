@@ -25,17 +25,24 @@ const corsHeaders = {
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-async function fetchHtml(websiteUrl: string): Promise<string> {
-  let url = websiteUrl.trim();
-  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+function normalizeUrl(websiteUrl: string): string {
+  const url = websiteUrl.trim();
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+}
+
+async function fetchDirect(url: string): Promise<string> {
   try {
     const resp = await fetch(url, {
       headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" },
       redirect: "follow",
     });
-    if (resp.ok) return await resp.text();
-  } catch { /* fall through to firecrawl */ }
+    return resp.ok ? await resp.text() : "";
+  } catch {
+    return "";
+  }
+}
 
+async function fetchRendered(url: string): Promise<string> {
   const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
   if (!firecrawlKey) return "";
   try {
@@ -50,6 +57,46 @@ async function fetchHtml(websiteUrl: string): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/** Pages that carry the social links when the homepage does not. */
+const FALLBACK_PATHS = ["/contact", "/about", "/about-us", "/company"];
+
+/**
+ * Everything this brand links to, from wherever on its site it links it.
+ *
+ * The homepage alone was the whole search, and it answered "no handles
+ * detected yet" for two kinds of site that are common: the ones that render
+ * their footer in JavaScript, where the HTML comes back 200 and empty of
+ * links, and the ones that keep their social links on a contact page. A 200
+ * with nothing in it now falls through to a rendered fetch, and then to the
+ * handful of pages a brand puts its links on, rather than being read as an
+ * answer.
+ */
+async function detectForSite(websiteUrl: string): Promise<DetectedHandle[]> {
+  const base = normalizeUrl(websiteUrl);
+
+  const direct = await fetchDirect(base);
+  const fromDirect = direct ? extractSocialHandles(direct) : [];
+  if (fromDirect.length > 0) return fromDirect;
+
+  const rendered = await fetchRendered(base);
+  const fromRendered = rendered ? extractSocialHandles(rendered) : [];
+  if (fromRendered.length > 0) return fromRendered;
+
+  for (const path of FALLBACK_PATHS) {
+    let target: string;
+    try {
+      target = new URL(path, base).toString();
+    } catch {
+      continue;
+    }
+    const html = await fetchDirect(target);
+    const found = html ? extractSocialHandles(html) : [];
+    if (found.length > 0) return found;
+  }
+
+  return [];
 }
 
 Deno.serve(async (req) => {
@@ -98,8 +145,7 @@ Deno.serve(async (req) => {
         results.push({ competitor_id: comp.id, detected: [] });
         continue;
       }
-      const html = await fetchHtml(comp.website_url);
-      const detected = html ? extractSocialHandles(html) : [];
+      const detected = await detectForSite(comp.website_url);
 
       for (const h of detected) {
         if (refresh) {
