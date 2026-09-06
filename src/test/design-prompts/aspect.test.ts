@@ -19,6 +19,30 @@ describe("isVerticalFormat", () => {
     expect(isVerticalFormat("YouTube", "")).toBe(false);
   });
 
+  it("makes a plain Video vertical where the platform publishes it that way", () => {
+    // "Video" says nothing about shape, so the platform decides.
+    expect(isVerticalFormat("Instagram", "Video")).toBe(true);
+    expect(isVerticalFormat("TikTok", "Video")).toBe(true);
+    expect(isVerticalFormat("Instagram", "Short Video")).toBe(true);
+    expect(isVerticalFormat("Facebook", "Video")).toBe(false);
+    expect(isVerticalFormat("LinkedIn", "Video")).toBe(false);
+    expect(isVerticalFormat("YouTube", "Video")).toBe(false);
+  });
+
+  it("does not turn Instagram stills vertical", () => {
+    // The same rule drives generated images, so the moving-format fallback must
+    // not reshape a feed post.
+    for (const f of ["Single Image", "Carousel", "Document/PDF", "Image"]) {
+      expect(isVerticalFormat("Instagram", f), f).toBe(false);
+      expect(isVerticalFormat("TikTok", f), f).toBe(false);
+    }
+  });
+
+  it("still lets an explicit shape override the platform", () => {
+    expect(isVerticalFormat("Instagram", "Landscape Video")).toBe(false);
+    expect(isVerticalFormat("YouTube", "Vertical Video")).toBe(true);
+  });
+
   it("handles the other vertical formats the planner produces", () => {
     for (const f of ["Reel/Video", "Reel", "Story", "Short Video", "Portrait"]) {
       expect(isVerticalFormat("Instagram", f), f).toBe(true);
@@ -49,6 +73,8 @@ describe("videoAspectRatio", () => {
     expect(videoAspectRatio("YouTube", "Video")).toBe("16:9");
     expect(videoAspectRatio("Facebook", "Video")).toBe("16:9");
     expect(videoAspectRatio("LinkedIn", "Article")).toBe("16:9");
+    expect(videoAspectRatio("Instagram", "Video")).toBe("9:16");
+    expect(videoAspectRatio("TikTok", "Video")).toBe("9:16");
   });
 
   it("only ever returns a ratio Veo accepts", () => {
@@ -70,6 +96,8 @@ describe("imageAspectRatio", () => {
   it("keeps the existing shapes for everything else", () => {
     expect(imageAspectRatio("Instagram", "Single Image")).toBe("1:1");
     expect(imageAspectRatio("Instagram", "Carousel")).toBe("1:1");
+    // A cover still for an Instagram video is tall, like the clip it fronts.
+    expect(imageAspectRatio("Instagram", "Video")).toBe("9:16");
     expect(imageAspectRatio("LinkedIn", "Single Image")).toBe("16:9");
     expect(imageAspectRatio("Pinterest", "Pin")).toBe("2:3");
     expect(imageAspectRatio("", "")).toBe("1:1");
