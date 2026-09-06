@@ -369,6 +369,24 @@ export default function CompetitiveReportView() {
     </div>
   );
 
+  /** The analysis's written notes for one company, matched by name. */
+  const breakdownFor = (name: string) =>
+    (ai.competitor_breakdowns || []).find((x: any) => (x.name || "").toLowerCase() === name.toLowerCase());
+
+  /** The dimensions the analysis describes in words, one row each. */
+  const breakdownRows = (
+    [
+      { label: "Copy", key: "copy_style" },
+      { label: "Look", key: "design_look" },
+      { label: "Mix", key: "content_type_mix" },
+    ] as const
+  )
+    .map((row) => ({
+      label: row.label,
+      valueFor: (name: string) => breakdownFor(name)?.[row.key] as string | undefined,
+    }))
+    .filter((row) => ordered.some((c) => row.valueFor(c.name)));
+
   // The running order for the rail. It drops whatever this report does not
   // have, so every section can be listed unconditionally.
   const navItems = [
@@ -522,8 +540,7 @@ export default function CompetitiveReportView() {
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {ordered.map((c) => {
                 const b = bucketFor(c, effectivePlat);
-                const breakdown = (ai.competitor_breakdowns || []).find((x: any) => (x.name || "").toLowerCase() === c.name.toLowerCase());
-                const platformNote = effectivePlat !== "all" ? (breakdown?.platform_notes || []).find((n: any) => normalizePlatform(n.platform) === effectivePlat)?.note : null;
+                const platformNote = effectivePlat !== "all" ? (breakdownFor(c.name)?.platform_notes || []).find((n: any) => normalizePlatform(n.platform) === effectivePlat)?.note : null;
                 return (
                   <Card key={c.company_id} className={c.is_client ? "glass-accent" : ""}>
                     <CardHeader className="pb-3">
@@ -562,16 +579,10 @@ export default function CompetitiveReportView() {
                           {b.media_type_mix.slice(0, 4).map((m) => <Chip key={m.key}>{m.key} · {m.count}</Chip>)}
                         </div>
                       )}
-                      {(platformNote || breakdown) && (
-                        // Three run-on sentences with "Copy:" and "Look:" buried
-                        // at the head of each is a wall in a column this narrow.
-                        // The label stands over the passage it belongs to.
-                        <dl className="space-y-3 border-t border-[rgba(255,255,255,0.06)] pt-3">
-                          {platformNote && <TileNote label={platformLabel(effectivePlat)} text={platformNote} />}
-                          {breakdown?.copy_style && <TileNote label="Copy" text={breakdown.copy_style} />}
-                          {breakdown?.design_look && <TileNote label="Look" text={breakdown.design_look} />}
-                          {breakdown?.content_type_mix && <TileNote label="Mix" text={breakdown.content_type_mix} />}
-                        </dl>
+                      {platformNote && (
+                        <div className="border-t border-[rgba(255,255,255,0.06)] pt-3">
+                          <TileNote label={platformLabel(effectivePlat)} text={platformNote} />
+                        </div>
                       )}
                       {b.top_hashtags?.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 items-center">
@@ -584,6 +595,46 @@ export default function CompetitiveReportView() {
                 );
               })}
             </div>
+            {/* How they write and how they look, side by side.
+                These read as three paragraphs stacked in every tile, four
+                tiles across, which is twelve passages to hold in your head at
+                once. Comparing one dimension across the field is the actual
+                job, and a row does that in a glance. */}
+            {breakdownRows.length > 0 && (
+              <Card>
+                <CardContent className="pt-5">
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr>
+                          <th className="t-label uppercase tracking-wider text-left align-bottom pb-3 pr-6 w-[92px]" />
+                          {ordered.map((c) => (
+                            <th key={c.company_id} className="text-left align-bottom pb-3 pr-6 last:pr-0 min-w-[240px]">
+                              <span className="t-body font-semibold text-white">{c.name}</span>
+                              {c.is_client && <span className="t-label !text-[#b9e045] ml-2">client</span>}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {breakdownRows.map((row) => (
+                          <tr key={row.label} className="border-t border-[rgba(255,255,255,0.06)] align-top">
+                            <th scope="row" className="t-label uppercase tracking-wider !text-white/70 font-semibold text-left py-4 pr-6">
+                              {row.label}
+                            </th>
+                            {ordered.map((c) => (
+                              <td key={c.company_id} className="t-body py-4 pr-6 last:pr-0 min-w-[240px]">
+                                {row.valueFor(c.name) || <span className="t-label">—</span>}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </Section>
         )}
 
