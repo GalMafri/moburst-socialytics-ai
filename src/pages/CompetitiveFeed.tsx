@@ -162,7 +162,13 @@ export default function CompetitiveFeed() {
     return diffCompanies(aggregatePosts(prev.socialPosts || [], days(prev.window), client?.name), aggregatePosts(payload.socialPosts || [], days(payload.window), client?.name), 6);
   }, [prevSnapshot, payload, client?.name]);
   const platforms = useMemo(() => Array.from(new Set(posts.map((p) => normalizePlatform(p.channel)).filter(Boolean))), [posts]);
-  const visible = posts.filter((p) => (company === "all" || (p.companyName || String(p.companyId)) === company) && (plat === "all" || normalizePlatform(p.channel) === plat)).slice(0, 60);
+  // RivalIQ returns X posts with no link, caption or image. A tile for one is an
+  // empty box with a "Draft our take" button that has nothing to work from, so
+  // they are counted in a footnote instead, as they are on the report.
+  const hasContent = (p: FeedPost) => !!(p.postLink || p.message || p.image);
+  const matching = posts.filter((p) => (company === "all" || (p.companyName || String(p.companyId)) === company) && (plat === "all" || normalizePlatform(p.channel) === plat)).slice(0, 60);
+  const visible = matching.filter(hasContent);
+  const contentless = matching.length - visible.length;
   const { previews } = usePostPreviews(visible.map((p) => ({ url: p.postLink, image: p.image || null, mediaType: p.type })));
   const byUrl = useMemo(() => new Map(posts.filter((p) => p.postLink).map((p) => [p.postLink as string, p])), [posts]);
 
@@ -274,7 +280,7 @@ export default function CompetitiveFeed() {
 
             {/* Posts */}
             {visible.length === 0 ? (
-              <p className="t-secondary">No posts match these filters.</p>
+              <div className="glass-inner p-4"><p className="t-body">No posts match these filters.</p></div>
             ) : (
               <div className="grid gap-4 grid-cols-2 md:grid-cols-3 xl:grid-cols-4 items-start">
                 {visible.map((p, i) => (
@@ -306,6 +312,9 @@ export default function CompetitiveFeed() {
                   </div>
                 ))}
               </div>
+            )}
+            {contentless > 0 && (
+              <p className="t-label">{contentless} X {contentless === 1 ? "post is" : "posts are"} counted in the totals only: RivalIQ sends no link, caption or image for X.</p>
             )}
           </>
         )}

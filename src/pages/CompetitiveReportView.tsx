@@ -282,6 +282,10 @@ export default function CompetitiveReportView() {
   const meM = me ? metricsFor(me) : null;
   const followersRows = withMetrics.filter((x) => x.m.audience && x.m.audience.current > 0).map((x) => ({ key: x.c.company_id, label: x.c.name, name: x.c.name, value: x.m.audience!.current, emphasized: x.c.is_client }));
   const previousDays = me?.rivaliq_metrics?.previous_period ? Math.round((Date.parse(me.rivaliq_metrics.previous_period.end) - Date.parse(me.rivaliq_metrics.previous_period.start)) / 86400000) + 1 : null;
+  // RivalIQ answers "No Prediction" for most Facebook pages, and the signal does
+  // not exist off Facebook at all, so only explain it when a company actually
+  // has boosted posts to show.
+  const anyBoosted = withMetrics.some((x) => (x.m.boosted?.current || 0) > 0);
 
   // Every creative a company ran in the period (all channels, or the filtered
   // one), for the mood board grids.
@@ -422,7 +426,7 @@ export default function CompetitiveReportView() {
             id="changes"
             index={next()}
             title={<><History className="h-5 w-5" /> Since the last report</>}
-            description={<>Against the report of {new Date(previous.created_at).toLocaleDateString()} covering {formatRange(periodOf(previous))}. Cadence is per week, so periods of different lengths compare fairly.</>}
+            description={<>Against the previous report on this landscape, covering {formatRange(periodOf(previous))}. Cadence is per week, so periods of different lengths compare fairly.</>}
           >
             {changes.length > 0 ? (
               <ChangeCards changes={changes} />
@@ -457,11 +461,12 @@ export default function CompetitiveReportView() {
 
         {/* The field */}
         {companies.length > 0 && (
-          <section id="field" className="space-y-4 scroll-mt-28">
-            <div className="glass px-5 py-4">
-              <h2 className="t-h2 flex items-center gap-3"><span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">{String(next()).padStart(2, "0")}</span><span>The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</span></h2>
-              <p className="t-secondary">Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates.</p>
-            </div>
+          <Section
+            id="field"
+            index={next()}
+            title={<>The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</>}
+            description="Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates."
+          >
             <Card>
               <CardContent className="pt-5 grid gap-8 lg:grid-cols-2">
                 <div className="space-y-3">
@@ -530,7 +535,7 @@ export default function CompetitiveReportView() {
                 );
               })}
             </div>
-          </section>
+          </Section>
         )}
 
         {/* Audience and momentum: RivalIQ's own period totals against the previous period */}
@@ -539,7 +544,7 @@ export default function CompetitiveReportView() {
             id="audience"
             index={next()}
             title={<><Users className="h-5 w-5" /> Audience and momentum{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</>}
-            description={<>RivalIQ's own totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}: followers, engagement, estimated impressions and posts for every company. "Likely boosted" is RivalIQ's estimate of paid promotion on Facebook.</>}
+            description={<>RivalIQ's own totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}: followers, engagement, estimated impressions and posts for every company.{anyBoosted ? " \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook." : ""}</>}
           >
             <Card>
               <CardContent className="pt-5 space-y-6">
@@ -566,8 +571,11 @@ export default function CompetitiveReportView() {
                           <MetricRow label="Posts" value={m.posts} format={(v) => String(Math.round(v))} signed={c.is_client} />
                         </div>
                         {nets.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {nets.map(([net, n]) => <Chip key={net}>{platformLabel(net)} <span className="text-muted-foreground ml-1">{compactNumber(n.followers!.current)}</span></Chip>)}
+                          <div className="space-y-1.5">
+                            <p className="t-label uppercase tracking-wider">Followers by network</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {nets.map(([net, n]) => <Chip key={net}>{platformLabel(net)} <span className="text-muted-foreground ml-1">{compactNumber(n.followers!.current)}</span></Chip>)}
+                            </div>
                           </div>
                         )}
                         {boosted > 0 && (
@@ -624,21 +632,22 @@ export default function CompetitiveReportView() {
 
         {/* Gaps */}
         {(gaps.length > 0 || hiddenGaps.length > 0) && (
-          <section id="gaps" className="space-y-4 scroll-mt-28">
-            <div className="flex items-end justify-between gap-4 flex-wrap">
-              <div className="glass px-5 py-4 flex-1 min-w-0">
-                <h2 className="t-h2 flex items-center gap-3"><span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">{String(next()).padStart(2, "0")}</span><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</h2>
-                <p className="t-secondary" data-print={isMoburstStaff ? "hide" : undefined}>
-                  {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
-                </p>
-              </div>
-              {isMoburstStaff && hiddenGaps.length > 0 && (
-                <Button data-print="hide" variant="ghost" size="sm" onClick={() => setShowHidden((v) => !v)}>
-                  <Eye className="h-4 w-4 mr-1" /> {showHidden ? "Hide" : "Show"} {hiddenGaps.length} hidden suggestion{hiddenGaps.length === 1 ? "" : "s"}
-                </Button>
-              )}
-            </div>
-            {gaps.length === 0 && <p className="t-secondary">Every suggestion for this view has been hidden by the team.</p>}
+          <Section
+            id="gaps"
+            index={next()}
+            title={<><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</>}
+            description={
+              <span data-print={isMoburstStaff ? "hide" : undefined}>
+                {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
+              </span>
+            }
+            action={isMoburstStaff && hiddenGaps.length > 0 ? (
+              <Button data-print="hide" variant="ghost" size="sm" onClick={() => setShowHidden((v) => !v)}>
+                <Eye className="h-4 w-4 mr-1" /> {showHidden ? "Hide" : "Show"} {hiddenGaps.length} hidden suggestion{hiddenGaps.length === 1 ? "" : "s"}
+              </Button>
+            ) : undefined}
+          >
+            {gaps.length === 0 && <div className="glass-inner p-4"><p className="t-body">Every suggestion for this view has been hidden by the team.</p></div>}
             <div className="grid gap-4 md:grid-cols-2">
               {gaps.map((g: any, i: number) => {
                 const v = verdictFor(g.gap);
@@ -692,7 +701,7 @@ export default function CompetitiveReportView() {
                   </CardContent>
                 </Card>
             )}
-          </section>
+          </Section>
         )}
 
         {/* Winner teardown */}

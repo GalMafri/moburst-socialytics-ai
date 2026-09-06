@@ -972,8 +972,9 @@ function TrendsSection({
                           {sl && <Badge variant="outline" className="t-label shrink-0" style={{ color: sl.color, borderColor: `${sl.color}55` }} title={getScoreExplanation(platform)}>Score: {Number(post.engagement_score).toLocaleString()} {sl.label}</Badge>}
                         </div>
                         <p className="t-body line-clamp-4">{post.caption}</p>
+                        {/* A hashtag has no spaces to wrap at, so one long enough (#fyppppp…) runs past the card unless it may break mid-word. */}
                         {Array.isArray(post.hashtags) && post.hashtags.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">{post.hashtags.slice(0, 6).map((h: string) => <span key={h} className="t-label text-primary">{h.startsWith("#") ? h : `#${h}`}</span>)}</div>
+                          <div className="flex flex-wrap gap-1.5 min-w-0">{post.hashtags.slice(0, 6).map((h: string) => <span key={h} className="t-label text-primary max-w-full break-all">{h.startsWith("#") ? h : `#${h}`}</span>)}</div>
                         )}
                         <div className="flex items-center gap-4 t-secondary">
                           {post.views != null && <span className="flex items-center gap-1"><Eye className="h-3.5 w-3.5" />{Number(post.views).toLocaleString()}</span>}

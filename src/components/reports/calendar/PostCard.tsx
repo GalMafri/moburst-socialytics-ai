@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { PlatformBadge } from "@/lib/platform-config";
 import { Clock, ImagePlus, Loader2, Sparkles, Video as VideoIcon } from "lucide-react";
@@ -36,6 +37,22 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
   // Active generation for this post — drives the in-card loading overlay and
   // the generating badge. Survives modal close because it lives in context.
   const activeGen = useGenerationForPost(post);
+
+  // The grid keeps captions to three lines. Folded AI copy has to say so, or a
+  // reader takes the card at face value and never opens the full post; the cue
+  // only appears when the text is actually cut, and print shows it all anyway.
+  const copyRef = useRef<HTMLParagraphElement>(null);
+  const [copyClamped, setCopyClamped] = useState(false);
+  useEffect(() => {
+    const el = copyRef.current;
+    if (!el) return;
+    const check = () => setCopyClamped(el.scrollHeight > el.clientHeight + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [copy]);
+
   const isGenerating = activeGen?.status === "running";
   const genJustCompleted =
     activeGen?.status === "completed" &&
@@ -132,9 +149,14 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
 
       {/* Copy */}
       {copy && (
-        <p className="t-body leading-relaxed tracking-[-0.5px] line-clamp-3 print:line-clamp-none text-foreground flex-1">
-          {copy}
-        </p>
+        <div className="space-y-1 flex-1">
+          <p ref={copyRef} className="t-body leading-relaxed tracking-[-0.5px] line-clamp-3 print:line-clamp-none text-foreground">
+            {copy}
+          </p>
+          {copyClamped && (
+            <span className="t-label !text-[#b9e045] print:hidden">Open to read the full copy</span>
+          )}
+        </div>
       )}
 
       {/* Status (or in-flight pill) */}

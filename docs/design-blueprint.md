@@ -51,13 +51,15 @@ highlights, recommendations):
 1. **At a glance**: six KPI tiles, this period against the previous one.
 2. **Highlights**: the month-over-month summary and the numbered key insights, plus top performing
    content types. The "why" behind the numbers.
-3. **Against the field**: benchmark score, share of voice, cadence, with the link to the Competitive tab.
-4. **Period-over-period performance**: the comparison chart.
-5. **Performance by platform**: one card per connected account, every insight shown.
-6. **Top posts**: by impressions and by engagement, with a platform filter.
-7. **Content pillar alignment**.
-8. **Where to act next**: every recommendation with its evidence link, closing the report.
-9. **In this report**: data counts, as a footer band.
+3. **Where to act next**: every recommendation with its evidence link. It sits third, not last: the
+   reader who stops after the headline still leaves with the actions.
+4. **Against the field**: benchmark score, share of voice, cadence, with the link to the Competitive tab.
+5. **Period-over-period performance**: the comparison chart.
+6. **Performance by platform**: one card per connected account, every insight shown.
+7. **Top posts**: by impressions and by engagement, with a platform filter.
+8. **Content pillar alignment**.
+
+**In this report** closes the page as an unnumbered footer band carrying the data counts.
 
 Other tabs stay: Content Ideas, Trends, Competitive.
 

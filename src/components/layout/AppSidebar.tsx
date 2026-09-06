@@ -48,7 +48,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="text-[#b1b7c1]/70 uppercase text-[12px] tracking-wider">Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel className="t-label uppercase tracking-wider">Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {/* Switch Tool — only for gOS (moburst.ai) sessions; never shown
