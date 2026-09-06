@@ -112,7 +112,9 @@ async function proposeCompetitors(args: {
       body: JSON.stringify({
         model: "claude-sonnet-5",
         max_tokens: maxTokens,
-        temperature: 0,
+        // No temperature: Claude 5 rejects it outright ("temperature is
+        // deprecated for this model", HTTP 400). The JSON prefill below is what
+        // keeps the shape steady, which is what the 0 was for.
         system:
           "You are a competitive intelligence analyst for a social media marketing agency. " +
           "You identify DIRECT competitors: companies a customer would genuinely consider instead, " +

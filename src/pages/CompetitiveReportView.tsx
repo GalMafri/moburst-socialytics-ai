@@ -128,6 +128,28 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * The evidence behind a winning pattern, folded away until asked for.
+ *
+ * A native details/summary: no state, and it prints open. The passage lives
+ * inside the summary because a details' other children are hidden when it is
+ * closed, and `group-open` is what expands it.
+ */
+function Evidence({ text }: { text?: string | null }) {
+  if (!text) return null;
+  return (
+    <details className="group">
+      <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer">
+        <span className="t-label !text-[#b9e045] group-open:hidden">Show the evidence</span>
+        <span className="t-label !text-[#9ca3af] hidden group-open:inline">Hide the evidence</span>
+        <div className="hidden group-open:block mt-2 print:!block">
+          <Prose text={text} cards={false} />
+        </div>
+      </summary>
+    </details>
+  );
+}
+
 /** One figure in a company tile. `exact` goes in the tooltip when the shown value is rounded. */
 function TileStat({ value, label, exact }: { value: string; label: string; exact?: string }) {
   return (
@@ -749,11 +771,15 @@ export default function CompetitiveReportView() {
                   return (
                     <div key={i} className="glass-inner p-4 space-y-3">
                       <p className="t-label uppercase tracking-wider">{w.competitor}</p>
-                      <p className="font-semibold leading-snug">{w.pattern}</p>
-                      {/* Through Prose: it drops the links this passage cites —
-                          they are the tiles below it — and breaks a slab on
-                          sentence boundaries so it arrives as paragraphs. */}
-                      <Prose text={w.evidence} cards={false} />
+                      {/* The pattern is the point of the tile, so it is the only
+                          thing set at full strength. It used to be five lines of
+                          bold over five lines of body, which is two walls. */}
+                      <p className="t-body text-white leading-[1.55]">{w.pattern}</p>
+                      {/* The evidence behind it is folded away: it is the numbers
+                          for the posts shown underneath, worth having, not worth
+                          reading four times over on one screen. Prose drops the
+                          links it cites — they are those tiles. */}
+                      <Evidence text={w.evidence} />
                       {examples.length > 0 && (
                         <div className={`grid gap-2 items-start pt-1 ${examples.length === 1 ? "grid-cols-1" : examples.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
                           {examples.map((ex, j) => (

@@ -57,10 +57,12 @@ export function groupSentences(sentences: string[], target = 260): string[] {
  * card empty. Long paragraphs are regrouped on sentence boundaries; every word
  * is kept, only paragraph breaks are added. Anything shorter is left alone.
  */
-export function reflowParagraph(paragraph: string, { min = 420, target = 260 } = {}): string[] {
+export function reflowParagraph(paragraph: string, { min = 300, target = 220 } = {}): string[] {
   if (paragraph.length <= min) return [paragraph];
   const sentences = splitSentences(paragraph);
-  if (sentences.length < 3) return [paragraph];
+  // Two sentences of 250 characters each are two paragraphs, not one: the
+  // floor used to be three, which left the densest passages in one block.
+  if (sentences.length < 2) return [paragraph];
   const grouped = groupSentences(sentences, target);
   return grouped.length > 1 ? grouped : [paragraph];
 }

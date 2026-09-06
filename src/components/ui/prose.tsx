@@ -191,13 +191,38 @@ export function leadFigure(text: string): { value: string; unit: string } | null
   return null;
 }
 
+/**
+ * Figures set in white so the eye can land on them.
+ *
+ * These passages are numbers carried in sentences — "30/54 posts (56%) across
+ * channels, and on Instagram 9/17 (53%)" — and at one weight and one colour
+ * the whole thing is a grey slab whatever the measure.
+ */
+function Figures({ text }: { text: string }): ReactNode {
+  const parts = text.split(FIGURE);
+  if (parts.length === 1) return text;
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <span key={i} className="text-white font-medium tabular-nums">
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
+
 /** "Volume/cadence: the rest" → bold "Volume/cadence:" followed by the rest. */
 function withLead(s: string): ReactNode {
   const m = s.match(/^([A-Z][^.:;!?]{1,42}):\s+(?=\S)/);
-  if (!m) return s;
+  if (!m) return <Figures text={s} />;
   return (
     <>
-      <strong className="font-semibold text-white">{m[1]}:</strong> {s.slice(m[0].length)}
+      <strong className="font-semibold text-white">{m[1]}:</strong> <Figures text={s.slice(m[0].length)} />
     </>
   );
 }
