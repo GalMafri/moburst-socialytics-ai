@@ -53,12 +53,20 @@ export function Prose({ text, className, columns = true, cards = true }: { text:
               {title && (
                 <dt className="min-w-0">
                   {lead && (
+                    // The unit sits on its own line rather than beside the
+                    // number: "30 days" fits in the column and "41,317
+                    // engagements" does not, and a unit that wraps on some rows
+                    // and not others is what makes a column look accidental.
                     <p className="text-[28px] leading-[32px] font-bold tracking-[-0.5px] tabular-nums text-white">
                       {lead.value}
-                      {lead.unit && <span className="text-[15px] font-medium tracking-normal text-[#9ca3af]"> {lead.unit}</span>}
+                      {lead.unit && (
+                        <span className="block text-[13px] leading-[18px] font-normal tracking-normal text-[#9ca3af]">
+                          {lead.unit}
+                        </span>
+                      )}
                     </p>
                   )}
-                  <p className={cn("t-label uppercase tracking-wider !text-white/85 font-semibold", lead ? "mt-1.5" : "md:pt-[3px]")}>
+                  <p className={cn("t-label uppercase tracking-wider !text-white/85 font-semibold", lead ? "mt-2" : "md:pt-[3px]")}>
                     {title}
                   </p>
                   {aside && <p className="t-label !text-[#6b7280]">{aside}</p>}
