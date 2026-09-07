@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { reflowParagraph, withoutUrls } from "@/lib/prose";
+import { nameifyDomains } from "@/lib/companyName";
 
 /**
  * Renders AI-written passages in full, structured for reading instead of
@@ -19,7 +20,9 @@ export function Prose({ text, className, cards = true }: { text: string | null |
   // Cited links are dropped: nothing here renders a URL as a link, so they sit
   // in the middle of a sentence as a line of unreadable characters, and where a
   // passage cites posts the page shows those posts as tiles anyway.
-  const paragraphs = withoutUrls(String(text))
+  // …and a competitor called by its domain gets its name back, for the same
+  // reason: the landscape's spelling is not the reader's problem.
+  const paragraphs = nameifyDomains(withoutUrls(String(text)))
     .split(/\n{2,}|\n(?=\s*(?:[-•*]|\d+[.)]))/)
     .map((p) => p.trim())
     .filter(Boolean);

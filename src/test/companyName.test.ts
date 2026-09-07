@@ -32,3 +32,25 @@ describe("displayCompanyName", () => {
     expect(nameWasDerived("")).toBe(false);
   });
 });
+
+describe("nameifyDomains", () => {
+  it("names the competitors an analysis refers to by domain", async () => {
+    const { nameifyDomains } = await import("../lib/companyName");
+    expect(
+      nameifyDomains("Morgan & Morgan spikes at 20:00 UTC, and reyeslaw.com centers 15:00–16:00 UTC."),
+    ).toBe("Morgan & Morgan spikes at 20:00 UTC, and Reyes Law centers 15:00–16:00 UTC.");
+  });
+
+  it("leaves a passage with no domains alone", async () => {
+    const { nameifyDomains } = await import("../lib/companyName");
+    const s = "Bader posted 54 times in-period (12.6 posts/week).";
+    expect(nameifyDomains(s)).toBe(s);
+  });
+
+  it("leaves a domain it cannot improve exactly as written", async () => {
+    const { nameifyDomains } = await import("../lib/companyName");
+    // Nothing to split and nothing to strip beyond the TLD: "Montlick" already
+    // reads as the name, so the sentence keeps whichever the analysis used.
+    expect(nameifyDomains("Traffic from montlick.com rose.")).toBe("Traffic from Montlick rose.");
+  });
+});

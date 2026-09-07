@@ -80,3 +80,21 @@ export function nameWasDerived(raw: string | null | undefined): boolean {
   const value = String(raw || "").trim();
   return !!value && value !== displayCompanyName(value);
 }
+
+/** A bare domain sitting in a sentence: "reyeslaw.com centers 15:00-16:00 UTC". */
+const DOMAIN_IN_TEXT = /\b([a-z0-9][a-z0-9-]{1,}\.(?:com|net|org|io|co|ai|app)(?:\.[a-z]{2})?)\b(\/?)/gi;
+
+/**
+ * The same treatment inside a written passage.
+ *
+ * The analysis calls a competitor whatever the landscape calls it, so a
+ * sentence reads "…while reyeslaw.com centers 15:00-16:00 UTC". Nothing else
+ * in these passages is a domain — links are stripped before this runs — so a
+ * domain here is a company, and it gets its name back.
+ */
+export function nameifyDomains(text: string): string {
+  return String(text || "").replace(DOMAIN_IN_TEXT, (match, domain) => {
+    const named = displayCompanyName(domain);
+    return named && named !== domain ? named : match;
+  });
+}
