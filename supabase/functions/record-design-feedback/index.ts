@@ -37,6 +37,11 @@ Deno.serve(async (req) => {
       return jsonResp({ error: "iteration_id and a verdict of rejected or archived are required" }, 400);
     }
 
+    // Staff first, before any lookup: an unauthenticated caller must not learn
+    // whether an id exists. The per-client write check follows once the row
+    // says which client this is.
+    const { userId, asCaller } = await requireStaff(req);
+
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: it, error: itErr } = await supabase
       .from("post_iterations")
@@ -46,8 +51,9 @@ Deno.serve(async (req) => {
     if (itErr) throw new Error(itErr.message);
     if (!it) return jsonResp({ error: "Design not found" }, 404);
 
-    // Staff with write access to this client, checked before anything changes.
-    const { userId } = await requireStaff(req, { writeClientId: it.client_id });
+    const { data: canWrite, error: writeErr } = await asCaller.rpc("can_write_client", { _client_id: it.client_id });
+    if (writeErr) throw new Error(`Access check failed: ${writeErr.message}`);
+    if (!canWrite) return jsonResp({ error: "You do not have access to this client." }, 403);
 
     const now = new Date().toISOString();
     const patch = verdict === "archived"
