@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil, Ban } from "lucide-react";
@@ -61,6 +62,22 @@ function isCarouselFormat(format?: string): boolean {
 
 type VariantSlot = string | null | "FAILED";
 
+/**
+ * The words to type onto a picture-only design: the first sentence of the copy,
+ * cut to eight words, as the headline in the top third; the call-to-action, if
+ * the post has one, low on the canvas where a button would sit.
+ */
+function seedOverlaysFor(post: any): Array<{ text: string; y: number; fontSize?: number; fontWeight?: "normal" | "bold" }> {
+  const copy = String(post?.copy || post?.hook || "").replace(/#[\w]+/g, "").trim();
+  const first = copy.split(/(?<=[.!?])\s+/)[0] || "";
+  const headline = first.split(/\s+/).slice(0, 8).join(" ").replace(/[.,;:]+$/, "");
+  const cta = String(post?.cta || "").trim().split(/\s+/).slice(0, 4).join(" ");
+  const out: Array<{ text: string; y: number; fontSize?: number; fontWeight?: "normal" | "bold" }> = [];
+  if (headline) out.push({ text: headline, y: 22, fontSize: 30, fontWeight: "bold" });
+  if (cta) out.push({ text: cta, y: 86, fontSize: 20, fontWeight: "bold" });
+  return out;
+}
+
 export function CreatePostDesignButton({ post, clientContext, brandIdentity, designReferences, brandBookFilePath, clientId, onImagesGenerated }: CreatePostDesignButtonProps) {
   const effectiveBrandIdentity = clientContext?.brand_identity ?? brandIdentity ?? null;
   const effectiveDesignReferences = clientContext?.design_references ?? designReferences ?? [];
@@ -78,6 +95,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const [editablePrompt, setEditablePrompt] = useState("");
   const [slideCount, setSlideCount] = useState(isCarousel ? 5 : 1);
   const [currentSlide, setCurrentSlide] = useState(0);
+  // Imagery only by default: the image model draws pictures well and letters
+  // badly, so the headline and call-to-action are typed on afterwards in the
+  // editor, in the brand's own face. Letting the model draw the words is the
+  // exception a reviewer opts into.
+  const [modelDrawsText, setModelDrawsText] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const [editableImageUrl, setEditableImageUrl] = useState<string | null>(null);
   // Phase 6 — multi-variant state. For carousels, each variant is a whole
@@ -275,6 +297,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           client_context: clientContext || undefined,
           client_id: clientId || clientContext?.client_id || undefined,
           client_name: clientContext?.client_name || undefined,
+          render_text: modelDrawsText,
           post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
           variant_angle: angle.instruction || undefined,
         },
@@ -326,6 +349,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 client_context: clientContext || undefined,
                 client_id: clientId || clientContext?.client_id || undefined,
                 client_name: clientContext?.client_name || undefined,
+          render_text: modelDrawsText,
                 post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
                 variant_angle: angleInstructions[i].instruction || undefined,
               },
@@ -512,6 +536,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               client_context: clientContext || undefined,
               client_id: clientId || clientContext?.client_id || undefined,
               client_name: clientContext?.client_name || undefined,
+          render_text: modelDrawsText,
               post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
               slide_context: { index: s, total: slides },
               variant_angle: variantAngle.instruction || undefined,
@@ -558,6 +583,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                     client_context: clientContext || undefined,
                     client_id: clientId || clientContext?.client_id || undefined,
                     client_name: clientContext?.client_name || undefined,
+          render_text: modelDrawsText,
                     post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
                     slide_context: { index: s, total: slides },
                     variant_angle: variantAngle.instruction || undefined,
@@ -805,6 +831,15 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               <p className="t-secondary">Fetching angle suggestions…</p>
             )}
 
+            {/* Who sets the words */}
+            <div className="glass-inner p-3 flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="t-body text-white">Let the model draw the text</p>
+                <p className="t-secondary">Off: the image is picture only and you type the headline and call-to-action in the editor, in the brand's typeface. On: the model renders the words itself — faster, but it misspells and invents lettering.</p>
+              </div>
+              <Switch checked={modelDrawsText} onCheckedChange={setModelDrawsText} aria-label="Let the model draw the text" />
+            </div>
+
             {/* Editable prompt */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -1001,6 +1036,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           imageUrl={editableImageUrl}
           brandIdentity={effectiveBrandIdentity}
           clientId={clientId || ""}
+          initialOverlays={modelDrawsText ? undefined : seedOverlaysFor(post)}
           onSave={(dataUrl) => {
             // Replace the edited image in the variants array
             setVariantUrls((prev) => {

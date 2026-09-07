@@ -38,6 +38,12 @@ export interface BuildImagePromptInput {
    * rule cannot remove what the seed already contains.
    */
   noText?: boolean;
+  /**
+   * What this client's reviewers rejected before, from record-design-feedback.
+   * Placed right after the brand language so it shapes the composition rather
+   * than trailing it as a footnote.
+   */
+  learnings?: { avoid: string[]; prefer: string[] } | null;
 }
 
 const HEX_RE = /#[0-9A-Fa-f]{3,8}\b/g;
@@ -167,6 +173,24 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
         `${sanitizedBase}${pillarLabel}${langLabel}\n\n` +
         `This is a complete, ready-to-post social media image — not a placeholder, abstract ` +
         `background, or generic stock. Treat it like work a senior social media designer would ship.`,
+    );
+  }
+
+  // 2b. What the reviewers have already rejected for this client.
+  if (input.learnings && (input.learnings.avoid.length || input.learnings.prefer.length)) {
+    const lines: string[] = ["## Learned from this client's reviews", "Designs were rejected before for the reasons below. Treat these as brand rules."];
+    for (const a of input.learnings.avoid.slice(0, 6)) lines.push(`- Avoid: ${a}`);
+    for (const p of input.learnings.prefer.slice(0, 4)) lines.push(`- Prefer: ${p}`);
+    sections.push(lines.join("\n"));
+  }
+
+  // 2c. A still that will carry typed text later leaves room for it.
+  if (input.noText && !input.slideContext) {
+    sections.push(
+      `## Composition for typed text\n` +
+        `The headline and any call-to-action will be set as real typography on top of this image afterwards. ` +
+        `Compose for that: keep the upper third calm and uncluttered as a field for a headline, and leave a quiet area near the bottom for a button. ` +
+        `Put the subject and visual interest in the middle band. No text of any kind in the image itself.`,
     );
   }
 

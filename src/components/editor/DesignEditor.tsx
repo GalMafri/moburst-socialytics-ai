@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +32,8 @@ export interface DesignEditorProps {
   clientId: string;
   onSave: (exportedDataUrl: string) => void;
   onClose: () => void;
+  /** Text to start with — the post's headline and call-to-action, typed in the brand's face. */
+  initialOverlays?: Array<{ text: string; y: number; fontSize?: number; fontWeight?: "normal" | "bold"; color?: string }>;
 }
 
 interface TextOverlay {
@@ -44,9 +46,33 @@ interface TextOverlay {
   fontWeight: "normal" | "bold";
 }
 
-export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClose }: DesignEditorProps) {
+export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClose, initialOverlays }: DesignEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [overlays, setOverlays] = useState<TextOverlay[]>([]);
+  // The brand's typeface, loaded from Google Fonts when it is one; the
+  // preview and the export both set it, so what you see is what ships.
+  const fontFamily = (brandIdentity?.font_family || "").split(",")[0].trim().replace(/['"]/g, "") || "";
+  useEffect(() => {
+    if (!fontFamily) return;
+    const id = `brand-font-${fontFamily.replace(/\s+/g, "-").toLowerCase()}`;
+    if (document.getElementById(id)) return;
+    const link = document.createElement("link");
+    link.id = id;
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontFamily).replace(/%20/g, "+")}:wght@400;700&display=swap`;
+    document.head.appendChild(link);
+  }, [fontFamily]);
+  const fontStack = fontFamily ? `"${fontFamily}", "Geist", ui-sans-serif, system-ui, sans-serif` : `"Geist", ui-sans-serif, system-ui, sans-serif`;
+  const [overlays, setOverlays] = useState<TextOverlay[]>(() =>
+    (initialOverlays || []).filter((o) => o.text.trim()).map((o, i) => ({
+      id: `seed-${i}`,
+      text: o.text,
+      x: 50,
+      y: o.y,
+      color: o.color || brandIdentity?.primary_color || "#ffffff",
+      fontSize: o.fontSize || 28,
+      fontWeight: o.fontWeight || "bold",
+    })),
+  );
   const [selectedOverlay, setSelectedOverlay] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -140,11 +166,14 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
       const ctx = canvas.getContext("2d")!;
       ctx.drawImage(loadedImg, 0, 0);
 
+      // The brand face must be loaded before it is drawn, or the canvas falls
+      // back silently and the export differs from the preview.
+      try { await (document as any).fonts?.ready; } catch { /* draw anyway */ }
       // Draw text overlays
       for (const ov of overlays) {
         if (!ov.text.trim()) continue;
         ctx.save();
-        ctx.font = `${ov.fontWeight} ${ov.fontSize * (canvas.width / 800)}px sans-serif`;
+        ctx.font = `${ov.fontWeight} ${ov.fontSize * (canvas.width / 800)}px ${fontStack}`;
         ctx.textAlign = "center";
         ctx.fillStyle = ov.color;
         ctx.shadowColor = "rgba(0,0,0,0.8)";
@@ -209,6 +238,7 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
                   top: `${ov.y}%`,
                   transform: "translate(-50%, -50%)",
                   fontSize: `${ov.fontSize}px`,
+                  fontFamily: fontStack,
                   fontWeight: ov.fontWeight,
                   color: ov.color,
                   textShadow: "2px 2px 6px rgba(0,0,0,0.9), 0 0 12px rgba(0,0,0,0.5)",

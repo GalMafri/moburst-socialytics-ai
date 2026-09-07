@@ -6,6 +6,7 @@ import { videoAspectRatio } from "../_shared/design-prompts/aspect.ts";
 import { brandFootingAdvice, footingOf, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
 import { correctionFor, validateDesignImage, verdictIsDirty } from "../_shared/design-prompts/validateImage.ts";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
+import { loadDesignLearnings, type DesignLearnings } from "../_shared/design-prompts/learnings.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -51,6 +52,7 @@ async function generateSeedImage(args: {
   post: any;
   variantAngle: string | null;
   aspectRatio: string;
+  learnings?: DesignLearnings | null;
 }): Promise<{ base64: string; mimeType: string } | null> {
   try {
     const seedPrompt = buildImagePrompt({
@@ -67,6 +69,7 @@ async function generateSeedImage(args: {
       synthesis: args.synthesis,
       post: args.post,
       variantAngle: args.variantAngle || undefined,
+      learnings: args.learnings || null,
     });
 
     const contentParts: any[] = [];
@@ -260,6 +263,7 @@ serve(async (req) => {
       post,
       variantAngle: variant_angle || null,
       aspectRatio,
+      learnings: await loadDesignLearnings(supabase, client_id || client_context?.client_id),
     });
     if (seedImage) {
       console.log("[generate-post-video] seed image ready — Veo will animate from brand-aligned frame");

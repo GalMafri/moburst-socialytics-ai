@@ -8,7 +8,10 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Check, Download, Expand, Sparkles, Star } from "lucide-react";
+import { Archive, Check, Download, Expand, Sparkles, Star, ThumbsDown } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useAuth } from "@/hooks/useAuth";
 import { PlatformBadge } from "@/lib/platform-config";
 import { CopyEditor } from "./CopyEditor";
@@ -47,6 +50,8 @@ interface Props {
   clientTimezone?: string;
   /** Toggle is_selected on a variant. */
   onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
+  /** Reject (with a reason the app learns from) or archive a variant. Staff only. */
+  onFeedback?: (iterationId: string, verdict: "rejected" | "archived", reason?: string, note?: string) => Promise<void> | void;
 }
 
 function isVideoUrl(url: string): boolean {
@@ -116,6 +121,7 @@ export function PostPanel({
   reportId,
   clientTimezone,
   onToggleSelected,
+  onFeedback,
 }: Props) {
   const { isClient } = useAuth();
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -221,6 +227,7 @@ export function PostPanel({
                       filenameStub={`design-${post.platform || "post"}`}
                       onPreview={() => openPreview(tile.url, false)}
                       onToggleSelected={onToggleSelected}
+                      onFeedback={isClient ? undefined : onFeedback}
                     />
                   ))}
                 </div>
@@ -270,6 +277,7 @@ export function PostPanel({
                       filenameStub={`video-${post.platform || "post"}`}
                       onPreview={() => openPreview(tile.url, true)}
                       onToggleSelected={onToggleSelected}
+                      onFeedback={isClient ? undefined : onFeedback}
                     />
                   ))}
                 </div>
@@ -349,7 +357,17 @@ interface TileCardProps {
   filenameStub: string;
   onPreview: () => void;
   onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
+  onFeedback?: (iterationId: string, verdict: "rejected" | "archived", reason?: string, note?: string) => Promise<void> | void;
 }
+
+const REJECT_REASONS: Array<{ value: string; label: string }> = [
+  { value: "off_brand_colours", label: "Off-brand colours" },
+  { value: "wrong_style", label: "Wrong style or layout" },
+  { value: "text_errors", label: "Text is wrong or garbled" },
+  { value: "logo_or_mark", label: "Shows a logo or mark it shouldn't" },
+  { value: "not_relevant", label: "Doesn't fit the message" },
+  { value: "other", label: "Something else" },
+];
 
 function MediaTileCard({
   tile,
@@ -358,8 +376,24 @@ function MediaTileCard({
   filenameStub,
   onPreview,
   onToggleSelected,
+  onFeedback,
 }: TileCardProps) {
   const canToggle = !!tile.iterationId && !!onToggleSelected;
+  const canReview = !!tile.iterationId && !!onFeedback;
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("wrong_style");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (verdict: "rejected" | "archived") => {
+    if (!tile.iterationId || !onFeedback) return;
+    setBusy(true);
+    try {
+      await onFeedback(tile.iterationId, verdict, verdict === "rejected" ? reason : undefined, verdict === "rejected" ? note : undefined);
+      setRejecting(false);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div
       className={`glass-inner overflow-hidden border ${
@@ -407,6 +441,16 @@ function MediaTileCard({
               />
             </Button>
           )}
+          {canReview && (
+            <>
+              <Button variant="ghost" size="sm" className="h-9 px-2" title="Reject and teach the app why" aria-label="Reject this design" onClick={() => setRejecting(true)} disabled={busy}>
+                <ThumbsDown className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-9 px-2" title="Archive without feedback" aria-label="Archive this design" onClick={() => submit("archived")} disabled={busy}>
+                <Archive className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          )}
           <a
             href={tile.url}
             download={`${filenameStub}-${index + 1}.${isVideo ? "mp4" : "png"}`}
@@ -414,10 +458,39 @@ function MediaTileCard({
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
           >
-            <Button variant="ghost" size="sm" className="h-8 px-2 text-sm">
+            <Button variant="ghost" size="sm" className="h-9 px-2">
               <Download className="h-3 w-3 mr-1" /> Download
             </Button>
           </a>
+          {/* The reason is what turns a rejection into a rule for the next design. */}
+          <Dialog open={rejecting} onOpenChange={setRejecting}>
+            <DialogContent className="max-w-md">
+              <div className="space-y-4">
+                <div>
+                  <h2 className="t-h3">Why is this one wrong?</h2>
+                  <p className="t-secondary mt-1">The design is hidden either way. The reason becomes a rule the next designs for this client follow.</p>
+                </div>
+                <RadioGroup value={reason} onValueChange={setReason} className="space-y-2">
+                  {REJECT_REASONS.map((r) => (
+                    <div key={r.value} className="flex items-center gap-2">
+                      <RadioGroupItem value={r.value} id={`reason-${tile.iterationId}-${r.value}`} />
+                      <Label htmlFor={`reason-${tile.iterationId}-${r.value}`} className="t-body font-normal">{r.label}</Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`note-${tile.iterationId}`} className="t-label">Anything specific? (optional)</Label>
+                  <Textarea id={`note-${tile.iterationId}`} value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="e.g. the red button — this brand never uses red" className="t-body" />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setRejecting(false)} disabled={busy}>Cancel</Button>
+                  <Button size="sm" onClick={() => submit("rejected")} disabled={busy}>
+                    <ThumbsDown className="h-3.5 w-3.5 mr-1.5" /> Reject and learn
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>

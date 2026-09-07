@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
+import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
 import { imageAspectRatio } from "../_shared/design-prompts/aspect.ts";
 import { brandFootingAdvice, footingOf, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
 
@@ -144,6 +145,7 @@ Deno.serve(async (req) => {
       post,                           // new — post-level brief
       slide_context,                  // new — { index, total } for carousels
       variant_angle,                  // new — creative angle override (Phase 6)
+      render_text,                    // false → imagery only; the app types the words on top
     } = await req.json();
 
     if (!prompt) {
@@ -220,8 +222,12 @@ Deno.serve(async (req) => {
 
     // ── Build the design prompt ──
     const aspectRatio = imageAspectRatio(platform, format);
+    // Rules learned from this client's rejected designs, if any.
+    const learnings = await loadDesignLearnings(brandDb, client_id || client_context?.client_id);
     const designPrompt = buildImagePrompt({
       basePrompt: prompt,
+      noText: render_text === false,
+      learnings,
       platform,
       format,
       brandIdentity: resolvedBrand,

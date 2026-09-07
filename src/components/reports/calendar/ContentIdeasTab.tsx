@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
 import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
 import { CalendarKanban, findLatestSelectedIteration } from "./CalendarKanban";
@@ -46,6 +47,7 @@ export function ContentIdeasTab({
    *  bulletproof — no copy-slice heuristic, no realtime lag dependency. */
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const qc = useQueryClient();
+  const { toast } = useToast();
 
   useRealtimePostIterations(clientId);
 
@@ -53,10 +55,13 @@ export function ContentIdeasTab({
     queryKey: ["post-iterations", clientId],
     queryFn: async () => {
       if (!clientId) return [];
-      const { data } = await supabase
-        .from("post_iterations")
+      // Rejected and archived designs stay in the table (the learnings point
+      // at them) but leave the board.
+      const { data } = await (supabase.from("post_iterations") as any)
         .select("*")
         .eq("client_id", clientId)
+        .is("rejected_at", null)
+        .is("archived_at", null)
         .order("created_at", { ascending: false });
       return data || [];
     },
@@ -230,6 +235,23 @@ export function ContentIdeasTab({
           clientId={clientId}
           reportId={reportId}
           clientTimezone={clientTimezone}
+          onFeedback={async (iterationId, verdict, reason, note) => {
+            const { data, error } = await supabase.functions.invoke("record-design-feedback", {
+              body: { iteration_id: iterationId, verdict, reason, note },
+            });
+            if (error || data?.error) {
+              toast({ title: "Could not save that", description: String(data?.error || error?.message || "Try again."), variant: "destructive" });
+              return;
+            }
+            qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
+            const learned = Array.isArray(data?.learnings) ? data.learnings.length : 0;
+            toast({
+              title: verdict === "rejected" ? "Rejected" : "Archived",
+              description: verdict === "rejected"
+                ? (learned ? `Hidden. ${learned} rule${learned === 1 ? "" : "s"} added for this client's next designs.` : "Hidden.")
+                : "Hidden from the board.",
+            });
+          }}
           onToggleSelected={(iterationId, nextSelected) => {
             supabase
               .from("post_iterations")
