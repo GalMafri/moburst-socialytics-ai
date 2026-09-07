@@ -324,6 +324,31 @@ export default function CompetitiveReportView() {
   // has boosted posts to show.
   const anyBoosted = withMetrics.some((x) => (x.m.boosted?.current || 0) > 0);
 
+  /**
+   * The teardowns worth showing under the current filter.
+   *
+   * The pattern is written across platforms but the posts that prove it carry
+   * a channel, so a filter keeps only the examples on that platform and drops
+   * a teardown whose proof is all somewhere else. Reading a Facebook teardown
+   * while the page says TikTok was the confusing part.
+   */
+  const teardowns = (Array.isArray(ai.winner_teardown) ? ai.winner_teardown : [])
+    .map((w: any) => {
+      const all: Array<{ url: string; post?: TopPost }> = (w.example_post_urls || []).slice(0, 6).map((u: string) => ({ url: u, post: allPosts.get(u) }));
+      const examples = effectivePlat === "all" ? all.slice(0, 3) : all.filter((ex) => normalizePlatform(ex.post?.channel || "") === effectivePlat).slice(0, 3);
+      return { ...w, examples };
+    })
+    .filter((w: any) => effectivePlat === "all" || w.examples.length > 0);
+
+  /** The analysis's note for this company on the filtered platform, when it wrote one. */
+  const platformNoteFor = (name: string) =>
+    effectivePlat === "all"
+      ? undefined
+      : (breakdownFor(name)?.platform_notes || []).find((n: any) => normalizePlatform(n.platform) === effectivePlat)?.note;
+
+  /** Marks a section the analysis wrote across every platform, while a filter is on. */
+  const acrossAll = effectivePlat !== "all" ? <Chip>Written across all platforms</Chip> : undefined;
+
   // Every creative a company ran in the period (all channels, or the filtered
   // one), for the mood board grids.
   const moodPosts = (c: Company): TopPost[] => {
@@ -384,7 +409,12 @@ export default function CompetitiveReportView() {
   )
     .map((row) => ({
       label: row.label,
-      valueFor: (name: string) => breakdownFor(name)?.[row.key] as string | undefined,
+      // Under a filter the platform note wins where the analysis wrote one;
+      // otherwise the overall read stands, marked as such in the caption.
+      valueFor: (name: string) =>
+        (effectivePlat !== "all" && row.key === "content_type_mix"
+          ? platformNoteFor(name)
+          : undefined) ?? (breakdownFor(name)?.[row.key] as string | undefined),
     }))
     .filter((row) => ordered.some((c) => row.valueFor(c.name)));
 
@@ -443,7 +473,12 @@ export default function CompetitiveReportView() {
               <Seg active={effectivePlat === "all"} onClick={() => setPlat("all")}>All platforms</Seg>
               {platforms.map((k) => <Seg key={k} active={effectivePlat === k} onClick={() => setPlat(k)}>{platformLabel(k)}</Seg>)}
             </div>
-            {effectivePlat !== "all" && <span className="t-secondary">Field, audience, rhythm, gaps and top posts now show {platformLabel(effectivePlat)} only.</span>}
+            {effectivePlat !== "all" && (
+              <span className="t-secondary">
+                Field, audience, rhythm, gaps, what wins, mood boards and top posts show {platformLabel(effectivePlat)} only.
+                The summary, the scorecard and the recommended schedule are written across every platform and are marked where they appear.
+              </span>
+            )}
           </div>
         )}
         {!hasChannels && companies.length > 0 && (
@@ -469,7 +504,7 @@ export default function CompetitiveReportView() {
 
         {/* Executive summary */}
         {ai.executive_summary && (
-            <Section id="summary" index={next()} title={<>Executive summary</>}>
+            <Section id="summary" index={next()} title={<>Executive summary</>} action={acrossAll}>
             {/* Plain card: glass-elevated is the opaque grey surface used for
                 things that float (the user chip, the progress card), and it
                 read as a different material next to every other section. */}
@@ -486,6 +521,7 @@ export default function CompetitiveReportView() {
             index={next()}
             title={<><History className="h-5 w-5" /> Since the last report</>}
             description={<>Against the previous report on this landscape, covering {formatRange(periodOf(previous))}. Cadence is per week, so periods of different lengths compare fairly.</>}
+            action={acrossAll}
           >
             {changes.length > 0 ? (
               <ChangeCards changes={changes} />
@@ -497,7 +533,7 @@ export default function CompetitiveReportView() {
 
         {/* Scorecard */}
         {scorecard?.dimensions?.length > 0 && (
-            <Section id="scorecard" index={next()} title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</>}>
+            <Section id="scorecard" index={next()} title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</>} action={acrossAll}>
             <Card>
               <CardContent className="pt-5 space-y-5">
                 {scorecard.dimensions.map((d: any, i: number) => (
@@ -541,7 +577,7 @@ export default function CompetitiveReportView() {
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {ordered.map((c) => {
                 const b = bucketFor(c, effectivePlat);
-                const platformNote = effectivePlat !== "all" ? (breakdownFor(c.name)?.platform_notes || []).find((n: any) => normalizePlatform(n.platform) === effectivePlat)?.note : null;
+                const platformNote = platformNoteFor(c.name);
                 return (
                   <Card key={c.company_id} className={c.is_client ? "glass-accent" : ""}>
                     <CardHeader className="pb-3">
@@ -733,7 +769,10 @@ export default function CompetitiveReportView() {
 
                 {schedule && (schedule.by_weekday || schedule.by_hour) && (
                   <div className="glass-inner p-4 space-y-3">
-                    <div className="t-h3 flex items-center gap-2 pb-3 border-b border-[rgba(255,255,255,0.08)]"><CalendarCheck className="h-4 w-4" /> Recommended schedule for {clientName}</div>
+                    <div className="t-h3 flex items-center gap-2 flex-wrap pb-3 border-b border-[rgba(255,255,255,0.08)]">
+                      <CalendarCheck className="h-4 w-4" /> Recommended schedule for {clientName}
+                      {acrossAll}
+                    </div>
                     {/* The reasoning sits beside the schedule it explains. Under
                         it, the block ran half empty: the strips stop at 830px
                         and the prose stops at its measure, leaving a third of
@@ -836,12 +875,12 @@ export default function CompetitiveReportView() {
         )}
 
         {/* Winner teardown */}
-        {Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0 && (
-            <Section id="wins" index={next()} title={<><Trophy className="h-5 w-5" /> What wins for them</>} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
+        {teardowns.length > 0 && (
+            <Section id="wins" index={next()} title={<><Trophy className="h-5 w-5" /> What wins for them{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</>} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
             <Card>
               <CardContent className="pt-5 grid gap-4 md:grid-cols-3">
-                {ai.winner_teardown.map((w: any, i: number) => {
-                  const examples: Array<{ url: string; post?: TopPost }> = (w.example_post_urls || []).slice(0, 3).map((u: string) => ({ url: u, post: allPosts.get(u) }));
+                {teardowns.map((w: any, i: number) => {
+                  const examples: Array<{ url: string; post?: TopPost }> = w.examples;
                   return (
                     <div key={i} className="glass-inner p-4 space-y-3">
                       <p className="t-h3 pb-3 border-b border-[rgba(255,255,255,0.08)]" title={w.competitor}>{displayCompanyName(w.competitor)}</p>
