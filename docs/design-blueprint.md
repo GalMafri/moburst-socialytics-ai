@@ -131,3 +131,18 @@ Audited with axe-core on every page; these are the rules that keep it clean.
 - **One `<main>`.** `SidebarInset` renders it; `AppLayout` renders a `div`.
 - **Sentence case** for headings, tabs and buttons ("Report history", "Run analysis"). Form field
   labels keep Title Case as their own convention.
+
+## Generated designs (settled 2026-09-07)
+
+- **The image model draws pictures, the app types the words.** Designs are picture-only by
+  default (`render_text: false`): the prompt asks for a calm upper third and a quiet spot for a
+  button, and the editor opens with the post's headline and call-to-action already set in the
+  brand's typeface, loaded from Google Fonts and used for both preview and export. Letting the
+  model draw the words is a switch a reviewer turns on, because it misspells and invents lettering.
+- **No letterforms that are not words of the message.** No logos, wordmarks, monograms, or a large
+  initial as a watermark. The client's real logo is a compositing job, never a drawing job.
+- **One accent colour, from the palette.** The call-to-action wears the brand accent and nothing
+  else does; no colour enters that the design language does not name.
+- **Reject and learn.** A rejected variant is hidden and its reason becomes one or two avoid/prefer
+  rules in `design_learnings`, read into every later prompt for that client right after the brand
+  language. Archive hides without teaching. Both are staff actions, like approval.
