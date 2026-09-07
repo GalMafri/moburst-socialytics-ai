@@ -108,3 +108,26 @@ the trend chart and report history.
 
 **Forms (setup, run, settings).** A narrower column (max-w-4xl or 5xl) shared by header and content,
 one primary action in the header.
+
+## Accessibility and copy rules (settled in the final QA pass, 2026-09-07)
+
+Audited with axe-core on every page; these are the rules that keep it clean.
+
+- **The sidebar inset carries `min-w-0`.** It is the flex item, and a flex item's automatic minimum
+  is its content's min-content width, so a wide table anywhere below it widens the whole page on a
+  narrow screen. Never remove it; put `min-w-0` on any new flex or grid column that can hold a table.
+- **One control per control.** A card is a surface. If it holds buttons, the card itself is not a
+  button; the title is the thing that opens it. `ClickableCard` is only for cards with nothing
+  interactive inside.
+- **Negative text is `#f87171`, never `text-destructive`.** The button red (hsl 0 70% 50%) is 3.5:1 as
+  text on this ground. Positive stays `text-success`.
+- **Brand colour on the icon and the edge, words in white.** LinkedIn blue and Instagram red fail
+  contrast as text here; a `PlatformBadge` shows the platform by its icon and tint.
+- **Small grey is `#9ca3af` at the darkest.** `#6b7280` fails at 13px.
+- **Card titles are `h2`** (styled `t-h3`). The page title is the only `h1`; sections are `h2`; inside
+  a section, sub-blocks are `h3`. No level is skipped.
+- **Every click target is at least 24px tall**, including text links (`inline-flex items-center
+  min-h-[24px]`).
+- **One `<main>`.** `SidebarInset` renders it; `AppLayout` renders a `div`.
+- **Sentence case** for headings, tabs and buttons ("Report history", "Run analysis"). Form field
+  labels keep Title Case as their own convention.

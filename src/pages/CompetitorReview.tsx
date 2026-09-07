@@ -671,7 +671,7 @@ export default function CompetitorReview() {
                             href={c.website_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="t-secondary hover:text-foreground underline-offset-2 hover:underline"
+                            className="t-secondary hover:text-foreground underline-offset-2 hover:underline inline-flex items-center min-h-[24px]"
                           >
                             {c.website_url.replace(/^https?:\/\/(www\.)?/, "")}
                           </a>
