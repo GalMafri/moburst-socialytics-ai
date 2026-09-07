@@ -95,7 +95,7 @@ export function AppSidebar() {
 
       <SidebarFooter className="p-4 space-y-2 border-t border-[rgba(255,255,255,0.05)] group-data-[collapsible=icon]:p-2">
         {user && (
-          <div className="glass-elevated px-3 py-2 flex items-center gap-3 group-data-[collapsible=icon]:px-1 group-data-[collapsible=icon]:justify-center" title={`${user.name || ""} ${user.email || ""}`.trim()}>
+          <div className="glass-inner px-3 py-2.5 flex items-center gap-3 group-data-[collapsible=icon]:px-1 group-data-[collapsible=icon]:justify-center" title={`${user.name || ""} ${user.email || ""}`.trim()}>
             <div className="relative">
               <div className="h-8 w-8 rounded-full bg-[#b9e045] flex items-center justify-center text-black text-sm font-bold">
                 {user.name?.charAt(0)?.toUpperCase() || "U"}
@@ -103,8 +103,8 @@ export function AppSidebar() {
               <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10b981] border-2 border-[#1a1d23]" />
             </div>
             <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
-              <div className="text-sm font-medium text-white truncate">{user.name}</div>
-              <div className="text-xs text-[#b1b7c1] truncate">{user.email}</div>
+              <div className="t-body font-medium text-white truncate leading-tight">{user.name}</div>
+              <div className="t-label truncate">{user.email}</div>
             </div>
           </div>
         )}

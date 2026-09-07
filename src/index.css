@@ -82,7 +82,10 @@
   background-image: url("/images/bg-main.png");
   background-size: cover;
   background-position: center bottom;
-  opacity: 0.9;
+  /* Held well back. At 0.9 the photograph competed with the type sitting on
+     it — every card is 20% black over this, so whatever the image is doing
+     comes through the card and lands behind the words. */
+  opacity: 0.4;
 }
 .intercept-bg::after {
   content: "";
@@ -91,9 +94,12 @@
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 900px 700px at 8% 90%, rgba(185,224,69,0.22) 0%, transparent 60%),
-    radial-gradient(ellipse 700px 600px at 90% 10%, rgba(16,185,129,0.16) 0%, transparent 60%),
-    radial-gradient(ellipse 600px 500px at 55% 45%, rgba(139,92,246,0.10) 0%, transparent 70%);
+    /* A veil first, so the colour that follows sits on a settled ground and
+       the page keeps a floor of contrast wherever the image is brightest. */
+    linear-gradient(180deg, rgba(11, 12, 16, 0.42) 0%, rgba(11, 12, 16, 0.58) 100%),
+    radial-gradient(ellipse 900px 700px at 8% 90%, rgba(185,224,69,0.13) 0%, transparent 60%),
+    radial-gradient(ellipse 700px 600px at 90% 10%, rgba(16,185,129,0.10) 0%, transparent 60%),
+    radial-gradient(ellipse 600px 500px at 55% 45%, rgba(139,92,246,0.07) 0%, transparent 70%);
 }
 
 /* ── Glass Surface System ── */

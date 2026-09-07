@@ -15,6 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { track } from "@/lib/telemetry";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { displayCompanyName } from "@/lib/companyName";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -309,7 +310,7 @@ export default function CompetitiveRun() {
             {(selectedCompetitors || []).map((c: any) => (
               <div key={c.id} className="flex items-center gap-3 t-body">
                 <Badge>#{c.selected_rank}</Badge>
-                <span className="font-medium">{c.name}</span>
+                <span className="font-medium" title={c.name}>{displayCompanyName(c.name)}</span>
                 <span className="t-secondary ml-auto">
                   {(c.competitor_handles || []).filter((h: any) => h.is_active).length} handles
                 </span>
