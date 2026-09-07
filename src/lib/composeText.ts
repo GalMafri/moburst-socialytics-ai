@@ -75,6 +75,24 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
  */
 export function drawOverlays(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, overlays: ComposeOverlay[], fontStack: string): void {
   const scale = canvas.width / 800;
+  // A soft dark band behind text that sits near an edge. The picture was
+  // composed to keep those areas calm, but calm is not always dark, and white
+  // type on a light wall needs more than a shadow.
+  const live = overlays.filter((o) => o.text.trim());
+  if (live.some((o) => o.y <= 35)) {
+    const g = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.42);
+    g.addColorStop(0, "rgba(0,0,0,0.55)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, canvas.width, canvas.height * 0.42);
+  }
+  if (live.some((o) => o.y >= 70)) {
+    const g = ctx.createLinearGradient(0, canvas.height * 0.62, 0, canvas.height);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, "rgba(0,0,0,0.6)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, canvas.height * 0.62, canvas.width, canvas.height * 0.38);
+  }
   for (const ov of overlays) {
     if (!ov.text.trim()) continue;
     ctx.save();

@@ -70,8 +70,17 @@ type VariantSlot = string | null | "FAILED";
  */
 function seedOverlaysFor(post: any): Array<{ text: string; y: number; fontSize?: number; fontWeight?: "normal" | "bold" }> {
   const copy = String(post?.copy || post?.hook || "").replace(/#[\w]+/g, "").trim();
-  const first = copy.split(/(?<=[.!?])\s+/)[0] || "";
-  const headline = first.split(/\s+/).slice(0, 8).join(" ").replace(/[.,;:]+$/, "");
+  const first = (copy.split(/(?<=[.!?])\s+/)[0] || "").replace(/[.,;:!?]+$/, "");
+  // Up to twelve words, cut at a clause break where one exists, and never
+  // left hanging on a connective ("…would never do after").
+  let words = first.split(/\s+/).filter(Boolean);
+  if (words.length > 12) {
+    const clause = first.slice(0, 90).search(/[,;:—–]|\s(?:because|while|which|so that)\s/);
+    words = (clause > 20 ? first.slice(0, clause) : words.slice(0, 12).join(" ")).split(/\s+/);
+  }
+  const HANGING = new Set(["after", "a", "an", "the", "to", "of", "and", "or", "for", "with", "in", "on", "at", "by", "your", "our", "that", "when", "if", "before"]);
+  while (words.length > 3 && HANGING.has(words[words.length - 1].toLowerCase())) words.pop();
+  const headline = words.join(" ").replace(/[.,;:]+$/, "");
   const cta = String(post?.cta || "").trim().split(/\s+/).slice(0, 4).join(" ");
   const out: Array<{ text: string; y: number; fontSize?: number; fontWeight?: "normal" | "bold" }> = [];
   if (headline) out.push({ text: headline, y: 22, fontSize: 30, fontWeight: "bold" });
@@ -885,7 +894,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 <Paintbrush className="h-4 w-4 mr-2" />
                 {isCarousel
                   ? `Generate ${variantCount} variant${variantCount === 1 ? "" : "s"} × ${slideCount} slides`
-                  : `Generate ${variantCount} Variants`}
+                  : `Generate ${variantCount} variants`}
               </Button>
             )}
 
@@ -1009,7 +1018,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                     <Paintbrush className="h-4 w-4 mr-1" /> Regenerate
                   </Button>
                   <Button variant="ghost" size="sm" onClick={handleStartOver}>
-                    New Design
+                    New design
                   </Button>
                   {variantUrls.map((url, i) => (
                     typeof url === "string" && url !== "FAILED" && (
