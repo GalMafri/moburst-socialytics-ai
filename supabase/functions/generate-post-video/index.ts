@@ -61,8 +61,9 @@ async function generateSeedImage(args: {
         args.basePrompt +
         "\n\nThis still will be used as the OPENING FRAME of a short social-media video — " +
         "compose for motion. Place the subject so it can move or transform without falling off frame. " +
-        "It is a photographic frame, not a title card or a thumbnail: depict the scene itself and " +
-        "render no words anywhere in it.",
+        "It is a frame in the brand's own visual system for this platform: photographic where the brand uses " +
+        "photography, a solid brand-colour field where the brand uses one, the brand's photo treatment either way. " +
+        "Not a stock scene, not a title card: depict the subject inside the brand's layout and render no words anywhere in it.",
       platform: args.platform,
       format: args.format,
       brandIdentity: args.brandIdentity,

@@ -251,9 +251,15 @@ Deno.serve(async (req) => {
     if (resolvedRefs && Array.isArray(resolvedRefs) && resolvedRefs.length > 0) {
       const storageClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-      contentParts.push({ text: "Here are existing brand design references. Match their visual style, layout patterns, and color usage:" });
+      contentParts.push({
+        text:
+          "These are the client's own published designs. Match their visual SYSTEM exactly — the same layout zones, " +
+          "the same colour fields in the same proportions, the same photographic treatment, the same placement of type — " +
+          "so the new image looks like the same designer made it. Do not copy their photographs or their words; " +
+          "do reproduce their system. Ignore any logo, monogram, watermark or lockup you see in them: this image has none.",
+      });
 
-      for (const ref of resolvedRefs.slice(0, 3)) {
+      for (const ref of resolvedRefs.slice(0, 4)) {
         try {
           const { data: fileData } = await storageClient.storage.from("design-references").download(ref);
           if (fileData) {

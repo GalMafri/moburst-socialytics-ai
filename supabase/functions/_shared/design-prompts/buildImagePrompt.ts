@@ -107,10 +107,19 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
     sections.push(
       `## Primary objective\n` +
         `Produce a single ready-to-post social media graphic that visually belongs to this ` +
-        `client's brand. The BRAND DESIGN LANGUAGE section below is the binding style guide — ` +
-        `composition, typography, imagery, color usage, surface, logo treatment, mood, and ` +
-        `platform adaptations are NOT suggestions. The creative direction tells you WHAT the ` +
-        `post is about; the brand design language tells you HOW it must look.`,
+        `client's brand — one a follower would recognise as theirs before reading a word. ` +
+        `The BRAND DESIGN LANGUAGE below is binding: composition, typography, imagery treatment, ` +
+        `colour usage, surface, mood and platform adaptations are rules, not suggestions.\n\n` +
+        `The creative direction names the SUBJECT only — who or what appears and what the post is about. ` +
+        `It does not decide the look. Layout zones, which colour fills each zone, where the subject sits, ` +
+        `how any photograph is treated, where type will go: all of that comes from the brand design language. ` +
+        `Where the direction describes a look the brand language forbids (a clean corporate office, ` +
+        `smiling professionals, soft aspirational lighting, a generic stock scene), the brand language wins ` +
+        `and the subject is re-staged inside the brand system.\n\n` +
+        `Work in this order: first, from the brand design language and its platform adaptation for this ` +
+        `format, fix the layout — the zones, their colours, the treatment of any photograph, the empty ` +
+        `field kept for type. Then place the subject from the creative direction into that layout. ` +
+        `Never the other way round.`,
     );
   } else {
     sections.push(
@@ -189,8 +198,10 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
     sections.push(
       `## Composition for typed text\n` +
         `The headline and any call-to-action will be set as real typography on top of this image afterwards. ` +
-        `Compose for that: keep the upper third calm and uncluttered as a field for a headline, and leave a quiet area near the bottom for a button — calm means a plain wall, sky, surface or soft depth of field that is still part of the scene, never an empty white or grey block. ` +
-        `Put the subject and visual interest in the middle band. No text of any kind in the image itself.`,
+        `Compose for that: the zone the brand design language gives to headline type is left as a plain field ` +
+        `in the brand's colour for that zone — a flat navy or red block, a plain wall, a soft depth-of-field ground — ` +
+        `with nothing in it, and a quiet spot near the bottom is kept for a button. ` +
+        `Everything else follows the brand's layout as usual. No text of any kind in the image itself.`,
     );
   }
 
