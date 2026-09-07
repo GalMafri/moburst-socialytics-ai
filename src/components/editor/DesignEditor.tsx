@@ -36,6 +36,8 @@ export interface DesignEditorProps {
   initialOverlays?: Array<{ text: string; y: number; fontSize?: number; fontWeight?: "normal" | "bold"; color?: string }>;
 }
 
+import { drawOverlays, ensureBrandFont, brandFontStack } from "@/lib/composeText";
+
 interface TextOverlay {
   id: string;
   text: string;
@@ -166,23 +168,10 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
       const ctx = canvas.getContext("2d")!;
       ctx.drawImage(loadedImg, 0, 0);
 
-      // The brand face must be loaded before it is drawn, or the canvas falls
-      // back silently and the export differs from the preview.
-      try { await (document as any).fonts?.ready; } catch { /* draw anyway */ }
-      // Draw text overlays
-      for (const ov of overlays) {
-        if (!ov.text.trim()) continue;
-        ctx.save();
-        ctx.font = `${ov.fontWeight} ${ov.fontSize * (canvas.width / 800)}px ${fontStack}`;
-        ctx.textAlign = "center";
-        ctx.fillStyle = ov.color;
-        ctx.shadowColor = "rgba(0,0,0,0.8)";
-        ctx.shadowBlur = 6;
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 2;
-        ctx.fillText(ov.text, (ov.x / 100) * canvas.width, (ov.y / 100) * canvas.height);
-        ctx.restore();
-      }
+      // Same drawing routine as the automatic composite, so what the editor
+      // exports is what a fresh variant already looks like.
+      await ensureBrandFont(brandIdentity?.font_family);
+      drawOverlays(ctx, canvas, overlays, brandFontStack(brandIdentity?.font_family).stack);
 
       const dataUrl = canvas.toDataURL("image/png");
 

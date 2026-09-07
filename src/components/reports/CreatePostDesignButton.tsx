@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { composeTextOnImage } from "@/lib/composeText";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil, Ban } from "lucide-react";
@@ -76,6 +77,18 @@ function seedOverlaysFor(post: any): Array<{ text: string; y: number; fontSize?:
   if (headline) out.push({ text: headline, y: 22, fontSize: 30, fontWeight: "bold" });
   if (cta) out.push({ text: cta, y: 86, fontSize: 20, fontWeight: "bold" });
   return out;
+}
+
+/** The seeded overlays as the compositor draws them: centred, brand primary. */
+function overlaysToDraw(post: any, brand: any) {
+  return seedOverlaysFor(post).map((o) => ({
+    text: o.text,
+    x: 50,
+    y: o.y,
+    color: brand?.primary_color || "#ffffff",
+    fontSize: o.fontSize || 28,
+    fontWeight: o.fontWeight || "bold",
+  }));
 }
 
 export function CreatePostDesignButton({ post, clientContext, brandIdentity, designReferences, brandBookFilePath, clientId, onImagesGenerated }: CreatePostDesignButtonProps) {
@@ -361,6 +374,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         } catch {
           // Review or retry failed — keep the original rather than lose it.
         }
+        // The words go on now, in the brand's face, so the tile arrives as a
+        // post rather than a picture. The editor can still move them.
+        if (!modelDrawsText) {
+          dataUrl = await composeTextOnImage(dataUrl, overlaysToDraw(post, effectiveBrandIdentity), effectiveBrandIdentity?.font_family);
+        }
         // Upload to persistent storage.
         const uploadedUrl = await uploadVariantToStorage(dataUrl, i);
         // Update the slot.
@@ -595,6 +613,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               // Validation/retry failed — keep the original image.
             }
 
+            // The cover carries the headline; interior slides carry their own copy.
+            if (!modelDrawsText && s === 0) {
+              finalImageUrl = await composeTextOnImage(finalImageUrl, overlaysToDraw(post, effectiveBrandIdentity), effectiveBrandIdentity?.font_family);
+            }
             const uploadedUrl = await uploadVariantToStorage(finalImageUrl, globalIdx);
             variantSlides.push(uploadedUrl);
             setVariantUrls((prev) => {
