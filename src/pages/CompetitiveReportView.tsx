@@ -22,6 +22,7 @@ import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
+import { PlatformIcon } from "@/lib/platform-config";
 import { partitionGaps, useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
@@ -346,8 +347,27 @@ export default function CompetitiveReportView() {
       ? undefined
       : (breakdownFor(name)?.platform_notes || []).find((n: any) => normalizePlatform(n.platform) === effectivePlat)?.note;
 
-  /** Marks a section the analysis wrote across every platform, while a filter is on. */
-  const acrossAll = effectivePlat !== "all" ? <Chip>Written across all platforms</Chip> : undefined;
+  /**
+   * Every section says what it is showing, once a filter is on.
+   *
+   * Marking only the four sections a filter cannot narrow still left the
+   * reader working out the rest by elimination. Now each section carries its
+   * own scope: the platform in the accent, or "All platforms" in grey for the
+   * parts the analysis writes once for the whole account.
+   */
+  const scopeTag = (scoped: boolean) => {
+    if (effectivePlat === "all") return undefined;
+    return scoped ? (
+      <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 t-label !text-[#b9e045] bg-[rgba(185,224,69,0.12)] border border-[rgba(185,224,69,0.3)] whitespace-nowrap">
+        <PlatformIcon platform={effectivePlat} className="h-3 w-3" /> {platformLabel(effectivePlat)} only
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 t-label bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.12)] whitespace-nowrap">
+        All platforms
+      </span>
+    );
+  };
+  const acrossAll = scopeTag(false);
 
   // Every creative a company ran in the period (all channels, or the filtered
   // one), for the mood board grids.
@@ -475,8 +495,8 @@ export default function CompetitiveReportView() {
             </div>
             {effectivePlat !== "all" && (
               <span className="t-secondary">
-                Field, audience, rhythm, gaps, what wins, mood boards and top posts show {platformLabel(effectivePlat)} only.
-                The summary, the scorecard and the recommended schedule are written across every platform and are marked where they appear.
+                Every section below says which it is: <span className="!text-[#b9e045]">{platformLabel(effectivePlat)} only</span> where the
+                numbers are filtered, <span className="text-white">All platforms</span> where the analysis was written once for the whole account.
               </span>
             )}
           </div>
@@ -559,7 +579,8 @@ export default function CompetitiveReportView() {
           <Section
             id="field"
             index={next()}
-            title={<>The field{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</>}
+            title={<>The field</>}
+            action={scopeTag(true)}
             description="Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates."
           >
             <Card>
@@ -680,7 +701,8 @@ export default function CompetitiveReportView() {
           <Section
             id="audience"
             index={next()}
-            title={<><Users className="h-5 w-5" /> Audience and momentum{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</>}
+            title={<><Users className="h-5 w-5" /> Audience and momentum</>}
+            action={scopeTag(true)}
             description={<>RivalIQ's own totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}: followers, engagement, estimated impressions and posts for every company.{anyBoosted ? " \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook." : ""}</>}
           >
             <Card>
@@ -729,7 +751,7 @@ export default function CompetitiveReportView() {
 
         {/* Posting rhythm */}
         {ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0) && (
-            <Section id="rhythm" index={next()} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description="When each company posts, by weekday and by hour (UTC), against the schedule we recommend.">
+            <Section id="rhythm" index={next()} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description="When each company posts, by weekday and by hour (UTC), against the schedule we recommend." action={scopeTag(true)}>
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {/* No summary paragraph here: the analysis wrote out each
@@ -805,17 +827,22 @@ export default function CompetitiveReportView() {
           <Section
             id="gaps"
             index={next()}
-            title={<><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</>}
+            title={<><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill</>}
             description={
               <span data-print={isMoburstStaff ? "hide" : undefined}>
                 {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
               </span>
             }
-            action={isMoburstStaff && hiddenGaps.length > 0 ? (
-              <Button data-print="hide" variant="ghost" size="sm" onClick={() => setShowHidden((v) => !v)}>
-                <Eye className="h-4 w-4 mr-1" /> {showHidden ? "Hide" : "Show"} {hiddenGaps.length} hidden suggestion{hiddenGaps.length === 1 ? "" : "s"}
-              </Button>
-            ) : undefined}
+            action={
+              <>
+                {scopeTag(true)}
+                {isMoburstStaff && hiddenGaps.length > 0 && (
+                  <Button data-print="hide" variant="ghost" size="sm" onClick={() => setShowHidden((v) => !v)}>
+                    <Eye className="h-4 w-4 mr-1" /> {showHidden ? "Hide" : "Show"} {hiddenGaps.length} hidden suggestion{hiddenGaps.length === 1 ? "" : "s"}
+                  </Button>
+                )}
+              </>
+            }
           >
             {gaps.length === 0 && <div className="glass-inner p-4"><p className="t-body">Every suggestion for this view has been hidden by the team.</p></div>}
             <div className="grid gap-4 md:grid-cols-2">
@@ -878,7 +905,8 @@ export default function CompetitiveReportView() {
         {/* Kept on screen when a filter empties it: a section that vanishes is
             its own kind of confusing, and the rail loses its place too. */}
         {(teardowns.length > 0 || (effectivePlat !== "all" && Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0)) && (
-            <Section id="wins" index={next()} title={<><Trophy className="h-5 w-5" /> What wins for them{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</>} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
+            <Section id="wins" index={next()} title={<><Trophy className="h-5 w-5" /> What wins for them</>}
+            action={scopeTag(true)} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
             <Card>
               <CardContent className={teardowns.length > 0 ? "pt-5 grid gap-4 md:grid-cols-3" : "pt-5"}>
                 {teardowns.length === 0 && (
@@ -949,7 +977,7 @@ export default function CompetitiveReportView() {
 
         {/* Mood boards */}
         {ordered.some((c) => moodPosts(c).length > 0) && (
-            <Section id="moodboards" index={next()} title={<><Images className="h-5 w-5" /> Mood boards</>} description={<>The creative each company actually ran in the period, side by side. Click any tile to open the post.</>}>
+            <Section id="moodboards" index={next()} action={scopeTag(true)} title={<><Images className="h-5 w-5" /> Mood boards</>} description={<>The creative each company actually ran in the period, side by side. Click any tile to open the post.</>}>
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {ordered.map((c) => {
@@ -971,7 +999,7 @@ export default function CompetitiveReportView() {
 
         {/* Top posts */}
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
-            <Section id="posts" index={next()} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</>}>
+            <Section id="posts" index={next()} action={scopeTag(true)} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</>}>
             <Card>
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
