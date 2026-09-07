@@ -33,7 +33,7 @@ export interface DesignEditorProps {
   onSave: (exportedDataUrl: string) => void;
   onClose: () => void;
   /** Text to start with — the post's headline and call-to-action, typed in the brand's face. */
-  initialOverlays?: Array<{ text: string; y: number; fontSize?: number; fontWeight?: "normal" | "bold"; color?: string }>;
+  initialOverlays?: Array<{ text: string; y: number; x?: number; width?: number; placed?: boolean; fontSize?: number; fontWeight?: "normal" | "bold"; color?: string }>;
 }
 
 import { drawOverlays, ensureBrandFont, brandFontStack } from "@/lib/composeText";
@@ -46,6 +46,9 @@ interface TextOverlay {
   color: string;
   fontSize: number;
   fontWeight: "normal" | "bold";
+  /** Wrap width in percent, and whether it sits on a flat field (no band behind it). */
+  width?: number;
+  placed?: boolean;
 }
 
 export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClose, initialOverlays }: DesignEditorProps) {
@@ -68,8 +71,10 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
     (initialOverlays || []).filter((o) => o.text.trim()).map((o, i) => ({
       id: `seed-${i}`,
       text: o.text,
-      x: 50,
+      x: o.x ?? 50,
       y: o.y,
+      width: o.width,
+      placed: o.placed,
       color: o.color || brandIdentity?.primary_color || "#ffffff",
       fontSize: o.fontSize || 28,
       fontWeight: o.fontWeight || "bold",

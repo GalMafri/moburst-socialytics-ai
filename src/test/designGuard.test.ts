@@ -126,3 +126,18 @@ describe("brandAdviceFrom", () => {
     expect(brandAdviceFrom(null)).toBeNull();
   });
 });
+
+describe("off-brand verdicts", () => {
+  it("counts an off-brand scene as worth regenerating, with or without typed text", () => {
+    expect(verdictIsDirty({ off_brand: true })).toBe(true);
+    expect(verdictIsDirty({ off_brand: false, has_text: true })).toBe(false);
+  });
+
+  it("names it in the toast and repeats the brand's rules in the correction", () => {
+    const v = { off_brand: true, avoid: "Never use smiling professionals in boardrooms." };
+    expect(verdictSummary(v)).toContain("off-brand");
+    const fix = correctionFor(v);
+    expect(fix).toContain("search bars");
+    expect(fix).toContain("smiling professionals in boardrooms");
+  });
+});

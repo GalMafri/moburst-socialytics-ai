@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { composeTextOnImage } from "@/lib/composeText";
+import { composePost, type ComposeOverlay } from "@/lib/composeText";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil, Ban } from "lucide-react";
@@ -138,6 +138,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // without re-rendering. Set to true via the registered onCancel handler
   // OR the inline Cancel button.
   const cancelRef = useRef(false);
+  // For every composited variant, the picture without words and where the
+  // words went, so the editor opens the same picture with the words movable
+  // rather than baked in twice.
+  const placedRef = useRef(new Map<string, { raw: string; overlays: ComposeOverlay[] }>());
+  const [editorSource, setEditorSource] = useState<{ raw: string; overlays: ComposeOverlay[] } | null>(null);
   const { toast } = useToast();
 
   const defaultPrompt =
@@ -357,7 +362,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           // Up to two regenerations: a smeared word or a stray letterform
           // sometimes survives the first correction, and a third image is
           // cheaper than a client seeing either.
-          let verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText } })).data;
+          let verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           for (let pass = 0; pass < 2 && verdictIsDirty(verdict, { expectNoText: !modelDrawsText }); pass++) {
             toast({ title: pass === 0 ? "Refining design" : "Refining design again", description: `Caught ${verdictSummary(verdict)} — regenerating.` });
             const { data: retry } = await supabase.functions.invoke("generate-post-image", {
@@ -378,18 +383,23 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             });
             if (!retry?.image_url) break;
             dataUrl = retry.image_url;
-            verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText } })).data;
+            verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           }
         } catch {
           // Review or retry failed — keep the original rather than lose it.
         }
         // The words go on now, in the brand's face, so the tile arrives as a
         // post rather than a picture. The editor can still move them.
+        let placed: { raw: string; overlays: ComposeOverlay[] } | null = null;
         if (!modelDrawsText) {
-          dataUrl = await composeTextOnImage(dataUrl, overlaysToDraw(post, effectiveBrandIdentity), effectiveBrandIdentity?.font_family);
+          const raw = dataUrl;
+          const composed = await composePost(raw, overlaysToDraw(post, effectiveBrandIdentity), effectiveBrandIdentity?.font_family);
+          dataUrl = composed.url;
+          placed = { raw, overlays: composed.overlays };
         }
         // Upload to persistent storage.
         const uploadedUrl = await uploadVariantToStorage(dataUrl, i);
+        if (placed) placedRef.current.set(uploadedUrl, placed);
         // Update the slot.
         setVariantUrls((prev) => {
           const next = [...prev];
@@ -594,7 +604,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             }
             try {
               const { data: validation } = await supabase.functions.invoke("validate-design-output", {
-                body: { image_data: data.image_url, expect_no_text: !modelDrawsText },
+                body: { image_data: data.image_url, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined },
               });
               if (verdictIsDirty(validation, { expectNoText: !modelDrawsText })) {
                 toast({ title: "Refining design", description: `Caught ${verdictSummary(validation)} — regenerating.` });
@@ -623,10 +633,15 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             }
 
             // The cover carries the headline; interior slides carry their own copy.
+            let placed: { raw: string; overlays: ComposeOverlay[] } | null = null;
             if (!modelDrawsText && s === 0) {
-              finalImageUrl = await composeTextOnImage(finalImageUrl, overlaysToDraw(post, effectiveBrandIdentity), effectiveBrandIdentity?.font_family);
+              const raw = finalImageUrl;
+              const composed = await composePost(raw, overlaysToDraw(post, effectiveBrandIdentity), effectiveBrandIdentity?.font_family);
+              finalImageUrl = composed.url;
+              placed = { raw, overlays: composed.overlays };
             }
             const uploadedUrl = await uploadVariantToStorage(finalImageUrl, globalIdx);
+            if (placed) placedRef.current.set(uploadedUrl, placed);
             variantSlides.push(uploadedUrl);
             setVariantUrls((prev) => {
               const next = [...prev];
@@ -1048,6 +1063,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                         size="sm"
                         onClick={() => {
                           setEditableImageUrl(url);
+                          setEditorSource(placedRef.current.get(url) ?? null);
                           setShowEditor(true);
                         }}
                       >
@@ -1064,10 +1080,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
       {showEditor && editableImageUrl && (
         <DesignEditor
-          imageUrl={editableImageUrl}
+          imageUrl={editorSource?.raw ?? editableImageUrl}
           brandIdentity={effectiveBrandIdentity}
           clientId={clientId || ""}
-          initialOverlays={modelDrawsText ? undefined : seedOverlaysFor(post)}
+          initialOverlays={editorSource ? editorSource.overlays : modelDrawsText ? undefined : seedOverlaysFor(post)}
           onSave={(dataUrl) => {
             // Replace the edited image in the variants array
             setVariantUrls((prev) => {

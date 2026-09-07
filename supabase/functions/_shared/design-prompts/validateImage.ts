@@ -6,6 +6,8 @@ export interface DesignVerdict {
   has_garbled_text: boolean;
   /** Any readable word or lettering at all — signage, documents, labels, props. Counts as a failure only when the design was asked for text-free. */
   has_text: boolean;
+  /** Shows something this brand's own rules forbid, or fake interface chrome (search bars, buttons, phone frames, empty placeholder blocks). */
+  off_brand: boolean;
   /** True when no check ran (no key, API error, unparseable reply). */
   skipped?: boolean;
 }
@@ -15,16 +17,29 @@ export const CLEAN_VERDICT: DesignVerdict = {
   has_logo: false,
   has_garbled_text: false,
   has_text: false,
+  off_brand: false,
 };
 
-const QUESTION =
+/** Interface furniture no post should carry; a model asked for a plain field draws these instead. */
+const FAKE_UI =
+  "fake interface chrome — a search bar, an input field, a button-shaped rectangle with nothing in it, a phone or app frame, tab bars, icons rows, or empty placeholder blocks";
+
+function questionFor(avoid?: string | null): string {
+  const rules = (avoid || "").trim();
+  return (
   "You are checking a generated social media graphic before it reaches a client.\n" +
-  "Answer four questions about what is actually visible in the image.\n" +
+  "Answer five questions about what is actually visible in the image.\n" +
   "1. HEX: does it show hex colour codes (like #FF5733), RGB values, or any technical colour notation as readable text?\n" +
   "2. LOGO: does it show a company logo, wordmark, monogram, badge or brand insignia — including a large single letter, initial or monogram used as a background, watermark or decorative element? Count any invented or fake-looking brand mark. Do NOT count plain body or headline text that is simply words.\n" +
   "3. GARBLED: is any visible text misspelled, malformed, nonsensical or made of broken letterforms — including letters that are doubled, smeared, overlapping, bleeding into each other, or a word cut off at the edge of the canvas or of its own line?\n" +
   "4. TEXT: is there ANY readable word, letter or number anywhere — a headline, a caption, a label on a prop, lettering on a document, a sign, a screen, a phone key? Count it even if it is small, partial or in the background.\n" +
-  "Reply with exactly four words separated by single spaces, each YES or NO, in the order HEX LOGO GARBLED TEXT. No other text.";
+  "5. OFFBRAND: does it show " + FAKE_UI +
+  (rules
+    ? `, OR anything the brand's own rules forbid? The rules: "${rules.replace(/"/g, "'").slice(0, 900)}" (ignore any rule about logos or lockups; those are checked in question 2).\n`
+    : "?\n") +
+  "Reply with exactly five words separated by single spaces, each YES or NO, in the order HEX LOGO GARBLED TEXT OFFBRAND. No other text."
+  );
+}
 
 /** Split a data URL or raw base64 into the parts the Anthropic API wants. */
 export function splitImageData(imageData: string, fallbackMime = "image/png"): { base64: string; mimeType: string } | null {
@@ -46,7 +61,7 @@ export function splitImageData(imageData: string, fallbackMime = "image/png"): {
  */
 export async function validateDesignImage(
   imageData: string,
-  opts: { apiKey?: string | null; mediaType?: string } = {},
+  opts: { apiKey?: string | null; mediaType?: string; avoid?: string | null } = {},
 ): Promise<DesignVerdict> {
   const apiKey = opts.apiKey ?? Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) return { ...CLEAN_VERDICT, skipped: true };
@@ -64,13 +79,13 @@ export async function validateDesignImage(
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 16,
+        max_tokens: 24,
         messages: [
           {
             role: "user",
             content: [
               { type: "image", source: { type: "base64", media_type: parts.mimeType, data: parts.base64 } },
-              { type: "text", text: QUESTION },
+              { type: "text", text: questionFor(opts.avoid) },
             ],
           },
         ],
@@ -94,6 +109,7 @@ export async function validateDesignImage(
       has_logo: words[1] === "YES",
       has_garbled_text: words[2] === "YES",
       has_text: words[3] === "YES",
+      off_brand: words[4] === "YES",
     };
   } catch (err) {
     console.error("validateDesignImage threw:", err);
@@ -104,7 +120,7 @@ export async function validateDesignImage(
 /** Anything worth regenerating for. */
 export function verdictIsDirty(v: DesignVerdict | null | undefined, opts: { expectNoText?: boolean } = {}): boolean {
   if (!v || v.skipped) return false;
-  return v.has_hex_codes || v.has_logo || v.has_garbled_text || (!!opts.expectNoText && !!v.has_text);
+  return v.has_hex_codes || v.has_logo || v.has_garbled_text || !!v.off_brand || (!!opts.expectNoText && !!v.has_text);
 }
 
 /**
@@ -112,8 +128,15 @@ export function verdictIsDirty(v: DesignVerdict | null | undefined, opts: { expe
  * far better than repeating the original constraint, which the model already
  * ignored once.
  */
-export function correctionFor(v: DesignVerdict, opts: { expectNoText?: boolean } = {}): string {
+export function correctionFor(v: DesignVerdict, opts: { expectNoText?: boolean; avoid?: string | null } = {}): string {
   const notes: string[] = [];
+  if (v.off_brand) {
+    notes.push(
+      "The previous attempt broke the brand's own rules or drew interface furniture. Draw NO search bars, input fields, empty button shapes, " +
+        "phone or app frames, tab bars or placeholder rectangles: the field kept for type is a flat block of the brand's colour and nothing else. " +
+        (opts.avoid ? `And obey these rules exactly: ${opts.avoid.slice(0, 600)}` : "Re-stage the subject inside the brand's own layout, palette and photographic treatment."),
+    );
+  }
   if (opts.expectNoText && v.has_text) {
     notes.push(
       "The previous attempt contained readable words — on a document, a sign, a screen or a prop. " +

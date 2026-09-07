@@ -185,6 +185,26 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
     );
   }
 
+  // 2a. The brand's own "never" list, repeated on its own after the direction.
+  //     Inside the language it is one section of nine and the model treats it
+  //     as colour; the direction that follows it usually describes exactly the
+  //     scene it forbids ("attorney in a bright office"). Said again here, as
+  //     the last thing before the rules of the format, it holds.
+  const never = (input.synthesis?.anti_patterns || "").trim();
+  if (hasStrongBrand) {
+    const lines = [
+      "## Never: this brand's own rules, and they beat the creative direction",
+      ...(never
+        ? [never.split(/(?<=[.!?])\s+/).filter((sentence) => !/\b(logo|lockup|monogram|watermark)\b/i.test(sentence)).join(" ").trim()]
+        : []),
+      "Never draw interface furniture: no search bars, input fields, empty button-shaped rectangles, phone or app frames, tab bars, icon rows or placeholder blocks. " +
+        "A post is a picture, not a screenshot of an app.",
+      "Never fill the canvas with a grid of small panels or a collage of scenes; one subject, one composition.",
+      "Never depict what the creative direction describes if it is on this list: keep its subject, drop its setting, lighting, mood and styling, and re-stage the subject the way this brand shoots.",
+    ].filter(Boolean);
+    sections.push(lines.join("\n"));
+  }
+
   // 2b. What the reviewers have already rejected for this client.
   if (input.learnings && (input.learnings.avoid.length || input.learnings.prefer.length)) {
     const lines: string[] = ["## Learned from this client's reviews", "Designs were rejected before for the reasons below. Treat these as brand rules."];
@@ -200,8 +220,8 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
         `The headline and any call-to-action will be set as real typography on top of this image afterwards. ` +
         `Compose for that: the zone the brand design language gives to headline type is left as a plain field ` +
         `in the brand's colour for that zone — a flat navy or red block, a plain wall, a soft depth-of-field ground — ` +
-        `with nothing in it, and a quiet spot near the bottom is kept for a button. ` +
-        `Everything else follows the brand's layout as usual. No text of any kind in the image itself.`,
+        `with nothing in it — one flat block of one colour covering at least a quarter of the canvas, an element of the layout, not a box, card, frame or button drawn onto it. ` +
+        `Everything else follows the brand's layout as usual. No text of any kind in the image itself, and no outlined or empty shapes standing in for text.`,
     );
   }
 

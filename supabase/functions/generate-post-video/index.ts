@@ -272,13 +272,14 @@ serve(async (req) => {
       // broken lettering on the anchor frame is carried through every frame of
       // the clip. Checking costs a couple of seconds against a Veo call that
       // costs minutes and real money, so it is worth one regeneration.
-      const verdict = await validateDesignImage(`data:${seedImage.mimeType};base64,${seedImage.base64}`);
+      const avoid = [resolvedSynthesis?.anti_patterns, resolvedSynthesis?.imagery_style].filter((x: unknown) => typeof x === "string" && x).join(" ") || null;
+      const verdict = await validateDesignImage(`data:${seedImage.mimeType};base64,${seedImage.base64}`, { avoid });
       if (verdictIsDirty(verdict, { expectNoText: true })) {
         console.warn("[generate-post-video] seed failed review, regenerating once:", verdict);
         const retry = await generateSeedImage({
           geminiKey,
           supabase,
-          basePrompt: prompt + correctionFor(verdict, { expectNoText: true }),
+          basePrompt: prompt + correctionFor(verdict, { expectNoText: true, avoid }),
           platform,
           format,
           brandIdentity: resolvedBrand,

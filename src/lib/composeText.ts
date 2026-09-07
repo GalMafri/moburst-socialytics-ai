@@ -6,6 +6,8 @@
 // editor is for adjusting it, not finishing it. Everything here runs in the
 // browser on a canvas; nothing is sent anywhere.
 
+import { findCalmZone, inkFor, regionLuminance } from "@/lib/calmZone";
+
 export interface ComposeOverlay {
   text: string;
   /** Horizontal centre, percent of width. */
@@ -16,6 +18,13 @@ export interface ComposeOverlay {
   /** Size relative to an 800px-wide canvas, like the editor. */
   fontSize: number;
   fontWeight: "normal" | "bold";
+  /** Wrap width, percent of the canvas. Default 84. */
+  width?: number;
+  /**
+   * Set when the block was placed on a flat colour field the picture already
+   * has, so no legibility band is painted behind it.
+   */
+  placed?: boolean;
 }
 
 /** The brand's own face if it is a Google font, else the app face. */
@@ -78,7 +87,7 @@ export function drawOverlays(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasEl
   // A soft dark band behind text that sits near an edge. The picture was
   // composed to keep those areas calm, but calm is not always dark, and white
   // type on a light wall needs more than a shadow.
-  const live = overlays.filter((o) => o.text.trim());
+  const live = overlays.filter((o) => o.text.trim() && !o.placed);
   if (live.some((o) => o.y <= 35)) {
     const g = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.42);
     g.addColorStop(0, "rgba(0,0,0,0.55)");
@@ -104,7 +113,7 @@ export function drawOverlays(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasEl
     ctx.shadowColor = "rgba(0,0,0,0.55)";
     ctx.shadowBlur = 8 * scale;
     ctx.shadowOffsetY = 2 * scale;
-    const lines = wrap(ctx, ov.text, canvas.width * 0.84);
+    const lines = wrap(ctx, ov.text, canvas.width * ((ov.width ?? 84) / 100));
     const lineHeight = px * 1.15;
     const startY = (ov.y / 100) * canvas.height - ((lines.length - 1) * lineHeight) / 2;
     lines.forEach((l, i) => ctx.fillText(l, (ov.x / 100) * canvas.width, startY + i * lineHeight));
@@ -133,26 +142,96 @@ export function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
+/** The picture as a small luminance grid, for finding the field to type into. */
+function luminanceGrid(img: HTMLImageElement, cols = 48, rows = 64): Float32Array | null {
+  const small = document.createElement("canvas");
+  small.width = cols;
+  small.height = rows;
+  const ctx = small.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0, cols, rows);
+  const { data } = ctx.getImageData(0, 0, cols, rows);
+  const lum = new Float32Array(cols * rows);
+  for (let i = 0; i < cols * rows; i++) {
+    lum[i] = (0.2126 * data[i * 4] + 0.7152 * data[i * 4 + 1] + 0.0722 * data[i * 4 + 2]) / 255;
+  }
+  return lum;
+}
+
+/**
+ * Moves the headline onto the flat colour field the picture was composed
+ * with, sized to fit it, in ink that reads against it; puts the call-to-action
+ * inside the same field when the field reaches the bottom, else low on the
+ * canvas as before. Overlays come back unchanged when no field is found.
+ */
+export function placeOverlays(img: HTMLImageElement, overlays: ComposeOverlay[]): ComposeOverlay[] {
+  const cols = 48;
+  const rows = Math.max(16, Math.round((cols * img.naturalHeight) / Math.max(1, img.naturalWidth)));
+  const lum = luminanceGrid(img, cols, rows);
+  if (!lum) return overlays;
+  const zone = findCalmZone(lum, cols, rows);
+  if (!zone) {
+    // No field: keep the positions, but let the ink follow the picture.
+    return overlays.map((o) => ({
+      ...o,
+      color: inkFor(regionLuminance(lum, cols, rows, { left: 10, right: 90, top: o.y - 8, bottom: o.y + 8 })),
+    }));
+  }
+  const zoneW = zone.right - zone.left;
+  const zoneH = zone.bottom - zone.top;
+  const ink = inkFor(zone.luminance);
+  const [headline, ...rest] = overlays;
+  const out: ComposeOverlay[] = [];
+  if (headline) {
+    // Type fills the field's width with a margin, and the size follows the
+    // width so a half-canvas block gets smaller type, not a broken line.
+    const width = Math.max(30, Math.min(84, zoneW * 0.86));
+    const fontSize = Math.round(Math.max(18, Math.min(headline.fontSize, headline.fontSize * (width / 84))));
+    out.push({ ...headline, x: zone.left + zoneW / 2, y: zone.top + zoneH * 0.42, width, fontSize, color: ink, placed: true });
+  }
+  for (const o of rest) {
+    if (zone.bottom >= 88 && zoneH >= 22) {
+      out.push({ ...o, x: zone.left + zoneW / 2, y: zone.bottom - 9, width: Math.max(30, Math.min(84, zoneW * 0.86)), color: ink, placed: true });
+    } else {
+      out.push({ ...o, color: inkFor(regionLuminance(lum, cols, rows, { left: 10, right: 90, top: o.y - 8, bottom: o.y + 8 })) });
+    }
+  }
+  return out;
+}
+
+/**
+ * The picture with the words on it, plus where the words went, so the editor
+ * can open the same picture with the same words in the same places.
+ */
+export async function composePost(
+  imageUrl: string,
+  overlays: ComposeOverlay[],
+  fontFamily?: string | null,
+): Promise<{ url: string; overlays: ComposeOverlay[] }> {
+  const live = overlays.filter((o) => o.text.trim());
+  if (live.length === 0) return { url: imageUrl, overlays: live };
+  try {
+    await ensureBrandFont(fontFamily);
+    const img = await loadImage(imageUrl);
+    const placed = placeOverlays(img, live);
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return { url: imageUrl, overlays: live };
+    ctx.drawImage(img, 0, 0);
+    drawOverlays(ctx, canvas, placed, brandFontStack(fontFamily).stack);
+    return { url: canvas.toDataURL("image/png"), overlays: placed };
+  } catch {
+    return { url: imageUrl, overlays: live };
+  }
+}
+
 /**
  * The picture with the words on it, as a PNG data URL. Returns the original
  * URL untouched when there is nothing to draw or drawing fails — a variant
  * without words is still a variant; a lost one is not.
  */
 export async function composeTextOnImage(imageUrl: string, overlays: ComposeOverlay[], fontFamily?: string | null): Promise<string> {
-  const live = overlays.filter((o) => o.text.trim());
-  if (live.length === 0) return imageUrl;
-  try {
-    await ensureBrandFont(fontFamily);
-    const img = await loadImage(imageUrl);
-    const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return imageUrl;
-    ctx.drawImage(img, 0, 0);
-    drawOverlays(ctx, canvas, live, brandFontStack(fontFamily).stack);
-    return canvas.toDataURL("image/png");
-  } catch {
-    return imageUrl;
-  }
+  return (await composePost(imageUrl, overlays, fontFamily)).url;
 }

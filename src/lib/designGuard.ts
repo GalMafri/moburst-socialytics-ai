@@ -67,17 +67,22 @@ export interface DesignVerdict {
   has_garbled_text?: boolean;
   /** Any readable word at all; a failure only when the design was asked for text-free. */
   has_text?: boolean;
+  /** Breaks the brand's own rules, or shows fake interface chrome. */
+  off_brand?: boolean;
+  /** The brand rules the server reviewed against, echoed back for the retry prompt. */
+  avoid?: string;
   skipped?: boolean;
 }
 
 export function verdictIsDirty(v: DesignVerdict | null | undefined, opts: { expectNoText?: boolean } = {}): boolean {
   if (!v || v.skipped) return false;
-  return !!(v.has_hex_codes || v.has_logo || v.has_garbled_text || (opts.expectNoText && v.has_text));
+  return !!(v.has_hex_codes || v.has_logo || v.has_garbled_text || v.off_brand || (opts.expectNoText && v.has_text));
 }
 
 /** Plain words for the "refining" toast, so the team knows what was caught. */
 export function verdictSummary(v: DesignVerdict): string {
   const bits: string[] = [];
+  if (v.off_brand) bits.push("an off-brand scene or fake interface");
   if (v.has_logo) bits.push("an invented logo");
   if (v.has_garbled_text) bits.push("malformed text");
   if (v.has_text && !v.has_garbled_text) bits.push("lettering where none was asked for");
@@ -92,6 +97,13 @@ export function verdictSummary(v: DesignVerdict): string {
  */
 export function correctionFor(v: DesignVerdict, opts: { expectNoText?: boolean } = {}): string {
   const notes: string[] = [];
+  if (v.off_brand) {
+    notes.push(
+      "The previous attempt broke the brand's own rules or drew interface furniture. Draw NO search bars, input fields, empty button shapes, " +
+        "phone or app frames, tab bars or placeholder rectangles: the field kept for type is a flat block of the brand's colour and nothing else. " +
+        (v.avoid ? `And obey these rules exactly: ${v.avoid.slice(0, 600)}` : "Re-stage the subject inside the brand's own layout, palette and photographic treatment."),
+    );
+  }
   if (opts.expectNoText && v.has_text) {
     notes.push(
       "The previous attempt contained readable words — on a document, a sign, a screen or a prop. " +
