@@ -170,7 +170,7 @@ export function AIDeepInsights({ reports, chartData }: Props) {
             {trends.length > 0 && <InsightGrid items={trends} numbered={false} />}
             {(facts.tiktok > 0 || facts.ig > 0) && (
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="t-label uppercase tracking-wider">Trend analysis in</span>
+                <span className="t-subhead">Trend analysis in</span>
                 {facts.tiktok > 0 && <Badge variant="outline">TikTok · {facts.tiktok} {facts.tiktok === 1 ? "report" : "reports"}</Badge>}
                 {facts.ig > 0 && <Badge variant="outline">Instagram · {facts.ig} {facts.ig === 1 ? "report" : "reports"}</Badge>}
               </div>

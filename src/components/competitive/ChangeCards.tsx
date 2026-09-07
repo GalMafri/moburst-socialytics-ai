@@ -14,7 +14,7 @@ export function ChangeCards({ changes, className }: { changes: Change[]; classNa
           <article key={i} className={cn("glass-inner p-4 flex items-start gap-3 min-w-0", c.is_client && "border-[rgba(185,224,69,0.35)]")}>
             <Icon className={cn("h-5 w-5 flex-shrink-0 mt-0.5", colour)} aria-hidden />
             <div className="min-w-0 space-y-1.5">
-              <p className="t-label uppercase tracking-wider">
+              <p className="t-subhead">
                 {c.company}
                 {c.is_client && <span className="text-[#b9e045]"> · client</span>}
               </p>

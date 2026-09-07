@@ -138,7 +138,7 @@ export function CompetitiveSnapshot({
 
       {gaps.length > 0 && (
         <Card id="snapshot-gaps" className="scroll-mt-[156px]"><CardContent className="pt-5 space-y-3">
-          <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Gaps to fill</p>
+          <p className="t-subhead flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Gaps to fill</p>
           <div className="grid gap-3 md:grid-cols-3">
             {gaps.map((g, i) => (
               <div key={i} className="glass-inner p-4 space-y-2">
@@ -156,7 +156,7 @@ export function CompetitiveSnapshot({
 
       {ai.posting_time_insights?.empty_airtime && (
         <Card id="snapshot-airtime" className="scroll-mt-[156px]"><CardContent className="pt-5 space-y-1">
-          <p className="t-label uppercase tracking-wider">Empty airtime</p>
+          <p className="t-subhead">Empty airtime</p>
           <Prose text={ai.posting_time_insights.empty_airtime} className="t-secondary" />
         </CardContent></Card>
       )}

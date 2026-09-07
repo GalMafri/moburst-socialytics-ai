@@ -266,12 +266,12 @@ export default function CompetitiveFeed() {
 
             {/* Filters */}
             <div className="flex items-center gap-3 flex-wrap">
-              <span className="t-label uppercase tracking-wider">Company</span>
+              <span className="t-subhead">Company</span>
               <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)] flex-wrap">
                 <Seg active={company === "all"} onClick={() => setCompany("all")}>All</Seg>
                 {companies.map((c) => <Seg key={c} active={company === c} onClick={() => setCompany(c)}>{c}</Seg>)}
               </div>
-              <span className="t-label uppercase tracking-wider ml-2">Platform</span>
+              <span className="t-subhead ml-2">Platform</span>
               <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)] flex-wrap">
                 <Seg active={plat === "all"} onClick={() => setPlat("all")}>All</Seg>
                 {platforms.map((p) => <Seg key={p} active={plat === p} onClick={() => setPlat(p)}>{platformLabel(p)}</Seg>)}

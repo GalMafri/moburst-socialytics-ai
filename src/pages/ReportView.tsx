@@ -414,7 +414,7 @@ export default function ReportView() {
                       <div className="grid gap-6 md:grid-cols-[auto_1fr] items-start">
                         {hero && (
                           <div className="min-w-[12rem]">
-                            <p className="t-label uppercase tracking-wider">Biggest move</p>
+                            <p className="t-subhead">Biggest move</p>
                             <p className={`text-[48px] leading-[52px] font-bold tracking-[-1px] ${hero.pct > 0 ? "text-success" : hero.pct < 0 ? "text-destructive" : "text-white"}`}>
                               {hero.pct > 0 ? "+" : ""}{Math.round(hero.pct)}%
                             </p>
@@ -429,7 +429,7 @@ export default function ReportView() {
                     )}
                     {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
                       <div className="pt-4 border-t space-y-2">
-                        <p className="t-label uppercase tracking-wider">Top performing content types</p>
+                        <p className="t-subhead">Top performing content types</p>
                         <InsightGrid items={aiAnalysis.sprout_performance_analysis.top_performing_content} numbered={false} />
                       </div>
                     )}
@@ -450,9 +450,9 @@ export default function ReportView() {
                 <Card className="glass-accent">
                   <CardContent className="pt-5 flex items-center justify-between gap-6 flex-wrap">
                     <dl className="flex items-center gap-10 flex-wrap">
-                      <div><dt className="t-label uppercase tracking-wider">Benchmark score</dt><dd className="t-stat tabular-nums">{compScore != null ? `${compScore}/100` : "pending"}</dd></div>
-                      {compTotal ? <div><dt className="t-label uppercase tracking-wider">Share of voice</dt><dd className="t-stat tabular-nums">{Math.round((compMe.post_count / compTotal) * 100)}%</dd></div> : null}
-                      {compMe.cadence_per_week != null && <div><dt className="t-label uppercase tracking-wider">Posts a week</dt><dd className="t-stat tabular-nums">{compMe.cadence_per_week}</dd></div>}
+                      <div><dt className="t-subhead">Benchmark score</dt><dd className="t-stat tabular-nums">{compScore != null ? `${compScore}/100` : "pending"}</dd></div>
+                      {compTotal ? <div><dt className="t-subhead">Share of voice</dt><dd className="t-stat tabular-nums">{Math.round((compMe.post_count / compTotal) * 100)}%</dd></div> : null}
+                      {compMe.cadence_per_week != null && <div><dt className="t-subhead">Posts a week</dt><dd className="t-stat tabular-nums">{compMe.cadence_per_week}</dd></div>}
                     </dl>
                     <Button variant="outline" onClick={() => setTab("competitive")}>Open the competitive view <ArrowRight className="h-4 w-4 ml-1" /></Button>
                   </CardContent>
@@ -471,11 +471,11 @@ export default function ReportView() {
                 <Card>
                   <CardContent className="pt-5 grid gap-8 lg:grid-cols-2">
                     <div className="space-y-3">
-                      <p className="t-label uppercase tracking-wider">Impressions by platform</p>
+                      <p className="t-subhead">Impressions by platform</p>
                       <RankedBars rows={platformBreakdown.map((p: any, i: number) => ({ key: `${p.network}-${i}`, name: platformLabelOf(p.network), label: <><PlatformBadge platform={p.network} size="sm" /></>, value: Number(p.current?.impressions ?? 0) }))} />
                     </div>
                     <div className="space-y-3">
-                      <p className="t-label uppercase tracking-wider">Engagements by platform</p>
+                      <p className="t-subhead">Engagements by platform</p>
                       <RankedBars rows={platformBreakdown.map((p: any, i: number) => ({ key: `${p.network}-${i}`, name: platformLabelOf(p.network), label: <><PlatformBadge platform={p.network} size="sm" /></>, value: Number(p.current?.reactions ?? 0) + Number(p.current?.comments ?? 0) + Number(p.current?.shares ?? 0) }))} />
                     </div>
                   </CardContent>
@@ -499,20 +499,20 @@ export default function ReportView() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {pillars.well_represented?.length > 0 && (
                           <div className="space-y-2">
-                            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
+                            <p className="t-subhead flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
                             <div className="flex flex-wrap gap-1.5">{pillars.well_represented.map((p: string) => <Badge key={p} variant="secondary" className="t-label">{p}</Badge>)}</div>
                           </div>
                         )}
                         {pillars.underrepresented?.length > 0 && (
                           <div className="space-y-2">
-                            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-warning" /> Needs attention</p>
+                            <p className="t-subhead flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-warning" /> Needs attention</p>
                             <div className="flex flex-wrap gap-1.5">{pillars.underrepresented.map((p: string) => <Badge key={p} variant="outline" className="t-label">{p}</Badge>)}</div>
                           </div>
                         )}
                       </div>
                       {pillarRecs.length > 0 && (
                         <div className="pt-4 border-t space-y-2">
-                          <p className="t-label uppercase tracking-wider">Recommendations</p>
+                          <p className="t-subhead">Recommendations</p>
                           <ul className="space-y-2">
                             {pillarRecs.map((r, i) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{r}</span></li>)}
                           </ul>
@@ -526,7 +526,7 @@ export default function ReportView() {
             {rd?.data_counts && (
               <Card>
                 <CardContent className="pt-5 flex items-center gap-8 flex-wrap">
-                  <p className="t-label uppercase tracking-wider">In this report</p>
+                  <p className="t-subhead">In this report</p>
                   <ul className="flex items-center gap-6 flex-wrap t-body">
                     <li className="flex items-center gap-2"><span>Sprout posts analyzed</span><span className="font-semibold tabular-nums">{rd.data_counts.sprout_top_posts ?? 0}</span></li>
                     <li className="flex items-center gap-2"><span>TikTok trends</span><span className="font-semibold tabular-nums">{rd.data_counts.tiktok_trends ?? 0}</span></li>
@@ -582,7 +582,7 @@ function ActionCard({ action, onOpen }: { action: { source: string; title: strin
   const icon = action.source === "Competitors" ? <Crosshair className="h-3.5 w-3.5" /> : action.source === "Trends" ? <TrendingUp className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />;
   return (
     <button type="button" onClick={onOpen} className="text-left glass-inner p-4 pl-5 space-y-2.5 group border-l-2 border-l-[#b9e045] flex flex-col">
-      <span className="inline-flex items-center gap-1.5 t-label uppercase tracking-wider">{icon} Recommendation · {action.source}</span>
+      <span className="inline-flex items-center gap-1.5 t-subhead">{icon} Recommendation · {action.source}</span>
       <p className="t-body font-semibold text-white">{action.title}</p>
       {action.detail && <p className="t-body">{action.detail}</p>}
       <span className="mt-auto inline-flex items-center gap-1 t-label !text-white rounded-full border border-[rgba(255,255,255,0.16)] px-3 py-1 group-hover:bg-[rgba(255,255,255,0.08)]">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open Trends" : "Open Competitive"} <ArrowRight className="h-3.5 w-3.5" /></span>
@@ -812,7 +812,7 @@ function TopPostsSection({ posts }: { posts: any[] }) {
     <div className="space-y-8">
       {platforms.length > 1 && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="t-label uppercase tracking-wider">Platform</span>
+          <span className="t-subhead">Platform</span>
           <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)]">
             <FilterChip active={effective === "all"} onClick={() => setActive("all")}>All</FilterChip>
             {platforms.map((k) => <PlatformFilterChip key={k} platform={prettyPlatformName(k)} active={effective === k} onClick={() => setActive(k)} />)}
@@ -955,13 +955,13 @@ function TrendsSection({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {analysis.top_themes?.length > 0 && (
               <Card><CardContent className="pt-5 space-y-3">
-                <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Top themes</p>
+                <p className="t-subhead flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Top themes</p>
                 <div className="flex flex-wrap gap-2">{analysis.top_themes.map((t: string, i: number) => <Badge key={t} variant="secondary" className="px-3 py-1 t-body"><span className="mr-1.5 t-badge text-[#b1b7c1]">{i + 1}</span>{t}</Badge>)}</div>
               </CardContent></Card>
             )}
             {analysis.top_hashtags?.length > 0 && (
               <Card><CardContent className="pt-5 space-y-3">
-                <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><span className="text-[14px] font-bold">#</span> Trending hashtags</p>
+                <p className="t-subhead flex items-center gap-1.5"><span className="text-[14px] font-bold">#</span> Trending hashtags</p>
                 <div className="flex flex-wrap gap-2">{analysis.top_hashtags.map((h: string) => <Badge key={h} variant="outline" className="px-3 py-1 t-body">{h.startsWith("#") ? h : `#${h}`}</Badge>)}</div>
               </CardContent></Card>
             )}

@@ -27,6 +27,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { PlatformBadge } from "@/lib/platform-config";
 import { describeInvokeError } from "@/lib/invokeError";
+import { displayCompanyName } from "@/lib/companyName";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Crosshair, Loader2, Plus, RefreshCw, Search, ShieldCheck, Trash2, Trophy, Play, Download,
@@ -78,7 +79,7 @@ function LandscapeRow({
       <div className="min-w-0">
         <p className="t-body font-medium text-white">{landscape.name}</p>
         <p className="t-secondary mt-0.5">
-          {empty ? "No competitors in this set" : rivals.map((c: any) => c.name).join(", ")}
+          {empty ? "No competitors in this set" : rivals.map((c: any) => displayCompanyName(c.name)).join(", ")}
         </p>
       </div>
       <Button
@@ -487,7 +488,7 @@ export default function CompetitorReview() {
                 <div className="space-y-2">
                   {landscapeMatches.length > 0 ? (
                     <>
-                      <p className="t-label uppercase tracking-wider">
+                      <p className="t-subhead">
                         Tracked for {client?.name || "this client"} · {landscapeMatches.length} set
                         {landscapeMatches.length === 1 ? "" : "s"} in RivalIQ
                       </p>
@@ -526,7 +527,7 @@ export default function CompetitorReview() {
                       </Button>
                     ) : (
                       <div className="space-y-4">
-                        <p className="t-label uppercase tracking-wider">Tracked for other clients</p>
+                        <p className="t-subhead">Tracked for other clients</p>
                         {landscapesByFocus.map(([focus, sets]) => (
                           <div key={focus} className="space-y-2">
                             <p className="t-body font-medium text-white">
@@ -603,7 +604,7 @@ export default function CompetitorReview() {
               {selected.map((c) => (
                 <div key={c.id} className="glass-inner flex items-center gap-3 p-3">
                   <Badge className="shrink-0">#{c.selected_rank}</Badge>
-                  <span className="font-medium t-body">{c.name}</span>
+                  <span className="font-medium t-body" title={c.name}>{displayCompanyName(c.name)}</span>
                   <span className="flex gap-1 ml-auto">
                     {(handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active).map((h) => (
                       <PlatformBadge key={h.id} platform={h.platform} size="sm" />
@@ -659,7 +660,7 @@ export default function CompetitorReview() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium t-body">{c.name}</span>
+                          <span className="font-medium t-body" title={c.name}>{displayCompanyName(c.name)}</span>
                           {c.source === "manual" && <Badge variant="outline">manual</Badge>}
                           {typeof c.similarity_score === "number" && (
                             <Badge variant="secondary">{Math.round(c.similarity_score * 100)}% match</Badge>

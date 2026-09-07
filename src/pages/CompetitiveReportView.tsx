@@ -14,6 +14,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { displayCompanyName } from "@/lib/companyName";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -139,7 +140,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <p className="t-body font-semibold leading-tight">{value}</p>
-      <p className="t-label uppercase tracking-wider leading-tight">{label}</p>
+      <p className="t-subhead leading-tight">{label}</p>
     </div>
   );
 }
@@ -158,7 +159,7 @@ function TileStat({ value, label, exact }: { value: string; label: string; exact
 function TileNote({ label, text }: { label: string; text: string }) {
   return (
     <div className="min-w-0">
-      <dt className="t-label uppercase tracking-wider !text-white/70 font-semibold">{label}</dt>
+      <dt className="t-subhead">{label}</dt>
       <dd className="t-body mt-0.5">{text}</dd>
     </div>
   );
@@ -186,7 +187,7 @@ function MetricRow({ label, value, format = compactNumber, signed = false }: { l
         {format(value.current)}
         {change != null && <span className={`t-label ml-1.5 ${tone}`}>{fmtDelta(change)}</span>}
       </p>
-      <p className="t-label uppercase tracking-wider leading-tight">{label}</p>
+      <p className="t-subhead leading-tight">{label}</p>
     </div>
   );
 }
@@ -316,7 +317,7 @@ export default function CompetitiveReportView() {
   const withMetrics = ordered.map((c) => ({ c, m: metricsFor(c) })).filter((x) => x.m) as { c: Company; m: NonNullable<ReturnType<typeof metricsFor>> }[];
   const hasMetrics = withMetrics.length > 0;
   const meM = me ? metricsFor(me) : null;
-  const followersRows = withMetrics.filter((x) => x.m.audience && x.m.audience.current > 0).map((x) => ({ key: x.c.company_id, label: x.c.name, name: x.c.name, value: x.m.audience!.current, emphasized: x.c.is_client }));
+  const followersRows = withMetrics.filter((x) => x.m.audience && x.m.audience.current > 0).map((x) => ({ key: x.c.company_id, label: displayCompanyName(x.c.name), name: x.c.name, value: x.m.audience!.current, emphasized: x.c.is_client }));
   const previousDays = me?.rivaliq_metrics?.previous_period ? Math.round((Date.parse(me.rivaliq_metrics.previous_period.end) - Date.parse(me.rivaliq_metrics.previous_period.start)) / 86400000) + 1 : null;
   // RivalIQ answers "No Prediction" for most Facebook pages, and the signal does
   // not exist off Facebook at all, so only explain it when a company actually
@@ -437,7 +438,7 @@ export default function CompetitiveReportView() {
         {/* Platform filter */}
         {hasChannels && (
           <div data-print="hide" className="glass px-5 py-3 flex items-center gap-3 flex-wrap">
-            <span className="t-label uppercase tracking-wider">Platform</span>
+            <span className="t-subhead">Platform</span>
             <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)]">
               <Seg active={effectivePlat === "all"} onClick={() => setPlat("all")}>All platforms</Seg>
               {platforms.map((k) => <Seg key={k} active={effectivePlat === k} onClick={() => setPlat(k)}>{platformLabel(k)}</Seg>)}
@@ -528,12 +529,12 @@ export default function CompetitiveReportView() {
             <Card>
               <CardContent className="pt-5 grid gap-8 lg:grid-cols-2">
                 <div className="space-y-3">
-                  <p className="t-label uppercase tracking-wider">Posts per week</p>
-                  <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => v.toFixed(1)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: c.name, value: Number(bucketFor(c, effectivePlat).cadence_per_week || 0), emphasized: !!c.is_client }))} />
+                  <p className="t-subhead">Posts per week</p>
+                  <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => v.toFixed(1)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).cadence_per_week || 0), emphasized: !!c.is_client }))} />
                 </div>
                 <div className="space-y-3">
-                  <p className="t-label uppercase tracking-wider">Engagement rate</p>
-                  <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => pct(v)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: c.name, value: Number(bucketFor(c, effectivePlat).engagement_rate_avg || 0), emphasized: !!c.is_client }))} />
+                  <p className="t-subhead">Engagement rate</p>
+                  <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => pct(v)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).engagement_rate_avg || 0), emphasized: !!c.is_client }))} />
                 </div>
               </CardContent>
             </Card>
@@ -544,8 +545,8 @@ export default function CompetitiveReportView() {
                 return (
                   <Card key={c.company_id} className={c.is_client ? "glass-accent" : ""}>
                     <CardHeader className="pb-3">
-                      <CardTitle className="t-h3 flex items-center gap-2 flex-wrap">
-                        {c.name}
+                      <CardTitle className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>
+                        {displayCompanyName(c.name)}
                         {c.is_client && <Badge>client</Badge>}
                         {c.in_confirmed_top3 && <Badge variant="secondary">top 3</Badge>}
                       </CardTitle>
@@ -607,10 +608,10 @@ export default function CompetitiveReportView() {
                     <table className="w-full border-collapse">
                       <thead>
                         <tr>
-                          <th className="t-label uppercase tracking-wider text-left align-bottom pb-3 pr-6 w-[92px]" />
+                          <th className="t-subhead text-left align-bottom pb-3 pr-6 w-[92px]" />
                           {ordered.map((c) => (
                             <th key={c.company_id} className="text-left align-bottom pb-3 pr-6 last:pr-0 min-w-[240px]">
-                              <span className="t-body font-semibold text-white">{c.name}</span>
+                              <span className="t-body font-semibold text-white" title={c.name}>{displayCompanyName(c.name)}</span>
                               {c.is_client && <span className="t-label !text-[#b9e045] ml-2">client</span>}
                             </th>
                           ))}
@@ -619,7 +620,7 @@ export default function CompetitiveReportView() {
                       <tbody>
                         {breakdownRows.map((row) => (
                           <tr key={row.label} className="border-t border-[rgba(255,255,255,0.06)] align-top">
-                            <th scope="row" className="t-label uppercase tracking-wider !text-white/70 font-semibold text-left py-4 pr-6">
+                            <th scope="row" className="t-subhead text-left py-4 pr-6">
                               {row.label}
                             </th>
                             {ordered.map((c) => (
@@ -650,7 +651,7 @@ export default function CompetitiveReportView() {
               <CardContent className="pt-5 space-y-6">
                 {followersRows.length > 0 && (
                   <div className="space-y-2">
-                    <p className="t-label uppercase tracking-wider">Followers{effectivePlat === "all" ? " across networks" : ""}</p>
+                    <p className="t-subhead">Followers{effectivePlat === "all" ? " across networks" : ""}</p>
                     <RankedBars rows={followersRows} emphasis legend={{ subject: clientName, others: "Competitors" }} />
                   </div>
                 )}
@@ -660,8 +661,8 @@ export default function CompetitiveReportView() {
                     const boosted = m.boosted?.current || 0;
                     return (
                       <article key={c.company_id} className={`glass-inner p-4 space-y-3 min-w-0 ${c.is_client ? "border-[rgba(185,224,69,0.35)]" : ""}`}>
-                        <p className="t-body font-semibold text-white">
-                          {c.name}
+                        <p className="t-body font-semibold text-white" title={c.name}>
+                          {displayCompanyName(c.name)}
                           {c.is_client && <span className="t-label !text-[#b9e045] ml-2">client</span>}
                         </p>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-3">
@@ -672,7 +673,7 @@ export default function CompetitiveReportView() {
                         </div>
                         {nets.length > 0 && (
                           <div className="space-y-1.5">
-                            <p className="t-label uppercase tracking-wider">Followers by network</p>
+                            <p className="t-subhead">Followers by network</p>
                             <div className="flex flex-wrap gap-1.5">
                               {nets.map(([net, n]) => <Chip key={net}>{platformLabel(net)} <span className="text-muted-foreground ml-1">{compactNumber(n.followers!.current)}</span></Chip>)}
                             </div>
@@ -704,7 +705,7 @@ export default function CompetitiveReportView() {
                   const peakDay = peakOf(b.by_weekday);
                   return (
                   <div key={c.company_id} className="space-y-3 glass-inner p-4">
-                    <div className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
+                    <div className="font-medium flex items-center gap-2" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
                     {(peakHour || peakDay) && (
                       <div className="flex flex-wrap gap-x-8 gap-y-2">
                         {peakHour && (
@@ -722,8 +723,8 @@ export default function CompetitiveReportView() {
                       </div>
                     )}
                     <div className="flex flex-wrap gap-x-8 gap-y-4">
-                      <div className="min-w-0 shrink-0"><p className="t-secondary mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} cell={28} /></div>
-                      <div className="min-w-0 grow basis-[420px]"><p className="t-secondary mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} cell={20} /></div>
+                      <div className="min-w-0 shrink-0"><p className="t-subhead mb-1.5">Weekday</p><HeatStrip counts={b.by_weekday} keys={WEEKDAYS} cell={28} /></div>
+                      <div className="min-w-0 grow basis-[420px]"><p className="t-subhead mb-1.5">Hour (UTC)</p><HeatStrip counts={b.by_hour} keys={HOURS} labelEvery={3} cell={20} /></div>
                     </div>
                   </div>
                   );
@@ -733,11 +734,17 @@ export default function CompetitiveReportView() {
                 {schedule && (schedule.by_weekday || schedule.by_hour) && (
                   <div className="glass-inner p-4 space-y-3">
                     <div className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-4 w-4" /> Recommended schedule for {clientName}</div>
-                    <div className="flex flex-wrap gap-x-8 gap-y-4">
-                      {schedule.by_weekday && <div className="min-w-0 shrink-0"><p className="t-secondary mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} cell={28} color={RECOMMEND} /></div>}
-                      {schedule.by_hour && <div className="min-w-0 grow basis-[420px]"><p className="t-secondary mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} cell={20} color={RECOMMEND} /></div>}
+                    {/* The reasoning sits beside the schedule it explains. Under
+                        it, the block ran half empty: the strips stop at 830px
+                        and the prose stops at its measure, leaving a third of
+                        the card blank. */}
+                    <div className="grid gap-x-10 gap-y-4 2xl:grid-cols-[minmax(0,auto)_minmax(0,1fr)] items-start">
+                      <div className="flex flex-wrap gap-x-8 gap-y-4">
+                        {schedule.by_weekday && <div className="min-w-0 shrink-0"><p className="t-subhead mb-1.5">Posts per weekday</p><HeatStrip counts={schedule.by_weekday} keys={WEEKDAYS} cell={28} color={RECOMMEND} /></div>}
+                        {schedule.by_hour && <div className="min-w-0 grow basis-[420px]"><p className="t-subhead mb-1.5">Posts per hour (UTC)</p><HeatStrip counts={schedule.by_hour} keys={HOURS} labelEvery={3} cell={20} color={RECOMMEND} /></div>}
+                      </div>
+                      {schedule.rationale && <Prose text={schedule.rationale} className="t-body" />}
                     </div>
-                    {schedule.rationale && <Prose text={schedule.rationale} className="t-body" />}
                   </div>
                 )}
 
@@ -745,7 +752,7 @@ export default function CompetitiveReportView() {
                   // The callout hugs its text. Stretched to the full card it held a
                   // readable measure beside 680px of empty accent panel.
                   <div className="glass-accent p-4 w-fit max-w-full">
-                    <p className="t-label uppercase tracking-wider mb-1">Empty airtime</p>
+                    <p className="t-subhead mb-1">Empty airtime</p>
                     <Prose text={ai.posting_time_insights.empty_airtime} className="t-body" />
                   </div>
                 )}
@@ -837,7 +844,7 @@ export default function CompetitiveReportView() {
                   const examples: Array<{ url: string; post?: TopPost }> = (w.example_post_urls || []).slice(0, 3).map((u: string) => ({ url: u, post: allPosts.get(u) }));
                   return (
                     <div key={i} className="glass-inner p-4 space-y-3">
-                      <p className="t-label uppercase tracking-wider">{w.competitor}</p>
+                      <p className="t-subhead" title={w.competitor}>{displayCompanyName(w.competitor)}</p>
                       {/* The pattern is the claim, and the only prose here. */}
                       <p className="t-body text-white leading-[1.55]">{w.pattern}</p>
                       {/* The proof, as the numbers rather than a paragraph
@@ -904,7 +911,7 @@ export default function CompetitiveReportView() {
                   if (!posts.length) return null;
                   return (
                     <div key={c.company_id} className="space-y-2">
-                      <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
+                      <p className="font-medium flex items-center gap-2" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
                       <div className="grid gap-2 grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
                         {posts.map((p, i) => <PostVisual key={i} url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} compact />)}
                       </div>
@@ -923,7 +930,7 @@ export default function CompetitiveReportView() {
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
                   <div key={c.company_id} className="space-y-3">
-                    <p className="font-medium flex items-center gap-2">{c.name}{c.is_client && <Badge>client</Badge>}</p>
+                    <p className="font-medium flex items-center gap-2" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
                     <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5 items-start">
                       {b.top_posts.filter(hasContent).slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}
                       {b.top_posts.filter((p) => !hasContent(p)).length > 0 && (

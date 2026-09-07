@@ -59,7 +59,7 @@ export function CompareBars({
           const max = Math.max(it.current, it.previous, 0);
           return (
             <div key={it.key} className="space-y-1.5 min-w-0">
-              <p className="t-label uppercase tracking-wider">{it.label}</p>
+              <p className="t-subhead">{it.label}</p>
               <div className="space-y-[2px]">
                 <Bar value={it.current} max={max} color={SERIES.accent} label={f(it.current)} title={`${it.label}, ${currentLabel}: ${it.current.toLocaleString()}`} />
                 <Bar value={it.previous} max={max} color={SERIES.muted} label={f(it.previous)} title={`${it.label}, ${previousLabel}: ${it.previous.toLocaleString()}`} />
@@ -96,7 +96,17 @@ export function RankedBars({
       <div className="space-y-2.5">
         {sorted.map((r) => (
           <div key={r.key} className="grid grid-cols-[minmax(0,10rem)_1fr] items-center gap-3">
-            <div className="t-body truncate flex items-center gap-2 min-w-0">{r.label}</div>
+            {/* The subject's own row is white and medium: the accent bar says
+                which one it is, but only if you have read the legend, and the
+                name is what the eye lands on first. */}
+            <div
+              className={cn(
+                "t-body truncate flex items-center gap-2 min-w-0",
+                emphasis && r.emphasized ? "font-semibold !text-white" : "!text-[#d1d5db]",
+              )}
+            >
+              {r.label}
+            </div>
             <Bar
               value={r.value}
               max={max}

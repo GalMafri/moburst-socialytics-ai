@@ -113,7 +113,7 @@ export function GenerationProgress() {
                 role="progressbar"
               />
             </div>
-            <p className="mt-1.5 t-label uppercase tracking-wider">
+            <p className="mt-1.5 t-subhead">
               {g.completed}/{g.total} complete
               {g.failed > 0 && ` · ${g.failed} failed`}
             </p>

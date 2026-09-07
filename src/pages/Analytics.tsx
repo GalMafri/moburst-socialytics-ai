@@ -924,7 +924,7 @@ function MetricBarSingle({
 }) {
   return (
     <div className="glass-inner p-4 pl-5 space-y-1 border-l-2" style={{ borderLeftColor: color }}>
-      <p className="t-label uppercase tracking-wider">{label}</p>
+      <p className="t-subhead">{label}</p>
       <p className="t-h3">{fmtVal(value)}</p>
     </div>
   );
@@ -997,9 +997,9 @@ function LiveSproutSection({
                     {p.network && <PlatformBadge platform={p.network} size="sm" />}
                   </div>
                   <div className="grid grid-cols-3 gap-2 t-body">
-                    <div><p className="font-semibold">{fmtVal(p.impressions || 0)}</p><p className="t-label uppercase tracking-wider">Impr.</p></div>
-                    <div><p className="font-semibold">{fmtVal(p.reactions || 0)}</p><p className="t-label uppercase tracking-wider">Reactions</p></div>
-                    <div><p className="font-semibold">{fmtVal(p.video_views || 0)}</p><p className="t-label uppercase tracking-wider">Views</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.impressions || 0)}</p><p className="t-subhead">Impr.</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.reactions || 0)}</p><p className="t-subhead">Reactions</p></div>
+                    <div><p className="font-semibold">{fmtVal(p.video_views || 0)}</p><p className="t-subhead">Views</p></div>
                   </div>
                 </div>
               ))}
