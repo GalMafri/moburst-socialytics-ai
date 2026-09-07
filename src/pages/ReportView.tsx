@@ -720,74 +720,83 @@ function postPlatformKey(post: any): string {
 
 /* ─── Platform Performance Card (mirrors the aggregate MetricsCards styling) ─── */
 function PlatformPerformanceCard({ platform }: { platform: any }) {
+  // Full words. Six abbreviated columns ("Impr.", "Comm.") in a 440px card
+  // were the reason the labels had to be 11px and grey; three columns of two
+  // rows fit the words at a size you can read.
   const metrics = [
-    { key: "impressions", label: "Impressions", short: "Impr.", icon: Eye },
-    { key: "reactions", label: "Reactions", short: "Reacts", icon: Heart },
-    { key: "link_clicks", label: "Link Clicks", short: "Clicks", icon: MousePointerClick },
-    { key: "video_views", label: "Video Views", short: "Views", icon: Video },
-    { key: "comments", label: "Comments", short: "Comm.", icon: MessageCircle },
-    { key: "shares", label: "Shares", short: "Shares", icon: Share2 },
+    { key: "impressions", label: "Impressions" },
+    { key: "reactions", label: "Reactions" },
+    { key: "link_clicks", label: "Link clicks" },
+    { key: "video_views", label: "Video views" },
+    { key: "comments", label: "Comments" },
+    { key: "shares", label: "Shares" },
   ];
   const cur = platform.current || {};
   const prev = platform.previous || null;
   const changes = platform.changes || null;
   const ai = platform.ai || null;
+  const name = prettyPlatformName(platform.network);
+  const handles: string[] = Array.isArray(platform.profile_names) ? platform.profile_names : [];
   return (
-    <div className="glass p-5">
-      <div className="pb-3 space-y-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <PlatformBadge platform={prettyPlatformName(platform.network)} size="sm" />
+    <article className="glass p-5 flex flex-col gap-4">
+      {/* The platform is the title of this card, so it is set as one: 18px,
+          white, with its icon in the brand colour. It used to be a 12px badge
+          in the corner, which left the card without a heading at all. */}
+      <header className="pb-3 border-b border-[rgba(255,255,255,0.08)] space-y-1">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="t-h3 flex items-center gap-2 min-w-0">
+            <span style={{ color: getPlatformColor(platform.network) }} className="inline-flex shrink-0">
+              <PlatformIcon platform={platform.network} className="h-5 w-5" />
+            </span>
+            <span className="truncate">{name}</span>
+          </h3>
           {typeof platform.post_count === "number" && platform.post_count > 0 && (
-            <span className="t-secondary whitespace-nowrap">
+            <span className="t-label whitespace-nowrap pt-1">
               {platform.post_count} {platform.post_count === 1 ? "post" : "posts"}
             </span>
           )}
         </div>
-        {Array.isArray(platform.profile_names) && platform.profile_names.length > 0 && (
-          <p className="t-secondary truncate">
-            {platform.profile_names.join(", ")}
+        {handles.length > 0 && (
+          <p className="t-label truncate" title={handles.join(", ")}>
+            {handles.map((h) => (h.startsWith("@") ? h : `@${h}`)).join(" · ")}
           </p>
         )}
-        {ai?.headline && (
-          <CardDescription className="leading-relaxed">
-            {formatNumbersInText(ai.headline)}
-          </CardDescription>
-        )}
-      </div>
-      <div className="space-y-4">
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-x-3 gap-y-3">
-          {metrics.map(({ key, label, short, icon: Icon }) => {
-            const value = Number(cur[key] ?? 0);
-            const ch = changes?.[key];
-            const pct = typeof ch?.percent === "number" ? ch.percent : null;
-            // A zero baseline isn't "+100% growth": surface it as "New" instead.
-            const isNew = ch != null && Number(ch.previous ?? prev?.[key] ?? 0) === 0 && value > 0;
-            const tone = isNew || (pct != null && pct > 0) ? "text-success" : pct != null && pct < 0 ? "text-[#f87171]" : "text-[#b1b7c1]";
-            return (
-              <div key={key} className="min-w-0" title={`${label}: ${value.toLocaleString()}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}% vs previous period)` : ""}`}>
-                <p className="t-label flex items-center gap-1 whitespace-nowrap"><Icon className="h-3 w-3 flex-shrink-0" aria-hidden /> <span aria-label={label}>{short}</span></p>
-                <p className="t-body font-semibold tabular-nums">{compactNumber(value)}</p>
-                {(pct != null || isNew) && (
-                  <p className={`t-label font-semibold ${tone}`}>{isNew ? "New" : `${pct > 0 ? "+" : ""}${pct}%`}</p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        {Array.isArray(ai?.insights) && ai.insights.length > 0 && (
-          <div className="pt-3 border-t space-y-2">
-            <ul className="space-y-1.5">
-              {ai.insights.map((t: string, i: number) => (
-                <li key={i} className="t-body flex gap-2">
-                  <span className="text-primary flex-shrink-0">•</span>
-                  <span>{formatNumbersInText(t)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </div>
+      </header>
+
+      {ai?.headline && <p className="t-body text-white leading-[1.55]">{formatNumbersInText(ai.headline)}</p>}
+
+      <dl className="grid grid-cols-3 gap-x-4 gap-y-4">
+        {metrics.map(({ key, label }) => {
+          const value = Number(cur[key] ?? 0);
+          const ch = changes?.[key];
+          const pct = typeof ch?.percent === "number" ? ch.percent : null;
+          // A zero baseline isn't "+100% growth": surface it as "new" instead.
+          const isNew = ch != null && Number(ch.previous ?? prev?.[key] ?? 0) === 0 && value > 0;
+          const tone = isNew || (pct != null && pct > 0) ? "text-success" : pct != null && pct < 0 ? "text-[#f87171]" : "text-[#9ca3af]";
+          const delta = isNew ? "new" : pct == null ? null : pct === 0 ? "—" : `${pct > 0 ? "+" : ""}${Math.round(pct)}%`;
+          return (
+            <div key={key} className="min-w-0" title={`${label}: ${value.toLocaleString()}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}% vs previous period)` : ""}`}>
+              <dd className="flex items-baseline gap-1.5 flex-wrap">
+                <span className="t-h3 tabular-nums">{compactNumber(value)}</span>
+                {delta && <span className={`t-label font-semibold tabular-nums ${tone}`}>{delta}</span>}
+              </dd>
+              <dt className="t-label mt-0.5">{label}</dt>
+            </div>
+          );
+        })}
+      </dl>
+
+      {Array.isArray(ai?.insights) && ai.insights.length > 0 && (
+        <ul className="pt-4 border-t border-[rgba(255,255,255,0.08)] space-y-2.5">
+          {ai.insights.map((txt: string, i: number) => (
+            <li key={i} className="t-body text-[#d1d5db] leading-[1.6] flex gap-3">
+              <span className="mt-[9px] h-1.5 w-1.5 rounded-full bg-[#b9e045] shrink-0" aria-hidden />
+              <span className="min-w-0">{formatNumbersInText(txt)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </article>
   );
 }
 
