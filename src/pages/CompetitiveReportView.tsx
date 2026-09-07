@@ -346,6 +346,38 @@ export default function CompetitiveReportView() {
       : (breakdownFor(name)?.platform_notes || []).find((n: any) => normalizePlatform(n.platform) === effectivePlat)?.note;
 
   /**
+   * Every section says what it is showing, once a filter is on.
+   *
+   * Marking only the four sections a filter cannot narrow still left the
+   * reader working out the rest by elimination. Now each section carries its
+   * own scope: the platform in the accent, or "All platforms" in grey for the
+   * parts the analysis writes once for the whole account.
+   */
+  const scopeTag = (scoped: boolean) => {
+    if (effectivePlat === "all") return undefined;
+    return scoped ? (
+      <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 t-label !text-[#b9e045] bg-[rgba(185,224,69,0.12)] border border-[rgba(185,224,69,0.3)] whitespace-nowrap">
+        <PlatformIcon platform={effectivePlat} className="h-3 w-3" /> {platformLabel(effectivePlat)} only
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 t-label bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.12)] whitespace-nowrap">
+        All platforms
+      </span>
+    );
+  };
+  const acrossAll = scopeTag(false);
+
+  // Every creative a company ran in the period (all channels, or the filtered
+  // one), for the mood board grids.
+  const moodPosts = (c: Company): TopPost[] => {
+    const seen = new Set<string>();
+    const out: TopPost[] = [];
+    const lists = [bucketFor(c, effectivePlat).top_posts || [], ...(effectivePlat === "all" ? Object.values(c.by_channel || {}).map((b) => b.top_posts || []) : [])];
+    for (const list of lists) for (const p of list) { const k = p.url || p.text; if (!k || seen.has(k)) continue; seen.add(k); out.push(p); }
+    return out.slice(0, 16);
+  };
+
+  /**
    * Which sections this report has, and the order they read in.
    *
    * With a platform selected the page splits in two: everything the filter
@@ -378,37 +410,6 @@ export default function CompetitiveReportView() {
   const firstWideId = displayIds.find((id) => WIDE_IDS.includes(id));
   const showZoneBreak = effectivePlat !== "all" && !!firstWideId;
 
-  /**
-   * Every section says what it is showing, once a filter is on.
-   *
-   * Marking only the four sections a filter cannot narrow still left the
-   * reader working out the rest by elimination. Now each section carries its
-   * own scope: the platform in the accent, or "All platforms" in grey for the
-   * parts the analysis writes once for the whole account.
-   */
-  const scopeTag = (scoped: boolean) => {
-    if (effectivePlat === "all") return undefined;
-    return scoped ? (
-      <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 t-label !text-[#b9e045] bg-[rgba(185,224,69,0.12)] border border-[rgba(185,224,69,0.3)] whitespace-nowrap">
-        <PlatformIcon platform={effectivePlat} className="h-3 w-3" /> {platformLabel(effectivePlat)} only
-      </span>
-    ) : (
-      <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 t-label bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.12)] whitespace-nowrap">
-        All platforms
-      </span>
-    );
-  };
-  const acrossAll = scopeTag(false);
-
-  // Every creative a company ran in the period (all channels, or the filtered
-  // one), for the mood board grids.
-  const moodPosts = (c: Company): TopPost[] => {
-    const seen = new Set<string>();
-    const out: TopPost[] = [];
-    const lists = [bucketFor(c, effectivePlat).top_posts || [], ...(effectivePlat === "all" ? Object.values(c.by_channel || {}).map((b) => b.top_posts || []) : [])];
-    for (const list of lists) for (const p of list) { const k = p.url || p.text; if (!k || seen.has(k)) continue; seen.add(k); out.push(p); }
-    return out.slice(0, 16);
-  };
 
   const castVote = async (g: any, verdict: "up" | "down") => {
     try {
