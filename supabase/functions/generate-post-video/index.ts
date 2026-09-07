@@ -272,12 +272,12 @@ serve(async (req) => {
       // the clip. Checking costs a couple of seconds against a Veo call that
       // costs minutes and real money, so it is worth one regeneration.
       const verdict = await validateDesignImage(`data:${seedImage.mimeType};base64,${seedImage.base64}`);
-      if (verdictIsDirty(verdict)) {
+      if (verdictIsDirty(verdict, { expectNoText: true })) {
         console.warn("[generate-post-video] seed failed review, regenerating once:", verdict);
         const retry = await generateSeedImage({
           geminiKey,
           supabase,
-          basePrompt: prompt + correctionFor(verdict),
+          basePrompt: prompt + correctionFor(verdict, { expectNoText: true }),
           platform,
           format,
           brandIdentity: resolvedBrand,

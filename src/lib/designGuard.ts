@@ -65,11 +65,14 @@ export interface DesignVerdict {
   has_hex_codes?: boolean;
   has_logo?: boolean;
   has_garbled_text?: boolean;
+  /** Any readable word at all; a failure only when the design was asked for text-free. */
+  has_text?: boolean;
   skipped?: boolean;
 }
 
-export function verdictIsDirty(v: DesignVerdict | null | undefined): boolean {
-  return !!v && !v.skipped && !!(v.has_hex_codes || v.has_logo || v.has_garbled_text);
+export function verdictIsDirty(v: DesignVerdict | null | undefined, opts: { expectNoText?: boolean } = {}): boolean {
+  if (!v || v.skipped) return false;
+  return !!(v.has_hex_codes || v.has_logo || v.has_garbled_text || (opts.expectNoText && v.has_text));
 }
 
 /** Plain words for the "refining" toast, so the team knows what was caught. */
@@ -77,6 +80,7 @@ export function verdictSummary(v: DesignVerdict): string {
   const bits: string[] = [];
   if (v.has_logo) bits.push("an invented logo");
   if (v.has_garbled_text) bits.push("malformed text");
+  if (v.has_text && !v.has_garbled_text) bits.push("lettering where none was asked for");
   if (v.has_hex_codes) bits.push("visible colour codes");
   return bits.join(" and ");
 }
@@ -86,8 +90,15 @@ export function verdictSummary(v: DesignVerdict): string {
  * better than repeating the original constraint the model already ignored.
  * Kept in step with correctionFor() in the shared edge-function module.
  */
-export function correctionFor(v: DesignVerdict): string {
+export function correctionFor(v: DesignVerdict, opts: { expectNoText?: boolean } = {}): string {
   const notes: string[] = [];
+  if (opts.expectNoText && v.has_text) {
+    notes.push(
+      "The previous attempt contained readable words — on a document, a sign, a screen or a prop. " +
+        "This image must contain NO lettering of any kind, anywhere, at any size: papers are blank or out of focus, " +
+        "screens are dark or abstract, signage is absent. The words are added afterwards by the app.",
+    );
+  }
   if (v.has_logo) {
     notes.push(
       "The previous attempt rendered a logo, wordmark or brand insignia. Render NO logo, no wordmark, no monogram and no badge of any kind. Leave the area where a logo would sit visually clear — the real logo is composited in afterwards.",

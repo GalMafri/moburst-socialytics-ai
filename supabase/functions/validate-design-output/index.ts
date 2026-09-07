@@ -1,4 +1,4 @@
-import { CLEAN_VERDICT, validateDesignImage } from "../_shared/design-prompts/validateImage.ts";
+import { CLEAN_VERDICT, validateDesignImage, verdictIsDirty } from "../_shared/design-prompts/validateImage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,14 +20,16 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { image_data, media_type } = await req.json();
+    const { image_data, media_type, expect_no_text } = await req.json();
 
     if (!image_data) {
       return jsonResp({ error: "image_data is required" }, 400);
     }
 
     const verdict = await validateDesignImage(image_data, { mediaType: media_type });
-    return jsonResp(verdict);
+    // The client decides what counts; it gets the raw answers plus the two views of them.
+    const dirty = verdictIsDirty(verdict, { expectNoText: expect_no_text === true });
+    return jsonResp({ ...verdict, dirty });
   } catch (err: any) {
     console.error("validate-design-output error:", err.message);
     // Fail open on unexpected errors — never block a good design.

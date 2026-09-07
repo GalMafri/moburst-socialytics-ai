@@ -4,6 +4,8 @@ export interface DesignVerdict {
   has_hex_codes: boolean;
   has_logo: boolean;
   has_garbled_text: boolean;
+  /** Any readable word or lettering at all — signage, documents, labels, props. Counts as a failure only when the design was asked for text-free. */
+  has_text: boolean;
   /** True when no check ran (no key, API error, unparseable reply). */
   skipped?: boolean;
 }
@@ -12,15 +14,17 @@ export const CLEAN_VERDICT: DesignVerdict = {
   has_hex_codes: false,
   has_logo: false,
   has_garbled_text: false,
+  has_text: false,
 };
 
 const QUESTION =
   "You are checking a generated social media graphic before it reaches a client.\n" +
-  "Answer three questions about what is actually visible in the image.\n" +
+  "Answer four questions about what is actually visible in the image.\n" +
   "1. HEX: does it show hex colour codes (like #FF5733), RGB values, or any technical colour notation as readable text?\n" +
   "2. LOGO: does it show a company logo, wordmark, monogram, badge or brand insignia — including a large single letter, initial or monogram used as a background, watermark or decorative element? Count any invented or fake-looking brand mark. Do NOT count plain body or headline text that is simply words.\n" +
   "3. GARBLED: is any visible text misspelled, malformed, nonsensical or made of broken letterforms — including letters that are doubled, smeared, overlapping, bleeding into each other, or a word cut off at the edge of the canvas or of its own line?\n" +
-  "Reply with exactly three words separated by single spaces, each YES or NO, in the order HEX LOGO GARBLED. No other text.";
+  "4. TEXT: is there ANY readable word, letter or number anywhere — a headline, a caption, a label on a prop, lettering on a document, a sign, a screen, a phone key? Count it even if it is small, partial or in the background.\n" +
+  "Reply with exactly four words separated by single spaces, each YES or NO, in the order HEX LOGO GARBLED TEXT. No other text.";
 
 /** Split a data URL or raw base64 into the parts the Anthropic API wants. */
 export function splitImageData(imageData: string, fallbackMime = "image/png"): { base64: string; mimeType: string } | null {
@@ -89,6 +93,7 @@ export async function validateDesignImage(
       has_hex_codes: words[0] === "YES",
       has_logo: words[1] === "YES",
       has_garbled_text: words[2] === "YES",
+      has_text: words[3] === "YES",
     };
   } catch (err) {
     console.error("validateDesignImage threw:", err);
@@ -97,8 +102,9 @@ export async function validateDesignImage(
 }
 
 /** Anything worth regenerating for. */
-export function verdictIsDirty(v: DesignVerdict | null | undefined): boolean {
-  return !!v && !v.skipped && (v.has_hex_codes || v.has_logo || v.has_garbled_text);
+export function verdictIsDirty(v: DesignVerdict | null | undefined, opts: { expectNoText?: boolean } = {}): boolean {
+  if (!v || v.skipped) return false;
+  return v.has_hex_codes || v.has_logo || v.has_garbled_text || (!!opts.expectNoText && !!v.has_text);
 }
 
 /**
@@ -106,8 +112,15 @@ export function verdictIsDirty(v: DesignVerdict | null | undefined): boolean {
  * far better than repeating the original constraint, which the model already
  * ignored once.
  */
-export function correctionFor(v: DesignVerdict): string {
+export function correctionFor(v: DesignVerdict, opts: { expectNoText?: boolean } = {}): string {
   const notes: string[] = [];
+  if (opts.expectNoText && v.has_text) {
+    notes.push(
+      "The previous attempt contained readable words — on a document, a sign, a screen or a prop. " +
+        "This image must contain NO lettering of any kind, anywhere, at any size: papers are blank or out of focus, " +
+        "screens are dark or abstract, signage is absent. The words are added afterwards by the app.",
+    );
+  }
   if (v.has_logo) {
     notes.push(
       "The previous attempt rendered a logo, wordmark, brand insignia or a large decorative letterform. Render NO logo, " +

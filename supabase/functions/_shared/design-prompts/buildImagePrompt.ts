@@ -189,7 +189,7 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
     sections.push(
       `## Composition for typed text\n` +
         `The headline and any call-to-action will be set as real typography on top of this image afterwards. ` +
-        `Compose for that: keep the upper third calm and uncluttered as a field for a headline, and leave a quiet area near the bottom for a button. ` +
+        `Compose for that: keep the upper third calm and uncluttered as a field for a headline, and leave a quiet area near the bottom for a button — calm means a plain wall, sky, surface or soft depth of field that is still part of the scene, never an empty white or grey block. ` +
         `Put the subject and visual interest in the middle band. No text of any kind in the image itself.`,
     );
   }

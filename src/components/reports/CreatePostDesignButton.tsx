@@ -357,12 +357,12 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           // Up to two regenerations: a smeared word or a stray letterform
           // sometimes survives the first correction, and a third image is
           // cheaper than a client seeing either.
-          let verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl } })).data;
-          for (let pass = 0; pass < 2 && verdictIsDirty(verdict); pass++) {
+          let verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText } })).data;
+          for (let pass = 0; pass < 2 && verdictIsDirty(verdict, { expectNoText: !modelDrawsText }); pass++) {
             toast({ title: pass === 0 ? "Refining design" : "Refining design again", description: `Caught ${verdictSummary(verdict)} — regenerating.` });
             const { data: retry } = await supabase.functions.invoke("generate-post-image", {
               body: {
-                prompt: (editablePrompt || defaultPrompt) + correctionFor(verdict),
+                prompt: (editablePrompt || defaultPrompt) + correctionFor(verdict, { expectNoText: !modelDrawsText }),
                 platform: post.platform,
                 format: post.format,
                 brand_context: effectiveBrandIdentity || undefined,
@@ -378,7 +378,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             });
             if (!retry?.image_url) break;
             dataUrl = retry.image_url;
-            verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl } })).data;
+            verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText } })).data;
           }
         } catch {
           // Review or retry failed — keep the original rather than lose it.
@@ -594,11 +594,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             }
             try {
               const { data: validation } = await supabase.functions.invoke("validate-design-output", {
-                body: { image_data: data.image_url },
+                body: { image_data: data.image_url, expect_no_text: !modelDrawsText },
               });
-              if (verdictIsDirty(validation)) {
+              if (verdictIsDirty(validation, { expectNoText: !modelDrawsText })) {
                 toast({ title: "Refining design", description: `Caught ${verdictSummary(validation)} — regenerating.` });
-                const retryPrompt = perSlidePrompt + correctionFor(validation);
+                const retryPrompt = perSlidePrompt + correctionFor(validation, { expectNoText: !modelDrawsText });
                 const { data: retryData } = await supabase.functions.invoke("generate-post-image", {
                   body: {
                     prompt: retryPrompt,
