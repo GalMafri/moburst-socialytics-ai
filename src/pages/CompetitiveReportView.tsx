@@ -14,7 +14,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { displayCompanyName } from "@/lib/companyName";
+import { displayCompanyName, nameifyDomains } from "@/lib/companyName";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -510,7 +510,7 @@ export default function CompetitiveReportView() {
                       <div className="absolute left-0 top-0 h-3 rounded-full" style={{ width: `${Math.min(100, d.client || 0)}%`, backgroundColor: `rgb(${ACCENT})` }} />
                       <div className="absolute top-[-4px] h-5 w-[3px] rounded bg-white/80" style={{ left: `${Math.min(100, d.competitor_avg || 0)}%` }} title="competitor average" />
                     </div>
-                    {d.note && <p className="t-secondary">{d.note}</p>}
+                    {d.note && <p className="t-secondary">{nameifyDomains(d.note)}</p>}
                   </div>
                 ))}
               </CardContent>
@@ -625,7 +625,7 @@ export default function CompetitiveReportView() {
                             </th>
                             {ordered.map((c) => (
                               <td key={c.company_id} className="t-body py-4 pr-6 last:pr-0 min-w-[240px]">
-                                {row.valueFor(c.name) || <span className="t-label">—</span>}
+                                {row.valueFor(c.name) ? nameifyDomains(row.valueFor(c.name)!) : <span className="t-label">—</span>}
                               </td>
                             ))}
                           </tr>
@@ -788,17 +788,17 @@ export default function CompetitiveReportView() {
                       <div className="flex items-start gap-3">
                         <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
                         <div className="min-w-0 space-y-1.5">
-                          <p className="t-body font-semibold text-white">{g.gap}</p>
+                          <p className="t-body font-semibold text-white">{nameifyDomains(g.gap)}</p>
                           <div className="flex gap-1.5 flex-wrap">
                             {g.platform && <Badge variant="outline">{g.platform === "all" ? "All platforms" : platformLabel(g.platform)}</Badge>}
                             {v === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                           </div>
                         </div>
                       </div>
-                      {g.why_it_matters && <p className="t-body">{g.why_it_matters}</p>}
+                      {g.why_it_matters && <p className="t-body">{nameifyDomains(g.why_it_matters)}</p>}
                       {g.suggested_play && (
                         <div className="glass-accent p-3 t-body">
-                          <span className="font-semibold">The play: </span>{g.suggested_play}
+                          <span className="font-semibold">The play: </span>{nameifyDomains(g.suggested_play)}
                         </div>
                       )}
                       {isMoburstStaff && (
