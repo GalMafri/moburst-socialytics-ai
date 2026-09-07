@@ -875,10 +875,17 @@ export default function CompetitiveReportView() {
         )}
 
         {/* Winner teardown */}
-        {teardowns.length > 0 && (
+        {/* Kept on screen when a filter empties it: a section that vanishes is
+            its own kind of confusing, and the rail loses its place too. */}
+        {(teardowns.length > 0 || (effectivePlat !== "all" && Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0)) && (
             <Section id="wins" index={next()} title={<><Trophy className="h-5 w-5" /> What wins for them{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}</>} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
             <Card>
-              <CardContent className="pt-5 grid gap-4 md:grid-cols-3">
+              <CardContent className={teardowns.length > 0 ? "pt-5 grid gap-4 md:grid-cols-3" : "pt-5"}>
+                {teardowns.length === 0 && (
+                  <p className="t-body">
+                    None of the posts behind these patterns are on {platformLabel(effectivePlat)}. Switch to all platforms to read them.
+                  </p>
+                )}
                 {teardowns.map((w: any, i: number) => {
                   const examples: Array<{ url: string; post?: TopPost }> = w.examples;
                   return (
