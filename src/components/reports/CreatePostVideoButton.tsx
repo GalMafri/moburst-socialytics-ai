@@ -516,7 +516,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
 
             {/* Editable prompt */}
             <div className="space-y-2">
-              <Label>Video Prompt (edit before generating)</Label>
+              <Label>Video prompt (edit before generating)</Label>
               <Textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}

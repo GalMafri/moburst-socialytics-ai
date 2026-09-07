@@ -141,7 +141,7 @@ export function BrandBookUpload({
 
         {/* File Upload */}
         <div className="space-y-2">
-          <Label className="t-secondary">Upload File (PDF, PNG, JPG)</Label>
+          <Label className="t-secondary">Upload file (PDF, PNG, JPG)</Label>
           {uploadedFileName ? (
             <div className="glass-inner flex items-center gap-2 p-3">
               <FileText className="h-4 w-4 text-primary" />

@@ -285,7 +285,7 @@ export function SchedulePostModal({
           </div>
 
           <div className="space-y-2">
-            <Label>Post Copy (includes hashtags)</Label>
+            <Label>Post copy (includes hashtags)</Label>
             <Textarea value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={6} className="whitespace-pre-wrap" />
           </div>
 

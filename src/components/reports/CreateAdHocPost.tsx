@@ -198,7 +198,7 @@ export function CreateAdHocPost({
               </div>
 
               <div className="space-y-2">
-                <Label>Creative Type</Label>
+                <Label>Creative type</Label>
                 <Select value={creativeType} onValueChange={setCreativeType}>
                   <SelectTrigger>
                     <SelectValue />

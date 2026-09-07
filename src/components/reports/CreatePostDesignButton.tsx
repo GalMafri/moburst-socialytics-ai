@@ -843,7 +843,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             {/* Editable prompt */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Visual Prompt (edit before generating)</Label>
+                <Label>Visual prompt (edit before generating)</Label>
                 <Button variant="ghost" size="sm" onClick={handleCopyPrompt}>
                   {copied ? <Check className="h-3 w-3 mr-1" /> : <Copy className="h-3 w-3 mr-1" />}
                   {copied ? "Copied" : "Copy"}
