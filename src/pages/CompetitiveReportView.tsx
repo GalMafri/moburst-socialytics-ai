@@ -248,8 +248,6 @@ export default function CompetitiveReportView() {
   const previous = useMemo(() => (report ? pickComparableReport(report as any, (priorReports || []) as any[]) : null), [report, priorReports]);
   const changes = useMemo(() => (previous ? diffCompanies(companiesFromReport(previous.report_data), companiesFromReport(rd)) : []), [previous, rd]);
   // Chapter numerals follow the sections actually present: each band takes the next number in render order.
-  let chapter = 0;
-  const next = () => ++chapter;
 
   // Every post the report carries, keyed by URL, for example-post lookups and previews.
   const allPosts = useMemo(() => {
@@ -348,6 +346,39 @@ export default function CompetitiveReportView() {
       : (breakdownFor(name)?.platform_notes || []).find((n: any) => normalizePlatform(n.platform) === effectivePlat)?.note;
 
   /**
+   * Which sections this report has, and the order they read in.
+   *
+   * With a platform selected the page splits in two: everything the filter
+   * narrows comes first, then a divider, then the parts the analysis writes
+   * once for the whole account. Mixing the two down one column is what made
+   * the filter hard to trust, and a tag on each header was not enough on its
+   * own. Numbering, the rail and the layout all read from this list, so they
+   * cannot disagree.
+   */
+  const present: Record<string, boolean> = {
+    summary: !!ai.executive_summary,
+    changes: !!previous,
+    scorecard: (scorecard?.dimensions?.length || 0) > 0,
+    field: companies.length > 0,
+    audience: hasMetrics,
+    rhythm: ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0),
+    gaps: gaps.length > 0 || hiddenGaps.length > 0,
+    wins: teardowns.length > 0 || (effectivePlat !== "all" && Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0),
+    moodboards: ordered.some((c) => moodPosts(c).length > 0),
+    posts: ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length),
+  };
+  const SCOPED_IDS = ["field", "audience", "rhythm", "gaps", "wins", "moodboards", "posts"];
+  const WIDE_IDS = ["summary", "changes", "scorecard"];
+  const NATURAL_IDS = ["summary", "changes", "scorecard", "field", "audience", "rhythm", "gaps", "wins", "moodboards", "posts"];
+  const displayIds = (effectivePlat === "all" ? NATURAL_IDS : [...SCOPED_IDS, ...WIDE_IDS]).filter((id) => present[id]);
+  /** The section's number in the order it is read. */
+  const num = (id: string) => displayIds.indexOf(id) + 1;
+  /** Its place in the flex column, so a filter can reorder without moving the markup. */
+  const orderOf = (id: string) => (displayIds.indexOf(id) + 1) * 10;
+  const firstWideId = displayIds.find((id) => WIDE_IDS.includes(id));
+  const showZoneBreak = effectivePlat !== "all" && !!firstWideId;
+
+  /**
    * Every section says what it is showing, once a filter is on.
    *
    * Marking only the four sections a filter cannot narrow still left the
@@ -440,22 +471,40 @@ export default function CompetitiveReportView() {
 
   // The running order for the rail. It drops whatever this report does not
   // have, so every section can be listed unconditionally.
-  const navItems = [
-    { id: "summary", label: "Summary" },
-    { id: "changes", label: "Since last report" },
-    { id: "scorecard", label: "Scorecard" },
-    { id: "field", label: "The field" },
-    { id: "audience", label: "Audience" },
-    { id: "rhythm", label: "Posting rhythm" },
-    { id: "gaps", label: "Gaps" },
-    { id: "wins", label: "What wins" },
-    { id: "moodboards", label: "Mood boards" },
-    { id: "posts", label: "Top posts" },
-  ];
+  const SECTION_LABELS: Record<string, string> = {
+    summary: "Summary",
+    changes: "Since last report",
+    scorecard: "Scorecard",
+    field: "The field",
+    audience: "Audience",
+    rhythm: "Posting rhythm",
+    gaps: "Gaps",
+    wins: "What wins",
+    moodboards: "Mood boards",
+    posts: "Top posts",
+  };
+  // Same order the page reads in, so the rail matches a filtered page too.
+  const navItems = displayIds.map((id) => ({ id, label: SECTION_LABELS[id] }));
 
   return (
     <AppLayout nav={<SectionNav items={navItems} />}>
-      <div ref={printRef} className="w-full space-y-8">
+      <div ref={printRef} className="w-full flex flex-col gap-8">
+
+        {/* The line where the filtered half of the report ends. Everything above
+            it is the platform you picked; everything below is written once for
+            the whole account and cannot be narrowed. */}
+        {showZoneBreak && (
+          <div
+            className="flex items-center gap-4 pt-2"
+            style={{ order: (displayIds.indexOf(firstWideId!) + 1) * 10 - 5 }}
+          >
+            <div className="h-px flex-1 bg-[rgba(255,255,255,0.10)]" />
+            <p className="t-subhead whitespace-nowrap">
+              Below this line: written across all platforms
+            </p>
+            <div className="h-px flex-1 bg-[rgba(255,255,255,0.10)]" />
+          </div>
+        )}
 
         {/* Hero */}
         <div className="glass p-5 flex items-start justify-between gap-4 flex-wrap">
@@ -524,7 +573,7 @@ export default function CompetitiveReportView() {
 
         {/* Executive summary */}
         {ai.executive_summary && (
-            <Section id="summary" index={next()} title={<>Executive summary</>} action={acrossAll}>
+            <Section id="summary" index={num("summary")} style={{ order: orderOf("summary") }} title={<>Executive summary</>} action={acrossAll}>
             {/* Plain card: glass-elevated is the opaque grey surface used for
                 things that float (the user chip, the progress card), and it
                 read as a different material next to every other section. */}
@@ -538,7 +587,8 @@ export default function CompetitiveReportView() {
         {previous && (
           <Section
             id="changes"
-            index={next()}
+            index={num("changes")}
+            style={{ order: orderOf("changes") }}
             title={<><History className="h-5 w-5" /> Since the last report</>}
             description={<>Against the previous report on this landscape, covering {formatRange(periodOf(previous))}. Cadence is per week, so periods of different lengths compare fairly.</>}
             action={acrossAll}
@@ -553,7 +603,7 @@ export default function CompetitiveReportView() {
 
         {/* Scorecard */}
         {scorecard?.dimensions?.length > 0 && (
-            <Section id="scorecard" index={next()} title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</>} action={acrossAll}>
+            <Section id="scorecard" index={num("scorecard")} style={{ order: orderOf("scorecard") }} title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</>} action={acrossAll}>
             <Card>
               <CardContent className="pt-5 space-y-5">
                 {scorecard.dimensions.map((d: any, i: number) => (
@@ -578,7 +628,8 @@ export default function CompetitiveReportView() {
         {companies.length > 0 && (
           <Section
             id="field"
-            index={next()}
+            index={num("field")}
+            style={{ order: orderOf("field") }}
             title={<>The field</>}
             action={scopeTag(true)}
             description="Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates."
@@ -700,7 +751,8 @@ export default function CompetitiveReportView() {
         {hasMetrics && (
           <Section
             id="audience"
-            index={next()}
+            index={num("audience")}
+            style={{ order: orderOf("audience") }}
             title={<><Users className="h-5 w-5" /> Audience and momentum</>}
             action={scopeTag(true)}
             description={<>RivalIQ's own totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}: followers, engagement, estimated impressions and posts for every company.{anyBoosted ? " \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook." : ""}</>}
@@ -751,7 +803,7 @@ export default function CompetitiveReportView() {
 
         {/* Posting rhythm */}
         {ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0) && (
-            <Section id="rhythm" index={next()} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description="When each company posts, by weekday and by hour (UTC), against the schedule we recommend." action={scopeTag(true)}>
+            <Section id="rhythm" index={num("rhythm")} style={{ order: orderOf("rhythm") }} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description="When each company posts, by weekday and by hour (UTC), against the schedule we recommend." action={scopeTag(true)}>
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {/* No summary paragraph here: the analysis wrote out each
@@ -826,7 +878,8 @@ export default function CompetitiveReportView() {
         {(gaps.length > 0 || hiddenGaps.length > 0) && (
           <Section
             id="gaps"
-            index={next()}
+            index={num("gaps")}
+            style={{ order: orderOf("gaps") }}
             title={<><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill</>}
             description={
               <span data-print={isMoburstStaff ? "hide" : undefined}>
@@ -905,7 +958,7 @@ export default function CompetitiveReportView() {
         {/* Kept on screen when a filter empties it: a section that vanishes is
             its own kind of confusing, and the rail loses its place too. */}
         {(teardowns.length > 0 || (effectivePlat !== "all" && Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0)) && (
-            <Section id="wins" index={next()} title={<><Trophy className="h-5 w-5" /> What wins for them</>}
+            <Section id="wins" index={num("wins")} style={{ order: orderOf("wins") }} title={<><Trophy className="h-5 w-5" /> What wins for them</>}
             action={scopeTag(true)} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
             <Card>
               <CardContent className={teardowns.length > 0 ? "pt-5 grid gap-4 md:grid-cols-3" : "pt-5"}>
@@ -977,7 +1030,7 @@ export default function CompetitiveReportView() {
 
         {/* Mood boards */}
         {ordered.some((c) => moodPosts(c).length > 0) && (
-            <Section id="moodboards" index={next()} action={scopeTag(true)} title={<><Images className="h-5 w-5" /> Mood boards</>} description={<>The creative each company actually ran in the period, side by side. Click any tile to open the post.</>}>
+            <Section id="moodboards" index={num("moodboards")} style={{ order: orderOf("moodboards") }} action={scopeTag(true)} title={<><Images className="h-5 w-5" /> Mood boards</>} description={<>The creative each company actually ran in the period, side by side. Click any tile to open the post.</>}>
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {ordered.map((c) => {
@@ -999,7 +1052,7 @@ export default function CompetitiveReportView() {
 
         {/* Top posts */}
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
-            <Section id="posts" index={next()} action={scopeTag(true)} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</>}>
+            <Section id="posts" index={num("posts")} style={{ order: orderOf("posts") }} action={scopeTag(true)} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</>}>
             <Card>
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (

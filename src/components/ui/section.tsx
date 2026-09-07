@@ -14,6 +14,7 @@ export function Section({
   action,
   children,
   className,
+  style,
 }: {
   id?: string;
   /** Chapter number shown before the title (01, 02, …). */
@@ -23,9 +24,12 @@ export function Section({
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** For a page that reorders its sections: flex `order` cannot be a Tailwind
+   *  class here, because a class composed at runtime is never generated. */
+  style?: React.CSSProperties;
 }) {
   return (
-    <section id={id} className={cn("space-y-4 scroll-mt-[156px]", className)}>
+    <section id={id} style={style} className={cn("space-y-4 scroll-mt-[156px]", className)}>
       <div className="glass px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
         {/* The line of context sits beside the title on a wide band rather than
             under it. Body text is capped at 72ch, so stacked it wrapped after
