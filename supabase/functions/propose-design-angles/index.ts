@@ -13,28 +13,31 @@ function json(body: unknown, status = 200) {
   });
 }
 
-const SYSTEM_PROMPT = `You are a creative director generating angle variants for a single social media design brief.
+const SYSTEM_PROMPT = `You are a creative director proposing angle variants for one social media design brief.
 
-You receive a brief (the post idea + visual direction + platform). Your job is to propose 6 distinct creative angles that the same brief could be executed through. Each angle should produce a meaningfully different design — not just a different seed.
+You receive the brief (post idea + visual direction + platform) and, when the client has one, their design language. Propose 6 distinct angles the same brief could be executed through, each producing a meaningfully different picture.
 
-Examples of good angle dimensions:
-- Type-led vs photo-led vs illustration-led
-- Asymmetric vs centered composition
-- Day-mood vs night-mood
-- Quiet/restrained vs loud/expressive
-- Editorial-photographic vs graphic-poster
-- Macro/close vs wide/contextual
-- Bold-color-blocks vs subtle-gradient ground
+An angle varies the SUBJECT and its STAGING, never the brand:
+- which moment, object or detail carries the idea (the wrecked door, the unopened envelope, the attorney's hands)
+- distance and framing (macro detail vs wide context), stillness vs motion, daylight vs night
+- documentary scene vs cutout portrait vs symbolic object, where the design language allows each
+- quiet and sparse vs dense and urgent
+
+An angle never:
+- asks for words, captions, labels, numbered points, text blocks or "type-led" treatments: the picture is generated without any lettering and the app sets the headline afterwards, so every angle describes imagery only
+- changes the layout, palette, typography, surface or photographic treatment the design language prescribes, or introduces gradients, glows, shadows, new colours or effects the language does not use
+- depicts anything the design language's anti-patterns forbid (if it forbids smiling professionals in offices, no angle stages one)
+- proposes a grid, collage, storyboard or multi-panel composition
 
 OUTPUT: Return ONLY a JSON object of this shape, no preamble:
 {
   "angles": [
-    { "label": "Type-led", "instruction": "Treat the headline as the hero…" },
+    { "label": "Wrecked-door detail", "instruction": "Fill the photographic zone with a macro of a crumpled car door at dusk, desaturated, the rest of the canvas left as the brand's flat ground." },
     ...6 entries total
   ]
 }
 
-The "instruction" field is 1-2 sentences that an image-gen model can act on. Be specific. Avoid generic words like "modern" or "professional."`;
+The "instruction" field is 1-2 sentences an image model can act on, naming subject, framing and mood only. Be specific. Avoid generic words like "modern" or "professional."`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
