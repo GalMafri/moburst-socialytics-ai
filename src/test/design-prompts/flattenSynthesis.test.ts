@@ -33,11 +33,34 @@ describe("flattenSynthesis", () => {
   });
 });
 
-describe("logo section qualifier", () => {
-  it("marks the logo section as placement-only so it cannot contradict the no-logo constraint", () => {
-    const out = flattenSynthesis({ logo_and_marks_treatment: "Logo bottom-right, 20% width." });
-    expect(out).toContain("PLACEMENT AWARENESS ONLY");
-    expect(out).toContain("do NOT render any logo");
-    expect(out).toContain("Logo bottom-right, 20% width.");
+describe("marks never reach the model", () => {
+  // The synthesis is learned from the client's own posts, which carry a logo,
+  // a monogram watermark and a lockup. The owner's rule is no marks at all, so
+  // the logo section is dropped and every sentence about marks elsewhere goes.
+  it("drops the logo section outright", () => {
+    const out = flattenSynthesis({
+      composition_patterns: "Two zones: image top, navy text zone below.",
+      logo_and_marks_treatment: "Place the full horizontal lockup centered at the bottom.",
+    });
+    expect(out).not.toContain("Logo & marks");
+    expect(out).not.toContain("lockup centered");
+    expect(out).not.toContain("PLACEMENT AWARENESS");
+  });
+
+  it("strips sentences about marks from the other sections", () => {
+    const out = flattenSynthesis({
+      surface_and_texture:
+        "Apply the large-scale 'IB' monogram lettermark as a watermark ghost behind the text zone. Keep all other surfaces flat and clean — no gradients.",
+      color_usage: "Ground the palette in deep navy. Reserve a near-white for video backgrounds where the logo mark watermark appears ghost-faded.",
+    });
+    expect(out).not.toMatch(/monogram|watermark|lettermark|logo/i);
+    expect(out).toContain("Keep all other surfaces flat and clean");
+    expect(out).toContain("Ground the palette in deep navy.");
+  });
+
+  it("closes with the rule that this image carries no mark", () => {
+    const out = flattenSynthesis({ composition_patterns: "Two zones." });
+    expect(out).toContain("### Marks");
+    expect(out).toContain("This image carries NONE of them");
   });
 });
