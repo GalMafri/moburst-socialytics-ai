@@ -142,7 +142,7 @@ export default function CompetitiveRun() {
               duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
             });
             setError(
-              "The analysis is taking longer than expected. The workflow may still be running — check back in Recent Runs below.",
+              "The analysis is taking longer than expected. The workflow may still be running — check back in Recent runs below.",
             );
             refetchRuns();
             return;
@@ -304,7 +304,7 @@ export default function CompetitiveRun() {
         {/* Confirmed set summary */}
         <Card>
           <CardHeader>
-            <CardTitle className="t-h3">Confirmed Top 3</CardTitle>
+            <CardTitle className="t-h3">Confirmed top 3</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {(selectedCompetitors || []).map((c: any) => (
@@ -374,7 +374,7 @@ export default function CompetitiveRun() {
             {!running && !error && currentStep < 0 && (
               <>
                 <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!rangeOk}>
-                  <Play className="h-5 w-5" /> Run Competitive Analysis
+                  <Play className="h-5 w-5" /> Run competitive analysis
                 </Button>
                 <p className="t-secondary">
                   Pulls Rival IQ data for {rangeOk ? formatRange(range) : "the selected period"}, breaks content down by platform and finds the gaps. The finished report exports to PDF.
@@ -431,7 +431,7 @@ export default function CompetitiveRun() {
         {pastRuns && pastRuns.length > 0 && (
           <Card>
             <CardHeader className="flex-row items-center justify-between space-y-0">
-              <CardTitle className="t-h3">Recent Runs</CardTitle>
+              <CardTitle className="t-h3">Recent runs</CardTitle>
               <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${id}/competitive/reports`)}>
                 <History className="h-4 w-4 mr-1" /> All runs
               </Button>

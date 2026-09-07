@@ -66,7 +66,10 @@ export function AppLayout({
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} style={{ "--sidebar-width-icon": "3.5rem" } as React.CSSProperties}>
       <AppSidebar />
-      <SidebarInset className="intercept-bg">
+      {/* min-w-0: the inset is the flex item, and a flex item's automatic minimum is
+          its content's min-content width — so a wide table anywhere below made the
+          whole page wider than a 768px screen and it scrolled sideways. */}
+      <SidebarInset className="intercept-bg min-w-0">
         <header className="relative z-10 flex h-[80px] items-center gap-4 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(11,12,16,0.5)] backdrop-blur-[60px] px-[32px]">
           <SidebarTrigger className="text-[#b1b7c1] hover:text-white" />
           <Separator orientation="vertical" className="h-5" />
@@ -77,7 +80,7 @@ export function AppLayout({
             <p className="t-label">{today}</p>
           </div>
         </header>
-        <main className="relative z-10 flex-1 p-[32px]">
+        <div className="relative z-10 flex-1 p-[32px]">
           {/* A page with a rail is allowed the rail's width on top of the usual
               column, so the report keeps the width it had. Taking it out of the
               1440 instead cost the content a fifth of its measure and left a
@@ -86,7 +89,7 @@ export function AppLayout({
           <div className={`mx-auto w-full ${nav ? "max-w-[1660px]" : width}`}>
             {nav ? (
               <div className="grid gap-5 xl:grid-cols-[180px_minmax(0,1fr)] items-start">
-                <div className="xl:sticky xl:top-[112px]">{nav}</div>
+                <div className="min-w-0 xl:sticky xl:top-[112px]">{nav}</div>
                 <div className="space-y-6 min-w-0">
                   {title && <PageHeader title={title} description={description} meta={meta} actions={actions} back={back} />}
                   {children}
@@ -99,7 +102,7 @@ export function AppLayout({
               </div>
             )}
           </div>
-        </main>
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );

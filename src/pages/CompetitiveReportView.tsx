@@ -181,7 +181,7 @@ function MetricRow({ label, value, format = compactNumber, signed = false }: { l
   if (!value) return <Stat label={label} value="–" />;
   const change = deltaPct(value);
   const rounded = change == null ? null : Number(fmtDelta(change).replace(/[+%]/g, ""));
-  const tone = !signed || !rounded ? "text-[#b1b7c1]" : change! > 0 ? "text-success" : "text-destructive";
+  const tone = !signed || !rounded ? "text-[#b1b7c1]" : change! > 0 ? "text-success" : "text-[#f87171]";
   return (
     <div className="min-w-0">
       <p className="t-body font-semibold leading-tight">
@@ -717,7 +717,7 @@ export default function CompetitiveReportView() {
                     <table className="w-full border-collapse">
                       <thead>
                         <tr>
-                          <th className="t-subhead text-left align-bottom pb-3 pr-6 w-[92px]" />
+                          <th className="t-subhead text-left align-bottom pb-3 pr-6 w-[92px]"><span className="sr-only">Dimension</span></th>
                           {ordered.map((c) => (
                             <th key={c.company_id} className="text-left align-bottom pb-3 pr-6 last:pr-0 min-w-[240px]">
                               <span className="t-body font-semibold text-white" title={c.name}>{displayCompanyName(c.name)}</span>

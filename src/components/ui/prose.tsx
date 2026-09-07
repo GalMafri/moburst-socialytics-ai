@@ -71,7 +71,7 @@ export function Prose({ text, className, cards = true }: { text: string | null |
                   <p className={cn("t-subhead", lead ? "mt-2" : "md:pt-[3px]")}>
                     {title}
                   </p>
-                  {aside && <p className="t-label !text-[#6b7280]">{aside}</p>}
+                  {aside && <p className="t-label !text-[#9ca3af]">{aside}</p>}
                 </dt>
               )}
               {/* Capped so a long passage keeps a readable measure instead of

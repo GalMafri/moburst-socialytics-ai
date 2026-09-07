@@ -400,7 +400,7 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto p-4">
         <DialogHeader>
-          <DialogTitle>Edit Video</DialogTitle>
+          <DialogTitle>Edit video</DialogTitle>
           <DialogDescription>
             Trim the clip and add text overlays. Saved changes apply to this variant only.
           </DialogDescription>

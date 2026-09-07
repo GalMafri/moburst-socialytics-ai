@@ -390,7 +390,7 @@ export default function ReportView() {
         <Tabs value={tab} onValueChange={setTab} className="space-y-6">
           <TabsList className="h-auto flex-wrap justify-start">
             <TabsTrigger value="overview" className="gap-1.5 flex-shrink-0"><BarChart3 className="h-4 w-4" /> Overview</TabsTrigger>
-            {hasContent && <TabsTrigger value="content" className="gap-1.5 flex-shrink-0"><Sparkles className="h-4 w-4" /> Content Ideas</TabsTrigger>}
+            {hasContent && <TabsTrigger value="content" className="gap-1.5 flex-shrink-0"><Sparkles className="h-4 w-4" /> Content ideas</TabsTrigger>}
             {hasTrends && <TabsTrigger value="trends" className="gap-1.5 flex-shrink-0"><TrendingUp className="h-4 w-4" /> Trends</TabsTrigger>}
             <TabsTrigger value="competitive" className="gap-1.5 flex-shrink-0"><Crosshair className="h-4 w-4" /> Competitive</TabsTrigger>
           </TabsList>
@@ -415,7 +415,7 @@ export default function ReportView() {
                         {hero && (
                           <div className="min-w-[12rem]">
                             <p className="t-subhead">Biggest move</p>
-                            <p className={`text-[48px] leading-[52px] font-bold tracking-[-1px] ${hero.pct > 0 ? "text-success" : hero.pct < 0 ? "text-destructive" : "text-white"}`}>
+                            <p className={`text-[48px] leading-[52px] font-bold tracking-[-1px] ${hero.pct > 0 ? "text-success" : hero.pct < 0 ? "text-[#f87171]" : "text-white"}`}>
                               {hero.pct > 0 ? "+" : ""}{Math.round(hero.pct)}%
                             </p>
                             <p className="t-body">{hero.label} vs the previous period</p>
@@ -688,9 +688,9 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
             href={post.permalink || post.url}
             target="_blank"
             rel="noopener"
-            className="t-label text-primary hover:underline flex items-center gap-1 pt-1"
+            className="t-label text-primary hover:underline inline-flex items-center gap-1 min-h-[24px] pt-1"
           >
-            View Original <ExternalLink className="h-3 w-3" />
+            View original <ExternalLink className="h-3 w-3" />
           </a>
         )}
           </div>
@@ -762,7 +762,7 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
             const pct = typeof ch?.percent === "number" ? ch.percent : null;
             // A zero baseline isn't "+100% growth": surface it as "New" instead.
             const isNew = ch != null && Number(ch.previous ?? prev?.[key] ?? 0) === 0 && value > 0;
-            const tone = isNew || (pct != null && pct > 0) ? "text-success" : pct != null && pct < 0 ? "text-destructive" : "text-[#b1b7c1]";
+            const tone = isNew || (pct != null && pct > 0) ? "text-success" : pct != null && pct < 0 ? "text-[#f87171]" : "text-[#b1b7c1]";
             return (
               <div key={key} className="min-w-0" title={`${label}: ${value.toLocaleString()}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}% vs previous period)` : ""}`}>
                 <p className="t-label flex items-center gap-1 whitespace-nowrap"><Icon className="h-3 w-3 flex-shrink-0" aria-hidden /> <span aria-label={label}>{short}</span></p>
@@ -820,13 +820,13 @@ function TopPostsSection({ posts }: { posts: any[] }) {
         </div>
       )}
       <div className="space-y-4">
-        <h4 className="t-h3 flex items-center gap-2"><Eye className="h-4 w-4 text-[#b1b7c1]" /> Top posts by impressions</h4>
+        <h3 className="t-h3 flex items-center gap-2"><Eye className="h-4 w-4 text-[#b1b7c1]" /> Top posts by impressions</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {byImpressions.map((post: any, i: number) => <PostCard key={`imp-${i}`} post={post} preview={previews[post.permalink || post.url]} />)}
         </div>
       </div>
       <div className="space-y-4">
-        <h4 className="t-h3 flex items-center gap-2"><Heart className="h-4 w-4 text-[#b1b7c1]" /> Top posts by engagement</h4>
+        <h3 className="t-h3 flex items-center gap-2"><Heart className="h-4 w-4 text-[#b1b7c1]" /> Top posts by engagement</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {byEngagement.map((post: any, i: number) => <PostCard key={`eng-${i}`} post={post} preview={previews[post.permalink || post.url]} />)}
         </div>

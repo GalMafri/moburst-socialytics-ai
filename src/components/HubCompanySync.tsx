@@ -114,7 +114,7 @@ export function HubCompanySync() {
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="t-h3">Hub Company Mapping</CardTitle>
+            <CardTitle className="t-h3">Hub company mapping</CardTitle>
             <CardDescription>
               The bridge matches Client users to clients by their Hub company.
             </CardDescription>
@@ -129,7 +129,7 @@ export function HubCompanySync() {
         {/* ── Hub companies side ── */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <h4 className="t-body font-semibold">Hub Companies</h4>
+            <h4 className="t-body font-semibold">Hub companies</h4>
             <Badge variant="outline" className="t-label">
               {hubCompanies?.length ?? 0} from Hub
             </Badge>
@@ -188,7 +188,7 @@ export function HubCompanySync() {
 
         {/* ── Tool clients side ── */}
         <div className="space-y-2">
-          <h4 className="t-body font-semibold">Tool Clients</h4>
+          <h4 className="t-body font-semibold">Tool clients</h4>
           {clientsLoading ? (
             <p className="t-secondary">Loading clients…</p>
           ) : (

@@ -49,7 +49,7 @@ export default function ReportHistory() {
       <div className="w-full space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle className="t-h3">Report History</CardTitle>
+            <CardTitle className="t-h3">Report history</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (

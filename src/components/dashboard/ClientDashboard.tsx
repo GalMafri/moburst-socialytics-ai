@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ClickableCard } from "@/components/ui/clickable-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { FileText, TrendingUp, BarChart3, AlertCircle, Crosshair } from "lucide-react";
 
@@ -127,14 +128,16 @@ export function ClientDashboard() {
       <PageHeader title={displayName} description="Your social media intelligence dashboard" />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card
-          className="cursor-pointer hover-lift transition-shadow"
+        <ClickableCard
+          className="hover-lift transition-shadow"
+          disabled={!latestReport}
+          ariaLabel="Open the latest report"
           onClick={() => latestReport && navigate(`/clients/${clientId}/reports/${latestReport.id}`)}
         >
           <CardHeader>
             <CardTitle className="t-h3 flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-accent" />
-              Latest Report
+              Latest report
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -146,40 +149,43 @@ export function ClientDashboard() {
               <p className="t-secondary">No reports available yet</p>
             )}
           </CardContent>
-        </Card>
+        </ClickableCard>
 
-        <Card
-          className="cursor-pointer hover-lift transition-shadow"
+        <ClickableCard
+          className="hover-lift transition-shadow"
+          ariaLabel="Open report history"
           onClick={() => navigate(`/clients/${clientId}/reports`)}
         >
           <CardHeader>
             <CardTitle className="t-h3 flex items-center gap-2">
               <FileText className="h-4 w-4 text-accent" />
-              Report History
+              Report history
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="t-secondary">View all past reports and analyses</p>
           </CardContent>
-        </Card>
+        </ClickableCard>
 
-        <Card
-          className="cursor-pointer hover-lift transition-shadow"
+        <ClickableCard
+          className="hover-lift transition-shadow"
+          ariaLabel="Open competitive analyses"
           onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}
         >
           <CardHeader>
             <CardTitle className="t-h3 flex items-center gap-2">
               <Crosshair className="h-4 w-4 text-accent" />
-              Competitive Analyses
+              Competitive analyses
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="t-secondary">How you compare with the rest of the field</p>
           </CardContent>
-        </Card>
+        </ClickableCard>
 
-        <Card
-          className="cursor-pointer hover-lift transition-shadow"
+        <ClickableCard
+          className="hover-lift transition-shadow"
+          ariaLabel="Open analytics"
           onClick={() => navigate(`/clients/${clientId}/analytics`)}
         >
           <CardHeader>
@@ -191,7 +197,7 @@ export function ClientDashboard() {
           <CardContent>
             <p className="t-secondary">Performance metrics and trend insights</p>
           </CardContent>
-        </Card>
+        </ClickableCard>
       </div>
     </div>
   );

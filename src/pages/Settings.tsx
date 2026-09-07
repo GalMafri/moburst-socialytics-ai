@@ -63,7 +63,7 @@ export default function Settings() {
       <div className="max-w-4xl mx-auto space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle className="t-h3">Integration Settings</CardTitle>
+            <CardTitle className="t-h3">Integration settings</CardTitle>
             <CardDescription>Configure external service connections</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

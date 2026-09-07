@@ -116,7 +116,7 @@ export function ReportActions({ report, onDeleted }: ReportActionsProps) {
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
-            <DialogTitle>Edit Report</DialogTitle>
+            <DialogTitle>Edit report</DialogTitle>
             <DialogDescription>Update report metadata.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -145,7 +145,7 @@ export function ReportActions({ report, onDeleted }: ReportActionsProps) {
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent onClick={(e) => e.stopPropagation()}>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Report</AlertDialogTitle>
+            <AlertDialogTitle>Delete report</AlertDialogTitle>
             <AlertDialogDescription>
               This will permanently delete this report. This action cannot be undone.
             </AlertDialogDescription>

@@ -29,7 +29,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <p className="t-secondary">
               {this.state.error?.message || "An unexpected error occurred."}
             </p>
-            <Button onClick={() => window.location.reload()}>Reload Page</Button>
+            <Button onClick={() => window.location.reload()}>Reload page</Button>
           </div>
         </div>
       );

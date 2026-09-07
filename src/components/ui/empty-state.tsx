@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
  *     icon={Sparkles}
  *     title="No reports yet"
  *     description="Run your first analysis to see results here."
- *     action={<Button onClick={...}>Run Analysis</Button>}
+ *     action={<Button onClick={...}>Run analysis</Button>}
  *   />
  */
 interface Props {

@@ -4,7 +4,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { PageHeader } from "@/components/ui/page-header";
-import { ClickableCard } from "@/components/ui/clickable-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Loading } from "@/components/ui/loading";
 import { Button } from "@/components/ui/button";
@@ -133,7 +132,7 @@ export function AdminDashboard() {
         actions={
           canManageClients ? (
             <Button onClick={() => navigate("/clients/new/setup")}>
-              <Plus className="h-4 w-4 mr-2" /> Add Client
+              <Plus className="h-4 w-4 mr-2" /> Add client
             </Button>
           ) : undefined
         }
@@ -164,7 +163,7 @@ export function AdminDashboard() {
           onClick={() => setShowArchived(!showArchived)}
         >
           <Archive className="h-3 w-3 mr-1" />
-          {showArchived ? "Show Active" : "Show Archived"}
+          {showArchived ? "Show Active" : "Show archived"}
         </Button>
       </div>
 
@@ -193,16 +192,24 @@ export function AdminDashboard() {
             );
             const reportCount = client.reports?.length ?? 0;
             return (
-              <ClickableCard
-                key={client.id}
-                className="hover-lift transition-shadow"
-                onClick={() => navigate(`/clients/${client.id}/setup`)}
-                ariaLabel={`Open ${client.name} setup`}
-              >
+              <Card key={client.id} className="hover-lift transition-shadow">
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <CardTitle className="t-h3">{client.name}</CardTitle>
+                      {/* The name opens setup. The card itself is no longer a
+                          control: a button wrapping five other buttons is a
+                          control inside a control, and screen readers and the
+                          Tab key both lose track of which one they are on. */}
+                      <CardTitle className="t-h3">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/clients/${client.id}/setup`)}
+                          aria-label={`Open ${client.name} setup`}
+                          className="text-left hover:underline underline-offset-4 decoration-[rgba(255,255,255,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-[6px]"
+                        >
+                          {client.name}
+                        </button>
+                      </CardTitle>
                       {(client as any).archived_at && (
                         <Badge variant="secondary" className="t-label">Archived</Badge>
                       )}
@@ -210,12 +217,12 @@ export function AdminDashboard() {
                     <div className="flex items-center gap-1">
                       {client.logo_url && <img src={client.logo_url} alt="" className="h-8 w-8 rounded object-cover" />}
                       <DropdownMenu>
-                          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                          <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="More actions">
                               <MoreVertical className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                          <DropdownMenuContent align="end">
                             {canRunAnalysis && (
                               <DropdownMenuItem onClick={() => navigate(`/clients/${client.id}/competitive`)}>
                                 <Crosshair className="h-4 w-4 mr-2" /> Competitive analysis
@@ -273,8 +280,7 @@ export function AdminDashboard() {
                         className="h-9 px-3"
                         title="Monthly reports"
                         aria-label="Monthly reports"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           navigate(`/clients/${client.id}/reports`);
                         }}
                       >
@@ -286,8 +292,7 @@ export function AdminDashboard() {
                         className="h-9 px-3"
                         title="Competitive analyses"
                         aria-label="Competitive analyses"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           navigate(`/clients/${client.id}/competitive/reports`);
                         }}
                       >
@@ -299,8 +304,7 @@ export function AdminDashboard() {
                         className="h-9 px-3"
                         title="Analytics"
                         aria-label="Analytics"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           navigate(`/clients/${client.id}/analytics`);
                         }}
                       >
@@ -313,8 +317,7 @@ export function AdminDashboard() {
                             className="h-9 px-3"
                             title="Run monthly report"
                             aria-label="Run monthly report"
-                            onClick={(e) => {
-                              e.stopPropagation();
+                            onClick={() => {
                               navigate(`/clients/${client.id}/analyze`);
                             }}
                           >
@@ -325,7 +328,7 @@ export function AdminDashboard() {
                     </div>
                   </div>
                 </CardContent>
-              </ClickableCard>
+              </Card>
             );
           })}
         </div>
@@ -337,7 +340,7 @@ export function AdminDashboard() {
           action={
             canManageClients ? (
               <Button onClick={() => navigate("/clients/new/setup")}>
-                <Plus className="h-4 w-4 mr-2" /> Add Client
+                <Plus className="h-4 w-4 mr-2" /> Add client
               </Button>
             ) : undefined
           }

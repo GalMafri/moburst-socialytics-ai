@@ -385,7 +385,7 @@ export default function Analytics() {
                 Run your first analysis to start tracking performance trends.
               </p>
               <Button onClick={() => navigate(`/clients/${id}/analyze`)} className="gap-2">
-                <Play className="h-4 w-4" /> Run First Analysis
+                <Play className="h-4 w-4" /> Run first analysis
               </Button>
             </div>
           </Card>
@@ -490,7 +490,7 @@ export default function Analytics() {
                           <Sparkles className="h-4 w-4 text-primary" />
                         </div>
                         <div className="space-y-1">
-                          <h4 className="t-body font-semibold">Key Takeaway</h4>
+                          <p className="t-body font-semibold text-white">Key takeaway</p>
                           <p className="t-secondary leading-relaxed">
                             {formatNumbersInText(latestAISummary)}
                           </p>
@@ -524,7 +524,7 @@ export default function Analytics() {
                         onClick={() => navigate(`/clients/${id}/analyze`)}
                         className="gap-2 mt-1"
                       >
-                        <Play className="h-3.5 w-3.5" /> Run Another Analysis
+                        <Play className="h-3.5 w-3.5" /> Run another analysis
                       </Button>
                     </CardContent>
                   </Card>
@@ -532,7 +532,7 @@ export default function Analytics() {
 
                 {/* Month-over-month comparison from latest report */}
                 {!viewWindow && comparison && Object.keys(comparison.changes).length > 0 && (
-                  <Section id="mom" title={<>Month-over-Month{" "} <span className="font-normal text-muted-foreground t-body">(latest report)</span></>}>
+                  <Section id="mom" title={<>Month over month{" "} <span className="font-normal text-muted-foreground t-body">(latest report)</span></>}>
                   <Card>
                     <CardContent className="pt-5">
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -575,9 +575,9 @@ export default function Analytics() {
                   </Section>
                 )}
 
-                {/* Performance Over Time — Per-metric line charts */}
+                {/* Performance over time — Per-metric line charts */}
                 {chartData.length >= 1 && chartData.some((d) => d.impressions > 0 || d.reactions > 0) && (
-                  <Section id="over-time" title={<>Performance Over Time <span className="font-normal text-muted-foreground t-body ml-2"> ({filtered.length} report{filtered.length !== 1 ? "s" : ""}) </span></>} description={<>{chartData.length === 1 ? "Showing your latest snapshot. Run more analyses to see trend lines." : "Each data point represents one analysis run. Hover over points for exact values."}</>}>
+                  <Section id="over-time" title={<>Performance over time <span className="font-normal text-muted-foreground t-body ml-2"> ({filtered.length} report{filtered.length !== 1 ? "s" : ""}) </span></>} description={<>{chartData.length === 1 ? "Showing your latest snapshot. Run more analyses to see trend lines." : "Each data point represents one analysis run. Hover over points for exact values."}</>}>
                   <Card>
                     <CardContent className="pt-5 space-y-6">
                       {/* Impressions chart (separate — it dominates if combined) */}
@@ -739,7 +739,7 @@ export default function Analytics() {
 
                 {/* Engagement rate trend */}
                 {chartData.length > 1 && chartData.some((d) => d.engagement_rate > 0) && (
-                  <Section id="engagement-rate" title={<>Engagement Rate Trend</>} description={<>(Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.</>}>
+                  <Section id="engagement-rate" title={<>Engagement rate trend</>} description={<>(Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.</>}>
                   <Card>
                     <CardContent className="pt-5">
                       <div className="h-56">
@@ -810,7 +810,7 @@ export default function Analytics() {
             </Tabs>
 
             {/* Recent reports table */}
-            <Section id="history" title={<>Report History</>} description={<>{filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to view full details.</>}>
+            <Section id="history" title={<>Report history</>} description={<>{filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to view full details.</>}>
             <Card>
               <CardContent className="pt-5">
                 <div className="space-y-2">
@@ -1030,8 +1030,8 @@ function LiveSproutSection({
                       <span className="flex items-center gap-1"><Share2 className="h-3 w-3" />{fmtVal(p.shares || 0)}</span>
                     </div>
                     {p.permalink && (
-                      <a href={p.permalink} target="_blank" rel="noopener" className="t-label text-primary hover:underline flex items-center gap-1">
-                        View Original <ExternalLink className="h-3 w-3" />
+                      <a href={p.permalink} target="_blank" rel="noopener" className="t-label text-primary hover:underline flex items-center gap-1 inline-flex items-center min-h-[24px]">
+                        View original <ExternalLink className="h-3 w-3" />
                       </a>
                     )}
                   </div>

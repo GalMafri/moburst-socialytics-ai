@@ -209,7 +209,7 @@ export default function RunAnalysis() {
               error_code: "client_timeout",
             });
             setError(
-              "Analysis is taking longer than expected. The workflow may still be running — check n8n execution logs. You can also check the report in Recent Analyses below once it completes.",
+              "Analysis is taking longer than expected. The workflow may still be running — check n8n execution logs. You can also check the report in Recent analyses below once it completes.",
             );
             refetchReports();
             return;
@@ -411,7 +411,7 @@ export default function RunAnalysis() {
 
   if (!client)
     return (
-      <AppLayout title="Run Analysis" width="max-w-4xl"
+      <AppLayout title="Run analysis" width="max-w-4xl"
       description="Check the configuration, choose the period and start the monthly report.">
         <Loading label="Loading" />
       </AppLayout>
@@ -423,7 +423,7 @@ export default function RunAnalysis() {
         {/* Client summary */}
         <Card>
           <CardHeader>
-            <CardTitle className="t-h3">Configuration Summary</CardTitle>
+            <CardTitle className="t-h3">Configuration summary</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid grid-cols-2 gap-4 t-body">
@@ -503,7 +503,7 @@ export default function RunAnalysis() {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label htmlFor="include-trends">Include Trend Analysis</Label>
+                <Label htmlFor="include-trends">Include trend analysis</Label>
                 <p className="t-secondary">
                   Scrape TikTok and Instagram for trending content in your niche
                 </p>
@@ -594,7 +594,7 @@ export default function RunAnalysis() {
         {pastReports && pastReports.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="t-h3">Recent Analyses</CardTitle>
+              <CardTitle className="t-h3">Recent analyses</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">

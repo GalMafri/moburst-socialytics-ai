@@ -40,7 +40,7 @@ export function StatCard({
   className?: string;
 }) {
   const pct = typeof delta?.percent === "number" && Number.isFinite(delta.percent) ? delta.percent : null;
-  const tone = pct == null ? "" : pct > 0 ? "text-success" : pct < 0 ? "text-destructive" : "text-[#b1b7c1]";
+  const tone = pct == null ? "" : pct > 0 ? "text-success" : pct < 0 ? "text-[#f87171]" : "text-[#b1b7c1]";
   const DeltaIcon = pct == null ? null : pct > 0 ? TrendingUp : pct < 0 ? TrendingDown : Minus;
   return (
     <Card className={cn("hover-lift", accent && "glass-accent", className)}>

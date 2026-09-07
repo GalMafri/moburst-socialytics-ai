@@ -680,7 +680,7 @@ export default function CompetitorReview() {
                         <div className="flex gap-1 mt-2 flex-wrap">
                           {compHandles.length > 0 ? (
                             compHandles.map((h) => (
-                              <a key={h.id} href={h.profile_url || undefined} target="_blank" rel="noreferrer">
+                              <a key={h.id} href={h.profile_url || undefined} target="_blank" rel="noreferrer" className="inline-flex items-center min-h-[24px]">
                                 <PlatformBadge platform={h.platform} size="sm" />
                               </a>
                             ))

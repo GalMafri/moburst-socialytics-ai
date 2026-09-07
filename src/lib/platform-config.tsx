@@ -192,12 +192,14 @@ export function PlatformBadge({
     <span
       className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-medium ${textSize} ${className}`}
       style={{
-        borderColor: `${color}40`,
-        backgroundColor: `${color}15`,
-        color: color,
+        borderColor: `${color}55`,
+        backgroundColor: `${color}1f`,
+        // The brand colour stays on the icon and the edge. As the text colour
+        // it failed contrast for LinkedIn blue and Instagram red on this ground.
+        color: "#e6e8ec",
       }}
     >
-      <PlatformIcon platform={platform} className={iconSize} />
+      <span style={{ color }} className="inline-flex"><PlatformIcon platform={platform} className={iconSize} /></span>
       {platform}
     </span>
   );

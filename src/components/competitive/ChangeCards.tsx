@@ -9,7 +9,7 @@ export function ChangeCards({ changes, className }: { changes: Change[]; classNa
     <div className={cn("grid gap-3 md:grid-cols-2 xl:grid-cols-3", className)}>
       {changes.map((c, i) => {
         const Icon = c.direction === "up" ? ArrowUpRight : c.direction === "down" ? ArrowDownRight : Minus;
-        const colour = c.tone === "good" ? "text-success" : c.tone === "bad" ? "text-destructive" : "text-[#b1b7c1]";
+        const colour = c.tone === "good" ? "text-success" : c.tone === "bad" ? "text-[#f87171]" : "text-[#b1b7c1]";
         return (
           <article key={i} className={cn("glass-inner p-4 flex items-start gap-3 min-w-0", c.is_client && "border-[rgba(185,224,69,0.35)]")}>
             <Icon className={cn("h-5 w-5 flex-shrink-0 mt-0.5", colour)} aria-hidden />

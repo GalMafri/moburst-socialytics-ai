@@ -185,7 +185,7 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto p-4">
         <DialogHeader>
-          <DialogTitle>Edit Design</DialogTitle>
+          <DialogTitle>Edit design</DialogTitle>
           <DialogDescription>Add text overlays and position them on the image.</DialogDescription>
         </DialogHeader>
 

@@ -364,9 +364,9 @@ export default function ClientSetup() {
           {/* On mobile (<sm), tabs scroll horizontally to keep labels readable.
               From sm and up, they fill the row in a 5-column grid. */}
           <TabsList className="w-full overflow-x-auto sm:grid sm:grid-cols-5 flex sm:flex-none gap-1 sm:gap-0 justify-start">
-            <TabsTrigger value="info" className="flex-shrink-0">Client Info</TabsTrigger>
+            <TabsTrigger value="info" className="flex-shrink-0">Client info</TabsTrigger>
             <TabsTrigger value="sprout" className="flex-shrink-0">Sprout Social</TabsTrigger>
-            <TabsTrigger value="strategy" className="flex-shrink-0">Content Strategy</TabsTrigger>
+            <TabsTrigger value="strategy" className="flex-shrink-0">Content strategy</TabsTrigger>
             <TabsTrigger value="competitors" className="flex-shrink-0">Competitors</TabsTrigger>
             <TabsTrigger value="brief" className="flex-shrink-0">Brief</TabsTrigger>
             <TabsTrigger value="schedule" className="flex-shrink-0">Schedule</TabsTrigger>
@@ -375,7 +375,7 @@ export default function ClientSetup() {
           <TabsContent value="info" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="t-h3">Basic Information</CardTitle>
+                <CardTitle className="t-h3">Basic information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -478,7 +478,7 @@ export default function ClientSetup() {
 
                 {form.brand_identity && (
                   <div className="space-y-4 rounded-lg border p-4 bg-[rgba(255,255,255,0.02)]">
-                    <Label className="t-body font-semibold">Brand Identity</Label>
+                    <Label className="t-body font-semibold">Brand identity</Label>
 
                     {/* Colors */}
                     <div className="grid grid-cols-3 gap-3">
@@ -738,7 +738,7 @@ export default function ClientSetup() {
           <TabsContent value="strategy" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="t-h3">Content Strategy</CardTitle>
+                <CardTitle className="t-h3">Content strategy</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="space-y-3">
@@ -836,7 +836,7 @@ export default function ClientSetup() {
           <TabsContent value="competitors" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="t-h3">Competitive Context</CardTitle>
+                <CardTitle className="t-h3">Competitive context</CardTitle>
                 <CardDescription>
                   Who does the account team think this client competes with? These notes are fed
                   into AI competitor identification and weighed heavily.
@@ -867,7 +867,7 @@ export default function ClientSetup() {
           <TabsContent value="brief" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="t-h3">Client Brief</CardTitle>
+                <CardTitle className="t-h3">Client brief</CardTitle>
                 <CardDescription>
                   Brand voice, target audience, campaign objectives, and content restrictions
                 </CardDescription>
@@ -978,7 +978,7 @@ export default function ClientSetup() {
             {voiceLearnings && voiceLearnings.length > 0 && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="t-h3">Learned Voice Preferences</CardTitle>
+                  <CardTitle className="t-h3">Learned voice preferences</CardTitle>
                   <CardDescription>
                     These patterns were learned from post edits. The AI will apply them to future content.
                   </CardDescription>
