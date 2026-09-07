@@ -309,11 +309,12 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         // invented wordmark or broken lettering on a client's post is worse
         // than a plain one, and it is cheap to catch and regenerate once.
         try {
-          const { data: verdict } = await supabase.functions.invoke("validate-design-output", {
-            body: { image_data: dataUrl },
-          });
-          if (verdictIsDirty(verdict)) {
-            toast({ title: "Refining design", description: `Caught ${verdictSummary(verdict)} — regenerating.` });
+          // Up to two regenerations: a smeared word or a stray letterform
+          // sometimes survives the first correction, and a third image is
+          // cheaper than a client seeing either.
+          let verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl } })).data;
+          for (let pass = 0; pass < 2 && verdictIsDirty(verdict); pass++) {
+            toast({ title: pass === 0 ? "Refining design" : "Refining design again", description: `Caught ${verdictSummary(verdict)} — regenerating.` });
             const { data: retry } = await supabase.functions.invoke("generate-post-image", {
               body: {
                 prompt: (editablePrompt || defaultPrompt) + correctionFor(verdict),
@@ -329,7 +330,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 variant_angle: angleInstructions[i].instruction || undefined,
               },
             });
-            if (retry?.image_url) dataUrl = retry.image_url;
+            if (!retry?.image_url) break;
+            dataUrl = retry.image_url;
+            verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl } })).data;
           }
         } catch {
           // Review or retry failed — keep the original rather than lose it.

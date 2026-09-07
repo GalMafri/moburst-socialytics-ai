@@ -218,7 +218,7 @@ export function AdminDashboard() {
                       {client.logo_url && <img src={client.logo_url} alt="" className="h-8 w-8 rounded object-cover" />}
                       <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="More actions">
+                            <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="More actions">
                               <MoreVertical className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>

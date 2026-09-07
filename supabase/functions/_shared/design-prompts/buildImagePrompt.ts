@@ -215,7 +215,14 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
   // 7. Hard constraints (short, qualitative)
   sections.push(
     `## Constraints\n` +
-      `- No company logos, brand wordmarks, or watermarks — the client adds those later.\n` +
+      `- No company logos, brand wordmarks, or watermarks — the client adds those later. ` +
+      `That includes a large initial, monogram or single letter used as a background or decorative element: no letterforms anywhere except the words of the message itself.\n` +
+      `- Text budget (for a still that carries text): at most three text elements — one headline, one supporting line, one call-to-action — ` +
+      `at most 12 words in total and at most 6 words on any one line. Short lines set in a single clean sans-serif; nothing in a second typeface. ` +
+      `Every word must be spelled exactly as written in the brief, with no letter doubled, smeared, cut off at an edge or overlapping another. ` +
+      `If a line will not fit at a readable size, shorten the line rather than shrink the type.\n` +
+      `- One accent colour only. The call-to-action, if there is one, is set in the brand's stated accent colour and nothing else on the canvas uses that colour. ` +
+      `Every colour on the canvas comes from the palette in the design language above; introduce no colour that is not there.\n` +
       (input.noText
         ? `- **Render NO text of any kind.** No headline, no caption, no title card, no subtitle, ` +
           `no label, no signage, no lettering on props or walls, no numbers. The words in the brief ` +

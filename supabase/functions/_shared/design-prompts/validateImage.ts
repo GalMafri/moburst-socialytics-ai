@@ -18,8 +18,8 @@ const QUESTION =
   "You are checking a generated social media graphic before it reaches a client.\n" +
   "Answer three questions about what is actually visible in the image.\n" +
   "1. HEX: does it show hex colour codes (like #FF5733), RGB values, or any technical colour notation as readable text?\n" +
-  "2. LOGO: does it show a company logo, wordmark, monogram, badge or brand insignia? Count any invented or fake-looking brand mark. Do NOT count plain body or headline text that is simply words.\n" +
-  "3. GARBLED: is any visible text misspelled, malformed, nonsensical or made of broken letterforms?\n" +
+  "2. LOGO: does it show a company logo, wordmark, monogram, badge or brand insignia — including a large single letter, initial or monogram used as a background, watermark or decorative element? Count any invented or fake-looking brand mark. Do NOT count plain body or headline text that is simply words.\n" +
+  "3. GARBLED: is any visible text misspelled, malformed, nonsensical or made of broken letterforms — including letters that are doubled, smeared, overlapping, bleeding into each other, or a word cut off at the edge of the canvas or of its own line?\n" +
   "Reply with exactly three words separated by single spaces, each YES or NO, in the order HEX LOGO GARBLED. No other text.";
 
 /** Split a data URL or raw base64 into the parts the Anthropic API wants. */
@@ -110,15 +110,16 @@ export function correctionFor(v: DesignVerdict): string {
   const notes: string[] = [];
   if (v.has_logo) {
     notes.push(
-      "The previous attempt rendered a logo, wordmark or brand insignia. Render NO logo, " +
-        "no wordmark, no monogram and no badge of any kind. Leave the area where a logo would " +
-        "sit visually clear and uncluttered — the real logo is composited in afterwards.",
+      "The previous attempt rendered a logo, wordmark, brand insignia or a large decorative letterform. Render NO logo, " +
+        "no wordmark, no monogram, no badge and no single letter or initial used as a background or watermark. " +
+        "Leave the area where a logo would sit visually clear and uncluttered — the real logo is composited in afterwards.",
     );
   }
   if (v.has_garbled_text) {
     notes.push(
-      "The previous attempt contained malformed or nonsensical text. Use only short, correctly " +
-        "spelled words taken from the brief, or no text at all. Never invent lettering.",
+      "The previous attempt contained malformed text: doubled, smeared or overlapping letters, or a word cut off. " +
+        "Use fewer words — at most 6 per line, 12 in total — set larger, each spelled exactly as in the brief, " +
+        "with clear space around every line. Never invent lettering.",
     );
   }
   if (v.has_hex_codes) {

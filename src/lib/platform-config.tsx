@@ -190,7 +190,7 @@ export function PlatformBadge({
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-medium ${textSize} ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-medium ${textSize} ${className}`}
       style={{
         borderColor: `${color}55`,
         backgroundColor: `${color}1f`,

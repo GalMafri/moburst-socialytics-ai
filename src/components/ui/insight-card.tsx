@@ -74,7 +74,7 @@ export function InsightCard({
           {metrics.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pt-0.5">
               {metrics.map((m) => (
-                <span key={m} className="t-label !text-white tabular-nums rounded-[8px] px-2 py-0.5 bg-[rgba(255,255,255,0.06)]">
+                <span key={m} className="t-label !text-white tabular-nums rounded-full px-2.5 py-0.5 bg-[rgba(255,255,255,0.06)]">
                   {m}
                 </span>
               ))}
