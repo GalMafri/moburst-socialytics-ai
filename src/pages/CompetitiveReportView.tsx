@@ -661,9 +661,9 @@ export default function CompetitiveReportView() {
                     const boosted = m.boosted?.current || 0;
                     return (
                       <article key={c.company_id} className={`glass-inner p-4 space-y-3 min-w-0 ${c.is_client ? "border-[rgba(185,224,69,0.35)]" : ""}`}>
-                        <p className="t-body font-semibold text-white" title={c.name}>
+                        <p className="t-h3 pb-3 border-b border-[rgba(255,255,255,0.08)]" title={c.name}>
                           {displayCompanyName(c.name)}
-                          {c.is_client && <span className="t-label !text-[#b9e045] ml-2">client</span>}
+                          {c.is_client && <span className="t-label !text-[#b9e045] ml-2 align-middle">client</span>}
                         </p>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-3">
                           <MetricRow label="Followers" value={m.audience} signed={c.is_client} />
@@ -705,7 +705,7 @@ export default function CompetitiveReportView() {
                   const peakDay = peakOf(b.by_weekday);
                   return (
                   <div key={c.company_id} className="space-y-3 glass-inner p-4">
-                    <div className="font-medium flex items-center gap-2" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
+                    <div className="t-h3 flex items-center gap-2 flex-wrap pb-3 border-b border-[rgba(255,255,255,0.08)]" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
                     {(peakHour || peakDay) && (
                       <div className="flex flex-wrap gap-x-8 gap-y-2">
                         {peakHour && (
@@ -733,7 +733,7 @@ export default function CompetitiveReportView() {
 
                 {schedule && (schedule.by_weekday || schedule.by_hour) && (
                   <div className="glass-inner p-4 space-y-3">
-                    <div className="flex items-center gap-2 font-semibold"><CalendarCheck className="h-4 w-4" /> Recommended schedule for {clientName}</div>
+                    <div className="t-h3 flex items-center gap-2 pb-3 border-b border-[rgba(255,255,255,0.08)]"><CalendarCheck className="h-4 w-4" /> Recommended schedule for {clientName}</div>
                     {/* The reasoning sits beside the schedule it explains. Under
                         it, the block ran half empty: the strips stop at 830px
                         and the prose stops at its measure, leaving a third of
@@ -788,7 +788,7 @@ export default function CompetitiveReportView() {
                       <div className="flex items-start gap-3">
                         <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
                         <div className="min-w-0 space-y-1.5">
-                          <p className="t-body font-semibold text-white">{nameifyDomains(g.gap)}</p>
+                          <p className="t-h3 leading-snug">{nameifyDomains(g.gap)}</p>
                           <div className="flex gap-1.5 flex-wrap">
                             {g.platform && <Badge variant="outline">{g.platform === "all" ? "All platforms" : platformLabel(g.platform)}</Badge>}
                             {v === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
@@ -844,9 +844,9 @@ export default function CompetitiveReportView() {
                   const examples: Array<{ url: string; post?: TopPost }> = (w.example_post_urls || []).slice(0, 3).map((u: string) => ({ url: u, post: allPosts.get(u) }));
                   return (
                     <div key={i} className="glass-inner p-4 space-y-3">
-                      <p className="t-subhead" title={w.competitor}>{displayCompanyName(w.competitor)}</p>
+                      <p className="t-h3 pb-3 border-b border-[rgba(255,255,255,0.08)]" title={w.competitor}>{displayCompanyName(w.competitor)}</p>
                       {/* The pattern is the claim, and the only prose here. */}
-                      <p className="t-body text-white leading-[1.55]">{w.pattern}</p>
+                      <p className="t-body text-white leading-[1.55] pt-0.5">{w.pattern}</p>
                       {/* The proof, as the numbers rather than a paragraph
                           reciting them. The analysis used to write out "hit
                           41,317 engagements … 3,000 comments … 261 shares" for
@@ -911,7 +911,7 @@ export default function CompetitiveReportView() {
                   if (!posts.length) return null;
                   return (
                     <div key={c.company_id} className="space-y-2">
-                      <p className="font-medium flex items-center gap-2" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
+                      <p className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
                       <div className="grid gap-2 grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
                         {posts.map((p, i) => <PostVisual key={i} url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} compact />)}
                       </div>
@@ -930,7 +930,7 @@ export default function CompetitiveReportView() {
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
                   <div key={c.company_id} className="space-y-3">
-                    <p className="font-medium flex items-center gap-2" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
+                    <p className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
                     <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5 items-start">
                       {b.top_posts.filter(hasContent).slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}
                       {b.top_posts.filter((p) => !hasContent(p)).length > 0 && (

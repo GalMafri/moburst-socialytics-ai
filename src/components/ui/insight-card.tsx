@@ -70,7 +70,7 @@ export function InsightCard({
         {icon && index == null && <span className="flex-shrink-0 mt-0.5 text-primary">{icon}</span>}
         <div className="min-w-0 space-y-1.5">
           {label && <p className="t-subhead">{label}</p>}
-          <h3 className="t-body font-semibold text-white leading-snug">{headline}</h3>
+          <h3 className="t-h3 leading-snug">{headline}</h3>
           {metrics.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pt-0.5">
               {metrics.map((m) => (

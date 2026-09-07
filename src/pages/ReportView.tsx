@@ -583,7 +583,7 @@ function ActionCard({ action, onOpen }: { action: { source: string; title: strin
   return (
     <button type="button" onClick={onOpen} className="text-left glass-inner p-4 pl-5 space-y-2.5 group border-l-2 border-l-[#b9e045] flex flex-col">
       <span className="inline-flex items-center gap-1.5 t-subhead">{icon} Recommendation · {action.source}</span>
-      <p className="t-body font-semibold text-white">{action.title}</p>
+      <p className="t-h3 leading-snug">{action.title}</p>
       {action.detail && <p className="t-body">{action.detail}</p>}
       <span className="mt-auto inline-flex items-center gap-1 t-label !text-white rounded-full border border-[rgba(255,255,255,0.16)] px-3 py-1 group-hover:bg-[rgba(255,255,255,0.08)]">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open Trends" : "Open Competitive"} <ArrowRight className="h-3.5 w-3.5" /></span>
     </button>
