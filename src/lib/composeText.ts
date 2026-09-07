@@ -159,6 +159,26 @@ function luminanceGrid(img: HTMLImageElement, cols = 48, rows = 64): Float32Arra
 }
 
 /**
+ * The largest type (in 800px-canvas units) at which the headline fits the
+ * field: at most four lines, using no more than 70% of the field's height.
+ * Estimated from an average glyph width, so it errs a little small rather
+ * than a little large; the field's width sets the wrap, its height the cap.
+ */
+export function fitFontSize(text: string, widthPct: number, zoneHPct: number, canvasW: number, canvasH: number, base: number): number {
+  const scale = canvasW / 800;
+  const widthPx = (widthPct / 100) * canvasW;
+  const zoneHPx = (zoneHPct / 100) * canvasH;
+  const chars = text.length;
+  for (let size = Math.max(base, 44); size >= 18; size -= 2) {
+    const px = size * scale;
+    const perLine = Math.max(1, Math.floor(widthPx / (px * 0.56)));
+    const lines = Math.ceil(chars / perLine);
+    if (lines <= 4 && lines * px * 1.15 <= zoneHPx * 0.7) return size;
+  }
+  return 18;
+}
+
+/**
  * Moves the headline onto the flat colour field the picture was composed
  * with, sized to fit it, in ink that reads against it; puts the call-to-action
  * inside the same field when the field reaches the bottom, else low on the
@@ -186,7 +206,7 @@ export function placeOverlays(img: HTMLImageElement, overlays: ComposeOverlay[])
     // Type fills the field's width with a margin, and the size follows the
     // width so a half-canvas block gets smaller type, not a broken line.
     const width = Math.max(30, Math.min(84, zoneW * 0.86));
-    const fontSize = Math.round(Math.max(18, Math.min(headline.fontSize, headline.fontSize * (width / 84))));
+    const fontSize = fitFontSize(headline.text, width, zoneH, img.naturalWidth, img.naturalHeight, headline.fontSize);
     out.push({ ...headline, x: zone.left + zoneW / 2, y: zone.top + zoneH * 0.42, width, fontSize, color: ink, placed: true });
   }
   for (const o of rest) {

@@ -71,3 +71,14 @@ describe("calmMask and inkFor", () => {
     expect(inkFor(0.9)).toBe("#111111");
   });
 });
+
+describe("fitFontSize", () => {
+  it("grows a short headline to fill a tall field and shrinks a long one to fit", async () => {
+    const { fitFontSize } = await import("@/lib/composeText");
+    const short = fitFontSize("Know your rights", 84, 45, 1080, 1920, 30);
+    const long = fitFontSize("3 things our attorneys would never do after a car accident", 40, 12, 1080, 1920, 30);
+    expect(short).toBeGreaterThan(30);
+    expect(long).toBeLessThan(30);
+    expect(long).toBeGreaterThanOrEqual(18);
+  });
+});

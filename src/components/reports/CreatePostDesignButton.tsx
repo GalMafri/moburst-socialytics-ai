@@ -70,7 +70,9 @@ type VariantSlot = string | null | "FAILED";
  */
 function seedOverlaysFor(post: any): Array<{ text: string; y: number; fontSize?: number; fontWeight?: "normal" | "bold" }> {
   const copy = String(post?.copy || post?.hook || "").replace(/#[\w]+/g, "").trim();
-  const first = (copy.split(/(?<=[.!?])\s+/)[0] || "").replace(/[.,;:!?]+$/, "");
+  // The first sentence, and when it introduces a list ("3 things…:\n1. …") only
+  // the part before the colon or line break: the list is the video, not the title.
+  const first = (copy.split(/(?<=[.!?])\s+|:\s*\n|\n+/)[0] || "").replace(/[.,;:!?]+$/, "");
   // Up to twelve words, cut at a clause break where one exists, and never
   // left hanging on a connective ("…would never do after").
   let words = first.split(/\s+/).filter(Boolean);
@@ -358,6 +360,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         // Single designs get the same review the carousel slides get: an
         // invented wordmark or broken lettering on a client's post is worse
         // than a plain one, and it is cheap to catch and regenerate once.
+        // A design that still fails review after the retries is dropped, not
+        // shown: an off-brand or lettered image in the client's tray is the
+        // thing the review exists to prevent.
+        let rejected = false;
         try {
           // Up to two regenerations: a smeared word or a stray letterform
           // sometimes survives the first correction, and a third image is
@@ -385,8 +391,21 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             dataUrl = retry.image_url;
             verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           }
+          rejected = verdictIsDirty(verdict, { expectNoText: !modelDrawsText });
+          if (rejected) {
+            toast({ title: `Variant ${i + 1} dropped`, description: `Three attempts still showed ${verdictSummary(verdict)}. Generate again or adjust the prompt.`, variant: "destructive" });
+          }
         } catch {
           // Review or retry failed — keep the original rather than lose it.
+        }
+        if (rejected) {
+          setVariantUrls((prev) => {
+            const next = [...prev];
+            next[i] = "FAILED";
+            return next;
+          });
+          generation.progressGeneration(postKey, { failed: true });
+          continue;
         }
         // The words go on now, in the brand's face, so the tile arrives as a
         // post rather than a picture. The editor can still move them.
