@@ -53,7 +53,10 @@ describe("marks never reach the model", () => {
         "Apply the large-scale 'IB' monogram lettermark as a watermark ghost behind the text zone. Keep all other surfaces flat and clean — no gradients.",
       color_usage: "Ground the palette in deep navy. Reserve a near-white for video backgrounds where the logo mark watermark appears ghost-faded.",
     });
-    expect(out).not.toMatch(/monogram|watermark|lettermark|logo/i);
+    // The closing Marks rule names the marks in order to forbid them; the
+    // learned sentences that would have the model draw one must be gone.
+    expect(out).not.toContain("Apply the large-scale");
+    expect(out).not.toContain("ghost-faded");
     expect(out).toContain("Keep all other surfaces flat and clean");
     expect(out).toContain("Ground the palette in deep navy.");
   });
