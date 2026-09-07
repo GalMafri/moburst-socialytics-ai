@@ -604,6 +604,57 @@ export type Database = {
           },
         ]
       }
+      design_learnings: {
+        Row: {
+          client_id: string
+          confidence: number
+          created_at: string
+          created_by: string | null
+          id: string
+          pattern_description: string
+          pattern_type: string
+          reason: string | null
+          source_iteration_id: string | null
+        }
+        Insert: {
+          client_id: string
+          confidence?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          pattern_description: string
+          pattern_type: string
+          reason?: string | null
+          source_iteration_id?: string | null
+        }
+        Update: {
+          client_id?: string
+          confidence?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          pattern_description?: string
+          pattern_type?: string
+          reason?: string | null
+          source_iteration_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_learnings_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "design_learnings_source_iteration_id_fkey"
+            columns: ["source_iteration_id"]
+            isOneToOne: false
+            referencedRelation: "post_iterations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       design_states: {
         Row: {
           canvas_json: Json
@@ -773,6 +824,7 @@ export type Database = {
         Row: {
           approved_at: string | null
           approved_by: string | null
+          archived_at: string | null
           client_id: string
           concept: string | null
           created_at: string | null
@@ -787,6 +839,9 @@ export type Database = {
           platform: string | null
           post_copy: string | null
           recommendation_index: number | null
+          rejected_at: string | null
+          rejection_note: string | null
+          rejection_reason: string | null
           report_id: string | null
           source: string | null
           variant_angle: string | null
@@ -798,6 +853,7 @@ export type Database = {
         Insert: {
           approved_at?: string | null
           approved_by?: string | null
+          archived_at?: string | null
           client_id: string
           concept?: string | null
           created_at?: string | null
@@ -812,6 +868,9 @@ export type Database = {
           platform?: string | null
           post_copy?: string | null
           recommendation_index?: number | null
+          rejected_at?: string | null
+          rejection_note?: string | null
+          rejection_reason?: string | null
           report_id?: string | null
           source?: string | null
           variant_angle?: string | null
@@ -823,6 +882,7 @@ export type Database = {
         Update: {
           approved_at?: string | null
           approved_by?: string | null
+          archived_at?: string | null
           client_id?: string
           concept?: string | null
           created_at?: string | null
@@ -837,6 +897,9 @@ export type Database = {
           platform?: string | null
           post_copy?: string | null
           recommendation_index?: number | null
+          rejected_at?: string | null
+          rejection_note?: string | null
+          rejection_reason?: string | null
           report_id?: string | null
           source?: string | null
           variant_angle?: string | null
