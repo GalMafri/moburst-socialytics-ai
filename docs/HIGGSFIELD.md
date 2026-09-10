@@ -82,3 +82,36 @@ claude mcp add --transport http higgsfield https://mcp.higgsfield.ai/mcp
 Then run `/mcp` inside Claude Code to complete the browser sign-in. This is
 per-person and entirely separate from the app's REST credentials — nothing you
 generate through the MCP touches Socialytics data unless you upload it.
+
+## What this account's REST key can actually reach (probed 2026-09-10)
+
+Run `higgsfield-probe` (staff-only, spends nothing) to re-check. A 422 means
+the route exists and rejected an empty body; 404 means it does not exist;
+503 `model_disabled` means it exists but is off for this key.
+
+| Route | Status | Use |
+| --- | --- | --- |
+| `GET /models` | 200 — 3 items | `higgsfield-ai/soul/cinema`, `higgsfield-ai/soul/v2/standard`, `soul-id`. All text2image |
+| `/higgsfield-ai/popcorn/auto` | 422 (needs `prompt`) | **Images.** The design-capable model; produced an on-brand NewDay two-zone post in the first attempt |
+| `/higgsfield-ai/dop/standard` | 422 (needs `prompt`, `image_url`) | **Video from a still.** Slugs are `lite`/`standard`/`turbo`, each with a `/first-last-frame` variant — NOT `v2/...` |
+| `/v1/image2video/seedance` | 422 (needs `params`) | **Video from a still**, Seedance family |
+| `/nano-banana-pro` | 503 `model_disabled` | Disabled for this key |
+| `/seedance-2-5`, `/v1/seedance-2-5` | 404 `model_not_found` | Wrong path; use `/v1/image2video/seedance` |
+
+The catalogue at `GET /models` is NOT the whole surface — popcorn and dop
+answer 422 while being absent from it. Probe the route; do not trust the list.
+
+### The REST key and the MCP account are not the same entitlement
+
+The hosted MCP (used by the team in Claude Code) reaches the modern
+catalogue — `nano_banana_pro`, `seedance_2_5`, `gpt_image_2_5`,
+`marketing_studio_image` — and on 2026-09-10 `nano_banana_pro` produced a
+Bader Law post that matched their design system exactly, headline spelled
+correctly, and `seedance_2_5` animated it for 5 seconds with the lettering
+still pixel-stable at the last frame. The app's REST key answers
+`model_disabled` for that same model.
+
+So the quality demonstrated through the MCP is not automatically what the app
+would ship. Either enable the modern models on the REST key at
+cloud.higgsfield.ai, or build against popcorn and dop, which this key does
+have.
