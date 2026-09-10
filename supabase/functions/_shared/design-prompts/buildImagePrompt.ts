@@ -1,6 +1,7 @@
 // supabase/functions/_shared/design-prompts/buildImagePrompt.ts
 
 import { flattenSynthesis, type DesignStyleSynthesis } from "./flattenSynthesis.ts";
+import { pictureBrief } from "./pictureBrief.ts";
 import {
   getPlaybookEntry,
   renderPlaybookSection,
@@ -129,7 +130,9 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
     );
   }
 
-  const sanitizedBase = stripHex(input.basePrompt);
+  // Picture-only generations never see the copy: wording in the brief is
+  // wording the model paints, and the app's typed headline then lands on top.
+  const sanitizedBase = input.noText ? pictureBrief(stripHex(input.basePrompt)) : stripHex(input.basePrompt);
   const pillarLabel = input.post?.pillar ? `\nContent pillar: ${input.post.pillar}` : "";
   const langLabel = input.post?.language ? `\nLanguage of any visible text: ${input.post.language}` : "";
 
@@ -223,6 +226,7 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
         `in the brand's colour for that zone — a flat navy or red block, a plain wall, a soft depth-of-field ground — ` +
         `with nothing in it: one flat area of one colour covering at least a quarter of the canvas, part of the layout itself. ` +
         `Do NOT draw a separate box, card, panel, frame, pill, button or blank rectangle anywhere as a stand-in for text or a button; ` +
+        `do NOT write the post's words, a slide counter ("1 of 5"), or any label from this brief; ` +
         `a white or light empty rectangle on the design is a failure. Everything else follows the brand's layout as usual. No text of any kind in the image itself.`,
     );
   }

@@ -637,8 +637,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           // sanitized overall brief. Defense-in-depth: collapse any
           // bullet-list / multi-concept structure that slipped through.
           const slideBrief = slideBriefs[s];
+          // The slide's headline is typed on afterwards, so the picture brief
+          // never carries it: handed to the model it gets painted, and the
+          // typed headline then sits on top of the painted one.
           const rawPerSlide = slideBrief
-            ? `${slideBrief.headline ? `Headline: ${slideBrief.headline}\n\n` : ""}${slideBrief.content_brief}`
+            ? `${!modelDrawsText || !slideBrief.headline ? "" : `Headline: ${slideBrief.headline}\n\n`}${slideBrief.content_brief}`
             : stripMultiSlideLanguage(editablePrompt || defaultPrompt);
           const perSlidePrompt = collapseListsInBrief(rawPerSlide);
 
