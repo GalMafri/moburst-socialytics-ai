@@ -119,3 +119,9 @@ verify_jwt = false
 # (scheduler); checks happen inside the function.
 [functions.refresh-competitor-feed]
 verify_jwt = false
+
+# Content pillars read from the client's strategy document, their own posts,
+# or the brief, instead of typed from nothing. Staff-gated inside the
+# function, like the rest of the project.
+[functions.derive-content-pillars]
+verify_jwt = false

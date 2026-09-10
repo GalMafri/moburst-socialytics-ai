@@ -42,6 +42,13 @@ Deno.serve(async (req) => {
     const brandIdentity =
       typeof client?.brand_identity === "object" ? client.brand_identity : {};
 
+    // Pillars are objects; interpolated straight into the prompt they read as
+    // "[object Object]", so the model was told nothing about them.
+    const pillarLines = (Array.isArray(client?.content_pillars) ? client!.content_pillars : [])
+      .map((p: any) => (typeof p === "string" ? `- ${p}` : `- ${p?.name}${p?.description ? ` — ${p.description}` : ""}`))
+      .filter((line: string) => line.trim() !== "-")
+      .join("\n") || "Not specified";
+
     // Load voice learnings (non-blocking — table may not exist yet)
     let voiceLearningsText = "No voice learnings yet.";
     try {
@@ -72,7 +79,8 @@ Deno.serve(async (req) => {
 
 BRAND: ${client?.name || "Unknown"}
 PLATFORM: ${platform}
-CONTENT PILLARS: ${client?.content_pillars || "Not specified"}
+CONTENT PILLARS:
+${pillarLines}
 BRAND BRIEF: ${client?.brand_book_text?.slice(0, 500) || "Not available"}
 BRAND VOICE: ${brandIdentity?.tone_of_voice || "Professional"}
 

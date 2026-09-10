@@ -1,4 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
+import { StrategyDocUpload } from "@/components/onboarding/StrategyDocUpload";
+import { PillarDerivationCard } from "@/components/onboarding/PillarDerivationCard";
 import { PlatformIcon, normalizePlatformKey } from "@/lib/platform-config";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -92,6 +94,7 @@ export default function ClientSetup() {
     website_url: "",
     social_keywords: [] as string[],
     content_pillars: [...DEFAULT_PILLARS] as ContentPillar[],
+    strategy_doc_file_path: "",
     primary_platforms: ["Instagram", "TikTok", "Facebook", "LinkedIn"],
     geo: ["US"] as string[],
     language: ["en"] as string[],
@@ -185,6 +188,7 @@ export default function ClientSetup() {
         website_url: client.website_url || "",
         social_keywords: client.social_keywords || [],
         content_pillars: pillars,
+        strategy_doc_file_path: (client as any).strategy_doc_file_path || "",
         primary_platforms: client.primary_platforms || ["Instagram", "TikTok", "Facebook", "LinkedIn"],
         geo: geoArr,
         language: langArr,
@@ -232,6 +236,7 @@ export default function ClientSetup() {
         language: form.language.join(","),
         sprout_customer_id: "1676448",
         content_pillars: form.content_pillars as any,
+        strategy_doc_file_path: form.strategy_doc_file_path || null,
         brand_book_url: form.brand_book_url || null,
         brand_book_file_path: form.brand_book_file_path || null,
         timezone: form.timezone || "UTC",
@@ -761,10 +766,34 @@ export default function ClientSetup() {
                 <CardTitle className="t-h3">Content strategy</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
+                {/* For a client with no posting history the strategy document
+                    is the only source of pillars, so it comes first. */}
+                <StrategyDocUpload
+                  clientId={isNew ? undefined : id}
+                  clientName={form.name}
+                  filePath={form.strategy_doc_file_path}
+                  onFilePathChange={(path) => setForm((f) => ({ ...f, strategy_doc_file_path: path }))}
+                />
+                <PillarDerivationCard
+                  clientId={isNew ? undefined : id}
+                  hasStrategyDoc={!!form.strategy_doc_file_path}
+                  hasBrief={!!form.brief_text?.trim() || !!form.brand_notes?.trim()}
+                  derivedAt={(client as any)?.pillars_derived_at}
+                  source={(client as any)?.pillars_source}
+                  onDerived={(pillars, keywords) =>
+                    setForm((f) => ({
+                      ...f,
+                      content_pillars: pillars.map((p) => ({ name: p.name, description: p.description })),
+                      // Keywords are added to what is there, never replacing
+                      // terms someone chose deliberately.
+                      social_keywords: Array.from(new Set([...(f.social_keywords || []), ...keywords])),
+                    }))
+                  }
+                />
                 <div className="space-y-3">
                   <Label>Content Pillars</Label>
                   <p className="t-secondary">
-                    Define your content pillars with descriptions to guide content strategy
+                    Read from the strategy or the client's own posts above, or written here. Either way, edit anything that looks wrong.
                   </p>
                   <div className="space-y-3">
                     {form.content_pillars.map((pillar, index) => (
