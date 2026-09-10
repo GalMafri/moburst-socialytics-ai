@@ -9,6 +9,7 @@
 // "not configured" message instead of failing silently.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { describeInvokeError } from "@/lib/invokeError";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -185,18 +186,6 @@ export default function CompetitiveRun() {
     [id, stopAllTimers, refetchRuns, toast],
   );
 
-  /** The reason the function gave, rather than "Edge Function returned a non-2xx status code". */
-  const describeRunError = async (err: any, data: any): Promise<string> => {
-    if (data?.error) return data.error;
-    try {
-      const body = await err?.context?.json?.();
-      if (body?.error) return body.error;
-    } catch {
-      // fall through to the generic message
-    }
-    return err?.message || "The run could not be started.";
-  };
-
   const runAnalysis = async () => {
     if (!rangeOk) {
       toast({ title: "Pick a valid period", description: "The end date must be on or after the start date, and the range at most one year.", variant: "destructive" });
@@ -220,8 +209,7 @@ export default function CompetitiveRun() {
           date_range_end: range.end,
         },
       });
-      if (runErr) throw new Error(await describeRunError(runErr, started));
-      if (started?.error) throw new Error(started.error);
+      if (runErr || started?.error) throw new Error(await describeInvokeError(runErr, started));
       const reportRowId: string = started.report_id;
       setReportId(reportRowId);
 

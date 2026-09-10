@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from "react-router-dom";
+import { describeInvokeError } from "@/lib/invokeError";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -282,17 +283,7 @@ export default function RunAnalysis() {
           skip_trends: skipTrends,
         },
       });
-      if (runErr || started?.error) {
-        let reason = started?.error as string | undefined;
-        if (!reason) {
-          try {
-            reason = (await (runErr as any)?.context?.json?.())?.error;
-          } catch {
-            reason = undefined;
-          }
-        }
-        throw new Error(reason || (runErr as any)?.message || "The run could not be started.");
-      }
+      if (runErr || started?.error) throw new Error(await describeInvokeError(runErr, started));
       const reportRowId: string = started.report_id;
       setReportId(reportRowId);
 

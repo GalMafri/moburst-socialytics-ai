@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { supabase } from "@/integrations/supabase/client";
+import { describeInvokeError } from "@/lib/invokeError";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2, RotateCw } from "lucide-react";
@@ -54,8 +55,9 @@ export function RetryReportButton({
     setBusy(true);
     try {
       const { data, error } = await supabase.functions.invoke("run-report", { body: { report_id: reportId } });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      // invoke() reports every non-2xx as "Edge Function returned a non-2xx
+      // status code" and leaves the real reason on the response body.
+      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
       toast({
         title: "Running again",
         description: "The workflow has taken the run. This page updates when it finishes.",
