@@ -14,13 +14,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Play, Layers, Image as ImageIcon, ExternalLink, ImageOff } from "lucide-react";
+import { Play, Layers, Image as ImageIcon, ExternalLink, ImageOff, FileText, Link as LinkIcon } from "lucide-react";
 import { normalizePlatform, platformLabel } from "@/lib/platform";
 
 // Re-exported so existing imports keep working; the helpers live in src/lib/platform.ts.
 export { normalizePlatform, platformLabel };
 
-export type MediaKind = "video" | "carousel" | "image" | "text";
+export type MediaKind = "video" | "carousel" | "image" | "document" | "link" | "text";
 
 export type PostPreview = {
   url: string;
@@ -46,9 +46,14 @@ export function platformFromUrl(url: string | null | undefined): string {
 export function mediaKind(value: string | null | undefined, url?: string | null): MediaKind {
   const v = String(value || "").toLowerCase();
   if (v.includes("video") || v.includes("reel") || v.includes("short") || v.includes("igtv")) return "video";
+  // A LinkedIn document post and a PDF carousel are their own thing: they
+  // used to be folded into "text", which read as a post with no creative.
+  // Checked before carousel, since "pdf_carousel" is a document.
+  if (v.includes("document") || v.includes("pdf")) return "document";
   if (v.includes("carousel") || v.includes("album") || v.includes("multi") || v.includes("sidecar")) return "carousel";
+  if (v.includes("link") || v.includes("article") || v.includes("share")) return "link";
   if (v.includes("photo") || v.includes("image") || v.includes("picture")) return "image";
-  if (v.includes("text") || v.includes("status") || v.includes("link")) return "text";
+  if (v.includes("text") || v.includes("status")) return "text";
   const p = platformFromUrl(url);
   if (p === "tiktok" || p === "youtube") return "video";
   if (String(url || "").includes("/reel/")) return "video";
@@ -56,7 +61,14 @@ export function mediaKind(value: string | null | undefined, url?: string | null)
 }
 
 export function mediaLabel(kind: MediaKind): string {
-  return kind === "video" ? "Video" : kind === "carousel" ? "Carousel" : kind === "text" ? "Text" : "Image";
+  switch (kind) {
+    case "video": return "Video";
+    case "carousel": return "Carousel";
+    case "document": return "Document";
+    case "link": return "Link";
+    case "text": return "Text";
+    default: return "Image";
+  }
 }
 
 export type PreviewHint = { url: string | null | undefined; image?: string | null; mediaType?: string | null };
@@ -164,8 +176,12 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
   const isVideoFile = !!src && /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(src);
   const kind = mediaKind(mediaType || preview?.media_type, url);
   const plat = normalizePlatform(platform || preview?.platform || platformFromUrl(url));
-  const aspect = frame || (compact ? "aspect-square" : "aspect-[4/5]");
-  const objectFit = (fit || (compact ? "cover" : "contain")) === "cover" ? "object-cover" : "object-contain";
+  // One frame everywhere (4:5, the tallest common social ratio) and contain
+  // by default: a square frame with object-cover turned a 9:16 Reel into a
+  // crop of its middle, which is how a thumbnail ends up unreadable. The
+  // blurred copy behind it fills the rest of the frame.
+  const aspect = frame || "aspect-[4/5]";
+  const objectFit = (fit || "contain") === "cover" ? "object-cover" : "object-contain";
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const el = videoRef.current;
@@ -215,7 +231,7 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
         />
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-2 text-center bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] text-muted-foreground">
-          {kind === "video" ? <Play className="h-7 w-7" /> : kind === "carousel" ? <Layers className="h-7 w-7" /> : <ImageOff className="h-6 w-6" />}
+          {kind === "video" ? <Play className="h-7 w-7" /> : kind === "carousel" ? <Layers className="h-7 w-7" /> : kind === "document" ? <FileText className="h-7 w-7" /> : kind === "link" ? <LinkIcon className="h-7 w-7" /> : <ImageOff className="h-6 w-6" />}
           {!compact && (
             <span className="t-label">
               {!url ? "No link" : plat ? `No preview from ${platformLabel(plat)}` : "No preview"}
@@ -228,15 +244,16 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
           <span className="h-11 w-11 rounded-full bg-black/55 backdrop-blur-sm flex items-center justify-center"><Play className="h-5 w-5 text-white ml-0.5" fill="white" /></span>
         </span>
       )}
-      {!compact && (
-        <div className="absolute top-2 left-2 right-2 flex items-center justify-between gap-2 t-label font-medium">
-          {plat ? <span className="px-2 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-sm">{platformLabel(plat)}</span> : <span />}
-          <span className="px-2 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-sm inline-flex items-center gap-1">
-            {kind === "video" ? <Play className="h-3 w-3" /> : kind === "carousel" ? <Layers className="h-3 w-3" /> : <ImageIcon className="h-3 w-3" />}
-            {mediaLabel(kind)}
-          </span>
-        </div>
-      )}
+      {/* Which creative this post used, on every tile. A compact tile shows
+          the type alone; a full one names the platform beside it. Without it
+          a list of thumbnails says nothing about what was actually posted. */}
+      <div className={`absolute top-1.5 left-1.5 right-1.5 flex items-center ${compact ? "justify-end" : "justify-between"} gap-2 t-label font-medium`}>
+        {!compact && (plat ? <span className="px-2 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-sm">{platformLabel(plat)}</span> : <span />)}
+        <span className="px-2 py-0.5 rounded-full bg-black/60 text-white backdrop-blur-sm inline-flex items-center gap-1">
+            {kind === "video" ? <Play className="h-3 w-3" /> : kind === "carousel" ? <Layers className="h-3 w-3" /> : kind === "document" ? <FileText className="h-3 w-3" /> : kind === "link" ? <LinkIcon className="h-3 w-3" /> : <ImageIcon className="h-3 w-3" />}
+          {mediaLabel(kind)}
+        </span>
+      </div>
       {url && !compact && (
         <span className="absolute bottom-2 right-2 h-7 w-7 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <ExternalLink className="h-3.5 w-3.5" />

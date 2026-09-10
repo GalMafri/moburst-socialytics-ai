@@ -36,7 +36,7 @@ const FOLDER = "post-thumbnails/v2";
 const MAX_PER_CALL = 40;
 const CONCURRENCY = 8;
 
-type Preview = { url: string; platform: string | null; media_type: string; image_url: string | null; title: string | null; status: "ok" | "unavailable" };
+type Preview = { url: string; platform: string | null; media_type: string; image_url: string | null; title: string | null; status: "ok" | "unavailable" | "expiring" };
 type Hint = { url: string; image?: string | null; media_type?: string | null };
 type Db = ReturnType<typeof createClient>;
 
@@ -65,7 +65,12 @@ const isGenericPlaceholder = (u: string) => /static\.licdn\.com\/aero-v1\/sc\/h\
 function mediaTypeOf(t: string | null | undefined): string {
   const s = String(t || "").toLowerCase();
   if (s.includes("video") || s.includes("reel")) return "video";
-  if (s.includes("carousel") || s.includes("album")) return "carousel";
+  // A LinkedIn document post carries a PDF, not an image; calling it "image"
+  // made the tile promise a picture that never arrived. Checked before
+  // carousel, since a PDF carousel is a document.
+  if (s.includes("document") || s.includes("pdf")) return "document";
+  if (s.includes("carousel") || s.includes("album") || s.includes("sidecar")) return "carousel";
+  if (s.includes("link") || s.includes("article")) return "link";
   if (s.includes("photo") || s.includes("image")) return "image";
   return "unknown";
 }
@@ -226,7 +231,15 @@ async function resolve(supabase: Db, hint: Hint): Promise<Preview> {
         return { ...base, media_type: "video", image_url: durable || image, title, status: "ok" };
       }
       const durable = isExpiringCdn(image) ? await persist(supabase, image, url) : null;
-      return { ...base, media_type: media_type === "unknown" ? "image" : media_type, image_url: durable || image, title, status: "ok" };
+      // Only an unknown type becomes "image"; a resolved og:image on a
+      // document post must not relabel the post as a picture.
+      const resolvedType = media_type === "unknown" ? "image" : media_type;
+      // A copy that could not be stored is still an expiring link. Marking it
+      // "ok" put it in a loop: every render re-resolved it and tried again.
+      if (!durable && isExpiringCdn(image)) {
+        return { ...base, media_type: resolvedType, image_url: image, title, status: "expiring" };
+      }
+      return { ...base, media_type: resolvedType, image_url: durable || image, title, status: "ok" };
     }
     const og = await ogPreview(url, platform === "facebook" ? FB_CRAWLER_UA : platform === "linkedin" ? CRAWLER_UA : UA);
     if (og.status === "ok" && og.image_url) {
@@ -271,7 +284,10 @@ Deno.serve(async (req) => {
       const hintedCreative = !!hints.get(u)?.image;
       const valid = c && ((c.status === "ok" && age < OK_TTL_MS) || (c.status !== "ok" && age < MISS_TTL_MS && !hintedCreative));
       // A cached hit that still points at an expiring CDN link (image or video) is re-resolved so it gets a durable copy.
+      // An "expiring" row is one we could not copy; it is served as-is and
+      // retried on the miss schedule instead of on every single render.
       if (valid && !(c!.status === "ok" && c!.image_url && isExpiringCdn(c!.image_url))) out[u] = c as Preview;
+      else if (c && c.status === "expiring" && age < MISS_TTL_MS && !hintedCreative) out[u] = c as Preview;
       else todo.push(hints.get(u)!);
     }
     const results: Preview[] = [];
