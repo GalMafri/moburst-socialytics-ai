@@ -201,9 +201,12 @@ export type Database = {
           language: string | null
           logo_url: string | null
           name: string
+          pillars_derived_at: string | null
+          pillars_source: string | null
           primary_platforms: string[] | null
           social_keywords: string[] | null
           sprout_customer_id: string | null
+          strategy_doc_file_path: string | null
           timezone: string | null
           trends_keywords: string | null
           updated_at: string | null
@@ -232,9 +235,12 @@ export type Database = {
           language?: string | null
           logo_url?: string | null
           name: string
+          pillars_derived_at?: string | null
+          pillars_source?: string | null
           primary_platforms?: string[] | null
           social_keywords?: string[] | null
           sprout_customer_id?: string | null
+          strategy_doc_file_path?: string | null
           timezone?: string | null
           trends_keywords?: string | null
           updated_at?: string | null
@@ -263,9 +269,12 @@ export type Database = {
           language?: string | null
           logo_url?: string | null
           name?: string
+          pillars_derived_at?: string | null
+          pillars_source?: string | null
           primary_platforms?: string[] | null
           social_keywords?: string[] | null
           sprout_customer_id?: string | null
+          strategy_doc_file_path?: string | null
           timezone?: string | null
           trends_keywords?: string | null
           updated_at?: string | null
