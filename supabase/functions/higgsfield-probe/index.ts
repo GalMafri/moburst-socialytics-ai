@@ -65,6 +65,24 @@ Deno.serve(async (req) => {
     } catch {
       // no submit block
     }
+    // Read one arbitrary GET, so a submitted request's status can be
+    // followed without another deploy.
+    let get: string | null = null;
+    try {
+      const again = await req.clone().json();
+      if (typeof again?.get === "string") get = again.get;
+    } catch {
+      // no get block
+    }
+    if (get) {
+      const resp = await fetch(`${HIGGSFIELD_BASE_URL}${get}`, {
+        headers: { Authorization: auth },
+        signal: AbortSignal.timeout(20000),
+      });
+      const text = (await resp.text().catch(() => "")).slice(0, 3000);
+      return json({ got: get, status: resp.status, body: text });
+    }
+
     if (submit?.path) {
       const resp = await fetch(`${HIGGSFIELD_BASE_URL}${submit.path}`, {
         method: "POST",
