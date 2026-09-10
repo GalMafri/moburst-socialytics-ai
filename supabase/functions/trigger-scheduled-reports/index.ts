@@ -18,7 +18,7 @@
 // of this real.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { buildCompetitivePayload, buildSocialPayload } from "../_shared/reports/payloads.ts";
+import { buildCompetitivePayload, buildSocialPayload, STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -44,6 +44,53 @@ function nextRun(now: Date, runDay: number, frequency: string): string {
 }
 
 /** Compact digest of the latest complete competitive report (mirrors RunAnalysis). */
+/**
+ * Close out runs that died without saying so.
+ *
+ * A workflow that fails at an HTTP node never reaches its writeback, so the
+ * report row sits on "running" for ever — Wendover's August report sat that
+ * way for two days, LegaBot's July one for a month, and nothing in the app
+ * or the database said anything was wrong. n8n's error trigger does not
+ * carry the report id, so the only reliable place to notice is here, from
+ * the clock.
+ *
+ * They become ordinary failures with a reason, which is what the Retry
+ * control is for.
+ */
+async function closeAbandonedRuns(supabase: any, now: Date, dryRun: boolean) {
+  const cutoff = new Date(now.getTime() - STUCK_AFTER_MINUTES * 60000).toISOString();
+  const out: Array<{ table: string; id: string }> = [];
+  for (const table of ["reports", "competitive_reports"]) {
+    try {
+      const { data: stale } = await supabase
+        .from(table)
+        .select("id")
+        .eq("status", "running")
+        .lt("created_at", cutoff);
+      for (const row of stale || []) {
+        out.push({ table, id: row.id });
+        if (dryRun) continue;
+        await supabase
+          .from(table)
+          .update({
+            status: "failed",
+            report_data: {
+              error:
+                "The workflow stopped without reporting back, so this run was closed automatically. " +
+                "Run it again, and if it stops again check the n8n execution for that client.",
+            },
+          })
+          .eq("id", row.id)
+          .eq("status", "running");
+      }
+    } catch (e) {
+      console.warn(`[abandoned] ${table}:`, e);
+    }
+  }
+  if (out.length > 0) console.log(`[abandoned] closed ${out.length} run(s) that never reported back`);
+  return out;
+}
+
 // Milestone 4: keep each client's competitor feed under a week old. One
 // RivalIQ call per client, at most ten clients per daily run, so the weekly
 // refresh never competes with the monthly pulls for the hourly budget.
@@ -102,8 +149,9 @@ Deno.serve(async (req) => {
       .eq("is_active", true)
       .lte("next_run_at", now.toISOString());
     if (dueErr) throw dueErr;
+    const abandoned = await closeAbandonedRuns(supabase, now, dryRun);
     const feeds = await refreshStaleFeeds(supabase, now, dryRun, secret);
-    if (!due || due.length === 0) return json({ message: "No schedules due", triggered: 0, feeds });
+    if (!due || due.length === 0) return json({ message: "No schedules due", triggered: 0, feeds, abandoned });
 
     const { data: settings } = await supabase.from("app_settings").select("key, value").in("key", ["n8n_webhook_url", "competitive_n8n_webhook_url"]);
     const socialUrl = settings?.find((s) => s.key === "n8n_webhook_url")?.value;
@@ -166,7 +214,7 @@ Deno.serve(async (req) => {
         results.push({ client: client?.name || schedule.client_id, kind: schedule.report_kind, status: "error", error: msg });
       }
     }
-    return json({ triggered: results.length, dry_run: dryRun, results, feeds });
+    return json({ triggered: results.length, dry_run: dryRun, results, feeds, abandoned });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
