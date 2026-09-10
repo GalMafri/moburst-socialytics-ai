@@ -13,16 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,10 +31,16 @@ interface ReportActionsProps {
     report_type?: string | null;
     gamma_url?: string | null;
   };
+  /**
+   * Which kind of report this row is. A competitive report lives in its own
+   * table and has no metadata to edit — its dates come from the run — so the
+   * same control serves both and shows only what applies.
+   */
+  kind?: "monthly" | "competitive";
   onDeleted?: () => void;
 }
 
-export function ReportActions({ report, onDeleted }: ReportActionsProps) {
+export function ReportActions({ report, kind = "monthly", onDeleted }: ReportActionsProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { canDelete } = useAuth();
@@ -79,15 +76,28 @@ export function ReportActions({ report, onDeleted }: ReportActionsProps) {
     }
   };
 
+  const table = kind === "competitive" ? "competitive_reports" : "reports";
+
   const handleDelete = async () => {
-    const { error } = await supabase.from("reports").delete().eq("id", report.id);
+    // Ask for the row back. A delete the database refuses returns no error
+    // and no rows, which used to toast success over a report that is still
+    // there.
+    const { data, error } = await supabase.from(table as any).delete().eq("id", report.id).select("id");
     if (error) {
-      toast({ title: "Error deleting report", description: error.message, variant: "destructive" });
+      toast({ title: "Could not delete the report", description: error.message, variant: "destructive" });
+    } else if (!data || data.length === 0) {
+      toast({
+        title: "Could not delete the report",
+        description: "You do not have permission to delete this one. An admin can.",
+        variant: "destructive",
+      });
     } else {
       toast({ title: "Report deleted" });
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
-      queryClient.invalidateQueries({ queryKey: ["reports-history"] });
-      queryClient.invalidateQueries({ queryKey: ["all-reports"] });
+      for (const key of kind === "competitive"
+        ? ["all-competitive-reports", "competitive-reports-history", "competitive-reports", "competitive-report", "competitive-latest", "competitive-runs"]
+        : ["reports", "reports-history", "all-reports", "report"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
       onDeleted?.();
     }
     setDeleteOpen(false);
@@ -104,16 +114,18 @@ export function ReportActions({ report, onDeleted }: ReportActionsProps) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          <DropdownMenuItem onClick={() => setEditOpen(true)}>
-            <Pencil className="h-4 w-4 mr-2" /> Edit
-          </DropdownMenuItem>
+          {kind === "monthly" && (
+            <DropdownMenuItem onClick={() => setEditOpen(true)}>
+              <Pencil className="h-4 w-4 mr-2" /> Edit
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem className="text-destructive" onClick={() => setDeleteOpen(true)}>
             <Trash2 className="h-4 w-4 mr-2" /> Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+      <Dialog open={editOpen && kind === "monthly"} onOpenChange={setEditOpen}>
         <DialogContent onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
             <DialogTitle>Edit report</DialogTitle>
@@ -142,22 +154,23 @@ export function ReportActions({ report, onDeleted }: ReportActionsProps) {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete report</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete this report. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={kind === "competitive" ? "Delete this competitive report?" : "Delete this report?"}
+        description={
+          <>
+            <p>The report and its analysis go for good. This cannot be undone.</p>
+            <p className="t-secondary">
+              {kind === "competitive"
+                ? "The cached RivalIQ data and any feedback on its insights stay, no longer attached to a report."
+                : "Designs and scheduled posts made from it stay, no longer attached to a report."}
+            </p>
+          </>
+        }
+        confirmLabel="Delete report"
+        onConfirm={handleDelete}
+      />
     </>
   );
 }

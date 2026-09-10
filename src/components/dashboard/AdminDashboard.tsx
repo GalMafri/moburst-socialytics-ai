@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,6 +38,7 @@ export function AdminDashboard() {
   const queryClient = useQueryClient();
   const { canManageClients, canRunAnalysis, canDelete } = useAuth();
   const [search, setSearch] = useState("");
+  const [archiving, setArchiving] = useState<{ id: string; name: string } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -247,7 +249,7 @@ export function AdminDashboard() {
                                 </DropdownMenuItem>
                               </>
                             ) : (
-                              <DropdownMenuItem onClick={() => archiveMutation.mutate(client.id)}>
+                              <DropdownMenuItem onClick={() => setArchiving({ id: client.id, name: client.name })}>
                                 <Archive className="h-4 w-4 mr-2" /> Archive Client
                               </DropdownMenuItem>
                             ))}
@@ -396,6 +398,23 @@ export function AdminDashboard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <ConfirmDialog
+        open={!!archiving}
+        onOpenChange={(o) => !o && setArchiving(null)}
+        title={`Archive ${archiving?.name ?? "this client"}?`}
+        description={
+          <>
+            <p>The client comes off the dashboard and stops being scheduled. Reports, designs and competitor sets stay.</p>
+            <p className="t-secondary">You can bring an archived client back at any time.</p>
+          </>
+        }
+        confirmLabel="Archive client"
+        destructive={false}
+        onConfirm={() => {
+          if (archiving) archiveMutation.mutate(archiving.id);
+          setArchiving(null);
+        }}
+      />
     </div>
   );
 }

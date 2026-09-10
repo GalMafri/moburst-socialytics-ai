@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatRange } from "@/lib/dateRange";
+import { ReportActions } from "@/components/reports/ReportActions";
 import { ArrowLeft, Crosshair, Eye, Loader2, Play, Rss } from "lucide-react";
 
 export default function CompetitiveReportHistory() {
@@ -96,7 +97,12 @@ export default function CompetitiveReportHistory() {
                             {r.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="t-secondary">{period}</TableCell>
+                        <TableCell className="t-secondary">
+                          {period}
+                          {r.status === "failed" && rd.error && (
+                            <span className="block t-label text-destructive break-words">{String(rd.error)}</span>
+                          )}
+                        </TableCell>
                         <TableCell className="t-secondary">{rd.landscape?.name || "—"}</TableCell>
                         <TableCell className="t-secondary">{r.duration_minutes ? `${r.duration_minutes}m` : "—"}</TableCell>
                         <TableCell className="text-right">
@@ -106,6 +112,7 @@ export default function CompetitiveReportHistory() {
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             )}
+                            <ReportActions report={r} kind="competitive" />
                           </div>
                         </TableCell>
                       </TableRow>

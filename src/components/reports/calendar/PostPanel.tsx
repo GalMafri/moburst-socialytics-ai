@@ -5,6 +5,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -381,6 +382,7 @@ function MediaTileCard({
   const canToggle = !!tile.iterationId && !!onToggleSelected;
   const canReview = !!tile.iterationId && !!onFeedback;
   const [rejecting, setRejecting] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [reason, setReason] = useState("wrong_style");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -446,7 +448,7 @@ function MediaTileCard({
               <Button variant="ghost" size="sm" className="h-9 px-2" title="Reject and teach the app why" aria-label="Reject this design" onClick={() => setRejecting(true)} disabled={busy}>
                 <ThumbsDown className="h-3.5 w-3.5" />
               </Button>
-              <Button variant="ghost" size="sm" className="h-9 px-2" title="Archive without feedback" aria-label="Archive this design" onClick={() => submit("archived")} disabled={busy}>
+              <Button variant="ghost" size="sm" className="h-9 px-2" title="Archive without feedback" aria-label="Archive this design" onClick={() => setArchiveOpen(true)} disabled={busy}>
                 <Archive className="h-3.5 w-3.5" />
               </Button>
             </>
@@ -462,6 +464,18 @@ function MediaTileCard({
               <Download className="h-3 w-3 mr-1" /> Download
             </Button>
           </a>
+          <ConfirmDialog
+            open={archiveOpen}
+            onOpenChange={setArchiveOpen}
+            title="Archive this design?"
+            description={<p>It comes out of the post's designs. Nothing is learned from an archive — reject it instead if it is wrong for the brand.</p>}
+            confirmLabel="Archive"
+            destructive={false}
+            onConfirm={() => {
+              setArchiveOpen(false);
+              void submit("archived");
+            }}
+          />
           {/* The reason is what turns a rejection into a rule for the next design. */}
           <Dialog open={rejecting} onOpenChange={setRejecting}>
             <DialogContent className="max-w-md">

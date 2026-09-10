@@ -11,6 +11,7 @@
 // creates a fresh draft set and leaves history behind (sets are cheap rows).
 
 import { useMemo, useState } from "react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -103,6 +104,7 @@ export default function CompetitorReview() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [identifying, setIdentifying] = useState(false);
+  const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [detectingId, setDetectingId] = useState<string | null>(null);
   const [manualName, setManualName] = useState("");
@@ -715,7 +717,7 @@ export default function CompetitorReview() {
                             size="sm"
                             variant="ghost"
                             className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                            onClick={() => removeCompetitor.mutate(c.id)}
+                            onClick={() => setRemoving({ id: c.id, name: displayCompanyName(c.name) })}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -766,6 +768,17 @@ export default function CompetitorReview() {
           </Card>
         )}
       </div>
+      <ConfirmDialog
+        open={!!removing}
+        onOpenChange={(o) => !o && setRemoving(null)}
+        title={`Remove ${removing?.name ?? "this competitor"}?`}
+        description={<p>It leaves this set, along with the social handles detected for it. Reports already run keep it.</p>}
+        confirmLabel="Remove competitor"
+        onConfirm={() => {
+          if (removing) removeCompetitor.mutate(removing.id);
+          setRemoving(null);
+        }}
+      />
     </AppLayout>
   );
 }

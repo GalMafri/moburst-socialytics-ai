@@ -25,6 +25,7 @@ import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@
 import { PlatformIcon } from "@/lib/platform-config";
 import { partitionGaps, useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { formatRange } from "@/lib/dateRange";
+import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
@@ -528,6 +529,11 @@ export default function CompetitiveReportView() {
               <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/feed`)}><Rss className="h-4 w-4 mr-2" /> Latest posts</Button>
             )}
             <ExportPdfButton contentRef={printRef} filename={`${clientName.replace(/[^a-z0-9]+/gi, "_")}_competitive_${period ? period.replace(/[^a-z0-9]+/gi, "_") : report.id.slice(0, 8)}`} title={`${clientName} vs. the field${period ? ` (${period})` : ""}`} />
+            <ReportActions
+              report={report as any}
+              kind="competitive"
+              onDeleted={() => navigate(`/clients/${clientId}/competitive/reports`)}
+            />
           </div>
         </div>
 

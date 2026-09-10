@@ -4,6 +4,7 @@
 // lands in the content planner as an ad-hoc post.
 
 import { useMemo, useState } from "react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -46,6 +47,7 @@ export default function CompetitiveFeed() {
   const qc = useQueryClient();
   const { canRunAnalysis } = useAuth();
   const [company, setCompany] = useState("all");
+  const [dismissing, setDismissing] = useState<string | null>(null);
   const [plat, setPlat] = useState("all");
 
   const { data: client } = useQuery({
@@ -230,7 +232,7 @@ export default function CompetitiveFeed() {
                             </div>
                           </div>
                           {canRunAnalysis && (
-                            <Button size="sm" variant="ghost" className="shrink-0" onClick={() => dismiss.mutate(a.id)} aria-label="Dismiss"><X className="h-4 w-4" /></Button>
+                            <Button size="sm" variant="ghost" className="shrink-0" onClick={() => setDismissing(a.id)} aria-label="Dismiss"><X className="h-4 w-4" /></Button>
                           )}
                         </div>
                         {a.summary && <p className="t-secondary">{a.summary}</p>}
@@ -319,6 +321,18 @@ export default function CompetitiveFeed() {
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={!!dismissing}
+        onOpenChange={(o) => !o && setDismissing(null)}
+        title="Dismiss this alert?"
+        description={<p>It comes off the feed. The posts behind it stay in the competitor data.</p>}
+        confirmLabel="Dismiss"
+        destructive={false}
+        onConfirm={() => {
+          if (dismissing) dismiss.mutate(dismissing);
+          setDismissing(null);
+        }}
+      />
     </AppLayout>
   );
 }
