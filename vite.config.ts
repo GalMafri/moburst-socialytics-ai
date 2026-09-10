@@ -2,26 +2,28 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
-
-// Public production values. .env is no longer tracked in git (it only ever
-// held these same public VITE_* values, and a hand-edited copy on the deploy
-// host blocked every deploy for months). Anything a .env or the process
-// environment already provides wins; these only fill gaps, so a missing .env
-// can never produce a bundle that cannot reach Supabase or the Hub.
-const PUBLIC_DEFAULTS: Record<string, string> = {
-  VITE_SUPABASE_PROJECT_ID: "rwouwxqggjjacbpbhqsn",
-  VITE_SUPABASE_URL: "https://rwouwxqggjjacbpbhqsn.supabase.co",
-  VITE_SUPABASE_PUBLISHABLE_KEY:
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3b3V3eHFnZ2pqYWNicGJocXNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA3MjI5MjUsImV4cCI6MjA4NjI5ODkyNX0.MVh6NOBLeBFvgYlxa9Ye9y6fTX3fQrMuo-YcwwJL5hU",
-  VITE_HUB_BACKEND_URL: "https://tools-server.moburst.com",
-};
+import { applyPublicEnvDefaults, REQUIRED_ENV } from "./public-env";
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const fileEnv = loadEnv(mode, process.cwd(), "VITE_");
-  for (const [key, value] of Object.entries(PUBLIC_DEFAULTS)) {
-    if (!fileEnv[key] && !process.env[key]) process.env[key] = value;
+  applyPublicEnvDefaults(fileEnv);
+
+  // Backstop for a required value that has no default in public-env.ts — a newly
+  // added variable, say. Today's four are all defaulted, so this stays quiet. It
+  // exists so the next missing one is a red build rather than a bundle that looks
+  // fine and renders nothing.
+  if (command === "build") {
+    const missing = REQUIRED_ENV.filter((k) => !fileEnv[k] && !process.env[k]);
+    if (missing.length) {
+      throw new Error(
+        `Missing required build env with no default: ${missing.join(", ")}.\n` +
+          `Add it to PUBLIC_DEFAULTS in public-env.ts (public values only) or ` +
+          `provide it via .env. Building without it renders a blank page.`,
+      );
+    }
   }
+
   return {
   server: {
     host: "::",
