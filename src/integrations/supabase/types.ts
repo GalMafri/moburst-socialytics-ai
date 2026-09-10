@@ -193,9 +193,11 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           design_references: Json | null
+          design_refs_harvested_at: string | null
           design_style_synthesis: Json | null
           exclude_from_reporting: boolean
           geo: string | null
+          harvested_design_references: Json
           hub_company_name: string | null
           id: string
           language: string | null
@@ -227,9 +229,11 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           design_references?: Json | null
+          design_refs_harvested_at?: string | null
           design_style_synthesis?: Json | null
           exclude_from_reporting?: boolean
           geo?: string | null
+          harvested_design_references?: Json
           hub_company_name?: string | null
           id?: string
           language?: string | null
@@ -261,9 +265,11 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           design_references?: Json | null
+          design_refs_harvested_at?: string | null
           design_style_synthesis?: Json | null
           exclude_from_reporting?: boolean
           geo?: string | null
+          harvested_design_references?: Json
           hub_company_name?: string | null
           id?: string
           language?: string | null
