@@ -131,3 +131,9 @@ verify_jwt = false
 # function, like the rest of the project.
 [functions.run-report]
 verify_jwt = false
+
+# Asks Higgsfield which model routes this account can reach. Read-only,
+# spends no credits, staff-gated. The live API does not match the published
+# spec, so the app is configured from what this returns rather than guesses.
+[functions.higgsfield-probe]
+verify_jwt = false
