@@ -35,11 +35,12 @@ export function PillarDerivationCard({
   hasBrief: boolean;
   derivedAt?: string | null;
   source?: string | null;
-  onDerived: (pillars: DerivedPillar[], keywords: string[]) => void;
+  onDerived: (pillars: DerivedPillar[], keywords: string[], source?: string) => void;
 }) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
+  const [proposed, setProposed] = useState(0);
 
   const run = async () => {
     if (!clientId) {
@@ -57,9 +58,10 @@ export function PillarDerivationCard({
       if (data?.error) throw new Error(data.error);
       const pillars: DerivedPillar[] = data?.pillars || [];
       if (pillars.length === 0) throw new Error("Nothing came back to work from.");
-      onDerived(pillars, data?.keywords || []);
+      onDerived(pillars, data?.keywords || [], data?.source);
       setNotes(data?.notes || null);
-      toast.success(`${pillars.length} pillars read from ${SOURCE_LABEL[data?.source] || "what is on file"}`);
+      setProposed(pillars.length);
+      toast.success(`${pillars.length} pillars proposed from ${SOURCE_LABEL[data?.source] || "what is on file"}. Nothing is saved until you press Save.`);
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
@@ -85,10 +87,15 @@ export function PillarDerivationCard({
           </div>
           <Button size="sm" variant="outline" onClick={run} disabled={running || !clientId || !ready} className="shrink-0">
             {running ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1" />}
-            {derivedAt ? "Read again" : "Read pillars"}
+            {proposed > 0 ? "Read again" : "Propose pillars"}
           </Button>
         </div>
 
+        {proposed > 0 && !running && (
+          <p className="t-label text-[#e0b563]">
+            {proposed} proposed pillars are in the list below, replacing what was there. Nothing is saved until you press Save; leave without saving to keep the old ones.
+          </p>
+        )}
         {derivedAt && !running && (
           <p className="t-label text-muted-foreground inline-flex items-center gap-1.5">
             <CheckCircle2 className="h-3.5 w-3.5 text-primary" />

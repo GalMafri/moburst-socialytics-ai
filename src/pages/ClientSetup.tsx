@@ -95,6 +95,7 @@ export default function ClientSetup() {
     social_keywords: [] as string[],
     content_pillars: [...DEFAULT_PILLARS] as ContentPillar[],
     strategy_doc_file_path: "",
+    pillars_source: "" as string,
     primary_platforms: ["Instagram", "TikTok", "Facebook", "LinkedIn"],
     geo: ["US"] as string[],
     language: ["en"] as string[],
@@ -189,6 +190,7 @@ export default function ClientSetup() {
         social_keywords: client.social_keywords || [],
         content_pillars: pillars,
         strategy_doc_file_path: (client as any).strategy_doc_file_path || "",
+        pillars_source: "",
         primary_platforms: client.primary_platforms || ["Instagram", "TikTok", "Facebook", "LinkedIn"],
         geo: geoArr,
         language: langArr,
@@ -237,6 +239,11 @@ export default function ClientSetup() {
         sprout_customer_id: "1676448",
         content_pillars: form.content_pillars as any,
         strategy_doc_file_path: form.strategy_doc_file_path || null,
+        // Provenance is stamped when the proposed pillars are actually saved,
+        // not when they were proposed.
+        ...(form.pillars_source
+          ? { pillars_source: form.pillars_source, pillars_derived_at: new Date().toISOString() }
+          : {}),
         brand_book_url: form.brand_book_url || null,
         brand_book_file_path: form.brand_book_file_path || null,
         timezone: form.timezone || "UTC",
@@ -780,9 +787,10 @@ export default function ClientSetup() {
                   hasBrief={!!form.brief_text?.trim() || !!form.brand_notes?.trim()}
                   derivedAt={(client as any)?.pillars_derived_at}
                   source={(client as any)?.pillars_source}
-                  onDerived={(pillars, keywords) =>
+                  onDerived={(pillars, keywords, source) =>
                     setForm((f) => ({
                       ...f,
+                      pillars_source: source || "brief",
                       content_pillars: pillars.map((p) => ({ name: p.name, description: p.description })),
                       // Keywords are added to what is there, never replacing
                       // terms someone chose deliberately.

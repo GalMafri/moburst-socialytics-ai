@@ -125,3 +125,9 @@ verify_jwt = false
 # function, like the rest of the project.
 [functions.derive-content-pillars]
 verify_jwt = false
+
+# Starts a report run, or starts a failed one again — monthly and competitive
+# both. One payload builder for every run in the app. Staff-gated inside the
+# function, like the rest of the project.
+[functions.run-report]
+verify_jwt = false

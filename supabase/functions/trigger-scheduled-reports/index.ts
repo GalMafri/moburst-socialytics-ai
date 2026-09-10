@@ -18,6 +18,7 @@
 // of this real.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildCompetitivePayload, buildSocialPayload } from "../_shared/reports/payloads.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,36 +44,6 @@ function nextRun(now: Date, runDay: number, frequency: string): string {
 }
 
 /** Compact digest of the latest complete competitive report (mirrors RunAnalysis). */
-function competitiveDigest(report: any, feedback: any[]): Record<string, unknown> | null {
-  if (!report?.report_data) return null;
-  const rd = report.report_data;
-  const ai = rd.ai_analysis || {};
-  const companies: any[] = rd.aggregates?.companies || [];
-  const me = companies.find((c) => c.is_client);
-  const rivals = companies.filter((c) => !c.is_client && c.post_count > 0);
-  const total = companies.reduce((s, c) => s + (c.post_count || 0), 0);
-  const down = new Set(feedback.filter((f) => f.verdict === "down").map((f) => f.insight_key));
-  const up = new Set(feedback.filter((f) => f.verdict === "up").map((f) => f.insight_key));
-  const key = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 120);
-  const gaps: any[] = Array.isArray(ai.gaps_for_client) ? ai.gaps_for_client : [];
-  return {
-    analyzed_at: report.created_at,
-    landscape: rd.landscape?.name || null,
-    period: rd.period || null,
-    benchmark_score: ai.benchmark_scorecard?.client_score ?? null,
-    benchmark_dimensions: (ai.benchmark_scorecard?.dimensions || []).map((d: any) => ({ dimension: d.dimension, client: d.client, competitor_avg: d.competitor_avg })),
-    share_of_voice_pct: me && total ? Math.round((me.post_count / total) * 100) : null,
-    client: me ? { cadence_per_week: me.cadence_per_week, engagement_rate_avg: me.engagement_rate_avg, channel_mix: me.channel_mix } : null,
-    competitors: rivals.map((c) => ({ name: c.name, cadence_per_week: c.cadence_per_week, engagement_rate_avg: c.engagement_rate_avg, channel_mix: c.channel_mix, top_hashtags: (c.top_hashtags || []).slice(0, 5).map((h: any) => h.key) })),
-    executive_summary: ai.executive_summary || null,
-    gaps: gaps.filter((g) => !down.has(key(g.gap || ""))).map((g) => ({ gap: g.gap, platform: g.platform || "all", suggested_play: g.suggested_play })),
-    endorsed_gaps: gaps.filter((g) => up.has(key(g.gap || ""))).map((g) => ({ gap: g.gap, platform: g.platform || "all", suggested_play: g.suggested_play })),
-    suppressed_gaps: feedback.filter((f) => f.verdict === "down").map((f) => f.gap_text),
-    winner_patterns: (ai.winner_teardown || []).map((w: any) => ({ competitor: w.competitor, pattern: w.pattern })),
-    posting_time: ai.posting_time_insights || null,
-  };
-}
-
 // Milestone 4: keep each client's competitor feed under a week old. One
 // RivalIQ call per client, at most ten clients per daily run, so the weekly
 // refresh never competes with the monthly pulls for the hourly budget.
@@ -159,21 +130,14 @@ Deno.serve(async (req) => {
           if (!competitiveUrl) throw new Error("competitive webhook URL not configured");
           const { data: set } = await supabase.from("competitor_sets").select("*").eq("client_id", client.id).in("status", ["confirmed", "complete"]).order("confirmed_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
           if (!set) { await advance("skipped: no confirmed competitor set"); results.push({ client: client.name, kind: "competitive", status: "skipped", reason: "no confirmed competitor set" }); continue; }
-          const { data: comps } = await supabase.from("competitors").select("*, competitor_handles(*)").eq("set_id", set.id).eq("is_selected", true).order("selected_rank");
-          const { data: fb } = await supabase.from("competitive_insight_feedback").select("gap_text, verdict").eq("client_id", client.id).eq("verdict", "down");
           if (dryRun) { results.push({ client: client.name, kind: "competitive", status: "would run", range }); continue; }
           const { data: report, error: repErr } = await supabase.from("competitive_reports").insert({ client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: schedule.created_by }).select("id").single();
           if (repErr) throw repErr;
           await supabase.from("competitor_sets").update({ status: "analyzing" }).eq("id", set.id).in("status", ["confirmed", "complete", "failed"]);
-          const payload = {
-            report_id: report.id, client_id: client.id, client_name: client.name, company_slug: client.company_slug, website_url: client.website_url,
-            set_id: set.id, rivaliq_landscape_id: set.rivaliq_landscape_id || undefined,
-            date_range_start: range.start, date_range_end: range.end,
-            suppressed_insights: (fb || []).map((f) => f.gap_text),
-            competitors: (comps || []).map((c: any) => ({ id: c.id, rank: c.selected_rank, name: c.name, website_url: c.website_url, rivaliq_company_id: c.rivaliq_company_id, handles: (c.competitor_handles || []).filter((h: any) => h.is_active).map((h: any) => ({ platform: h.platform, handle: h.handle, url: h.profile_url })) })),
-            scheduled: true,
-            stagger_seconds: competitiveIndex++ * 150,
-          };
+          const payload = await buildCompetitivePayload({
+            supabase, client, reportId: report.id, set, range,
+            scheduled: true, staggerSeconds: competitiveIndex++ * 150,
+          });
           const r = await fetch(competitiveUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
           if (!r.ok) throw new Error(`competitive webhook ${r.status}`);
           await advance(`triggered competitive report ${report.id}`);
@@ -183,35 +147,19 @@ Deno.serve(async (req) => {
 
         // social (default)
         if (!socialUrl) throw new Error("n8n webhook URL not configured");
-        const { data: profiles } = await supabase.from("sprout_profiles").select("*").eq("client_id", client.id).eq("is_active", true);
-        const { data: compReport } = await supabase.from("competitive_reports").select("id, created_at, report_data").eq("client_id", client.id).eq("status", "complete").order("created_at", { ascending: false }).limit(1).maybeSingle();
-        const { data: feedback } = await supabase.from("competitive_insight_feedback").select("insight_key, verdict, gap_text").eq("client_id", client.id);
-        if (dryRun) { results.push({ client: client.name, kind: "social", status: "would run", range, competitive_context: !!compReport }); continue; }
+        if (dryRun) { results.push({ client: client.name, kind: "social", status: "would run", range }); continue; }
 
         const { data: report, error: reportErr } = await supabase.from("reports").insert({ client_id: client.id, status: "running", report_data: {}, created_by: schedule.created_by, date_range_start: range.start, date_range_end: range.end }).select("id").single();
         if (reportErr) throw reportErr;
 
-        let brandNotes = client.brand_notes || ""; let brandVoice = "";
-        const voiceMatch = brandNotes.match(/^\[VOICE:(.+?)]\n?/);
-        if (voiceMatch) { brandVoice = voiceMatch[1]; brandNotes = brandNotes.slice(voiceMatch[0].length); }
-        const split = (v: string | null, d: string[]) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : d);
-        const payload = {
-          report_id: report.id, client_name: client.name, sprout_customer_id: client.sprout_customer_id || "1676448",
-          profile_ids: (profiles || []).map((p: any) => p.sprout_profile_id),
-          profiles: (profiles || []).map((p: any) => ({ id: p.sprout_profile_id, name: p.profile_name, native_name: p.native_name, network: p.network_type, url: p.native_link })),
-          social_keywords: client.social_keywords || [], trends_keywords: client.trends_keywords || "", content_pillars: client.content_pillars || [],
-          primary_platforms: (client.primary_platforms || []).join(","), geo: split(client.geo, ["US"]), languages: split(client.language, ["en"]),
-          brand_voice: brandVoice, brand_notes: brandNotes, brand_book_text: client.brand_book_text || "", brief_text: client.brief_text || "", brief_file_id: client.brief_file_id || "",
-          design_style_synthesis: client.design_style_synthesis || null, design_references: client.design_references || [], brand_book_file_path: client.brand_book_file_path || null,
-          date_range_start: range.start, date_range_end: range.end, skip_trends: false, timezone: client.timezone || "UTC",
-          competitive_context: competitiveDigest(compReport, feedback || []),
-          scheduled: true,
-          stagger_seconds: socialIndex++ * 180,
-        };
+        const payload = await buildSocialPayload({
+          supabase, client, reportId: report.id, range,
+          scheduled: true, staggerSeconds: socialIndex++ * 180,
+        });
         const r = await fetch(socialUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
         if (!r.ok) throw new Error(`social webhook ${r.status}`);
         await advance(`triggered social report ${report.id}`);
-        results.push({ client: client.name, kind: "social", status: "triggered", report_id: report.id, range, competitive_context: !!compReport });
+        results.push({ client: client.name, kind: "social", status: "triggered", report_id: report.id, range, competitive_context: !!payload.competitive_context });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         await advance(`error: ${msg}`);

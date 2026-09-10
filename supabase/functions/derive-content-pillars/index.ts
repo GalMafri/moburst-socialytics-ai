@@ -182,16 +182,11 @@ Deno.serve(async (req) => {
     // The primary source is the strongest evidence present, and it is what
     // the card reports back to the person reviewing the pillars.
     const primary = sources.includes("strategy_doc") ? "strategy_doc" : sources.includes("social_posts") ? "social_posts" : "brief";
-    const { error: saveErr } = await supabase
-      .from("clients")
-      .update({
-        content_pillars: pillars.map((p: any) => ({ name: p.name, description: p.description })),
-        pillars_derived_at: new Date().toISOString(),
-        pillars_source: primary,
-      })
-      .eq("id", client_id);
-    if (saveErr) throw new Error(saveErr.message);
 
+    // Nothing is written here. These are a proposal: the page puts them in
+    // the editable pillar list and the person saves them, or does not. A
+    // client whose pillars were written by hand must not lose them to
+    // somebody pressing this to see what it says.
     return json({
       pillars,
       keywords,
