@@ -13,6 +13,9 @@
 
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { HIGGSFIELD_BASE_URL, authHeader, resolveCredentials } from "../_shared/higgsfield/client.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { McpClient } from "../_shared/higgsfield/mcp.ts";
+import { MCP_URL, accessTokenFor } from "../_shared/higgsfield/oauth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,6 +44,35 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     await requireStaff(req);
+
+    // MCP mode: prove the linked team account works, and what it can reach.
+    // Separate from the REST probe below, which uses the API key.
+    let mcpAction: string | null = null;
+    let mcpArgs: Record<string, unknown> = {};
+    let mcpTool: string | null = null;
+    try {
+      const b = await req.clone().json();
+      if (typeof b?.mcp === "string") mcpAction = b.mcp;
+      if (typeof b?.tool === "string") mcpTool = b.tool;
+      if (b?.args && typeof b.args === "object") mcpArgs = b.args;
+    } catch {
+      // no mcp block
+    }
+    if (mcpAction) {
+      const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const token = await accessTokenFor(admin);
+      const mcp = new McpClient({ url: MCP_URL, accessToken: token, timeoutMs: 90_000 });
+      if (mcpAction === "tools") {
+        const tools = await mcp.listTools();
+        return json({ mcp: "tools", count: tools.length, tools: tools.map((t) => t.name) });
+      }
+      if (mcpAction === "call" && mcpTool) {
+        const out = await mcp.callTool(mcpTool, mcpArgs);
+        return json({ mcp: "call", tool: mcpTool, isError: out.isError, data: out.data, text: out.text.slice(0, 2000) });
+      }
+      return json({ error: "mcp must be 'tools', or 'call' with a tool name" }, 400);
+    }
+
     const creds = resolveCredentials();
     const auth = authHeader(creds);
     const extra: string[] = [];

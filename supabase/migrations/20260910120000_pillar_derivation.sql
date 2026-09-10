@@ -27,3 +27,27 @@ comment on column public.clients.harvested_design_references is 'Auto-pulled fro
 -- lasted until the next refresh.
 alter table public.competitor_handles add column if not exists source text not null default 'auto';
 comment on column public.competitor_handles.source is 'auto = found by detect-competitor-handles; manual = entered by a person. A refresh never overwrites a manual row.';
+
+-- OAuth credentials for third-party integrations, starting with Higgsfield.
+--
+-- RLS is enabled with NO policies on purpose: only the service role reaches
+-- this table. app_settings is the counter-example — it is SELECT-able by
+-- every staff session and Settings.tsx pulls the whole table into the
+-- browser, so a refresh token there would be readable by anyone on the team.
+create table if not exists public.integration_tokens (
+  provider text primary key,
+  account_email text,
+  client_id text,
+  refresh_token text,
+  access_token text,
+  expires_at timestamptz,
+  -- The in-flight authorisation: PKCE verifier held between the redirect out
+  -- and the callback back.
+  pending_state text,
+  pending_verifier text,
+  pending_started_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+alter table public.integration_tokens enable row level security;
+revoke all on public.integration_tokens from anon, authenticated;
+comment on table public.integration_tokens is 'OAuth credentials for third-party integrations. RLS is on with NO policies on purpose: only the service role reaches this. Never readable from the browser, unlike app_settings.';

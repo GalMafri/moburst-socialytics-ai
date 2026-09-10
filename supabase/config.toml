@@ -137,3 +137,10 @@ verify_jwt = false
 # spec, so the app is configured from what this returns rather than guesses.
 [functions.higgsfield-probe]
 verify_jwt = false
+
+# Links the team's Higgsfield account once, then keeps the server signed in
+# with the refresh token. verify_jwt must stay false: the OAuth callback is a
+# plain browser redirect with no Authorization header, and the state we
+# issued is what authenticates it.
+[functions.higgsfield-auth]
+verify_jwt = false
