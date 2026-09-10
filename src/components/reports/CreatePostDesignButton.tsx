@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil, Ban } from "lucide-react";
 import { GenerationStages } from "@/components/reports/GenerationStages";
 import { useMediaBackend } from "@/hooks/useMediaBackend";
+import { tileAspectFor } from "@/lib/tileAspect";
 import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -191,7 +192,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
   // Tiles keep the design's own proportions so a headline at the top of a
   // 9:16 reel is not cropped away by a square thumbnail.
-  const tileAspect = /reel|stor|short|tiktok/i.test(`${post.format || ""} ${post.platform || ""}`) ? "aspect-[9/16]" : "aspect-square";
+  const tileAspect = tileAspectFor(post);
 
   const runStages = isCarousel
     ? ["Reading the brief and the brand", "Splitting the story into slides", "Painting the slides", "Brand review", "Saving"]

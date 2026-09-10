@@ -22,6 +22,7 @@ import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
 import { isVideoFormat } from "@/lib/platform";
 import { useState } from "react";
+import { tileAspectFor } from "@/lib/tileAspect";
 
 interface Iteration {
   id?: string;
@@ -225,6 +226,7 @@ export function PostPanel({
                       tile={tile}
                       index={i}
                       isVideo={false}
+                      tileAspect={tileAspectFor(post)}
                       filenameStub={`design-${post.platform || "post"}`}
                       onPreview={() => openPreview(tile.url, false)}
                       onToggleSelected={onToggleSelected}
@@ -275,6 +277,7 @@ export function PostPanel({
                       tile={tile}
                       index={i}
                       isVideo={true}
+                      tileAspect={tileAspectFor(post)}
                       filenameStub={`video-${post.platform || "post"}`}
                       onPreview={() => openPreview(tile.url, true)}
                       onToggleSelected={onToggleSelected}
@@ -355,6 +358,8 @@ interface TileCardProps {
   tile: MediaTile;
   index: number;
   isVideo: boolean;
+  /** The box this variant is shown in, matched to the ratio it was made at. */
+  tileAspect?: string;
   filenameStub: string;
   onPreview: () => void;
   onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
@@ -374,6 +379,7 @@ function MediaTileCard({
   tile,
   index,
   isVideo,
+  tileAspect,
   filenameStub,
   onPreview,
   onToggleSelected,
@@ -405,12 +411,12 @@ function MediaTileCard({
       <button
         type="button"
         onClick={onPreview}
-        className={`block w-full bg-black relative group ${isVideo ? "aspect-[9/16]" : "aspect-square"}`}
+        className={`block w-full bg-black relative group ${tileAspect || (isVideo ? "aspect-[9/16]" : "aspect-square")}`}
       >
         {isVideo ? (
-          <video src={tile.url} className="w-full h-full object-cover" muted loop preload="metadata" />
+          <video src={tile.url} className="w-full h-full object-contain" muted loop preload="metadata" />
         ) : (
-          <img src={tile.url} alt={`Variant ${index + 1}`} className="w-full h-full object-cover" />
+          <img src={tile.url} alt={`Variant ${index + 1}`} className="w-full h-full object-contain" />
         )}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
           <Expand className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />

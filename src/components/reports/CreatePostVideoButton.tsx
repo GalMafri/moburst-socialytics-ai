@@ -15,6 +15,7 @@ import { verdictIsDirty, correctionFor, verdictSummary } from "@/lib/designGuard
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 import { brandAdviceFrom, brandWarning } from "@/lib/designGuard";
 import { useMediaBackend } from "@/hooks/useMediaBackend";
+import { tileAspectFor } from "@/lib/tileAspect";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -166,6 +167,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   // Only so the dialog can tell the truth about the wait and the model.
   const mediaBackend = useMediaBackend(clientId || clientContext?.client_id);
   const slowBackend = mediaBackend === "higgsfield";
+  const clipTileAspect = tileAspectFor(post);
   const [motionStage, setMotionStage] = useState(0);
   useEffect(() => {
     if (!loading) return;
@@ -731,7 +733,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                       type="button"
                       onClick={() => toggleFavorite(i)}
                       disabled={url === "FAILED" || url === null}
-                      className={`relative aspect-[9/16] rounded-md border overflow-hidden transition-all bg-black ${
+                      className={`relative ${clipTileAspect} rounded-md border overflow-hidden transition-all bg-black ${
                         favoriteIdxs.has(i) ? "ring-2 ring-primary border-primary" : ""
                       }`}
                     >
@@ -747,7 +749,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                         </div>
                       )}
                       {typeof url === "string" && url !== "FAILED" && (
-                        <video src={url} className="w-full h-full object-cover" muted loop preload="metadata" />
+                        <video src={url} className="w-full h-full object-contain" muted loop preload="metadata" />
                       )}
                       {favoriteIdxs.has(i) && (
                         <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-1">
