@@ -220,9 +220,16 @@ async function resolve(supabase: Db, hint: Hint): Promise<Preview> {
         return { ...base, media_type: kind, image_url: poster, title, status: "ok" };
       }
     }
-    if (!image) {
-      const hit = await rivaliqLookup(supabase, url).catch(() => null);
-      if (hit) { image = hit.image; media_type = hit.media_type; title = hit.title; }
+    // RivalIQ's cached post is consulted even when the caller supplied a
+    // creative, because the competitive report's own aggregation keeps the
+    // SMALL copy (`image`) and the snapshot holds the large one. Preferring
+    // the caller's hint meant every competitor thumbnail in the report was
+    // served at RivalIQ's thumbnail resolution, permanently.
+    const hit = await rivaliqLookup(supabase, url).catch(() => null);
+    if (hit && (!image || hit.image !== image)) {
+      image = hit.image;
+      if (media_type === "unknown") media_type = hit.media_type;
+      title = title || hit.title;
     }
     if (image) {
       // Reels arrive as the video file itself; the client renders a frame from it.
