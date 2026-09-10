@@ -397,7 +397,7 @@ Deno.serve(async (req) => {
           prompt: promptText,
           aspectRatio,
           referenceUrls: [],
-          budgetMs: 60_000,
+          budgetMs: 40_000,
         });
         return { b64: again.imageB64, mime: again.imageMime };
       }
@@ -425,6 +425,10 @@ Deno.serve(async (req) => {
         prompt: designPrompt,
         aspectRatio,
         referenceUrls,
+        // Bounded so a carousel slide, which can render twice with a vision
+        // check in between, still finishes inside the 150 seconds the
+        // platform allows. A measured render is about 48s.
+        budgetMs: 80_000,
       });
       imageB64 = rendered.imageB64;
       imageMime = rendered.imageMime;

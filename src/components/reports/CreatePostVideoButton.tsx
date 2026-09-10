@@ -14,6 +14,7 @@ import { clipSize, renderMotionClip } from "@/lib/motion";
 import { verdictIsDirty, correctionFor, verdictSummary } from "@/lib/designGuard";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 import { brandAdviceFrom, brandWarning } from "@/lib/designGuard";
+import { useMediaBackend } from "@/hooks/useMediaBackend";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -162,6 +163,9 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   // How the clip is made. "motion" cuts the brand's own designed frames
   // together; "ai" hands the brief to Veo.
   const [engine, setEngine] = useState<"motion" | "ai">("motion");
+  // Only so the dialog can tell the truth about the wait and the model.
+  const mediaBackend = useMediaBackend(clientId || clientContext?.client_id);
+  const slowBackend = mediaBackend === "higgsfield";
   const [motionStage, setMotionStage] = useState(0);
   useEffect(() => {
     if (!loading) return;
@@ -679,11 +683,28 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                   stages={
                     motion
                       ? ["Writing the brief", "Designing the frames", "Cutting the clip", "Saving"]
-                      : ["Writing the motion brief", "Painting the opening frame with the headline", "Brand review", `Animating ${variantCount} clips with Veo`, "Saving"]
+                      : [
+                          "Writing the motion brief",
+                          "Painting the opening frame with the headline",
+                          "Brand review",
+                          `Animating ${variantCount} ${variantCount === 1 ? "clip" : "clips"}`,
+                          "Saving",
+                        ]
                   }
                   current={motion ? (briefing ? 0 : motionStage) : aiStage}
                   startedAt={startedAt || Date.now()}
-                  estimate={motion ? "about a minute" : "3 to 5 minutes"}
+                  // Higgsfield renders a frame in about 50 seconds and a clip
+                  // in six to fourteen minutes, so the old figures, and the
+                  // stage that named Veo, would both now be lies.
+                  estimate={
+                    motion
+                      ? slowBackend
+                        ? "about two minutes"
+                        : "about a minute"
+                      : slowBackend
+                        ? "6 to 15 minutes"
+                        : "3 to 5 minutes"
+                  }
                   note="You can close this window. The run continues and the card in the corner says when the clips are ready."
                   done={variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
                   total={variantUrls.length}
@@ -793,13 +814,17 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                           From the brand's designs
                         </Button>
                         <Button size="sm" variant={engine === "ai" ? "default" : "outline"} aria-pressed={engine === "ai"} onClick={() => setEngine("ai")}>
-                          AI footage (Veo)
+                          AI footage
                         </Button>
                       </div>
                       <p className="t-secondary">
                         {engine === "motion"
-                          ? "Two designed frames of this post, held with a slow move and dissolved. On brand, about a minute."
-                          : "Veo invents the footage from the brief. Good for a real filmed scene; it can drift off the brand and takes 3 to 5 minutes."}
+                          ? slowBackend
+                            ? "Two designed frames of this post, held with a slow move and dissolved. On brand, about two minutes."
+                            : "Two designed frames of this post, held with a slow move and dissolved. On brand, about a minute."
+                          : slowBackend
+                            ? "The model animates a designed opening frame, so the headline stays legible. Six to fifteen minutes, and it spends about 33 Higgsfield credits per clip."
+                            : "Veo invents the footage from the brief. Good for a real filmed scene; it can drift off the brand and takes 3 to 5 minutes."}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">

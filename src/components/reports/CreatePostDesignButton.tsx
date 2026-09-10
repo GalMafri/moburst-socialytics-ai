@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil, Ban } from "lucide-react";
 import { GenerationStages } from "@/components/reports/GenerationStages";
+import { useMediaBackend } from "@/hooks/useMediaBackend";
 import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -127,6 +128,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const generation = useGenerationContext();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Only so the dialog can tell the truth about how long this will take.
+  const slowBackend = useMediaBackend(clientId || clientContext?.client_id) === "higgsfield";
   // Variant slot tracking — null=loading, string=URL, "FAILED"=error.
   // For carousels these are slide slots; for non-carousels they are variant slots.
   const [variantUrls, setVariantUrls] = useState<VariantSlot[]>([]);
@@ -879,10 +882,15 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 stages={runStages}
                 current={stage}
                 startedAt={startedAt || Date.now()}
+                // A Higgsfield slide takes about 50 seconds, and a carousel
+                // slide can render twice when the layout check rejects the
+                // first, so the per-slide figures differ by backend.
                 estimate={
                   isCarousel
-                    ? `${Math.max(1, Math.ceil((slideCount * variantCount * 20) / 60))} to ${Math.max(2, Math.ceil((slideCount * variantCount * 30) / 60))} minutes`
-                    : "2 to 3 minutes"
+                    ? `${Math.max(1, Math.ceil((slideCount * variantCount * (slowBackend ? 35 : 20)) / 60))} to ${Math.max(2, Math.ceil((slideCount * variantCount * (slowBackend ? 55 : 30)) / 60))} minutes`
+                    : slowBackend
+                      ? "1 to 2 minutes"
+                      : "2 to 3 minutes"
                 }
                 note="You can close this window. The run continues and the card in the corner says when it is done."
                 done={variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
