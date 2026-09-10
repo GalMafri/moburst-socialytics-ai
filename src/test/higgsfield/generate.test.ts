@@ -19,9 +19,17 @@ function stub(replies: Record<string, unknown | ((args: any) => unknown)>) {
     async callTool(name: string, args: Record<string, unknown>) {
       calls.push({ name, args });
       const reply = replies[name];
-      const data = typeof reply === "function" ? (reply as (a: any) => unknown)(args) : reply;
-      if (data === undefined) throw new Error(`test stub has no reply for ${name}`);
-      return { data, text: "", isError: false };
+      const raw = typeof reply === "function" ? (reply as (a: any) => unknown)(args) : reply;
+      if (raw === undefined) throw new Error(`test stub has no reply for ${name}`);
+      // A reply may declare isError, because the live server sets it on
+      // answers that still carry a usable body. A stub that always said
+      // "success" is what let a real failure through review.
+      const wrapped = raw as any;
+      if (wrapped && typeof wrapped === "object" && "__isError" in wrapped) {
+        const { __isError, __text, ...data } = wrapped;
+        return { data, text: __text || "", isError: !!__isError };
+      }
+      return { data: raw, text: "", isError: false };
     },
   };
   return { caller, calls };
@@ -105,8 +113,12 @@ describe("submitVideo", () => {
     const { caller, calls } = stub({
       generate_video_batch: () => {
         call += 1;
+        // The live server flags this answer as an error AND puts the preset
+        // id in the body. Reading only the flag means never declining it.
         return call === 1
           ? {
+              __isError: true,
+              __text: 'Submitted 0/1 video generations.\n- index 0: submission_failed — Preset "IN THE DARK" was recommended.',
               jobs: [
                 {
                   index: 0,
@@ -129,7 +141,11 @@ describe("submitVideo", () => {
 
   it("explains a submission the server refused outright", async () => {
     const { caller } = stub({
-      generate_video_batch: { jobs: [{ index: 0, status: "submission_failed", error: "content policy" }] },
+      generate_video_batch: {
+        __isError: true,
+        __text: "content policy",
+        jobs: [{ index: 0, status: "submission_failed", error: "content policy" }],
+      },
     });
     await expect(submitVideo(caller, { prompt: "p", aspect: "9:16" })).rejects.toThrow(/content policy/);
   });

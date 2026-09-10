@@ -92,10 +92,24 @@ function nearestAspect(want: string, supported: string[]): string {
 export const imageAspect = (want: string): string => nearestAspect(want, IMAGE_ASPECTS);
 export const videoAspect = (want: string): string => nearestAspect(want, VIDEO_ASPECTS);
 
-/** Structured content if the tool gave any, else whatever parsed out of the text. */
-function payload(result: { data: unknown; text: string; isError: boolean }, tool: string): any {
-  if (result.isError) throw new HiggsfieldError(`Higgsfield ${tool} failed: ${result.text.slice(0, 300)}`);
+/**
+ * Structured content if the tool gave any, else whatever parsed out of the text.
+ *
+ * `allowError` is for the one case where a tool result flagged as an error
+ * still carries the thing the caller needs: a video submission that the
+ * server declined in favour of a style preset comes back isError with the
+ * preset id in the body, and throwing on the flag alone means never reading
+ * it. Verified live, and the reason this had to be a two-step read.
+ */
+function payload(
+  result: { data: unknown; text: string; isError: boolean },
+  tool: string,
+  opts: { allowError?: boolean } = {},
+): any {
   const data = result.data as any;
+  if (result.isError && !opts.allowError) {
+    throw new HiggsfieldError(`Higgsfield ${tool} failed: ${result.text.slice(0, 300)}`);
+  }
   // A generation call that comes back asking which balance to spend has not
   // generated anything. Better a clear failure than a silent no-op.
   if (data && typeof data === "object" && "unlim_choice" in data) {
@@ -277,24 +291,24 @@ export async function submitVideo(mcp: ToolCaller, req: VideoRequest): Promise<J
     params.mode = "omni_reference";
     params.medias = medias;
   }
-  let data = payload(
-    await mcp.callTool("generate_video_batch", { requests: [{ index: 0, params }] }),
-    "generate_video_batch",
-  );
+  // Read the first answer even if it is flagged as an error: a preset
+  // recommendation arrives that way, and the id needed to decline it is in
+  // the body.
+  const first = await mcp.callTool("generate_video_batch", { requests: [{ index: 0, params }] });
+  const firstData = payload(first, "generate_video_batch", { allowError: true });
 
-  // The server may answer with a style preset it would rather run. Declining
-  // it and resubmitting is the documented way through; without this the clip
-  // never starts and the reason reads like a failure.
-  const preset = recommendedPresetId(data);
+  const preset = recommendedPresetId(firstData);
   if (preset) {
-    data = payload(
-      await mcp.callTool("generate_video_batch", {
-        requests: [{ index: 0, params: { ...params, declined_preset_id: preset } }],
-      }),
-      "generate_video_batch",
-    );
+    const second = await mcp.callTool("generate_video_batch", {
+      requests: [{ index: 0, params: { ...params, declined_preset_id: preset } }],
+    });
+    return readJobs(payload(second, "generate_video_batch"), "generate_video_batch");
   }
-  return readJobs(data, "generate_video_batch");
+
+  if (first.isError) {
+    throw new HiggsfieldError(`Higgsfield generate_video_batch failed: ${first.text.slice(0, 300)}`);
+  }
+  return readJobs(firstData, "generate_video_batch");
 }
 
 export interface WaitResult {

@@ -36,6 +36,12 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
+    // Staff, before any lookup. The report is resolved with the service-role
+    // key, so without this an anonymous caller could tell a real report id
+    // from an invented one by whether it got a 404. The client-scoped check
+    // follows below, once the row says which client this is.
+    await requireStaff(req);
+
     // A retry names only the report; everything else comes from the row.
     let existing: any = null;
     let existingSetId: string | null = null;

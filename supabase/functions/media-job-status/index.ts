@@ -29,6 +29,11 @@ Deno.serve(async (req) => {
 
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   try {
+    // Authenticate before anything is revealed, including whether a given
+    // job id exists. The client-scoped check follows, once the row says
+    // which client the job belongs to.
+    await requireStaff(req);
+
     const body = await req.json().catch(() => ({}));
     const jobId = typeof body?.job_id === "string" ? body.job_id : "";
     if (!jobId) return json({ error: "job_id is required" }, 400);
