@@ -45,10 +45,35 @@ Deno.serve(async (req) => {
     const auth = authHeader(creds);
     const extra: string[] = [];
     try {
-      const body = await req.json();
+      const body = await req.clone().json();
       if (Array.isArray(body?.paths)) extra.push(...body.paths.filter((p: unknown) => typeof p === "string"));
     } catch {
       // no body is fine
+    }
+
+    // Deliberate submission mode: { submit: { path, body } } posts a real
+    // request and SPENDS CREDITS. It exists because entitlement cannot be
+    // read anywhere — the dashboard lists three Soul models, the docs say
+    // "use the generation endpoint available to your account", and an empty
+    // POST returns 422 from schema validation before entitlement is even
+    // checked. Only a valid body distinguishes "we have this model" from
+    // "we do not".
+    let submit: { path?: string; body?: unknown } | null = null;
+    try {
+      const again = await req.clone().json();
+      if (again?.submit?.path) submit = again.submit;
+    } catch {
+      // no submit block
+    }
+    if (submit?.path) {
+      const resp = await fetch(`${HIGGSFIELD_BASE_URL}${submit.path}`, {
+        method: "POST",
+        headers: { Authorization: auth, "Content-Type": "application/json" },
+        body: JSON.stringify(submit.body ?? {}),
+        signal: AbortSignal.timeout(30000),
+      });
+      const text = (await resp.text().catch(() => "")).slice(0, 2000);
+      return json({ submitted: submit.path, status: resp.status, body: text });
     }
 
     const results: Array<{ path: string; method: string; status: number; body: string }> = [];
