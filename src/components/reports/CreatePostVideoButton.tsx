@@ -10,6 +10,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { ClientContext } from "@/lib/clientContext";
 import { GenerationStages } from "@/components/reports/GenerationStages";
+import { clipSize, renderMotionClip } from "@/lib/motion";
+import { verdictIsDirty, correctionFor, verdictSummary } from "@/lib/designGuard";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 import { brandAdviceFrom, brandWarning } from "@/lib/designGuard";
 
@@ -114,6 +116,10 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   const [startedAt, setStartedAt] = useState(0);
   const [tick, setTick] = useState(0);
   const [briefing, setBriefing] = useState(false);
+  // How the clip is made. "motion" cuts the brand's own designed frames
+  // together; "ai" hands the brief to Veo.
+  const [engine, setEngine] = useState<"motion" | "ai">("motion");
+  const [motionStage, setMotionStage] = useState(0);
   useEffect(() => {
     if (!loading) return;
     const t = setInterval(() => setTick((x) => x + 1), 1000);
@@ -290,11 +296,140 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     setPrompt(brief);
     const picked = angles.length > 0 ? angles : await fetchAngles(brief);
     setBriefing(false);
-    await generateVideo(brief, picked);
+    if (engine === "motion") await generateMotion(picked);
+    else await generateVideo(brief, picked);
+  };
+
+  /**
+   * A clip cut from the brand's own designs.
+   *
+   * Each clip is two designed frames of the same message, generated through
+   * the same pipeline as a static post — so the layout, palette and type are
+   * the brand's, and the words are spelled right — held with a slow move and
+   * dissolved into each other. It takes about a minute instead of five, and
+   * it cannot drift off-brand, because nothing invents motion content: the
+   * frames ARE the design.
+   */
+  const generateMotion = async (anglesList: Array<{ label: string; instruction: string }> = angles) => {
+    const count = Math.min(Math.max(variantCount, 1), 3);
+    const groupId = crypto.randomUUID();
+    setVariantGroupId(groupId);
+    setLoading(true);
+    setMotionStage(1);
+    if (!startedAt || !loading) setStartedAt(Date.now());
+    setVariantUrls(new Array(count).fill(null));
+    setVariantSeeds(new Array(count).fill(null));
+    setFavoriteIdxs(new Set());
+    cancelRef.current = false;
+
+    const postKey = generation.startGeneration({
+      post,
+      type: "video",
+      total: count,
+      variantGroupId: groupId,
+      onCancel: () => {
+        cancelRef.current = true;
+      },
+    });
+
+    const brief = post.ai_visual_prompt || post.visual_direction || post.copy || post.concept || "";
+    const size = clipSize(spec.aspect.split(" ")[0]);
+
+    /** One designed frame, reviewed and regenerated once if it comes back wrong. */
+    const frame = async (angle: string): Promise<string | null> => {
+      const body = {
+        prompt: brief,
+        platform: post.platform,
+        format: post.format,
+        brand_context: effectiveBrandIdentity || undefined,
+        client_context: clientContext || undefined,
+        client_id: clientId || clientContext?.client_id || undefined,
+        client_name: clientContext?.client_name || undefined,
+        render_text: true,
+        post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
+        variant_angle: angle || undefined,
+      };
+      const { data } = await supabase.functions.invoke("generate-post-image", { body });
+      let url: string | null = data?.image_url || null;
+      if (!url) return null;
+      try {
+        const { data: verdict } = await supabase.functions.invoke("validate-design-output", {
+          body: { image_data: url, client_id: clientId || clientContext?.client_id || undefined },
+        });
+        if (verdictIsDirty(verdict)) {
+          const { data: retry } = await supabase.functions.invoke("generate-post-image", {
+            body: { ...body, prompt: brief + correctionFor(verdict) },
+          });
+          if (retry?.image_url) url = retry.image_url;
+        }
+      } catch {
+        // Review unavailable — the frame still stands.
+      }
+      return url;
+    };
+
+    const load = (src: string) =>
+      new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("frame failed to load"));
+        img.src = src;
+      });
+
+    for (let i = 0; i < count && !cancelRef.current; i++) {
+      try {
+        // Two beats: the clip's own angle, and the next one along.
+        const a = anglesList[i % Math.max(1, anglesList.length)]?.instruction || "";
+        const b = anglesList[(i + 1) % Math.max(1, anglesList.length)]?.instruction || "";
+        setMotionStage(1);
+        const [f1, f2] = await Promise.all([frame(a), frame(b)]);
+        const sources = [f1, f2].filter((x): x is string => !!x);
+        if (sources.length === 0) throw new Error("no frames");
+        setMotionStage(2);
+        const images = await Promise.all(sources.map(load));
+        const { blob, mimeType } = await renderMotionClip({
+          images,
+          width: size.width,
+          height: size.height,
+          seconds: images.length > 1 ? 7 : 5,
+        });
+        setMotionStage(3);
+        const ext = mimeType === "video/mp4" ? "mp4" : "webm";
+        const path = `${clientId || "unknown"}/${Date.now()}-motion-${post.platform || "post"}-${i}.${ext}`;
+        const { error: upErr } = await supabase.storage.from("generated-media").upload(path, blob, { contentType: mimeType, upsert: true });
+        if (upErr) throw upErr;
+        const { data: pub } = supabase.storage.from("generated-media").getPublicUrl(path);
+        setVariantUrls((prev) => {
+          const next = [...prev];
+          next[i] = pub.publicUrl;
+          return next;
+        });
+        setVariantSeeds((prev) => {
+          const next = [...prev];
+          next[i] = sources[0];
+          return next;
+        });
+        await persistVariantRow(pub.publicUrl, anglesList[i % Math.max(1, anglesList.length)]?.label || "", groupId, false);
+        generation.progressGeneration(postKey);
+      } catch (e) {
+        console.error("[CreatePostVideoButton] motion clip failed:", e);
+        setVariantUrls((prev) => {
+          const next = [...prev];
+          next[i] = "FAILED";
+          return next;
+        });
+        generation.progressGeneration(postKey, { failed: true });
+      }
+    }
+
+    generation.completeGeneration(postKey);
+    setLoading(false);
   };
 
   /** The same brief through the next angles on the list. */
   const anotherTake = () => {
+    if (engine === "motion") return void generateMotion();
     if (angles.length === 0) return void generateVideo();
     const n = Math.max(1, Math.min(variantCount, angles.length));
     const start = ((selectedAngleIdxs[selectedAngleIdxs.length - 1] ?? -1) + 1) % angles.length;
@@ -460,7 +595,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
               <Video className="h-4 w-4" /> Video, {spec.label}
             </DialogTitle>
             <DialogDescription>
-              Short clips in the client's design system, animated from a finished opening frame. Tap the ones to keep.
+              Short clips cut from the client's own designs. Tap the ones to keep.
             </DialogDescription>
           </DialogHeader>
 
@@ -493,13 +628,18 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
             {(loading || briefing) && (() => {
               const elapsed = startedAt ? (Date.now() - startedAt) / 1000 : 0;
               void tick;
-              const current = briefing ? 0 : elapsed < 30 ? 1 : elapsed < 45 ? 2 : 3;
+              const aiStage = briefing ? 0 : elapsed < 30 ? 1 : elapsed < 45 ? 2 : 3;
+              const motion = engine === "motion";
               return (
                 <GenerationStages
-                  stages={["Writing the motion brief", "Painting the opening frame with the headline", "Brand review", `Animating ${variantCount} clips with Veo`, "Saving"]}
-                  current={current}
+                  stages={
+                    motion
+                      ? ["Writing the brief", "Designing the frames", "Cutting the clip", "Saving"]
+                      : ["Writing the motion brief", "Painting the opening frame with the headline", "Brand review", `Animating ${variantCount} clips with Veo`, "Saving"]
+                  }
+                  current={motion ? (briefing ? 0 : motionStage) : aiStage}
                   startedAt={startedAt || Date.now()}
-                  estimate="3 to 5 minutes"
+                  estimate={motion ? "about a minute" : "3 to 5 minutes"}
                   note="You can close this window. The run continues and the card in the corner says when the clips are ready."
                   done={variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
                   total={variantUrls.length}
@@ -602,6 +742,22 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 <details className="glass-inner p-3">
                   <summary className="t-body text-white cursor-pointer">Change the brief, the angle or the count</summary>
                   <div className="mt-3 space-y-4">
+                    <div className="space-y-2">
+                      <Label>How the clip is made</Label>
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant={engine === "motion" ? "default" : "outline"} aria-pressed={engine === "motion"} onClick={() => setEngine("motion")}>
+                          From the brand's designs
+                        </Button>
+                        <Button size="sm" variant={engine === "ai" ? "default" : "outline"} aria-pressed={engine === "ai"} onClick={() => setEngine("ai")}>
+                          AI footage (Veo)
+                        </Button>
+                      </div>
+                      <p className="t-secondary">
+                        {engine === "motion"
+                          ? "Two designed frames of this post, held with a slow move and dissolved. On brand, about a minute."
+                          : "Veo invents the footage from the brief. Good for a real filmed scene; it can drift off the brand and takes 3 to 5 minutes."}
+                      </p>
+                    </div>
                     <div className="flex items-center gap-2">
                       <Label className="mr-1">Clips</Label>
                       {[1, 2, 3].map((n) => (
@@ -640,7 +796,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                       <Label htmlFor="motion-brief">Motion brief</Label>
                       <Textarea id="motion-brief" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={5} className="t-label font-mono" />
                     </div>
-                    <Button onClick={() => void generateVideo()} size="sm">
+                    <Button onClick={() => void (engine === "motion" ? generateMotion() : generateVideo())} size="sm">
                       <Video className="h-4 w-4 mr-1" /> Generate with these
                     </Button>
                   </div>
@@ -655,7 +811,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 {variantSeeds.some((s) => !!s) && (
                   <div className="space-y-2 pt-2 border-t border-white/[0.06]">
                     <p className="t-secondary tracking-[-0.2px]">
-                      Seed frames (what Veo animated from). Click to view full size.
+                      {engine === "motion" ? "The designed frames each clip is cut from. Click to view full size." : "Seed frames (what Veo animated from). Click to view full size."}
                     </p>
                     <div className="flex gap-2 flex-wrap">
                       {variantSeeds.map((seedUrl, i) =>
