@@ -2,12 +2,11 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { composePost, type ComposeOverlay } from "@/lib/composeText";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Loader2, Paintbrush, Download, Copy, Check, Plus, Minus, Pencil, Ban } from "lucide-react";
-import { Slider } from "@/components/ui/slider";
+import { GenerationStages } from "@/components/reports/GenerationStages";
 import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -123,13 +122,18 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // badly, so the headline and call-to-action are typed on afterwards in the
   // editor, in the brand's own face. Letting the model draw the words is the
   // exception a reviewer opts into.
-  const [modelDrawsText, setModelDrawsText] = useState(false);
+  // The picture is generated without words and the app types them in the
+  // brand's face; the model never draws text.
+  const modelDrawsText = false;
+  // Where the run is, for the stage list, and when it started.
+  const [stage, setStage] = useState(0);
+  const [startedAt, setStartedAt] = useState(0);
   const [showEditor, setShowEditor] = useState(false);
   const [editableImageUrl, setEditableImageUrl] = useState<string | null>(null);
   // Phase 6 — multi-variant state. For carousels, each variant is a whole
   // N-slide deck (so 2 variants × 5 slides = 10 images total). Capped at 3
   // for carousels to keep total generation time sane (5×3=15 sequential calls).
-  const [variantCount, setVariantCount] = useState(isCarousel ? 2 : 4);
+  const [variantCount, setVariantCount] = useState(2);
   const [angles, setAngles] = useState<Array<{ label: string; instruction: string }>>([]);
   const [selectedAngleIdxs, setSelectedAngleIdxs] = useState<number[]>([]);
   const [fetchingAngles, setFetchingAngles] = useState(false);
@@ -155,11 +159,17 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
   if (!defaultPrompt) return null;
 
+  const runStages = isCarousel
+    ? ["Reading the brief and the brand", "Splitting the story into slides", "Painting the slides", "Brand review", "Saving"]
+    : ["Reading the brief and the brand", `Painting ${variantCount} variants`, "Brand review", "Setting the headline in the brand's type", "Saving"];
+
   // Fetches the 6 creative angles from the propose-design-angles edge function.
-  const fetchAngles = async () => {
+  // Angles are a bonus, never a gate: if the suggestion call takes longer
+  // than eight seconds the run goes ahead without them.
+  const fetchAngles = async (): Promise<Array<{ label: string; instruction: string }>> => {
     setFetchingAngles(true);
     try {
-      const { data } = await supabase.functions.invoke("propose-design-angles", {
+      const call = supabase.functions.invoke("propose-design-angles", {
         body: {
           brief: editablePrompt || defaultPrompt,
           platform: post.platform,
@@ -167,11 +177,13 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           design_language: clientContext?.design_style_synthesis || null,
         },
       });
+      const timeout = new Promise<{ data: null }>((r) => setTimeout(() => r({ data: null }), 8000));
+      const { data } = (await Promise.race([call, timeout])) as { data: any };
       if (data?.angles && Array.isArray(data.angles)) {
         const a = data.angles.slice(0, 6);
         setAngles(a);
-        // Pre-select top N matching variantCount.
         setSelectedAngleIdxs(Array.from({ length: Math.min(variantCount, a.length) }, (_, i) => i));
+        return a;
       }
     } catch (e) {
       console.warn("Failed to fetch angles:", e);
@@ -179,6 +191,29 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     } finally {
       setFetchingAngles(false);
     }
+    return [];
+  };
+
+  /**
+   * The whole run from one click: brief and brand, angles (if they arrive in
+   * time), then the pictures. Opening the dialog starts it; nothing to set.
+   */
+  const startRun = async () => {
+    setLoading(true);
+    setStage(0);
+    setStartedAt(Date.now());
+    const picked = angles.length > 0 ? angles : await fetchAngles();
+    await generateImages(undefined, picked);
+  };
+
+  /** The same brief through the next angles on the list. */
+  const anotherTake = () => {
+    if (angles.length === 0) return void generateImages();
+    const n = Math.max(1, Math.min(variantCount, angles.length));
+    const start = ((selectedAngleIdxs[selectedAngleIdxs.length - 1] ?? -1) + 1) % angles.length;
+    const next = Array.from({ length: n }, (_, i) => (start + i) % angles.length);
+    setSelectedAngleIdxs(next);
+    void generateImages(next);
   };
 
   // Upload a base64 image URL to Supabase storage, return a public URL.
@@ -266,14 +301,20 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     sonnerToast.success(`Saved ${favoriteUrls.length} favorite${favoriteUrls.length === 1 ? "" : "s"}`);
   };
 
-  const generateImages = async () => {
+  const generateImages = async (
+    overrideIdxs?: number[],
+    anglesList: Array<{ label: string; instruction: string }> = angles,
+  ) => {
     const groupId = crypto.randomUUID();
     setVariantGroupId(groupId);
     setLoading(true);
+    if (!startedAt || !loading) setStartedAt(Date.now());
+    setStage(1);
     setRevisedPrompt(null);
     setFavoriteIdxs(new Set());
     // Reset cancel flag at the start of every generation.
     cancelRef.current = false;
+    const chosen = overrideIdxs ?? (selectedAngleIdxs.length > 0 ? selectedAngleIdxs : anglesList.map((_, i) => i).slice(0, variantCount));
 
     if (isCarousel) {
       // Carousel path: sequential slide-by-slide generation, single variant set.
@@ -285,10 +326,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
     // Pick angle instructions. If we got angles, use the selected ones; else empty.
     const angleInstructions: Array<{ label: string; instruction: string }> = [];
-    if (angles.length > 0 && selectedAngleIdxs.length > 0) {
+    if (anglesList.length > 0 && chosen.length > 0) {
       for (let i = 0; i < count; i++) {
-        const angleIdx = selectedAngleIdxs[i] ?? selectedAngleIdxs[selectedAngleIdxs.length - 1] ?? 0;
-        angleInstructions.push(angles[angleIdx] || { label: "", instruction: "" });
+        const angleIdx = chosen[i] ?? chosen[chosen.length - 1] ?? 0;
+        angleInstructions.push(anglesList[angleIdx] || { label: "", instruction: "" });
       }
     } else {
       for (let i = 0; i < count; i++) angleInstructions.push({ label: "", instruction: "" });
@@ -334,6 +375,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     );
 
     const results = await Promise.allSettled(promises);
+    setStage(2);
 
     // Process each result in order; persist to storage + DB; update UI per slot.
     // If the user cancelled mid-flight, stop uploading/persisting the remaining
@@ -411,12 +453,14 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         // post rather than a picture. The editor can still move them.
         let placed: { raw: string; overlays: ComposeOverlay[] } | null = null;
         if (!modelDrawsText) {
+          setStage(3);
           const raw = dataUrl;
           const composed = await composePost(raw, overlaysToDraw(post, effectiveBrandIdentity), effectiveBrandIdentity?.font_family);
           dataUrl = composed.url;
           placed = { raw, overlays: composed.overlays };
         }
         // Upload to persistent storage.
+        setStage(4);
         const uploadedUrl = await uploadVariantToStorage(dataUrl, i);
         if (placed) placedRef.current.set(uploadedUrl, placed);
         // Update the slot.
@@ -460,6 +504,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     const variants = Math.min(Math.max(variantCount, 1), 3);
     const totalImages = slides * variants;
     setVariantUrls(new Array(totalImages).fill(null));
+    setStage(1);
 
     // Page-level generation tracker — survives modal close. Total = every
     // image across every variant deck. onCancel lets the floating progress
@@ -716,20 +761,16 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   };
 
   const handleOpen = () => {
+    const fresh = variantUrls.length === 0;
     // Only reset prompt if no images exist yet — preserve generated designs
-    if (variantUrls.length === 0) {
+    if (fresh) {
       setEditablePrompt(defaultPrompt);
       setSlideCount(isCarousel ? 5 : 1);
     }
     setOpen(true);
-
-    // Pre-fetch creative angles in the background so they're ready when the
-    // user clicks Generate. For carousels each angle drives a separate
-    // N-slide variant deck; for non-carousels each angle drives a single
-    // variant image.
-    if (angles.length === 0) {
-      fetchAngles();
-    }
+    // Opening is the decision. The defaults are the brand's; anything else
+    // can be changed after the first result, with the result in view.
+    if (fresh && !loading) void startRun();
   };
 
   const handleStartOver = () => {
@@ -741,7 +782,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     setShowEditor(false);
     setVariantGroupId(null);
     setFavoriteIdxs(new Set());
-    setVariantCount(isCarousel ? 2 : 4);
+    setVariantCount(2);
+    void startRun();
   };
 
   const handleCopyPrompt = () => {
@@ -765,11 +807,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>AI Post Design {isCarousel && "(Carousel)"}</DialogTitle>
+            <DialogTitle>{isCarousel ? "Carousel design" : "Post design"}</DialogTitle>
             <DialogDescription>
               {isCarousel
-                ? "Generate a brand-aligned carousel. Slides share a single design system."
-                : "Generate brand-aligned design variants. Star the ones you want to keep."}
+                ? "Slides in the client's design system, from this post's brief."
+                : "Designs in the client's design system, from this post's brief. Tap the ones to keep."}
             </DialogDescription>
           </DialogHeader>
 
@@ -802,163 +844,26 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               </div>
             )}
 
-            {/* Variant count slider — works for both single-image and carousel.
-                For carousels, each variant is a whole N-slide deck — so the
-                cap is lower (3) to keep total latency reasonable. */}
-            <div className="space-y-2">
-              <Label htmlFor="variant-count">Number of variants</Label>
-              <div className="flex items-center gap-3">
-                <Slider
-                  id="variant-count"
-                  min={isCarousel ? 1 : 2}
-                  max={isCarousel ? 3 : 6}
-                  step={1}
-                  value={[variantCount]}
-                  onValueChange={(v) => setVariantCount(v[0])}
-                  disabled={loading}
-                  className="flex-1"
-                  aria-label="Number of design variants"
-                />
-                <span className="t-body font-medium w-8 text-center">{variantCount}</span>
-              </div>
-              <p className="t-secondary">
-                {isCarousel
-                  ? `Each variant = a complete ${slideCount}-slide carousel using a different creative angle. ${variantCount * slideCount} images total.`
-                  : "More variants = more options to pick from. Generation runs in parallel."}
-              </p>
-            </div>
-
-            {/* Slide count for carousel */}
-            {isCarousel && (
-              <div className="space-y-2">
-                <Label>Number of slides</Label>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline" size="sm"
-                    onClick={() => setSlideCount(Math.max(2, slideCount - 1))}
-                    disabled={loading}
-                  >
-                    <Minus className="h-3 w-3" />
-                  </Button>
-                  <Input
-                    type="number" min={2} max={10}
-                    value={slideCount}
-                    onChange={(e) => setSlideCount(Math.min(10, Math.max(2, parseInt(e.target.value) || 2)))}
-                    className="w-16 text-center"
-                    disabled={loading}
-                  />
-                  <Button
-                    variant="outline" size="sm"
-                    onClick={() => setSlideCount(Math.min(10, slideCount + 1))}
-                    disabled={loading}
-                  >
-                    <Plus className="h-3 w-3" />
-                  </Button>
-                  <span className="t-secondary">slides</span>
-                </div>
-              </div>
-            )}
-
-            {/* Suggested angles — used by both single-image and carousel.
-                For carousels, each selected angle drives a separate N-slide
-                variant deck. */}
-            {angles.length > 0 && (
-              <div className="space-y-2">
-                <Label>
-                  {isCarousel ? "Creative angles for each variant deck" : "Suggested angles"}
-                </Label>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {angles.map((a, i) => (
-                    <label key={i} className="flex items-start gap-2 t-label cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedAngleIdxs.includes(i)}
-                        disabled={loading}
-                        onChange={(e) => {
-                          setSelectedAngleIdxs((prev) =>
-                            e.target.checked
-                              ? [...prev, i].slice(0, variantCount)
-                              : prev.filter((x) => x !== i),
-                          );
-                        }}
-                        className="mt-0.5"
-                      />
-                      <span>
-                        <span className="font-medium">{a.label}.</span> {a.instruction}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {fetchingAngles && (
-              <p className="t-secondary">Fetching angle suggestions…</p>
-            )}
-
-            {/* Who sets the words */}
-            <div className="glass-inner p-3 flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="t-body text-white">Let the model draw the text</p>
-                <p className="t-secondary">Off: the image is picture only and you type the headline and call-to-action in the editor, in the brand's typeface. On: the model renders the words itself — faster, but it misspells and invents lettering.</p>
-              </div>
-              <Switch checked={modelDrawsText} onCheckedChange={setModelDrawsText} aria-label="Let the model draw the text" />
-            </div>
-
-            {/* Editable prompt */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Visual prompt (edit before generating)</Label>
-                <Button variant="ghost" size="sm" onClick={handleCopyPrompt}>
-                  {copied ? <Check className="h-3 w-3 mr-1" /> : <Copy className="h-3 w-3 mr-1" />}
-                  {copied ? "Copied" : "Copy"}
-                </Button>
-              </div>
-              <Textarea
-                value={editablePrompt}
-                onChange={(e) => setEditablePrompt(e.target.value)}
-                rows={5}
-                className="t-body"
-              />
-            </div>
-
-            {/* Generate button */}
-            {variantUrls.length === 0 && !loading && (
-              <Button onClick={generateImages} className="w-full">
-                <Paintbrush className="h-4 w-4 mr-2" />
-                {isCarousel
-                  ? `Generate ${variantCount} variant${variantCount === 1 ? "" : "s"} × ${slideCount} slides`
-                  : `Generate ${variantCount} variants`}
-              </Button>
-            )}
-
-            {/* Loading state — with inline Cancel for accidental clicks. */}
             {loading && (
-              <div className="flex flex-col items-center justify-center py-6 space-y-3">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <p className="t-secondary text-center">
-                  {cancelRef.current
-                    ? "Cancelling — finishing current request…"
-                    : isCarousel
-                    ? `Generating ${variantCount} variant${variantCount === 1 ? "" : "s"} (slide ${currentSlide} of ${slideCount * variantCount})…`
-                    : `Generating ${variantCount} variants in parallel...`}
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    cancelRef.current = true;
-                    // Also mark the page-level tracker as cancelled so the
-                    // floating progress card reflects it immediately.
-                    generation.cancelGeneration(postKeyOf(post));
-                  }}
-                  disabled={cancelRef.current}
-                  className="text-red-300 hover:text-red-200 hover:bg-[rgba(239,68,68,0.10)] border-[rgba(239,68,68,0.30)]"
-                >
-                  <Ban className="h-3.5 w-3.5 mr-1.5" />
-                  {cancelRef.current ? "Cancelling…" : "Cancel"}
-                </Button>
-              </div>
+              <GenerationStages
+                stages={runStages}
+                current={stage}
+                startedAt={startedAt || Date.now()}
+                estimate={
+                  isCarousel
+                    ? `${Math.max(1, Math.ceil((slideCount * variantCount * 20) / 60))} to ${Math.max(2, Math.ceil((slideCount * variantCount * 30) / 60))} minutes`
+                    : "1 to 2 minutes"
+                }
+                note="You can close this window. The run continues and the card in the corner says when it is done."
+                done={variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
+                total={variantUrls.length}
+                failed={variantUrls.filter((u) => u === "FAILED").length}
+                onCancel={() => {
+                  cancelRef.current = true;
+                  generation.cancelGeneration(postKeyOf(post));
+                }}
+                cancelling={cancelRef.current}
+              />
             )}
 
             {/* Variant/slide grid */}
@@ -1041,6 +946,79 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                   <p className="t-secondary italic">Refined prompt: {revisedPrompt}</p>
                 )}
 
+                {/* Everything that used to stand between the person and the
+                    first design. Here, after it, with the result in view. */}
+                <details className="glass-inner p-3">
+                  <summary className="t-body text-white cursor-pointer">Change the brief, the angle or the count</summary>
+                  <div className="mt-3 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Label className="mr-1">{isCarousel ? "Decks" : "Variants"}</Label>
+                      {(isCarousel ? [1, 2, 3] : [2, 3, 4, 6]).map((n) => (
+                        <Button key={n} size="sm" variant={variantCount === n ? "default" : "outline"} onClick={() => setVariantCount(n)} aria-pressed={variantCount === n}>
+                          {n}
+                        </Button>
+                      ))}
+                    </div>
+                    {isCarousel && (
+                      <div className="flex items-center gap-2">
+                        <Label className="mr-1">Slides</Label>
+                        <Button variant="outline" size="sm" onClick={() => setSlideCount(Math.max(2, slideCount - 1))} aria-label="One slide fewer">
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <Input
+                          type="number" min={2} max={10}
+                          value={slideCount}
+                          onChange={(e) => setSlideCount(Math.min(10, Math.max(2, parseInt(e.target.value) || 2)))}
+                          className="w-16 text-center"
+                          aria-label="Number of slides"
+                        />
+                        <Button variant="outline" size="sm" onClick={() => setSlideCount(Math.min(10, slideCount + 1))} aria-label="One slide more">
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
+                    {angles.length > 0 && (
+                      <div className="space-y-2">
+                        <Label>Angles for the next run</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {angles.map((a, i) => {
+                            const on = selectedAngleIdxs.includes(i);
+                            return (
+                              <button
+                                key={i}
+                                type="button"
+                                title={a.instruction}
+                                aria-pressed={on}
+                                onClick={() =>
+                                  setSelectedAngleIdxs((prev) => (on ? prev.filter((x) => x !== i) : [...prev, i].slice(-variantCount)))
+                                }
+                                className={`rounded-full px-3 py-1 t-label border transition-colors ${
+                                  on ? "border-[#b9e045] bg-[rgba(185,224,69,0.14)] text-white" : "border-[rgba(255,255,255,0.14)] text-[#d1d5db] hover:bg-[rgba(255,255,255,0.06)]"
+                                }`}
+                              >
+                                {a.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="visual-brief">Visual brief</Label>
+                        <Button variant="ghost" size="sm" onClick={handleCopyPrompt}>
+                          {copied ? <Check className="h-3 w-3 mr-1" /> : <Copy className="h-3 w-3 mr-1" />}
+                          {copied ? "Copied" : "Copy"}
+                        </Button>
+                      </div>
+                      <Textarea id="visual-brief" value={editablePrompt} onChange={(e) => setEditablePrompt(e.target.value)} rows={4} className="t-body" />
+                    </div>
+                    <Button onClick={() => void generateImages()} size="sm">
+                      <Paintbrush className="h-4 w-4 mr-1" /> Generate with these
+                    </Button>
+                  </div>
+                </details>
+
                 <div className="flex flex-wrap gap-2">
                   {/* Favorites action — non-carousel only */}
                   {!isCarousel && favoriteIdxs.size > 0 && (
@@ -1048,8 +1026,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                       Use {favoriteIdxs.size} favorite{favoriteIdxs.size === 1 ? "" : "s"}
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" onClick={generateImages}>
-                    <Paintbrush className="h-4 w-4 mr-1" /> Regenerate
+                  <Button variant="outline" size="sm" onClick={anotherTake}>
+                    <Paintbrush className="h-4 w-4 mr-1" /> Another take
                   </Button>
                   <Button variant="ghost" size="sm" onClick={handleStartOver}>
                     New design

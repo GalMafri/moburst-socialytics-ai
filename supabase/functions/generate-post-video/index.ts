@@ -7,6 +7,7 @@ import { brandFootingAdvice, footingOf, resolveBrandContext } from "../_shared/d
 import { correctionFor, validateDesignImage, verdictIsDirty } from "../_shared/design-prompts/validateImage.ts";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 import { loadDesignLearnings, type DesignLearnings } from "../_shared/design-prompts/learnings.ts";
+import { headlineFrom } from "../_shared/design-prompts/headline.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -53,17 +54,30 @@ async function generateSeedImage(args: {
   variantAngle: string | null;
   aspectRatio: string;
   learnings?: DesignLearnings | null;
+  /**
+   * The words the frame carries. A video cannot have its headline typed on
+   * afterwards the way a still can (Veo animates whatever the seed shows), so
+   * the seed is a finished post: the headline set in the brand's headline
+   * zone, spelled exactly, and nothing else written anywhere.
+   */
+  headline?: string | null;
 }): Promise<{ base64: string; mimeType: string } | null> {
   try {
+    const headline = (args.headline || "").trim();
     const seedPrompt = buildImagePrompt({
-      noText: true,
+      noText: !headline,
       basePrompt:
         args.basePrompt +
         "\n\nThis still will be used as the OPENING FRAME of a short social-media video — " +
         "compose for motion. Place the subject so it can move or transform without falling off frame. " +
         "It is a frame in the brand's own visual system for this platform: photographic where the brand uses " +
         "photography, a solid brand-colour field where the brand uses one, the brand's photo treatment either way. " +
-        "Not a stock scene, not a title card: depict the subject inside the brand's layout and render no words anywhere in it.",
+        "Not a stock scene, not a title card: depict the subject inside the brand's layout." +
+        (headline
+          ? ` The frame is a FINISHED post: the headline is set in the brand's headline zone, in the brand's typographic treatment, ` +
+            `large and fully legible, and reads exactly: "${headline}". Every letter spelled as written, no line broken mid-word, ` +
+            `no other words, labels, captions or lettering anywhere else in the frame. Where the brand uses a text card, the card holds this headline and is not left empty.`
+          : " Render no words anywhere in it."),
       platform: args.platform,
       format: args.format,
       brandIdentity: args.brandIdentity,
@@ -250,7 +264,10 @@ serve(async (req) => {
     // prompt and produces generic "AI-flavored" footage with no brand alignment.
     // With it, Veo animates from a frame that already encodes the brand's
     // palette, composition, typography, and design references.
-    console.log("[generate-post-video] generating brand-aligned seed image…");
+    // The seed carries the post's headline so Veo animates a finished post,
+    // not an empty layout waiting for words that will never come.
+    const headline = headlineFrom(post?.copy || post?.hook || "");
+    console.log("[generate-post-video] generating brand-aligned seed image…", { headline });
     let seedImage = await generateSeedImage({
       geminiKey,
       supabase,
@@ -265,6 +282,7 @@ serve(async (req) => {
       variantAngle: variant_angle || null,
       aspectRatio,
       learnings: await loadDesignLearnings(supabase, client_id || client_context?.client_id),
+      headline,
     });
     if (seedImage) {
       console.log("[generate-post-video] seed image ready — Veo will animate from brand-aligned frame");
@@ -274,12 +292,13 @@ serve(async (req) => {
       // costs minutes and real money, so it is worth one regeneration.
       const avoid = [resolvedSynthesis?.anti_patterns, resolvedSynthesis?.imagery_style].filter((x: unknown) => typeof x === "string" && x).join(" ") || null;
       const verdict = await validateDesignImage(`data:${seedImage.mimeType};base64,${seedImage.base64}`, { avoid });
-      if (verdictIsDirty(verdict, { expectNoText: true })) {
+      if (verdictIsDirty(verdict, { expectNoText: !headline })) {
         console.warn("[generate-post-video] seed failed review, regenerating once:", verdict);
         const retry = await generateSeedImage({
           geminiKey,
           supabase,
-          basePrompt: prompt + correctionFor(verdict, { expectNoText: true, avoid }),
+          basePrompt: prompt + correctionFor(verdict, { expectNoText: !headline, avoid }),
+          headline,
           platform,
           format,
           brandIdentity: resolvedBrand,
@@ -313,6 +332,7 @@ serve(async (req) => {
       post,
       variantAngle: variant_angle || null,
       hasSeedImage: !!seedImage,
+      seedHasText: !!seedImage && !!headline,
     });
 
     // Try each Veo model until one works. Every failure is kept: the loop used

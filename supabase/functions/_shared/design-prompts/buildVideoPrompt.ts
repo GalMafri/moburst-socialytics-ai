@@ -18,6 +18,8 @@ export interface BuildVideoPromptInput {
    *  prompt as the `image` field on Veo's instance. The prompt then becomes
    *  a MOTION brief that animates the seed rather than a full scene brief. */
   hasSeedImage?: boolean;
+  /** The seed carries the post's headline; it must survive every frame untouched. */
+  seedHasText?: boolean;
 }
 
 const HEX_RE = /#[0-9A-Fa-f]{3,8}\b/g;
@@ -56,6 +58,13 @@ export function buildVideoPrompt(input: BuildVideoPromptInput): string {
     );
 
     // 2. Motion brief built from the scene description.
+    if (input.seedHasText) {
+      sections.push(
+        "THE HEADLINE IS PART OF THE DESIGN: the lettering in the anchor frame stays exactly as it is in every frame — " +
+          "same words, same spelling, same position, same size, pixel-stable and fully legible. Never animate, warp, " +
+          "re-render, blur, fade or replace it; motion happens around it and behind it.",
+      );
+    }
     sections.push(`MOTION BRIEF (what happens during the 5-8 seconds): ${scene}`);
 
     sections.push(
@@ -95,7 +104,9 @@ export function buildVideoPrompt(input: BuildVideoPromptInput): string {
 
   // 6. Hard constraints (short, qualitative)
   sections.push(
-    "Constraints: No text overlays, watermarks, logos, or color codes visible in any frame. " +
+    (input.seedHasText
+      ? "Constraints: No NEW text, captions or subtitles; the anchor frame's headline is the only lettering, kept unchanged. No watermarks, logos or color codes in any frame. "
+      : "Constraints: No text overlays, watermarks, logos, or color codes visible in any frame. ") +
       "No real people's names or celebrity likenesses. " +
       "Describe colors only through the visual look, never as written codes. " +
       "Avoid generic stock-video clichés (people on laptops in coffee shops, abstract gradient backgrounds, " +

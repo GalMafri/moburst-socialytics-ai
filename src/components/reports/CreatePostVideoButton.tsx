@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,7 +9,7 @@ import { VideoTrimmer } from "@/components/editor/VideoTrimmer";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { ClientContext } from "@/lib/clientContext";
-import { Slider } from "@/components/ui/slider";
+import { GenerationStages } from "@/components/reports/GenerationStages";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 import { brandAdviceFrom, brandWarning } from "@/lib/designGuard";
 
@@ -108,6 +108,17 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   // if seed is good but video drifts, that's Veo conditioning; if seed is
   // already generic, the multimodal context flow is the problem.
   const [variantSeeds, setVariantSeeds] = useState<Array<string | null>>([]);
+  // When the run started and a once-a-second tick, so the stage list can
+  // follow the clock: the server does frame, review and Veo in one call and
+  // reports nothing in between, so elapsed time is the only signal.
+  const [startedAt, setStartedAt] = useState(0);
+  const [tick, setTick] = useState(0);
+  const [briefing, setBriefing] = useState(false);
+  useEffect(() => {
+    if (!loading) return;
+    const t = setInterval(() => setTick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [loading]);
   const [previewSeedUrl, setPreviewSeedUrl] = useState<string | null>(null);
   // Cancellation flag — checked when results return. Veo calls are 30-120s
   // each, so users may want to abort an accidental click while we're still
@@ -170,21 +181,24 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   };
 
   // Fetches creative-angle suggestions from the shared propose-design-angles edge function.
-  const fetchAngles = async () => {
+  const fetchAngles = async (brief: string): Promise<Array<{ label: string; instruction: string }>> => {
     setFetchingAngles(true);
     try {
-      const { data } = await supabase.functions.invoke("propose-design-angles", {
+      const call = supabase.functions.invoke("propose-design-angles", {
         body: {
-          brief: prompt,
+          brief,
           platform: post.platform,
           format: post.format,
           design_language: clientContext?.design_style_synthesis || null,
         },
       });
+      const timeout = new Promise<{ data: null }>((r) => setTimeout(() => r({ data: null }), 8000));
+      const { data } = (await Promise.race([call, timeout])) as { data: any };
       if (data?.angles && Array.isArray(data.angles)) {
         const a = data.angles.slice(0, 6);
         setAngles(a);
         setSelectedAngleIdxs(Array.from({ length: Math.min(variantCount, a.length) }, (_, i) => i));
+        return a;
       }
     } catch (e) {
       console.warn("Failed to fetch angles:", e);
@@ -192,6 +206,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     } finally {
       setFetchingAngles(false);
     }
+    return [];
   };
 
   // Toggle a variant's favorite state.
@@ -263,27 +278,43 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
 
   const handleOpen = async () => {
     setOpen(true);
-    setPrompt("Generating video prompt...");
-
-    // Get the raw visual direction from whichever field the post has
+    if (variantUrls.length > 0 || loading || briefing) return;
+    // Opening is the decision: brief, angles and the videos follow without
+    // another click. Everything adjustable waits behind the first result.
+    setBriefing(true);
+    setStartedAt(Date.now());
     const rawDirection = post.ai_visual_prompt || post.visual_direction || post.copy || post.concept || "";
     const postCopy = post.copy || post.caption_angle || "";
-
-    // Distill the complex storyboard into a simple Veo-compatible scene description
     const sceneDescription = await distillForVeo(rawDirection, postCopy);
-
-    setPrompt(buildVideoPrompt(sceneDescription));
-
-    if (angles.length === 0) {
-      fetchAngles();
-    }
+    const brief = buildVideoPrompt(sceneDescription);
+    setPrompt(brief);
+    const picked = angles.length > 0 ? angles : await fetchAngles(brief);
+    setBriefing(false);
+    await generateVideo(brief, picked);
   };
 
-  const generateVideo = async () => {
+  /** The same brief through the next angles on the list. */
+  const anotherTake = () => {
+    if (angles.length === 0) return void generateVideo();
+    const n = Math.max(1, Math.min(variantCount, angles.length));
+    const start = ((selectedAngleIdxs[selectedAngleIdxs.length - 1] ?? -1) + 1) % angles.length;
+    const next = Array.from({ length: n }, (_, i) => (start + i) % angles.length);
+    setSelectedAngleIdxs(next);
+    void generateVideo(undefined, undefined, next);
+  };
+
+  const generateVideo = async (
+    briefOverride?: string,
+    anglesList: Array<{ label: string; instruction: string }> = angles,
+    overrideIdxs?: number[],
+  ) => {
+    const brief = briefOverride ?? prompt;
+    const chosen = overrideIdxs ?? (selectedAngleIdxs.length > 0 ? selectedAngleIdxs : anglesList.map((_, i) => i).slice(0, variantCount));
     const count = Math.min(Math.max(variantCount, 1), 3);
     const groupId = crypto.randomUUID();
     setVariantGroupId(groupId);
     setLoading(true);
+    if (!startedAt || !loading) setStartedAt(Date.now());
     setVideoUrl(null);
     setFavoriteIdxs(new Set());
     setVariantUrls(new Array(count).fill(null));
@@ -292,10 +323,10 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
 
     // Build angle instructions for each variant.
     const angleInstructions: Array<{ label: string; instruction: string }> = [];
-    if (angles.length > 0 && selectedAngleIdxs.length > 0) {
+    if (anglesList.length > 0 && chosen.length > 0) {
       for (let i = 0; i < count; i++) {
-        const angleIdx = selectedAngleIdxs[i] ?? selectedAngleIdxs[selectedAngleIdxs.length - 1] ?? 0;
-        angleInstructions.push(angles[angleIdx] || { label: "", instruction: "" });
+        const angleIdx = chosen[i] ?? chosen[chosen.length - 1] ?? 0;
+        angleInstructions.push(anglesList[angleIdx] || { label: "", instruction: "" });
       }
     } else {
       for (let i = 0; i < count; i++) angleInstructions.push({ label: "", instruction: "" });
@@ -319,7 +350,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     const promises = angleInstructions.map((angle) =>
       supabase.functions.invoke("generate-post-video", {
         body: {
-          prompt,
+          prompt: brief,
           platform: post.platform,
           format: post.format,
           brandIdentity: effectiveBrandIdentity,
@@ -426,10 +457,10 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Video className="h-4 w-4" /> Generate Video — {spec.label}
+              <Video className="h-4 w-4" /> Video, {spec.label}
             </DialogTitle>
             <DialogDescription>
-              Generate 2–3 video variants with Google Veo. Each takes 30–120 seconds.
+              Short clips in the client's design system, animated from a finished opening frame. Tap the ones to keep.
             </DialogDescription>
           </DialogHeader>
 
@@ -459,114 +490,28 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
               )}
             </div>
 
-            {/* Variant count slider — 2 to 3 (Veo is slow + expensive) */}
-            <div className="space-y-2">
-              <Label htmlFor="video-variant-count">Number of variants</Label>
-              <div className="flex items-center gap-3">
-                <Slider
-                  id="video-variant-count"
-                  min={2}
-                  max={3}
-                  step={1}
-                  value={[variantCount]}
-                  onValueChange={(v) => setVariantCount(v[0])}
-                  disabled={loading}
-                  className="flex-1"
-                  aria-label="Number of video variants"
-                />
-                <span className="t-body font-medium w-8 text-center">{variantCount}</span>
-              </div>
-              <p className="t-secondary">
-                Video generation takes 30-120 seconds per variant.
-              </p>
-            </div>
-
-            {/* Suggested angles */}
-            {angles.length > 0 && (
-              <div className="space-y-2">
-                <Label>Suggested angles</Label>
-                <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {angles.map((a, i) => (
-                    <label key={i} className="flex items-start gap-2 t-label cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedAngleIdxs.includes(i)}
-                        disabled={loading}
-                        onChange={(e) => {
-                          setSelectedAngleIdxs((prev) =>
-                            e.target.checked
-                              ? [...prev, i].slice(0, variantCount)
-                              : prev.filter((x) => x !== i),
-                          );
-                        }}
-                        className="mt-0.5"
-                      />
-                      <span>
-                        <span className="font-medium">{a.label}.</span> {a.instruction}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {fetchingAngles && (
-              <p className="t-secondary">Fetching angle suggestions…</p>
-            )}
-
-            {/* Editable prompt */}
-            <div className="space-y-2">
-              <Label>Video prompt (edit before generating)</Label>
-              <Textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                rows={8}
-                className="t-label font-mono"
-              />
-            </div>
-
-            {/* Generate button — only when no variants yet */}
-            {variantUrls.length === 0 && (
-              <Button onClick={generateVideo} disabled={loading} className="w-full">
-                {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Generating {variantCount} variants (30-120s each)...
-                  </>
-                ) : (
-                  <>
-                    <Video className="h-4 w-4 mr-2" /> Generate {variantCount} Variants
-                  </>
-                )}
-              </Button>
-            )}
-
-            {loading && (
-              <div className="text-center py-6 space-y-3">
-                <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-                <div>
-                  <p className="t-secondary">
-                    {cancelRef.current
-                      ? "Cancelling — waiting for in-flight Veo calls to return…"
-                      : `Generating ${variantCount} ${spec.label} variants with Google Veo...`}
-                  </p>
-                  <p className="t-secondary mt-1">This may take 30-120 seconds per variant</p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
+            {(loading || briefing) && (() => {
+              const elapsed = startedAt ? (Date.now() - startedAt) / 1000 : 0;
+              void tick;
+              const current = briefing ? 0 : elapsed < 30 ? 1 : elapsed < 45 ? 2 : 3;
+              return (
+                <GenerationStages
+                  stages={["Writing the motion brief", "Painting the opening frame with the headline", "Brand review", `Animating ${variantCount} clips with Veo`, "Saving"]}
+                  current={current}
+                  startedAt={startedAt || Date.now()}
+                  estimate="3 to 5 minutes"
+                  note="You can close this window. The run continues and the card in the corner says when the clips are ready."
+                  done={variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
+                  total={variantUrls.length}
+                  failed={variantUrls.filter((u) => u === "FAILED").length}
+                  onCancel={() => {
                     cancelRef.current = true;
                     generation.cancelGeneration(postKeyOf(post));
                   }}
-                  disabled={cancelRef.current}
-                  className="text-red-300 hover:text-red-200 hover:bg-[rgba(239,68,68,0.10)] border-[rgba(239,68,68,0.30)]"
-                >
-                  <Ban className="h-3.5 w-3.5 mr-1.5" />
-                  {cancelRef.current ? "Cancelling…" : "Cancel"}
-                </Button>
-              </div>
-            )}
+                  cancelling={cancelRef.current}
+                />
+              );
+            })()}
 
             {/* Variant grid */}
             {variantUrls.length > 0 && !loading && (
@@ -619,8 +564,8 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                       Use {favoriteIdxs.size} favorite{favoriteIdxs.size === 1 ? "" : "s"}
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" onClick={generateVideo}>
-                    <RefreshCw className="h-4 w-4 mr-1" /> Regenerate
+                  <Button variant="outline" size="sm" onClick={anotherTake}>
+                    <RefreshCw className="h-4 w-4 mr-1" /> Another take
                   </Button>
                   {variantUrls.map((url, i) => (
                     typeof url === "string" && url !== "FAILED" && (
@@ -653,6 +598,53 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                     )
                   ))}
                 </div>
+
+                <details className="glass-inner p-3">
+                  <summary className="t-body text-white cursor-pointer">Change the brief, the angle or the count</summary>
+                  <div className="mt-3 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Label className="mr-1">Clips</Label>
+                      {[1, 2, 3].map((n) => (
+                        <Button key={n} size="sm" variant={variantCount === n ? "default" : "outline"} onClick={() => setVariantCount(n)} aria-pressed={variantCount === n}>
+                          {n}
+                        </Button>
+                      ))}
+                    </div>
+                    {angles.length > 0 && (
+                      <div className="space-y-2">
+                        <Label>Angles for the next run</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {angles.map((a, i) => {
+                            const on = selectedAngleIdxs.includes(i);
+                            return (
+                              <button
+                                key={i}
+                                type="button"
+                                title={a.instruction}
+                                aria-pressed={on}
+                                onClick={() =>
+                                  setSelectedAngleIdxs((prev) => (on ? prev.filter((x) => x !== i) : [...prev, i].slice(-variantCount)))
+                                }
+                                className={`rounded-full px-3 py-1 t-label border transition-colors ${
+                                  on ? "border-[#b9e045] bg-[rgba(185,224,69,0.14)] text-white" : "border-[rgba(255,255,255,0.14)] text-[#d1d5db] hover:bg-[rgba(255,255,255,0.06)]"
+                                }`}
+                              >
+                                {a.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="motion-brief">Motion brief</Label>
+                      <Textarea id="motion-brief" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={5} className="t-label font-mono" />
+                    </div>
+                    <Button onClick={() => void generateVideo()} size="sm">
+                      <Video className="h-4 w-4 mr-1" /> Generate with these
+                    </Button>
+                  </div>
+                </details>
 
                 {/* Seed images — the brand-aligned anchor frame each video
                     was animated from. Surfacing these lets the user diagnose
