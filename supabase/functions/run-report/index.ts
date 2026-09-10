@@ -14,7 +14,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
-import { buildCompetitivePayload, buildSocialPayload, type ReportRange } from "../_shared/reports/payloads.ts";
+import { buildCompetitivePayload, buildSocialPayload, isStuckRun, type ReportRange } from "../_shared/reports/payloads.ts";
 import { summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
 
 const corsHeaders = {
@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     if (retryId) {
       const social = await admin
         .from("reports")
-        .select("id, client_id, status, date_range_start, date_range_end")
+        .select("id, client_id, status, created_at, date_range_start, date_range_end")
         .eq("id", retryId)
         .maybeSingle();
       if (social.data) {
@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
       } else {
         const comp = await admin
           .from("competitive_reports")
-          .select("id, client_id, status, set_id, date_range_start, date_range_end")
+          .select("id, client_id, status, created_at, set_id, date_range_start, date_range_end")
           .eq("id", retryId)
           .maybeSingle();
         if (!comp.data) return json({ error: "That report no longer exists." }, 404);
@@ -69,7 +69,10 @@ Deno.serve(async (req) => {
     // read back to the caller.
     await requireStaff(req, { writeClientId: clientId });
 
-    if (existing && existing.status === "running") {
+    // A row that is genuinely mid-run must not be fired twice. A row that
+    // says "running" but stopped talking hours ago is the case Retry exists
+    // for, so only a recent one is refused.
+    if (existing && existing.status === "running" && !isStuckRun(existing.status, existing.created_at)) {
       return json({ error: "That run is still going. Wait for it to finish or fail." }, 409);
     }
 

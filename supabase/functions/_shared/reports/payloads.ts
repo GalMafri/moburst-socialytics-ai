@@ -9,6 +9,24 @@
 // repeatable reels"), so a gap the team endorsed never reached a scheduled
 // run. Every run now goes through here: manual, scheduled, and retried.
 
+/**
+ * How long a run may sit on "running" before it is treated as dead.
+ *
+ * A workflow that crashes before its writeback node leaves the row running
+ * for ever, and nothing else distinguishes that from a run in progress.
+ * Mirrored by STUCK_AFTER_MINUTES in src/lib/reportRun.ts, which decides
+ * when the app offers the button; a test asserts the two agree.
+ */
+export const STUCK_AFTER_MINUTES = 45;
+
+/** True when a row claims to be running but has stopped saying anything. */
+export function isStuckRun(status: string | null | undefined, createdAt: string | null | undefined, now = Date.now()): boolean {
+  if (status !== "running") return false;
+  const started = createdAt ? new Date(createdAt).getTime() : NaN;
+  if (!Number.isFinite(started)) return false;
+  return now - started > STUCK_AFTER_MINUTES * 60000;
+}
+
 export interface ReportRange {
   start: string;
   end: string;

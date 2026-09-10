@@ -66,8 +66,12 @@ export function RetryReportButton({
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       onStarted?.();
-    } catch (e: any) {
-      toast({ title: "Could not start the run", description: e.message || String(e), variant: "destructive" });
+    } catch (e) {
+      toast({
+        title: "Could not start the run",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
     } finally {
       setBusy(false);
       setOpen(false);
