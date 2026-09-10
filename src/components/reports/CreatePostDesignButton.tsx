@@ -178,6 +178,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
   if (!defaultPrompt) return null;
 
+  // Tiles keep the design's own proportions so a headline at the top of a
+  // 9:16 reel is not cropped away by a square thumbnail.
+  const tileAspect = /reel|stor|short|tiktok/i.test(`${post.format || ""} ${post.platform || ""}`) ? "aspect-[9/16]" : "aspect-square";
+
   const runStages = isCarousel
     ? ["Reading the brief and the brand", "Splitting the story into slides", "Painting the slides", "Brand review", "Saving"]
     : ["Reading the brief and the brand", `Painting ${variantCount} variants`, "Brand review", "Setting the headline in the brand's type", "Saving"];
@@ -627,6 +631,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           if (cancelRef.current) break;
           const globalIdx = v * slides + s;
           setCurrentSlide(globalIdx + 1);
+          setStage(2);
 
           // Per-slide brief if decomposition succeeded; otherwise the
           // sanitized overall brief. Defense-in-depth: collapse any
@@ -866,7 +871,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 estimate={
                   isCarousel
                     ? `${Math.max(1, Math.ceil((slideCount * variantCount * 20) / 60))} to ${Math.max(2, Math.ceil((slideCount * variantCount * 30) / 60))} minutes`
-                    : "1 to 2 minutes"
+                    : "2 to 3 minutes"
                 }
                 note="You can close this window. The run continues and the card in the corner says when it is done."
                 done={variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
@@ -895,7 +900,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                       type="button"
                       onClick={() => !isCarousel && toggleFavorite(i)}
                       disabled={url === "FAILED" || url === null || isCarousel}
-                      className={`relative aspect-square rounded-md border overflow-hidden transition-all ${
+                      className={`relative ${tileAspect} rounded-md border overflow-hidden transition-all bg-black ${
                         favoriteIdxs.has(i) ? "ring-2 ring-primary border-primary" : ""
                       }`}
                     >
@@ -910,7 +915,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                         </div>
                       )}
                       {typeof url === "string" && url !== "FAILED" && (
-                        <img src={url} alt={isCarousel ? `Slide ${i + 1}` : `Variant ${i + 1}`} className="w-full h-full object-cover" />
+                        <img src={url} alt={isCarousel ? `Slide ${i + 1}` : `Variant ${i + 1}`} className="w-full h-full object-contain" />
                       )}
                       {favoriteIdxs.has(i) && (
                         <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-1">

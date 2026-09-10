@@ -22,7 +22,8 @@ export const CLEAN_VERDICT: DesignVerdict = {
 
 /** Interface furniture no post should carry; a model asked for a plain field draws these instead. */
 const FAKE_UI =
-  "fake interface chrome — a search bar, an input field, a button-shaped rectangle with nothing in it, a phone or app frame, tab bars, icons rows, or empty placeholder blocks";
+  "fake interface chrome (a search bar, an input field, a phone or app frame, tab bars, icon rows), an empty white or light rectangle sitting on the design as a placeholder, " +
+  "or two or more separate photographs tiled, split-screen or gridded on the one canvas";
 
 function questionFor(avoid?: string | null): string {
   const rules = (avoid || "").trim();
@@ -132,8 +133,9 @@ export function correctionFor(v: DesignVerdict, opts: { expectNoText?: boolean; 
   const notes: string[] = [];
   if (v.off_brand) {
     notes.push(
-      "The previous attempt broke the brand's own rules or drew interface furniture. Draw NO search bars, input fields, empty button shapes, " +
-        "phone or app frames, tab bars or placeholder rectangles: the field kept for type is a flat block of the brand's colour and nothing else. " +
+      "The previous attempt broke the brand's own rules, drew interface furniture, left a blank placeholder rectangle, or tiled several photographs. " +
+        "Draw NO search bars, input fields, empty button shapes, phone or app frames, tab bars or blank rectangles, and use exactly ONE photograph: " +
+        "the area kept for type is a flat field of the brand's colour and nothing else. " +
         (opts.avoid ? `And obey these rules exactly: ${opts.avoid.slice(0, 600)}` : "Re-stage the subject inside the brand's own layout, palette and photographic treatment."),
     );
   }

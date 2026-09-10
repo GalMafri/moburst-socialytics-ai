@@ -82,7 +82,7 @@ export function verdictIsDirty(v: DesignVerdict | null | undefined, opts: { expe
 /** Plain words for the "refining" toast, so the team knows what was caught. */
 export function verdictSummary(v: DesignVerdict): string {
   const bits: string[] = [];
-  if (v.off_brand) bits.push("an off-brand scene or fake interface");
+  if (v.off_brand) bits.push("an off-brand scene, a blank placeholder or a photo grid");
   if (v.has_logo) bits.push("an invented logo");
   if (v.has_garbled_text) bits.push("malformed text");
   if (v.has_text && !v.has_garbled_text) bits.push("lettering where none was asked for");
@@ -99,8 +99,9 @@ export function correctionFor(v: DesignVerdict, opts: { expectNoText?: boolean }
   const notes: string[] = [];
   if (v.off_brand) {
     notes.push(
-      "The previous attempt broke the brand's own rules or drew interface furniture. Draw NO search bars, input fields, empty button shapes, " +
-        "phone or app frames, tab bars or placeholder rectangles: the field kept for type is a flat block of the brand's colour and nothing else. " +
+      "The previous attempt broke the brand's own rules, drew interface furniture, left a blank placeholder rectangle, or tiled several photographs. " +
+        "Draw NO search bars, input fields, empty button shapes, phone or app frames, tab bars or blank rectangles, and use exactly ONE photograph: " +
+        "the area kept for type is a flat field of the brand's colour and nothing else. " +
         (v.avoid ? `And obey these rules exactly: ${v.avoid.slice(0, 600)}` : "Re-stage the subject inside the brand's own layout, palette and photographic treatment."),
     );
   }

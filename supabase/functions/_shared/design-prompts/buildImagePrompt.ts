@@ -199,7 +199,8 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
         : []),
       "Never draw interface furniture: no search bars, input fields, empty button-shaped rectangles, phone or app frames, tab bars, icon rows or placeholder blocks. " +
         "A post is a picture, not a screenshot of an app.",
-      "Never fill the canvas with a grid of small panels or a collage of scenes; one subject, one composition.",
+      "Never fill the canvas with a grid of small panels or a collage of scenes. Exactly ONE photograph or one subject in the image zone: " +
+        "not two side by side, not a 2x2 of stock shots, not a strip of thumbnails. If several ideas are in the brief, pick the single strongest and drop the rest.",
       "Never depict what the creative direction describes if it is on this list: keep its subject, drop its setting, lighting, mood and styling, and re-stage the subject the way this brand shoots.",
     ].filter(Boolean);
     sections.push(lines.join("\n"));
@@ -220,8 +221,9 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
         `The headline${input.slideContext ? ", this slide's supporting line" : " and any call-to-action"} will be set as real typography on top of this image afterwards. ` +
         `Compose for that: the zone the brand design language gives to headline type is left as a plain field ` +
         `in the brand's colour for that zone — a flat navy or red block, a plain wall, a soft depth-of-field ground — ` +
-        `with nothing in it — one flat block of one colour covering at least a quarter of the canvas, an element of the layout, not a box, card, frame or button drawn onto it. ` +
-        `Everything else follows the brand's layout as usual. No text of any kind in the image itself, and no outlined or empty shapes standing in for text.`,
+        `with nothing in it: one flat area of one colour covering at least a quarter of the canvas, part of the layout itself. ` +
+        `Do NOT draw a separate box, card, panel, frame, pill, button or blank rectangle anywhere as a stand-in for text or a button; ` +
+        `a white or light empty rectangle on the design is a failure. Everything else follows the brand's layout as usual. No text of any kind in the image itself.`,
     );
   }
 
@@ -285,6 +287,7 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
           `readable word in it is a failed frame.\n`
         : `- No invented company names or brand text — only use text that appears in the creative direction.\n`) +
       `- No hex color codes, RGB values, or any technical color notation visible as text in the image.\n` +
+      `- One photograph only. Two or more photos tiled, split-screen or gridded on one canvas is a failed image.\n` +
       `- No stock-photo cliché or template-generator look.`,
   );
 
