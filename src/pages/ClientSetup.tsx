@@ -105,6 +105,7 @@ export default function ClientSetup() {
     brand_book_url: "",
     brand_book_file_path: "",
     timezone: "UTC",
+    media_backend: "gemini",
     design_references: [] as string[],
     brand_identity: null as any,
     brief_text: "",
@@ -200,6 +201,7 @@ export default function ClientSetup() {
         brand_book_url: (client as any).brand_book_url || "",
         brand_book_file_path: (client as any).brand_book_file_path || "",
         timezone: (client as any).timezone || "UTC",
+        media_backend: (client as any).media_backend || "gemini",
         design_references: ((client as any).design_references as string[]) || [],
         brand_identity: client.brand_identity || null,
         brief_text: client.brief_text || "",
@@ -247,6 +249,7 @@ export default function ClientSetup() {
         brand_book_url: form.brand_book_url || null,
         brand_book_file_path: form.brand_book_file_path || null,
         timezone: form.timezone || "UTC",
+        media_backend: form.media_backend || "gemini",
         design_references: design_references.length > 0 ? design_references : null,
       };
       let clientId: string;
@@ -503,6 +506,26 @@ export default function ClientSetup() {
                   </Select>
                   <p className="t-secondary">
                     Used for scheduling content calendar posting times.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="client-media-backend">Image &amp; video generation</Label>
+                  <Select
+                    value={form.media_backend}
+                    onValueChange={(value) => setForm((f) => ({ ...f, media_backend: value }))}
+                  >
+                    <SelectTrigger id="client-media-backend" className="w-full">
+                      <SelectValue placeholder="Select a generator" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="gemini">Standard (Gemini + Veo)</SelectItem>
+                      <SelectItem value="higgsfield">Higgsfield (sharper type, team credits)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="t-secondary">
+                    Higgsfield renders headline type far more cleanly, and spends the team's shared Higgsfield
+                    credits: roughly 2 per design. Connect the account under Settings before switching a client over.
                   </p>
                 </div>
 

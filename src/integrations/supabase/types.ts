@@ -202,6 +202,7 @@ export type Database = {
           id: string
           language: string | null
           logo_url: string | null
+          media_backend: string
           name: string
           pillars_derived_at: string | null
           pillars_source: string | null
@@ -238,6 +239,7 @@ export type Database = {
           id?: string
           language?: string | null
           logo_url?: string | null
+          media_backend?: string
           name: string
           pillars_derived_at?: string | null
           pillars_source?: string | null
@@ -274,6 +276,7 @@ export type Database = {
           id?: string
           language?: string | null
           logo_url?: string | null
+          media_backend?: string
           name?: string
           pillars_derived_at?: string | null
           pillars_source?: string | null

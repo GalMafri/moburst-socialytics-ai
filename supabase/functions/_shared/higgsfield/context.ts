@@ -13,7 +13,7 @@
 // produce exactly that synthesis, so clients with a PDF-only brand book and no
 // synthesis row lose brand grounding — the caller surfaces that as a warning.
 
-export const MAX_REFERENCE_IMAGES = 3; // same cap the Gemini path used
+export const MAX_REFERENCE_IMAGES = 4; // the Gemini path attaches 4; both backends should see the same references
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // Higgsfield fetches immediately; 1h is generous
 
 /** Extensions Higgsfield will accept as image input. */

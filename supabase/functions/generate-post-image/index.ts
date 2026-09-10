@@ -3,6 +3,11 @@ import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts"
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
 import { imageAspectRatio } from "../_shared/design-prompts/aspect.ts";
 import { brandFootingAdvice, footingOf, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
+import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
+import { mediaBackendFor } from "../_shared/higgsfield/backend.ts";
+import { renderImageWithHiggsfield } from "../_shared/higgsfield/renderImage.ts";
+import { HiggsfieldError } from "../_shared/higgsfield/generate.ts";
+import { resolveContextImageUrls } from "../_shared/higgsfield/context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -132,6 +137,11 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // This function runs with verify_jwt = false, so nothing checks the caller
+    // unless it does so itself. It spends money on every call — a Gemini key,
+    // or the team's Higgsfield credits — so it checks.
+    await requireStaff(req);
+
     const {
       prompt,
       platform,
@@ -195,6 +205,11 @@ Deno.serve(async (req) => {
     // on-brand work, and is pointed at the fix.
     const brandAdvice = brandFootingAdvice(footing, client_name);
 
+    // Which provider renders this. Read from the clients row, never from the
+    // body: this endpoint spends the team's Higgsfield credits.
+    const backend = await mediaBackendFor(brandDb, client_id || client_context?.client_id);
+    console.log("[generate-post-image] backend:", backend);
+
     // ── Get Gemini API key (try env, then app_settings) ──
     let geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");
 
@@ -210,7 +225,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (!geminiKey) {
+    if (!geminiKey && backend === "gemini") {
       return jsonResp(
         {
           error:
@@ -325,59 +340,111 @@ Deno.serve(async (req) => {
     // Add the main design prompt
     contentParts.push({ text: designPrompt });
 
-    // ── Call Gemini 3.1 Flash Image (Nano Banana 2) ──
+    // ── Render the image ──
+    //
+    // Two providers, one output shape: base64 bytes and a mime type. Nothing
+    // below this block knows or cares which one ran.
     const geminiModel = "gemini-3.1-flash-image-preview";
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: contentParts,
-          },
-        ],
-        generationConfig: {
-          responseModalities: ["TEXT", "IMAGE"],
-          imageConfig: {
-            aspectRatio: aspectRatio,
-            imageSize: "2K",
-          },
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => "");
-      return jsonResp({ error: `Gemini API error: ${response.status}`, details: errorBody }, 502);
-    }
-
-    const result = await response.json();
-
-    // ── Extract image from response ──
-    const candidates = result.candidates || [];
     let imageB64: string | null = null;
     let imageMime: string | null = null;
     let textResponse: string | null = null;
+    let renderedModel: string | null = null;
 
-    for (const candidate of candidates) {
-      for (const part of candidate.content?.parts || []) {
-        if (part.inlineData) {
-          imageB64 = part.inlineData.data;
-          imageMime = part.inlineData.mimeType || "image/png";
-        }
-        if (part.text) {
-          textResponse = part.text;
+    /** One Gemini call. Returns the LAST inline image across all candidates. */
+    async function callGemini(parts: any[]): Promise<{ b64: string | null; mime: string | null; text: string | null; raw: any }> {
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: {
+            responseModalities: ["TEXT", "IMAGE"],
+            imageConfig: { aspectRatio: aspectRatio, imageSize: "2K" },
+          },
+        }),
+      });
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => "");
+        throw new Error(`Gemini API error: ${response.status} ${errorBody.slice(0, 300)}`);
+      }
+      const raw = await response.json();
+      let b64: string | null = null;
+      let mime: string | null = null;
+      let text: string | null = null;
+      for (const candidate of raw.candidates || []) {
+        for (const part of candidate.content?.parts || []) {
+          if (part.inlineData) {
+            b64 = part.inlineData.data;
+            mime = part.inlineData.mimeType || "image/png";
+          }
+          if (part.text) text = part.text;
         }
       }
+      return { b64, mime, text, raw };
+    }
+
+    /**
+     * A second attempt from a stripped prompt, with no references attached.
+     * Used by the carousel contact-sheet retry, which must not silently stay
+     * on Gemini when the client is on the other backend.
+     */
+    async function renderFromPromptAlone(promptText: string): Promise<{ b64: string; mime: string } | null> {
+      if (backend === "higgsfield") {
+        const again = await renderImageWithHiggsfield({
+          supabase: brandDb,
+          prompt: promptText,
+          aspectRatio,
+          referenceUrls: [],
+          budgetMs: 60_000,
+        });
+        return { b64: again.imageB64, mime: again.imageMime };
+      }
+      const out = await callGemini([{ text: promptText }]);
+      return out.b64 && out.mime ? { b64: out.b64, mime: out.mime } : null;
+    }
+
+    let rawResult: any = null;
+    if (backend === "higgsfield") {
+      // Higgsfield takes references as signed https urls rather than inline
+      // bytes, so the contentParts assembled above are not used on this path.
+      const { referenceUrls, brandGroundingMissing } = await resolveContextImageUrls(
+        {
+          design_references: resolvedRefs,
+          brand_book_file_path: resolvedBrandBookPath,
+          design_style_synthesis: resolvedSynthesis,
+        },
+        brandDb,
+      );
+      if (brandGroundingMissing) {
+        console.warn("[generate-post-image] brand book cannot cross to Higgsfield and there is no synthesis to stand in");
+      }
+      const rendered = await renderImageWithHiggsfield({
+        supabase: brandDb,
+        prompt: designPrompt,
+        aspectRatio,
+        referenceUrls,
+      });
+      imageB64 = rendered.imageB64;
+      imageMime = rendered.imageMime;
+      textResponse = rendered.textResponse;
+      renderedModel = rendered.model;
+      console.log("[generate-post-image] higgsfield rendered with", renderedModel, "credits before:", rendered.creditsBefore);
+    } else {
+      const out = await callGemini(contentParts);
+      imageB64 = out.b64;
+      imageMime = out.mime;
+      textResponse = out.text;
+      renderedModel = geminiModel;
+      rawResult = out.raw;
     }
 
     if (!imageB64) {
       return jsonResp(
         {
           error: "No image generated. The model may have refused the prompt or returned text only.",
-          details: textResponse || JSON.stringify(result).slice(0, 500),
+          details: textResponse || JSON.stringify(rawResult).slice(0, 500),
         },
         500,
       );
@@ -426,38 +493,19 @@ Deno.serve(async (req) => {
           });
           console.log("[generate-post-image] retry prompt (first 600 chars):", retryPrompt.slice(0, 600));
 
-          const retryParts: any[] = [{ text: retryPrompt }];
-          const retryResp = await fetch(apiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: retryParts }],
-              generationConfig: {
-                responseModalities: ["TEXT", "IMAGE"],
-                imageConfig: { aspectRatio, imageSize: "2K" },
-              },
-            }),
-          });
-
-          if (retryResp.ok) {
-            const retryResult = await retryResp.json();
-            for (const candidate of retryResult.candidates || []) {
-              for (const part of candidate.content?.parts || []) {
-                if (part.inlineData) {
-                  imageB64 = part.inlineData.data;
-                  imageMime = part.inlineData.mimeType || "image/png";
-                  wasRetried = true;
-                }
-              }
-            }
-            if (wasRetried) {
+          try {
+            const again = await renderFromPromptAlone(retryPrompt);
+            if (again) {
+              imageB64 = again.b64;
+              imageMime = again.mime;
+              wasRetried = true;
               console.log("[generate-post-image] retry produced a new image");
             } else {
               console.warn("[generate-post-image] retry returned no image; keeping original");
             }
-          } else {
-            const t = await retryResp.text().catch(() => "");
-            console.warn("[generate-post-image] retry failed:", retryResp.status, t.slice(0, 200));
+          } catch (e) {
+            // The first image is imperfect, not unusable. Keep it.
+            console.warn("[generate-post-image] retry failed; keeping original:", e instanceof Error ? e.message : e);
           }
         }
       } else {
@@ -476,8 +524,12 @@ Deno.serve(async (req) => {
       validation_reason: validationReason,
       brand_footing: footing.strong ? "strong" : footing.weak ? "weak" : "none",
       brand_advice: brandAdvice,
+      rendered_by: backend,
+      model: renderedModel,
     });
   } catch (err: any) {
+    if (err instanceof AuthzError) return jsonResp({ error: err.message }, err.status);
+    if (err instanceof HiggsfieldError) return jsonResp({ error: err.message }, 502);
     return jsonResp({ error: err.message }, 500);
   }
 });
