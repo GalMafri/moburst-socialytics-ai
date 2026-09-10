@@ -202,6 +202,7 @@ export type Database = {
           id: string
           language: string | null
           logo_url: string | null
+          media_backend: string
           name: string
           pillars_derived_at: string | null
           pillars_source: string | null
@@ -238,6 +239,7 @@ export type Database = {
           id?: string
           language?: string | null
           logo_url?: string | null
+          media_backend?: string
           name: string
           pillars_derived_at?: string | null
           pillars_source?: string | null
@@ -274,6 +276,7 @@ export type Database = {
           id?: string
           language?: string | null
           logo_url?: string | null
+          media_backend?: string
           name?: string
           pillars_derived_at?: string | null
           pillars_source?: string | null
@@ -775,6 +778,7 @@ export type Database = {
           account_email: string | null
           client_id: string | null
           expires_at: string | null
+          linked_at: string | null
           pending_started_at: string | null
           pending_state: string | null
           pending_verifier: string | null
@@ -787,6 +791,7 @@ export type Database = {
           account_email?: string | null
           client_id?: string | null
           expires_at?: string | null
+          linked_at?: string | null
           pending_started_at?: string | null
           pending_state?: string | null
           pending_verifier?: string | null
@@ -799,6 +804,7 @@ export type Database = {
           account_email?: string | null
           client_id?: string | null
           expires_at?: string | null
+          linked_at?: string | null
           pending_started_at?: string | null
           pending_state?: string | null
           pending_verifier?: string | null
