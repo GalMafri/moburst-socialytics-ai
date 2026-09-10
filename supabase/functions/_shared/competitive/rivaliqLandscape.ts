@@ -40,6 +40,8 @@ export interface LandscapeSummary {
   name: string;
   focus_company: string | null;
   is_match: boolean;
+  /** Why it matched, so the import screen can say so: "focus company", "website", "landscape name". */
+  match_reason: string | null;
   companies: Array<{
     id: string;
     name: string;
@@ -78,19 +80,66 @@ function namesOverlap(a: string, b: string): boolean {
   return !!x && !!y && (x.includes(y) || y.includes(x));
 }
 
-/** Summarize a landscape and flag whether its focus company (or its name) is this client. */
-export function summarizeLandscape(landscape: RivalIqLandscape, clientName: string): LandscapeSummary {
+/**
+ * The registrable part of a URL or bare domain: "https://www.Moburst.com/x"
+ * and "Moburst.com" both give "moburst".
+ *
+ * A landscape's focus company is often stored with a suffix the client row
+ * does not have ("Moburst Ltd", "Bader Law LLC") or the other way round, and
+ * some are stored as the website. Matching the domain stem catches every one
+ * of those, which matching names alone does not.
+ */
+export function domainStem(value: string | null | undefined): string {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  const host = raw
+    .replace(/^[a-z]+:\/\//, "")
+    .replace(/^www\./, "")
+    .split(/[/?#]/)[0];
+  if (!host.includes(".")) return "";
+  const parts = host.split(".").filter(Boolean);
+  // Drop the TLD, and a country code behind it (.co.uk).
+  while (parts.length > 1 && parts[parts.length - 1].length <= 3) parts.pop();
+  return parts[parts.length - 1] || "";
+}
+
+/**
+ * Summarize a landscape and say whether it belongs to this client.
+ *
+ * Three ways it can: the focus company's name, the focus company's website,
+ * or the landscape's own name. The website is the reliable one — RivalIQ
+ * companies are named however whoever built the landscape typed them, and
+ * "Moburst" against a focus company called "Moburst Ltd." or a landscape
+ * whose focus is stored as moburst.com used to come back as no match at all,
+ * which is what left a client with an empty import screen.
+ */
+export function summarizeLandscape(
+  landscape: RivalIqLandscape,
+  clientName: string,
+  clientWebsite?: string | null,
+): LandscapeSummary {
   const companies = landscape.companies || [];
   const focus = companies.find((c) => String(c.id) === String(landscape.focusCompanyId ?? ""));
   const focusName = focus?.name || null;
-  const isMatch =
-    (!!focusName && namesOverlap(focusName, clientName)) ||
-    namesOverlap(String(landscape.name || ""), clientName);
+  const clientStem = domainStem(clientWebsite) || domainStem(clientName);
+  const focusStem = domainStem(focus?.url) || domainStem(focusName);
+  let matchReason: string | null = null;
+  if (!!focusName && namesOverlap(focusName, clientName)) matchReason = "focus company";
+  else if (!!clientStem && clientStem === focusStem) matchReason = "website";
+  else if (namesOverlap(String(landscape.name || ""), clientName)) matchReason = "landscape name";
+  else if (
+    !!clientStem &&
+    companies.some((c) => domainStem(c.url) === clientStem || namesOverlap(String(c.name || ""), clientName))
+  ) {
+    // The client is in the landscape but is not its focus company. Still theirs.
+    matchReason = "client is in the set";
+  }
   return {
     id: String(landscape.id),
     name: String(landscape.name || landscape.id),
     focus_company: focusName,
-    is_match: isMatch,
+    is_match: matchReason !== null,
+    match_reason: matchReason,
     companies: companies.map((c) => ({
       id: String(c.id),
       name: String(c.name || c.id),
@@ -102,8 +151,12 @@ export function summarizeLandscape(landscape: RivalIqLandscape, clientName: stri
 }
 
 /** All landscapes summarized, matches first, then alphabetical. */
-export function summarizeLandscapes(landscapes: RivalIqLandscape[], clientName: string): LandscapeSummary[] {
+export function summarizeLandscapes(
+  landscapes: RivalIqLandscape[],
+  clientName: string,
+  clientWebsite?: string | null,
+): LandscapeSummary[] {
   return landscapes
-    .map((l) => summarizeLandscape(l, clientName))
+    .map((l) => summarizeLandscape(l, clientName, clientWebsite))
     .sort((a, b) => Number(b.is_match) - Number(a.is_match) || a.name.localeCompare(b.name));
 }

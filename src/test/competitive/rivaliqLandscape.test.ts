@@ -1,47 +1,78 @@
-import { describe, it, expect } from "vitest";
-import {
-  companyToHandles,
-  summarizeLandscapes,
-} from "../../../supabase/functions/_shared/competitive/rivaliqLandscape";
+import { describe, expect, it } from "vitest";
+import { domainStem, summarizeLandscapes } from "../../../supabase/functions/_shared/competitive/rivaliqLandscape";
 
-const bader = {
-  id: 1916178, name: "Bader Law", url: "https://baderlaw.com/",
-  twitter: { handle: "baderscottlaw", url: "https://twitter.com/baderscottlaw" },
-  instagram: { handle: "baderlawllc", url: "https://instagram.com/baderlawllc" },
-  tikTok: { handle: "baderlawllc", url: "https://www.tiktok.com/baderlawllc" },
-  youTube: { url: "https://www.youtube.com/channel/UCdoYEfeglHyYbIhOgQYK2Eg", nativeId: "UCdoYEfeglHyYbIhOgQYK2Eg" },
-};
-const montlick = { id: 1955974, name: "Montlick", url: "https://www.montlick.com/", facebook: { handle: "montlicklaw", url: "https://facebook.com/1" } };
+const landscape = (over: any) => ({
+  id: over.id ?? 1,
+  name: over.name ?? "TIER 1 Competitors",
+  focusCompanyId: over.focusCompanyId ?? 10,
+  companies: over.companies ?? [],
+});
 
-describe("companyToHandles", () => {
-  it("maps RivalIQ social objects to app platforms, twitter→x, youtube→channel id", () => {
-    const h = companyToHandles(bader);
-    expect(h).toContainEqual({ platform: "x", handle: "baderscottlaw", profile_url: "https://twitter.com/baderscottlaw" });
-    expect(h).toContainEqual({ platform: "tiktok", handle: "baderlawllc", profile_url: "https://www.tiktok.com/baderlawllc" });
-    expect(h.find((x) => x.platform === "youtube")?.handle).toBe("UCdoYEfeglHyYbIhOgQYK2Eg");
-    expect(h.find((x) => x.platform === "facebook")).toBeUndefined();
+describe("domainStem", () => {
+  it("reduces a URL or a bare domain to the same stem", () => {
+    expect(domainStem("https://www.Moburst.com/about")).toBe("moburst");
+    expect(domainStem("Moburst.com")).toBe("moburst");
+    expect(domainStem("https://baderlaw.com/")).toBe("baderlaw");
+    expect(domainStem("montlick.co.uk")).toBe("montlick");
+  });
+  it("is empty for something that is not a domain", () => {
+    expect(domainStem("Bader Law")).toBe("");
+    expect(domainStem("")).toBe("");
+    expect(domainStem(null)).toBe("");
   });
 });
 
 describe("summarizeLandscapes", () => {
-  const landscapes = [
-    { id: 612909, name: "Subliy", focusCompanyId: 1, companies: [{ id: 1, name: "Jobber" }] },
-    { id: 587596, name: "TIER 1 Competitors", focusCompanyId: 1916178, companies: [bader, montlick] },
-  ];
-
-  it("matches a client through the focus company, not the landscape name", () => {
-    const out = summarizeLandscapes(landscapes, "Bader Law");
-    expect(out[0].id).toBe("587596");
+  it("matches on the focus company's website when the names differ", () => {
+    // The live failure: client "Moburst" (Moburst.com), focus company "Moburst Ltd."
+    const out = summarizeLandscapes(
+      [landscape({ companies: [{ id: 10, name: "Moburst Ltd.", url: "https://moburst.com/" }] })],
+      "Moburst",
+      "Moburst.com",
+    );
     expect(out[0].is_match).toBe(true);
-    expect(out[0].focus_company).toBe("Bader Law");
-    expect(out[1].is_match).toBe(false);
+    expect(out[0].match_reason).toBe("focus company");
   });
 
-  it("marks the focus company and carries handles per company", () => {
-    const tier1 = summarizeLandscapes(landscapes, "Bader Law")[0];
-    expect(tier1.companies.find((c) => c.name === "Bader Law")?.is_focus).toBe(true);
-    expect(tier1.companies.find((c) => c.name === "Montlick")?.handles).toEqual([
-      { platform: "facebook", handle: "montlicklaw", profile_url: "https://facebook.com/1" },
-    ]);
+  it("matches when the focus company is stored as a bare domain", () => {
+    const out = summarizeLandscapes(
+      [landscape({ companies: [{ id: 10, name: "mbrst", url: "https://www.moburst.com" }] })],
+      "Moburst",
+      "Moburst.com",
+    );
+    expect(out[0].is_match).toBe(true);
+    expect(out[0].match_reason).toBe("website");
+  });
+
+  it("still claims a landscape where the client is tracked but is not the focus", () => {
+    const out = summarizeLandscapes(
+      [landscape({ focusCompanyId: 99, companies: [{ id: 99, name: "Rival Co", url: "https://rival.com" }, { id: 10, name: "Moburst", url: "https://moburst.com" }] })],
+      "Moburst",
+      "Moburst.com",
+    );
+    expect(out[0].is_match).toBe(true);
+    expect(out[0].match_reason).toBe("client is in the set");
+  });
+
+  it("does not claim someone else's landscape", () => {
+    const out = summarizeLandscapes(
+      [landscape({ companies: [{ id: 10, name: "Bader Law", url: "https://baderlaw.com/" }] })],
+      "Moburst",
+      "Moburst.com",
+    );
+    expect(out[0].is_match).toBe(false);
+    expect(out[0].match_reason).toBeNull();
+  });
+
+  it("puts the client's own landscapes first", () => {
+    const out = summarizeLandscapes(
+      [
+        landscape({ id: 1, name: "Z others", companies: [{ id: 10, name: "Bader Law", url: "https://baderlaw.com" }] }),
+        landscape({ id: 2, name: "A ours", companies: [{ id: 10, name: "Moburst", url: "https://moburst.com" }] }),
+      ],
+      "Moburst",
+      "Moburst.com",
+    );
+    expect(out[0].id).toBe("2");
   });
 });

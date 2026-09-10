@@ -75,13 +75,19 @@ Deno.serve(async (req) => {
       if (gamma_url !== undefined) updates.gamma_url = gamma_url;
       if (duration_minutes !== undefined) updates.duration_minutes = duration_minutes;
 
-      const { data, error } = await supabase
-        .from("competitive_reports")
-        .update(updates)
-        .eq("id", report_id)
-        .select("id, status");
+      // A finished report is never downgraded. Every error output in the
+      // workflow lands in one "Mark Report Failed" node, including the error
+      // output of the POST that writes the finished report — so a timeout on
+      // a successful writeback used to replace a complete report with an
+      // error stub.
+      let query = supabase.from("competitive_reports").update(updates).eq("id", report_id);
+      if (status === "failed") query = query.neq("status", "complete");
+      const { data, error } = await query.select("id, status");
       if (error) throw new Error(error.message);
-      if (!data || data.length === 0) return jsonResp({ error: "report not found" }, 404);
+      if (!data || data.length === 0) {
+        if (status === "failed") return jsonResp({ ok: true, skipped: "report already complete" });
+        return jsonResp({ error: "report not found" }, 404);
+      }
 
       // Keep the set's lifecycle in step with its latest run. A successful run
       // supersedes an earlier failure (sets are re-runnable by design), so

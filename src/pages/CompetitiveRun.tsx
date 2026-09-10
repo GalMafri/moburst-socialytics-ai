@@ -150,7 +150,7 @@ export default function CompetitiveRun() {
 
           const { data } = await supabase
             .from("competitive_reports")
-            .select("status, gamma_url")
+            .select("status, gamma_url, report_data")
             .eq("id", rId)
             .maybeSingle();
 
@@ -171,7 +171,10 @@ export default function CompetitiveRun() {
               client_id: id, entity_id: rId, stage: "server", ok: false, error_code: "server_failed",
               duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
             });
-            setError("Analysis failed on the server. Check the n8n execution logs.");
+            // The workflow records why it stopped; showing it beats sending
+            // someone to the execution log for a reason we already hold.
+            const why = String((data as any)?.report_data?.error || "").trim();
+            setError(why ? `Analysis failed: ${why}` : "Analysis failed on the server, with no reason recorded.");
             refetchRuns();
           }
         } catch {
@@ -204,6 +207,22 @@ export default function CompetitiveRun() {
         throw new Error(
           "The competitive analysis workflow is not configured yet (app_settings.competitive_n8n_webhook_url). " +
             "It goes live with the Rival IQ integration.",
+        );
+      }
+
+      // The analysis reads a RivalIQ landscape, not the app's competitor set.
+      // A client with no landscape used to spend a run to be told so by a
+      // JavaScript error inside the workflow, so the check happens here.
+      const { data: landscapes } = await supabase.functions.invoke("import-rivaliq-landscape", {
+        body: { client_id: id, mode: "list" },
+      });
+      const available: Array<{ id: string; name: string; is_match?: boolean }> = landscapes?.landscapes || [];
+      const wanted = (confirmedSet as any).rivaliq_landscape_id
+        ? available.find((l) => String(l.id) === String((confirmedSet as any).rivaliq_landscape_id))
+        : available.find((l) => l.is_match);
+      if (available.length > 0 && !wanted) {
+        throw new Error(
+          `No RivalIQ landscape tracks ${client!.name}. Create one in RivalIQ with ${client!.name} as the focus company, then import it on the Competitors screen. The analysis reads the landscape, not the competitor list here.`,
         );
       }
 

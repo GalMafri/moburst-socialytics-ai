@@ -22,6 +22,66 @@ interface ExportOptions {
   title?: string;
 }
 
+/**
+ * Lays out the tab panels that are not on screen, so their charts exist
+ * before the clone is taken.
+ *
+ * A Radix panel that is not selected is `display: none`, and a Recharts
+ * chart inside one measures 0×0 and renders nothing at all — which is why
+ * the Analytics PDF came out with the active tab's charts and blank space
+ * where the others should be. Giving the panels a real width and height
+ * off-flow (absolutely positioned, invisible) makes them measure. Anything
+ * with no size — display:none, height:0, a zero-width wrapper — does not.
+ *
+ * Returns a function that puts the page back.
+ */
+async function layOutHiddenPanels(root: HTMLElement): Promise<() => void> {
+  const panels = Array.from(root.querySelectorAll('[role="tabpanel"][data-state="inactive"]')) as HTMLElement[];
+  if (panels.length === 0) return () => {};
+  const style = document.createElement("style");
+  style.dataset.pdfMeasure = "true";
+  style.textContent = `
+    [data-pdf-measure-root] { position: relative !important; }
+    [data-pdf-measure] {
+      display: block !important;
+      position: absolute !important;
+      left: 0; top: 0;
+      width: 100%;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }`;
+  document.head.appendChild(style);
+  const marked: HTMLElement[] = [];
+  for (const panel of panels) {
+    panel.setAttribute("data-pdf-measure", "");
+    marked.push(panel);
+    const holder = panel.parentElement;
+    if (holder && !holder.hasAttribute("data-pdf-measure-root")) {
+      holder.setAttribute("data-pdf-measure-root", "");
+      marked.push(holder);
+    }
+  }
+  const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+  await frame();
+  await frame();
+  // Charts mount asynchronously; wait until their count stops growing, and
+  // never longer than a second — a missing chart is better than a hang.
+  let previous = -1;
+  for (let i = 0; i < 10; i++) {
+    const count = root.querySelectorAll(".recharts-surface").length;
+    if (count === previous) break;
+    previous = count;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return () => {
+    for (const el of marked) {
+      el.removeAttribute("data-pdf-measure");
+      el.removeAttribute("data-pdf-measure-root");
+    }
+    style.remove();
+  };
+}
+
 export async function exportReportToPdf({ contentRef, filename, title }: ExportOptions): Promise<void> {
   if (!contentRef.current) throw new Error("No content to export");
 
@@ -31,7 +91,17 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   }
 
   // ── 1. Clone + expand all tab panels ──
-  const content = contentRef.current.cloneNode(true) as HTMLElement;
+  const restorePanels = await layOutHiddenPanels(contentRef.current);
+  let content: HTMLElement;
+  try {
+    content = contentRef.current.cloneNode(true) as HTMLElement;
+  } finally {
+    restorePanels();
+  }
+  content.querySelectorAll("[data-pdf-measure], [data-pdf-measure-root]").forEach((el) => {
+    el.removeAttribute("data-pdf-measure");
+    el.removeAttribute("data-pdf-measure-root");
+  });
 
   // On-screen controls have no meaning on paper: navigation, export, filter
   // chips and feedback toggles all print as dead buttons. Anything the page
@@ -90,9 +160,12 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
        DARK THEME HARDENING — prevents Chrome from rendering a white page
        ═══════════════════════════════════════════════════════════════════ */
 
+    /* The margin belongs to the page, not the wrapper: .pdf-root's padding
+       only lands on the first and last fragment, so pages 2..n used to run
+       to the paper edge. */
     @page {
       size: auto;
-      margin: 0;
+      margin: 12mm 10mm;
     }
 
     :root, html, body {
@@ -114,7 +187,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     .pdf-root {
       background: #0b0c10 !important;
       color: #ffffff !important;
-      padding: 24px 40px !important;
+      padding: 0 !important;
       min-height: 100vh;
       font-family: "Geist", "Inter", system-ui, -apple-system, sans-serif !important;
       -webkit-print-color-adjust: exact !important;
@@ -123,6 +196,11 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     .pdf-root * {
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
+    }
+    /* The default hairline, minus the accent surfaces: the client's own card
+       is told apart from a competitor's by its lime edge, and a blanket
+       border-colour here used to erase it. */
+    .pdf-root *:not([class*="glass-accent"]) {
       border-color: rgba(255, 255, 255, 0.05);
     }
 
@@ -130,6 +208,15 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
        The live app uses overflow: hidden and fixed heights for scroll areas
        (report pages, trend grids, etc). In print we want EVERYTHING to flow
        naturally so nothing is clipped. */
+    /* The glass surfaces are the real clipping boxes: .glass sets
+       overflow:hidden, which both cuts wide content at the card edge and
+       makes a tall card monolithic, so the engine drops its overflow instead
+       of paging it. The Tailwind selectors below never matched them, because
+       "glass text-card-foreground" contains no "overflow-". */
+    .pdf-root .glass,
+    .pdf-root .glass-inner,
+    .pdf-root .glass-accent,
+    .pdf-root .glass-elevated,
     .pdf-root [class*="overflow-"],
     .pdf-root .overflow-hidden,
     .pdf-root .overflow-x-auto,
@@ -185,9 +272,8 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       --primary-foreground: 0 0% 0%;
     }
 
-    .pdf-root [data-slot="card"],
-    .pdf-root .glass,
-    .pdf-root .rounded-lg.border {
+    .pdf-root .glass:not(.glass-accent),
+    .pdf-root .rounded-lg.border:not([class*="glass-accent"]) {
       border: 1px solid rgba(255, 255, 255, 0.08) !important;
       border-top-color: rgba(255, 255, 255, 0.14) !important;
       background: rgba(26, 29, 35, 0.85) !important;
@@ -229,6 +315,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     .pdf-root p, .pdf-root span, .pdf-root div,
     .pdf-root td, .pdf-root th, .pdf-root li { color: inherit; }
 
+    .pdf-root .rounded-full.border,
     .pdf-root [data-slot="badge"] {
       display: inline-flex !important;
       padding: 2px 8px !important;
@@ -278,13 +365,40 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
 
     .pdf-root h2, .pdf-root h3 { break-after: avoid; }
 
+    .pdf-root .pdf-title {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin: 0 0 16px;
+      color: #ffffff !important;
+    }
+
     .pdf-root .animate-pulse, .pdf-root .animate-slide-up { animation: none !important; }
 
+    /* A backdrop-filtered box cannot be fragmented, so every glass level
+       loses the filter — including the bare accent divs that carry no Card. */
     .pdf-root .glass,
     .pdf-root .glass-inner,
+    .pdf-root .glass-accent,
     .pdf-root .glass-elevated {
       backdrop-filter: none !important;
       -webkit-backdrop-filter: none !important;
+    }
+
+    /* Recharts writes measured pixels into the DOM (inline width/height on
+       the wrapper and width/height attributes on the svg), so a chart
+       measured at 1200px on screen lands inside a ~730px page. The svg has a
+       viewBox, so width:100% + height:auto rescales it; the wrapper div has
+       to be reset too or its inline width still drives the layout. */
+    .pdf-root .recharts-responsive-container,
+    .pdf-root .recharts-wrapper {
+      width: 100% !important;
+      max-width: 100% !important;
+      height: auto !important;
+    }
+    .pdf-root svg.recharts-surface {
+      width: 100% !important;
+      height: auto !important;
     }
 
     .pdf-root a { color: #b9e045 !important; }
@@ -299,7 +413,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
        it to a fresh page and then split it anyway, wasting the page it left. So
        the repeating units are protected and the containers are free to flow. */
     article, .glass-inner, .glass-accent { break-inside: avoid; page-break-inside: avoid; }
-    section, .pdf-root > .glass, [data-slot="card"] { break-inside: auto; page-break-inside: auto; }
+    section, .pdf-root .glass { break-inside: auto; page-break-inside: auto; }
     /* A heading never ends a page on its own. */
     h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
     .animate-slide-up, .stagger-children > * { animation: none !important; opacity: 1 !important; transform: none !important; }
@@ -314,6 +428,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
 </head>
 <body>
   <div class="pdf-root">
+    ${title ? `<h1 class="pdf-title">${escapeHtml(title)}</h1>` : ""}
     ${content.outerHTML}
   </div>
   <script>

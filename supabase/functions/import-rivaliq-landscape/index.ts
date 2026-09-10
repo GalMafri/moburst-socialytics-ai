@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: client, error: clientErr } = await supabase
-      .from("clients").select("id, name").eq("id", client_id).maybeSingle();
+      .from("clients").select("id, name, website_url").eq("id", client_id).maybeSingle();
     if (clientErr || !client) return jsonResp({ error: "Client not found" }, 404);
 
     const resp = await fetch(`https://api.rivaliq.com/v3/landscapes?apiKey=${encodeURIComponent(apiKey)}`);
@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
       return jsonResp({ error: `RivalIQ ${resp.status}: ${text.slice(0, 200)}` }, 502);
     }
     const body = await resp.json();
-    const summaries = summarizeLandscapes(body.landscapes || [], client.name);
+    const summaries = summarizeLandscapes(body.landscapes || [], client.name, (client as any).website_url);
 
     if (mode === "list") return jsonResp({ client: client.name, landscapes: summaries });
 

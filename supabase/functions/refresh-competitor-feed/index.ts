@@ -8,6 +8,7 @@
 // week by trigger-scheduled-reports (shared secret).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
@@ -95,7 +96,7 @@ Deno.serve(async (req) => {
     if (!clientId) return json({ error: "client_id is required" }, 400);
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { data: client } = await admin.from("clients").select("id, name").eq("id", clientId).maybeSingle();
+    const { data: client } = await admin.from("clients").select("id, name, website_url").eq("id", clientId).maybeSingle();
     if (!client) return json({ error: "Client not found" }, 404);
     const key = Deno.env.get("RIVALIQ_API_KEY");
     if (!key) return json({ error: "RIVALIQ_API_KEY is not configured" }, 500);
@@ -112,15 +113,14 @@ Deno.serve(async (req) => {
       .maybeSingle();
     let landscapeId = set?.rivaliq_landscape_id ? String(set.rivaliq_landscape_id) : null;
     if (!landscapeId) {
+      // Same resolution the import screen and the analysis workflow use:
+      // focus-company name, then website, then landscape name. Matching on
+      // the name alone missed clients whose RivalIQ company carries a suffix
+      // or is stored as a domain.
       const list = await rivaliq("/landscapes", key);
-      const needle = String(client.name).toLowerCase();
-      const match = (list.landscapes || []).find((l: any) => {
-        const focus = (l.companies || []).find((c: any) => String(c.id) === String(l.focusCompanyId));
-        const fn = String(focus?.name || "").toLowerCase();
-        return fn && (fn.includes(needle) || needle.includes(fn));
-      });
-      if (!match) return json({ error: `No RivalIQ landscape has ${client.name} as its focus company.` }, 422);
-      landscapeId = String(match.id);
+      const match = summarizeLandscapes(list.landscapes || [], client.name, (client as any).website_url).find((l) => l.is_match);
+      if (!match) return json({ error: `No RivalIQ landscape tracks ${client.name}. Import or create one first.` }, 422);
+      landscapeId = match.id;
     }
 
     const days = Math.min(30, Math.max(1, Number(body.days) || 7));
