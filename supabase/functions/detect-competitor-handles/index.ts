@@ -217,6 +217,20 @@ Deno.serve(async (req) => {
 
     const results: Array<{ competitor_id: string; detected: DetectedHandle[] }> = [];
 
+    // Handles a person entered. These are never overwritten by a refresh.
+    const manual = new Set<string>();
+    {
+      const ids = competitors.map((c: any) => c.id);
+      if (ids.length > 0) {
+        const { data: rows } = await supabase
+          .from("competitor_handles")
+          .select("competitor_id, platform, source")
+          .in("competitor_id", ids)
+          .eq("source", "manual");
+        for (const r of rows || []) manual.add(`${r.competitor_id}:${r.platform}`);
+      }
+    }
+
     // Serial on purpose: target sites are third parties, and a review set is
     // at most ~12 rows. Parallel fan-out buys seconds and risks rate limiting.
     for (const comp of competitors) {
@@ -228,6 +242,10 @@ Deno.serve(async (req) => {
 
       for (const h of detected) {
         if (refresh) {
+          // A refresh replaces what the scraper found before, and leaves
+          // alone what a person typed: correcting a wrong handle used to
+          // last only until the next refresh overwrote it.
+          if (manual.has(`${comp.id}:${h.platform}`)) continue;
           await supabase.from("competitor_handles").upsert(
             {
               competitor_id: comp.id,
@@ -238,6 +256,7 @@ Deno.serve(async (req) => {
               is_active: true,
               detection_confidence: 0.9,
               detected_at: new Date().toISOString(),
+              source: "auto",
             },
             { onConflict: "competitor_id,platform" },
           );
@@ -252,6 +271,7 @@ Deno.serve(async (req) => {
               profile_url: h.profile_url,
               is_active: true,
               detection_confidence: 0.9,
+              source: "auto",
             },
             { onConflict: "competitor_id,platform", ignoreDuplicates: true },
           );

@@ -11,6 +11,7 @@
 // creates a fresh draft set and leaves history behind (sets are cheap rows).
 
 import { useMemo, useState } from "react";
+import { classifyProfileUrl } from "@/lib/profileUrl";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,7 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
-import { PlatformBadge } from "@/lib/platform-config";
+import { PlatformBadge, prettyPlatformName } from "@/lib/platform-config";
 import { describeInvokeError } from "@/lib/invokeError";
 import { displayCompanyName } from "@/lib/companyName";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -107,6 +108,10 @@ export default function CompetitorReview() {
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [detectingId, setDetectingId] = useState<string | null>(null);
+  const [detectProgress, setDetectProgress] = useState<{ done: number; total: number } | null>(null);
+  const [addingHandleFor, setAddingHandleFor] = useState<string | null>(null);
+  const [newHandlePlatform, setNewHandlePlatform] = useState("instagram");
+  const [newHandle, setNewHandle] = useState("");
   const [manualName, setManualName] = useState("");
   const [manualUrl, setManualUrl] = useState("");
   // RivalIQ import: the agency's landscapes are the curated competitor sets.
@@ -271,18 +276,11 @@ export default function CompetitorReview() {
       // Driving the loop from here keeps every call small, and handles
       // appear row by row as they land.
       setDetecting(true);
-      let detectFailures = 0;
-      for (const comp of data.competitors || []) {
-        const det = await supabase.functions.invoke("detect-competitor-handles", {
-          body: { competitor_id: comp.id },
-        });
-        if (det.error || det.data?.error) detectFailures++;
-        refreshAll();
-      }
-      if (detectFailures > 0) {
+      const { empty } = await detectForAll(data.competitors || []);
+      if (empty.length > 0) {
         toast({
-          title: "Some handle detections failed",
-          description: `${detectFailures} competitor site(s) could not be read — add or re-detect those handles manually.`,
+          title: `${empty.length} of ${(data.competitors || []).length} still have no handles`,
+          description: "Two passes found nothing on those sites. Add the handle by hand on the row.",
         });
       }
     } catch (err: any) {
@@ -294,6 +292,57 @@ export default function CompetitorReview() {
       setIdentifying(false);
       setDetecting(false);
     }
+  };
+
+  /**
+   * Find handles for a whole set, in one go.
+   *
+   * Four at a time rather than one after another (twelve sites serially took
+   * minutes), and anything that comes back empty is tried once more before
+   * anyone is told about it: a site that was slow, rendering its footer in
+   * JavaScript, or refusing the first request usually answers the second.
+   * Nobody should have to press "look again" on a brand that plainly has
+   * social profiles.
+   */
+  const detectForAll = async (
+    comps: Array<{ id: string; name?: string }>,
+    opts: { refresh?: boolean } = {},
+  ): Promise<{ empty: string[] }> => {
+    const BATCH = 4;
+    const runOne = async (id: string) => {
+      try {
+        const { data, error } = await supabase.functions.invoke("detect-competitor-handles", {
+          body: { competitor_id: id, refresh: opts.refresh === true },
+        });
+        if (error || data?.error) return { id, found: 0 };
+        return { id, found: (data?.results?.[0]?.detected || []).length };
+      } catch {
+        return { id, found: 0 };
+      }
+    };
+
+    const sweep = async (ids: string[]) => {
+      const results: Array<{ id: string; found: number }> = [];
+      for (let i = 0; i < ids.length; i += BATCH) {
+        results.push(...(await Promise.all(ids.slice(i, i + BATCH).map(runOne))));
+        setDetectProgress({ done: Math.min(i + BATCH, ids.length), total: ids.length });
+        refreshAll();
+      }
+      return results;
+    };
+
+    const ids = comps.map((c) => c.id);
+    setDetectProgress({ done: 0, total: ids.length });
+    const first = await sweep(ids);
+    let empty = first.filter((r) => r.found === 0).map((r) => r.id);
+    if (empty.length > 0) {
+      // The second pass always refreshes: the first pass may have written
+      // nothing, and a gap-fill upsert would skip a site that now answers.
+      const second = await sweep(empty);
+      empty = second.filter((r) => r.found === 0).map((r) => r.id);
+    }
+    setDetectProgress(null);
+    return { empty };
   };
 
   /**
@@ -328,18 +377,10 @@ export default function CompetitorReview() {
     if (!currentSet || !competitors) return;
     setDetecting(true);
     try {
-      // Same one-per-call pacing as the identify flow (150s gateway cap).
-      let failures = 0;
-      for (const comp of competitors) {
-        const { data, error } = await supabase.functions.invoke("detect-competitor-handles", {
-          body: { competitor_id: comp.id, refresh: true },
-        });
-        if (error || data?.error) failures++;
-        refreshAll();
-      }
+      const { empty } = await detectForAll(competitors, { refresh: true });
       toast({
-        title: failures === 0 ? "Handles refreshed" : "Handles refreshed with gaps",
-        description: failures > 0 ? `${failures} site(s) could not be read.` : undefined,
+        title: empty.length === 0 ? "Handles refreshed" : "Handles refreshed with gaps",
+        description: empty.length > 0 ? `${empty.length} site(s) gave nothing after two passes.` : undefined,
       });
     } catch (err: any) {
       toast({ title: "Detection failed", description: err.message, variant: "destructive" });
@@ -387,6 +428,56 @@ export default function CompetitorReview() {
       refreshAll();
     },
     onError: (err: any) => toast({ title: "Could not add competitor", description: err.message, variant: "destructive" }),
+  });
+
+  /**
+   * A handle typed by a person.
+   *
+   * The detector is good but not perfect, and a wrong or missing handle used
+   * to be unfixable: the run sent whatever the scraper decided. These rows
+   * are marked manual, and a re-detect leaves them alone.
+   */
+  const addHandle = useMutation({
+    mutationFn: async ({ competitorId }: { competitorId: string }) => {
+      const raw = newHandle.trim();
+      if (!raw) throw new Error("Enter a handle or a profile URL");
+      // A pasted profile URL is read for its handle; anything else is taken
+      // as the handle itself.
+      const fromUrl = classifyProfileUrl(raw);
+      const platform = fromUrl?.platform || newHandlePlatform;
+      const handle = (fromUrl?.handle || raw).replace(/^@/, "").trim();
+      if (!handle) throw new Error("That does not look like a handle");
+      const { error } = await supabase.from("competitor_handles").upsert(
+        {
+          competitor_id: competitorId,
+          client_id: clientId!,
+          platform,
+          handle,
+          profile_url: fromUrl?.profile_url || null,
+          is_active: true,
+          detection_confidence: 1,
+          source: "manual",
+        } as any,
+        { onConflict: "competitor_id,platform" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setNewHandle("");
+      setAddingHandleFor(null);
+      refreshAll();
+      toast({ title: "Handle saved", description: "A re-detect will leave it alone." });
+    },
+    onError: (e: any) => toast({ title: "Could not save the handle", description: e.message, variant: "destructive" }),
+  });
+
+  const removeHandle = useMutation({
+    mutationFn: async (handleId: string) => {
+      const { error } = await supabase.from("competitor_handles").delete().eq("id", handleId);
+      if (error) throw error;
+    },
+    onSuccess: () => refreshAll(),
+    onError: (e: any) => toast({ title: "Could not remove the handle", description: e.message, variant: "destructive" }),
   });
 
   const removeCompetitor = useMutation({
@@ -680,28 +771,80 @@ export default function CompetitorReview() {
                         )}
                         {c.rationale && <p className="t-secondary mt-1">{c.rationale}</p>}
                         <div className="flex gap-1 mt-2 flex-wrap">
-                          {compHandles.length > 0 ? (
-                            compHandles.map((h) => (
-                              <a key={h.id} href={h.profile_url || undefined} target="_blank" rel="noreferrer" className="inline-flex items-center min-h-[24px]">
+                          {compHandles.map((h) => (
+                            <span key={h.id} className="inline-flex items-center gap-1">
+                              <a href={h.profile_url || undefined} target="_blank" rel="noreferrer" className="inline-flex items-center min-h-[24px]" title={`@${h.handle}`}>
                                 <PlatformBadge platform={h.platform} size="sm" />
                               </a>
-                            ))
-                          ) : (
+                              {isDraft && (
+                                <button
+                                  type="button"
+                                  aria-label={`Remove the ${h.platform} handle @${h.handle}`}
+                                  title={`Remove @${h.handle}`}
+                                  onClick={() => removeHandle.mutate(h.id)}
+                                  className="text-muted-foreground hover:text-destructive leading-none px-0.5"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                          {compHandles.length === 0 && (
+                            <span className="t-label text-amber-500/80 inline-flex items-center gap-1.5">
+                              {detectingId === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
+                              {detectingId === c.id ? "Looking…" : "No handles found"}
+                            </span>
+                          )}
+                          {isDraft && (
+                            <button
+                              type="button"
+                              onClick={() => setAddingHandleFor(addingHandleFor === c.id ? null : c.id)}
+                              className="t-label text-muted-foreground hover:text-white inline-flex items-center gap-1 min-h-[24px]"
+                            >
+                              <Plus className="h-3 w-3" /> Add
+                            </button>
+                          )}
+                          {compHandles.length === 0 && isDraft && (
                             <button
                               type="button"
                               onClick={() => detectOne(c.id)}
-                              disabled={detectingId === c.id || !isDraft}
-                              className="t-label !text-amber-500/80 hover:!text-white inline-flex items-center gap-1.5 disabled:opacity-60"
+                              disabled={detectingId === c.id}
+                              className="t-label text-muted-foreground hover:text-white inline-flex items-center gap-1 min-h-[24px] disabled:opacity-60"
                             >
-                              {detectingId === c.id ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <Search className="h-3 w-3" />
-                              )}
-                              {detectingId === c.id ? "Looking for handles…" : "No handles found — look again"}
+                              <Search className="h-3 w-3" /> Look again
                             </button>
                           )}
                         </div>
+                        {addingHandleFor === c.id && isDraft && (
+                          <div className="flex items-center gap-2 mt-2 flex-wrap">
+                            <select
+                              aria-label="Platform"
+                              value={newHandlePlatform}
+                              onChange={(e) => setNewHandlePlatform(e.target.value)}
+                              className="input-glass rounded-md h-9 px-2 t-label"
+                            >
+                              {["instagram", "facebook", "tiktok", "linkedin", "youtube", "x"].map((p) => (
+                                <option key={p} value={p}>{prettyPlatformName(p)}</option>
+                              ))}
+                            </select>
+                            <Input
+                              aria-label="Handle"
+                              value={newHandle}
+                              onChange={(e) => setNewHandle(e.target.value)}
+                              placeholder="handle, or paste the profile URL"
+                              className="h-9 w-64"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  addHandle.mutate({ competitorId: c.id });
+                                }
+                              }}
+                            />
+                            <Button size="sm" onClick={() => addHandle.mutate({ competitorId: c.id })} disabled={addHandle.isPending || !newHandle.trim()}>
+                              Save handle
+                            </Button>
+                          </div>
+                        )}
                       </div>
                       {isDraft && (
                         <div className="flex items-center gap-1 shrink-0">

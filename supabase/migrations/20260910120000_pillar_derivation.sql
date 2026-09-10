@@ -21,3 +21,9 @@ alter table public.clients add column if not exists pillars_source text;
 alter table public.clients add column if not exists harvested_design_references jsonb not null default '[]'::jsonb;
 alter table public.clients add column if not exists design_refs_harvested_at timestamptz;
 comment on column public.clients.harvested_design_references is 'Auto-pulled from the client''s own RivalIQ focus-company posts, weekly. Kept apart from design_references so a harvest never overwrites what staff uploaded.';
+
+-- Who put a handle there. A re-detect overwrites what the scraper found and
+-- leaves alone what a person typed; without this, correcting a wrong handle
+-- lasted until the next refresh.
+alter table public.competitor_handles add column if not exists source text not null default 'auto';
+comment on column public.competitor_handles.source is 'auto = found by detect-competitor-handles; manual = entered by a person. A refresh never overwrites a manual row.';
