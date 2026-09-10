@@ -33,3 +33,18 @@ describe("platform helpers still behave", () => {
     expect(platformLabel("tiktok")).toBe("TikTok");
   });
 });
+
+describe("prettyPlatformName on Sprout's raw network types", () => {
+  it("turns the network_type a Sprout profile carries into a readable name", async () => {
+    const { prettyPlatformName } = await import("@/lib/platform-config");
+    expect(prettyPlatformName("fb_instagram_account")).toBe("Instagram");
+    expect(prettyPlatformName("linkedin_company")).toBe("LinkedIn");
+    expect(prettyPlatformName("fb_page")).toBe("Facebook");
+    expect(prettyPlatformName("twitter_profile")).toBe("Twitter/X");
+  });
+  it("leaves a name that is already readable alone", async () => {
+    const { prettyPlatformName } = await import("@/lib/platform-config");
+    expect(prettyPlatformName("Instagram")).toBe("Instagram");
+    expect(prettyPlatformName("TikTok")).toBe("TikTok");
+  });
+});

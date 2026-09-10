@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from "react-router-dom";
+import { PlatformIcon, normalizePlatformKey } from "@/lib/platform-config";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -108,6 +109,9 @@ export default function ClientSetup() {
     competitor_seed_notes: "",
   });
   const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
+  // Whether Sprout actually answered. Without this the save path cannot tell
+  // "the user deselected everything" from "Sprout was down".
+  const [sproutLoaded, setSproutLoaded] = useState(false);
   const [researchingBrand, setResearchingBrand] = useState(false);
   const [brandDebug, setBrandDebug] = useState<any>(null);
   const [newKeyword, setNewKeyword] = useState("");
@@ -255,21 +259,35 @@ export default function ClientSetup() {
         clientId = id!;
       }
 
-      // Save selected Sprout profiles
-      if (selectedSproutProfiles.length > 0) {
-        // Remove old profiles
-        await supabase.from("sprout_profiles").delete().eq("client_id", clientId);
-        // Insert selected
-        const inserts = selectedSproutProfiles.map((p) => ({
+      // Save selected Sprout profiles.
+      //
+      // Only when Sprout actually answered: this used to delete every
+      // assignment and re-insert the current selection, so a Sprout outage
+      // (or a save from another tab, where the selector had nothing loaded)
+      // wiped the client's profiles. Upsert first, prune second, so a failure
+      // never leaves a client with none.
+      if (sproutLoaded) {
+        const rows = selectedSproutProfiles.map((p) => ({
           client_id: clientId,
-          sprout_profile_id: p.id,
+          // The column is numeric; Sprout gives the id as a number and the
+          // stored row reads back as one, so only the comparison is string-wise.
+          sprout_profile_id: Number(p.id),
           profile_name: p.name,
           native_name: p.native_name,
           network_type: p.network_type,
           native_link: p.native_link,
         }));
-        const { error: profileError } = await supabase.from("sprout_profiles").insert(inserts);
-        if (profileError) throw profileError;
+        if (rows.length > 0) {
+          const { error: upsertErr } = await supabase
+            .from("sprout_profiles")
+            .upsert(rows, { onConflict: "client_id,sprout_profile_id" });
+          if (upsertErr) throw upsertErr;
+        }
+        const keep = rows.map((r) => r.sprout_profile_id).filter((x) => Number.isFinite(x));
+        let prune = supabase.from("sprout_profiles").delete().eq("client_id", clientId);
+        if (keep.length > 0) prune = prune.not("sprout_profile_id", "in", `(${keep.join(",")})`);
+        const { error: pruneErr } = await prune;
+        if (pruneErr) throw pruneErr;
       }
 
       return { id: clientId };
@@ -730,6 +748,8 @@ export default function ClientSetup() {
                   clientId={isNew ? undefined : id}
                   selectedProfiles={selectedSproutProfiles}
                   onSelectionChange={setSelectedSproutProfiles}
+                  onLoadStateChange={setSproutLoaded}
+                  primaryPlatforms={form.primary_platforms}
                 />
               </CardContent>
             </Card>
@@ -1142,10 +1162,15 @@ function SproutProfileSelector({
   clientId,
   selectedProfiles,
   onSelectionChange,
+  onLoadStateChange,
+  primaryPlatforms = [],
 }: {
   clientId?: string;
   selectedProfiles: any[];
   onSelectionChange: (profiles: any[]) => void;
+  /** True once Sprout has answered. The save path must not prune on a failure. */
+  onLoadStateChange?: (loaded: boolean) => void;
+  primaryPlatforms?: string[];
 }) {
   const [fetching, setFetching] = useState(false);
   const [allProfiles, setAllProfiles] = useState<any[]>([]);
@@ -1172,10 +1197,34 @@ function SproutProfileSelector({
 
   useEffect(() => {
     if (assignedProfiles && allProfiles.length > 0 && selectedProfiles.length === 0) {
-      const preSelected = allProfiles.filter((p) => assignedProfiles.some((a) => a.sprout_profile_id === p.id));
-      if (preSelected.length > 0) onSelectionChange(preSelected);
+      // Match on strings: the assignment stores the id as text and Sprout
+      // returns it as a number, so a strict compare dropped every row.
+      // A profile assigned here that Sprout no longer lists is KEPT as a
+      // stub — dropping it silently deleted the assignment on the next save.
+      const preSelected = allProfiles.filter((p) =>
+        assignedProfiles.some((a: any) => String(a.sprout_profile_id) === String(p.id)),
+      );
+      const orphans = assignedProfiles
+        .filter((a: any) => !allProfiles.some((p) => String(p.id) === String(a.sprout_profile_id)))
+        .map((a: any) => ({
+          id: a.sprout_profile_id,
+          name: a.profile_name,
+          native_name: a.native_name,
+          network_type: a.network_type,
+          network_display: a.network_type,
+          native_link: a.native_link,
+          missing: true,
+        }));
+      const all = [...preSelected, ...orphans];
+      if (all.length > 0) onSelectionChange(all);
     }
   }, [assignedProfiles, allProfiles]);
+
+  // Platforms the client publishes on that have no profile connected.
+  const missingPlatforms = primaryPlatforms.filter((platform) => {
+    const want = normalizePlatformKey(platform);
+    return !selectedProfiles.some((p) => normalizePlatformKey(p.network_type || p.network_display || "") === want);
+  });
 
   const fetchProfiles = async () => {
     setFetching(true);
@@ -1185,8 +1234,10 @@ function SproutProfileSelector({
       });
       if (error) throw error;
       setAllProfiles(data.profiles || []);
+      onLoadStateChange?.(true);
     } catch (err: any) {
-      toast({ title: "Error fetching Sprout profiles", description: err.message, variant: "destructive" });
+      onLoadStateChange?.(false);
+      toast({ title: "Could not reach Sprout Social", description: `${err.message}. Profile assignments are left as they are.`, variant: "destructive" });
     } finally {
       setFetching(false);
     }
@@ -1245,12 +1296,42 @@ function SproutProfileSelector({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="t-secondary">
-          {selectedProfiles.length} of {allProfiles.length} profiles selected
+          {selectedProfiles.length} of {allProfiles.length} profiles in Sprout are assigned to this client
         </p>
         <Button variant="ghost" size="sm" onClick={fetchProfiles}>
           <RefreshCw className="h-4 w-4 mr-1" /> Refresh
         </Button>
       </div>
+
+      {/* Which ones, by name — a count alone never answered the question
+          the page is asked: is this client's Instagram connected? */}
+      {selectedProfiles.length > 0 && (
+        <div className="glass-inner p-3 space-y-2">
+          <p className="t-subhead">Connected</p>
+          <ul className="space-y-1.5">
+            {selectedProfiles.map((profile) => (
+              <li key={profile.id} className="flex items-center gap-2 min-w-0">
+                <PlatformIcon platform={profile.network_type || profile.network_display} className="h-4 w-4 shrink-0" />
+                <span className="t-body truncate">{profile.name}</span>
+                {profile.native_name && <span className="t-label text-muted-foreground truncate">@{profile.native_name}</span>}
+                {profile.missing && (
+                  <span className="t-label text-[#e0b563] shrink-0">no longer in Sprout</span>
+                )}
+                {profile.native_link && (
+                  <a href={profile.native_link} target="_blank" rel="noopener noreferrer" className="t-label text-primary ml-auto shrink-0">
+                    Open
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+          {missingPlatforms.length > 0 && (
+            <p className="t-secondary">
+              No profile connected for {missingPlatforms.join(", ")}, {missingPlatforms.length === 1 ? "which is" : "which are"} on this client's platform list.
+            </p>
+          )}
+        </div>
+      )}
 
       <Input placeholder="Search by name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
 

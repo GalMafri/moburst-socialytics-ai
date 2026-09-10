@@ -37,7 +37,10 @@ export function normalizePlatformKey(input?: string | null): string {
   if (s.includes("linkedin")) return "linkedin";
   if (s.includes("tiktok") || s === "tik tok") return "tiktok";
   if (s.includes("youtube") || s === "yt") return "youtube";
-  if (s.includes("facebook") || s === "fb") return "facebook";
+  // Sprout names a Facebook page "fb_page" and an Instagram business account
+  // "fb_instagram_account" — the instagram test above catches the latter, so
+  // any remaining fb_* is Facebook.
+  if (s.includes("facebook") || s === "fb" || s.startsWith("fb_") || s === "fb page") return "facebook";
   if (s.includes("pinterest")) return "pinterest";
   if (s.includes("threads")) return "threads";
   if (s.includes("snapchat")) return "snapchat";
@@ -200,7 +203,12 @@ export function PlatformBadge({
       }}
     >
       <span style={{ color }} className="inline-flex"><PlatformIcon platform={platform} className={iconSize} /></span>
-      {platform}
+      {/* The label is the platform's real name. Sprout's raw network_type
+          reached this badge unmapped, so a client's Instagram profile read
+          "fb_instagram_account" and LinkedIn read "linkedin_company".
+          prettyPlatformName is idempotent, so already-pretty callers are
+          unaffected. */}
+      {prettyPlatformName(platform)}
     </span>
   );
 }
