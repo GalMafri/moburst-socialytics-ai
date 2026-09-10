@@ -8,15 +8,52 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { Save, Loader2 } from "lucide-react";
 import { HubCompanySync } from "@/components/HubCompanySync";
+import { HiggsfieldConnection } from "@/components/settings/HiggsfieldConnection";
+
+/**
+ * Why a sign-in did not take. Higgsfield's callback cannot render a page of
+ * its own — Supabase serves html from *.supabase.co as plain text — so it
+ * redirects here with a short code and this is where it becomes a sentence.
+ */
+const HIGGSFIELD_REASONS: Record<string, string> = {
+  refused: "Higgsfield refused the sign-in. Nothing was saved.",
+  bad_state: "That sign-in link was not the one this app started. Start again from here.",
+  expired: "That sign-in link had expired. They last 15 minutes; start again from here.",
+  no_refresh_token:
+    "Higgsfield returned a session but no way to stay signed in, so nothing was saved. Start again and leave every permission ticked.",
+};
 
 export default function Settings() {
   const { isAdmin } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Higgsfield's callback lands back here with the outcome of a sign-in.
+  const higgsfieldResult = searchParams.get("higgsfield");
+  useEffect(() => {
+    if (!higgsfieldResult) return;
+    if (higgsfieldResult === "linked") {
+      queryClient.invalidateQueries({ queryKey: ["higgsfield-status"] });
+      toast({ title: "Higgsfield connected" });
+    } else {
+      const reason = searchParams.get("reason") || "";
+      toast({
+        title: "Higgsfield is not connected",
+        description: HIGGSFIELD_REASONS[reason] || "The sign-in did not finish. Nothing was saved.",
+        variant: "destructive",
+      });
+    }
+    // Clear it so a refresh does not repeat the message.
+    const next = new URLSearchParams(searchParams);
+    next.delete("higgsfield");
+    next.delete("reason");
+    setSearchParams(next, { replace: true });
+  }, [higgsfieldResult, queryClient, searchParams, setSearchParams, toast]);
 
   const { data: settings } = useQuery({
     queryKey: ["app-settings"],
@@ -84,6 +121,8 @@ export default function Settings() {
         </Card>
 
         <HubCompanySync />
+
+        <HiggsfieldConnection />
 
         <Card>
           <CardHeader>

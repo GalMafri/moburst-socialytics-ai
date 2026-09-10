@@ -39,6 +39,16 @@ function redirectUri(): string {
 /** An authorisation left half-finished should not be usable for ever. */
 const PENDING_TTL_MS = 15 * 60 * 1000;
 
+/**
+ * Where the callback sends the browser when it is done.
+ *
+ * This function cannot answer the callback with a page of its own: Supabase
+ * serves every text/html body from *.supabase.co as text/plain with nosniff,
+ * so the browser shows the markup as source. The result is therefore reported
+ * by the app, which is also where someone would go to fix it.
+ */
+const APP_ORIGIN = Deno.env.get("APP_ORIGIN") || "https://socialytics.moburst.com";
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -50,7 +60,7 @@ Deno.serve(async (req) => {
     //    we generated and stored is what proves this is our redirect.
     if (req.method === "GET" && (url.searchParams.get("code") || url.searchParams.get("error"))) {
       const error = url.searchParams.get("error");
-      if (error) return page(`Higgsfield refused the sign-in: ${error}. Nothing was saved.`, false);
+      if (error) return back("failed", "refused");
 
       const code = url.searchParams.get("code")!;
       const state = url.searchParams.get("state") || "";
@@ -61,11 +71,11 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (!row?.pending_state || !row.pending_verifier || !state || state !== row.pending_state) {
-        return page("That sign-in link is not the one this app started. Begin again from Settings.", false);
+        return back("failed", "bad_state");
       }
       const startedAt = row.pending_started_at ? new Date(row.pending_started_at).getTime() : 0;
       if (!startedAt || Date.now() - startedAt > PENDING_TTL_MS) {
-        return page("That sign-in link has expired. Begin again from Settings.", false);
+        return back("failed", "expired");
       }
 
       const grant = await exchangeCode({
@@ -74,13 +84,7 @@ Deno.serve(async (req) => {
         verifier: row.pending_verifier,
         redirectUri: redirectUri(),
       });
-      if (!grant.refresh_token) {
-        return page(
-          "Higgsfield returned a session but no refresh token, so the server cannot stay signed in. " +
-            "The offline_access scope was refused — nothing was saved.",
-          false,
-        );
-      }
+      if (!grant.refresh_token) return back("failed", "no_refresh_token");
 
       // Who this is, so the screen can say which account is linked. The id
       // token is informational here; the refresh token is the credential.
@@ -106,7 +110,8 @@ Deno.serve(async (req) => {
         })
         .eq("provider", PROVIDER);
 
-      return page(`Higgsfield is linked${email ? ` to ${email}` : ""}. You can close this tab.`, true);
+      // The account is deliberately not put in the URL; the page asks for it.
+      return back("linked");
     }
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
@@ -174,14 +179,15 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-/** The callback lands in a browser, so it answers in words rather than JSON. */
-function page(message: string, ok: boolean): Response {
-  const html = `<!doctype html><meta charset="utf-8"><title>Higgsfield</title>
-<body style="margin:0;background:#0b0c10;color:#fff;font:16px/1.6 -apple-system,Segoe UI,sans-serif;display:grid;place-items:center;height:100vh">
-<div style="max-width:34rem;padding:2rem;text-align:center">
-<div style="font-size:2rem;margin-bottom:.5rem">${ok ? "✓" : "✕"}</div>
-<p style="color:${ok ? "#b9e045" : "#f87171"};font-weight:600;margin:0 0 .5rem">${ok ? "Connected" : "Not connected"}</p>
-<p style="color:#d1d5db;margin:0">${message.replace(/[<>&]/g, "")}</p>
-</div></body>`;
-  return new Response(html, { status: ok ? 200 : 400, headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } });
+/**
+ * The callback lands in a browser, so it hands the outcome back to the app
+ * rather than rendering anything here. Only a short code travels in the URL:
+ * the app turns it into a sentence, and the linked account is read from
+ * `status` rather than passed as a query parameter.
+ */
+function back(status: "linked" | "failed", reason?: string): Response {
+  const to = new URL("/settings", APP_ORIGIN);
+  to.searchParams.set("higgsfield", status);
+  if (reason) to.searchParams.set("reason", reason);
+  return new Response(null, { status: 302, headers: { ...corsHeaders, Location: to.toString() } });
 }
