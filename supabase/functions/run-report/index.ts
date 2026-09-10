@@ -144,7 +144,9 @@ Deno.serve(async (req) => {
         reportId = existing.id;
         const { error } = await admin
           .from("competitive_reports")
-          .update({ status: "running", report_data: {}, set_id: set.id, date_range_start: range.start, date_range_end: range.end })
+          // The clock restarts with the run: the row now IS this attempt, and
+          // a stale created_at would leave a fresh run reading as stuck.
+          .update({ status: "running", report_data: {}, set_id: set.id, date_range_start: range.start, date_range_end: range.end, created_at: new Date().toISOString() })
           .eq("id", reportId);
         if (error) throw new Error(error.message);
       } else {
@@ -164,7 +166,8 @@ Deno.serve(async (req) => {
         reportId = existing.id;
         const { error } = await admin
           .from("reports")
-          .update({ status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end })
+          // Same here: the row is this attempt, so its clock starts now.
+          .update({ status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_at: new Date().toISOString() })
           .eq("id", reportId);
         if (error) throw new Error(error.message);
       } else {
