@@ -14,7 +14,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
-import { extractSocialHandles, type DetectedHandle } from "../_shared/competitive/extractSocialHandles.ts";
+import { extractSocialHandles, mergeHandles, type DetectedHandle } from "../_shared/competitive/extractSocialHandles.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -35,28 +35,94 @@ async function fetchDirect(url: string): Promise<string> {
     const resp = await fetch(url, {
       headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" },
       redirect: "follow",
+      // A site that never answers used to hold the whole set behind it.
+      signal: AbortSignal.timeout(8000),
     });
-    return resp.ok ? await resp.text() : "";
-  } catch {
+    if (!resp.ok) {
+      console.log(`[detect] ${resp.status} ${url}`);
+      return "";
+    }
+    return await resp.text();
+  } catch (e) {
+    console.log(`[detect] fetch failed ${url}: ${(e as Error)?.name || e}`);
     return "";
   }
 }
 
+/**
+ * The rendered page, plus the links Firecrawl found on it.
+ *
+ * Two things were wrong with asking for `html` alone: Firecrawl defaults to
+ * onlyMainContent, which throws away the footer — exactly where a brand puts
+ * its social links — and the HTML still has to be parsed. The `links` array
+ * is the footer's hrefs already extracted, whatever JavaScript built them.
+ */
 async function fetchRendered(url: string): Promise<string> {
   const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
-  if (!firecrawlKey) return "";
+  if (!firecrawlKey) {
+    console.log("[detect] no FIRECRAWL_API_KEY; skipping the rendered pass");
+    return "";
+  }
   try {
     const fcResp = await fetch("https://api.firecrawl.dev/v1/scrape", {
       method: "POST",
       headers: { Authorization: `Bearer ${firecrawlKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ url, formats: ["html"], waitFor: 4000 }),
+      body: JSON.stringify({ url, formats: ["rawHtml", "links"], onlyMainContent: false, waitFor: 4000, timeout: 20000 }),
     });
-    if (!fcResp.ok) return "";
+    if (!fcResp.ok) {
+      console.log(`[detect] firecrawl ${fcResp.status} for ${url}: ${(await fcResp.text().catch(() => "")).slice(0, 200)}`);
+      return "";
+    }
     const fcData = await fcResp.json();
-    return fcData.data?.html || fcData.html || "";
-  } catch {
+    const html = fcData.data?.rawHtml || fcData.data?.html || fcData.rawHtml || fcData.html || "";
+    const links: string[] = fcData.data?.links || fcData.links || [];
+    // The links go in as plain text; the extractor treats them as URLs.
+    return `${html}\n${links.join("\n")}`;
+  } catch (e) {
+    console.log(`[detect] firecrawl threw for ${url}: ${(e as Error)?.message || e}`);
     return "";
   }
+}
+
+/**
+ * Last resort: ask the web where the brand's profile is.
+ *
+ * A brand whose site links nothing (a one-page builder site, an app-store
+ * landing page) still has profiles, and a site: search finds them. Only the
+ * platforms still missing are searched, and the results are written at a
+ * lower confidence so a person can tell them apart.
+ */
+async function searchForHandles(brandName: string, missing: string[]): Promise<DetectedHandle[]> {
+  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
+  if (!firecrawlKey || !brandName || missing.length === 0) return [];
+  const SITE: Record<string, string> = {
+    instagram: "instagram.com",
+    facebook: "facebook.com",
+    tiktok: "tiktok.com",
+    linkedin: "linkedin.com",
+    youtube: "youtube.com",
+    x: "x.com",
+  };
+  const out: DetectedHandle[] = [];
+  for (const platform of missing.slice(0, 4)) {
+    const site = SITE[platform];
+    if (!site) continue;
+    try {
+      const resp = await fetch("https://api.firecrawl.dev/v1/search", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${firecrawlKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ query: `"${brandName}" site:${site}`, limit: 5 }),
+      });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const urls: string[] = (data.data || data.results || []).map((r: any) => r.url).filter(Boolean);
+      const hits = extractSocialHandles(urls.join("\n"), brandName).filter((h) => h.platform === platform);
+      if (hits[0]) out.push(hits[0]);
+    } catch {
+      // A search that fails leaves the platform empty, which is the honest answer.
+    }
+  }
+  return out;
 }
 
 /** Pages that carry the social links when the homepage does not. */
@@ -73,18 +139,27 @@ const FALLBACK_PATHS = ["/contact", "/about", "/about-us", "/company"];
  * handful of pages a brand puts its links on, rather than being read as an
  * answer.
  */
-async function detectForSite(websiteUrl: string): Promise<DetectedHandle[]> {
+const ALL_PLATFORMS = ["instagram", "facebook", "tiktok", "linkedin", "youtube", "x"];
+
+async function detectForSite(websiteUrl: string, brandName?: string): Promise<DetectedHandle[]> {
   const base = normalizeUrl(websiteUrl);
+  const groups: DetectedHandle[][] = [];
+  const missing = () => ALL_PLATFORMS.filter((p) => !groups.some((g) => g.some((h) => h.platform === p)));
 
+  // Every source is read and merged. Returning on the first non-empty result
+  // meant one LinkedIn badge in the raw HTML suppressed the rendered pass and
+  // the contact pages, so a brand with five profiles was recorded as having
+  // one.
   const direct = await fetchDirect(base);
-  const fromDirect = direct ? extractSocialHandles(direct) : [];
-  if (fromDirect.length > 0) return fromDirect;
+  if (direct) groups.push(extractSocialHandles(direct, brandName));
 
-  const rendered = await fetchRendered(base);
-  const fromRendered = rendered ? extractSocialHandles(rendered) : [];
-  if (fromRendered.length > 0) return fromRendered;
+  if (missing().length > 0) {
+    const rendered = await fetchRendered(base);
+    if (rendered) groups.push(extractSocialHandles(rendered, brandName));
+  }
 
   for (const path of FALLBACK_PATHS) {
+    if (missing().length === 0) break;
     let target: string;
     try {
       target = new URL(path, base).toString();
@@ -92,11 +167,15 @@ async function detectForSite(websiteUrl: string): Promise<DetectedHandle[]> {
       continue;
     }
     const html = await fetchDirect(target);
-    const found = html ? extractSocialHandles(html) : [];
-    if (found.length > 0) return found;
+    if (html) groups.push(extractSocialHandles(html, brandName));
   }
 
-  return [];
+  const still = missing();
+  if (still.length > 0 && brandName) {
+    groups.push(await searchForHandles(brandName, still));
+  }
+
+  return mergeHandles(...groups);
 }
 
 Deno.serve(async (req) => {
@@ -145,7 +224,7 @@ Deno.serve(async (req) => {
         results.push({ competitor_id: comp.id, detected: [] });
         continue;
       }
-      const detected = await detectForSite(comp.website_url);
+      const detected = await detectForSite(comp.website_url, comp.name);
 
       for (const h of detected) {
         if (refresh) {

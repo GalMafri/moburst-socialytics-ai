@@ -63,3 +63,71 @@ describe("extractSocialHandles", () => {
     expect(b).toHaveLength(1);
   });
 });
+
+describe("the shapes real brand sites emit", () => {
+  const wrap = (body: string) => `<html><body>${body}</body></html>`;
+
+  it("reads a URL escaped inside JSON, as React sites emit it", () => {
+    const out = extractSocialHandles(wrap(`<script>{"url":"https:\\/\\/www.instagram.com\\/acmewidgets\\/"}</script>`), "Acme Widgets");
+    expect(out.find((h) => h.platform === "instagram")?.handle).toBe("acmewidgets");
+  });
+
+  it("reads entity-encoded and protocol-relative and uppercase links", () => {
+    expect(extractSocialHandles(wrap(`<a href="https:&#x2F;&#x2F;instagram.com&#x2F;acme">ig</a>`)).some((h) => h.handle === "acme")).toBe(true);
+    expect(extractSocialHandles(wrap(`<a href="//www.tiktok.com/@acme">tt</a>`)).some((h) => h.handle === "acme")).toBe(true);
+    expect(extractSocialHandles(wrap(`<a href="HTTPS://WWW.INSTAGRAM.COM/ACME">ig</a>`)).some((h) => h.handle.toLowerCase() === "acme")).toBe(true);
+  });
+
+  it("reads mobile and localised Facebook hosts, and slugs with dashes", () => {
+    expect(extractSocialHandles(wrap(`<a href="https://m.facebook.com/Acme-Widgets-100064123456789">fb</a>`)).find((h) => h.platform === "facebook")?.handle)
+      .toBe("Acme-Widgets-100064123456789");
+    expect(extractSocialHandles(wrap(`<a href="https://de-de.facebook.com/AcmeWidgets">fb</a>`)).find((h) => h.platform === "facebook")?.handle).toBe("AcmeWidgets");
+  });
+
+  it("reads a legacy YouTube channel and keeps its URL shape", () => {
+    const out = extractSocialHandles(wrap(`<a href="https://www.youtube.com/user/LegacyBrand">yt</a>`));
+    const yt = out.find((h) => h.platform === "youtube");
+    expect(yt?.handle).toBe("LegacyBrand");
+    expect(yt?.profile_url).toBe("https://www.youtube.com/user/LegacyBrand");
+  });
+
+  it("reads LinkedIn showcase and school pages, not just company", () => {
+    expect(extractSocialHandles(wrap(`<a href="https://www.linkedin.com/showcase/acme-cloud/">li</a>`)).find((h) => h.platform === "linkedin")?.handle).toBe("acme-cloud");
+  });
+
+  it("never takes a share widget, a post, or a login page for a profile", () => {
+    const noise = wrap(`
+      <a href="https://www.facebook.com/sharer/sharer.php?u=x">share</a>
+      <a href="https://www.facebook.com/profile.php?id=100064123456789">profile</a>
+      <a href="https://www.facebook.com/pages/Acme/123">pages</a>
+      <a href="https://www.instagram.com/p/Cxy12345/">post</a>
+      <a href="https://www.instagram.com/tv/Cxy12345/">tv</a>
+      <a href="https://www.instagram.com/accounts/login/">login</a>
+      <a href="https://twitter.com/intent/tweet?text=hi">tweet</a>
+      <a href="https://www.youtube.com/watch?v=abc">watch</a>`);
+    expect(extractSocialHandles(noise)).toEqual([]);
+  });
+
+  it("prefers the brand's own footer link over an embedded feed near the top", () => {
+    const page = wrap(`
+      <div class="influencer-widget"><a href="https://www.instagram.com/someinfluencer/">feed</a></div>
+      ${"<p>copy</p>".repeat(400)}
+      <footer class="footer"><a href="https://www.instagram.com/acmewidgets/">Follow us</a></footer>`);
+    expect(extractSocialHandles(page, "Acme Widgets").find((h) => h.platform === "instagram")?.handle).toBe("acmewidgets");
+  });
+
+  it("keeps a real handle that happens to be a platform's name", () => {
+    // A competitor actually called Shopify used to have its handle discarded.
+    expect(extractSocialHandles(wrap(`<a href="https://www.instagram.com/shopify/">ig</a>`), "Shopify").find((h) => h.platform === "instagram")?.handle).toBe("shopify");
+  });
+
+  it("merges sources without letting a later one overwrite an earlier hit", async () => {
+    const { mergeHandles } = await import("../../../supabase/functions/_shared/competitive/extractSocialHandles");
+    const merged = mergeHandles(
+      [{ platform: "instagram", handle: "first", profile_url: "a" }],
+      [{ platform: "instagram", handle: "second", profile_url: "b" }, { platform: "x", handle: "third", profile_url: "c" }],
+    );
+    expect(merged).toHaveLength(2);
+    expect(merged.find((h) => h.platform === "instagram")?.handle).toBe("first");
+  });
+});
