@@ -210,7 +210,7 @@ serve(async (req) => {
     // verify_jwt is off for this function, so nothing checks the caller
     // unless it does. It spends a Gemini key or the team's Higgsfield
     // credits on every call.
-    await requireStaff(req);
+    const caller = await requireStaff(req);
 
     const {
       prompt,
@@ -310,11 +310,17 @@ serve(async (req) => {
               },
               supabase,
             );
+            // Budgeted, not open-ended. This runs at most twice (the seed
+            // review can ask for one regeneration) and the clip submission
+            // follows, all inside the 150 seconds the platform allows. A
+            // measured run with one regeneration came in at 110s, so the
+            // ceiling here is what keeps the worst case inside it.
             const still = await renderImageWithHiggsfield({
               supabase,
               prompt: seedPrompt,
               aspectRatio,
               referenceUrls,
+              budgetMs: 55_000,
             });
             return { base64: still.imageB64, mimeType: still.imageMime, jobId: still.jobId };
           }
@@ -414,6 +420,9 @@ serve(async (req) => {
           request_id: started.jobId,
           model_path: started.model,
           status: "submitted",
+          // created_by defaults to auth.uid(), which is NULL under the
+          // service role this function uses.
+          created_by: caller.userId,
           input: { prompt: enhancedPrompt, aspect: started.aspect, seconds: 5, headline },
         })
         .select("id")
