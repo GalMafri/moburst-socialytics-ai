@@ -115,3 +115,26 @@ So the quality demonstrated through the MCP is not automatically what the app
 would ship. Either enable the modern models on the REST key at
 cloud.higgsfield.ai, or build against popcorn and dop, which this key does
 have.
+
+### Verdict, 2026-09-10: do not wire the app to Higgsfield yet
+
+Both candidates were run against the same brief and the same three Bader Law
+design references.
+
+| Model | Reachable by | Result |
+| --- | --- | --- |
+| `nano_banana_pro` | the team's MCP account only | Bader's system exactly: navy ribbing, red block, black-and-white cutout, headline spelled correctly. A `seedance_2_5` clip from that still keeps the lettering pixel-stable to the last frame |
+| `higgsfield-ai/popcorn/auto` | **the app's REST key** | On-brand colours, unusable type: mirrored and garbled ("wogяƚ would inover gfd afer ta aciglent"), and it copied "Happy Mother's Day" out of a reference image |
+
+Popcorn IS entitled on the app's key — it returns 200 and completes, despite
+being absent from the cloud dashboard's three-model list, so that list is not
+the entitlement. But its typography is the exact failure the current pipeline
+already fights, so moving generation onto it would be a regression.
+
+The value is real and it sits behind one model the API account cannot use.
+`cloud.higgsfield.ai` is a SEPARATE account from the one the MCP uses:
+different wallet (782 credits against 2427) and a different catalogue, with
+no per-model controls on the API-keys page. Getting `nano-banana-pro` (and a
+seedance image-to-video route) enabled on the API account is a conversation
+with Higgsfield, not a setting. Until then the app stays on its current
+pipeline.
