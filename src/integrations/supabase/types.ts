@@ -467,6 +467,7 @@ export type Database = {
           is_active: boolean
           platform: string
           profile_url: string | null
+          source: string
         }
         Insert: {
           client_id: string
@@ -479,6 +480,7 @@ export type Database = {
           is_active?: boolean
           platform: string
           profile_url?: string | null
+          source?: string
         }
         Update: {
           client_id?: string
@@ -491,6 +493,7 @@ export type Database = {
           is_active?: boolean
           platform?: string
           profile_url?: string | null
+          source?: string
         }
         Relationships: [
           {
