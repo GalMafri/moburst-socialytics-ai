@@ -55,8 +55,10 @@ Deno.serve(async (req) => {
     for (const path of [...CANDIDATES, ...extra]) {
       for (const method of ["GET", "POST"] as const) {
         // GET only for the catalogue-ish routes; POST for model routes.
-        if (method === "GET" && !path.includes("model")) continue;
-        if (method === "POST" && path.includes("model")) continue;
+        // Catalogue routes are read with GET; model routes are POSTed.
+        const isCatalogue = path.includes("model");
+        if (method === "GET" && !isCatalogue) continue;
+        if (method === "POST" && isCatalogue) continue;
         try {
           const resp = await fetch(`${HIGGSFIELD_BASE_URL}${path}`, {
             method,
@@ -64,7 +66,10 @@ Deno.serve(async (req) => {
             body: method === "POST" ? JSON.stringify({}) : undefined,
             signal: AbortSignal.timeout(12000),
           });
-          const text = (await resp.text().catch(() => "")).slice(0, 300);
+          // A path the caller asked for explicitly gets a full answer; the
+          // standing candidates only need enough to tell 404 from 422.
+          const limit = extra.includes(path) ? 6000 : 300;
+          const text = (await resp.text().catch(() => "")).slice(0, limit);
           results.push({ path, method, status: resp.status, body: text });
         } catch (e) {
           results.push({ path, method, status: 0, body: String((e as Error)?.name || e) });
