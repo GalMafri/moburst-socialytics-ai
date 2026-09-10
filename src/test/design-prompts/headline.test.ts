@@ -18,3 +18,10 @@ describe("headlineFrom", () => {
     expect(headlineFrom(null)).toBe("");
   });
 });
+
+describe("headlineFrom keeps the question", () => {
+  it("keeps a question mark and drops a full stop", async () => {
+    const { headlineFrom } = await import("../../../supabase/functions/_shared/design-prompts/headline");
+    expect(headlineFrom("Where does mobile growth stall first?\n\nUsually, not in budget.")).toBe("Where does mobile growth stall first?");
+  });
+});

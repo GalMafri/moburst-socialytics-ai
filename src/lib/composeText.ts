@@ -25,6 +25,8 @@ export interface ComposeOverlay {
    * has, so no legibility band is painted behind it.
    */
   placed?: boolean;
+  /** "sub" sits directly under the headline in the same field; "cta" goes low. */
+  role?: "headline" | "sub" | "cta";
 }
 
 /** The brand's own face if it is a Google font, else the app face. */
@@ -164,6 +166,13 @@ function luminanceGrid(img: HTMLImageElement, cols = 48, rows = 64): Float32Arra
  * Estimated from an average glyph width, so it errs a little small rather
  * than a little large; the field's width sets the wrap, its height the cap.
  */
+/** Rough line count for `text` at `size` wrapped to `widthPct`, from an average glyph width. */
+export function estimateLines(text: string, widthPct: number, size: number, canvasW: number): number {
+  const px = size * (canvasW / 800);
+  const perLine = Math.max(1, Math.floor(((widthPct / 100) * canvasW) / (px * 0.56)));
+  return Math.max(1, Math.ceil(text.length / perLine));
+}
+
 export function fitFontSize(text: string, widthPct: number, zoneHPct: number, canvasW: number, canvasH: number, base: number): number {
   const scale = canvasW / 800;
   const widthPx = (widthPct / 100) * canvasW;
@@ -202,14 +211,30 @@ export function placeOverlays(img: HTMLImageElement, overlays: ComposeOverlay[])
   const ink = inkFor(zone.luminance);
   const [headline, ...rest] = overlays;
   const out: ComposeOverlay[] = [];
+  const sub = rest.find((o) => o.role === "sub");
+  const others = rest.filter((o) => o !== sub);
+  const scale = img.naturalWidth / 800;
   if (headline) {
     // Type fills the field's width with a margin, and the size follows the
     // width so a half-canvas block gets smaller type, not a broken line.
+    // With a supporting line the headline sits a little higher and takes at
+    // most 55% of the field, leaving the line its room.
     const width = Math.max(30, Math.min(84, zoneW * 0.86));
-    const fontSize = fitFontSize(headline.text, width, zoneH, img.naturalWidth, img.naturalHeight, headline.fontSize);
-    out.push({ ...headline, x: zone.left + zoneW / 2, y: zone.top + zoneH * 0.42, width, fontSize, color: ink, placed: true });
+    const fontSize = fitFontSize(headline.text, width, sub ? zoneH * 0.55 : zoneH, img.naturalWidth, img.naturalHeight, headline.fontSize);
+    const y = zone.top + zoneH * (sub ? 0.36 : 0.42);
+    out.push({ ...headline, x: zone.left + zoneW / 2, y, width, fontSize, color: ink, placed: true });
+    if (sub) {
+      const headLines = estimateLines(headline.text, width, fontSize, img.naturalWidth);
+      const subSize = Math.max(14, Math.min(sub.fontSize, Math.round(fontSize * 0.6)));
+      const subLines = estimateLines(sub.text, width, subSize, img.naturalWidth);
+      const halfHead = (headLines * fontSize * 1.15 * scale) / 2;
+      const halfSub = (subLines * subSize * 1.15 * scale) / 2;
+      const gap = 14 * scale;
+      const subY = y + ((halfHead + gap + halfSub) / img.naturalHeight) * 100;
+      out.push({ ...sub, x: zone.left + zoneW / 2, y: Math.min(subY, zone.bottom - 4), width, fontSize: subSize, color: ink, placed: true });
+    }
   }
-  for (const o of rest) {
+  for (const o of others) {
     if (zone.bottom >= 88 && zoneH >= 22) {
       out.push({ ...o, x: zone.left + zoneW / 2, y: zone.bottom - 9, width: Math.max(30, Math.min(84, zoneW * 0.86)), color: ink, placed: true });
     } else {

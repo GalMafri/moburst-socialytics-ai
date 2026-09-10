@@ -13,7 +13,7 @@ const HANGING = new Set([
 export function headlineFrom(copy: string | null | undefined, maxWords = 12): string {
   const clean = String(copy || "").replace(/#[\w]+/g, "").trim();
   if (!clean) return "";
-  const first = (clean.split(/(?<=[.!?])\s+|:\s*\n|\n+/)[0] || "").replace(/[.,;:!?]+$/, "");
+  const first = (clean.split(/(?<=[.!?])\s+|:\s*\n|\n+/)[0] || "").replace(/[.,;:]+$/, "");
   let words = first.split(/\s+/).filter(Boolean);
   if (words.length > maxWords) {
     const clause = first.slice(0, 90).search(/[,;:]|\s(?:because|while|which|so that)\s/);

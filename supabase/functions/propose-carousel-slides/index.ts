@@ -92,12 +92,14 @@ Return ONLY this JSON object — no preamble, no markdown code fence:
 
 {
   "slides": [
-    { "index": 0, "role": "cover", "headline": "...", "content_brief": "..." },
-    { "index": 1, "role": "interior", "headline": "...", "content_brief": "..." },
+    { "index": 0, "role": "cover", "headline": "...", "body": "", "content_brief": "..." },
+    { "index": 1, "role": "interior", "headline": "...", "body": "...", "content_brief": "..." },
     ...
-    { "index": N-1, "role": "interior" | "cta", "headline": "...", "content_brief": "..." }
+    { "index": N-1, "role": "interior" | "cta", "headline": "...", "body": "...", "content_brief": "..." }
   ]
-}`;
+}
+
+"headline" is the slide's own title, at most 8 words, taken or tightened from the post copy, never invented. "body" is one supporting line of at most 14 words that carries the slide's actual point (a number, a claim, a step), or "" when the headline says it all. The app sets both as real type on the slide; the content_brief describes the picture only and must not repeat them.`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });

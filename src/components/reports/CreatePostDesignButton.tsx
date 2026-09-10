@@ -71,7 +71,8 @@ function seedOverlaysFor(post: any): Array<{ text: string; y: number; fontSize?:
   const copy = String(post?.copy || post?.hook || "").replace(/#[\w]+/g, "").trim();
   // The first sentence, and when it introduces a list ("3 things…:\n1. …") only
   // the part before the colon or line break: the list is the video, not the title.
-  const first = (copy.split(/(?<=[.!?])\s+|:\s*\n|\n+/)[0] || "").replace(/[.,;:!?]+$/, "");
+  // A question keeps its mark; only a full stop or list colon is dropped.
+  const first = (copy.split(/(?<=[.!?])\s+|:\s*\n|\n+/)[0] || "").replace(/[.,;:]+$/, "");
   // Up to twelve words, cut at a clause break where one exists, and never
   // left hanging on a connective ("…would never do after").
   let words = first.split(/\s+/).filter(Boolean);
@@ -90,15 +91,31 @@ function seedOverlaysFor(post: any): Array<{ text: string; y: number; fontSize?:
 }
 
 /** The seeded overlays as the compositor draws them: centred, brand primary. */
-function overlaysToDraw(post: any, brand: any) {
-  return seedOverlaysFor(post).map((o) => ({
+function overlaysToDraw(post: any, brand: any): ComposeOverlay[] {
+  return seedOverlaysFor(post).map((o, i) => ({
     text: o.text,
     x: 50,
     y: o.y,
     color: brand?.primary_color || "#ffffff",
     fontSize: o.fontSize || 28,
     fontWeight: o.fontWeight || "bold",
+    role: i === 0 ? "headline" : "cta",
   }));
+}
+
+/**
+ * The words for one carousel slide: its own headline and, when the brief
+ * gives one, its supporting line. Every slide is a post in its own right;
+ * a slide without words is an empty card.
+ */
+function slideOverlays(brief: { headline?: string; body?: string } | undefined, post: any, brand: any): ComposeOverlay[] {
+  const color = brand?.primary_color || "#ffffff";
+  const headline = String(brief?.headline || "").trim();
+  if (!headline) return overlaysToDraw(post, brand).filter((o) => o.role === "headline");
+  const out: ComposeOverlay[] = [{ text: headline, x: 50, y: 22, color, fontSize: 30, fontWeight: "bold", role: "headline" }];
+  const body = String(brief?.body || "").trim();
+  if (body) out.push({ text: body, x: 50, y: 34, color, fontSize: 18, fontWeight: "normal", role: "sub" });
+  return out;
 }
 
 export function CreatePostDesignButton({ post, clientContext, brandIdentity, designReferences, brandBookFilePath, clientId, onImagesGenerated }: CreatePostDesignButtonProps) {
@@ -560,7 +577,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     // slide-by-slide breakdown is reused across variants (variants differ by
     // creative angle, not by content). Falls back to a sanitized shared
     // brief if decomposition fails.
-    let slideBriefs: Array<{ index: number; role: string; headline?: string; content_brief: string }> = [];
+    let slideBriefs: Array<{ index: number; role: string; headline?: string; body?: string; content_brief: string }> = [];
     try {
       const { data: decomposed } = await supabase.functions.invoke("propose-carousel-slides", {
         body: {
@@ -697,10 +714,13 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             }
 
             // The cover carries the headline; interior slides carry their own copy.
+            // Every slide carries its own words: the cover its headline, each
+            // interior slide the headline and line the brief gave it.
             let placed: { raw: string; overlays: ComposeOverlay[] } | null = null;
-            if (!modelDrawsText && s === 0) {
+            if (!modelDrawsText) {
               const raw = finalImageUrl;
-              const composed = await composePost(raw, overlaysToDraw(post, effectiveBrandIdentity), effectiveBrandIdentity?.font_family);
+              const words = s === 0 && !slideBriefs[0]?.headline ? overlaysToDraw(post, effectiveBrandIdentity) : slideOverlays(slideBriefs[s], post, effectiveBrandIdentity);
+              const composed = await composePost(raw, words, effectiveBrandIdentity?.font_family);
               finalImageUrl = composed.url;
               placed = { raw, overlays: composed.overlays };
             }

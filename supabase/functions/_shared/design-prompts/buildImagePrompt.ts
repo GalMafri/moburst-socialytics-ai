@@ -214,10 +214,10 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
   }
 
   // 2c. A still that will carry typed text later leaves room for it.
-  if (input.noText && !input.slideContext) {
+  if (input.noText) {
     sections.push(
       `## Composition for typed text\n` +
-        `The headline and any call-to-action will be set as real typography on top of this image afterwards. ` +
+        `The headline${input.slideContext ? ", this slide's supporting line" : " and any call-to-action"} will be set as real typography on top of this image afterwards. ` +
         `Compose for that: the zone the brand design language gives to headline type is left as a plain field ` +
         `in the brand's colour for that zone — a flat navy or red block, a plain wall, a soft depth-of-field ground — ` +
         `with nothing in it — one flat block of one colour covering at least a quarter of the canvas, an element of the layout, not a box, card, frame or button drawn onto it. ` +
