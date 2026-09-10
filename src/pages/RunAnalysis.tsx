@@ -15,7 +15,6 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Loading } from "@/components/ui/loading";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
-import { buildCompetitiveContext } from "@/components/competitive/CompetitiveSnapshot";
 import { Navigate } from "react-router-dom";
 
 const STEPS_FULL = [
@@ -106,15 +105,6 @@ export default function RunAnalysis() {
 
   // Team verdicts on competitive gaps: endorsed gaps become must-address items
   // for the synthesis, down-voted gaps are kept out of the brief entirely.
-  const { data: insightFeedback } = useQuery({
-    queryKey: ["insight-feedback", id],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("competitive_insight_feedback").select("*").eq("client_id", id!);
-      if (error) throw error;
-      return data || [];
-    },
-    enabled: !!id,
-  });
 
   const { data: pastReports, refetch: refetchReports } = useQuery({
     queryKey: ["reports", id],
@@ -280,118 +270,38 @@ export default function RunAnalysis() {
     });
 
     try {
-      // Get webhook URL from app settings
-      const { data: setting } = await supabase
-        .from("app_settings")
-        .select("value")
-        .eq("key", "n8n_webhook_url")
-        .maybeSingle();
-
-      if (!setting?.value) {
-        throw new Error("n8n webhook URL not configured. Go to Settings to set it up.");
+      // One place builds what n8n receives: the same function serves this
+      // page, the scheduler and a retry, so a rerun can never send something
+      // different from the original attempt.
+      const { data: started, error: runErr } = await supabase.functions.invoke("run-report", {
+        body: {
+          client_id: id,
+          kind: "social",
+          date_range_start: dateRangeStart || undefined,
+          date_range_end: dateRangeEnd || undefined,
+          skip_trends: skipTrends,
+        },
+      });
+      if (runErr || started?.error) {
+        let reason = started?.error as string | undefined;
+        if (!reason) {
+          try {
+            reason = (await (runErr as any)?.context?.json?.())?.error;
+          } catch {
+            reason = undefined;
+          }
+        }
+        throw new Error(reason || (runErr as any)?.message || "The run could not be started.");
       }
+      const reportRowId: string = started.report_id;
+      setReportId(reportRowId);
 
-      // Create report row with date ranges
-      const { data: report, error: reportErr } = await supabase
-        .from("reports")
-        .insert({
-          client_id: id!,
-          status: "running",
-          report_data: {},
-          // created_by is omitted on purpose: the column defaults to auth.uid(),
-          // so the row attributes itself to whoever ran the analysis. Passing an
-          // explicit null here would override that default and lose the user.
-          date_range_start: dateRangeStart || null,
-          date_range_end: dateRangeEnd || null,
-        })
-        .select()
-        .single();
-      if (reportErr) throw reportErr;
-
-      setReportId(report.id);
-
-      // Parse brand voice preset from brand_notes ([VOICE:preset] prefix)
-      let brandNotes = client!.brand_notes || "";
-      let brandVoice = "";
-      const voiceMatch = brandNotes.match(/^\[VOICE:(.+?)]\n?/);
-      if (voiceMatch) {
-        brandVoice = voiceMatch[1];
-        brandNotes = brandNotes.slice(voiceMatch[0].length);
-      }
-
-      // Parse comma-separated geo/language to arrays
-      const geoArr = client!.geo
-        ? client!.geo
-            .split(",")
-            .map((s: string) => s.trim())
-            .filter(Boolean)
-        : ["US"];
-      const langArr = client!.language
-        ? client!.language
-            .split(",")
-            .map((s: string) => s.trim())
-            .filter(Boolean)
-        : ["en"];
-
-      // Build payload — include report_id so n8n can write back to Supabase
-      const payload = {
-        report_id: report.id,
-        client_name: client!.name,
-        sprout_customer_id: client!.sprout_customer_id || "1676448",
-        profile_ids: profiles?.map((p) => p.sprout_profile_id) || [],
-        profiles:
-          profiles?.map((p) => ({
-            id: p.sprout_profile_id,
-            name: p.profile_name,
-            native_name: p.native_name,
-            network: p.network_type,
-            url: p.native_link,
-          })) || [],
-        social_keywords: client!.social_keywords || [],
-        trends_keywords: client!.trends_keywords || "",
-        content_pillars: client!.content_pillars || [],
-        primary_platforms: (client!.primary_platforms || []).join(","),
-        geo: geoArr,
-        languages: langArr,
-        brand_voice: brandVoice,
-        brand_notes: brandNotes,
-        brand_book_text: client!.brand_book_text || "",
-        brief_text: client!.brief_text || "",
-        brief_file_id: client!.brief_file_id || "",
-        design_style_synthesis: (client as any)?.design_style_synthesis || null,
-        design_references: (client as any)?.design_references || [],
-        brand_book_file_path: (client as any)?.brand_book_file_path || null,
-        date_range_start: dateRangeStart || "",
-        date_range_end: dateRangeEnd || "",
-        skip_trends: skipTrends,
-        timezone: (client as any)?.timezone || "UTC",
-        competitive_context: buildCompetitiveContext(latestCompetitive, insightFeedback as any),
-      };
-
-      console.log("Sending webhook payload:", JSON.stringify(payload, null, 2));
-      console.log("Report ID:", report.id);
-      console.log("Profile IDs:", payload.profile_ids);
-
-      // Animate steps
       stepRef.current = setInterval(() => {
         setCurrentStep((prev) => (prev < STEPS.length - 1 ? prev + 1 : prev));
       }, 15000);
 
-      // Fire webhook — don't wait for the full workflow to finish
-      // n8n will respond immediately, then process and write results to Supabase
-      const response = await fetch(setting.value, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
-        throw new Error(`Webhook returned ${response.status}${errorText ? ": " + errorText.slice(0, 200) : ""}`);
-      }
-
       // Start polling Supabase for completion
-      pollForCompletion(report.id);
+      pollForCompletion(reportRowId);
     } catch (err: any) {
       stopAllTimers();
       setRunning(false);

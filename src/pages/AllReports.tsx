@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { canRetry, retryLabel } from "@/lib/reportRun";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -181,6 +182,7 @@ export default function AllReports() {
                                   <Eye className="h-4 w-4 mr-1" /> View
                                 </Button>
                               )}
+                              {canRetry(r) && <RetryReportButton reportId={r.id} kind="monthly" label={retryLabel(r)} />}
                               <ReportActions report={r} />
                             </div>
                           </TableCell>
@@ -243,7 +245,7 @@ export default function AllReports() {
                                     <Eye className="h-4 w-4 mr-1" /> View
                                   </Button>
                                 )}
-                                {r.status === "failed" && <RetryReportButton reportId={r.id} kind="competitive" />}
+                                {canRetry(r) && <RetryReportButton reportId={r.id} kind="competitive" label={retryLabel(r)} />}
                                 <ReportActions report={r} kind="competitive" />
                               </div>
                             </TableCell>

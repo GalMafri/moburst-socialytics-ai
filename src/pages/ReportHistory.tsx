@@ -1,4 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
+import { canRetry, retryLabel } from "@/lib/reportRun";
+import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -107,6 +109,7 @@ export default function ReportHistory() {
                               <Eye className="h-4 w-4 mr-1" /> View
                             </Button>
                           )}
+                          {canRetry(r) && <RetryReportButton reportId={r.id} kind="monthly" label={retryLabel(r)} />}
                           <ReportActions report={r} />
                         </TableCell>
                       </TableRow>

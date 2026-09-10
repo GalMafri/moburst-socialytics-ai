@@ -1,4 +1,6 @@
 import { useNavigate, useParams } from "react-router-dom";
+import { canRetry, retryLabel } from "@/lib/reportRun";
+import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -383,6 +385,9 @@ export default function ReportView() {
               </Button>
             )}
             <ExportPdfButton contentRef={reportContentRef} filename={`${clientName}-report-${new Date(report.created_at).toISOString().slice(0, 10)}`} />
+            {canRetry(report) && (
+              <RetryReportButton reportId={report.id} kind="monthly" variant="outline" label={retryLabel(report)} />
+            )}
             <ReportActions report={report} />
           </div>
         </div>

@@ -8,6 +8,7 @@
 // by_channel data, so the filter only appears when it can do something.
 
 import { useMemo, useRef, useState } from "react";
+import { canRetry, retryLabel } from "@/lib/reportRun";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { StatCard } from "@/components/ui/stat-card";
 import { useParams, useNavigate } from "react-router-dom";
@@ -530,8 +531,8 @@ export default function CompetitiveReportView() {
               <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/feed`)}><Rss className="h-4 w-4 mr-2" /> Latest posts</Button>
             )}
             <ExportPdfButton contentRef={printRef} filename={`${clientName.replace(/[^a-z0-9]+/gi, "_")}_competitive_${period ? period.replace(/[^a-z0-9]+/gi, "_") : report.id.slice(0, 8)}`} title={`${clientName} vs. the field${period ? ` (${period})` : ""}`} />
-            {report.status === "failed" && (
-              <RetryReportButton reportId={report.id} kind="competitive" variant="outline" label="Run again" />
+            {canRetry(report) && (
+              <RetryReportButton reportId={report.id} kind="competitive" variant="outline" label={retryLabel(report)} />
             )}
             <ReportActions
               report={report as any}

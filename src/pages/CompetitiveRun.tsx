@@ -185,6 +185,18 @@ export default function CompetitiveRun() {
     [id, stopAllTimers, refetchRuns, toast],
   );
 
+  /** The reason the function gave, rather than "Edge Function returned a non-2xx status code". */
+  const describeRunError = async (err: any, data: any): Promise<string> => {
+    if (data?.error) return data.error;
+    try {
+      const body = await err?.context?.json?.();
+      if (body?.error) return body.error;
+    } catch {
+      // fall through to the generic message
+    }
+    return err?.message || "The run could not be started.";
+  };
+
   const runAnalysis = async () => {
     if (!rangeOk) {
       toast({ title: "Pick a valid period", description: "The end date must be on or after the start date, and the range at most one year.", variant: "destructive" });
@@ -197,85 +209,27 @@ export default function CompetitiveRun() {
     track("competitive_analysis_started", { client_id: id, entity_id: confirmedSet?.id });
 
     try {
-      const { data: setting } = await supabase
-        .from("app_settings")
-        .select("value")
-        .eq("key", "competitive_n8n_webhook_url")
-        .maybeSingle();
-
-      if (!setting?.value) {
-        throw new Error(
-          "The competitive analysis workflow is not configured yet (app_settings.competitive_n8n_webhook_url). " +
-            "It goes live with the Rival IQ integration.",
-        );
-      }
-
-      // The analysis reads a RivalIQ landscape, not the app's competitor set.
-      // A client with no landscape used to spend a run to be told so by a
-      // JavaScript error inside the workflow, so the check happens here.
-      const { data: landscapes } = await supabase.functions.invoke("import-rivaliq-landscape", {
-        body: { client_id: id, mode: "list" },
+      // One place builds what n8n receives: the same function serves this
+      // page, the scheduler and a retry, so a rerun can never send something
+      // different from the original attempt.
+      const { data: started, error: runErr } = await supabase.functions.invoke("run-report", {
+        body: {
+          client_id: id,
+          kind: "competitive",
+          date_range_start: range.start,
+          date_range_end: range.end,
+        },
       });
-      const available: Array<{ id: string; name: string; is_match?: boolean }> = landscapes?.landscapes || [];
-      const wanted = (confirmedSet as any).rivaliq_landscape_id
-        ? available.find((l) => String(l.id) === String((confirmedSet as any).rivaliq_landscape_id))
-        : available.find((l) => l.is_match);
-      if (available.length > 0 && !wanted) {
-        throw new Error(
-          `No RivalIQ landscape tracks ${client!.name}. Create one in RivalIQ with ${client!.name} as the focus company, then import it on the Competitors screen. The analysis reads the landscape, not the competitor list here.`,
-        );
-      }
-
-      const { data: report, error: reportErr } = await supabase
-        .from("competitive_reports")
-        .insert({ client_id: id!, set_id: confirmedSet!.id, status: "running", date_range_start: range.start, date_range_end: range.end })
-        .select()
-        .single();
-      if (reportErr) throw reportErr;
-      setReportId(report.id);
-
-      const payload = {
-        report_id: report.id,
-        client_id: id,
-        client_name: client!.name,
-        company_slug: client!.company_slug,
-        website_url: client!.website_url,
-        set_id: confirmedSet!.id,
-        // Sets imported from RivalIQ carry the landscape id; the workflow then
-        // resolves it explicitly instead of matching by focus-company name.
-        rivaliq_landscape_id: (confirmedSet as any).rivaliq_landscape_id || undefined,
-        date_range_start: range.start,
-        date_range_end: range.end,
-        range_preset: preset,
-        // Gap suggestions the team voted down; the analysis never re-proposes them.
-        suppressed_insights: suppressedTexts,
-        competitors: (selectedCompetitors || []).map((c: any) => ({
-          id: c.id,
-          rank: c.selected_rank,
-          name: c.name,
-          website_url: c.website_url,
-          rivaliq_company_id: c.rivaliq_company_id,
-          handles: (c.competitor_handles || [])
-            .filter((h: any) => h.is_active)
-            .map((h: any) => ({ platform: h.platform, handle: h.handle, url: h.profile_url })),
-        })),
-      };
+      if (runErr) throw new Error(await describeRunError(runErr, started));
+      if (started?.error) throw new Error(started.error);
+      const reportRowId: string = started.report_id;
+      setReportId(reportRowId);
 
       stepRef.current = setInterval(() => {
         setCurrentStep((prev) => (prev < STEPS.length - 1 ? prev + 1 : prev));
       }, 30000);
 
-      const response = await fetch(setting.value, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) {
-        const t = await response.text().catch(() => "");
-        throw new Error(`Webhook returned ${response.status}${t ? ": " + t.slice(0, 200) : ""}`);
-      }
-
-      pollForCompletion(report.id);
+      pollForCompletion(reportRowId);
     } catch (err: any) {
       stopAllTimers();
       setRunning(false);

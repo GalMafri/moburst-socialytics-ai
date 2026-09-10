@@ -15,6 +15,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { buildCompetitivePayload, buildSocialPayload, type ReportRange } from "../_shared/reports/payloads.ts";
+import { summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -111,6 +112,33 @@ Deno.serve(async (req) => {
         set = data;
       }
       if (!set) return json({ error: `${client.name} has no confirmed competitor set to analyse.` }, 422);
+
+      // The analysis reads a RivalIQ landscape, not the competitor list in
+      // the app. A client with no landscape used to spend a whole run to be
+      // told so by a JavaScript error inside the workflow. Checked here, so
+      // the scheduler and a retry get the same protection as the run page.
+      const rivaliqKey = Deno.env.get("RIVALIQ_API_KEY");
+      if (rivaliqKey) {
+        try {
+          const resp = await fetch(`https://api.rivaliq.com/v3/landscapes?apiKey=${encodeURIComponent(rivaliqKey)}`);
+          if (resp.ok) {
+            const listed = summarizeLandscapes(((await resp.json()).landscapes || []), client.name, client.website_url);
+            const wanted = set.rivaliq_landscape_id
+              ? listed.find((l) => String(l.id) === String(set.rivaliq_landscape_id))
+              : listed.find((l) => l.is_match);
+            if (listed.length > 0 && !wanted) {
+              return json({
+                error:
+                  `No RivalIQ landscape tracks ${client.name}. Create one in RivalIQ with ${client.name} as the focus company, ` +
+                  `then import it on the Competitors screen. The analysis reads the landscape, not the competitor list here.`,
+              }, 422);
+            }
+          }
+        } catch {
+          // RivalIQ unreachable is not a reason to refuse the run; the
+          // workflow will report it properly if it persists.
+        }
+      }
 
       if (existing) {
         reportId = existing.id;
