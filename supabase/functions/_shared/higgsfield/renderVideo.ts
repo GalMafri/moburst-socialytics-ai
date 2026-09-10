@@ -23,6 +23,23 @@ import {
 /** A clip is 32.5 credits, so the floor sits above one. */
 export const VIDEO_CREDIT_FLOOR = 60;
 
+/**
+ * What to add to a motion brief when the clip animates a designed still.
+ *
+ * Measured: given a free hand, the model pushes the camera in hard, and by
+ * the last frame the headline has drifted out of shot entirely. The opening
+ * frame was perfect and the post was useless. The brief is written for a
+ * model that invents a scene; this says the scene already exists and the
+ * job is to bring it to life without moving it.
+ */
+export const HOLD_THE_FRAME =
+  "\n\nCRITICAL FRAMING. This is a finished, designed post being brought to life, not a scene to re-shoot. " +
+  "Hold the framing exactly as it is: no push in, no pull out, no pan, no tilt, no reframing, no crop. " +
+  "Every element stays where it starts, at the same size, for the whole clip. " +
+  "Any text in the frame stays completely visible, in its original position, and perfectly legible from the " +
+  "first frame to the last: it must never be covered, cropped, blurred, distorted or moved off screen. " +
+  "Motion is limited to light, glow, sparkle, and small drifts of secondary decorative objects.";
+
 export interface StartVideoArgs {
   supabase: any;
   prompt: string;
@@ -55,7 +72,8 @@ export async function startVideoWithHiggsfield(args: StartVideoArgs): Promise<St
 
   const aspect = videoAspect(args.aspectRatio);
   const jobs = await submitVideo(mcp, {
-    prompt: args.prompt,
+    // The still is the design; the clip must not wander away from it.
+    prompt: args.startImageId ? `${args.prompt}${HOLD_THE_FRAME}` : args.prompt,
     aspect,
     seconds: args.seconds || 5,
     resolution: args.resolution || "720p",
