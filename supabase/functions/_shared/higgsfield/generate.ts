@@ -328,7 +328,10 @@ export async function awaitJobs(mcp: ToolCaller, jobs: JobRef[], opts: WaitOptio
   const started = now();
   let outcomes: JobOutcome[] = jobs.map((j) => ({ ...j, status: "pending" }));
 
-  while (now() - started < budgetMs) {
+  // do/while, so a zero budget still asks once. A caller that wants a
+  // snapshot rather than a wait passes budgetMs 0, and getting no answer at
+  // all for that would be a trap.
+  do {
     const data = payload(
       await mcp.callTool("jobs_wait", {
         jobs: jobs.map((j) => ({ index: j.index, job_id: j.job_id })),
@@ -348,7 +351,7 @@ export async function awaitJobs(mcp: ToolCaller, jobs: JobRef[], opts: WaitOptio
       }));
     }
     if (data?.all_terminal === true) return { outcomes, allTerminal: true, waitedMs: now() - started };
-  }
+  } while (now() - started < budgetMs);
   return { outcomes, allTerminal: false, waitedMs: now() - started };
 }
 

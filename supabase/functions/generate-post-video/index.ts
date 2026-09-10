@@ -8,6 +8,12 @@ import { correctionFor, validateDesignImage, verdictIsDirty } from "../_shared/d
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 import { loadDesignLearnings, type DesignLearnings } from "../_shared/design-prompts/learnings.ts";
 import { headlineFrom } from "../_shared/design-prompts/headline.ts";
+import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
+import { mediaBackendFor } from "../_shared/higgsfield/backend.ts";
+import { HiggsfieldError } from "../_shared/higgsfield/generate.ts";
+import { renderImageWithHiggsfield } from "../_shared/higgsfield/renderImage.ts";
+import { startVideoWithHiggsfield } from "../_shared/higgsfield/renderVideo.ts";
+import { resolveContextImageUrls } from "../_shared/higgsfield/context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -61,7 +67,14 @@ async function generateSeedImage(args: {
    * zone, spelled exactly, and nothing else written anywhere.
    */
   headline?: string | null;
-}): Promise<{ base64: string; mimeType: string } | null> {
+  /**
+   * An alternative renderer for the finished seed prompt. Higgsfield takes
+   * references as signed urls of its own, so the inline-base64 assembly
+   * below belongs to Gemini alone, and a provider that returns a job id
+   * needs to hand that back so a clip can start from it.
+   */
+  renderWith?: (prompt: string) => Promise<{ base64: string; mimeType: string; jobId?: string | null } | null>;
+}): Promise<{ base64: string; mimeType: string; jobId?: string | null } | null> {
   try {
     const headline = (args.headline || "").trim();
     const seedPrompt = buildImagePrompt({
@@ -86,6 +99,8 @@ async function generateSeedImage(args: {
       variantAngle: args.variantAngle || undefined,
       learnings: args.learnings || null,
     });
+
+    if (args.renderWith) return await args.renderWith(seedPrompt);
 
     const contentParts: any[] = [];
 
@@ -192,6 +207,11 @@ serve(async (req) => {
   }
 
   try {
+    // verify_jwt is off for this function, so nothing checks the caller
+    // unless it does. It spends a Gemini key or the team's Higgsfield
+    // credits on every call.
+    await requireStaff(req);
+
     const {
       prompt,
       platform,
@@ -253,7 +273,13 @@ serve(async (req) => {
       geminiKey = settings?.value;
     }
 
-    if (!geminiKey) {
+    // Which provider renders this, read from the clients row rather than the
+    // body: a body-chosen provider would let any caller spend the team's
+    // Higgsfield credits on any client.
+    const backend = await mediaBackendFor(supabase, client_id || client_context?.client_id);
+    console.log("[generate-post-video] backend:", backend);
+
+    if (!geminiKey && backend === "gemini") {
       throw new Error("Gemini API key not configured");
     }
 
@@ -268,9 +294,36 @@ serve(async (req) => {
     // not an empty layout waiting for words that will never come.
     const headline = headlineFrom(post?.copy || post?.hook || "");
     console.log("[generate-post-video] generating brand-aligned seed image…", { headline });
+
+    // On the Higgsfield path the still is rendered by the same model the
+    // design button uses, so the clip animates type that is actually legible.
+    // Its job id comes back with it: Higgsfield takes one as the clip's start
+    // frame directly, with no second upload.
+    const higgsfieldSeed =
+      backend === "higgsfield"
+        ? async (seedPrompt: string) => {
+            const { referenceUrls } = await resolveContextImageUrls(
+              {
+                design_references: resolvedRefs,
+                brand_book_file_path: resolvedBrandBookPath,
+                design_style_synthesis: resolvedSynthesis,
+              },
+              supabase,
+            );
+            const still = await renderImageWithHiggsfield({
+              supabase,
+              prompt: seedPrompt,
+              aspectRatio,
+              referenceUrls,
+            });
+            return { base64: still.imageB64, mimeType: still.imageMime, jobId: still.jobId };
+          }
+        : undefined;
+
     let seedImage = await generateSeedImage({
       geminiKey,
       supabase,
+      renderWith: higgsfieldSeed,
       basePrompt: prompt,
       platform,
       format,
@@ -297,6 +350,7 @@ serve(async (req) => {
         const retry = await generateSeedImage({
           geminiKey,
           supabase,
+          renderWith: higgsfieldSeed,
           basePrompt: prompt + correctionFor(verdict, { expectNoText: !headline, avoid }),
           headline,
           platform,
@@ -334,6 +388,59 @@ serve(async (req) => {
       hasSeedImage: !!seedImage,
       seedHasText: !!seedImage && !!headline,
     });
+
+    // ── Higgsfield: submit and hand back a job.
+    //
+    // Measured on the team's account, a five-second clip takes about fourteen
+    // minutes. Supabase kills this request at 150 seconds, so waiting here
+    // would guarantee a spent generation that nobody can collect. The row is
+    // written first, so a clip is never running with no record of it.
+    if (backend === "higgsfield") {
+      const seedPreview = seedImage ? `data:${seedImage.mimeType};base64,${seedImage.base64}` : null;
+      const started = await startVideoWithHiggsfield({
+        supabase,
+        prompt: enhancedPrompt,
+        aspectRatio,
+        startImageId: seedImage?.jobId || null,
+        seconds: 5,
+      });
+
+      const { data: jobRow, error: jobErr } = await supabase
+        .from("media_jobs")
+        .insert({
+          client_id: client_id || client_context?.client_id || null,
+          kind: "video",
+          provider: "higgsfield",
+          request_id: started.jobId,
+          model_path: started.model,
+          status: "submitted",
+          input: { prompt: enhancedPrompt, aspect: started.aspect, seconds: 5, headline },
+        })
+        .select("id")
+        .single();
+      if (jobErr) {
+        // The clip is already running and already charged. Say so rather
+        // than pretending nothing happened.
+        console.error("[generate-post-video] clip started but the job row failed:", jobErr.message);
+        throw new Error(
+          `The clip started but could not be recorded, so it cannot be collected (${jobErr.message}). Higgsfield job ${started.jobId}.`,
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          job_id: jobRow.id,
+          status: "running",
+          seed_image_url: seedPreview,
+          seed_used: !!seedImage,
+          brand_footing: footing.strong ? "strong" : footing.weak ? "weak" : "none",
+          brand_advice: brandAdvice,
+          rendered_by: "higgsfield",
+          model: started.model,
+        }),
+        { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // Try each Veo model until one works. Every failure is kept: the loop used
     // to overwrite a single lastError, so a real failure on the first model was
@@ -485,8 +592,9 @@ serve(async (req) => {
     throw new Error("Video generation timed out after 3 minutes. Please try again.");
   } catch (error: any) {
     console.error("Error generating video:", error);
+    const status = error instanceof AuthzError ? error.status : error instanceof HiggsfieldError ? 502 : 500;
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
+      status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

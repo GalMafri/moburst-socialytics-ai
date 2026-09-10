@@ -87,6 +87,49 @@ function getPlatformVideoSpec(platform?: string, format?: string) {
 
 type VariantSlot = string | null | "FAILED";
 
+/** How long to keep collecting a clip before giving up on it. */
+const VIDEO_JOB_TIMEOUT_MS = 25 * 60 * 1000;
+/** Gap between collection attempts. Higgsfield suggests ten seconds. */
+const VIDEO_POLL_MS = 12_000;
+
+/**
+ * One clip, however long the provider takes.
+ *
+ * Veo answers inside the request. Higgsfield's video model does not: a
+ * five-second clip measured at about fourteen minutes, far past the 150
+ * seconds an edge function lives, so that path answers 202 with a job id and
+ * the result is collected here. Either way the caller gets back something
+ * carrying video_url, and everything downstream is unchanged.
+ */
+async function invokeVideo(
+  body: Record<string, unknown>,
+  isCancelled: () => boolean,
+): Promise<{ data: any; error: any }> {
+  const first = await supabase.functions.invoke("generate-post-video", { body });
+  if (first.error || first.data?.video_url || !first.data?.job_id) return first as any;
+
+  const jobId = first.data.job_id as string;
+  const deadline = Date.now() + VIDEO_JOB_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (isCancelled()) return { data: { error: "Cancelled." }, error: null };
+    await new Promise((r) => setTimeout(r, VIDEO_POLL_MS));
+    const { data, error } = await supabase.functions.invoke("media-job-status", { body: { job_id: jobId } });
+    // A single failed poll is a blip, not a lost clip: the job keeps running
+    // and the row keeps the result, so try again rather than give up.
+    if (error || !data) continue;
+    if (data.status === "completed" && data.video_url) {
+      return { data: { ...first.data, ...data }, error: null };
+    }
+    if (data.status === "failed") {
+      return { data: { error: data.error || "The clip could not be generated." }, error: null };
+    }
+  }
+  return {
+    data: { error: "The clip is still rendering after 25 minutes. It has not been lost; open the post again shortly." },
+    error: null,
+  };
+}
+
 export function CreatePostVideoButton({ post, clientContext, brandIdentity, clientId, onVideoGenerated }: CreatePostVideoButtonProps) {
   const effectiveBrandIdentity = clientContext?.brand_identity ?? brandIdentity ?? null;
   const generation = useGenerationContext();
@@ -483,8 +526,8 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
 
     // Fire all variants in parallel.
     const promises = angleInstructions.map((angle) =>
-      supabase.functions.invoke("generate-post-video", {
-        body: {
+      invokeVideo(
+        {
           prompt: brief,
           platform: post.platform,
           format: post.format,
@@ -495,7 +538,8 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
           post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
           variant_angle: angle.instruction || undefined,
         },
-      }),
+        () => cancelRef.current,
+      ),
     );
 
     const results = await Promise.allSettled(promises);

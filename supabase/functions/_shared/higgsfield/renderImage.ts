@@ -47,6 +47,12 @@ export interface RenderedImage {
   /** What Higgsfield actually ran. It can substitute for the one asked for. */
   model: string | null;
   creditsBefore: number | null;
+  /**
+   * The generation's job id. Higgsfield accepts one of these directly as a
+   * medias[].value, so a clip can be started from this still without
+   * uploading the bytes back again.
+   */
+  jobId: string | null;
 }
 
 export interface RenderImageArgs {
@@ -114,5 +120,6 @@ export async function renderImageWithHiggsfield(args: RenderImageArgs): Promise<
     textResponse: null,
     model: done.model ?? IMAGE_MODEL,
     creditsBefore: balance?.credits ?? null,
+    jobId: waited.outcomes.find((o) => o.status === "completed")?.job_id ?? null,
   };
 }

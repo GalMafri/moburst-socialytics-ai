@@ -144,3 +144,6 @@ verify_jwt = false
 # issued is what authenticates it.
 [functions.higgsfield-auth]
 verify_jwt = false
+
+[functions.media-job-status]
+verify_jwt = false

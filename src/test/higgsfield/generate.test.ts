@@ -178,6 +178,19 @@ describe("awaitJobs", () => {
     expect(() => firstResult(result)).toThrow(/still working/i);
   });
 
+  it("asks once even with no budget, so a snapshot is possible", async () => {
+    const { caller, calls } = stub({
+      jobs_wait: {
+        jobs: [{ index: 0, job_id: "job-1", status: "completed", result_url: "https://cdn/x.mp4" }],
+        all_terminal: true,
+      },
+    });
+    const result = await awaitJobs(caller, [{ index: 0, job_id: "job-1" }], { budgetMs: 0, pollSeconds: 0, now: () => 0 });
+    expect(calls.length).toBe(1);
+    expect(calls[0].args.timeout_seconds).toBe(0);
+    expect(result.allTerminal).toBe(true);
+  });
+
   it("reports a failed job as a failure, not a timeout", () => {
     expect(() =>
       firstResult({
