@@ -98,6 +98,42 @@ describe("submitVideo", () => {
     expect(calls[0].args.requests[0].params.mode).toBeUndefined();
   });
 
+  it("declines a recommended preset and resubmits, rather than reporting a failure", async () => {
+    // Measured live: the server can answer a submission with a style preset
+    // instead of a job. Nothing is created and nothing is charged.
+    let call = 0;
+    const { caller, calls } = stub({
+      generate_video_batch: () => {
+        call += 1;
+        return call === 1
+          ? {
+              jobs: [
+                {
+                  index: 0,
+                  status: "submission_failed",
+                  error: 'Preset "IN THE DARK" was recommended instead of submitting a job.',
+                  preset_recommendation: { preset_id: "preset-9", name: "IN THE DARK" },
+                },
+              ],
+              submitted_count: 0,
+              failed_count: 1,
+            }
+          : jobsReply;
+      },
+    });
+    const jobs = await submitVideo(caller, { prompt: "p", aspect: "9:16", startImageId: "still-1" });
+    expect(calls.length).toBe(2);
+    expect(calls[1].args.requests[0].params.declined_preset_id).toBe("preset-9");
+    expect(jobs).toEqual([{ index: 0, job_id: "job-1" }]);
+  });
+
+  it("explains a submission the server refused outright", async () => {
+    const { caller } = stub({
+      generate_video_batch: { jobs: [{ index: 0, status: "submission_failed", error: "content policy" }] },
+    });
+    await expect(submitVideo(caller, { prompt: "p", aspect: "9:16" })).rejects.toThrow(/content policy/);
+  });
+
   it("is silent unless audio is asked for", async () => {
     const { caller, calls } = stub({ generate_video_batch: jobsReply });
     await submitVideo(caller, { prompt: "p", aspect: "16:9" });

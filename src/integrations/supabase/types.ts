@@ -778,6 +778,7 @@ export type Database = {
           account_email: string | null
           client_id: string | null
           expires_at: string | null
+          linked_at: string | null
           pending_started_at: string | null
           pending_state: string | null
           pending_verifier: string | null
@@ -790,6 +791,7 @@ export type Database = {
           account_email?: string | null
           client_id?: string | null
           expires_at?: string | null
+          linked_at?: string | null
           pending_started_at?: string | null
           pending_state?: string | null
           pending_verifier?: string | null
@@ -802,6 +804,7 @@ export type Database = {
           account_email?: string | null
           client_id?: string | null
           expires_at?: string | null
+          linked_at?: string | null
           pending_started_at?: string | null
           pending_state?: string | null
           pending_verifier?: string | null

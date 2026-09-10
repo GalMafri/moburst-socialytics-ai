@@ -8,7 +8,7 @@
 // week by trigger-scheduled-reports (shared secret).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
+import { bestLandscapeMatch, summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
 import { harvestedPaths, type HarvestedRef } from "../_shared/design-prompts/designRefs.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
 
@@ -133,7 +133,10 @@ async function harvestOwnCreative(
 
     const added: HarvestedRef[] = [];
     for (const post of mine) {
-      if (existing.length + added.length >= HARVEST_CAP) break;
+      // Cap what this run adds, not the total. Counting the stored list here
+      // meant that once it reached the cap nothing was ever harvested again,
+      // and the trim below that keeps the newest could never run.
+      if (added.length >= HARVEST_CAP) break;
       const id = String(post.postId ?? post.nativeId ?? post.postLink ?? "");
       if (!id || seen.has(id)) continue;
       // imageLarge first: RivalIQ's `image` is a smaller copy, and a
@@ -212,7 +215,7 @@ Deno.serve(async (req) => {
       // the name alone missed clients whose RivalIQ company carries a suffix
       // or is stored as a domain.
       const list = await rivaliq("/landscapes", key);
-      const match = summarizeLandscapes(list.landscapes || [], client.name, (client as any).website_url).find((l) => l.is_match);
+      const match = bestLandscapeMatch(summarizeLandscapes(list.landscapes || [], client.name, (client as any).website_url));
       if (!match) return json({ error: `No RivalIQ landscape tracks ${client.name}. Import or create one first.` }, 422);
       landscapeId = match.id;
     }

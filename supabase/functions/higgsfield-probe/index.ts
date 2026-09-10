@@ -43,7 +43,13 @@ const CANDIDATES = [
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    await requireStaff(req);
+    // Admin, not merely staff. This function forwards caller-supplied paths,
+    // bodies and MCP tool calls to Higgsfield under the team's shared
+    // credentials with no allowlist, and its submit mode spends credits. That
+    // is a developer's tool, not something every staff session should hold.
+    const { asCaller } = await requireStaff(req);
+    const { data: isAdmin } = await asCaller.rpc("is_admin");
+    if (!isAdmin) return json({ error: "Higgsfield diagnostics are an admin action." }, 403);
 
     // MCP mode: prove the linked team account works, and what it can reach.
     // Separate from the REST probe below, which uses the API key.

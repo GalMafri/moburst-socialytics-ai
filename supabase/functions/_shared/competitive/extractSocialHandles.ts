@@ -74,8 +74,7 @@ function harvestUrls(text: string): Array<{ url: string; index: number }> {
 }
 
 /** Which platform a host belongs to, ignoring www/m/web and language prefixes. */
-function platformOf(host: string): string | null {
-  const h = host.toLowerCase().replace(/^(?:www|m|web|[a-z]{2}-[a-z]{2}|[a-z]{2})\./, "");
+function knownHost(h: string): string | null {
   if (h === "instagram.com") return "instagram";
   if (h === "facebook.com" || h === "fb.com") return "facebook";
   if (h === "tiktok.com") return "tiktok";
@@ -83,6 +82,17 @@ function platformOf(host: string): string | null {
   if (h === "youtube.com" || h === "youtu.be") return "youtube";
   if (h === "twitter.com" || h === "x.com") return "x";
   return null;
+}
+
+function platformOf(host: string): string | null {
+  const raw = host.toLowerCase();
+  // The whole host first. Stripping unconditionally ate the name out of
+  // "fb.com", whose "fb" matches the two-letter language-prefix alternative,
+  // leaving "com" and no facebook match at all.
+  const direct = knownHost(raw);
+  if (direct) return direct;
+  const stripped = raw.replace(/^(?:www|m|web|[a-z]{2}-[a-z]{2}|[a-z]{2})\./, "");
+  return stripped !== raw && stripped.includes(".") ? knownHost(stripped) : null;
 }
 
 const HANDLE_OK: Record<string, RegExp> = {

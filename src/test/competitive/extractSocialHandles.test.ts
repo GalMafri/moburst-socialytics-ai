@@ -131,3 +131,23 @@ describe("the shapes real brand sites emit", () => {
     expect(merged.find((h) => h.platform === "instagram")?.handle).toBe("first");
   });
 });
+
+describe("fb.com short links", () => {
+  it("reads a facebook handle from fb.com", () => {
+    // The host prefix strip is unanchored to a real subdomain, so "fb" was
+    // being eaten as a two-letter language prefix and fb.com resolved to
+    // "com", matching nothing.
+    const out = extractSocialHandles('<footer><a href="https://fb.com/acmecorp">Facebook</a></footer>', "Acme");
+    expect(out.find((h) => h.platform === "facebook")?.handle).toBe("acmecorp");
+  });
+
+  it("still reads the ordinary host", () => {
+    const out = extractSocialHandles('<footer><a href="https://www.facebook.com/acmecorp">Facebook</a></footer>', "Acme");
+    expect(out.find((h) => h.platform === "facebook")?.handle).toBe("acmecorp");
+  });
+
+  it("still reads a language-prefixed host", () => {
+    const out = extractSocialHandles('<footer><a href="https://de-de.facebook.com/acmecorp">Facebook</a></footer>', "Acme");
+    expect(out.find((h) => h.platform === "facebook")?.handle).toBe("acmecorp");
+  });
+});

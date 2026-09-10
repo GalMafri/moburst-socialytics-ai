@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { domainStem, summarizeLandscapes } from "../../../supabase/functions/_shared/competitive/rivaliqLandscape";
+import { bestLandscapeMatch, domainStem, summarizeLandscapes } from "../../../supabase/functions/_shared/competitive/rivaliqLandscape";
 
 const landscape = (over: any) => ({
   id: over.id ?? 1,
@@ -74,5 +74,47 @@ describe("summarizeLandscapes", () => {
       "Moburst.com",
     );
     expect(out[0].id).toBe("2");
+  });
+});
+
+describe("domainStem on modern TLDs", () => {
+  it("keeps the name, not the suffix, when the TLD is longer than three characters", () => {
+    // A length test used to stop at .agency and return it as the stem, so
+    // every company on that TLD compared equal to every other.
+    expect(domainStem("https://someshop.agency")).toBe("someshop");
+    expect(domainStem("another.agency")).toBe("another");
+    expect(domainStem("someshop.agency")).not.toBe(domainStem("another.agency"));
+  });
+
+  it("still strips a country-code pair", () => {
+    expect(domainStem("https://www.example.co.uk/about")).toBe("example");
+    expect(domainStem("example.com.au")).toBe("example");
+  });
+
+  it("still handles the ordinary case", () => {
+    expect(domainStem("https://moburst.com")).toBe("moburst");
+  });
+});
+
+type Summary = { id: string; is_match: boolean; match_reason: string | null };
+
+describe("bestLandscapeMatch", () => {
+  it("prefers a landscape the client is the focus of over one that merely tracks them", () => {
+    // Taking the first match meant a competitor's landscape could win purely
+    // on ordering, and the weekly feed would then report on somebody else.
+    const picked = bestLandscapeMatch<Summary>([
+      { id: "a", is_match: true, match_reason: "client is in the set" },
+      { id: "b", is_match: true, match_reason: "focus company" },
+    ]);
+    expect(picked?.id).toBe("b");
+  });
+
+  it("falls back to the weak match when it is the only one", () => {
+    const picked = bestLandscapeMatch<Summary>([{ id: "a", is_match: true, match_reason: "client is in the set" }]);
+    expect(picked?.id).toBe("a");
+  });
+
+  it("returns nothing when nothing matches", () => {
+    expect(bestLandscapeMatch<Summary>([{ id: "a", is_match: false, match_reason: null }])).toBeUndefined();
   });
 });

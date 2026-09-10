@@ -15,7 +15,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { buildCompetitivePayload, buildSocialPayload, isStuckRun, type ReportRange } from "../_shared/reports/payloads.ts";
-import { summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
+import { bestLandscapeMatch, summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -67,13 +67,31 @@ Deno.serve(async (req) => {
 
     // Staff, with write access to this client. Checked before anything is
     // read back to the caller.
-    await requireStaff(req, { writeClientId: clientId });
+    const caller = await requireStaff(req, { writeClientId: clientId });
 
-    // A row that is genuinely mid-run must not be fired twice. A row that
-    // says "running" but stopped talking hours ago is the case Retry exists
-    // for, so only a recent one is refused.
-    if (existing && existing.status === "running" && !isStuckRun(existing.status, existing.created_at)) {
-      return json({ error: "That run is still going. Wait for it to finish or fail." }, 409);
+    if (existing) {
+      const stuck = isStuckRun(existing.status, existing.created_at);
+      // A row that is genuinely mid-run must not be fired twice. A row that
+      // says "running" but stopped talking hours ago is the case Retry exists
+      // for, so only a recent one is refused.
+      if (existing.status === "running" && !stuck) {
+        return json({ error: "That run is still going. Wait for it to finish or fail." }, 409);
+      }
+      // Retrying reuses the row and clears report_data, so pointing it at a
+      // report that already finished would destroy the analysis. Only a run
+      // that failed, or one that died without saying so, may be run again;
+      // anything else needs a new report, which is a call without a
+      // report_id. Until now only the button's own canRetry() stopped this,
+      // which is no protection at all for a direct call.
+      if (existing.status !== "failed" && !stuck) {
+        return json(
+          {
+            error:
+              "That report has already finished, so it cannot be retried. Running it again would erase it. Start a new report for this client instead.",
+          },
+          409,
+        );
+      }
     }
 
     const { data: client, error: clientErr } = await admin.from("clients").select("*").eq("id", clientId).maybeSingle();
@@ -95,6 +113,8 @@ Deno.serve(async (req) => {
 
     let reportId: string;
     let payload: Record<string, unknown>;
+    /** Set moved to 'analyzing' by this call, so it can be released again. */
+    let startedSetId: string | null = null;
 
     if (kind === "competitive") {
       // The set the failed run used, or the client's current confirmed one.
@@ -128,7 +148,7 @@ Deno.serve(async (req) => {
             const listed = summarizeLandscapes(((await resp.json()).landscapes || []), client.name, client.website_url);
             const wanted = set.rivaliq_landscape_id
               ? listed.find((l) => String(l.id) === String(set.rivaliq_landscape_id))
-              : listed.find((l) => l.is_match);
+              : bestLandscapeMatch(listed);
             if (listed.length > 0 && !wanted) {
               return json({
                 error:
@@ -155,7 +175,10 @@ Deno.serve(async (req) => {
       } else {
         const { data, error } = await admin
           .from("competitive_reports")
-          .insert({ client_id: clientId, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end })
+          // created_by defaults to auth.uid(), which is NULL under the
+          // service role, so the author is set explicitly. The browser-side
+          // insert this path replaced got one for free.
+          .insert({ client_id: clientId, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: caller.userId })
           .select("id")
           .single();
         if (error) throw new Error(error.message);
@@ -163,6 +186,7 @@ Deno.serve(async (req) => {
       }
       // The set follows its run, so a retry takes it out of 'failed'.
       await admin.from("competitor_sets").update({ status: "analyzing" }).eq("id", set.id).in("status", ["confirmed", "complete", "failed"]);
+      startedSetId = set.id;
       payload = await buildCompetitivePayload({ supabase: admin, client, reportId, set, range });
     } else {
       if (existing) {
@@ -176,7 +200,8 @@ Deno.serve(async (req) => {
       } else {
         const { data, error } = await admin
           .from("reports")
-          .insert({ client_id: clientId, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end })
+          // Same here: under the service role auth.uid() is NULL.
+          .insert({ client_id: clientId, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: caller.userId })
           .select("id")
           .single();
         if (error) throw new Error(error.message);
@@ -199,6 +224,13 @@ Deno.serve(async (req) => {
         .from(table)
         .update({ status: "failed", report_data: { error: `The workflow did not accept the run (${resp.status}).` } })
         .eq("id", reportId);
+      // The set was moved to 'analyzing' in anticipation of a run that never
+      // started. Only an n8n callback ever moves it out of that state, and
+      // none is coming, so it would sit there for ever — and a set stuck on
+      // 'analyzing' is skipped by the scheduler, silently dropping the client.
+      if (kind === "competitive" && startedSetId) {
+        await admin.from("competitor_sets").update({ status: "failed" }).eq("id", startedSetId).eq("status", "analyzing");
+      }
       return json({ error: `The workflow returned ${resp.status}${text ? `. ${text.slice(0, 200)}` : "."}` }, 502);
     }
 

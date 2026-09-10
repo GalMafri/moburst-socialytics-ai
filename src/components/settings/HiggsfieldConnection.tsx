@@ -26,7 +26,7 @@ export function HiggsfieldConnection() {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["higgsfield-status"],
     queryFn: async (): Promise<Status> => {
       const { data, error } = await supabase.functions.invoke("higgsfield-auth", { body: { action: "status" } });
@@ -69,6 +69,13 @@ export function HiggsfieldConnection() {
           <p className="t-secondary flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             Checking the connection
+          </p>
+        ) : isError ? (
+          // Not the same thing as "not connected": saying so would send
+          // someone to re-link an account that is fine.
+          <p className="t-body flex items-start gap-2 text-[rgb(248,113,113)]">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
+            Could not check the connection. {error instanceof Error ? error.message : "Try again in a moment."}
           </p>
         ) : linked ? (
           <div className="space-y-2">

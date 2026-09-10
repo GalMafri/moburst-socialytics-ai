@@ -24,6 +24,8 @@ const HIGGSFIELD_REASONS: Record<string, string> = {
   expired: "That sign-in link had expired. They last 15 minutes; start again from here.",
   no_refresh_token:
     "Higgsfield returned a session but no way to stay signed in, so nothing was saved. Start again and leave every permission ticked.",
+  exchange_failed: "Higgsfield would not complete the sign-in. Nothing was saved. Start again from here.",
+  not_saved: "The sign-in worked but the connection could not be stored. Start again from here.",
 };
 
 export default function Settings() {

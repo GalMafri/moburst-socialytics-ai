@@ -98,8 +98,12 @@ export function domainStem(value: string | null | undefined): string {
     .split(/[/?#]/)[0];
   if (!host.includes(".")) return "";
   const parts = host.split(".").filter(Boolean);
-  // Drop the TLD, and a country code behind it (.co.uk).
-  while (parts.length > 1 && parts[parts.length - 1].length <= 3) parts.pop();
+  // Drop the TLD, then the registry label behind a country code (.co.uk,
+  // .com.au). Testing the label's LENGTH instead kept the whole suffix for
+  // anything newer than three characters, so every company on .agency or
+  // .studio reduced to that suffix and compared equal to each other.
+  parts.pop();
+  if (parts.length > 1 && REGISTRY_SECOND_LEVELS.has(parts[parts.length - 1])) parts.pop();
   return parts[parts.length - 1] || "";
 }
 
@@ -113,6 +117,30 @@ export function domainStem(value: string | null | undefined): string {
  * whose focus is stored as moburst.com used to come back as no match at all,
  * which is what left a client with an empty import screen.
  */
+/** Second-level labels that are part of the suffix, not the name. */
+const REGISTRY_SECOND_LEVELS = new Set(["co", "com", "org", "net", "ac", "gov", "edu"]);
+
+/**
+ * How much a match is worth, so the pick is the strongest one rather than
+ * whichever happened to come first. "The client is in the set" also matches
+ * a competitor's landscape that merely tracks them, which is somebody else's
+ * landscape; it should only win when nothing better exists.
+ */
+const MATCH_RANK: Record<string, number> = {
+  "focus company": 4,
+  website: 3,
+  "landscape name": 2,
+  "client is in the set": 1,
+};
+
+export function bestLandscapeMatch<T extends { is_match?: boolean; match_reason?: string | null }>(
+  summaries: T[],
+): T | undefined {
+  return summaries
+    .filter((l) => l.is_match)
+    .sort((a, b) => (MATCH_RANK[b.match_reason || ""] || 0) - (MATCH_RANK[a.match_reason || ""] || 0))[0];
+}
+
 export function summarizeLandscape(
   landscape: RivalIqLandscape,
   clientName: string,

@@ -78,12 +78,21 @@ Deno.serve(async (req) => {
         return back("failed", "expired");
       }
 
-      const grant = await exchangeCode({
-        clientId: row.client_id!,
-        code,
-        verifier: row.pending_verifier,
-        redirectUri: redirectUri(),
-      });
+      // A browser is mid-redirect here, so a thrown error would reach the
+      // generic handler and answer with JSON the person never sees as
+      // anything but raw text. Every exit from the callback is a redirect.
+      let grant;
+      try {
+        grant = await exchangeCode({
+          clientId: row.client_id!,
+          code,
+          verifier: row.pending_verifier,
+          redirectUri: redirectUri(),
+        });
+      } catch (e) {
+        console.error("[higgsfield-auth] token exchange failed:", e instanceof Error ? e.message : e);
+        return back("failed", "exchange_failed");
+      }
       if (!grant.refresh_token) return back("failed", "no_refresh_token");
 
       // Who this is, so the screen can say which account is linked. The id
@@ -96,19 +105,27 @@ Deno.serve(async (req) => {
         email = null;
       }
 
-      await admin
+      const { error: saveErr } = await admin
         .from("integration_tokens")
         .update({
           refresh_token: grant.refresh_token,
           access_token: grant.access_token,
           expires_at: expiryFrom(grant.expires_in),
           account_email: email,
+          // Distinct from updated_at, which every token refresh bumps. This
+          // is the only column that records when a person actually signed in,
+          // which is what the Settings card claims to show.
+          linked_at: new Date().toISOString(),
           pending_state: null,
           pending_verifier: null,
           pending_started_at: null,
           updated_at: new Date().toISOString(),
         })
         .eq("provider", PROVIDER);
+      if (saveErr) {
+        console.error("[higgsfield-auth] could not store the grant:", saveErr.message);
+        return back("failed", "not_saved");
+      }
 
       // The account is deliberately not put in the URL; the page asks for it.
       return back("linked");
@@ -121,13 +138,13 @@ Deno.serve(async (req) => {
       await requireStaff(req);
       const { data: row } = await admin
         .from("integration_tokens")
-        .select("account_email, expires_at, updated_at, refresh_token")
+        .select("account_email, expires_at, updated_at, linked_at, refresh_token")
         .eq("provider", PROVIDER)
         .maybeSingle();
       return json({
         linked: !!row?.refresh_token,
         account_email: row?.account_email || null,
-        linked_at: row?.updated_at || null,
+        linked_at: row?.linked_at || null,
       });
     }
 

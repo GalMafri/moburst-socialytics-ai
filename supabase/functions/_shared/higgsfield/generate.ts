@@ -12,7 +12,7 @@
 //   generate_image {…,get_cost:true}     → {cost:{credits, credits_exact}} and submits nothing
 //   balance {}                           → {credits, subscription_plan_type}
 //
-// Three things about this API will bite anyone who assumes otherwise:
+// Four things about this API will bite anyone who assumes otherwise:
 //
 //  1. `use_unlim` must be sent. Left out, the server may answer a generation
 //     request with a QUESTION (`unlim_choice`) about which balance to spend,
@@ -22,6 +22,9 @@
 //     imported first, which is what importReference is for.
 //  3. The batch tools are the headless ones. `generate_image` opens a widget
 //     in a chat client; `generate_image_batch` just returns job ids.
+//  4. A video submission can come back `submission_failed` with a style
+//     preset the server would rather run. Nothing was created and nothing
+//     was charged; the answer is to resubmit with declined_preset_id.
 //
 // Kept free of Deno globals so vitest can drive it with a stub client.
 
@@ -177,12 +180,39 @@ export async function costOf(
   }
 }
 
+/**
+ * The preset id the server wants declined, when it recommended one instead
+ * of generating.
+ *
+ * Measured on the live server: a video submission can come back with
+ * `status:"submission_failed"` and a `preset_recommendation`, having created
+ * nothing and charged nothing. It is the same shape of trap as unlim_choice —
+ * the server asking a human a question — and the documented answer is to
+ * resubmit with declined_preset_id. Nobody is here to answer, so the caller
+ * declines and resubmits by itself.
+ */
+export function recommendedPresetId(data: any): string | null {
+  const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
+  for (const j of jobs) {
+    const id = j?.preset_recommendation?.preset_id;
+    if (typeof id === "string" && id.length > 0) return id;
+  }
+  return null;
+}
+
 function readJobs(data: any, tool: string): JobRef[] {
   const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
   const refs = jobs
-    .filter((j: any) => typeof j?.job_id === "string")
+    .filter((j: any) => typeof j?.job_id === "string" && j.status !== "submission_failed")
     .map((j: any) => ({ index: Number(j.index) || 0, job_id: j.job_id as string }));
-  if (!refs.length) throw new HiggsfieldError(`Higgsfield ${tool} accepted the request but returned no job.`);
+  if (!refs.length) {
+    const why = jobs.find((j: any) => typeof j?.error === "string")?.error;
+    throw new HiggsfieldError(
+      why
+        ? `Higgsfield did not start the generation: ${String(why).slice(0, 200)}`
+        : `Higgsfield ${tool} accepted the request but returned no job.`,
+    );
+  }
   return refs;
 }
 
@@ -247,10 +277,23 @@ export async function submitVideo(mcp: ToolCaller, req: VideoRequest): Promise<J
     params.mode = "omni_reference";
     params.medias = medias;
   }
-  const data = payload(
+  let data = payload(
     await mcp.callTool("generate_video_batch", { requests: [{ index: 0, params }] }),
     "generate_video_batch",
   );
+
+  // The server may answer with a style preset it would rather run. Declining
+  // it and resubmitting is the documented way through; without this the clip
+  // never starts and the reason reads like a failure.
+  const preset = recommendedPresetId(data);
+  if (preset) {
+    data = payload(
+      await mcp.callTool("generate_video_batch", {
+        requests: [{ index: 0, params: { ...params, declined_preset_id: preset } }],
+      }),
+      "generate_video_batch",
+    );
+  }
   return readJobs(data, "generate_video_batch");
 }
 
@@ -317,7 +360,7 @@ export function firstResult(result: WaitResult): { url: string; model?: string }
   if (failed) throw new HiggsfieldError(`Higgsfield could not finish the generation: ${failed.error || failed.status}`);
   if (!result.allTerminal) {
     throw new HiggsfieldError(
-      `Higgsfield was still working after ${Math.round(result.waitedMs / 1000)}s. Nothing was lost — try again in a moment.`,
+      `Higgsfield was still working after ${Math.round(result.waitedMs / 1000)}s. Nothing was lost, so try again in a moment.`,
     );
   }
   throw new HiggsfieldError("Higgsfield finished without returning an image.");

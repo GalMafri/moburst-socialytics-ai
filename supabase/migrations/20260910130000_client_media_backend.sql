@@ -13,3 +13,14 @@ ALTER TABLE public.clients
 
 COMMENT ON COLUMN public.clients.media_backend IS
   'Image/video generation provider for this client: gemini (default) or higgsfield.';
+
+-- When a person actually signed the team's Higgsfield account in.
+--
+-- updated_at was standing in for this, but every token refresh bumps it, so
+-- the Settings card's "Signed in on" date drifted to whenever the server last
+-- renewed its access token.
+ALTER TABLE public.integration_tokens
+  ADD COLUMN IF NOT EXISTS linked_at timestamptz;
+
+COMMENT ON COLUMN public.integration_tokens.linked_at IS
+  'When a person completed the OAuth link. Unlike updated_at, token refreshes do not touch it.';

@@ -116,7 +116,10 @@ export default function ClientSetup() {
   const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
   // Whether Sprout actually answered. Without this the save path cannot tell
   // "the user deselected everything" from "Sprout was down".
-  const [sproutLoaded, setSproutLoaded] = useState(false);
+  // "Sprout answered AND listed profiles we could choose from". Not merely
+  // "Sprout answered": an empty list leaves the selection empty too, and the
+  // prune below would then read that as "assign nothing" and delete the lot.
+  const [sproutListed, setSproutListed] = useState(false);
   const [researchingBrand, setResearchingBrand] = useState(false);
   const [brandDebug, setBrandDebug] = useState<any>(null);
   const [newKeyword, setNewKeyword] = useState("");
@@ -281,7 +284,7 @@ export default function ClientSetup() {
       // (or a save from another tab, where the selector had nothing loaded)
       // wiped the client's profiles. Upsert first, prune second, so a failure
       // never leaves a client with none.
-      if (sproutLoaded) {
+      if (sproutListed) {
         const rows = selectedSproutProfiles.map((p) => ({
           client_id: clientId,
           // The column is numeric; Sprout gives the id as a number and the
@@ -783,7 +786,7 @@ export default function ClientSetup() {
                   clientId={isNew ? undefined : id}
                   selectedProfiles={selectedSproutProfiles}
                   onSelectionChange={setSelectedSproutProfiles}
-                  onLoadStateChange={setSproutLoaded}
+                  onLoadStateChange={setSproutListed}
                   primaryPlatforms={form.primary_platforms}
                 />
               </CardContent>
@@ -1229,7 +1232,7 @@ function SproutProfileSelector({
   selectedProfiles: any[];
   onSelectionChange: (profiles: any[]) => void;
   /** True once Sprout has answered. The save path must not prune on a failure. */
-  onLoadStateChange?: (loaded: boolean) => void;
+  onLoadStateChange?: (hasProfiles: boolean) => void;
   primaryPlatforms?: string[];
 }) {
   const [fetching, setFetching] = useState(false);
@@ -1293,8 +1296,11 @@ function SproutProfileSelector({
         body: {},
       });
       if (error) throw error;
-      setAllProfiles(data.profiles || []);
-      onLoadStateChange?.(true);
+      const listed = data.profiles || [];
+      setAllProfiles(listed);
+      // Report whether there is anything to choose from, not just that the
+      // call succeeded. An empty list must not authorise a prune.
+      onLoadStateChange?.(listed.length > 0);
     } catch (err: any) {
       onLoadStateChange?.(false);
       toast({ title: "Could not reach Sprout Social", description: `${err.message}. Profile assignments are left as they are.`, variant: "destructive" });
