@@ -130,6 +130,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // Variant slot tracking — null=loading, string=URL, "FAILED"=error.
   // For carousels these are slide slots; for non-carousels they are variant slots.
   const [variantUrls, setVariantUrls] = useState<VariantSlot[]>([]);
+  // What the brand review still objected to on a variant that shipped anyway.
+  const [reviewFlags, setReviewFlags] = useState<Record<number, string>>({});
   const [revisedPrompt, setRevisedPrompt] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [editablePrompt, setEditablePrompt] = useState("");
@@ -325,6 +327,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     const groupId = crypto.randomUUID();
     setVariantGroupId(groupId);
     setLoading(true);
+    setReviewFlags({});
     if (!startedAt || !loading) setStartedAt(Date.now());
     setStage(1);
     setRevisedPrompt(null);
@@ -419,10 +422,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         // Single designs get the same review the carousel slides get: an
         // invented wordmark or broken lettering on a client's post is worse
         // than a plain one, and it is cheap to catch and regenerate once.
-        // A design that still fails review after the retries is dropped, not
-        // shown: an off-brand or lettered image in the client's tray is the
-        // thing the review exists to prevent.
-        let rejected = false;
+        // A design that still fails review after the retries ships with the
+        // objection on it. Three minutes and nothing to show is worse than a
+        // flagged draft the person can judge and reject in one tap.
+        let flag = "";
         try {
           // Up to two regenerations: a smeared word or a stray letterform
           // sometimes survives the first correction, and a third image is
@@ -450,21 +453,12 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             dataUrl = retry.image_url;
             verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           }
-          rejected = verdictIsDirty(verdict, { expectNoText: !modelDrawsText });
-          if (rejected) {
-            toast({ title: `Variant ${i + 1} dropped`, description: `Three attempts still showed ${verdictSummary(verdict)}. Generate again or adjust the prompt.`, variant: "destructive" });
+          if (verdictIsDirty(verdict, { expectNoText: !modelDrawsText })) {
+            flag = verdictSummary(verdict);
+            setReviewFlags((prev) => ({ ...prev, [i]: flag }));
           }
         } catch {
           // Review or retry failed — keep the original rather than lose it.
-        }
-        if (rejected) {
-          setVariantUrls((prev) => {
-            const next = [...prev];
-            next[i] = "FAILED";
-            return next;
-          });
-          generation.progressGeneration(postKey, { failed: true });
-          continue;
         }
         // The words go on now, in the brand's face, so the tile arrives as a
         // post rather than a picture. The editor can still move them.
@@ -912,7 +906,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                       )}
                       {url === "FAILED" && (
                         <div className="absolute inset-0 flex items-center justify-center t-label text-destructive p-2 text-center">
-                          Failed
+                          Could not be made
                         </div>
                       )}
                       {typeof url === "string" && url !== "FAILED" && (
@@ -921,6 +915,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                       {favoriteIdxs.has(i) && (
                         <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-1">
                           <Check className="h-3 w-3" />
+                        </div>
+                      )}
+                      {reviewFlags[i] && (
+                        <div className="absolute top-1 left-1 right-8 rounded bg-[rgba(245,158,11,0.92)] text-black t-label px-1.5 py-0.5 truncate" title={`Review still saw ${reviewFlags[i]} after three attempts`}>
+                          Check: {reviewFlags[i]}
                         </div>
                       )}
                       {!isCarousel && angles[selectedAngleIdxs[i]] && (

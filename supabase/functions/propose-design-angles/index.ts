@@ -57,8 +57,9 @@ Deno.serve(async (req) => {
 Platform: ${platform || "general"}
 Format: ${format || "general"}
 ${design_language ? `Design language context: ${JSON.stringify(design_language).slice(0, 1500)}` : ""}
+${design_language?.anti_patterns ? `\nNEVER (this brand's own rules; no angle may stage any of these): ${String(design_language.anti_patterns).slice(0, 800)}` : ""}
 
-Generate 6 distinct angles.`;
+Generate 6 distinct angles. Every angle stays inside the brand's imagery rules above.`;
 
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

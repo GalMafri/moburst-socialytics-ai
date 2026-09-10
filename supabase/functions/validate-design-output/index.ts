@@ -12,7 +12,9 @@ async function antiPatternsFor(clientId: unknown): Promise<string | null> {
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data } = await db.from("clients").select("design_style_synthesis").eq("id", clientId).maybeSingle();
     const s = (data as any)?.design_style_synthesis;
-    const rules = [s?.anti_patterns, s?.imagery_style].filter((x) => typeof x === "string" && x.trim()).join(" ");
+    // Only the brand's own "never" list. The imagery guidance is positive
+    // direction and, read as rules, failed nearly every picture.
+    const rules = typeof s?.anti_patterns === "string" ? s.anti_patterns.trim() : "";
     return rules || null;
   } catch {
     return null;
