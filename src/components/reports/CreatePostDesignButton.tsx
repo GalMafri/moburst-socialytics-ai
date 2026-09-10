@@ -141,9 +141,17 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // badly, so the headline and call-to-action are typed on afterwards in the
   // editor, in the brand's own face. Letting the model draw the words is the
   // exception a reviewer opts into.
-  // The picture is generated without words and the app types them in the
-  // brand's face; the model never draws text.
-  const modelDrawsText = false;
+  // The image model renders the whole design, words included.
+  //
+  // For a stretch the app generated a picture-only image and typed the
+  // headline onto it on a canvas. It placed type reliably, and it produced
+  // designs that read as assembled: the model composes a layout around its
+  // own lettering, and a headline set afterwards is a headline set on top of
+  // a composition that was never expecting one. The review below still
+  // catches the reasons the split was introduced — garbled letters, invented
+  // wordmarks, off-brand scenes — and regenerates. The editor can still add
+  // or move type by hand on any variant.
+  const modelDrawsText = true;
   // Where the run is, for the stage list, and when it started.
   const [stage, setStage] = useState(0);
   const [startedAt, setStartedAt] = useState(0);
@@ -184,7 +192,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
   const runStages = isCarousel
     ? ["Reading the brief and the brand", "Splitting the story into slides", "Painting the slides", "Brand review", "Saving"]
-    : ["Reading the brief and the brand", `Painting ${variantCount} variants`, "Brand review", "Setting the headline in the brand's type", "Saving"];
+    : ["Reading the brief and the brand", `Painting ${variantCount} variants`, "Brand review", "Saving"];
 
   // Fetches the 6 creative angles from the propose-design-angles edge function.
   // Angles are a bonus, never a gate: if the suggestion call takes longer
@@ -475,7 +483,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           placed = { raw, overlays: composed.overlays };
         }
         // Upload to persistent storage.
-        setStage(4);
+        setStage(3);
         const uploadedUrl = await uploadVariantToStorage(dataUrl, i);
         if (placed) placedRef.current.set(uploadedUrl, placed);
         // Update the slot.
