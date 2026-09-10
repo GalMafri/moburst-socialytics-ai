@@ -769,6 +769,45 @@ export type Database = {
         }
         Relationships: []
       }
+      integration_tokens: {
+        Row: {
+          access_token: string | null
+          account_email: string | null
+          client_id: string | null
+          expires_at: string | null
+          pending_started_at: string | null
+          pending_state: string | null
+          pending_verifier: string | null
+          provider: string
+          refresh_token: string | null
+          updated_at: string
+        }
+        Insert: {
+          access_token?: string | null
+          account_email?: string | null
+          client_id?: string | null
+          expires_at?: string | null
+          pending_started_at?: string | null
+          pending_state?: string | null
+          pending_verifier?: string | null
+          provider: string
+          refresh_token?: string | null
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string | null
+          account_email?: string | null
+          client_id?: string | null
+          expires_at?: string | null
+          pending_started_at?: string | null
+          pending_state?: string | null
+          pending_verifier?: string | null
+          provider?: string
+          refresh_token?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       media_jobs: {
         Row: {
           client_id: string
