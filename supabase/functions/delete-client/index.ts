@@ -49,7 +49,7 @@ serve(async (req) => {
     // Get client info for storage cleanup
     const { data: client } = await supabase
       .from("clients")
-      .select("name, brand_book_file_path, strategy_doc_file_path, design_references")
+      .select("name, brand_book_file_path, strategy_doc_file_path, design_references, harvested_design_references")
       .eq("id", client_id)
       .single();
 
@@ -73,8 +73,14 @@ serve(async (req) => {
     if (bookPaths.length > 0) {
       await supabase.storage.from("brand-books").remove(bookPaths);
     }
-    if (client?.design_references && Array.isArray(client.design_references)) {
-      await supabase.storage.from("design-references").remove(client.design_references as string[]);
+    const refPaths = [
+      ...(Array.isArray(client?.design_references) ? (client!.design_references as string[]) : []),
+      ...(Array.isArray((client as any)?.harvested_design_references)
+        ? ((client as any).harvested_design_references as Array<{ path?: string }>).map((r) => r?.path).filter(Boolean)
+        : []),
+    ] as string[];
+    if (refPaths.length > 0) {
+      await supabase.storage.from("design-references").remove(refPaths);
     }
 
     return new Response(JSON.stringify({ success: true }), {

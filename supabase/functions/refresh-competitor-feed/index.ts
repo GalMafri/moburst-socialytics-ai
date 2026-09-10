@@ -9,6 +9,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
+import { harvestedPaths, type HarvestedRef } from "../_shared/design-prompts/designRefs.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
@@ -85,6 +86,99 @@ ${JSON.stringify(compact)}`;
   }
 }
 
+/** How many of the client's own posts are kept as references. */
+const HARVEST_CAP = 8;
+/** A reference has to be an image the readers accept, and small enough for them. */
+const HARVEST_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Stores the client's own recent creative as design references.
+ *
+ * Selection is by RivalIQ's focusCompanyId, never by name: the focus company
+ * IS the client, and matching names would pull a competitor whose name
+ * happens to contain the client's.
+ */
+async function harvestOwnCreative(
+  admin: any,
+  clientId: string,
+  landscapeId: string,
+  key: string,
+  socialPosts: any[],
+  clientName: string,
+): Promise<{ added: number; kept: number; skipped: string[] }> {
+  const skipped: string[] = [];
+  try {
+    // Which company in this landscape is the client.
+    const list = await rivaliq("/landscapes", key);
+    const landscape = (list?.landscapes || []).find((l: any) => String(l.id) === String(landscapeId));
+    const focusId = landscape?.focusCompanyId;
+    if (!focusId) {
+      return { added: 0, kept: 0, skipped: ["the landscape names no focus company, so the client's own posts cannot be told apart"] };
+    }
+
+    const { data: row } = await admin
+      .from("clients")
+      .select("harvested_design_references")
+      .eq("id", clientId)
+      .maybeSingle();
+    const existing: HarvestedRef[] = Array.isArray(row?.harvested_design_references)
+      ? (row!.harvested_design_references as HarvestedRef[]).filter((r) => r && typeof r.path === "string")
+      : [];
+    const seen = new Set(existing.map((r) => String(r.source_post_id || "")));
+
+    const mine = socialPosts
+      .filter((p) => String(p?.companyId) === String(focusId))
+      .filter((p) => typeof (p?.imageLarge || p?.image) === "string")
+      .sort((a, b) => Number(b?.engagementTotal || 0) - Number(a?.engagementTotal || 0));
+
+    const added: HarvestedRef[] = [];
+    for (const post of mine) {
+      if (existing.length + added.length >= HARVEST_CAP) break;
+      const id = String(post.postId ?? post.nativeId ?? post.postLink ?? "");
+      if (!id || seen.has(id)) continue;
+      // imageLarge first: RivalIQ's `image` is a smaller copy, and a
+      // reference the synthesis reads should be the best available.
+      const src = String(post.imageLarge || post.image);
+      try {
+        const resp = await fetch(src, { signal: AbortSignal.timeout(15000) });
+        if (!resp.ok) { skipped.push(`${id}: ${resp.status}`); continue; }
+        const type = (resp.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+        if (type !== "image/png" && type !== "image/jpeg") { skipped.push(`${id}: ${type || "unknown type"}`); continue; }
+        const bytes = new Uint8Array(await resp.arrayBuffer());
+        if (bytes.byteLength > HARVEST_MAX_BYTES) { skipped.push(`${id}: too large`); continue; }
+        const ext = type === "image/png" ? "png" : "jpg";
+        const folder = (clientName || "client").replace(/[^a-zA-Z0-9]/g, "-");
+        const path = `${folder}/harvested-${clientId}-${id.replace(/[^a-zA-Z0-9]/g, "")}.${ext}`;
+        const { error: upErr } = await admin.storage.from("design-references").upload(path, bytes, { contentType: type, upsert: true });
+        if (upErr) { skipped.push(`${id}: ${upErr.message}`); continue; }
+        added.push({ path, source_post_id: id, platform: String(post.channel || ""), posted_at: String(post.publishedAt || "") });
+        seen.add(id);
+      } catch (e) {
+        skipped.push(`${id}: ${(e as Error)?.name || "failed"}`);
+      }
+    }
+
+    if (added.length === 0) return { added: 0, kept: existing.length, skipped };
+
+    // Newest first, capped. Anything pushed out is deleted, so the bucket
+    // does not grow without limit.
+    const merged = [...added, ...existing].sort((a, b) => String(b.posted_at || "").localeCompare(String(a.posted_at || "")));
+    const keep = merged.slice(0, HARVEST_CAP);
+    const drop = merged.slice(HARVEST_CAP).map((r) => r.path);
+    if (drop.length > 0) await admin.storage.from("design-references").remove(drop).catch(() => {});
+
+    await admin
+      .from("clients")
+      .update({ harvested_design_references: keep, design_refs_harvested_at: new Date().toISOString() })
+      .eq("id", clientId);
+    console.log(`[harvest] ${clientName}: +${added.length}, keeping ${keep.length}`);
+    return { added: added.length, kept: keep.length, skipped };
+  } catch (e) {
+    console.warn("[harvest] failed:", e);
+    return { added: 0, kept: 0, skipped: [String((e as Error)?.message || e)] };
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
@@ -139,6 +233,15 @@ Deno.serve(async (req) => {
       payload: { window, socialPosts, fetched_at: new Date().toISOString(), truncated: socialPosts.length >= PAGE_LIMIT },
     });
 
+    // The client's own creative, pulled from the same response.
+    //
+    // The design language is synthesized from references, and until now the
+    // only ones were whatever staff uploaded at onboarding — usually five
+    // images from the day the client was set up, going stale from then on.
+    // The client's own recent posts are in hand here already, at no extra
+    // RivalIQ call, so the newest of them become references too.
+    const harvest = await harvestOwnCreative(admin, clientId, landscapeId, key, socialPosts, client.name);
+
     const topics = await detectTopics(client.name, socialPosts, window.start, window.end);
     let saved = 0;
     for (const t of topics) {
@@ -162,7 +265,7 @@ Deno.serve(async (req) => {
       else console.error("[refresh-competitor-feed] alert upsert failed", error.message);
     }
 
-    return json({ client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: saved });
+    return json({ client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: saved, design_refs: harvest });
   } catch (err: any) {
     const status = typeof err?.status === "number" ? err.status : 500;
     console.error("[refresh-competitor-feed]", err);

@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { referencesFor } from "../_shared/design-prompts/designRefs.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -70,14 +71,20 @@ Deno.serve(async (req) => {
     // Load the client
     const { data: client, error: clientErr } = await supabase
       .from("clients")
-      .select("name, design_references, brand_book_file_path")
+      .select("name, design_references, harvested_design_references, brand_book_file_path")
       .eq("id", client_id)
       .maybeSingle();
     if (clientErr || !client) return json({ error: "client not found" }, 404);
 
-    const designRefs: string[] = Array.isArray(client.design_references)
-      ? (client.design_references as string[])
-      : [];
+    // Staff uploads first, then the weekly harvest of the client's own
+    // posts, up to the eight the synthesis reads. Without the harvest a
+    // client's design language stays frozen at whatever was uploaded the day
+    // they were onboarded.
+    const designRefs: string[] = referencesFor(
+      client.design_references,
+      (client as any).harvested_design_references,
+      8,
+    );
     const brandBookPath: string | null = (client as any).brand_book_file_path || null;
 
     if (designRefs.length === 0 && !brandBookPath) {

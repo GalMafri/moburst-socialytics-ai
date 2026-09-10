@@ -1,6 +1,7 @@
 // supabase/functions/_shared/design-prompts/resolveBrand.ts
 
 import type { DesignStyleSynthesis } from "./flattenSynthesis.ts";
+import { referencesFor } from "./designRefs.ts";
 
 export interface ResolvedBrand {
   brandIdentity: any | null;
@@ -109,7 +110,7 @@ export async function resolveBrandContext(args: {
     const { data, error } = await args.supabase
       .from("clients")
       .select(
-        "brand_identity, design_references, brand_book_file_path, content_pillars, brief_text, brand_notes, geo, language, design_style_synthesis",
+        "brand_identity, design_references, harvested_design_references, brand_book_file_path, content_pillars, brief_text, brand_notes, geo, language, design_style_synthesis",
       )
       .eq("id", args.clientId)
       .maybeSingle();
@@ -120,7 +121,9 @@ export async function resolveBrandContext(args: {
       synthesis: fromCaller.synthesis ?? data.design_style_synthesis ?? null,
       designReferences: fromCaller.designReferences.length
         ? fromCaller.designReferences
-        : asArray(data.design_references),
+        // Staff uploads lead; the weekly harvest of the client's own posts
+        // fills the rest, so a generation sees the current work too.
+        : referencesFor(data.design_references, (data as any).harvested_design_references, 8),
       brandBookPath: fromCaller.brandBookPath ?? data.brand_book_file_path ?? null,
       pillars: fromCaller.pillars.length
         ? fromCaller.pillars
