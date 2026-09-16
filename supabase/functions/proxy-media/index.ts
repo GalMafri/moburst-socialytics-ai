@@ -1,3 +1,5 @@
+import { staffGate } from "../_shared/auth/requireStaff.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -8,6 +10,11 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // Fetches any URL it is given and returns the bytes, which unauthenticated
+  // is an open proxy running on our infrastructure.
+  const denied = await staffGate(req, corsHeaders);
+  if (denied) return denied;
 
   try {
     const { url } = await req.json();

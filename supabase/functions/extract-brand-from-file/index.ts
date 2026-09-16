@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { staffGate } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,6 +13,11 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // Reads any path out of a storage bucket and spends model credits on it, so
+  // it cannot be world-invokable.
+  const denied = await staffGate(req, corsHeaders);
+  if (denied) return denied;
 
   try {
     const { file_path, bucket, client_name } = await req.json();

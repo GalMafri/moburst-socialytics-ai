@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
+import { staffGate } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -41,6 +42,12 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // This lists every social profile on the agency's Sprout account, with
+  // handles and links. It ran with verify_jwt = false and no check of its own,
+  // so an unauthenticated POST returned all 73 of them.
+  const denied = await staffGate(req, corsHeaders);
+  if (denied) return denied;
 
   try {
     const customerId = DEFAULT_CUSTOMER_ID;

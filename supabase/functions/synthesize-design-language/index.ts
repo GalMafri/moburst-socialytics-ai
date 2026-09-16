@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { referencesFor } from "../_shared/design-prompts/designRefs.ts";
+import { staffGate } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,6 +48,11 @@ FORMAT:
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // Reads a client's design state and spends model credits on our key, so it
+  // cannot be world-invokable.
+  const denied = await staffGate(req, corsHeaders);
+  if (denied) return denied;
 
   try {
     const { client_id } = await req.json();

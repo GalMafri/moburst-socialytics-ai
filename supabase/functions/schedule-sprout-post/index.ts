@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
+import { staffGate } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,6 +48,12 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // This publishes to a client's real social accounts through Sprout. It ran
+  // with verify_jwt = false and no check of its own, so anyone who knew the
+  // URL could schedule a post to any profile on the agency's account.
+  const denied = await staffGate(req, corsHeaders);
+  if (denied) return denied;
 
   try {
     const {

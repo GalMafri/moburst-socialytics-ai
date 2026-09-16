@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { CLEAN_VERDICT, validateDesignImage, verdictIsDirty } from "../_shared/design-prompts/validateImage.ts";
+import { staffGate } from "../_shared/auth/requireStaff.ts";
 
 /**
  * The brand's own "never" list, so the review can catch a design that is
@@ -39,6 +40,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // Spends model credits on our key, so it cannot be world-invokable.
+  const denied = await staffGate(req, corsHeaders);
+  if (denied) return denied;
 
   try {
     const { image_data, media_type, expect_no_text, client_id } = await req.json();

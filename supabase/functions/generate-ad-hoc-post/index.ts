@@ -6,11 +6,17 @@ const corsHeaders = {
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { competitiveBrief } from "../_shared/competitive/brief.ts";
+import { staffGate } from "../_shared/auth/requireStaff.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // Reads a client's brand context and spends model credits on our key, so it
+  // cannot be world-invokable.
+  const denied = await staffGate(req, corsHeaders);
+  if (denied) return denied;
 
   try {
     const { client_id, platform, topic, creative_type } = await req.json();

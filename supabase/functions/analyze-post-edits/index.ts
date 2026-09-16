@@ -5,11 +5,17 @@ const corsHeaders = {
 };
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { staffGate } from "../_shared/auth/requireStaff.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // Spends model credits on our key and writes brand-voice learnings, so it
+  // cannot be world-invokable.
+  const denied = await staffGate(req, corsHeaders);
+  if (denied) return denied;
 
   try {
     const { client_id, original_copy, edited_copy, original_cta, edited_cta, original_hashtags, edited_hashtags } = await req.json();

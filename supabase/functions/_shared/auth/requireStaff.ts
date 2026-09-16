@@ -67,3 +67,32 @@ export async function requireStaff(
 
   return { userId: userData.user.id, asCaller };
 }
+
+/**
+ * The same guard, as a Response to return rather than an error to catch.
+ *
+ * Nearly every function in this project wraps its whole body in one broad
+ * `catch` that turns anything into a 500. A thrown AuthzError lands there and
+ * gets reported as a server fault, so the caller cannot tell "you are signed
+ * out" from "the Sprout API is down". Calling this at the top of the handler,
+ * before that try block, keeps the status code honest without threading an
+ * AuthzError branch through every catch in the codebase.
+ *
+ * Returns null when the caller is staff. Otherwise returns the Response.
+ */
+export async function staffGate(
+  req: Request,
+  corsHeaders: Record<string, string>,
+): Promise<Response | null> {
+  try {
+    await requireStaff(req);
+    return null;
+  } catch (err) {
+    const status = err instanceof AuthzError ? err.status : 500;
+    const message = err instanceof Error ? err.message : "Authentication failed.";
+    return new Response(JSON.stringify({ error: message }), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+}

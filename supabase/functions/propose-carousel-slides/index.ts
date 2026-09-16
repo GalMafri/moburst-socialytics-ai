@@ -9,6 +9,7 @@
 // Output: { slides: [{ index, role, headline, content_brief }, ...] }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { staffGate } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -103,6 +104,11 @@ Return ONLY this JSON object — no preamble, no markdown code fence:
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // Spends model credits on our key, so it cannot be world-invokable.
+  const denied = await staffGate(req, corsHeaders);
+  if (denied) return denied;
+
   try {
     const { brief, total, platform, format, post_copy, design_language } = await req.json();
     if (!brief) return json({ error: "brief required" }, 400);
