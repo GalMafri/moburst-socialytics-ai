@@ -241,7 +241,11 @@ export default function ClientSetup() {
         brand_notes: serializedBrandNotes,
         geo: form.geo.join(","),
         language: form.language.join(","),
-        sprout_customer_id: "1676448",
+        // Whatever the client already has is kept. The form never loads this
+        // column, so writing a literal here silently reset any client that had
+        // been pointed at a different Sprout account. New clients are left
+        // null and the server falls back to the account default.
+        sprout_customer_id: (client as any)?.sprout_customer_id ?? null,
         content_pillars: form.content_pillars as any,
         strategy_doc_file_path: form.strategy_doc_file_path || null,
         // Provenance is stamped when the proposed pillars are actually saved,

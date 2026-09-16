@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -7,7 +8,7 @@ const corsHeaders = {
 
 const SPROUT_TOKEN_URL = 'https://identity.sproutsocial.com/oauth2/84e39c75-d770-45d9-90a9-7b79e3037d2c/v1/token';
 const SPROUT_API_BASE = 'https://api.sproutsocial.com/v1';
-const DEFAULT_CUSTOMER_ID = '1676448';
+const DEFAULT_CUSTOMER_ID = defaultSproutCustomerId();
 
 async function getSproutAccessToken(): Promise<string> {
   const clientId = Deno.env.get("SPROUT_CLIENT_ID");

@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -82,7 +83,7 @@ serve(async (req) => {
       .eq("id", client_id)
       .single();
 
-    const customerId = client?.sprout_customer_id || "1676448";
+    const customerId = client?.sprout_customer_id || defaultSproutCustomerId();
     const token = await getSproutToken();
 
     const publishPayload: any = {

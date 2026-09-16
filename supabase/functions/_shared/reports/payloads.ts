@@ -9,6 +9,7 @@
 // repeatable reels"), so a gap the team endorsed never reached a scheduled
 // run. Every run now goes through here: manual, scheduled, and retried.
 
+import { defaultSproutCustomerId } from "../sprout/customer.ts";
 /**
  * How long a run may sit on "running" before it is treated as dead.
  *
@@ -169,7 +170,7 @@ export async function buildSocialPayload(args: {
   return {
     report_id: reportId,
     client_name: client.name,
-    sprout_customer_id: client.sprout_customer_id || "1676448",
+    sprout_customer_id: client.sprout_customer_id || defaultSproutCustomerId(),
     profile_ids: (profiles || []).map((p: any) => p.sprout_profile_id),
     profiles: (profiles || []).map((p: any) => ({
       id: p.sprout_profile_id,

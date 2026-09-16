@@ -61,9 +61,9 @@ export function SchedulePostModal({
   } = useQuery({
     queryKey: ["sprout-profiles-all"],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("sprout-profiles", {
-        body: { customer_id: "1676448" },
-      });
+      // No customer id: sprout-profiles resolves the account itself, so the
+      // screen does not carry its own copy of that identity.
+      const { data, error } = await supabase.functions.invoke("sprout-profiles", { body: {} });
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
       return (data?.profiles || []) as any[];
