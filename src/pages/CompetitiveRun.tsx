@@ -364,9 +364,25 @@ export default function CompetitiveRun() {
             )}
 
             {currentStep >= STEPS.length && !error && (
-              <div className="flex items-center gap-2 justify-center text-success">
-                <CheckCircle2 className="h-6 w-6" />
-                <span className="font-medium">Analysis complete!</span>
+              // The page used to end here. The run button renders only while
+              // currentStep < 0, so after a run finished this card held a tick
+              // and nothing else: no way to open what had just been produced,
+              // and no way to run another period without reloading the page.
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 justify-center text-success">
+                  <CheckCircle2 className="h-6 w-6" />
+                  <span className="font-medium">Analysis complete</span>
+                </div>
+                <div className="flex gap-2 justify-center">
+                  {reportId && (
+                    <Button onClick={() => navigate(`/clients/${id}/competitive/reports/${reportId}`)} className="gap-2">
+                      Open the report
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={() => { setCurrentStep(-1); setReportId(null); setError(null); }}>
+                    Run another period
+                  </Button>
+                </div>
               </div>
             )}
 

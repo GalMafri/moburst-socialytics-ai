@@ -78,15 +78,23 @@ export default function CompetitiveFeed() {
   });
   const snapshot = snaps?.[0];
   const prevSnapshot = snaps?.[1];
+  /** The window this page is showing, so its topics can be scoped to it. */
+  const windowStart: string | null = (snapshot as any)?.payload?.window?.start ?? null;
 
   const { data: alerts } = useQuery({
-    queryKey: ["competitive-alerts", id],
+    // Scoped to the window the page is showing. It used to take the newest 12
+    // rows for the client whatever window they belonged to, so cards from
+    // three weeks earlier sat under a heading that says "this week" beside a
+    // meta line naming a different date range.
+    queryKey: ["competitive-alerts", id, windowStart],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from("competitive_alerts")
         .select("*")
         .eq("client_id", id!)
-        .neq("status", "dismissed")
+        .neq("status", "dismissed");
+      if (windowStart) q = q.eq("window_start", windowStart);
+      const { data, error } = await q
         .order("window_start", { ascending: false })
         .order("confidence", { ascending: false })
         .limit(12);
@@ -136,7 +144,7 @@ export default function CompetitiveFeed() {
     },
     onSuccess: (post: any) => {
       qc.invalidateQueries({ queryKey: ["competitive-alerts", id] });
-      toast({ title: "Draft saved to Content Ideas", description: post.hook || post.concept?.slice(0, 120) });
+      toast({ title: "Draft saved to this client's posts", description: post.hook || post.concept?.slice(0, 120) });
     },
     onError: (e: any) => toast({ title: "Could not draft the post", description: e.message, variant: "destructive" }),
   });
@@ -147,6 +155,8 @@ export default function CompetitiveFeed() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["competitive-alerts", id] }),
+    onError: (e: any) =>
+      toast({ title: "Could not dismiss the topic", description: e.message, variant: "destructive" }),
   });
 
   const payload: any = snapshot?.payload || {};
@@ -168,7 +178,12 @@ export default function CompetitiveFeed() {
   // empty box with a "Draft our take" button that has nothing to work from, so
   // they are counted in a footnote instead, as they are on the report.
   const hasContent = (p: FeedPost) => !!(p.postLink || p.message || p.image);
-  const matching = posts.filter((p) => (company === "all" || (p.companyName || String(p.companyId)) === company) && (plat === "all" || normalizePlatform(p.channel) === plat)).slice(0, 60);
+  const FEED_LIMIT = 60;
+  const allMatching = posts.filter((p) => (company === "all" || (p.companyName || String(p.companyId)) === company) && (plat === "all" || normalizePlatform(p.channel) === plat));
+  // The grid stops at 60. It used to stop silently, so a filter holding 300
+  // posts looked like a filter holding 60.
+  const matching = allMatching.slice(0, FEED_LIMIT);
+  const hiddenByLimit = allMatching.length - matching.length;
   const visible = matching.filter(hasContent);
   const contentless = matching.length - visible.length;
   const { previews } = usePostPreviews(visible.map((p) => ({ url: p.postLink, image: p.image || null, mediaType: p.type })));
@@ -186,7 +201,7 @@ export default function CompetitiveFeed() {
           <ArrowLeft className="h-4 w-4 mr-1" /> Competitive reports
         </Button>
       }
-      meta={<span className="t-label">{snapshot ? <>Pulled {new Date(snapshot.fetched_at).toLocaleString()}{payload.window ? ` · ${payload.window.start} to ${payload.window.end}` : ""}{payload.truncated ? " · capped at 100 posts" : ""}</> : "No pull yet for this client."}</span>}
+      meta={<span className="t-label">{snapshot ? <>Pulled {new Date(snapshot.fetched_at).toLocaleString()}{payload.window ? ` · ${payload.window.start} to ${payload.window.end}` : ""}{payload.truncated ? ` · capped at ${posts.length} posts` : ""}</> : "No pull yet for this client."}</span>}
       actions={
         canRunAnalysis ? (
           <Button onClick={() => refresh.mutate()} disabled={refresh.isPending}>
@@ -314,6 +329,11 @@ export default function CompetitiveFeed() {
                   </div>
                 ))}
               </div>
+            )}
+            {hiddenByLimit > 0 && (
+              <p className="t-label">
+                Showing the {matching.length} newest of {allMatching.length} posts in this filter.
+              </p>
             )}
             {contentless > 0 && (
               <p className="t-label">{contentless} X {contentless === 1 ? "post is" : "posts are"} counted in the totals only: RivalIQ sends no link, caption or image for X.</p>

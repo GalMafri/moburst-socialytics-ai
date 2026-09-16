@@ -207,8 +207,17 @@ export function SectionNav({ items, className }: { items: { id: string; label: s
       if (lockedRef.current === id) lockedRef.current = null;
     }, 1200);
     setActive(id);
-    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    // Instant, not smooth. `main` is `overflow: clip`, which Chrome treats as
+    // a scroll container that cannot scroll, and every smooth scroll on these
+    // pages — scrollIntoView and window.scrollTo alike — silently moves zero
+    // pixels as a result. Measured on the competitive report: the nav set the
+    // hash and the active dot and left the reader at the top of a 9,000px
+    // page, on all three pages that carry this rail.
+    const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
+    const top = window.scrollY + el.getBoundingClientRect().top - margin;
+    window.scrollTo({ top, behavior: "auto" });
     history.replaceState(null, "", `#${id}`);
+    void reduce;
   };
 
   return (

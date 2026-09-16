@@ -124,8 +124,11 @@ describe("the shapes real brand sites emit", () => {
   it("merges sources without letting a later one overwrite an earlier hit", async () => {
     const { mergeHandles } = await import("../../../supabase/functions/_shared/competitive/extractSocialHandles");
     const merged = mergeHandles(
-      [{ platform: "instagram", handle: "first", profile_url: "a" }],
-      [{ platform: "instagram", handle: "second", profile_url: "b" }, { platform: "x", handle: "third", profile_url: "c" }],
+      [{ platform: "instagram", handle: "first", profile_url: "a", confidence: 0.9 }],
+      [
+        { platform: "instagram", handle: "second", profile_url: "b", confidence: 0.9 },
+        { platform: "x", handle: "third", profile_url: "c", confidence: 0.9 },
+      ],
     );
     expect(merged).toHaveLength(2);
     expect(merged.find((h) => h.platform === "instagram")?.handle).toBe("first");
@@ -149,5 +152,45 @@ describe("fb.com short links", () => {
   it("still reads a language-prefixed host", () => {
     const out = extractSocialHandles('<footer><a href="https://de-de.facebook.com/acmecorp">Facebook</a></footer>', "Acme");
     expect(out.find((h) => h.platform === "facebook")?.handle).toBe("acmecorp");
+  });
+});
+
+describe("platform product pages are not profiles", () => {
+  it("does not read facebook.com/marketplace as a competitor's page", () => {
+    // Seen live: a competitor's stored Facebook handle was "marketplace".
+    const out = extractSocialHandles(
+      '<footer><a href="https://www.facebook.com/marketplace/">Marketplace</a></footer>',
+      "Acme",
+    );
+    expect(out.find((h) => h.platform === "facebook")).toBeUndefined();
+  });
+
+  it("still reads a real page next to a product link", () => {
+    const out = extractSocialHandles(
+      '<footer><a href="https://www.facebook.com/marketplace/">Marketplace</a><a href="https://www.facebook.com/acmecorp">Us</a></footer>',
+      "Acme",
+    );
+    expect(out.find((h) => h.platform === "facebook")?.handle).toBe("acmecorp");
+  });
+});
+
+describe("confidence reflects the evidence", () => {
+  it("rates a footer link matching the brand far above a loose body link", async () => {
+    const { confidenceFor } = await import("../../../supabase/functions/_shared/competitive/extractSocialHandles");
+    // A footer hit (3) near "social" (2) whose handle matches the brand (3).
+    expect(confidenceFor(8)).toBeGreaterThan(0.9);
+    // A link found loose in the body naming nothing like the brand: the case
+    // that put an employee's personal TikTok on a competitor at 0.9.
+    expect(confidenceFor(0)).toBeLessThan(0.3);
+  });
+
+  it("gives a body link with no brand relation a visibly low score", () => {
+    const out = extractSocialHandles(
+      '<div><p>Filmed by <a href="https://www.tiktok.com/@kat_ayala8">Kat</a></p></div>',
+      "Phiture",
+    );
+    const tiktok = out.find((h) => h.platform === "tiktok");
+    expect(tiktok?.handle).toBe("kat_ayala8");
+    expect(tiktok!.confidence).toBeLessThan(0.5);
   });
 });

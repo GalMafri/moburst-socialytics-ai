@@ -91,6 +91,10 @@ Deno.serve(async (req) => {
           c.handles.map((h) => ({
             competitor_id: comp.id, client_id, platform: h.platform, handle: h.handle,
             profile_url: h.profile_url, is_active: true, detection_confidence: 1,
+            // RivalIQ tracks these profiles; they are not a guess from a
+            // website, and a handle refresh must not overwrite them. Without
+            // this they took the column default 'auto' and were replaced.
+            source: "rivaliq",
           })),
         );
         if (hErr) throw new Error(hErr.message);

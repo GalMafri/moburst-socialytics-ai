@@ -182,6 +182,21 @@ export function leadFigure(text: string): { value: string; unit: string } | null
   for (const m of text.matchAll(FIGURE)) {
     const value = m[1].trim();
     if (!value || /^\d{4}-\d{2}-\d{2}$/.test(value)) continue;
+    // Scientific notation: the model sometimes writes "6.83e5 followers", and
+    // the figure pattern stops at "6.83", which was then set at stat size as
+    // the headline number of the report. Take the whole thing or take none.
+    const tail = text.slice((m.index ?? 0) + m[1].length);
+    if (/^e[+-]?\d/i.test(tail)) {
+      const exp = tail.match(/^e([+-]?\d+)/i);
+      const scaled = exp ? Number(value) * Math.pow(10, Number(exp[1])) : NaN;
+      if (!Number.isFinite(scaled)) continue;
+      const rest = tail.slice(exp![0].length);
+      const w = rest.match(/^\s*([A-Za-z][A-Za-z/-]{1,11})\b/)?.[1] ?? "";
+      return {
+        value: scaled >= 1000 ? scaled.toLocaleString("en-US", { maximumFractionDigits: 0 }) : String(scaled),
+        unit: w && !UNIT_STOPWORDS.has(w.toLowerCase()) ? w : "",
+      };
+    }
     if (/^\d{4}$/.test(value) && Number(value) > 1900 && Number(value) < 2100) continue;
     const after = text
       .slice((m.index ?? 0) + m[1].length)

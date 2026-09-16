@@ -176,7 +176,11 @@ Deno.serve(async (req) => {
       try {
         if (schedule.report_kind === "competitive") {
           if (!competitiveUrl) throw new Error("competitive webhook URL not configured");
-          const { data: set } = await supabase.from("competitor_sets").select("*").eq("client_id", client.id).in("status", ["confirmed", "complete"]).order("confirmed_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+          const { data: set } = await supabase.from("competitor_sets").select("*").eq("client_id", client.id)// Same statuses every other consumer accepts. Restricting the scheduler to
+          // confirmed|complete meant a client whose last run failed, or whose set
+          // was left mid-analysis, silently stopped being scheduled altogether and
+          // nothing said so.
+          .in("status", ["confirmed", "analyzing", "complete", "failed"]).order("confirmed_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
           if (!set) { await advance("skipped: no confirmed competitor set"); results.push({ client: client.name, kind: "competitive", status: "skipped", reason: "no confirmed competitor set" }); continue; }
           if (dryRun) { results.push({ client: client.name, kind: "competitive", status: "would run", range }); continue; }
           const { data: report, error: repErr } = await supabase.from("competitive_reports").insert({ client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: schedule.created_by }).select("id").single();

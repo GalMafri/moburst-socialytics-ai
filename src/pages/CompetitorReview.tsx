@@ -170,7 +170,10 @@ export default function CompetitorReview() {
       const { data, error } = await supabase
         .from("competitor_handles")
         .select("*")
-        .in("competitor_id", ids);
+        .in("competitor_id", ids)
+        // A handle someone removed is kept as the record of that decision,
+        // so the detector stops re-adding it. It is not shown.
+        .neq("is_active", false);
       if (error) throw error;
       return data as HandleRow[];
     },
@@ -276,11 +279,14 @@ export default function CompetitorReview() {
       // Driving the loop from here keeps every call small, and handles
       // appear row by row as they land.
       setDetecting(true);
-      const { empty } = await detectForAll(data.competitors || []);
+      const { empty, failures } = await detectForAll(data.competitors || []);
       if (empty.length > 0) {
         toast({
           title: `${empty.length} of ${(data.competitors || []).length} still have no handles`,
-          description: "Two passes found nothing on those sites. Add the handle by hand on the row.",
+          description: failures.length
+            ? `Detection failed: ${failures[0]}`
+            : "Two passes found nothing on those sites. Add the handle by hand on the row.",
+          variant: failures.length ? "destructive" : undefined,
         });
       }
     } catch (err: any) {
@@ -307,22 +313,25 @@ export default function CompetitorReview() {
   const detectForAll = async (
     comps: Array<{ id: string; name?: string }>,
     opts: { refresh?: boolean } = {},
-  ): Promise<{ empty: string[] }> => {
+  ): Promise<{ empty: string[]; failures: string[] }> => {
     const BATCH = 4;
-    const runOne = async (id: string) => {
+    const runOne = async (id: string): Promise<{ id: string; found: number; failed?: string }> => {
       try {
         const { data, error } = await supabase.functions.invoke("detect-competitor-handles", {
           body: { competitor_id: id, refresh: opts.refresh === true },
         });
-        if (error || data?.error) return { id, found: 0 };
+        // A site with no links and a server that refused the call are not the
+        // same thing, and reporting both as "those sites have nothing" sent
+        // people hunting for handles that were never looked for.
+        if (error || data?.error) return { id, found: 0, failed: await describeInvokeError(error, data) };
         return { id, found: (data?.results?.[0]?.detected || []).length };
-      } catch {
-        return { id, found: 0 };
+      } catch (e: any) {
+        return { id, found: 0, failed: e?.message || "The request did not complete." };
       }
     };
 
     const sweep = async (ids: string[]) => {
-      const results: Array<{ id: string; found: number }> = [];
+      const results: Array<{ id: string; found: number; failed?: string }> = [];
       for (let i = 0; i < ids.length; i += BATCH) {
         results.push(...(await Promise.all(ids.slice(i, i + BATCH).map(runOne))));
         setDetectProgress({ done: Math.min(i + BATCH, ids.length), total: ids.length });
@@ -334,15 +343,18 @@ export default function CompetitorReview() {
     const ids = comps.map((c) => c.id);
     setDetectProgress({ done: 0, total: ids.length });
     const first = await sweep(ids);
+    let last = first;
     let empty = first.filter((r) => r.found === 0).map((r) => r.id);
     if (empty.length > 0) {
       // The second pass always refreshes: the first pass may have written
       // nothing, and a gap-fill upsert would skip a site that now answers.
       const second = await sweep(empty);
+      last = second;
       empty = second.filter((r) => r.found === 0).map((r) => r.id);
     }
     setDetectProgress(null);
-    return { empty };
+    const failures = last.filter((r) => r.failed).map((r) => r.failed!);
+    return { empty, failures };
   };
 
   /**
@@ -377,10 +389,15 @@ export default function CompetitorReview() {
     if (!currentSet || !competitors) return;
     setDetecting(true);
     try {
-      const { empty } = await detectForAll(competitors, { refresh: true });
+      const { empty, failures } = await detectForAll(competitors, { refresh: true });
       toast({
-        title: empty.length === 0 ? "Handles refreshed" : "Handles refreshed with gaps",
-        description: empty.length > 0 ? `${empty.length} site(s) gave nothing after two passes.` : undefined,
+        title: empty.length === 0 ? "Handles refreshed" : failures.length ? "Detection failed" : "Handles refreshed with gaps",
+        description: failures.length
+          ? failures[0]
+          : empty.length > 0
+            ? `${empty.length} site(s) gave nothing after two passes.`
+            : undefined,
+        variant: failures.length ? "destructive" : undefined,
       });
     } catch (err: any) {
       toast({ title: "Detection failed", description: err.message, variant: "destructive" });
@@ -472,8 +489,15 @@ export default function CompetitorReview() {
   });
 
   const removeHandle = useMutation({
+    // Marked rejected rather than deleted. A deleted row left no trace that a
+    // person had judged the handle wrong, so the next handle refresh detected
+    // it again and put it straight back; correcting a wrong handle only ever
+    // lasted until the next refresh.
     mutationFn: async (handleId: string) => {
-      const { error } = await supabase.from("competitor_handles").delete().eq("id", handleId);
+      const { error } = await supabase
+        .from("competitor_handles")
+        .update({ is_active: false, source: "rejected" })
+        .eq("id", handleId);
       if (error) throw error;
     },
     onSuccess: () => refreshAll(),
@@ -533,13 +557,23 @@ export default function CompetitorReview() {
 
   const reopenSet = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("competitor_sets")
         .update({ status: "draft", confirmed_by: null, confirmed_at: null })
-        .eq("id", currentSet!.id);
+        .eq("id", currentSet!.id)
+        // Never pull a set out from under a run that is going. The page's
+        // idea of the status can be minutes old, and it has no realtime
+        // subscription, so the guard belongs on the write.
+        .neq("status", "analyzing")
+        .select("id");
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error("That set is mid-analysis. Wait for the run to finish or fail, then reopen it.");
+      }
     },
     onSuccess: refreshAll,
+    onError: (err: any) =>
+      toast({ title: "Could not reopen the set", description: err.message, variant: "destructive" }),
   });
 
   if (!canRunAnalysis) return <Navigate to="/" replace />;
@@ -716,12 +750,19 @@ export default function CompetitorReview() {
                     Confirm top 3 {selected.length !== 3 ? `(${selected.length}/3 selected)` : ""}
                   </Button>
                 )}
-                {currentSet?.status === "confirmed" && (
+                {!isDraft && (
                   <>
                     <Button className="gap-2" onClick={() => navigate(`/clients/${clientId}/competitive/run`)}>
                       <Play className="h-4 w-4" /> Run deep analysis
                     </Button>
-                    <Button variant="outline" onClick={() => reopenSet.mutate()}>
+                    {/* Offered for every non-draft status, not just
+                        'confirmed'. A run moves the set to 'analyzing' and
+                        then 'complete' or 'failed', and while it sat in one
+                        of those the whole page was read-only with no way
+                        back: every edit control is gated on draft and this
+                        was the only door. Two clients were already stranded
+                        that way. */}
+                    <Button variant="outline" onClick={() => reopenSet.mutate()} disabled={reopenSet.isPending}>
                       Reopen for edits
                     </Button>
                   </>
@@ -737,7 +778,7 @@ export default function CompetitorReview() {
             <CardHeader className="pb-3">
               <CardTitle className="t-h3">Candidates</CardTitle>
               <CardDescription>
-                {competitors!.length} proposed · click a row's star slot to select it into the top 3
+                {competitors!.length} proposed · click Select on the three you want analysed
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">

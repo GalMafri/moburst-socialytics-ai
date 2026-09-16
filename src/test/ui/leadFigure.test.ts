@@ -29,3 +29,25 @@ describe("leadFigure", () => {
     expect(leadFigure("Community and leadership content is what works here.")).toBeNull();
   });
 });
+
+describe("leadFigure on scientific notation", () => {
+  it("reads the whole number rather than the mantissa", () => {
+    // Seen live on a client report: "Scale: 6.83e5 followers makes TopDog Law
+    // the reach leader" was rendered as the headline figure "6.83".
+    expect(leadFigure("6.83e5 followers makes TopDog Law the reach leader.")).toEqual({
+      value: "683,000",
+      unit: "followers",
+    });
+  });
+
+  it("handles a negative exponent without inventing a figure", () => {
+    expect(leadFigure("1.2e-2 of the field.")).toEqual({ value: "0.012", unit: "" });
+  });
+
+  it("leaves ordinary numbers alone", () => {
+    expect(leadFigure("167 posts puts Morgan & Morgan P.A. at the highest output.")).toEqual({
+      value: "167",
+      unit: "posts",
+    });
+  });
+});

@@ -19,16 +19,29 @@ export interface DetectedHandle {
   platform: string;
   handle: string;
   profile_url: string;
+  /**
+   * How much the page backed this up, 0 to 1.
+   *
+   * The scoring below already knows the difference between a link in the
+   * footer whose text matches the brand and a lone link somewhere in the
+   * body — the kind that turns out to be an employee's personal TikTok. That
+   * was being thrown away and every handle written as 0.9, so nothing
+   * downstream, and nobody reading the screen, could tell a certainty from a
+   * guess. Measured on a real set: 12 of 52 handles were wrong, all recorded
+   * at 0.9.
+   */
+  confidence: number;
 }
 
 /** Path segments that match the shape of a profile but never are one. */
 const RESERVED: Record<string, Set<string>> = {
-  instagram: new Set(["p", "reel", "reels", "tv", "stories", "explore", "accounts", "direct", "challenge", "about", "legal", "developer", "privacy", "terms"]),
-  facebook: new Set(["sharer", "share", "sharer.php", "dialog", "plugins", "tr", "profile.php", "pages", "groups", "events", "watch", "story.php", "help", "policies", "legal", "privacy", "login", "search", "photo", "video", "media", "people", "hashtag"]),
-  tiktok: new Set(["video", "tag", "music", "discover", "foryou", "explore", "legal", "about", "embed"]),
-  linkedin: new Set(["shareArticle", "sharing", "feed", "posts", "pulse", "jobs", "legal", "help"]),
-  youtube: new Set(["watch", "embed", "playlist", "results", "shorts", "feed", "about", "t", "howyoutubeworks"]),
-  x: new Set(["intent", "share", "hashtag", "home", "explore", "i", "search", "login", "signup", "settings", "privacy", "tos", "notifications", "messages"]),
+  instagram: new Set(["p", "reel", "reels", "tv", "stories", "explore", "accounts", "direct", "challenge", "about", "legal", "developer", "privacy", "terms", "s", "web", "emails", "lite", "create", "topics"]),
+  // facebook.com/marketplace was reaching production as a competitor's page.
+  facebook: new Set(["sharer", "share", "sharer.php", "dialog", "plugins", "tr", "profile.php", "pages", "groups", "events", "watch", "story.php", "help", "policies", "legal", "privacy", "login", "search", "photo", "video", "media", "people", "hashtag", "marketplace", "gaming", "business", "ads", "settings", "bookmarks", "friends", "notes", "reel", "reels", "permalink.php", "directory", "home.php", "games", "jobs", "fundraisers", "live"]),
+  tiktok: new Set(["video", "tag", "music", "discover", "foryou", "explore", "legal", "about", "embed", "live", "upload", "following", "friends", "search", "business", "ads", "effect", "t", "creators", "trending"]),
+  linkedin: new Set(["shareArticle", "sharing", "feed", "posts", "pulse", "jobs", "legal", "help", "school", "showcase", "learning", "groups", "events", "newsletters", "signup", "login", "uas", "checkpoint"]),
+  youtube: new Set(["watch", "embed", "playlist", "results", "shorts", "feed", "about", "t", "howyoutubeworks", "hashtag", "live", "premium", "gaming", "music", "account", "signin", "redirect"]),
+  x: new Set(["intent", "share", "hashtag", "home", "explore", "i", "search", "login", "signup", "settings", "privacy", "tos", "notifications", "messages", "compose", "account", "download", "tos.html"]),
 };
 
 /** Hosts whose presence in a URL means the page is embedding, not linking. */
@@ -201,7 +214,23 @@ export function extractSocialHandles(html: string, brandName?: string): Detected
     platform: c.platform,
     handle: c.handle,
     profile_url: canonicalProfileUrl(c.platform, c.handle, c.youtubeKind),
+    confidence: confidenceFor(c.score),
   }));
+}
+
+/**
+ * The 0-9 score as a 0-1 confidence.
+ *
+ * A maximum score is footer (3) + near "social" (2) + brand-token match (3)
+ * + header (1). Nothing scores 0 and is trustworthy: that is a link found
+ * loose in the body naming something unrelated to the brand.
+ */
+export function confidenceFor(score: number): number {
+  if (score >= 6) return 0.95;
+  if (score >= 4) return 0.8;
+  if (score >= 2) return 0.6;
+  if (score >= 1) return 0.45;
+  return 0.25;
 }
 
 /** Merge results from several sources, keeping the first hit per platform. */

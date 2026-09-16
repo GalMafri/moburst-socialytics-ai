@@ -219,6 +219,17 @@ Deno.serve(async (req) => {
 
     // Handles a person entered. These are never overwritten by a refresh.
     const manual = new Set<string>();
+    /**
+     * Platforms a person removed, and the ones RivalIQ supplied.
+     *
+     * Both are decisions the scraper must not undo. A removed handle used to
+     * come back on the next refresh, because removal deleted the row and so
+     * left no trace of the decision; it is now kept as source 'rejected'.
+     * RivalIQ's tracked profiles were being overwritten by website guesses
+     * for the same reason: the import never marked where they came from.
+     */
+    const rejected = new Set<string>();
+    const writeErrors: string[] = [];
     {
       const ids = competitors.map((c: any) => c.id);
       if (ids.length > 0) {
@@ -226,8 +237,12 @@ Deno.serve(async (req) => {
           .from("competitor_handles")
           .select("competitor_id, platform, source")
           .in("competitor_id", ids)
-          .eq("source", "manual");
-        for (const r of rows || []) manual.add(`${r.competitor_id}:${r.platform}`);
+          .in("source", ["manual", "rivaliq", "rejected"]);
+        for (const r of rows || []) {
+          const k = `${r.competitor_id}:${r.platform}`;
+          if (r.source === "rejected") rejected.add(k);
+          else manual.add(k);
+        }
       }
     }
 
@@ -239,6 +254,7 @@ Deno.serve(async (req) => {
         continue;
       }
       const detected = await detectForSite(comp.website_url, comp.name);
+      const saved: string[] = [];
 
       for (const h of detected) {
         if (refresh) {
@@ -246,7 +262,10 @@ Deno.serve(async (req) => {
           // alone what a person typed: correcting a wrong handle used to
           // last only until the next refresh overwrote it.
           if (manual.has(`${comp.id}:${h.platform}`)) continue;
-          await supabase.from("competitor_handles").upsert(
+          // A handle a person deleted stays deleted: re-adding it on the next
+          // refresh is how a wrong guess kept coming back.
+          if (rejected.has(`${comp.id}:${h.platform}`)) continue;
+          const { error: upErr } = await supabase.from("competitor_handles").upsert(
             {
               competitor_id: comp.id,
               client_id: comp.client_id,
@@ -254,15 +273,21 @@ Deno.serve(async (req) => {
               handle: h.handle,
               profile_url: h.profile_url,
               is_active: true,
-              detection_confidence: 0.9,
+              // What the page actually evidenced, not a flat number. A link
+              // loose in the body naming nothing like the brand is a guess
+              // and is now recorded as one.
+              detection_confidence: h.confidence,
               detected_at: new Date().toISOString(),
               source: "auto",
             },
             { onConflict: "competitor_id,platform" },
           );
+          if (upErr) { writeErrors.push(`${comp.name} ${h.platform}: ${upErr.message}`); continue; }
+          saved.push(h.platform);
         } else {
+          if (rejected.has(`${comp.id}:${h.platform}`)) continue;
           // Fill gaps only — never clobber a row a human may have edited.
-          await supabase.from("competitor_handles").upsert(
+          const { error: upErr } = await supabase.from("competitor_handles").upsert(
             {
               competitor_id: comp.id,
               client_id: comp.client_id,
@@ -270,17 +295,21 @@ Deno.serve(async (req) => {
               handle: h.handle,
               profile_url: h.profile_url,
               is_active: true,
-              detection_confidence: 0.9,
+              detection_confidence: h.confidence,
               source: "auto",
             },
             { onConflict: "competitor_id,platform", ignoreDuplicates: true },
           );
+          if (upErr) { writeErrors.push(`${comp.name} ${h.platform}: ${upErr.message}`); continue; }
+          saved.push(h.platform);
         }
       }
-      results.push({ competitor_id: comp.id, detected });
+      // Report what was written, not what was found: the two used to differ
+      // silently whenever an upsert failed.
+      results.push({ competitor_id: comp.id, detected: detected.filter((h) => saved.includes(h.platform)) });
     }
 
-    return jsonResp({ results });
+    return jsonResp(writeErrors.length ? { results, write_errors: writeErrors } : { results });
   } catch (err: unknown) {
     if (err instanceof AuthzError) {
       return jsonResp({ error: err.message }, err.status);

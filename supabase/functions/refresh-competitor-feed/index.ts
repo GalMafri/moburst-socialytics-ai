@@ -189,8 +189,11 @@ Deno.serve(async (req) => {
     const clientId = String(body.client_id || "");
     const secret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
     const viaSecret = !!secret && req.headers.get("X-Socialytics-Secret") === secret;
-    if (!viaSecret) await requireStaff(req);
     if (!clientId) return json({ error: "client_id is required" }, 400);
+    // Scoped to the client, not merely to staff. This was the only competitive
+    // function that checked the role and not the client, so a company-scoped
+    // staff member could pull any client's competitor feed.
+    if (!viaSecret) await requireStaff(req, { writeClientId: clientId });
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: client } = await admin.from("clients").select("id, name, website_url").eq("id", clientId).maybeSingle();
