@@ -128,7 +128,10 @@ async function harvestOwnCreative(
 
     const mine = socialPosts
       .filter((p) => String(p?.companyId) === String(focusId))
-      .filter((p) => typeof (p?.imageLarge || p?.image) === "string")
+      // Non-empty, not merely a string: RivalIQ sends "" for a post with no
+      // image, which passed this test and then threw "Invalid URL" inside the
+      // loop. Four posts a run were being reported as failures for it.
+      .filter((p) => typeof (p?.imageLarge || p?.image) === "string" && String(p.imageLarge || p.image).trim().length > 0)
       .sort((a, b) => Number(b?.engagementTotal || 0) - Number(a?.engagementTotal || 0));
 
     const added: HarvestedRef[] = [];
