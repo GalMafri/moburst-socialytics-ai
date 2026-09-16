@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789542515663,
+      "tag": "0000_competitive_qa_fixes",
+      "breakpoints": true
+    }
+  ]
+}
