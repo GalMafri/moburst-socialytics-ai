@@ -21,9 +21,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loading } from "@/components/ui/loading";
+import { LoadError } from "@/components/ui/load-error";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
-import { useInsightFeedback } from "@/hooks/useInsightFeedback";
 import { PRESET_LABELS, presetRange, isValidRange, rangeDays, formatRange, type RangePreset, type DateRange } from "@/lib/dateRange";
 import { CheckCircle2, Clock, Crosshair, History, Loader2, Play, RefreshCw, XCircle } from "lucide-react";
 
@@ -52,13 +52,12 @@ export default function CompetitiveRun() {
   const [custom, setCustom] = useState<DateRange>(() => presetRange("30d"));
   const range: DateRange = preset === "custom" ? custom : presetRange(preset);
   const rangeOk = isValidRange(range) && rangeDays(range) <= 366;
-  const { suppressedTexts } = useInsightFeedback(id);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const runStartedAt = useRef(0);
   const pollStartRef = useRef(0);
 
-  const { data: client } = useQuery({
+  const { data: client, isLoading: clientLoading, isError: clientFailed, error: clientError, refetch: refetchClient } = useQuery({
     queryKey: ["client", id],
     queryFn: async () => {
       const { data, error } = await supabase.from("clients").select("*").eq("id", id!).maybeSingle();
@@ -233,10 +232,22 @@ export default function CompetitiveRun() {
 
   if (!canRunAnalysis) return <Navigate to="/" replace />;
 
-  if (!client || setLoading) {
+  if (clientLoading || setLoading) {
     return (
       <AppLayout title="Competitive Analysis" width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
         <Loading label="Loading" />
+      </AppLayout>
+    );
+  }
+
+  if (clientFailed || !client) {
+    return (
+      <AppLayout title="Competitive Analysis" width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
+        <LoadError
+          title={clientFailed ? "Could not load this client" : "That client is not available"}
+          error={clientFailed ? clientError : "It may have been deleted, or your account may not have access to it."}
+          onRetry={clientFailed ? () => refetchClient() : undefined}
+        />
       </AppLayout>
     );
   }

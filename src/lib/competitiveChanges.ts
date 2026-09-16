@@ -59,6 +59,22 @@ export function comparablePeriods(prev: Period | null | undefined, curr: Period 
 type RawPost = { companyId?: string | number; companyName?: string; channel?: string; type?: string; engagementTotal?: number | string; engagementRate?: number | string };
 
 /** Per-company stats from raw RivalIQ posts (the feed snapshots), on the same fields the report aggregates carry. */
+/**
+ * Whether two company names denote the same company.
+ *
+ * Punctuation, case and the legal suffixes RivalIQ carries ("Ltd", "P.A.",
+ * "LLC") are noise; everything else has to match.
+ */
+const SUFFIXES = /\b(inc|llc|ltd|limited|corp|corporation|co|plc|gmbh|pa|p\.a|llp|lp|group|the)\b/g;
+function normalizeCompany(s: string): string {
+  return lower(s).replace(/[^a-z0-9 ]+/g, " ").replace(SUFFIXES, " ").replace(/\s+/g, " ").trim();
+}
+export function sameCompany(a: string, b: string): boolean {
+  const x = normalizeCompany(a);
+  const y = normalizeCompany(b);
+  return !!x && !!y && x === y;
+}
+
 export function aggregatePosts(posts: RawPost[], days: number, clientName?: string): CompanyStats[] {
   type Acc = CompanyStats & { engSum: number; rateSum: number; ch: Record<string, number>; mt: Record<string, number> };
   const by = new Map<string, Acc>();
@@ -67,7 +83,11 @@ export function aggregatePosts(posts: RawPost[], days: number, clientName?: stri
     const name = String(p.companyName || p.companyId || "Unknown");
     let c = by.get(name);
     if (!c) {
-      const isClient = !!needle && (lower(name).includes(needle) || needle.includes(lower(name)));
+      // Compared whole, not by substring in both directions. "Reyes Law"
+      // inside "Reyes Law Group", and any company whose name contains the
+      // client's, used to come back as the client itself, which moves a
+      // competitor's posts into the client's own row.
+      const isClient = !!needle && sameCompany(name, needle);
       c = { name, is_client: isClient, post_count: 0, cadence_per_week: 0, engagement_avg: 0, engagement_rate_avg: 0, channel_mix: [], media_type_mix: [], engSum: 0, rateSum: 0, ch: {}, mt: {} };
       by.set(name, c);
     }

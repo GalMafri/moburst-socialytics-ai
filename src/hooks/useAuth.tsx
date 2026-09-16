@@ -78,7 +78,9 @@ async function bridgeHubSession(
       body: JSON.stringify({ hubToken }),
     });
     const body = await res.json().catch(() => ({}));
-    if (body?.debug) console.log("[Auth] bridge debug:", body.debug);
+    // Dev only: this printed an auth payload to the console of every
+    // production session, several times per page.
+    if (body?.debug && import.meta.env.DEV) console.log("[Auth] bridge debug:", body.debug);
     if (!res.ok || body?.error) {
       return { toolRole: null, error: body?.error || `Bridge failed (${res.status})`, debug: body?.debug };
     }
@@ -107,7 +109,7 @@ async function bridgeGosSession(handoffToken: string): Promise<{ error?: string 
       body: JSON.stringify({ handoffToken }),
     });
     const body = await res.json().catch(() => ({}));
-    if (body?.debug) console.log("[Auth] gos-bridge debug:", body.debug);
+    if (body?.debug && import.meta.env.DEV) console.log("[Auth] gos-bridge debug:", body.debug);
     if (!res.ok || body?.error) return { error: body?.error || `Bridge failed (${res.status})` };
     if (body.access_token && body.refresh_token) {
       await supabase.auth.setSession({

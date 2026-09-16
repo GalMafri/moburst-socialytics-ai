@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loading } from "@/components/ui/loading";
+import { LoadError } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { PlatformBadge, prettyPlatformName } from "@/lib/platform-config";
@@ -121,7 +122,7 @@ export default function CompetitorReview() {
   const [showOtherLandscapes, setShowOtherLandscapes] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
 
-  const { data: client } = useQuery({
+  const { data: client, isLoading: clientLoading, isError: clientFailed, error: clientError, refetch: refetchClient } = useQuery({
     queryKey: ["client", clientId],
     queryFn: async () => {
       const { data, error } = await supabase.from("clients").select("*").eq("id", clientId!).maybeSingle();
@@ -148,7 +149,7 @@ export default function CompetitorReview() {
     enabled: !!clientId,
   });
 
-  const { data: competitors } = useQuery({
+  const { data: competitors, isLoading: competitorsLoading, isError: competitorsFailed, error: competitorsError, refetch: refetchCompetitors } = useQuery({
     queryKey: ["competitors", currentSet?.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -192,6 +193,15 @@ export default function CompetitorReview() {
   const selected = useMemo(
     () => (competitors || []).filter((c) => c.is_selected).sort((a, b) => (a.selected_rank || 9) - (b.selected_rank || 9)),
     [competitors],
+  );
+
+  /** Selected competitors the server will refuse, because they carry no handle. */
+  const withoutHandles = useMemo(
+    () =>
+      selected
+        .filter((c) => (handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active !== false).length === 0)
+        .map((c) => displayCompanyName(c.name)),
+    [selected, handlesByCompetitor],
   );
 
   const isDraft = currentSet?.status === "draft";
@@ -578,11 +588,27 @@ export default function CompetitorReview() {
 
   if (!canRunAnalysis) return <Navigate to="/" replace />;
 
-  if (!client || setLoading) {
+  // Three outcomes, not one. Gating purely on `!client` meant a client that
+  // failed to load, and a client id that does not resolve, both sat on a
+  // spinner that never resolved.
+  if (clientLoading || setLoading) {
     return (
       <AppLayout title="Competitive Analysis"
       description="Review the proposed competitors, confirm the top three, then run the analysis.">
         <Loading label="Loading" />
+      </AppLayout>
+    );
+  }
+
+  if (clientFailed || !client) {
+    return (
+      <AppLayout title="Competitive Analysis"
+      description="Review the proposed competitors, confirm the top three, then run the analysis.">
+        <LoadError
+          title={clientFailed ? "Could not load this client" : "That client is not available"}
+          error={clientFailed ? clientError : "It may have been deleted, or your account may not have access to it."}
+          onRetry={clientFailed ? () => refetchClient() : undefined}
+        />
       </AppLayout>
     );
   }
@@ -700,7 +726,11 @@ export default function CompetitorReview() {
                 {currentSet && (
                   <Button variant="outline" size="sm" onClick={redetectHandles} disabled={detecting || !isDraft}>
                     {detecting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Search className="h-3.5 w-3.5 mr-1" />}
-                    Re-detect handles
+                    {/* The count was being tracked and never shown, on a step
+                        that takes a minute or more over ten sites. */}
+                    {detecting && detectProgress
+                      ? `Re-detecting ${detectProgress.done}/${detectProgress.total}`
+                      : "Re-detect handles"}
                   </Button>
                 )}
                 <Button size="sm" onClick={identify} disabled={identifying}>
@@ -743,7 +773,11 @@ export default function CompetitorReview() {
                 {isDraft && (
                   <Button
                     onClick={() => confirmSet.mutate()}
-                    disabled={selected.length !== 3 || confirmSet.isPending}
+                    // confirm-competitor-set refuses a selection where any
+                    // competitor has no active handle. The button used to be
+                    // enabled anyway, so the only way to learn was to press it
+                    // and read a 422.
+                    disabled={selected.length !== 3 || withoutHandles.length > 0 || confirmSet.isPending}
                     className="gap-2"
                   >
                     <ShieldCheck className="h-4 w-4" />
@@ -768,6 +802,12 @@ export default function CompetitorReview() {
                   </>
                 )}
               </div>
+              {isDraft && selected.length === 3 && withoutHandles.length > 0 && (
+                <p className="t-secondary">
+                  {withoutHandles.join(" and ")} {withoutHandles.length === 1 ? "has" : "have"} no social handle yet.
+                  Add one on the row below, or swap in another competitor, before confirming.
+                </p>
+              )}
             </CardContent>
           </Card>
         )}
@@ -913,6 +953,13 @@ export default function CompetitorReview() {
               })}
             </CardContent>
           </Card>
+        ) : competitorsFailed ? (
+          <LoadError title="Could not load the competitors" error={competitorsError} onRetry={() => refetchCompetitors()} />
+        ) : currentSet && competitorsLoading ? (
+          // A set exists and its competitors are still arriving. Saying "no
+          // competitor set yet" here told people to start over on a set that
+          // was about to appear.
+          <Loading label="Loading competitors" />
         ) : (
           !identifying && (
             <EmptyState

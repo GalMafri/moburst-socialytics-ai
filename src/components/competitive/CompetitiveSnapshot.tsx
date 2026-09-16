@@ -84,8 +84,14 @@ export function CompetitiveSnapshot({
   const ai = rd.ai_analysis || {};
   const companies: any[] = rd.aggregates?.companies || [];
   const me = companies.find((c) => c.is_client);
-  const rivals = companies.filter((c) => !c.is_client && c.post_count > 0);
-  const avg = (f: (c: any) => number) => (rivals.length ? rivals.reduce((s, c) => s + f(c), 0) / rivals.length : 0);
+  // Two different questions, and they used to share one answer. How many
+  // competitors the analysis covers is every tracked company — the figure the
+  // full report puts in its header — while an average is only meaningful over
+  // the ones that actually posted. Counting the active subset in both places
+  // made the snapshot say "3 competitors" and the report it links to say "4".
+  const rivals = companies.filter((c) => !c.is_client);
+  const active = rivals.filter((c) => c.post_count > 0);
+  const avg = (f: (c: any) => number) => (active.length ? active.reduce((s, c) => s + f(c), 0) / active.length : 0);
   const totalPosts = companies.reduce((s, c) => s + (c.post_count || 0), 0);
   const share = me && totalPosts ? Math.round((me.post_count / totalPosts) * 100) : null;
   const score = ai.benchmark_scorecard?.client_score;

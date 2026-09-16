@@ -157,7 +157,9 @@ async function harvestOwnCreative(
         added.push({ path, source_post_id: id, platform: String(post.channel || ""), posted_at: String(post.publishedAt || "") });
         seen.add(id);
       } catch (e) {
-        skipped.push(`${id}: ${(e as Error)?.name || "failed"}`);
+        // The message, not just the class: "TypeError" told nobody which
+        // url failed or why, and four of these appeared in one live run.
+        skipped.push(`${id}: ${(e as Error)?.message || (e as Error)?.name || "failed"}`);
       }
     }
 
@@ -249,15 +251,37 @@ Deno.serve(async (req) => {
     const harvest = await harvestOwnCreative(admin, clientId, landscapeId, key, socialPosts, client.name);
 
     const topics = await detectTopics(client.name, socialPosts, window.start, window.end);
+
+    // A topic somebody dismissed stays dismissed. The alert's identity
+    // includes the window it was found in, so the same recurring topic gets a
+    // new row every week and a dismissal only ever applied to the week it was
+    // made in: the card people had already waved away came straight back on
+    // the next pull, indefinitely.
+    const dismissedKeys = new Set<string>();
+    {
+      const since = iso(new Date(Date.now() - 90 * DAY));
+      const { data: prior } = await admin
+        .from("competitive_alerts")
+        .select("topic_key")
+        .eq("client_id", clientId)
+        .eq("status", "dismissed")
+        .gte("window_start", since);
+      for (const r of prior || []) if (r.topic_key) dismissedKeys.add(String(r.topic_key));
+    }
+
     let saved = 0;
     for (const t of topics) {
+      const topicKey = slug(t.topic);
       const { error } = await admin.from("competitive_alerts").upsert(
         {
           client_id: clientId,
           window_start: window.start,
           window_end: window.end,
+          // Carried forward rather than re-raised. The row is still written,
+          // so the topic stays in the record and a person can bring it back.
+          ...(dismissedKeys.has(topicKey) ? { status: "dismissed" } : {}),
           topic: t.topic,
-          topic_key: slug(t.topic),
+          topic_key: topicKey,
           summary: t.summary,
           companies: t.companies,
           platforms: t.platforms,
@@ -267,7 +291,7 @@ Deno.serve(async (req) => {
         },
         { onConflict: "client_id,window_start,topic_key", ignoreDuplicates: false },
       );
-      if (!error) saved += 1;
+      if (!error && !dismissedKeys.has(topicKey)) saved += 1;
       else console.error("[refresh-competitor-feed] alert upsert failed", error.message);
     }
 

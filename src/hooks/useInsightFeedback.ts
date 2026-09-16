@@ -76,8 +76,10 @@ export function useInsightFeedback(clientId: string | undefined) {
         const { error } = await supabase.from("competitive_insight_feedback").delete().eq("id", existing.id);
         if (error) throw error;
       } else {
-        // user_id is filled by the column default (auth.uid()): the app's
-        // user object carries the hub id, which is not the Supabase UUID.
+        // The column default (auth.uid()) fills user_id on INSERT only, so a
+        // flipped verdict used to keep the first voter's name and timestamp.
+        // Written explicitly from the session so the row says who decided.
+        const { data: auth } = await supabase.auth.getUser();
         const { error } = await supabase.from("competitive_insight_feedback").upsert(
           {
             client_id: clientId,
@@ -86,6 +88,7 @@ export function useInsightFeedback(clientId: string | undefined) {
             gap_text: args.gapText,
             verdict: args.verdict,
             report_id: args.reportId ?? null,
+            ...(auth?.user?.id ? { user_id: auth.user.id, created_at: new Date().toISOString() } : {}),
           },
           { onConflict: "client_id,insight_key" },
         );

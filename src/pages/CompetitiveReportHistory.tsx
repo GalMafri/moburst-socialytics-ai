@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/ui/load-error";
 import { formatRange } from "@/lib/dateRange";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ArrowLeft, Crosshair, Eye, Loader2, Play, Rss } from "lucide-react";
@@ -34,7 +35,7 @@ export default function CompetitiveReportHistory() {
     enabled: !!id,
   });
 
-  const { data: reports, isLoading } = useQuery({
+  const { data: reports, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["competitive-reports-history", id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -73,6 +74,11 @@ export default function CompetitiveReportHistory() {
           <CardContent>
             {isLoading ? (
               <Loading label="Loading competitive reports" />
+            ) : isError ? (
+              // Not an empty state. "No competitive analyses yet" asserts
+              // something about the data on the strength of a request that
+              // never answered, and the runs are almost certainly still there.
+              <LoadError title="Could not load the run history" error={error} onRetry={() => refetch()} />
             ) : reports && reports.length > 0 ? (
               <Table>
                 <TableHeader>

@@ -28,10 +28,26 @@ export default function CompetitiveIndex() {
       if (setsRes.error) throw setsRes.error;
       if (reportsRes.error) throw reportsRes.error;
       const latestSet = new Map<string, any>();
-      for (const s of setsRes.data || []) if (!latestSet.has(s.client_id)) latestSet.set(s.client_id, s);
+      // The newest set decides the badge. Whether a run can start is a
+      // different question, and it is the server's: run-report and the run
+      // page both pick the newest set in a RUNNABLE status, so a fresh draft
+      // sitting on top of a confirmed set does not stop anything. The button
+      // used to read the newest set of any status and go dead in exactly that
+      // case, which is what every "Re-identify" leaves behind.
+      const RUNNABLE = ["confirmed", "analyzing", "complete", "failed"];
+      const runnableSet = new Map<string, any>();
+      for (const s of setsRes.data || []) {
+        if (!latestSet.has(s.client_id)) latestSet.set(s.client_id, s);
+        if (RUNNABLE.includes(s.status) && !runnableSet.has(s.client_id)) runnableSet.set(s.client_id, s);
+      }
       const latestReport = new Map<string, any>();
       for (const r of reportsRes.data || []) if (!latestReport.has(r.client_id)) latestReport.set(r.client_id, r);
-      return (clientsRes.data || []).map((c) => ({ ...c, set: latestSet.get(c.id) || null, report: latestReport.get(c.id) || null }));
+      return (clientsRes.data || []).map((c) => ({
+        ...c,
+        set: latestSet.get(c.id) || null,
+        runnable: runnableSet.get(c.id) || null,
+        report: latestReport.get(c.id) || null,
+      }));
     },
   });
 
@@ -56,7 +72,7 @@ export default function CompetitiveIndex() {
                   </div>
                   <div className="flex gap-2 flex-wrap">
                     <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${c.id}/competitive`)}><Crosshair className="h-3.5 w-3.5 mr-1" /> Competitors</Button>
-                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${c.id}/competitive/run`)} disabled={!c.set || !["confirmed", "analyzing", "complete", "failed"].includes(c.set.status)}><Play className="h-3.5 w-3.5 mr-1" /> Run</Button>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${c.id}/competitive/run`)} disabled={!c.runnable}><Play className="h-3.5 w-3.5 mr-1" /> Run</Button>
                     {c.report?.status === "complete" && (
                       <Button size="sm" onClick={() => navigate(`/clients/${c.id}/competitive/reports/${c.report.id}`)}><FileText className="h-3.5 w-3.5 mr-1" /> Latest report</Button>
                     )}
