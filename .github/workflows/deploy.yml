@@ -5,14 +5,15 @@ on:
     branches: [main]
   workflow_dispatch:        # allow manual runs from the Actions tab
 
-# Avoid overlapping deploys: a newer push cancels an in-flight one.
-concurrency:
-  group: deploy-production
-  cancel-in-progress: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Only the build is cancellable: a newer push supersedes an in-flight build.
+    # The deploy job stays outside this group, because cancelling it mid-run can
+    # kill deploy.sh partway through npm ci on the server.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
