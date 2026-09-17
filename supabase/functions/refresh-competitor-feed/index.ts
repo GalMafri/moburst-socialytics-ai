@@ -294,8 +294,11 @@ Deno.serve(async (req) => {
         },
         { onConflict: "client_id,window_start,topic_key", ignoreDuplicates: false },
       );
-      if (!error && !dismissedKeys.has(topicKey)) saved += 1;
-      else console.error("[refresh-competitor-feed] alert upsert failed", error.message);
+      // Two separate questions. Folding them into one condition sent a
+      // SUCCESSFUL write of a carried-forward dismissal into the error branch,
+      // where error is null, and the whole refresh died on the dereference.
+      if (error) console.error("[refresh-competitor-feed] alert upsert failed", error.message);
+      else if (!dismissedKeys.has(topicKey)) saved += 1;
     }
 
     return json({ client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: saved, design_refs: harvest });
