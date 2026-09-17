@@ -1,3 +1,7 @@
+import { useActiveReportRun } from "@/hooks/useActiveReportRun";
+import { ReportRunStatus } from "@/components/reports/ReportRunStatus";
+import { RetryReportButton } from "@/components/reports/RetryReportButton";
+import { RUN_ESTIMATE, canRetry } from "@/lib/reportRun";
 import { useParams, useNavigate } from "react-router-dom";
 import { describeInvokeError } from "@/lib/invokeError";
 import { useQuery } from "@tanstack/react-query";
@@ -33,8 +37,6 @@ const STEPS_NO_TRENDS = [
   "Generating presentation...",
 ];
 
-// Max time to wait for report completion (10 minutes)
-const MAX_POLL_DURATION_MS = 10 * 60 * 1000;
 
 export default function RunAnalysis() {
   const { id } = useParams();
@@ -42,6 +44,9 @@ export default function RunAnalysis() {
   const { user, canRunAnalysis } = useAuth();
   const { toast } = useToast();
   const [running, setRunning] = useState(false);
+  const activeRun = useActiveReportRun(id, "monthly");
+  const [startedAt, setStartedAt] = useState<string | null>(null);
+  const submitting = useRef(false);
   const [currentStep, setCurrentStep] = useState(-1);
   const [error, setError] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
@@ -57,7 +62,6 @@ export default function RunAnalysis() {
   // Wall-clock for the whole run, so latency is measured as the user feels it.
   const runStartedAt = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollStartRef = useRef<number>(0);
 
   // Subscribe to realtime report updates
   useRealtimeReports(id);
@@ -185,28 +189,10 @@ export default function RunAnalysis() {
 
   const pollForCompletion = useCallback(
     (rId: string) => {
-      pollStartRef.current = Date.now();
+      if (pollRef.current) clearInterval(pollRef.current);
 
       pollRef.current = setInterval(async () => {
         try {
-          // Check if we've exceeded max poll duration
-          if (Date.now() - pollStartRef.current > MAX_POLL_DURATION_MS) {
-            stopAllTimers();
-            setRunning(false);
-            track("analysis_timed_out", {
-              client_id: id,
-              entity_id: rId,
-              duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
-              ok: false,
-              error_code: "client_timeout",
-            });
-            setError(
-              "Analysis is taking longer than expected. The workflow may still be running — check n8n execution logs. You can also check the report in Recent analyses below once it completes.",
-            );
-            refetchReports();
-            return;
-          }
-
           const { data, error: fetchErr } = await supabase
             .from("reports")
             .select("status, report_data, gamma_url")
@@ -255,7 +241,23 @@ export default function RunAnalysis() {
     [id, navigate, toast, stopAllTimers, refetchReports],
   );
 
+  useEffect(() => {
+    const active = activeRun.data;
+    if (!active || running || reportId) return;
+    setReportId(active.id);
+    setStartedAt(active.created_at);
+    if (active.date_range_start) setDateRangeStart(active.date_range_start);
+    if (active.date_range_end) setDateRangeEnd(active.date_range_end);
+    setError(null);
+    setCurrentStep(0);
+    setRunning(true);
+    pollForCompletion(active.id);
+  }, [activeRun.data, running, reportId, pollForCompletion]);
+
   const runAnalysis = async () => {
+    if (submitting.current || running || activeRun.data || !activeRun.isSuccess || activeRun.isFetching) return;
+    submitting.current = true;
+    setStartedAt(new Date().toISOString());
     setRunning(true);
     setError(null);
     setCurrentStep(0);
@@ -287,12 +289,8 @@ export default function RunAnalysis() {
       if (runErr || started?.error) throw new Error(await describeInvokeError(runErr, started));
       const reportRowId: string = started.report_id;
       setReportId(reportRowId);
+      setStartedAt(started.created_at || new Date().toISOString());
 
-      stepRef.current = setInterval(() => {
-        setCurrentStep((prev) => (prev < STEPS.length - 1 ? prev + 1 : prev));
-      }, 15000);
-
-      // Start polling Supabase for completion
       pollForCompletion(reportRowId);
     } catch (err: any) {
       stopAllTimers();
@@ -306,6 +304,9 @@ export default function RunAnalysis() {
         error_code: String(err?.message || "unknown").slice(0, 120),
       });
       toast({ title: "Analysis failed", description: err.message, variant: "destructive" });
+    } finally {
+      submitting.current = false;
+      activeRun.refetch();
     }
   };
 
@@ -370,6 +371,7 @@ export default function RunAnalysis() {
                 <Label htmlFor="range-start">Start Date</Label>
                 <Input
                   id="range-start"
+                  disabled={running || !!activeRun.data}
                   type="date"
                   value={dateRangeStart}
                   onChange={(e) => setDateRangeStart(e.target.value)}
@@ -380,6 +382,7 @@ export default function RunAnalysis() {
                 <Label htmlFor="range-end">End Date</Label>
                 <Input
                   id="range-end"
+                  disabled={running || !!activeRun.data}
                   type="date"
                   value={dateRangeEnd}
                   onChange={(e) => setDateRangeEnd(e.target.value)}
@@ -414,7 +417,7 @@ export default function RunAnalysis() {
                 id="include-trends"
                 checked={!skipTrends}
                 onCheckedChange={(checked) => setSkipTrends(!checked)}
-                disabled={!hasKeywords}
+                disabled={running || !!activeRun.data || !hasKeywords}
               />
             </div>
             {!hasKeywords && (
@@ -436,32 +439,15 @@ export default function RunAnalysis() {
           <CardContent className="pt-5 text-center space-y-6">
             {!running && !error && currentStep < 0 && (
               <>
-                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!profiles || profiles.length === 0}>
+                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!profiles || profiles.length === 0 || !activeRun.isSuccess || activeRun.isFetching || !!activeRun.data}>
                   <Play className="h-5 w-5" /> Run Full Analysis
                 </Button>
-                <p className="t-secondary">This typically takes 3-7 minutes</p>
+                <p className="t-secondary">{RUN_ESTIMATE}</p>
               </>
             )}
 
-            {running && (
-              <div className="space-y-4">
-                {STEPS.map((step, i) => (
-                  <div key={i} className="flex items-center gap-3 t-body">
-                    {i < currentStep ? (
-                      <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
-                    ) : i === currentStep ? (
-                      <Loader2 className="h-5 w-5 text-accent animate-spin shrink-0" />
-                    ) : (
-                      <Clock className="h-5 w-5 text-muted-foreground shrink-0" />
-                    )}
-                    <span className={i <= currentStep ? "text-foreground" : "text-muted-foreground"}>{step}</span>
-                  </div>
-                ))}
-                <p className="t-secondary mt-2">
-                  Polling for results... {reportId ? `(Report: ${reportId.slice(0, 8)}...)` : ""}
-                </p>
-              </div>
-            )}
+            {activeRun.isError && <p className="t-secondary">Could not check for an existing run. Reconnect or refresh before starting an analysis.</p>}
+            {running && <ReportRunStatus reportId={reportId} startedAt={startedAt} kind="monthly" onStarted={() => { setStartedAt(new Date().toISOString()); activeRun.refetch(); refetchReports(); }} />}
 
             {currentStep >= STEPS.length && !error && (
               <div className="flex items-center gap-2 justify-center text-success">
@@ -477,6 +463,11 @@ export default function RunAnalysis() {
                   <span className="font-medium">Analysis issue</span>
                 </div>
                 <p className="t-secondary">{error}</p>
+                {reportId ? (
+                  canRetry({ status: "failed", created_at: startedAt }) ?
+                    <RetryReportButton reportId={reportId} kind="monthly" variant="outline" onStarted={() => { setError(null); setRunning(true); setCurrentStep(0); setStartedAt(new Date().toISOString()); pollForCompletion(reportId); }} /> :
+                    <p className="t-secondary">Retry becomes available 90 minutes after this run started. You can return later from report history.</p>
+                ) : (
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -485,8 +476,9 @@ export default function RunAnalysis() {
                     setReportId(null);
                   }}
                 >
-                  <RefreshCw className="h-4 w-4 mr-2" /> Try Again
+                  <RefreshCw className="h-4 w-4 mr-2" /> Review settings
                 </Button>
+                )}
               </div>
             )}
           </CardContent>

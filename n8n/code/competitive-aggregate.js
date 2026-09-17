@@ -11,6 +11,16 @@ const seriesResp = safeJson("Landscape Metrics Timeseries");
 const mRows = Array.isArray(metricsResp.metrics) ? metricsResp.metrics : [];
 const mPrevRows = Array.isArray(metricsPrevResp.metrics) ? metricsPrevResp.metrics : [];
 const sRows = Array.isArray(seriesResp.metrics) ? seriesResp.metrics : [];
+// Verify provider boundaries before attributing metrics to the report period.
+const day = value => String(value || '').slice(0, 10);
+const durationDays = Math.round((Date.parse(cfg.range_end) - Date.parse(cfg.range_start)) / 86400000) + 1;
+const prevEnd = new Date(Date.parse(cfg.range_start) - 86400000).toISOString().slice(0, 10);
+const prevStart = new Date(Date.parse(cfg.range_start) - durationDays * 86400000).toISOString().slice(0, 10);
+for (const [rows, start, end] of [[mRows, cfg.range_start, cfg.range_end], [mPrevRows, prevStart, prevEnd]]) {
+  for (const row of rows) if (day(row.mainPeriodStart) !== start || day(row.mainPeriodEnd) !== end) {
+    throw new Error('RivalIQ returned summary metrics for a different period. No report was produced from mismatched dates.');
+  }
+}
 const byCompanyId = (rows) => { const o = {}; for (const r of rows) o[String(r.companyId)] = r; return o; };
 const mCur = byCompanyId(mRows);
 const mPrev = byCompanyId(mPrevRows);
@@ -33,7 +43,7 @@ const metricsFor = (id) => {
     for (const field of Object.keys(keys)) { const v = both(keys[field]); n[field] = v; if (v.current || v.previous) any = true; }
     if (any) by_network[net] = n;
   }
-  const daily = sRows.filter((r) => String(r.companyId) === id).map((r) => ({ date: String(r.date || "").slice(0, 10), posts: pick(r, "crossChannelSocialActivity"), engagement: pick(r, "crossChannelSocialEngagement"), audience: pick(r, "crossChannelSocialAudience") })).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const daily = sRows.filter((r) => String(r.companyId) === id && day(r.date) >= cfg.range_start && day(r.date) <= cfg.range_end).map((r) => ({ date: String(r.date || "").slice(0, 10), posts: pick(r, "crossChannelSocialActivity"), engagement: pick(r, "crossChannelSocialEngagement"), audience: pick(r, "crossChannelSocialAudience") })).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return {
     period: { start: String(cur.mainPeriodStart || "").slice(0, 10), end: String(cur.mainPeriodEnd || "").slice(0, 10) },
     previous_period: prev ? { start: String(prev.mainPeriodStart || "").slice(0, 10), end: String(prev.mainPeriodEnd || "").slice(0, 10) } : null,
@@ -49,7 +59,16 @@ const metricsFor = (id) => {
 };
 const fromEndpoint = companiesResp.companies || companiesResp.data || companiesResp.items || (Array.isArray(companiesResp) ? companiesResp : []);
 const companies = fromEndpoint.length > 0 ? fromEndpoint : (landscape.companies || []);
-const posts = postsResp.socialPosts || postsResp.posts || postsResp.data || postsResp.items || (Array.isArray(postsResp) ? postsResp : []);
+const rawPosts = postsResp.socialPosts || postsResp.posts || postsResp.data || postsResp.items || (Array.isArray(postsResp) ? postsResp : []);
+if (Number(postsResp.failed_windows) > 0 || Number(postsResp.truncated_pages) > 0) throw new Error('RivalIQ post coverage is incomplete. The report cannot be presented as a complete period.');
+const seenPosts = new Set();
+const posts = rawPosts.filter(post => {
+  const date = day(post.publishedAt || post.published_at || post.created || post.created_at || post.date);
+  if (!date || date < cfg.range_start || date > cfg.range_end) return false;
+  const key = String(post.postId || post.postLink || JSON.stringify([post.companyId, date, post.message]));
+  if (seenPosts.has(key)) return false;
+  seenPosts.add(key); return true;
+});
 const truncatedPages = Number(postsResp.truncated_pages) || 0;
 let selected = []; try { selected = JSON.parse(cfg.competitors_json || "[]"); } catch (e) { selected = []; }
 let suppressed = []; try { suppressed = JSON.parse(cfg.suppressed_insights_json || "[]"); } catch (e) { suppressed = []; }

@@ -79,12 +79,12 @@ async function runScheduler(options={}){
  }});
  const response=await handler(new Request('https://fixture.invalid/scheduler'+(options.dryRun?'?dry_run=1':''),{method:'POST',body:JSON.stringify(options.body||{})}));return{...state,requests,status:response.status,body:await response.json()};
 }
-async function runManual(transport){
- const state=database();let handler;
+async function runManual(transport, options={}){
+ const state=options.state || database();let handler;let dispatches=0;
  class AuthzError extends Error{constructor(status,message){super(message);this.status=status;}}
- moduleFrom('supabase/functions/run-report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>({userId:'fixture-user'})},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/competitive/rivaliqLandscape.ts':{bestLandscapeMatch(){},summarizeLandscapes(){}}},{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},fetch:async()=>{if(transport==='late-completed'){state.tables.reports.at(-1).status='completed';throw new Error('Timeout after callback')};if(transport==='throw')throw new Error('Fixture network failure');return new Response('{}',{status:transport==='reject'?503:200})}});
- const response=await handler(new Request('https://fixture.invalid/run',{method:'POST',body:JSON.stringify({client_id:'fixture-client',kind:'social',date_range_start:'2026-09-01',date_range_end:'2026-09-15'})}));
- return{status:response.status,body:await response.json(),reportStatus:state.tables.reports.at(-1)?.status};
+ moduleFrom('supabase/functions/run-report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>({userId:'fixture-user'})},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/competitive/rivaliqLandscape.ts':{bestLandscapeMatch(){},summarizeLandscapes(){}}},{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},fetch:async()=>{dispatches++;if(transport==='late-completed'){state.tables.reports.at(-1).status='completed';throw new Error('Timeout after callback')};if(transport==='throw')throw new Error('Fixture network failure');return new Response('{}',{status:transport==='reject'?503:200})}});
+ const response=await handler(new Request('https://fixture.invalid/run',{method:'POST',body:JSON.stringify(options.body || {client_id:'fixture-client',kind:'social',date_range_start:'2026-09-01',date_range_end:'2026-09-15'})}));
+ return{state,dispatches,status:response.status,body:await response.json(),reportStatus:state.tables.reports.at(-1)?.status};
 }
 
 async function runCallback(state,kind,status,reportId,{authorized=true,resume=true}={}){
@@ -120,6 +120,21 @@ async function runCallback(state,kind,status,reportId,{authorized=true,resume=tr
  await check('QA-11','regression','late social failure cannot erase a completed report',async()=>{const state=database();state.tables.reports.push({id:'fixture',status:'completed',report_data:{keep:'original'}});const callback=await runCallback(state,'social','failed','fixture');assert.equal(callback.status,200);assert.equal(state.tables.reports[0].status,'completed');assert.equal(state.tables.reports[0].report_data.keep,'original');});
  await check('QA-11','control','unauthorized callback cannot change report',async()=>{const state=database();state.tables.reports.push({id:'fixture',status:'running'});const callback=await runCallback(state,'social','failed','fixture',{authorized:false});assert.equal(callback.status,401);assert.equal(state.tables.reports[0].status,'running');});
  await check('QA-10','regression','delayed completion retains the competitive report period',async()=>{const r=await runScheduler();const comp=r.tables.competitive_reports.at(-1);comp.status='complete';comp.date_range_start='2026-07-01';comp.date_range_end='2026-07-31';const resumed=await runScheduler({state:r,body:{resume_competitive_report_id:comp.id}});assert.equal(resumed.requests[0].payload.date_range_start,'2026-07-01');assert.equal(resumed.requests[0].payload.date_range_end,'2026-07-31');});
+ for (const kind of ['social','competitive']) {
+  const table=kind==='social'?'reports':'competitive_reports';
+  for (const status of ['running','failed']) for (const age of [10,15,45,89]) await check('QA-90','regression',kind+' '+status+' retry locked at '+age+' minutes',async()=>{
+    const state=database(); state.tables[table].push({id:'retry-fixture',client_id:'fixture-client',status,created_at:new Date(Date.now()-age*60000).toISOString()});
+    const r=await runManual('accept',{state,body:{report_id:'retry-fixture'}});assert.equal(r.status,409);assert.equal(r.dispatches,0);assert.equal(state.tables[table].at(-1).status,status);
+  });
+  await check('QA-90','regression',kind+' fresh start resumes active run without dispatch',async()=>{
+    const state=database();state.tables[table].push({id:'active-fixture',client_id:'fixture-client',status:'running',created_at:new Date().toISOString()});
+    const r=await runManual('accept',{state,body:{client_id:'fixture-client',kind}});assert.equal(r.status,200);assert.equal(r.body.report_id,'active-fixture');assert.equal(r.body.resumed,true);assert.equal(r.dispatches,0);
+  });
+ }
+ for(const status of ['running','failed']) await check('QA-90','control','social '+status+' may retry after 90 minutes',async()=>{
+  const state=database();state.tables.reports.push({id:'old-fixture',client_id:'fixture-client',status,created_at:new Date(Date.now()-91*60000).toISOString()});
+  const r=await runManual('accept',{state,body:{report_id:'old-fixture'}});assert.equal(r.status,200);assert.equal(r.dispatches,1);assert.equal(state.tables.reports.length,1);
+ });
  const report={checks:results.length,passed:results.filter(x=>x.result==='pass').length,failed:results.filter(x=>x.result==='FAIL')};
  console.log(JSON.stringify(report,null,2));if(report.failed.length)process.exitCode=1;
 })();

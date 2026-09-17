@@ -19,8 +19,7 @@ const SOURCE_LABEL: Record<string, string> = {
 
 /**
  * Reads the client's content pillars instead of asking someone to invent
- * them. Whatever comes back lands in the same editable pillar list, so it is
- * a starting point rather than an answer.
+ * them. Suggestions stay separate until the user explicitly implements them.
  */
 export function PillarDerivationCard({
   clientId,
@@ -40,7 +39,7 @@ export function PillarDerivationCard({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
-  const [proposed, setProposed] = useState(0);
+  const [proposal, setProposal] = useState<{ pillars: DerivedPillar[]; keywords: string[]; source?: string } | null>(null);
 
   const run = async () => {
     if (!clientId) {
@@ -58,10 +57,10 @@ export function PillarDerivationCard({
       if (data?.error) throw new Error(data.error);
       const pillars: DerivedPillar[] = data?.pillars || [];
       if (pillars.length === 0) throw new Error("Nothing came back to work from.");
-      onDerived(pillars, data?.keywords || [], data?.source);
+      setProposal({ pillars, keywords: data?.keywords || [], source: data?.source });
       setNotes(data?.notes || null);
-      setProposed(pillars.length);
-      toast.success(`${pillars.length} pillars proposed from ${SOURCE_LABEL[data?.source] || "what is on file"}. Nothing is saved until you press Save.`);
+
+      toast.success(`${pillars.length} pillars proposed from ${SOURCE_LABEL[data?.source] || "what is on file"}. Review the suggestions before implementing them.`);
     } catch (e: any) {
       setError(e.message || String(e));
     } finally {
@@ -85,16 +84,32 @@ export function PillarDerivationCard({
                 : "Upload a social strategy, or write the brief, and this can read the pillars from it."}
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={run} disabled={running || !clientId || !ready} className="shrink-0">
+          <Button size="sm" variant="outline" onClick={run} disabled={running || !clientId || !ready || !!proposal} className="shrink-0">
             {running ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1" />}
-            {proposed > 0 ? "Read again" : "Propose pillars"}
+            {running ? "Generating suggestions…" : "Propose pillars and keywords"}
           </Button>
         </div>
 
-        {proposed > 0 && !running && (
-          <p className="t-label text-[#e0b563]">
-            {proposed} proposed pillars are in the list below, replacing what was there. Nothing is saved until you press Save; leave without saving to keep the old ones.
-          </p>
+        {proposal && (
+          <section aria-label="AI suggestions — pending review" className="rounded-lg border-2 border-primary/50 bg-primary/5 p-4 space-y-4">
+            <h3 className="font-semibold">AI suggestions — pending review</h3>
+            <p className="t-secondary">Your existing pillars and keywords are unchanged. Implement adds new suggestions to the editable lists and keeps existing entries. Save the client to persist them.</p>
+            <div className="space-y-2">
+              <h4 className="font-medium">Suggested content pillars</h4>
+              {proposal.pillars.map((pillar, index) => <div key={index} className="space-y-1">
+                <p className="font-medium">{pillar.name}</p><p className="t-secondary">{pillar.description}</p>
+                {pillar.rationale && <p className="t-secondary">{pillar.rationale}</p>}
+              </div>)}
+            </div>
+            <div className="space-y-2"><h4 className="font-medium">Suggested social keywords</h4>
+              <ul className="flex flex-wrap gap-2">{proposal.keywords.map((keyword, index) => <li key={index} className="rounded border px-2 py-1 t-body">{keyword}</li>)}</ul>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" disabled={running} onClick={() => { onDerived(proposal.pillars, proposal.keywords, proposal.source); setProposal(null); setNotes(null); toast.success("Suggestions added. Existing entries were kept. Save the client to persist the changes."); }}>Implement</Button>
+              <Button size="sm" variant="outline" disabled={running} onClick={run}>Re-do</Button>
+              <Button size="sm" variant="ghost" disabled={running} onClick={() => { setProposal(null); setNotes(null); setError(null); }}>Reject</Button>
+            </div>
+          </section>
         )}
         {derivedAt && !running && (
           <p className="t-label text-muted-foreground inline-flex items-center gap-1.5">

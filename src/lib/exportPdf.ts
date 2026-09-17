@@ -287,7 +287,6 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
        - Keep images with their captions */
     .pdf-root img,
     .pdf-root .recharts-wrapper,
-    .pdf-root table,
     .pdf-root blockquote,
     .pdf-root pre,
     .pdf-root figure {
@@ -417,6 +416,26 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     /* A heading never ends a page on its own. */
     h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
     .animate-slide-up, .stagger-children > * { animation: none !important; opacity: 1 !important; transform: none !important; }
+    /* Paper uses a single reading column. Responsive screen grids and tall
+       flex items otherwise become unbreakable fragments in Chromium. */
+    .pdf-root { width: 100%; max-width: 190mm; min-height: 0 !important; margin: 0 auto; }
+    .pdf-root .grid, .pdf-root .flex-col { display: block !important; }
+    .pdf-root .grid > *, .pdf-root .flex-col > * { margin-bottom: 12px; }
+    .pdf-root .flex { flex-wrap: wrap; }
+    .pdf-root * { min-width: 0; }
+    .pdf-root [class*="min-w-"], .pdf-root table { min-width: 0 !important; max-width: 100% !important; }
+    .pdf-root [class*="max-h-"], .pdf-root [role="tabpanel"] { height: auto !important; max-height: none !important; }
+    .pdf-root [class*="overflow-"], .pdf-root [data-radix-scroll-area-viewport] { overflow: visible !important; height: auto !important; }
+    .pdf-root .whitespace-nowrap { white-space: normal !important; }
+    .pdf-root table { table-layout: fixed; break-inside: auto !important; page-break-inside: auto !important; }
+    .pdf-root thead { display: table-header-group; }
+    .pdf-root tr { break-inside: avoid; }
+    .pdf-root th, .pdf-root td { white-space: normal !important; overflow-wrap: anywhere; font-size: 10px; padding: 6px; }
+    .pdf-root img { max-width: 100% !important; max-height: 65mm !important; object-fit: contain !important; }
+    .pdf-root .recharts-wrapper { max-height: 95mm !important; }
+    .pdf-root p, .pdf-root li { orphans: 3; widows: 3; }
+    .pdf-root [data-pdf-splittable] { break-inside: auto !important; page-break-inside: auto !important; height: auto !important; overflow: visible !important; }
+    .pdf-root [data-pdf-keep] { break-inside: avoid !important; page-break-inside: avoid !important; }
     @media print {
       html, body, .pdf-root {
         background: #0b0c10 !important;
@@ -434,15 +453,17 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   <script>
     // Focus + print once everything is in the DOM. Do NOT auto-close — the
     // user needs time to confirm the save dialog.
-    window.addEventListener("load", () => {
-      setTimeout(() => {
-        try {
-          window.focus();
-          window.print();
-        } catch (err) {
-          console.error("Print dialog failed:", err);
-        }
-      }, 500);
+    window.addEventListener("load", async () => {
+      // Wait for layout assets, then classify blocks at the actual print width.
+      await Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 3000))]);
+      await Promise.race([Promise.all(Array.from(document.images).map(image => image.decode().catch(() => {}))), new Promise(resolve => setTimeout(resolve, 5000))]);
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const usablePageHeight = 250 * 96 / 25.4; // conservative A4/Letter content height
+      document.querySelectorAll('.pdf-root article, .pdf-root .glass, .pdf-root .glass-inner, .pdf-root .glass-accent, .pdf-root blockquote, .pdf-root tr').forEach(el => {
+        el.setAttribute(el.getBoundingClientRect().height > usablePageHeight ? 'data-pdf-splittable' : 'data-pdf-keep', '');
+      });
+      try { window.focus(); window.print(); }
+      catch (err) { console.error("Print dialog failed:", err); }
     });
   </script>
 </body>

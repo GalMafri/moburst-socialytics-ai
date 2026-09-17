@@ -233,6 +233,9 @@ const fullReport = {
   },
 
   sprout_performance: {
+    metric_scope: "reporting_period",
+    top_post_metric_scope: "lifetime",
+    collected_at: new Date().toISOString(),
     profiles: sproutData.profiles || [],
     overall_totals: sproutData.overall_totals || {},
     top_posts: sproutData.top_posts || [],

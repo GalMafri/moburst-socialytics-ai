@@ -14,7 +14,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
-import { buildCompetitivePayload, buildSocialPayload, isStuckRun, type ReportRange } from "../_shared/reports/payloads.ts";
+import { buildCompetitivePayload, buildSocialPayload, isStuckRun, STUCK_AFTER_MINUTES, type ReportRange } from "../_shared/reports/payloads.ts";
 import { bestLandscapeMatch, summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
 
 const corsHeaders = {
@@ -77,6 +77,26 @@ Deno.serve(async (req) => {
     // read back to the caller.
     const caller = await requireStaff(req, { writeClientId: clientId });
 
+    if (existing && ["running", "failed"].includes(existing.status)) {
+      const started = Date.parse(existing.created_at || "");
+      if (!Number.isFinite(started) || Date.now() - started < STUCK_AFTER_MINUTES * 60000) {
+        return json({ error: "Retry is unavailable until 90 minutes after this run started. The original workflow may still be working." }, 409);
+      }
+    }
+
+    // Navigation, refresh or an uncertain response must resume an existing run,
+    // not launch a second workflow. This also protects clients with an older UI.
+    const table = kind === "competitive" ? "competitive_reports" : "reports";
+    const { data: active, error: activeError } = await admin.from(table)
+      .select("id, created_at, date_range_start, date_range_end")
+      .eq("client_id", clientId).eq("status", "running")
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (activeError) throw activeError;
+    if (active && active.id !== retryId) {
+      return json({ report_id: active.id, kind, created_at: active.created_at,
+        range: { start: active.date_range_start, end: active.date_range_end }, resumed: true });
+    }
+
     if (existing) {
       const stuck = isStuckRun(existing.status, existing.created_at);
       // A row that is genuinely mid-run must not be fired twice. A row that
@@ -117,6 +137,18 @@ Deno.serve(async (req) => {
       const end = new Date();
       const start = new Date(end.getTime() - 29 * 86400000);
       range = { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+    }
+
+    if (!retryId) {
+      const { data: recentFailure, error: failureError } = await admin.from(table)
+        .select("id, status, created_at")
+        .eq("client_id", clientId).eq("status", "failed")
+        .eq("date_range_start", range.start).eq("date_range_end", range.end)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (failureError) throw failureError;
+      if (recentFailure && Date.now() - Date.parse(recentFailure.created_at) < STUCK_AFTER_MINUTES * 60000) {
+        return json({report_id: recentFailure.id, kind, range, created_at: recentFailure.created_at, resumed: true});
+      }
     }
 
     let reportId: string;
@@ -183,13 +215,15 @@ Deno.serve(async (req) => {
 
       if (existing) {
         reportId = existing.id;
-        const { error } = await admin
+        const { data: claimed, error } = await admin
           .from("competitive_reports")
           // The clock restarts with the run: the row now IS this attempt, and
           // a stale created_at would leave a fresh run reading as stuck.
           .update({ status: "running", report_data: {}, set_id: set.id, date_range_start: range.start, date_range_end: range.end, created_at: attemptStartedAt })
-          .eq("id", reportId);
+          .eq("id", reportId).eq("created_at", existing.created_at).eq("status", existing.status)
+          .select("id").maybeSingle();
         if (error) throw new Error(error.message);
+        if (!claimed) return json({ error: "This report changed while you were reviewing it. Refresh before trying again." }, 409);
       } else {
         const { data, error } = await admin
           .from("competitive_reports")
@@ -210,12 +244,14 @@ Deno.serve(async (req) => {
     } else {
       if (existing) {
         reportId = existing.id;
-        const { error } = await admin
+        const { data: claimed, error } = await admin
           .from("reports")
           // Same here: the row is this attempt, so its clock starts now.
           .update({ status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_at: attemptStartedAt })
-          .eq("id", reportId);
+          .eq("id", reportId).eq("created_at", existing.created_at).eq("status", existing.status)
+          .select("id").maybeSingle();
         if (error) throw new Error(error.message);
+        if (!claimed) return json({ error: "This report changed while you were reviewing it. Refresh before trying again." }, 409);
       } else {
         const { data, error } = await admin
           .from("reports")
@@ -254,7 +290,7 @@ Deno.serve(async (req) => {
       return json({ error: `The workflow returned ${resp.status}${text ? `. ${text.slice(0, 200)}` : "."}` }, 502);
     }
 
-    return json({ report_id: reportId, kind, range, retried: !!existing });
+    return json({ report_id: reportId, kind, range, created_at: attemptStartedAt, retried: !!existing });
   } catch (err) {
     if (err instanceof AuthzError) return json({ error: err.message }, err.status);
     const msg = err instanceof Error ? err.message : String(err);

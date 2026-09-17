@@ -19,14 +19,14 @@ import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
  * Mirrored by STUCK_AFTER_MINUTES in src/lib/reportRun.ts, which decides
  * when the app offers the button; a test asserts the two agree.
  */
-export const STUCK_AFTER_MINUTES = 45;
+export const STUCK_AFTER_MINUTES = 90;
 
 /** True when a row claims to be running but has stopped saying anything. */
 export function isStuckRun(status: string | null | undefined, createdAt: string | null | undefined, now = Date.now()): boolean {
   if (status !== "running") return false;
   const started = createdAt ? new Date(createdAt).getTime() : NaN;
   if (!Number.isFinite(started)) return false;
-  return now - started > STUCK_AFTER_MINUTES * 60000;
+  return now - started >= STUCK_AFTER_MINUTES * 60000;
 }
 
 export interface ReportRange {

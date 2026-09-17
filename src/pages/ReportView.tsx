@@ -283,18 +283,18 @@ export default function ReportView() {
   const platformLine = (() => {
     if (!platformBreakdown.length) return undefined;
     const imp = platformBreakdown.map((p: any) => ({ n: platformLabelOf(p.network), v: Number(p.current?.impressions ?? 0) }));
-    const eng = platformBreakdown.map((p: any) => ({ n: platformLabelOf(p.network), v: Number(p.current?.reactions ?? 0) + Number(p.current?.comments ?? 0) + Number(p.current?.shares ?? 0) }));
+    const eng = platformBreakdown.map((p: any) => ({ n: platformLabelOf(p.network), v: Number(p.current?.engagements ?? ((p.current?.reactions ?? 0) + (p.current?.comments ?? 0) + (p.current?.shares ?? 0))) }));
     const share = (rows: { n: string; v: number }[]) => { const t = rows.reduce((a, r) => a + r.v, 0); const best = [...rows].sort((a, b) => b.v - a.v)[0]; return t > 0 && best ? { n: best.n, pct: Math.round((best.v / t) * 100) } : null; };
     const a = share(imp), b = share(eng);
     if (!a && !b) return undefined;
-    return `${a ? `${a.n} carries ${a.pct}% of impressions` : ""}${a && b ? "; " : ""}${b ? `${b.n} carries ${b.pct}% of engagements` : ""}. Every connected account below, with change against the previous period.`;
+    return `${a ? `${a.n} carries ${a.pct}% of impressions` : ""}${a && b ? "; " : ""}${b ? `${b.n} carries ${b.pct}% of ${platformBreakdown.every(p => p.current?.engagements != null) ? "engagements" : "reactions, comments and shares"}` : ""}. Every connected account below, with change against the previous period.`;
   })();
   const postsLine = (() => {
     const posts: any[] = sproutPerformance?.top_posts || [];
     const best = [...posts].sort((x, y) => Number(y.impressions ?? 0) - Number(x.impressions ?? 0))[0];
     if (!best) return undefined;
     const plat = platformLabelOf(best.network_type || best.platform || "");
-    return `The best post reached ${compactNumber(Number(best.impressions ?? 0))} impressions${plat ? ` on ${plat}` : ""}${best.engagement != null ? ` with ${compactNumber(Number(best.engagement))} engagements` : ""}. Ranked by impressions and by engagement, with a platform filter.`;
+    return `The best post reached ${compactNumber(Number(best.impressions ?? 0))} impressions${plat ? ` on ${plat}` : ""}${best.engagements != null ? ` with ${compactNumber(Number(best.engagements))} engagements` : ""}. Lifetime metrics for posts published in the report period; ranked by impressions and engagement.`;
   })();
   type Action = { source: "Competitors" | "Performance" | "Trends"; title: string; detail?: string; tab?: string; anchor?: string; href?: string };
   const actions: Action[] = [];
@@ -479,6 +479,7 @@ export default function ReportView() {
 
             {platformBreakdown.length > 0 && (
               <Section id="platforms" index={6} className="[&>*:not(:first-child)]:mt-4" title="Performance by platform" description={platformLine || "How each connected account performed this period."}>
+                <p className="t-secondary">Snapshot collected {new Date(report.created_at).toLocaleString()}. Profile figures cover the selected reporting period; Facebook and Instagram impressions represent views. LinkedIn clicks include all post clicks. Providers may revise historical data after collection.</p>
                 <Card>
                   <CardContent className="pt-5 grid gap-8 lg:grid-cols-2">
                     <div className="space-y-3">
@@ -486,8 +487,8 @@ export default function ReportView() {
                       <RankedBars rows={platformBreakdown.map((p: any, i: number) => ({ key: `${p.network}-${i}`, name: platformLabelOf(p.network), label: <><PlatformBadge platform={p.network} size="sm" /></>, value: Number(p.current?.impressions ?? 0) }))} />
                     </div>
                     <div className="space-y-3">
-                      <p className="t-subhead">Engagements by platform</p>
-                      <RankedBars rows={platformBreakdown.map((p: any, i: number) => ({ key: `${p.network}-${i}`, name: platformLabelOf(p.network), label: <><PlatformBadge platform={p.network} size="sm" /></>, value: Number(p.current?.reactions ?? 0) + Number(p.current?.comments ?? 0) + Number(p.current?.shares ?? 0) }))} />
+                      <p className="t-subhead">{platformBreakdown.every(p => p.current?.engagements != null) ? "Engagements by platform" : "Reactions, comments and shares by platform"}</p>
+                      <RankedBars rows={platformBreakdown.map((p: any, i: number) => ({ key: `${p.network}-${i}`, name: platformLabelOf(p.network), label: <><PlatformBadge platform={p.network} size="sm" /></>, value: Number(p.current?.engagements ?? ((p.current?.reactions ?? 0) + (p.current?.comments ?? 0) + (p.current?.shares ?? 0))) }))} />
                     </div>
                   </CardContent>
                 </Card>
@@ -720,6 +721,7 @@ function pick6(m: any) {
 }
 
 function engagementOf(p: any): number {
+  if (typeof p?.engagements === "number") return p.engagements;
   if (typeof p?.engagement === "number") return p.engagement;
   return (p?.reactions ?? p?.likes ?? 0) + (p?.comments ?? 0) + (p?.shares ?? 0);
 }

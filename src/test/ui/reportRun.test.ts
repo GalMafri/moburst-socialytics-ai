@@ -5,15 +5,15 @@ const NOW = new Date("2026-09-10T12:00:00Z").getTime();
 const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60000).toISOString();
 
 describe("canRetry", () => {
-  it("offers a retry on a failed run", () => {
-    expect(canRetry({ status: "failed", created_at: at(5) }, NOW)).toBe(true);
+  it("withholds retry on a recently failed run", () => {
+    expect(canRetry({ status: "failed", created_at: at(5) }, NOW)).toBe(false);
   });
 
   it("offers a retry on a run that died without saying so", () => {
     // The workflow crashes before its writeback node and the row never moves
     // off "running" — the only signal is the clock.
     expect(canRetry({ status: "running", created_at: at(90) }, NOW)).toBe(true);
-    expect(retryLabel({ status: "running", created_at: at(90) }, NOW)).toBe("Stuck, run again");
+    expect(retryLabel({ status: "running", created_at: at(90) }, NOW)).toBe("Review retry");
   });
 
   it("leaves a run that is genuinely still going alone", () => {
@@ -45,9 +45,15 @@ describe("the app and the server agree on when a run is stuck", () => {
     const { isStuck } = await import("@/lib/reportRun");
     const { isStuckRun } = await import("../../../supabase/functions/_shared/reports/payloads");
     const now = new Date("2026-09-10T12:00:00Z").getTime();
-    for (const minutes of [1, 44, 46, 3000]) {
+    for (const minutes of [1, 10, 15, 45, 89.999, 90, 91, 3000]) {
       const created = new Date(now - minutes * 60000).toISOString();
       expect(isStuckRun("running", created, now)).toBe(isStuck({ status: "running", created_at: created }, now));
     }
   });
+});
+
+it.each(["running", "failed"])("%s respects the exact 90-minute boundary", (status) => {
+  expect(canRetry({status, created_at: at(89.999)}, NOW)).toBe(false);
+  expect(canRetry({status, created_at: at(90)}, NOW)).toBe(true);
+  expect(canRetry({status, created_at: "invalid"}, NOW)).toBe(false);
 });

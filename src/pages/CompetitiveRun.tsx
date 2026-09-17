@@ -1,3 +1,7 @@
+import { useActiveReportRun } from "@/hooks/useActiveReportRun";
+import { ReportRunStatus } from "@/components/reports/ReportRunStatus";
+import { RetryReportButton } from "@/components/reports/RetryReportButton";
+import { RUN_ESTIMATE, canRetry } from "@/lib/reportRun";
 // Step 2: the competitive-analysis "go" button, with the same visible-status
 // contract as the social report (RunAnalysis.tsx): insert a row in status
 // 'running', fire the n8n webhook, watch the row via realtime + poll, land on
@@ -35,7 +39,6 @@ const STEPS = [
   "Writing the report...",
 ];
 
-const MAX_POLL_DURATION_MS = 15 * 60 * 1000; // RivalIQ runs are slower than Sprout runs
 
 export default function CompetitiveRun() {
   const { id } = useParams();
@@ -43,6 +46,9 @@ export default function CompetitiveRun() {
   const { canRunAnalysis } = useAuth();
   const { toast } = useToast();
   const [running, setRunning] = useState(false);
+  const activeRun = useActiveReportRun(id, "competitive");
+  const [startedAt, setStartedAt] = useState<string | null>(null);
+  const submitting = useRef(false);
   const [currentStep, setCurrentStep] = useState(-1);
   const [error, setError] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
@@ -55,7 +61,6 @@ export default function CompetitiveRun() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const runStartedAt = useRef(0);
-  const pollStartRef = useRef(0);
 
   const { data: client, isLoading: clientLoading, isError: clientFailed, error: clientError, refetch: refetchClient } = useQuery({
     queryKey: ["client", id],
@@ -131,23 +136,9 @@ export default function CompetitiveRun() {
 
   const pollForCompletion = useCallback(
     (rId: string) => {
-      pollStartRef.current = Date.now();
+      if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
         try {
-          if (Date.now() - pollStartRef.current > MAX_POLL_DURATION_MS) {
-            stopAllTimers();
-            setRunning(false);
-            track("competitive_analysis_timed_out", {
-              client_id: id, entity_id: rId, ok: false, error_code: "client_timeout",
-              duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
-            });
-            setError(
-              "The analysis is taking longer than expected. The workflow may still be running. Check back in Recent runs below.",
-            );
-            refetchRuns();
-            return;
-          }
-
           const { data } = await supabase
             .from("competitive_reports")
             .select("status, gamma_url, report_data")
@@ -185,11 +176,26 @@ export default function CompetitiveRun() {
     [id, stopAllTimers, refetchRuns, toast],
   );
 
+  useEffect(() => {
+    const active = activeRun.data;
+    if (!active || running || reportId) return;
+    setReportId(active.id);
+    setStartedAt(active.created_at);
+    if (active.date_range_start && active.date_range_end) { setPreset("custom"); setCustom({start: active.date_range_start, end: active.date_range_end}); }
+    setError(null);
+    setCurrentStep(0);
+    setRunning(true);
+    pollForCompletion(active.id);
+  }, [activeRun.data, running, reportId, pollForCompletion]);
+
   const runAnalysis = async () => {
+    if (submitting.current || running || activeRun.data || !activeRun.isSuccess || activeRun.isFetching) return;
     if (!rangeOk) {
       toast({ title: "Pick a valid period", description: "The end date must be on or after the start date, and the range at most one year.", variant: "destructive" });
       return;
     }
+    submitting.current = true;
+    setStartedAt(new Date().toISOString());
     setRunning(true);
     setError(null);
     setCurrentStep(0);
@@ -211,10 +217,7 @@ export default function CompetitiveRun() {
       if (runErr || started?.error) throw new Error(await describeInvokeError(runErr, started));
       const reportRowId: string = started.report_id;
       setReportId(reportRowId);
-
-      stepRef.current = setInterval(() => {
-        setCurrentStep((prev) => (prev < STEPS.length - 1 ? prev + 1 : prev));
-      }, 30000);
+      setStartedAt(started.created_at || new Date().toISOString());
 
       pollForCompletion(reportRowId);
     } catch (err: any) {
@@ -227,6 +230,9 @@ export default function CompetitiveRun() {
         duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
       });
       toast({ title: "Could not start analysis", description: err.message, variant: "destructive" });
+    } finally {
+      submitting.current = false;
+      activeRun.refetch();
     }
   };
 
@@ -345,34 +351,17 @@ export default function CompetitiveRun() {
           <CardContent className="pt-5 text-center space-y-6">
             {!running && !error && currentStep < 0 && (
               <>
-                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!rangeOk}>
+                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!rangeOk || !activeRun.isSuccess || activeRun.isFetching || !!activeRun.data}>
                   <Play className="h-5 w-5" /> Run competitive analysis
                 </Button>
                 <p className="t-secondary">
-                  Pulls Rival IQ data for {rangeOk ? formatRange(range) : "the selected period"}, breaks content down by platform and finds the gaps. The finished report exports to PDF.
+                  Pulls Rival IQ data for {rangeOk ? formatRange(range) : "the selected period"}, breaks content down by platform and finds the gaps. The finished report exports to PDF. {RUN_ESTIMATE}
                 </p>
               </>
             )}
 
-            {running && (
-              <div className="space-y-4">
-                {STEPS.map((step, i) => (
-                  <div key={i} className="flex items-center gap-3 t-body">
-                    {i < currentStep ? (
-                      <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
-                    ) : i === currentStep ? (
-                      <Loader2 className="h-5 w-5 text-accent animate-spin shrink-0" />
-                    ) : (
-                      <Clock className="h-5 w-5 text-muted-foreground shrink-0" />
-                    )}
-                    <span className={i <= currentStep ? "text-foreground" : "text-muted-foreground"}>{step}</span>
-                  </div>
-                ))}
-                <p className="t-secondary mt-2">
-                  Polling for results... {reportId ? `(Run: ${reportId.slice(0, 8)}...)` : ""}
-                </p>
-              </div>
-            )}
+            {activeRun.isError && <p className="t-secondary">Could not check for an existing run. Reconnect or refresh before starting an analysis.</p>}
+            {running && <ReportRunStatus reportId={reportId} startedAt={startedAt} kind="competitive" onStarted={() => { setStartedAt(new Date().toISOString()); activeRun.refetch(); refetchRuns(); }} />}
 
             {currentStep >= STEPS.length && !error && (
               // The page used to end here. The run button renders only while
@@ -404,12 +393,18 @@ export default function CompetitiveRun() {
                   <span className="font-medium">Analysis issue</span>
                 </div>
                 <p className="t-secondary">{error}</p>
+                {reportId ? (
+                  canRetry({ status: "failed", created_at: startedAt }) ?
+                    <RetryReportButton reportId={reportId} kind="competitive" variant="outline" onStarted={() => { setError(null); setRunning(true); setCurrentStep(0); setStartedAt(new Date().toISOString()); pollForCompletion(reportId); }} /> :
+                    <p className="t-secondary">Retry becomes available 90 minutes after this run started. You can return later from report history.</p>
+                ) : (
                 <Button
                   variant="outline"
                   onClick={() => { setError(null); setCurrentStep(-1); setReportId(null); }}
                 >
-                  <RefreshCw className="h-4 w-4 mr-2" /> Try Again
+                  <RefreshCw className="h-4 w-4 mr-2" /> Review settings
                 </Button>
+                )}
               </div>
             )}
           </CardContent>

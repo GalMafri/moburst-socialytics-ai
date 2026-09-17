@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2, RotateCw } from "lucide-react";
 
-const MONTHLY_KEYS = ["reports", "reports-history", "all-reports", "report"];
+const MONTHLY_KEYS = ["active-report-run", "reports", "reports-history", "all-reports", "report"];
 const COMPETITIVE_KEYS = [
   "all-competitive-reports",
   "competitive-reports-history",
@@ -16,6 +16,7 @@ const COMPETITIVE_KEYS = [
   "competitive-report",
   "competitive-latest",
   "competitive-runs",
+  "active-report-run",
 ];
 
 /**
@@ -99,8 +100,8 @@ export function RetryReportButton({
         description={
           <>
             <p>
-              The same period is analysed again and this row is reused, so the failed attempt is replaced rather than
-              added to.
+              Retry only after confirming the original workflow has stopped. It may still be running even after 90 minutes.
+              Retrying replaces this attempt and can duplicate work if the original is still active.
             </p>
             <p className="t-secondary">
               {kind === "competitive"

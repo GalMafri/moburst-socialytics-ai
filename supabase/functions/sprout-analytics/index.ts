@@ -53,24 +53,40 @@ async function sproutPost(token: string, customerId: string, path: string, body:
 
 /** Profile analytics for a window: totals, per-day series and per-profile totals. */
 async function profileAnalytics(token: string, customerId: string, profileIds: number[], start: string, end: string) {
-  const resp = await sproutPost(token, customerId, "analytics/profiles", {
-    filters: [`customer_profile_id.eq(${profileIds.join(", ")})`, `reporting_period.in(${start}...${end})`],
-    metrics: [...METRICS],
-    page: 1,
-  });
-  const rows: any[] = Array.isArray(resp?.data) ? resp.data : [];
+  const rows: any[] = [];
+  let page = 1;
+  for (;;) {
+    const resp = await sproutPost(token, customerId, "analytics/profiles", {
+      filters: [`customer_profile_id.eq(${profileIds.join(", ")})`, `reporting_period.in(${start}...${end})`],
+      metrics: ["impressions", "reactions", "post_link_clicks", "video_views", "comments_count", "shares_count"],
+      page, limit: 1000,
+    });
+    if (!Array.isArray(resp?.data)) throw new Error("Sprout returned no valid period data.");
+    rows.push(...resp.data);
+    const totalPages = Number(resp.paging?.total_pages || 1);
+    if (page >= totalPages) break;
+    if (page >= 100) throw new Error("Sprout period data is incomplete; pagination limit reached.");
+    page++;
+  }
   const totals = emptyTotals();
   const daily = new Map<string, Totals>();
   const byProfile = new Map<string, Totals>();
+  const seen = new Set<string>();
   for (const row of rows) {
     const dims = row.dimensions || {};
     const dayKey = Object.keys(dims).find((k) => k.startsWith("reporting_period"));
-    const date = dayKey ? String(dims[dayKey]).slice(0, 10) : start;
+    const date = dayKey ? String(dims[dayKey]).slice(0, 10) : "";
+    if (!date || date < start || date > end) throw new Error("Sprout returned data outside the requested reporting period.");
     const profile = String(dims.customer_profile_id ?? "all");
+    if (!profileIds.includes(Number(profile))) throw new Error("Sprout returned an unexpected profile.");
+    const rowKey = `${profile}:${date}`;
+    if (seen.has(rowKey)) continue;
+    seen.add(rowKey);
     const d = daily.get(date) || emptyTotals();
     const p = byProfile.get(profile) || emptyTotals();
     for (const m of METRICS) {
-      const v = num(row.metrics?.[m]);
+      const providerKey = m === "comments" ? "comments_count" : m === "shares" ? "shares_count" : m;
+      const v = num(row.metrics?.[providerKey]);
       totals[m] += v;
       d[m] += v;
       p[m] += v;
@@ -89,6 +105,7 @@ async function profileAnalytics(token: string, customerId: string, profileIds: n
 async function topPosts(token: string, customerId: string, profileIds: number[], start: string, end: string) {
   try {
     const resp = await sproutPost(token, customerId, "analytics/posts", {
+      timezone: "UTC",
       filters: [`customer_profile_id.eq(${profileIds.join(", ")})`, `created_time.in(${start}T00:00:00...${end}T23:59:59)`],
       metrics: ["lifetime.impressions", "lifetime.reactions", "lifetime.comments_count", "lifetime.shares_count", "lifetime.post_link_clicks", "lifetime.video_views"],
       fields: ["created_time", "perma_link", "text", "post_type"],

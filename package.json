@@ -14,7 +14,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:qa": "node scripts/qa-backend.cjs && node scripts/qa-workflows.mjs"
+    "test:qa": "node scripts/qa-backend.cjs && node scripts/qa-workflows.mjs && node scripts/qa-metrics.cjs && node scripts/qa-sprout.cjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

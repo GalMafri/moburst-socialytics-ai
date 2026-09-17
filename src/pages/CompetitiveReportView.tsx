@@ -525,6 +525,7 @@ export default function CompetitiveReportView() {
               {rivals.length > 0 && <Chip>{rivals.length} competitors</Chip>}
               {effectivePlat !== "all" && <Chip>{platformLabel(effectivePlat)} only</Chip>}
             </div>
+            <p className="t-secondary">Snapshot from the report run started {new Date(report.created_at).toLocaleString()}. RivalIQ can revise historical figures after collection; competitor impressions are estimates.</p>
           </div>
           <div data-print="hide" className="flex gap-2 flex-wrap">
             <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}><History className="h-4 w-4 mr-2" /> All runs</Button>

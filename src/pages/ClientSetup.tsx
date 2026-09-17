@@ -1,3 +1,4 @@
+import { mergeStrategySuggestions } from "@/lib/strategySuggestions";
 import { useParams, useNavigate } from "react-router-dom";
 import { StrategyDocUpload } from "@/components/onboarding/StrategyDocUpload";
 import { PillarDerivationCard } from "@/components/onboarding/PillarDerivationCard";
@@ -825,15 +826,13 @@ export default function ClientSetup() {
                     setForm((f) => ({
                       ...f,
                       pillars_source: source || "brief",
-                      content_pillars: pillars.map((p) => ({ name: p.name, description: p.description })),
-                      // Keywords are added to what is there, never replacing
-                      // terms someone chose deliberately.
-                      social_keywords: Array.from(new Set([...(f.social_keywords || []), ...keywords])),
+                      ...mergeStrategySuggestions(f.content_pillars, f.social_keywords, pillars, keywords),
+
                     }))
                   }
                 />
                 <div className="space-y-3">
-                  <Label>Content Pillars</Label>
+                  <Label>Current content pillars</Label>
                   <p className="t-secondary">
                     Read from the strategy or the client's own posts above, or written here. Either way, edit anything that looks wrong.
                   </p>
