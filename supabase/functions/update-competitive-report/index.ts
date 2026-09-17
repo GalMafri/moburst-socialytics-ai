@@ -91,6 +91,45 @@ Deno.serve(async (req) => {
         }
       }
 
+      // Say when the period is only partly covered.
+      //
+      // Landscape Social Posts runs once per weekly window and is set to
+      // continueErrorOutput, so a window that fails routes its own item to
+      // Mark Report Failed while the survivors carry on to a complete report.
+      // Because a complete report is never downgraded (see below), the
+      // completion wins and the failure disappears: the run finishes on
+      // partial data and reads as if it covered the whole month.
+      //
+      // Merge Post Pages now counts the windows that never arrived, and
+      // Cache Posts Snapshot stores its whole output against this report, so
+      // the count can be read back here rather than by editing two large code
+      // nodes in the workflow.
+      if (status === "complete" && report_data && typeof report_data === "object") {
+        const { data: snap } = await supabase
+          .from("rivaliq_snapshots")
+          .select("payload")
+          .eq("report_id", report_id)
+          .eq("endpoint", "socialposts")
+          .order("fetched_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const failed = Number((snap?.payload as Record<string, unknown> | null)?.failed_windows) || 0;
+        const expected = Number((snap?.payload as Record<string, unknown> | null)?.expected_windows) || 0;
+        if (failed > 0) {
+          const rd = report_data as Record<string, unknown>;
+          const warning =
+            `${failed} of ${expected} weekly windows did not load, so this report covers only part of the period ` +
+            `and the comparison is incomplete.`;
+          const existing = typeof rd.schema_note === "string" ? rd.schema_note.trim() : "";
+          rd.schema_note = existing ? `${warning} ${existing}` : warning;
+          const totals = (rd.totals && typeof rd.totals === "object" ? rd.totals : {}) as Record<string, unknown>;
+          totals.windows_failed = failed;
+          totals.windows_expected = expected;
+          rd.totals = totals;
+          updates.report_data = rd;
+        }
+      }
+
       // A finished report is never downgraded. Every error output in the
       // workflow lands in one "Mark Report Failed" node, including the error
       // output of the POST that writes the finished report — so a timeout on
