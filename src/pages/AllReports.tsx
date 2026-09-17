@@ -135,7 +135,7 @@ export default function AllReports() {
           <TabsContent value="social">
             <Card>
               <CardHeader>
-                <CardTitle className="t-h3">{filteredClientName ? `${filteredClientName} — monthly reports` : "All monthly reports"}</CardTitle>
+                <CardTitle className="t-h3">{filteredClientName ? `${filteredClientName}: monthly reports` : "All monthly reports"}</CardTitle>
               </CardHeader>
               <CardContent>
                 {isLoading ? (
@@ -210,7 +210,7 @@ export default function AllReports() {
           <TabsContent value="competitive">
             <Card>
               <CardHeader>
-                <CardTitle className="t-h3">{filteredClientName ? `${filteredClientName} — competitive analyses` : "All competitive analyses"}</CardTitle>
+                <CardTitle className="t-h3">{filteredClientName ? `${filteredClientName}: competitive analyses` : "All competitive analyses"}</CardTitle>
               </CardHeader>
               <CardContent>
                 {competitiveLoading ? (

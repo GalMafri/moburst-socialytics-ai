@@ -537,8 +537,14 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
 
           {/* ─── Playback controls ─── */}
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={togglePlay}>
-              {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={togglePlay}
+              aria-label={isPlaying ? "Pause" : "Play"}
+              aria-pressed={isPlaying}
+            >
+              {isPlaying ? <Pause className="h-4 w-4" aria-hidden="true" /> : <Play className="h-4 w-4" aria-hidden="true" />}
             </Button>
             <span className="t-secondary">
               Trim: {fmt(trimStart)} → {fmt(trimEnd)} ({fmt(trimEnd - trimStart)})

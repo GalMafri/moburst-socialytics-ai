@@ -538,7 +538,7 @@ export default function CompetitorReview() {
       } else {
         const used = new Set(selected.map((s) => s.selected_rank));
         const free = [1, 2, 3].find((r) => !used.has(r));
-        if (!free) throw new Error("Three competitors are already selected — deselect one first.");
+        if (!free) throw new Error("Three competitors are already selected. Deselect one first.");
         const { error } = await supabase
           .from("competitors")
           .update({ is_selected: true, selected_rank: free })
@@ -656,7 +656,7 @@ export default function CompetitorReview() {
                       </p>
                       <p className="t-secondary">
                         Either build one in RivalIQ and come back, or let the app propose competitors from this
-                        client's website and brief — you review the list before anything is tracked.
+                        client's website and brief. You review the list before anything is tracked.
                       </p>
                       <Button
                         size="sm"

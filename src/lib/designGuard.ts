@@ -58,7 +58,7 @@ export function brandWarning(ctx: ClientContext | null | undefined): string | nu
   if (f.none) {
     return `${name} has no brand material on file, so designs will be generic rather than on-brand. Upload design references in the client's onboarding (Client Setup → Brief → Design References) and run "Brand design language".`;
   }
-  return `${name} has only written brand notes — no design references — so designs follow the description but cannot match the real look. Upload design references in the client's onboarding (Client Setup → Brief → Design References).`;
+  return `${name} has only written brand notes, with no design references, so designs follow the description but cannot match the real look. Upload design references in the client's onboarding (Client Setup → Brief → Design References).`;
 }
 
 export interface DesignVerdict {

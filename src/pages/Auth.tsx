@@ -91,9 +91,12 @@ export default function Auth() {
         {!hasError && (
           <div className="pt-6 space-y-4 text-left">
             {[
-              { icon: TrendingUp, title: "Trend Analysis", desc: "Track TikTok & Instagram trends in real-time" },
-              { icon: BarChart3, title: "Performance Analytics", desc: "Monitor cross-platform social media metrics" },
-              { icon: Zap, title: "AI Recommendations", desc: "Get AI-powered content strategy insights" },
+              // Say what the product does. "in real-time" described a feature
+              // that does not exist: trends come from a completed monthly
+              // report, not from anything that polls or streams.
+              { icon: TrendingUp, title: "Trend analysis", desc: "TikTok and Instagram trends, read out in each monthly report" },
+              { icon: BarChart3, title: "Performance analytics", desc: "Every connected platform's numbers in one place" },
+              { icon: Zap, title: "Content recommendations", desc: "A month of post ideas, written from the client's own brand and results" },
             ].map((f) => (
               <div key={f.title} className="flex items-start gap-3 glass-inner p-4">
                 <div className="mt-1 p-2 rounded-lg bg-[rgba(185,224,69,0.1)]">

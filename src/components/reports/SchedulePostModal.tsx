@@ -236,7 +236,7 @@ export function SchedulePostModal({
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Sprout Profile</Label>
+            <Label htmlFor="schedule-profile">Sprout Profile</Label>
 
             {loadingApi && (
               <div className="flex items-center gap-2 t-secondary py-2">
@@ -290,7 +290,7 @@ export function SchedulePostModal({
                   </p>
                 )}
                 <Select value={selectedProfileId} onValueChange={setSelectedProfileId}>
-                  <SelectTrigger>
+                  <SelectTrigger id="schedule-profile">
                     <SelectValue placeholder="Select profile" />
                   </SelectTrigger>
                   <SelectContent>
@@ -314,18 +314,18 @@ export function SchedulePostModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label className="flex items-center gap-1"><Calendar className="h-3 w-3" /> Date</Label>
-              <Input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
+              <Label htmlFor="schedule-date" className="flex items-center gap-1"><Calendar className="h-3 w-3" aria-hidden="true" /> Date</Label>
+              <Input id="schedule-date" type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label className="flex items-center gap-1"><Clock className="h-3 w-3" /> Time ({clientTimezone})</Label>
-              <Input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} />
+              <Label htmlFor="schedule-time" className="flex items-center gap-1"><Clock className="h-3 w-3" aria-hidden="true" /> Time ({clientTimezone})</Label>
+              <Input id="schedule-time" type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label>Post copy (includes hashtags)</Label>
-            <Textarea value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={6} className="whitespace-pre-wrap" />
+            <Label htmlFor="schedule-copy">Post copy (includes hashtags)</Label>
+            <Textarea id="schedule-copy" value={postContent} onChange={(e) => setPostContent(e.target.value)} rows={6} className="whitespace-pre-wrap" />
           </div>
 
           {mediaUrls.length > 0 && (

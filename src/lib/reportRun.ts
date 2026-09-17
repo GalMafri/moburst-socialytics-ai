@@ -33,5 +33,5 @@ export function canRetry(report: RunnableReport, now = Date.now()): boolean {
 
 /** What to call the control, so a stuck run does not read as a failure. */
 export function retryLabel(report: RunnableReport, now = Date.now()): string {
-  return isStuck(report, now) ? "Stuck — run again" : "Retry";
+  return isStuck(report, now) ? "Stuck, run again" : "Retry";
 }

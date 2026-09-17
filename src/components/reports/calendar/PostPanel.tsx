@@ -4,7 +4,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -259,7 +259,7 @@ export function PostPanel({
                   <p className="t-secondary">
                     {videoTiles.length > 0
                       ? "Click any video to preview at full size."
-                      : "Generate 2–3 video variants — takes ~30–120s each."}
+                      : "Generate 2 to 3 video variants. Each takes about 30 to 120 seconds."}
                   </p>
                 </div>
                 <CreatePostVideoButton
@@ -332,6 +332,9 @@ export function PostPanel({
       {/* Full-size preview overlay */}
       <Dialog open={!!previewUrl} onOpenChange={(o) => !o && setPreviewUrl(null)}>
         <DialogContent className="max-w-5xl bg-black/95 border-white/10 p-0 overflow-hidden">
+          {/* Radix labels a dialog by its Title. Without one the dialog is
+              announced with no name and Radix logs an error. */}
+          <DialogTitle className="sr-only">Full-size preview</DialogTitle>
           {previewUrl && previewIsVideo && (
             <video
               src={previewUrl}
@@ -474,7 +477,7 @@ function MediaTileCard({
             open={archiveOpen}
             onOpenChange={setArchiveOpen}
             title="Archive this design?"
-            description={<p>It comes out of the post's designs. Nothing is learned from an archive — reject it instead if it is wrong for the brand.</p>}
+            description={<p>It comes out of the post's designs. Nothing is learned from an archive. Reject it instead if it is wrong for the brand.</p>}
             confirmLabel="Archive"
             destructive={false}
             onConfirm={() => {
@@ -487,7 +490,7 @@ function MediaTileCard({
             <DialogContent className="max-w-md">
               <div className="space-y-4">
                 <div>
-                  <h2 className="t-h3">Why is this one wrong?</h2>
+                  <DialogTitle className="t-h3">Why is this one wrong?</DialogTitle>
                   <p className="t-secondary mt-1">The design is hidden either way. The reason becomes a rule the next designs for this client follow.</p>
                 </div>
                 <RadioGroup value={reason} onValueChange={setReason} className="space-y-2">
@@ -500,7 +503,7 @@ function MediaTileCard({
                 </RadioGroup>
                 <div className="space-y-1.5">
                   <Label htmlFor={`note-${tile.iterationId}`} className="t-label">Anything specific? (optional)</Label>
-                  <Textarea id={`note-${tile.iterationId}`} value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="e.g. the red button — this brand never uses red" className="t-body" />
+                  <Textarea id={`note-${tile.iterationId}`} value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="e.g. the red button, this brand never uses red" className="t-body" />
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button variant="ghost" size="sm" onClick={() => setRejecting(false)} disabled={busy}>Cancel</Button>

@@ -13,7 +13,7 @@ describe("canRetry", () => {
     // The workflow crashes before its writeback node and the row never moves
     // off "running" — the only signal is the clock.
     expect(canRetry({ status: "running", created_at: at(90) }, NOW)).toBe(true);
-    expect(retryLabel({ status: "running", created_at: at(90) }, NOW)).toBe("Stuck — run again");
+    expect(retryLabel({ status: "running", created_at: at(90) }, NOW)).toBe("Stuck, run again");
   });
 
   it("leaves a run that is genuinely still going alone", () => {

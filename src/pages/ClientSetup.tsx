@@ -105,7 +105,10 @@ export default function ClientSetup() {
     brand_book_url: "",
     brand_book_file_path: "",
     timezone: "UTC",
-    media_backend: "gemini",
+    // Every client runs on Higgsfield. Defaulting a new one to gemini put it
+    // on a path nobody exercises, which is where the leaked-key and
+    // poll-past-the-request-limit bugs were found.
+    media_backend: "higgsfield",
     design_references: [] as string[],
     brand_identity: null as any,
     brief_text: "",
@@ -420,17 +423,17 @@ export default function ClientSetup() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Client Name *</Label>
-                  <Input
+                  <Label htmlFor="client-name">Client Name *</Label>
+                  <Input id="client-name"
                     value={form.name}
                     onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                     placeholder="e.g., Acme Corp"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Website URL</Label>
+                  <Label htmlFor="client-website">Website URL</Label>
                   <div className="flex gap-2">
-                    <Input
+                    <Input id="client-website"
                       value={form.website_url}
                       onChange={(e) => setForm((f) => ({ ...f, website_url: e.target.value }))}
                       placeholder="https://example.com"
@@ -570,8 +573,8 @@ export default function ClientSetup() {
                     {/* Font + Visual Style */}
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <Label className="t-label">Font Family</Label>
-                        <Input
+                        <Label htmlFor="brand-font" className="t-label">Font Family</Label>
+                        <Input id="brand-font"
                           value={form.brand_identity?.font_family || ""}
                           onChange={(e) =>
                             setForm((f) => ({
@@ -584,8 +587,8 @@ export default function ClientSetup() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="t-label">Visual Style</Label>
-                        <Input
+                        <Label htmlFor="brand-visual-style" className="t-label">Visual Style</Label>
+                        <Input id="brand-visual-style"
                           value={form.brand_identity?.visual_style || ""}
                           onChange={(e) =>
                             setForm((f) => ({
@@ -602,8 +605,8 @@ export default function ClientSetup() {
                     {/* Tone of Voice + Background Style */}
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <Label className="t-label">Tone of Voice</Label>
-                        <Input
+                        <Label htmlFor="brand-tone" className="t-label">Tone of Voice</Label>
+                        <Input id="brand-tone"
                           value={form.brand_identity?.tone_of_voice || ""}
                           onChange={(e) =>
                             setForm((f) => ({
@@ -616,8 +619,8 @@ export default function ClientSetup() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="t-label">Background Style</Label>
-                        <Input
+                        <Label htmlFor="brand-background" className="t-label">Background Style</Label>
+                        <Input id="brand-background"
                           value={form.brand_identity?.background_style || ""}
                           onChange={(e) =>
                             setForm((f) => ({
@@ -633,8 +636,8 @@ export default function ClientSetup() {
 
                     {/* Design Elements */}
                     <div className="space-y-1">
-                      <Label className="t-label">Design Elements</Label>
-                      <Input
+                      <Label htmlFor="brand-elements" className="t-label">Design Elements</Label>
+                      <Input id="brand-elements"
                         value={form.brand_identity?.design_elements || ""}
                         onChange={(e) =>
                           setForm((f) => ({
@@ -649,8 +652,8 @@ export default function ClientSetup() {
 
                     {/* Logo Description */}
                     <div className="space-y-1">
-                      <Label className="t-label">Logo Description</Label>
-                      <Input
+                      <Label htmlFor="brand-logo" className="t-label">Logo Description</Label>
+                      <Input id="brand-logo"
                         value={form.brand_identity?.logo_description || ""}
                         onChange={(e) =>
                           setForm((f) => ({
@@ -851,7 +854,7 @@ export default function ClientSetup() {
                         <Textarea
                           value={pillar.description}
                           onChange={(e) => updatePillarDescription(index, e.target.value)}
-                          placeholder={`Describe what "${pillar.name}" content looks like — topics, tone, examples...`}
+                          placeholder={`Describe what "${pillar.name}" content looks like: topics, tone, examples...`}
                           rows={2}
                           className="t-body"
                         />
@@ -865,8 +868,8 @@ export default function ClientSetup() {
                       placeholder="Add a content pillar"
                       onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPillar())}
                     />
-                    <Button variant="outline" size="sm" onClick={addPillar}>
-                      <Plus className="h-4 w-4" />
+                    <Button variant="outline" size="sm" onClick={addPillar} aria-label="Add content pillar">
+                      <Plus className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
@@ -912,8 +915,8 @@ export default function ClientSetup() {
                       placeholder="Add keyword phrase (press Enter)"
                       onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())}
                     />
-                    <Button variant="outline" size="sm" onClick={addKeyword}>
-                      <Plus className="h-4 w-4" />
+                    <Button variant="outline" size="sm" onClick={addKeyword} aria-label="Add keyword phrase">
+                      <Plus className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
@@ -932,10 +935,10 @@ export default function ClientSetup() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Competitor notes</Label>
-                  <Textarea
+                  <Label htmlFor="competitor-notes">Competitor notes</Label>
+                  <Textarea id="competitor-notes"
                     rows={5}
-                    placeholder={'e.g. "Direct: Brand A, Brand B (same price point). Aspirational: Brand C — do not include. Regional player: Brand D."'}
+                    placeholder={'e.g. "Direct: Brand A, Brand B (same price point). Aspirational: Brand C, do not include. Regional player: Brand D."'}
                     value={form.competitor_seed_notes}
                     onChange={(e) => setForm((f) => ({ ...f, competitor_seed_notes: e.target.value }))}
                   />
@@ -985,8 +988,8 @@ export default function ClientSetup() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Brand Notes</Label>
-                  <Textarea
+                  <Label htmlFor="brand-notes">Brand Notes</Label>
+                  <Textarea id="brand-notes"
                     value={form.brand_notes}
                     onChange={(e) => setForm((f) => ({ ...f, brand_notes: e.target.value }))}
                     placeholder="Brand voice, positioning, key messaging..."
@@ -1027,8 +1030,8 @@ export default function ClientSetup() {
                   onSynthesized={(s) => setForm((f) => ({ ...f, design_style_synthesis: s }))}
                 />
                 <div className="space-y-2">
-                  <Label>Brief Text</Label>
-                  <Textarea
+                  <Label htmlFor="brief-text">Brief Text</Label>
+                  <Textarea id="brief-text"
                     value={form.brief_text}
                     onChange={(e) => setForm((f) => ({ ...f, brief_text: e.target.value }))}
                     rows={10}
@@ -1036,8 +1039,8 @@ export default function ClientSetup() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Google Doc ID (optional)</Label>
-                  <Input
+                  <Label htmlFor="brief-doc-id">Google Doc ID (optional)</Label>
+                  <Input id="brief-doc-id"
                     value={form.brief_file_id}
                     onChange={(e) => setForm((f) => ({ ...f, brief_file_id: e.target.value }))}
                     placeholder="e.g., 1BxiMVs0XRA5nFMdKvBdBZjgmUii3ObRy2CmEkTzOQ5s"

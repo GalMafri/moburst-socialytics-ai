@@ -319,7 +319,7 @@ export default function Analytics() {
       <ExportPdfButton
         contentRef={exportRef}
         filename={pdfFilename}
-        title={`${client?.name || "Client"} — Analytics (${rangeLabel})`}
+        title={`${client?.name || "Client"}: Analytics (${rangeLabel})`}
       />
     </div>
   );
@@ -524,7 +524,7 @@ export default function Analytics() {
                         <span className="t-body font-medium">Want to see trends over time?</span>
                       </div>
                       <p className="t-secondary">
-                        You have 1 report. Run more analyses to unlock trend charts, engagement rate tracking, and
+                        You have 1 report. Run more analyses to see trend charts, engagement rate tracking and
                         richer insights.
                       </p>
                       <Button

@@ -41,7 +41,7 @@ export function StrategyDocUpload({
     // 4MB is what the reader accepts; a larger file is rejected server-side,
     // so it is refused here instead of after the upload.
     if (file.size > 4 * 1024 * 1024) {
-      toast.error("The file must be under 4MB — that is the largest the reader takes");
+      toast.error("The file must be under 4MB. That is the largest the reader takes.");
       return;
     }
     setUploading(true);

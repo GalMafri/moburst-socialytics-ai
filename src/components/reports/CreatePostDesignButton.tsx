@@ -448,7 +448,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           // cheaper than a client seeing either.
           let verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           for (let pass = 0; pass < 2 && verdictIsDirty(verdict, { expectNoText: !modelDrawsText }); pass++) {
-            toast({ title: pass === 0 ? "Refining design" : "Refining design again", description: `Caught ${verdictSummary(verdict)} — regenerating.` });
+            toast({ title: pass === 0 ? "Refining design" : "Refining design again", description: `Caught ${verdictSummary(verdict)}, regenerating.` });
             const { data: retry } = await supabase.functions.invoke("generate-post-image", {
               body: {
                 prompt: (editablePrompt || defaultPrompt) + correctionFor(verdict, { expectNoText: !modelDrawsText }),
@@ -702,7 +702,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 body: { image_data: data.image_url, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined },
               });
               if (verdictIsDirty(validation, { expectNoText: !modelDrawsText })) {
-                toast({ title: "Refining design", description: `Caught ${verdictSummary(validation)} — regenerating.` });
+                toast({ title: "Refining design", description: `Caught ${verdictSummary(validation)}, regenerating.` });
                 const retryPrompt = perSlidePrompt + correctionFor(validation, { expectNoText: !modelDrawsText });
                 const { data: retryData } = await supabase.functions.invoke("generate-post-image", {
                   body: {

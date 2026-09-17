@@ -138,7 +138,7 @@ export function DesignSynthesisCard({
 
         {error && !running && (
           <div className="t-label text-destructive flex items-center gap-2">
-            <AlertCircle className="h-3 w-3" /> Synthesis failed — re-run. ({error})
+            <AlertCircle className="h-3 w-3" /> Synthesis failed. Run it again. ({error})
           </div>
         )}
 

@@ -146,8 +146,8 @@ export function BrandBookUpload({
             <div className="glass-inner flex items-center gap-2 p-3">
               <FileText className="h-4 w-4 text-primary" />
               <span className="t-body flex-1 truncate">{uploadedFileName}</span>
-              <Button variant="ghost" size="sm" onClick={handleRemoveFile}>
-                <X className="h-3 w-3" />
+              <Button variant="ghost" size="sm" onClick={handleRemoveFile} aria-label="Remove the uploaded brand book">
+                <X className="h-3 w-3" aria-hidden="true" />
               </Button>
               <Button size="sm" onClick={handleExtractFromFile} disabled={extracting}>
                 {extracting ? (

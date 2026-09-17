@@ -6,6 +6,7 @@ import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { PageHeader } from "@/components/ui/page-header";
+import { Loading } from "@/components/ui/loading";
 
 function greeting(now = new Date()): string {
   const h = now.getHours();
@@ -56,7 +57,9 @@ export function AppLayout({
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0b0c10]">
-        <div className="animate-pulse text-[#b1b7c1]">Loading...</div>
+        {/* loading.tsx exists for exactly this and sets role="status"
+            aria-live="polite"; this was the one place still rolling its own. */}
+        <Loading variant="page" label="Signing you in" />
       </div>
     );
   }

@@ -142,7 +142,7 @@ export default function CompetitiveRun() {
               duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
             });
             setError(
-              "The analysis is taking longer than expected. The workflow may still be running — check back in Recent runs below.",
+              "The analysis is taking longer than expected. The workflow may still be running. Check back in Recent runs below.",
             );
             refetchRuns();
             return;
