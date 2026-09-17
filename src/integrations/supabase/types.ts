@@ -888,7 +888,6 @@ export type Database = {
           approved_at: string | null
           approved_by: string | null
           archived_at: string | null
-          calendar_post_key: string | null
           client_id: string
           concept: string | null
           created_at: string | null
@@ -918,7 +917,6 @@ export type Database = {
           approved_at?: string | null
           approved_by?: string | null
           archived_at?: string | null
-          calendar_post_key?: string | null
           client_id: string
           concept?: string | null
           created_at?: string | null
@@ -948,7 +946,6 @@ export type Database = {
           approved_at?: string | null
           approved_by?: string | null
           archived_at?: string | null
-          calendar_post_key?: string | null
           client_id?: string
           concept?: string | null
           created_at?: string | null
@@ -1066,8 +1063,6 @@ export type Database = {
           client_id: string
           created_at: string | null
           created_by: string | null
-          dispatch_claimed_at: string | null
-          pending_competitive_report_id: string | null
           frequency: string
           id: string
           is_active: boolean | null
@@ -1085,8 +1080,6 @@ export type Database = {
           client_id: string
           created_at?: string | null
           created_by?: string | null
-          dispatch_claimed_at?: string | null
-          pending_competitive_report_id?: string | null
           frequency?: string
           id?: string
           is_active?: boolean | null
@@ -1104,8 +1097,6 @@ export type Database = {
           client_id?: string
           created_at?: string | null
           created_by?: string | null
-          dispatch_claimed_at?: string | null
-          pending_competitive_report_id?: string | null
           frequency?: string
           id?: string
           is_active?: boolean | null
@@ -1119,13 +1110,6 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "report_schedules_pending_competitive_report_id_fkey"
-            columns: ["pending_competitive_report_id"]
-            isOneToOne: false
-            referencedRelation: "competitive_reports"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "report_schedules_client_id_fkey"
             columns: ["client_id"]
@@ -1416,10 +1400,6 @@ export type Database = {
       }
     }
     Functions: {
-      claim_report_schedule: {
-        Args: { schedule_id: string; expected_next_run_at: string }
-        Returns: boolean
-      }
       attribution_health: {
         Args: never
         Returns: {
