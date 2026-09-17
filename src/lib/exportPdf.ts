@@ -118,7 +118,9 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   // Keep compact metrics side by side; only prose/card grids need one column.
   content.querySelectorAll('.grid').forEach(el => {
     const children = Array.from(el.children);
-    if (children.length > 1 && children.length <= 12 && children.every(child =>
+    if ((el as HTMLElement).style.gridTemplateColumns && children.every(child => (child.textContent || '').trim().length < 12)) {
+      el.setAttribute('data-pdf-data-grid', '');
+    } else if (children.length > 1 && children.length <= 12 && !el.querySelector('.grid') && children.every(child =>
       (child.textContent || '').trim().length < 160 && !child.querySelector('img, video, table, .recharts-wrapper, article'))
     ) {
       el.setAttribute('data-pdf-compact', '');
@@ -449,6 +451,9 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     .pdf-root .grid, .pdf-root .flex-col { display: block !important; }
     .pdf-root .grid[data-pdf-compact] { display: grid !important; grid-template-columns: repeat(var(--pdf-columns), minmax(0, 1fr)) !important; break-inside: avoid; }
     .pdf-root .grid[data-pdf-data-grid] { display: grid !important; break-inside: avoid; }
+    .pdf-root .grid[data-pdf-data-grid] { gap: 3px !important; }
+    .pdf-root .grid[data-pdf-data-grid] > * { margin: 0 !important; }
+    .pdf-root .grid[data-pdf-data-grid] span { white-space: nowrap !important; font-size: 9px !important; overflow-wrap: normal; }
     .pdf-root .grid > *, .pdf-root .flex-col > * { margin-bottom: 12px; }
     .pdf-root .flex { flex-wrap: wrap; }
     .pdf-root * { min-width: 0; }

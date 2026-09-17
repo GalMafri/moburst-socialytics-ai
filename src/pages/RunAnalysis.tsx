@@ -406,6 +406,7 @@ export default function RunAnalysis() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {running ? <p className="t-secondary">This analysis uses the trend settings selected when it started.</p> : <>
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label htmlFor="include-trends">Include trend analysis</Label>
@@ -431,6 +432,7 @@ export default function RunAnalysis() {
                 Trend analysis will be skipped. The report will focus on performance metrics and content calendar only.
               </p>
             )}
+            </>}
           </CardContent>
         </Card>
 
