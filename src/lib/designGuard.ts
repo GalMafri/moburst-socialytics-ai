@@ -61,25 +61,12 @@ export function brandWarning(ctx: ClientContext | null | undefined): string | nu
   return `${name} has only written brand notes, with no design references, so designs follow the description but cannot match the real look. Upload design references in the client's onboarding (Client Setup → Brief → Design References).`;
 }
 
-export interface DesignVerdict {
-  has_hex_codes?: boolean;
-  has_logo?: boolean;
-  has_garbled_text?: boolean;
-  /** Any readable word at all; a failure only when the design was asked for text-free. */
-  has_text?: boolean;
-  /** Breaks the brand's own rules, or shows fake interface chrome. */
-  off_brand?: boolean;
-  /** The brand rules the server reviewed against, echoed back for the retry prompt. */
-  avoid?: string;
-  skipped?: boolean;
-}
+// One source of truth, shared with the edge functions. Two copies of this
+// prompt drifted apart once already; see correction.ts for what that cost.
+export type { DesignVerdict } from "../../supabase/functions/_shared/design-prompts/correction";
+export { correctionFor, verdictIsDirty } from "../../supabase/functions/_shared/design-prompts/correction";
+import type { DesignVerdict } from "../../supabase/functions/_shared/design-prompts/correction";
 
-export function verdictIsDirty(v: DesignVerdict | null | undefined, opts: { expectNoText?: boolean } = {}): boolean {
-  if (!v || v.skipped) return false;
-  return !!(v.has_hex_codes || v.has_logo || v.has_garbled_text || v.off_brand || (opts.expectNoText && v.has_text));
-}
-
-/** Plain words for the "refining" toast, so the team knows what was caught. */
 export function verdictSummary(v: DesignVerdict): string {
   const bits: string[] = [];
   if (v.off_brand) bits.push("an off-brand scene, a blank placeholder or a photo grid");
@@ -90,46 +77,6 @@ export function verdictSummary(v: DesignVerdict): string {
   return bits.join(" and ");
 }
 
-/**
- * Correction appended to a retry prompt. Naming the specific failure works far
- * better than repeating the original constraint the model already ignored.
- * Kept in step with correctionFor() in the shared edge-function module.
- */
-export function correctionFor(v: DesignVerdict, opts: { expectNoText?: boolean } = {}): string {
-  const notes: string[] = [];
-  if (v.off_brand) {
-    notes.push(
-      "The previous attempt broke the brand's own rules, drew interface furniture, left a blank placeholder rectangle, or tiled several photographs. " +
-        "Draw NO search bars, input fields, empty button shapes, phone or app frames, tab bars or blank rectangles, and use exactly ONE photograph: " +
-        "the area kept for type is a flat field of the brand's colour and nothing else. " +
-        (v.avoid ? `And obey these rules exactly: ${v.avoid.slice(0, 600)}` : "Re-stage the subject inside the brand's own layout, palette and photographic treatment."),
-    );
-  }
-  if (opts.expectNoText && v.has_text) {
-    notes.push(
-      "The previous attempt contained readable words — on a document, a sign, a screen or a prop. " +
-        "This image must contain NO lettering of any kind, anywhere, at any size: papers are blank or out of focus, " +
-        "screens are dark or abstract, signage is absent. The words are added afterwards by the app.",
-    );
-  }
-  if (v.has_logo) {
-    notes.push(
-      "The previous attempt rendered a logo, wordmark or brand insignia. Render NO logo, no wordmark, no monogram and no badge of any kind. Leave the area where a logo would sit visually clear — the real logo is composited in afterwards.",
-    );
-  }
-  if (v.has_garbled_text) {
-    notes.push(
-      "The previous attempt contained malformed or nonsensical text. Use only short, correctly spelled words taken from the brief, or no text at all. Never invent lettering.",
-    );
-  }
-  if (v.has_hex_codes) {
-    notes.push(
-      "The previous attempt showed colour codes as readable text. Never render hex codes, RGB values or any technical colour notation — colour is applied visually only.",
-    );
-  }
-  if (notes.length === 0) return "";
-  return `\n\nCRITICAL CORRECTIONS — the previous attempt failed review:\n- ${notes.join("\n- ")}`;
-}
 
 /**
  * Advice the generators return alongside a design when the client's brand

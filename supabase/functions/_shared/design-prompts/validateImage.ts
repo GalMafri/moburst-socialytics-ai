@@ -1,48 +1,14 @@
 // supabase/functions/_shared/design-prompts/validateImage.ts
 
-export interface DesignVerdict {
-  has_hex_codes: boolean;
-  has_logo: boolean;
-  has_garbled_text: boolean;
-  /** Any readable word or lettering at all — signage, documents, labels, props. Counts as a failure only when the design was asked for text-free. */
-  has_text: boolean;
-  /** Shows something this brand's own rules forbid, or fake interface chrome (search bars, buttons, phone frames, empty placeholder blocks). */
-  off_brand: boolean;
-  /** True when no check ran (no key, API error, unparseable reply). */
-  skipped?: boolean;
-}
+// DesignVerdict, CLEAN_VERDICT, verdictIsDirty and correctionFor moved to
+// ./correction.ts so the browser and the edge functions share one copy
+// instead of two that drifted. Re-exported here so every existing import
+// of this module keeps working.
+export type { DesignVerdict } from "./correction.ts";
+export { CLEAN_VERDICT, correctionFor, verdictIsDirty } from "./correction.ts";
+import type { DesignVerdict } from "./correction.ts";
+import { CLEAN_VERDICT } from "./correction.ts";
 
-export const CLEAN_VERDICT: DesignVerdict = {
-  has_hex_codes: false,
-  has_logo: false,
-  has_garbled_text: false,
-  has_text: false,
-  off_brand: false,
-};
-
-/** Interface furniture no post should carry; a model asked for a plain field draws these instead. */
-const FAKE_UI =
-  "fake interface chrome (a search bar, an input field, a phone or app frame, tab bars, icon rows), an empty white or light rectangle sitting on the design as a placeholder, " +
-  "or two or more separate photographs tiled, split-screen or gridded on the one canvas";
-
-function questionFor(avoid?: string | null): string {
-  const rules = (avoid || "").trim();
-  return (
-  "You are checking a generated social media graphic before it reaches a client.\n" +
-  "Answer five questions about what is actually visible in the image.\n" +
-  "1. HEX: does it show hex colour codes (like #FF5733), RGB values, or any technical colour notation as readable text?\n" +
-  "2. LOGO: does it show a company logo, wordmark, monogram, badge or brand insignia — including a large single letter, initial or monogram used as a background, watermark or decorative element? Count any invented or fake-looking brand mark. Do NOT count plain body or headline text that is simply words.\n" +
-  "3. GARBLED: is any visible text misspelled, malformed, nonsensical or made of broken letterforms — including letters that are doubled, smeared, overlapping, bleeding into each other, or a word cut off at the edge of the canvas or of its own line?\n" +
-  "4. TEXT: is there ANY readable word, letter or number anywhere — a headline, a caption, a label on a prop, lettering on a document, a sign, a screen, a phone key? Count it even if it is small, partial or in the background.\n" +
-  "5. OFFBRAND: does it show " + FAKE_UI +
-  (rules
-    ? `, OR anything the brand's own rules forbid? The rules: "${rules.replace(/"/g, "'").slice(0, 900)}" (ignore any rule about logos or lockups; those are checked in question 2).\n`
-    : "?\n") +
-  "Reply with exactly five words separated by single spaces, each YES or NO, in the order HEX LOGO GARBLED TEXT OFFBRAND. No other text."
-  );
-}
-
-/** Split a data URL or raw base64 into the parts the Anthropic API wants. */
 export function splitImageData(imageData: string, fallbackMime = "image/png"): { base64: string; mimeType: string } | null {
   if (!imageData) return null;
   if (imageData.startsWith("data:")) {
@@ -119,53 +85,9 @@ export async function validateDesignImage(
 }
 
 /** Anything worth regenerating for. */
-export function verdictIsDirty(v: DesignVerdict | null | undefined, opts: { expectNoText?: boolean } = {}): boolean {
-  if (!v || v.skipped) return false;
-  return v.has_hex_codes || v.has_logo || v.has_garbled_text || !!v.off_brand || (!!opts.expectNoText && !!v.has_text);
-}
 
 /**
  * The correction appended to a retry prompt. Naming the specific failure works
  * far better than repeating the original constraint, which the model already
  * ignored once.
  */
-export function correctionFor(v: DesignVerdict, opts: { expectNoText?: boolean; avoid?: string | null } = {}): string {
-  const notes: string[] = [];
-  if (v.off_brand) {
-    notes.push(
-      "The previous attempt broke the brand's own rules, drew interface furniture, left a blank placeholder rectangle, or tiled several photographs. " +
-        "Draw NO search bars, input fields, empty button shapes, phone or app frames, tab bars or blank rectangles, and use exactly ONE photograph: " +
-        "the area kept for type is a flat field of the brand's colour and nothing else. " +
-        (opts.avoid ? `And obey these rules exactly: ${opts.avoid.slice(0, 600)}` : "Re-stage the subject inside the brand's own layout, palette and photographic treatment."),
-    );
-  }
-  if (opts.expectNoText && v.has_text) {
-    notes.push(
-      "The previous attempt contained readable words — on a document, a sign, a screen or a prop. " +
-        "This image must contain NO lettering of any kind, anywhere, at any size: papers are blank or out of focus, " +
-        "screens are dark or abstract, signage is absent. The words are added afterwards by the app.",
-    );
-  }
-  if (v.has_logo) {
-    notes.push(
-      "The previous attempt rendered a logo, wordmark, brand insignia or a large decorative letterform. Render NO logo, " +
-        "no wordmark, no monogram, no badge and no single letter or initial used as a background or watermark. " +
-        "Leave the area where a logo would sit visually clear and uncluttered — the real logo is composited in afterwards.",
-    );
-  }
-  if (v.has_garbled_text) {
-    notes.push(
-      "The previous attempt contained malformed text: doubled, smeared or overlapping letters, or a word cut off. " +
-        "Use fewer words — at most 6 per line, 12 in total — set larger, each spelled exactly as in the brief, " +
-        "with clear space around every line. Never invent lettering.",
-    );
-  }
-  if (v.has_hex_codes) {
-    notes.push(
-      "The previous attempt showed colour codes as readable text. Never render hex codes, RGB " +
-        "values or any technical colour notation — colour is applied visually only.",
-    );
-  }
-  if (notes.length === 0) return "";
-  return `\n\nCRITICAL CORRECTIONS — the previous attempt failed review:\n- ${notes.join("\n- ")}`;
-}
