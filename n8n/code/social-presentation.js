@@ -115,14 +115,17 @@ CRITICAL CONTENT RULES (follow exactly - do not deviate):
 SLIDE 1: TITLE
 
 ${clientName}
-Weekly Social Performance & Trend Analysis
-${date}
+Social Performance Report
+Reporting period: ${clientData.report_window?.current_month?.start} to ${clientData.report_window?.current_month?.end}
+Generated: ${date}
 
 ---
 
 SLIDE 2: EXECUTIVE SUMMARY
 
 REPORT PERIOD: ${clientData.report_window?.current_month?.start || 'Current Month'} to ${clientData.report_window?.current_month?.end || 'Present'}
+
+METRIC SCOPE NOTE (display visibly): Profile totals cover only the report dates. Facebook/Instagram impressions use the provider's views metric. The clicks total includes LinkedIn all-post clicks, not only outbound link clicks. Top-post figures are lifetime metrics and are separate from these period totals.
 
 KEY METRICS AT A GLANCE:
 `;

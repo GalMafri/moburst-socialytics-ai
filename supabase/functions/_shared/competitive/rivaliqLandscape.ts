@@ -110,8 +110,8 @@ export function domainStem(value: string | null | undefined): string {
 /**
  * Summarize a landscape and say whether it belongs to this client.
  *
- * Three ways it can: the focus company's name, the focus company's website,
- * or the landscape's own name. The website is the reliable one — RivalIQ
+ * Match a tracked company's name or website, including a non-focus client.
+ * A landscape title alone never proves client identity. RivalIQ
  * companies are named however whoever built the landscape typed them, and
  * "Moburst" against a focus company called "Moburst Ltd." or a landscape
  * whose focus is stored as moburst.com used to come back as no match at all,
