@@ -73,6 +73,16 @@ const truncatedPages = Number(postsResp.truncated_pages) || 0;
 let selected = []; try { selected = JSON.parse(cfg.competitors_json || "[]"); } catch (e) { selected = []; }
 let suppressed = []; try { suppressed = JSON.parse(cfg.suppressed_insights_json || "[]"); } catch (e) { suppressed = []; }
 const clientNeedle = String(cfg.client_name || "").toLowerCase();
+const body = safeJson('Competitive Webhook').body || {};
+const host = value => String(value || '').toLowerCase().replace(/^[a-z]+:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0];
+const clientHost = host(body.website_url);
+const clientMatches = companies.filter(c => {
+  if (landscape.client_company_id != null) return String(c.id) === String(landscape.client_company_id);
+  const name = String(c.name || c.company_name || '').toLowerCase().trim();
+  return (!!clientHost && host(c.url) === clientHost) || (!!name && !!clientNeedle && (name.includes(clientNeedle) || clientNeedle.includes(name)));
+});
+if (clientMatches.length !== 1) throw new Error('CLIENT_IDENTITY_UNVERIFIED — the RivalIQ landscape must track exactly one company matching ' + cfg.client_name + '. A focus company is not automatically the client.');
+const verifiedClientId = String(clientMatches[0].id ?? clientMatches[0].company_id);
 const clean = (s) => String(s || "").replace(/[\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim();
 const num = (v) => (typeof v === "number" && isFinite(v) ? v : (typeof v === "string" && v.trim() !== "" && isFinite(Number(v)) ? Number(v) : 0));
 // RivalIQ's paid signal on Facebook posts is a string: "Likely Boosted", "Not Likely Boosted" or "No Prediction".
@@ -85,7 +95,7 @@ for (const c of companies) {
   const name = clean(c.name || c.company_name || key);
   const lower = name.toLowerCase();
   const agg = blank(key, name, c.url);
-  agg.is_client = c.is_focus === true || String(c.id) === String(landscape.focus_company_id) || (!!clientNeedle && (lower.includes(clientNeedle) || clientNeedle.includes(lower)));
+  agg.is_client = key === verifiedClientId;
   agg.in_confirmed_top3 = selected.some((s) => { const sn = String(s.name || "").toLowerCase(); return !!sn && (lower.includes(sn) || sn.includes(lower)); });
   byCompany[key] = agg;
 }

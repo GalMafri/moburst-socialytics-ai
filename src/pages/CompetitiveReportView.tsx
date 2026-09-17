@@ -289,6 +289,13 @@ export default function CompetitiveReportView() {
     );
   }
 
+  if (report.status === "failed") return <AppLayout>
+    <EmptyState icon={Crosshair} title="This report needs attention" description={rd.error || "The analysis did not complete. Its figures are unavailable."} />
+    <div className="flex gap-2 mt-4">
+      <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
+      {canRetry(report) && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
+    </div>
+  </AppLayout>;
   const me = companies.find((c) => c.is_client) || null;
   const rivals = companies.filter((c) => !c.is_client).sort((a, b) => b.post_count - a.post_count);
   const meB = me ? bucketFor(me, effectivePlat) : null;

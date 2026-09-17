@@ -23,6 +23,10 @@ describe("domainStem", () => {
 });
 
 describe("summarizeLandscapes", () => {
+  it("does not treat a landscape title as proof that the client is tracked", () => {
+    const out = summarizeLandscapes([landscape({name:"Subliy",companies:[{id:10,name:"Jobber",url:"https://getjobber.com"}]})], "Subliy", "https://subliy.com");
+    expect(out[0].is_match).toBe(false);
+  });
   it("matches on the focus company's website when the names differ", () => {
     // The live failure: client "Moburst" (Moburst.com), focus company "Moburst Ltd."
     const out = summarizeLandscapes(

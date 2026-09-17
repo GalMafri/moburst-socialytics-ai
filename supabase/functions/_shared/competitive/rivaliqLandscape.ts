@@ -154,10 +154,8 @@ export function summarizeLandscape(
   let matchReason: string | null = null;
   if (!!focusName && namesOverlap(focusName, clientName)) matchReason = "focus company";
   else if (!!clientStem && clientStem === focusStem) matchReason = "website";
-  else if (namesOverlap(String(landscape.name || ""), clientName)) matchReason = "landscape name";
   else if (
-    !!clientStem &&
-    companies.some((c) => domainStem(c.url) === clientStem || namesOverlap(String(c.name || ""), clientName))
+    companies.some((c) => (!!clientStem && domainStem(c.url) === clientStem) || namesOverlap(String(c.name || ""), clientName))
   ) {
     // The client is in the landscape but is not its focus company. Still theirs.
     matchReason = "client is in the set";

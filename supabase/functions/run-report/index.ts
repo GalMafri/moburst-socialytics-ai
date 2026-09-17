@@ -199,7 +199,7 @@ Deno.serve(async (req) => {
             const wanted = set.rivaliq_landscape_id
               ? listed.find((l) => String(l.id) === String(set.rivaliq_landscape_id))
               : bestLandscapeMatch(listed);
-            if (listed.length > 0 && !wanted) {
+            if (!wanted?.is_match) {
               return json({
                 error:
                   `No RivalIQ landscape tracks ${client.name}. Create one in RivalIQ with ${client.name} as the focus company, ` +
