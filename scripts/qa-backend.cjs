@@ -82,7 +82,7 @@ async function runScheduler(options={}){
 async function runManual(transport, options={}){
  const state=options.state || database();let handler;let dispatches=0;
  class AuthzError extends Error{constructor(status,message){super(message);this.status=status;}}
- moduleFrom('supabase/functions/run-report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>({userId:'fixture-user'})},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/competitive/rivaliqLandscape.ts':{bestLandscapeMatch(){},summarizeLandscapes(){}}},{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},fetch:async()=>{dispatches++;if(transport==='late-completed'){state.tables.reports.at(-1).status='completed';throw new Error('Timeout after callback')};if(transport==='throw')throw new Error('Fixture network failure');return new Response('{}',{status:transport==='reject'?503:200})}});
+ moduleFrom('supabase/functions/run-report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>({userId:'fixture-user'})},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/competitive/rivaliqLandscape.ts':options.landscapes ? moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts') : {bestLandscapeMatch(){},summarizeLandscapes(){}}},{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},fetch:async(url)=>{if(options.landscapes && url.startsWith('https://api.rivaliq.com/v3/landscapes'))return new Response(JSON.stringify({landscapes:options.landscapes}));dispatches++;if(transport==='late-completed'){state.tables.reports.at(-1).status='completed';throw new Error('Timeout after callback')};if(transport==='throw')throw new Error('Fixture network failure');return new Response('{}',{status:transport==='reject'?503:200})}});
  const response=await handler(new Request('https://fixture.invalid/run',{method:'POST',body:JSON.stringify(options.body || {client_id:'fixture-client',kind:'social',date_range_start:'2026-09-01',date_range_end:'2026-09-15'})}));
  return{state,dispatches,status:response.status,body:await response.json(),reportStatus:state.tables.reports.at(-1)?.status};
 }
@@ -134,6 +134,14 @@ async function runCallback(state,kind,status,reportId,{authorized=true,resume=tr
  for(const status of ['running','failed']) await check('QA-90','control','social '+status+' may retry after 90 minutes',async()=>{
   const state=database();state.tables.reports.push({id:'old-fixture',client_id:'fixture-client',status,created_at:new Date(Date.now()-91*60000).toISOString()});
   const r=await runManual('accept',{state,body:{report_id:'old-fixture'}});assert.equal(r.status,200);assert.equal(r.dispatches,1);assert.equal(state.tables.reports.length,1);
+ });
+ for(const explicit of [false,true]) await check('QA-IDENTITY','regression','competitive rejects unrelated client before writes, explicit landscape '+explicit,async()=>{
+  const state=database();Object.assign(state.tables.clients[0],{name:'Subliy',website_url:'https://www.subliy.com'});
+  if(explicit)state.tables.competitor_sets[0].rivaliq_landscape_id='612909';
+  const landscapes=[{id:612909,name:'Subliy',focusCompanyId:1955162,companies:[{id:1955162,name:'Jobber',url:'https://getjobber.com'}]}];
+  const before=state.tables.competitive_reports.length;
+  const r=await runManual('accept',{state,landscapes,body:{client_id:'fixture-client',kind:'competitive',date_range_start:'2026-09-10',date_range_end:'2026-09-16'}});
+  assert.equal(r.status,422);assert.match(r.body.error,/No RivalIQ landscape tracks Subliy/);assert.equal(r.dispatches,0);assert.equal(state.tables.competitive_reports.length,before);assert.equal(state.operations.length,0);
  });
  const report={checks:results.length,passed:results.filter(x=>x.result==='pass').length,failed:results.filter(x=>x.result==='FAIL')};
  console.log(JSON.stringify(report,null,2));if(report.failed.length)process.exitCode=1;
