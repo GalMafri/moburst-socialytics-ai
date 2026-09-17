@@ -261,7 +261,12 @@ Deno.serve(async (req) => {
           // A refresh replaces what the scraper found before, and leaves
           // alone what a person typed: correcting a wrong handle used to
           // last only until the next refresh overwrote it.
-          if (manual.has(`${comp.id}:${h.platform}`)) continue;
+          //
+          // The handle still counts as covered in the reported result: the
+          // caller uses an empty list to mean "this competitor has no handle
+          // at all" and would otherwise re-scrape the site and tell the user
+          // to go find a handle that is already saved.
+          if (manual.has(`${comp.id}:${h.platform}`)) { saved.push(h.platform); continue; }
           // A handle a person deleted stays deleted: re-adding it on the next
           // refresh is how a wrong guess kept coming back.
           if (rejected.has(`${comp.id}:${h.platform}`)) continue;
