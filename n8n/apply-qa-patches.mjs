@@ -54,6 +54,19 @@ export function applyQaPatches(input, kind) {
     connect('Extract Brief PDF', [['Prepare Brief Text']]);
     connect('Prepare Brief Text', [['Has Brief Text']]);
     connect('Has Brief Text', [['Analyze Client Brief Context'], ['Combine Brief Context with Client Data']]);
+    add('Prepare Trend Inputs', 'n8n-nodes-base.code', 2, { mode: 'runOnceForAllItems', jsCode: readCode('prepare-trends') }, [680, 500]);
+    add('Run TikTok Trends', 'n8n-nodes-base.if', 2.2, condition('={{ $json.trend_inputs.tiktok !== null }}'), [900, 400]);
+    add('Run Instagram Trends', 'n8n-nodes-base.if', 2.2, condition('={{ $json.trend_inputs.instagram !== null }}'), [900, 600]);
+    for (const [platform, name, normalizer] of [['tiktok', 'Skip TikTok Trends', 'Normalize TikTok Trends'], ['instagram', 'Skip Instagram Trends', 'Normalize Instagram Trends']]) {
+      add(name, 'n8n-nodes-base.code', 2, { mode: 'runOnceForAllItems', jsCode: `return [{json:{source:'${platform}',_empty:true,_skipped:true,reason:$json.trend_status.${platform}}}];` }, [1120, platform === 'tiktok' ? 400 : 600]);
+      workflow.connections[name] = structuredClone(workflow.connections[normalizer]);
+    }
+    connect('Combine Brief Context with Client Data', [['Prepare Trend Inputs', 'Code in JavaScript']]);
+    connect('Prepare Trend Inputs', [['Run TikTok Trends', 'Run Instagram Trends']]);
+    connect('Run TikTok Trends', [['Run TikTok Scraper'], ['Skip TikTok Trends']]);
+    connect('Run Instagram Trends', [['Run IG Scraper'], ['Skip Instagram Trends']]);
+    get('Run TikTok Scraper').parameters.customBody = '={{ JSON.stringify($json.trend_inputs.tiktok) }}';
+    get('Run IG Scraper').parameters.customBody = '={{ JSON.stringify($json.trend_inputs.instagram) }}';
     get('Wait').parameters = { resume: 'timeInterval', amount: 30, unit: 'seconds' };
     get('Fetch Gamma Result').parameters.url = "=https://public-api.gamma.app/v1.0/generations/{{ $('Create Gamma Presentation').first().json.id || $('Create Gamma Presentation').first().json.generationId || '' }}";
     get('Fetch Gamma Result').onError = 'continueRegularOutput';

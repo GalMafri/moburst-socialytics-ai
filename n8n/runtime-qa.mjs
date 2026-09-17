@@ -16,6 +16,16 @@ add('mockGamma','Pending Gamma Fixture',"return [{json:{status:'pending'}}];");
 add('check','Check Gamma State',read('check-gamma'));
 code.push("const again=ifElse({version:2.2,config:{name:'Poll Gamma Again',parameters:{conditions:{options:{caseSensitive:true,leftValue:'',typeValidation:'strict'},conditions:[{leftValue:'={{ $json._gamma_poll_again }}',operator:{type:'boolean',operation:'true',singleValue:true}}],combinator:'and'},options:{}}}});");
 add('assertPoll','Assert Bounded Polling',"if ($json._gamma_attempt !== 20 || !$json._gamma_timeout || $json._gamma_poll_again) throw new Error('Polling bound failed'); return [{json:{passed:true,plain_text_brief:true,pdf_brief:true,poll_attempts:$json._gamma_attempt,external_calls:0}}];");
-code.push("export default workflow('qa-socialytics-runtime','TEMP QA Socialytics isolated runtime').add(start.to(config).to(brief).to(assertText).to(makePdf).to(pdf).to(pdfBrief).to(assertPdf).to(mockGamma).to(check).to(again.onTrue(mockGamma).onFalse(assertPoll)));");
+
+add('skipConfig','Skip Trends Fixture',"return [{json:{skip_trends:true,social_keywords:['mobile marketing'],geo:['US']}}];");
+add('skipInputs','Prepare Skipped Trend Inputs',read('prepare-trends'));
+const gate = (variable,name,expression) => code.push(`const ${variable}=ifElse(${JSON.stringify({version:2.2,config:{name,parameters:{conditions:{options:{caseSensitive:true,leftValue:'',typeValidation:'strict'},conditions:[{leftValue:expression,operator:{type:'boolean',operation:'true',singleValue:true}}],combinator:'and'},options:{}}}})});`);
+gate('skipGate','Skipped Scrapers Must Not Run','={{ $json.trend_inputs.tiktok !== null || $json.trend_inputs.instagram !== null }}');
+add('unexpected','Reject Unexpected Scraper Call',"throw new Error('A disabled scraper would have been called');");
+add('assertSkip','Assert No Scraper Inputs',"if ($json.trend_status.tiktok !== 'skipped' || $json.trend_status.instagram !== 'skipped') throw new Error('Skip status missing'); return [{json:{skip_trends:false,social_keywords:['mobile marketing'],trends_keywords:'app marketing',geo:['US']}}];");
+add('enabledInputs','Prepare Enabled Trend Inputs',read('prepare-trends'));
+gate('enabledGate','Enabled Scrapers Receive Valid Inputs','={{ $json.trend_inputs.tiktok !== null && $json.trend_inputs.instagram !== null }}');
+add('assertEnabled','Assert Valid Actor Inputs',"const t = $json.trend_inputs.tiktok; const i = $json.trend_inputs.instagram; if (t.resultsPerPage < 1 || !t.searchQueries.length || i.resultsLimit < 1 || !i.hashtags.length || i.hashtags.some(x => !x.trim())) throw new Error('Invalid actor input'); return [{json:{passed:true,plain_text_brief:true,pdf_brief:true,poll_attempts:20,disabled_scraper_calls:0,enabled_actor_inputs_valid:true,external_calls:0}}];");
+code.push("export default workflow('qa-socialytics-runtime','TEMP QA Socialytics isolated runtime').add(start.to(config).to(brief).to(assertText).to(makePdf).to(pdf).to(pdfBrief).to(assertPdf).to(mockGamma).to(check).to(again.onTrue(mockGamma).onFalse(assertPoll.to(skipConfig).to(skipInputs).to(skipGate.onTrue(unexpected).onFalse(assertSkip.to(enabledInputs).to(enabledGate.onTrue(assertEnabled).onFalse(unexpected)))))));");
 if (!process.argv[2]) throw new Error('Usage: node n8n/runtime-qa.mjs OUTPUT.mjs');
 fs.writeFileSync(process.argv[2],code.join('\n'),{flag:'wx'});

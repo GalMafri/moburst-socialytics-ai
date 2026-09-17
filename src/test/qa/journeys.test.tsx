@@ -11,11 +11,12 @@ import { StaffOnlyRoute } from '@/components/StaffOnlyRoute';
 import { ClientDashboard } from '@/components/dashboard/ClientDashboard';
 import ReportHistory from '@/pages/ReportHistory';
 import AllReports from '@/pages/AllReports';
+import ReportView from '@/pages/ReportView';
 import { ContentIdeasTab } from '@/components/reports/calendar/ContentIdeasTab';
 import { applyCopyRevisions } from '@/lib/calendarRevision';
 import { FunnelCard } from '@/components/usage/UsageSections';
 
-const f=vi.hoisted(()=>({role:'staff',insertError:null as any,assignedError:null as any,iterationsError:null as any,reportRows:null as any[] | null,rows:[] as any[],reads:[] as string[],invokes:[] as any[],success:vi.fn(),error:vi.fn(),warning:vi.fn()}));
+const f=vi.hoisted(()=>({role:'staff',insertError:null as any,assignedError:null as any,iterationsError:null as any,reportRows:null as any[] | null,detailedReport:null as any,rows:[] as any[],reads:[] as string[],invokes:[] as any[],success:vi.fn(),error:vi.fn(),warning:vi.fn()}));
 vi.stubGlobal('ResizeObserver',class {observe(){} unobserve(){} disconnect(){}});
 vi.stubGlobal('fetch',vi.fn(()=>Promise.reject(new Error('Unexpected outbound request'))));
 vi.mock('@/hooks/useAuth',()=>({useAuth:()=>({isLoading:false,isAuthenticated:true,isMoburstStaff:f.role==='staff',isClient:f.role==='client',isAdmin:false,isGosSession:true,canRunAnalysis:f.role==='staff',canDelete:false,user:{_id:'fixture-user',name:'Fixture user',company:null}})}));
@@ -37,7 +38,7 @@ vi.mock('@/integrations/supabase/client',()=>({supabase:{
     let range: [number,number] | null = null;
     const q:any={select(){return q},is(){return q},range(start:number,end:number){range=[start,end];return q},eq(){return q},neq(){return q},order(){return q},limit(){return q},in(){return q},
       insert:async(row:any)=>{if(!f.insertError)f.rows.push({...row});return{data:null,error:f.insertError}},
-      maybeSingle:async()=>{f.reads.push(table);return{data:table==='clients'?{id:'fixture-client',name:'Fixture company',hub_company_name:'Legacy name',media_backend:'higgsfield'}:fixtureReport(),error:null}},
+      maybeSingle:async()=>{f.reads.push(table);return{data:table==='clients'?{id:'fixture-client',name:'Fixture company',hub_company_name:'Legacy name',media_backend:'higgsfield'}:table==='reports'&&f.detailedReport?f.detailedReport:fixtureReport(),error:null}},
       then:(resolve:any,reject:any)=>{f.reads.push(table);const value=table==='client_users'?[]:table==='clients'?[{id:'fixture-client',name:'Fixture company',hub_company_name:'Legacy name'}]:table==='reports'?(range?(f.reportRows||[fixtureReport()]).slice(range[0],range[1]+1):f.reportRows||[fixtureReport()]):table==='sprout_profiles'?[{sprout_profile_id:1,network_type:'linkedin_company'}]:[...f.rows];return Promise.resolve({data:value,error:table==='sprout_profiles'?f.assignedError:table==='post_iterations'?f.iterationsError:null}).then(resolve,reject)}
     };return q;
   }
@@ -51,7 +52,7 @@ function mount(node:React.ReactNode,path='/'){
  const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false}}});clients.push(client);
  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}>{node}</MemoryRouter></QueryClientProvider>);
 }
-beforeEach(()=>{f.role='staff';f.iterationsError=null;f.reportRows=null;f.insertError=null;f.assignedError=null;f.rows=[];f.reads=[];f.invokes=[];f.success.mockClear();f.error.mockClear();f.warning.mockClear();});
+beforeEach(()=>{f.role='staff';f.detailedReport=null;f.iterationsError=null;f.reportRows=null;f.insertError=null;f.assignedError=null;f.rows=[];f.reads=[];f.invokes=[];f.success.mockClear();f.error.mockClear();f.warning.mockClear();});
 afterEach(()=>{cleanup();clients.splice(0).forEach(c=>c.clear());});
 async function edit(text='Reviewed fixture copy',success=true){
  fireEvent.click(screen.getByRole('button',{name:'Edit'}));
@@ -154,4 +155,14 @@ describe('whole calendar persistence and history paging',()=>{
   fireEvent.click(screen.getByRole('button',{name:'Previous monthly reports'}));
   expect(await screen.findByText('Brand 001')).toBeInTheDocument();
  });
+});
+
+it('report calendar schedules in the current client timezone when historical report metadata omits it',async()=>{
+ f.detailedReport={...fixtureReport(),clients:{id:'fixture-client',name:'Fixture company',timezone:'America/New_York'},report_data:{content_calendar:[{day:'Monday',posts:[{copy:'Calendar timezone test',platform:'LinkedIn'}]}]}};
+ mount(<Routes><Route path="/clients/:id/reports/:reportId" element={<ReportView/>}/></Routes>,'/clients/fixture-client/reports/fixture-report');
+ fireEvent.mouseDown(await screen.findByRole('tab',{name:'Content ideas'}),{button:0,ctrlKey:false});
+ fireEvent.click(await screen.findByRole('button',{name:'Open post: Calendar timezone test'}));
+ fireEvent.mouseDown(screen.getByRole('tab',{name:'Schedule'}),{button:0,ctrlKey:false});
+ fireEvent.click(await screen.findByRole('button',{name:'Open scheduler'}));
+ expect(await screen.findByText(/America\/New_York/)).toBeInTheDocument();
 });

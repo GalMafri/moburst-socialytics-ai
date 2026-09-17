@@ -5,6 +5,7 @@ These are versioned patches for the existing Socialytics and Competitive Analysi
 ## What changes
 
 - Resolve the brief ID from the webhook body. Skip Drive when no file is configured; read exported Google Docs/text bytes and extract text-based PDFs before the brief agent. Unsupported, empty or failed files produce a visible report warning, with saved brief text used as a fallback. Scanned PDFs and DOCX are not silently treated as readable text.
+- Bypass TikTok/Instagram actors when trends are disabled or usable keywords are missing. Enabled requests keep their existing limits (50/80) and receive nonempty queries/hashtags. Skipped branches still supply empty placeholders to the merge.
 - Poll Gamma every 30 seconds for up to 20 checks. Only use a real URL from a completed generation. Keep usable analysis with a presentation warning on failure/timeout. Do not retry a generation-creation POST blindly after a transport failure.
 - Send critical social-workflow failures back to the app and then stop with an error so the existing error workflow can notify. Completed reports are protected from late failure callbacks.
 - Include both dates in competitive cadence calculations. Generate numeric benchmark dimensions from RivalIQ/aggregate numbers instead of the language model's suggested values. The shared metric implementation also corrects historical numeric views without rewriting stored reports.
@@ -50,7 +51,7 @@ QA_SQL_MODULE="$(pwd)/../sql-qa/node_modules/@electric-sql/pglite/dist/index.js"
 
 `node n8n/runtime-qa.mjs /private/runtime-qa-sdk.mjs` produces a manual-only n8n SDK test workflow. Validate it before creating an isolated workflow. It uses synthetic text/PDF bytes and pending Gamma responses, has no credentials or external-service nodes, and checks real binary extraction plus the 20-iteration polling bound. Archive the temporary workflow afterward.
 
-The isolated runtime test passed in n8n execution **451759** on 2026-09-17. The temporary workflow `o40X0dsb1R81zqiT` was archived. Both complete patched graphs passed SDK validation; the validator retained pre-existing `builtInTools`/`responsesApiEnabled` warnings on existing model nodes. Those model settings were not changed.
+The isolated runtime tests passed in n8n executions **451759** and **451774** on 2026-09-17. The second also checks disabled/enabled trend routing and actor-input constraints. Neither test calls Apify. Both temporary workflows (`o40X0dsb1R81zqiT`, `Yja3rapMoFoyHuHh`) were archived. Both complete patched graphs passed SDK validation; the validator retained pre-existing `builtInTools`/`responsesApiEnabled` warnings on existing model nodes. Those model settings were not changed.
 
 ## Deliberately unchanged
 

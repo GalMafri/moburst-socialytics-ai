@@ -20,7 +20,7 @@ try {
     // Ensure top-level client_name is set
     clientData.client_name = wfClientName;
     console.log('✅ Got client data from Workflow Configuration');
-    
+
     // Get the webhook body for custom date range check
     let whBody = {};
     try {
@@ -29,12 +29,12 @@ try {
     } catch(e) {
       whBody = wfBody;
     }
-    
+
     // ALWAYS compute previous period dynamically based on current period length
     const fmt = (d) => d.toISOString().split('T')[0];
     const currentStart = whBody.date_range_start || clientData.date_range_start || clientData.current_month_start;
     const currentEnd = whBody.date_range_end || clientData.date_range_end || clientData.current_month_end;
-    
+
     if (currentStart && currentEnd) {
       clientData.current_month_start = currentStart;
       clientData.current_month_end = currentEnd;
@@ -77,16 +77,16 @@ if (!clientData.client_name) {
       const fmt = (d) => d.toISOString().split('T')[0];
 
       // Use custom date range from Loveable if provided, otherwise use month defaults
-      const effectiveStart = (body.date_range_start && body.date_range_start.length > 0) 
-        ? body.date_range_start 
+      const effectiveStart = (body.date_range_start && body.date_range_start.length > 0)
+        ? body.date_range_start
         : fmt(currentMonthStart);
-      const effectiveEnd = (body.date_range_end && body.date_range_end.length > 0) 
-        ? body.date_range_end 
+      const effectiveEnd = (body.date_range_end && body.date_range_end.length > 0)
+        ? body.date_range_end
         : fmt(currentMonthEnd);
-      
+
       clientData.current_month_start = effectiveStart;
       clientData.current_month_end = effectiveEnd;
-      
+
       // ALWAYS compute previous period dynamically based on current period length
       const customStartDate = new Date(effectiveStart);
       const customEndDate = new Date(effectiveEnd);
@@ -97,7 +97,7 @@ if (!clientData.client_name) {
       prevStartDate.setDate(prevStartDate.getDate() - daysDiff);
       clientData.previous_month_start = fmt(prevStartDate);
       clientData.previous_month_end = fmt(prevEndDate);
-      
+
       console.log('✅ Current period:', effectiveStart, 'to', effectiveEnd, '(' + daysDiff + ' days)');
       console.log('✅ Previous period:', clientData.previous_month_start, 'to', clientData.previous_month_end);
 

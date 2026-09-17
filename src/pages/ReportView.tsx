@@ -560,7 +560,7 @@ export default function ReportView() {
                 clientContext={clientContext}
                 clientId={id}
                 reportId={reportId}
-                clientTimezone={rd?.context?.timezone || "UTC"}
+                clientTimezone={clientContext.timezone}
                 availablePlatforms={availablePlatforms}
                 availableLanguages={availableLanguages}
               />

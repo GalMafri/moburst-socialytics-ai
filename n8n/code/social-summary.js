@@ -207,6 +207,11 @@ if (!Array.isArray(languagesArr)) languagesArr = [languagesArr];
 const brandVoice = clientData.context?.brand_voice || config.brand_voice || '';
 const brandBookText = clientData.context?.brand_book_text || config.brand_book_text || '';
 
+let trendStatus = {};
+try { trendStatus = $('Prepare Trend Inputs').first().json.trend_status || {}; } catch (error) {}
+for (const [platform, state] of Object.entries(trendStatus)) {
+  if (state === 'missing_keywords') warnings.push(`${platform === 'tiktok' ? 'TikTok' : 'Instagram'} trend analysis could not run because there were no usable keywords. Add keywords in client setup.`);
+}
 const fullReport = {
   report_id: reportId,
   status: isSuccess ? 'success' : 'failed',
@@ -254,10 +259,12 @@ const fullReport = {
   },
 
   ai_analysis: aiAnalysis,
+  trend_status: trendStatus,
 
   content_calendar: aiAnalysis.content_calendar || [],
 
   context: {
+    timezone: clientData.context?.timezone || config.timezone || 'UTC',
     geo: geoArr,
     languages: languagesArr,
     brand_voice: brandVoice,
