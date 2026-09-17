@@ -11,7 +11,7 @@
 //                  the run is skipped and the reason recorded in last_result.
 // Range: range_mode 'previous_month' covers the first to the last day of the
 // previous calendar month, so a run on the 7th reports on the whole prior
-// month. next_run_at advances to run_day_of_month of the following month, 07:00 UTC.
+// month. next_run_at advances to run_day_of_month of the following month, 07:15 UTC.
 //
 // FINDING (2026-09-02): nothing had been calling this function — schedules sat
 // with stale next_run_at values — so the daily n8n trigger is what makes any
@@ -41,7 +41,7 @@ function nextRun(now: Date, runDay: number, frequency: string): string {
   if (frequency === "weekly") return new Date(now.getTime() + 7 * 86400000).toISOString();
   if (frequency === "biweekly") return new Date(now.getTime() + 14 * 86400000).toISOString();
   const day = Math.min(Math.max(runDay || 7, 1), 28);
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, day, 7, 0, 0)).toISOString();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, day, 7, 15, 0)).toISOString();
 }
 
 /** Compact digest of the latest complete competitive report (mirrors RunAnalysis). */
@@ -102,7 +102,7 @@ async function refreshStaleFeeds(supabase: any, now: Date, dryRun: boolean, secr
       .from("competitor_sets")
       .select("client_id, status, clients!inner(id, name, archived_at)")
       .in("status", ["confirmed", "analyzing", "complete", "failed"]);
-    const clientIds = [...new Set((sets || []).filter((s: any) => !s.clients?.archived_at).map((s: any) => s.client_id as string))].slice(0, 25);
+    const clientIds = [...new Set<string>((sets || []).filter((s: any) => !s.clients?.archived_at).map((s: any) => s.client_id as string))].slice(0, 25);
     if (clientIds.length === 0) return out;
     const { data: snaps } = await supabase
       .from("rivaliq_snapshots")
@@ -144,36 +144,56 @@ Deno.serve(async (req) => {
     const now = new Date();
     const dryRun = new URL(req.url).searchParams.get("dry_run") === "1";
 
-    const { data: due, error: dueErr } = await supabase
+    const body = await req.json().catch(() => ({}));
+    const resumeId = typeof body.resume_competitive_report_id === "string" ? body.resume_competitive_report_id : null;
+    let dueQuery = supabase
       .from("report_schedules")
       .select("*, clients(*)")
       .eq("is_active", true)
       .lte("next_run_at", now.toISOString());
+    if (resumeId) dueQuery = dueQuery.eq("report_kind", "social").eq("pending_competitive_report_id", resumeId);
+    const { data: due, error: dueErr } = await dueQuery;
     if (dueErr) throw dueErr;
-    const abandoned = await closeAbandonedRuns(supabase, now, dryRun);
-    const feeds = await refreshStaleFeeds(supabase, now, dryRun, secret);
-    if (!due || due.length === 0) return json({ message: "No schedules due", triggered: 0, feeds, abandoned });
+    const abandoned = resumeId ? [] : await closeAbandonedRuns(supabase, now, dryRun);
+    const feeds = resumeId ? [] : await refreshStaleFeeds(supabase, now, dryRun, secret);
+    const finish = (results: Array<Record<string, unknown>>) => {
+      const failed = [...results, ...feeds].filter((r: any) => r.status === "error").length;
+      return json({ status: failed ? "partial_failure" : "ok", failed, triggered: results.filter(r => r.status === "triggered").length, dry_run: dryRun, results, feeds, abandoned }, failed ? 502 : 200);
+    };
+    if (!due || due.length === 0) return finish([]);
 
     const { data: settings } = await supabase.from("app_settings").select("key, value").in("key", ["n8n_webhook_url", "competitive_n8n_webhook_url"]);
     const socialUrl = settings?.find((s) => s.key === "n8n_webhook_url")?.value;
     const competitiveUrl = settings?.find((s) => s.key === "competitive_n8n_webhook_url")?.value;
 
-    const results: unknown[] = [];
+    const results: Array<Record<string, unknown>> = [];
     // Runs fired in the same minute are spaced out: each n8n workflow waits
     // stagger_seconds before its first external call. RivalIQ allows one concurrent
     // call per account (competitive, 150 s apart); the social pipeline shares Sprout,
     // Apify and Gamma quotas across clients (180 s apart).
     let competitiveIndex = 0;
     let socialIndex = 0;
-    for (const schedule of due) {
+    for (const schedule of [...due].sort((a, b) => Number(b.report_kind === "competitive") - Number(a.report_kind === "competitive"))) {
       const client = schedule.clients;
       if (!client || client.archived_at) { results.push({ schedule: schedule.id, status: "skipped", reason: "client archived or missing" }); continue; }
-      const range = schedule.range_mode === "previous_month" ? previousMonthRange(now) : currentMonthRange(now);
+      let range = schedule.range_mode === "previous_month" ? previousMonthRange(now) : currentMonthRange(now);
       const advance = async (result: string) => {
         if (dryRun) return;
-        await supabase.from("report_schedules").update({ last_run_at: now.toISOString(), next_run_at: nextRun(now, schedule.run_day_of_month, schedule.frequency), last_result: result.slice(0, 500) }).eq("id", schedule.id);
+        await supabase.from("report_schedules").update({ last_run_at: now.toISOString(), next_run_at: nextRun(now, schedule.run_day_of_month, schedule.frequency), last_result: result.slice(0, 500), dispatch_claimed_at: null, pending_competitive_report_id: null }).eq("id", schedule.id).throwOnError();
       };
 
+      const waitForDependency = async (reason: string, failed = false) => {
+        if (!dryRun) await supabase.from("report_schedules").update({ last_result: reason, dispatch_claimed_at: null }).eq("id", schedule.id).throwOnError();
+        results.push({ client: client.name, kind: schedule.report_kind, status: failed ? "error" : "waiting", reason });
+      };
+      if (!dryRun) {
+        const { data: claimed, error: claimError } = await supabase.rpc("claim_report_schedule", { schedule_id: schedule.id, expected_next_run_at: schedule.next_run_at });
+        if (claimError) throw claimError;
+        if (!claimed) {
+          results.push({ client: client.name, kind: schedule.report_kind, status: "claimed_elsewhere", reason: "Already dispatched or claimed. An interrupted claim needs execution review before retrying." });
+          continue;
+        }
+      }
       // The report row is created BEFORE the webhook call, so a webhook that
       // refuses used to leave it sitting on "running" (and a competitor set on
       // "analyzing") until closeAbandonedRuns noticed hours later. Remember
@@ -189,12 +209,16 @@ Deno.serve(async (req) => {
           // was left mid-analysis, silently stopped being scheduled altogether and
           // nothing said so.
           .in("status", ["confirmed", "analyzing", "complete", "failed"]).order("confirmed_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
-          if (!set) { await advance("skipped: no confirmed competitor set"); results.push({ client: client.name, kind: "competitive", status: "skipped", reason: "no confirmed competitor set" }); continue; }
+          if (!set) { await waitForDependency("Waiting for a confirmed competitor set; paired social report is held."); continue; }
           if (dryRun) { results.push({ client: client.name, kind: "competitive", status: "would run", range }); continue; }
           const { data: report, error: repErr } = await supabase.from("competitive_reports").insert({ client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: schedule.created_by }).select("id").single();
           if (repErr) throw repErr;
           openReport = { table: "competitive_reports", id: report.id };
           openSetId = set.id;
+          await supabase.from("report_schedules")
+            .update({ pending_competitive_report_id: report.id, last_result: `Waiting for competitive report ${report.id}` })
+            .eq("client_id", client.id).eq("report_kind", "social").eq("is_active", true)
+            .lte("next_run_at", now.toISOString()).is("pending_competitive_report_id", null).throwOnError();
           await supabase.from("competitor_sets").update({ status: "analyzing" }).eq("id", set.id).in("status", ["confirmed", "complete", "failed"]);
           const payload = await buildCompetitivePayload({
             supabase, client, reportId: report.id, set, range,
@@ -207,6 +231,29 @@ Deno.serve(async (req) => {
           continue;
         }
 
+        // Re-read after claiming: the competitive dispatch or its callback may
+        // have attached a dependency since this invocation loaded its due list.
+        let dependencyId: string | undefined;
+        if (!dryRun) {
+          const { data: fresh, error: freshError } = await supabase.from("report_schedules").select("pending_competitive_report_id").eq("id", schedule.id).single();
+          if (freshError) throw freshError;
+          dependencyId = fresh.pending_competitive_report_id || undefined;
+          if (dependencyId) {
+            const { data: dependency, error: dependencyError } = await supabase.from("competitive_reports").select("status, client_id, date_range_start, date_range_end").eq("id", dependencyId).eq("client_id", client.id).maybeSingle();
+            if (dependencyError) throw dependencyError;
+            if (dependency?.status !== "complete") {
+              await waitForDependency(`Waiting for competitive report ${dependencyId} (${dependency?.status || "unavailable"}). Retry that report if it failed.`, dependency?.status === "failed" || !dependency);
+              continue;
+            }
+            if (!dependency.date_range_start || !dependency.date_range_end) throw new Error("The required competitive report has no reporting period.");
+            range = { start: dependency.date_range_start, end: dependency.date_range_end };
+          } else {
+            const { data: paired, error: pairedError } = await supabase.from("report_schedules").select("id").eq("client_id", client.id).eq("report_kind", "competitive").eq("is_active", true).lte("next_run_at", now.toISOString()).maybeSingle();
+            if (pairedError) throw pairedError;
+            if (paired) { await waitForDependency("Waiting for the due competitive analysis to start."); continue; }
+          }
+        }
+
         // social (default)
         if (!socialUrl) throw new Error("n8n webhook URL not configured");
         if (dryRun) { results.push({ client: client.name, kind: "social", status: "would run", range }); continue; }
@@ -217,7 +264,7 @@ Deno.serve(async (req) => {
 
         const payload = await buildSocialPayload({
           supabase, client, reportId: report.id, range,
-          scheduled: true, staggerSeconds: socialIndex++ * 180,
+          scheduled: true, staggerSeconds: socialIndex++ * 180, competitiveReportId: dependencyId,
         });
         const r = await fetch(socialUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
         if (!r.ok) throw new Error(`social webhook ${r.status}`);
@@ -232,18 +279,19 @@ Deno.serve(async (req) => {
         if (openReport) {
           await supabase
             .from(openReport.table)
-            .update({ status: "failed", report_data: { error: `The run could not be started: ${msg}` } })
+            .update({ status: "failed", report_data: { error: `Dispatch could not be confirmed: ${msg}. Check the n8n execution before retrying.` } })
             .eq("id", openReport.id)
             .eq("status", "running");
         }
         if (openSetId) {
           await supabase.from("competitor_sets").update({ status: "failed" }).eq("id", openSetId).eq("status", "analyzing");
         }
-        await advance(`error: ${msg}`);
+        if (openReport) await advance(`error: ${msg}`);
+        else if (!dryRun) await supabase.from("report_schedules").update({ last_result: `error: ${msg}`.slice(0, 500), dispatch_claimed_at: null }).eq("id", schedule.id).throwOnError();
         results.push({ client: client?.name || schedule.client_id, kind: schedule.report_kind, status: "error", error: msg });
       }
     }
-    return json({ triggered: results.length, dry_run: dryRun, results, feeds, abandoned });
+    return finish(results);
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Pencil, RefreshCw } from "lucide-react";
@@ -6,20 +6,52 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { track, editDistancePct } from "@/lib/telemetry";
 import { postCopyOf } from "@/lib/postCopy";
+import { useAuth } from "@/hooks/useAuth";
+import type { CalendarPost } from "@/lib/calendarRevision";
 
 interface Props {
   post: any;
   clientId?: string;
   reportId?: string;
+  onCopySaved?: (post: CalendarPost) => void;
 }
 
-export function CopyEditor({ post, clientId, reportId }: Props) {
+export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
+  const { isMoburstStaff } = useAuth();
   const initialCopy = postCopyOf(post);
   const [isEditing, setIsEditing] = useState(false);
   const [editedCopy, setEditedCopy] = useState(initialCopy);
   const [displayCopy, setDisplayCopy] = useState(initialCopy);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  useEffect(() => {
+    setDisplayCopy(initialCopy);
+    setEditedCopy(initialCopy);
+    setIsEditing(false);
+  }, [initialCopy, post._calendarPostKey]);
+
+  const saveRevision = async (copy: string, generated?: any) => {
+    if (!clientId || !reportId || !post._calendarPostKey) {
+      throw new Error("Open this post from its report calendar before saving changes.");
+    }
+    const updated = {
+      ...post, copy, _originalCopy: post._originalCopy ?? initialCopy,
+      _copyVersion: (post._copyVersion || 0) + 1,
+      _copyHistory: [...(post._copyHistory || [initialCopy]), copy],
+      hashtags: generated?.hashtags ?? post.hashtags,
+      CTA: generated?.CTA ?? generated?.cta ?? post.CTA ?? post.cta,
+    };
+    const { error } = await supabase.from("post_iterations").insert({
+      client_id: clientId, report_id: reportId, calendar_post_key: post._calendarPostKey,
+      version: updated._copyVersion, platform: post.platform || null, post_copy: copy,
+      hashtags: updated.hashtags || null, cta: updated.CTA || null,
+      concept: post.concept || null, visual_direction: post.visual_direction || null,
+      format: post.format || null, source: generated ? "regeneration" : "calendar",
+    });
+    if (error) throw error;
+    onCopySaved?.(updated);
+    return updated;
+  };
 
   // How much of the AI draft survives, and how long people deliberate before
   // committing, are the two signals that separate "trusted" from "rewritten".
@@ -51,42 +83,16 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
     setIsSavingEdit(true);
     const distance = editDistancePct(displayCopy, editedCopy);
     try {
-      // Save original version (v1) and edited version (v2) to post_iterations
-      await supabase.from("post_iterations").insert({
-        client_id: clientId,
-        report_id: reportId || null,
-        version: 1,
-        platform: post.platform || null,
-        post_copy: displayCopy,
-        hashtags: post.hashtags || null,
-        cta: post.CTA || post.cta || null,
-        concept: post.concept || null,
-        visual_direction: post.visual_direction || null,
-        format: post.format || null,
-        source: "calendar",
-      } as any);
-      await supabase.from("post_iterations").insert({
-        client_id: clientId,
-        report_id: reportId || null,
-        version: 2,
-        platform: post.platform || null,
-        post_copy: editedCopy,
-        hashtags: post.hashtags || null,
-        cta: post.CTA || post.cta || null,
-        concept: post.concept || null,
-        visual_direction: post.visual_direction || null,
-        format: post.format || null,
-        source: "calendar",
-      } as any);
+      await saveRevision(editedCopy);
 
       // Fire-and-forget call to learn from this edit.
-      supabase.functions.invoke("analyze-post-edits", {
+      if (isMoburstStaff) void supabase.functions.invoke("analyze-post-edits", {
         body: {
           client_id: clientId,
           original_copy: displayCopy,
           edited_copy: editedCopy,
         },
-      });
+      }).catch(() => undefined);
 
       // distance 0 means the draft was accepted verbatim ("strong acceptance");
       // anything above ~50 means the user effectively rewrote it.
@@ -103,7 +109,7 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
 
       setDisplayCopy(editedCopy);
       setIsEditing(false);
-      toast.success("Post updated and preferences saved");
+      toast.success("Post copy saved");
     } catch (err: any) {
       track("post_copy_edited", {
         client_id: clientId,
@@ -118,7 +124,7 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
   };
 
   const handleRegenerate = async () => {
-    if (!clientId) return;
+    if (!clientId || !isMoburstStaff) return;
     setIsRegenerating(true);
     regenCount.current += 1;
     const t0 = performance.now();
@@ -145,20 +151,9 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
 
       const postResult = data?.post || data;
       const newCopy = postResult?.caption_angle || postResult?.copy || postResult?.post_copy;
+      if (!newCopy?.trim()) throw new Error("No copy was returned. Your existing copy is unchanged.");
       if (newCopy) {
-        await supabase.from("post_iterations").insert({
-          client_id: clientId,
-          report_id: reportId || null,
-          version: 1,
-          platform: post.platform || null,
-          post_copy: newCopy,
-          hashtags: postResult?.hashtags || post.hashtags || null,
-          cta: postResult?.CTA || postResult?.cta || post.CTA || post.cta || null,
-          concept: post.concept || null,
-          visual_direction: post.visual_direction || null,
-          format: post.format || null,
-          source: "regeneration",
-        } as any);
+        await saveRevision(newCopy, postResult);
 
         // A high regeneration count on one post is the clearest "the model is
         // not giving them what they want" signal the product emits.
@@ -251,7 +246,7 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
               >
                 <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
               </Button>
-              <Button
+              {isMoburstStaff && <Button
                 variant="ghost"
                 size="sm"
                 onClick={handleRegenerate}
@@ -263,7 +258,7 @@ export function CopyEditor({ post, clientId, reportId }: Props) {
                   <RefreshCw className="h-3.5 w-3.5 mr-1" />
                 )}
                 {isRegenerating ? "Regenerating..." : "Regenerate"}
-              </Button>
+              </Button>}
             </div>
           )}
           {post.visual_direction && (

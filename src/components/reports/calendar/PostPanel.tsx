@@ -2,6 +2,7 @@ import {
   Sheet,
   SheetContent,
   SheetHeader,
+  SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -21,7 +22,8 @@ import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButto
 import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
 import { isVideoFormat } from "@/lib/platform";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { CalendarPost } from "@/lib/calendarRevision";
 import { tileAspectFor } from "@/lib/tileAspect";
 
 interface Iteration {
@@ -50,6 +52,7 @@ interface Props {
   clientId?: string;
   reportId?: string;
   clientTimezone?: string;
+  onCopySaved?: (post: CalendarPost) => void;
   /** Toggle is_selected on a variant. */
   onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
   /** Reject (with a reason the app learns from) or archive a variant. Staff only. */
@@ -116,16 +119,20 @@ function tilesFromIterations(
 export function PostPanel({
   open,
   onOpenChange,
-  post,
+  post: sourcePost,
   postIterations,
   clientContext,
   clientId,
   reportId,
   clientTimezone,
+  onCopySaved,
   onToggleSelected,
   onFeedback,
 }: Props) {
-  const { isClient } = useAuth();
+  const { isClient, isMoburstStaff } = useAuth();
+  const [editedPost, setEditedPost] = useState<CalendarPost | null>(null);
+  useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab("copy"); }, [sourcePost?._calendarPostKey, open]);
+  const post = editedPost && editedPost._calendarPostKey === sourcePost?._calendarPostKey ? editedPost : sourcePost;
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewIsVideo, setPreviewIsVideo] = useState(false);
@@ -169,6 +176,7 @@ export function PostPanel({
               )}
             </SheetTitle>
           </SheetHeader>
+          <SheetDescription className="sr-only">Review the copy and creative for this post.</SheetDescription>
 
           <Tabs value={tab} onValueChange={setTab} className="mt-4">
             <TabsList className={`grid ${isClient ? "grid-cols-3" : "grid-cols-4"}`}>
@@ -183,7 +191,10 @@ export function PostPanel({
 
             {/* Copy tab */}
             <TabsContent value="copy" className="mt-4">
-              <CopyEditor post={post} clientId={clientId} reportId={reportId} />
+              <CopyEditor post={post} clientId={clientId} reportId={reportId} onCopySaved={(updated) => {
+                setEditedPost(updated);
+                onCopySaved?.(updated);
+              }} />
             </TabsContent>
 
             {/* Design tab */}
@@ -211,11 +222,11 @@ export function PostPanel({
                       : "Generate brand-aligned variants to get started."}
                   </p>
                 </div>
-                <CreatePostDesignButton
+                {isMoburstStaff && <CreatePostDesignButton
                   post={post}
                   clientContext={clientContext}
                   clientId={clientId}
-                />
+                />}
               </div>
 
               {imageTiles.length > 0 ? (
@@ -262,11 +273,11 @@ export function PostPanel({
                       : "Generate 2 to 3 video variants. Each takes about 30 to 120 seconds."}
                   </p>
                 </div>
-                <CreatePostVideoButton
+                {isMoburstStaff && <CreatePostVideoButton
                   post={post}
                   clientContext={clientContext}
                   clientId={clientId}
-                />
+                />}
               </div>
 
               {videoTiles.length > 0 ? (

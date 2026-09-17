@@ -1,0 +1,658 @@
+{
+  "id": "EBiAwSay3H2R8krv",
+  "name": "Socialytics - Competitive Analysis (RivalIQ) - v1",
+  "versionId": "6f18e322-7268-4583-98b1-6de1fc242d7d",
+  "nodes": [
+    {
+      "id": "97c788b0-9e45-4646-9096-dba6b6c71089",
+      "name": "Competitive Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "aed9ba7e-6142-41bf-8713-0e88f31fa54e",
+      "name": "Run Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "cd06525d-2855-4156-a918-9467161f8670",
+      "name": "List RivalIQ Landscapes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "645ff4ca-6048-442f-9e88-4e0729b1e036",
+      "name": "Resolve Landscape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "a20eee47-6043-4ac8-9d31-ffc574013fb0",
+      "name": "Landscape Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "fcc35753-be8e-4b61-817e-5f3afaad3dd8",
+      "name": "Landscape Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "a8edfcf7-eca1-4578-9a6c-121be1604f11",
+      "name": "Landscape Social Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "f368dd76-7147-4ac8-8e5a-9542b0717f6f",
+      "name": "Aggregate Competitive Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "94581da5-ca95-4c21-afe1-fc260d9fd110",
+      "name": "Competitive Analysis Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "860b84f1-8eb6-48d3-880f-2a2e3a9b07f1",
+      "name": "Analysis Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "e5942d70-405e-4c05-8e9e-3b7c848a38cb",
+      "name": "Competitive Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "0418e1b3-ecc5-4394-a370-0f0fdc3bd828",
+      "name": "Assemble Report Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "b9369ddb-a93c-4b69-a9b5-5733a58e0d86",
+      "name": "Mark Report Complete",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "3fafe0d1-4008-4088-aea4-d627415fb086",
+      "name": "Cache Status Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "55065ac3-37f3-45a1-8a43-47aa09f1ea9e",
+      "name": "Cache Companies Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "6fe4ef91-85e6-40f2-b45b-86c8aaf5bf7a",
+      "name": "Cache Posts Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "a2148e03-48cb-4e50-9e88-e4651eceda20",
+      "name": "Mark Report Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "ee283935-4a7b-4d6f-ba93-acb84923eff3",
+      "name": "Sticky Note 9bd8cdc3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "fc32db9c-8b95-4658-b409-0cd8a3f58ea9",
+      "name": "Sticky Note 5705daee",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "cea318d4-5e21-447c-bf00-5a582e5ed46f",
+      "name": "Build Post Windows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "4b2eb385-090b-47ca-8fff-9ff3b3b940c2",
+      "name": "Merge Post Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "257a3d75-d710-4a2d-a20e-35b6ff492283",
+      "name": "Stagger scheduled runs",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "3e62bf11-ed81-46e2-a718-600abcf51e7c",
+      "name": "Landscape Metrics Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "onError": "continueRegularOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "6b12948b-2cab-44c9-a314-1cc7b72545ef",
+      "name": "Landscape Metrics Summary Previous",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "onError": "continueRegularOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "e9de05e3-7d72-47d4-b12b-551ef7496fdf",
+      "name": "Landscape Metrics Timeseries",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "onError": "continueRegularOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "cbae5569-b9ad-4fa0-a154-12a6ebfa6a4b",
+      "name": "Cache Metrics Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "onError": "continueRegularOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Competitive Webhook": {
+      "main": [
+        [
+          {
+            "node": "Run Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List RivalIQ Landscapes": {
+      "main": [
+        [
+          {
+            "node": "Resolve Landscape",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Landscape": {
+      "main": [
+        [
+          {
+            "node": "Landscape Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Status": {
+      "main": [
+        [
+          {
+            "node": "Landscape Companies",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Cache Status Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Companies": {
+      "main": [
+        [
+          {
+            "node": "Cache Companies Snapshot",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Landscape Metrics Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Social Posts": {
+      "main": [
+        [
+          {
+            "node": "Merge Post Pages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Competitive Data": {
+      "main": [
+        [
+          {
+            "node": "Competitive Analysis Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Competitive Analysis Agent": {
+      "main": [
+        [
+          {
+            "node": "Assemble Report Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analysis Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Competitive Analysis Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Competitive Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Competitive Analysis Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Report Data": {
+      "main": [
+        [
+          {
+            "node": "Mark Report Complete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Report Complete": {
+      "main": [
+        null,
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Post Windows": {
+      "main": [
+        [
+          {
+            "node": "Landscape Social Posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Post Pages": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Competitive Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Cache Posts Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Config": {
+      "main": [
+        [
+          {
+            "node": "Stagger scheduled runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stagger scheduled runs": {
+      "main": [
+        [
+          {
+            "node": "List RivalIQ Landscapes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Metrics Summary": {
+      "main": [
+        [
+          {
+            "node": "Landscape Metrics Summary Previous",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Metrics Summary Previous": {
+      "main": [
+        [
+          {
+            "node": "Landscape Metrics Timeseries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Metrics Timeseries": {
+      "main": [
+        [
+          {
+            "node": "Build Post Windows",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Cache Metrics Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

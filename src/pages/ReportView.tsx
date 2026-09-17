@@ -392,6 +392,12 @@ export default function ReportView() {
           </div>
         </div>
 
+        {Array.isArray(rd?.warnings) && rd.warnings.length > 0 && (
+          <div role="status" className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm space-y-1">
+            {rd.warnings.filter((warning: unknown) => typeof warning === "string").map((warning: string, index: number) => <p key={index}>{warning}</p>)}
+          </div>
+        )}
+
         <Tabs value={tab} onValueChange={setTab} className="space-y-6">
           <TabsList className="h-auto flex-wrap justify-start">
             <TabsTrigger value="overview" className="gap-1.5 flex-shrink-0"><BarChart3 className="h-4 w-4" /> Overview</TabsTrigger>
@@ -554,7 +560,7 @@ export default function ReportView() {
                 clientContext={clientContext}
                 clientId={id}
                 reportId={reportId}
-                clientTimezone={rd?.context?.timezone || "UTC"}
+                clientTimezone={clientContext.timezone}
                 availablePlatforms={availablePlatforms}
                 availableLanguages={availableLanguages}
               />

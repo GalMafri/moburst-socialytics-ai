@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { canRetry, retryLabel } from "@/lib/reportRun";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useNavigate } from "react-router-dom";
@@ -26,6 +26,10 @@ export default function AllReports() {
   /** "all", or a client id. Both tabs follow it. */
   const [clientFilter, setClientFilter] = useState<string>("all");
 
+  const [socialLimit, setSocialLimit] = useState(50);
+  const [competitiveLimit, setCompetitiveLimit] = useState(50);
+  useEffect(() => { setSocialLimit(50); setCompetitiveLimit(50); }, [clientFilter]);
+
   // For client role, first get their assigned client IDs
   const { data: clientAccess } = useQuery({
     queryKey: ["my-clients", user?._id],
@@ -43,7 +47,7 @@ export default function AllReports() {
   const ready = !isClient || (isClient && clientAccess !== undefined);
 
   // The picker lists every client the viewer can see, not only the ones with a
-  // report in the last 50 rows, so choosing one is how you reach the older ones.
+  // report on the current page. The filter applies to both paginated lists.
   const { data: clientOptions } = useQuery({
     queryKey: ["report-filter-clients", isClient ? clientAccess : "all"],
     queryFn: async () => {
@@ -58,13 +62,14 @@ export default function AllReports() {
   });
 
   const { data: reports, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["all-reports", isClient ? clientAccess : "all", clientFilter],
+    queryKey: ["all-reports", isClient ? clientAccess : "all", clientFilter, socialLimit],
     queryFn: async () => {
       let query = supabase
         .from("reports")
         .select("*, clients(id, name)")
         .order("created_at", { ascending: false })
-        .limit(50);
+        .order("id", { ascending: false })
+        .range(socialLimit - 50, socialLimit);
       if (isClient && clientAccess && clientAccess.length > 0) {
         query = query.in("client_id", clientAccess);
       } else if (isClient) {
@@ -80,14 +85,15 @@ export default function AllReports() {
     enabled: ready,
   });
 
-  const { data: competitive, isLoading: competitiveLoading } = useQuery({
-    queryKey: ["all-competitive-reports", isClient ? clientAccess : "all", clientFilter],
+  const { data: competitive, isLoading: competitiveLoading, isError: competitiveFailed, error: competitiveError, refetch: refetchCompetitive } = useQuery({
+    queryKey: ["all-competitive-reports", isClient ? clientAccess : "all", clientFilter, competitiveLimit],
     queryFn: async () => {
       let query = supabase
         .from("competitive_reports")
         .select("id, client_id, status, created_at, date_range_start, date_range_end, duration_minutes, gamma_url, report_data, clients(id, name)")
         .order("created_at", { ascending: false })
-        .limit(50);
+        .order("id", { ascending: false })
+        .range(competitiveLimit - 50, competitiveLimit);
       if (isClient && clientAccess && clientAccess.length > 0) {
         query = query.in("client_id", clientAccess);
       } else if (isClient) {
@@ -155,7 +161,7 @@ export default function AllReports() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {reports.map((r: any) => (
+                      {reports.slice(0, 50).map((r: any) => (
                         <TableRow key={r.id}>
                           <TableCell className="font-medium t-body">{r.clients?.name ?? "—"}</TableCell>
                           <TableCell className="t-body">{new Date(r.created_at).toLocaleDateString()}</TableCell>
@@ -171,10 +177,10 @@ export default function AllReports() {
                             <TableCell>
                               {r.gamma_url ? (
                                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
-                                  <ExternalLink className="h-3.5 w-3.5" /> View
+                                  <ExternalLink className="h-3.5 w-3.5" /> Presentation
                                 </Button>
                               ) : (
-                                <span className="t-secondary">Coming soon</span>
+                                <span className="t-secondary">{r.status === "running" || r.status === "pending" ? "Generating" : "Unavailable"}</span>
                               )}
                             </TableCell>
                           )}
@@ -182,7 +188,7 @@ export default function AllReports() {
                             <div className="flex items-center justify-end gap-1">
                               {r.status === "completed" && (
                                 <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.clients?.id}/reports/${r.id}`)}>
-                                  <Eye className="h-4 w-4 mr-1" /> View
+                                  <Eye className="h-4 w-4 mr-1" /> Open report
                                 </Button>
                               )}
                               {canRetry(r) && <RetryReportButton reportId={r.id} kind="monthly" label={retryLabel(r)} />}
@@ -203,6 +209,7 @@ export default function AllReports() {
                     }
                   />
                 )}
+                {!isLoading && !isError && (!!reports?.length || socialLimit > 50) && <div className="flex items-center justify-between gap-3 mt-4"><p className="t-secondary">Monthly reports {reports?.length ? `${socialLimit - 49}–${socialLimit - 50 + Math.min(reports.length, 50)}` : "— no more results"}{(reports?.length || 0) > 50 ? "; more available" : ""}.</p>{socialLimit > 50 && <Button variant="outline" onClick={() => setSocialLimit((n) => n - 50)}>Previous monthly reports</Button>}{(reports?.length || 0) > 50 && <Button variant="outline" onClick={() => setSocialLimit((n) => n + 50)}>Next monthly reports</Button>}</div>}
               </CardContent>
             </Card>
           </TabsContent>
@@ -215,6 +222,8 @@ export default function AllReports() {
               <CardContent>
                 {competitiveLoading ? (
                   <Loading label="Loading competitive analyses" />
+                ) : competitiveFailed ? (
+                  <LoadError title="Could not load competitive analyses" error={competitiveError} onRetry={() => refetchCompetitive()} />
                 ) : competitive && competitive.length > 0 ? (
                   <Table>
                     <TableHeader>
@@ -228,7 +237,7 @@ export default function AllReports() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {competitive.map((r: any) => {
+                      {competitive.slice(0, 50).map((r: any) => {
                         const rd = (r.report_data || {}) as any;
                         const period = rd.period?.start ? formatRange(rd.period) : r.date_range_start ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "—";
                         return (
@@ -245,7 +254,7 @@ export default function AllReports() {
                                 <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.client_id}/competitive/reports`)}>All runs</Button>
                                 {r.status !== "running" && (
                                   <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.client_id}/competitive/reports/${r.id}`)}>
-                                    <Eye className="h-4 w-4 mr-1" /> View
+                                    <Eye className="h-4 w-4 mr-1" /> Open report
                                   </Button>
                                 )}
                                 {canRetry(r) && <RetryReportButton reportId={r.id} kind="competitive" label={retryLabel(r)} />}
@@ -265,6 +274,7 @@ export default function AllReports() {
                     action={!isClient ? <Button onClick={() => navigate("/competitive")}>Go to competitive analysis</Button> : undefined}
                   />
                 )}
+                {!competitiveLoading && !competitiveFailed && (!!competitive?.length || competitiveLimit > 50) && <div className="flex items-center justify-between gap-3 mt-4"><p className="t-secondary">Competitive analyses {competitive?.length ? `${competitiveLimit - 49}–${competitiveLimit - 50 + Math.min(competitive.length, 50)}` : "— no more results"}{(competitive?.length || 0) > 50 ? "; more available" : ""}.</p>{competitiveLimit > 50 && <Button variant="outline" onClick={() => setCompetitiveLimit((n) => n - 50)}>Previous competitive analyses</Button>}{(competitive?.length || 0) > 50 && <Button variant="outline" onClick={() => setCompetitiveLimit((n) => n + 50)}>Next competitive analyses</Button>}</div>}
               </CardContent>
             </Card>
           </TabsContent>

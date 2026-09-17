@@ -1,0 +1,48 @@
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+import { applyQaPatches } from '../n8n/apply-qa-patches.mjs';
+const read = path => readFileSync(new URL('../'+path, import.meta.url),'utf8');
+const silent = {log(){},warn(){},error(){}};
+const checks=[];
+async function check(name,fn){await fn();checks.push(name)}
+const fixtures=Object.fromEntries(['social','competitive'].map(k=>[k,JSON.parse(read('n8n/fixtures/'+k+'-structure.json'))]));
+const social=applyQaPatches(fixtures.social,'social'),competitive=applyQaPatches(fixtures.competitive,'competitive');
+const node=(w,name)=>w.nodes.find(n=>n.name===name);
+const targets=(w,name,index=0)=>w.connections[name]?.main?.[index]?.map(c=>c.node)||[];
+async function code(name,input={},nodes={},extra={},context={}){
+ const source=read('n8n/code/'+name+'.js');
+ const fn=vm.runInNewContext('(async function(){'+source+'})',{$input:{first:()=>input},$runIndex:0,$:name=>({first:()=>({json:nodes[name]||{}})}),console:silent,...extra});
+ return (await fn.call(context))[0].json;
+}
+await check('patch refuses drifted versions',()=>assert.throws(()=>applyQaPatches({...fixtures.social,versionId:'changed'},'social'),/changed since QA/));
+await check('patch does not mutate the source export',()=>assert.equal(fixtures.social.nodes.length,34));
+for(const w of [social,competitive])await check(w.name+' graph has unique nodes and no dangling connections',()=>{const names=w.nodes.map(n=>n.name);assert.equal(new Set(names).size,names.length);for(const [source,connections] of Object.entries(w.connections)){assert(names.includes(source));for(const outputs of Object.values(connections))for(const connections of outputs)for(const c of connections || [])assert(names.includes(c.node),c.node);}});
+await check('Google Drive reads body.brief_file_id',()=>assert.match(node(social,'Get Client Brief from Drive').parameters.fileId.value,/body\?\.brief_file_id/));
+await check('no-file route skips Google Drive and no-text route skips AI',()=>{assert.deepEqual(targets(social,'Has Brief File',1),['Prepare Brief Text']);assert.deepEqual(targets(social,'Has Brief Text',1),['Combine Brief Context with Client Data']);assert.equal(node(social,'Analyze Client Brief Context').parameters.text,'={{ $json.brief_text }}');});
+await check('Google Docs text bytes reach the brief',async()=>{let reads=0;const r=await code('prepare-brief',{json:{},binary:{data:{mimeType:'text/plain'}}},{'Workflow Configuration':{body:{brief_file_id:'fixture'}}},{},{helpers:{getBinaryDataBuffer:async(i,key)=>{reads++;assert.equal(i,0);assert.equal(key,'data');return Buffer.from('Actual brief words')}}});assert.equal(reads,1);assert.equal(r.brief_text,'Actual brief words');assert.equal(r.brief_warning,'');});
+await check('PDF extraction text reaches the brief',async()=>{const r=await code('prepare-brief',{json:{text:'PDF brief words'}},{'Workflow Configuration':{body:{brief_file_id:'fixture'}}});assert.equal(r.brief_text,'PDF brief words');assert.equal(r.brief_source,'file');});
+await check('failed download uses saved text and a visible warning',async()=>{const r=await code('prepare-brief',{json:{error:'fixture'}},{'Workflow Configuration':{body:{brief_file_id:'fixture',brief_text:'Saved fallback'}}});assert.equal(r.brief_text,'Saved fallback');assert.match(r.brief_warning,/saved brief text was used/);});
+await check('unsupported file cannot become AI metadata-as-brief',async()=>{const r=await code('prepare-brief',{json:{id:'fixture',name:'brief.docx'},binary:{data:{mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}}},{'Workflow Configuration':{body:{brief_file_id:'fixture'}}});assert.equal(r.brief_text,'');assert.match(r.brief_warning,/could not be read/);});
+await check('no configured brief is a clean optional path',async()=>{const r=await code('prepare-brief',{json:{}},{'Workflow Configuration':{body:{}}});assert.equal(r.brief_text,'');assert.equal(r.brief_warning,'');});
+const context={'Workflow Configuration':{body:{client_name:'Fixture',date_range_start:'2026-09-01',date_range_end:'2026-09-07'}},'Prepare Brief Text':{brief_text:'Actual source text'}};
+await check('brief without brand voice still retains useful structured fields',async()=>{const r=await code('combine-brief',{json:{output:{brand_voice:null,target_audience:'Adults',content_themes:['Education']}}},context);assert.equal(r.brief_context.target_audience,'Adults');assert.equal(r.brief_context.content_themes[0],'Education');});
+await check('failed brief AI preserves extracted raw text with warning',async()=>{const r=await code('combine-brief',{json:{error:'Parser error'}},context);assert.equal(r.brief_context.raw_brief,'Actual source text');assert.match(r.brief_warning,/original text/);});
+for(const status of ['pending','queued','processing','running','in_progress'])await check('Gamma '+status+' polls but stops after twenty attempts',async()=>{const first=await code('check-gamma',{json:{status}},{},{$runIndex:0});const last=await code('check-gamma',{json:{status}},{},{$runIndex:19});assert.equal(first._gamma_poll_again,true);assert.equal(last._gamma_poll_again,false);assert.equal(last._gamma_timeout,true);});
+for(const status of ['completed','failed','unknown'])await check('Gamma '+status+' terminates polling',async()=>assert.equal((await code('check-gamma',{json:{status}}))._gamma_poll_again,false));
+await check('Gamma failure retains analysis and creation is not blindly retried',()=>{assert.equal(node(social,'Create Gamma Presentation').retryOnFail,false);assert.deepEqual(targets(social,'Create Gamma Presentation',1),['Generate Run Summary']);assert.deepEqual(targets(social,'Poll Gamma Again'),['Wait']);assert.deepEqual(targets(social,'Poll Gamma Again',1),['Generate Run Summary']);assert.match(node(social,'Fetch Gamma Result').parameters.url,/Create Gamma Presentation/);});
+await check('critical workflow failures write back then trigger the existing error handler',()=>{for(const name of ['Get Sprout Social Analytics Data','AI Synthesis Agent','Generate Run Summary'])assert.deepEqual(targets(social,name,1),['Mark Social Report Failed']);assert.equal(node(social,'Mark Social Report Failed').parameters.headerParameters.parameters[0].value,'fixture-secret');assert.deepEqual(targets(social,'Mark Social Report Failed'),['Stop Failed Social Run']);});
+await check('stored competitive dimensions use source numbers, not AI invented scores',()=>{
+ const source=node(competitive,'Assemble Report Data').parameters.jsCode;
+ const nodes={'Run Config':{report_id:'fixture',started_at:new Date().toISOString()},'Aggregate Competitive Data':{period:{start:'2026-09-09',end:'2026-09-15',days:7},companies:[{is_client:true,post_count:16,rivaliq_metrics:{audience:{current:14952}}},{post_count:7,rivaliq_metrics:{audience:{current:1000}}}]}};
+ const r=vm.runInNewContext('(function(){'+source+'})()',{$input:{first:()=>({json:{output:{benchmark_scorecard:{dimensions:[{dimension:'Audience',client:25}]}}}})},$:name=>({first:()=>({json:nodes[name]||{}})}),console:silent})[0].json;
+ const report=JSON.parse(r.body_string).report_data;assert.equal(report.ai_analysis.benchmark_scorecard.dimensions[0].client,14952);assert.equal(report.aggregates.companies[0].cadence_per_week,16);
+});
+
+await check('trend skip disables both actors despite configured keywords',async()=>{const r=await code('prepare-trends',{json:{skip_trends:true,social_keywords:['mobile marketing'],geo:['US']}});assert.equal(r.trend_inputs.tiktok,null);assert.equal(r.trend_inputs.instagram,null);assert.equal(r.trend_status.tiktok,'skipped');});
+await check('missing/blank/non-string keywords bypass actors',async()=>{for(const keywords of [[],['  ','#!!!'],[null,42]]){const r=await code('prepare-trends',{json:{social_keywords:keywords}});assert.equal(r.trend_inputs.tiktok,null);assert.equal(r.trend_inputs.instagram,null);assert.equal(r.trend_status.instagram,'missing_keywords');}});
+await check('enabled trends preserve nonempty actor inputs and original result limits',async()=>{const r=await code('prepare-trends',{json:{skip_trends:false,social_keywords:['mobile marketing','AI content'],trends_keywords:'growth, app marketing',geo:['US']}});assert.equal(r.trend_inputs.tiktok.resultsPerPage,50);assert(r.trend_inputs.tiktok.searchQueries.length>0);assert.equal(r.trend_inputs.instagram.resultsLimit,80);assert(r.trend_inputs.instagram.hashtags.length>0);assert(r.trend_inputs.instagram.hashtags.every(tag=>tag.length>0));});
+await check('Hebrew keywords remain usable hashtags',async()=>{const r=await code('prepare-trends',{json:{social_keywords:['שיווק דיגיטלי'],geo:['IL']}});assert.deepEqual(Array.from(r.trend_inputs.instagram.hashtags),['שיווק','דיגיטלי']);});
+await check('hashtag-only invalid inputs skip Instagram independently',async()=>{const r=await code('prepare-trends',{json:{social_keywords:['א'],geo:[]}});assert(r.trend_inputs.tiktok);assert.equal(r.trend_inputs.instagram,null);});
+await check('skipped trend branches preserve the merge inputs without running actors',()=>{assert.deepEqual(targets(social,'Run TikTok Trends',1),['Skip TikTok Trends']);assert.deepEqual(targets(social,'Run Instagram Trends',1),['Skip Instagram Trends']);assert.equal(social.connections['Skip TikTok Trends'].main[0][0].index,1);assert.equal(social.connections['Skip Instagram Trends'].main[0][0].index,2);assert.deepEqual(targets(social,'Run TikTok Trends'),['Run TikTok Scraper']);assert.deepEqual(targets(social,'Run Instagram Trends'),['Run IG Scraper']);});
+console.log(JSON.stringify({checks:checks.length,passed:checks.length},null,2));

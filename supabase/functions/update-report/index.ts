@@ -67,15 +67,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { data, error } = await supabase
-      .from("reports")
-      .update(updates)
-      .eq("id", report_id)
-      .select();
+    let query = supabase.from("reports").update(updates).eq("id", report_id);
+    if (status === "failed") query = query.neq("status", "completed");
+    const { data, error } = await query.select();
 
     if (error) throw error;
 
     if (!data || data.length === 0) {
+      if (status === "failed") return new Response(JSON.stringify({ ok: true, skipped: "No unfinished report to fail" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       return new Response(
         JSON.stringify({ error: "Report not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }

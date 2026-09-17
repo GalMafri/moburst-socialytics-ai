@@ -165,7 +165,21 @@ Deno.serve(async (req) => {
             .in("status", from);
         }
       }
-      return jsonResp({ ok: true, report: data[0] });
+      let schedulingWarning: string | undefined;
+      if (status === "complete") {
+        try {
+          const response = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/trigger-scheduled-reports`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET")! },
+            body: JSON.stringify({ resume_competitive_report_id: report_id }),
+          });
+          if (!response.ok) throw new Error(`Scheduler returned ${response.status}`);
+        } catch (error) {
+          schedulingWarning = "The competitive report is saved. Its waiting social schedule will be checked again by the daily scheduler.";
+          console.warn("[competitive schedule resume]", error);
+        }
+      }
+      return jsonResp({ ok: true, report: data[0], ...(schedulingWarning ? { warning: schedulingWarning } : {}) });
     }
 
     return jsonResp({ error: "op must be 'snapshot' or 'report'" }, 400);

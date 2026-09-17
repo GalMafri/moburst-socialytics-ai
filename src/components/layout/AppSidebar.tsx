@@ -1,4 +1,5 @@
-import { useNavigate, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { activeNavigationSection } from "@/lib/navigationSection";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Sidebar,
@@ -16,7 +17,6 @@ import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Cros
 import { PORTAL_URL } from "@/utils/gosAuth";
 
 export function AppSidebar() {
-  const navigate = useNavigate();
   const location = useLocation();
   const { isAdmin, isMoburstStaff, isClient, user, isGosSession } = useAuth();
 
@@ -36,14 +36,14 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="flex items-center justify-center h-[90px] border-b border-[rgba(255,255,255,0.05)] px-4 py-5 group-data-[collapsible=icon]:px-2">
-        <div className="cursor-pointer transition-opacity hover:opacity-80" onClick={() => navigate("/")} role="link" aria-label="Socialytics home">
+        <Link className="transition-opacity hover:opacity-80 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" to="/" aria-label="Socialytics home">
           <img
             src="/images/logo-dark.png"
             alt="Socialytics by Moburst"
             className="h-10 w-auto max-w-[200px] object-contain group-data-[collapsible=icon]:hidden"
           />
           <img src="/images/icon-192.png" alt="" className="hidden h-8 w-8 rounded-[8px] object-contain group-data-[collapsible=icon]:block" />
-        </div>
+        </Link>
       </SidebarHeader>
 
       <SidebarContent>
@@ -69,21 +69,25 @@ export function AppSidebar() {
                 </SidebarMenuItem>
               )}
               {navItems.map((item) => {
-                const isActive = item.href === "/" ? location.pathname === "/" : location.pathname.startsWith(item.href);
+                const section = activeNavigationSection(location.pathname);
+                const visibleSection = navItems.some((n) => n.href === section) ? section : "/";
+                const isActive = visibleSection === item.href;
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton
                       isActive={isActive}
+                      asChild
                       tooltip={item.label}
-                      onClick={() => navigate(item.href)}
                       className={`h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] transition-all ${
                         isActive
                           ? "nav-active text-white"
                           : "text-[#b1b7c1] opacity-80 hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]"
                       }`}
                     >
-                      <item.icon className="h-[24px] w-[24px]" />
-                      <span>{item.label}</span>
+                      <Link to={item.href} aria-current={isActive ? "page" : undefined}>
+                        <item.icon className="h-[24px] w-[24px]" />
+                        <span>{item.label}</span>
+                      </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
