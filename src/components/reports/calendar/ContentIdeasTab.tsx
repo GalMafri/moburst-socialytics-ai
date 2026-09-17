@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -11,7 +11,8 @@ import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
 import { GenerationProvider } from "./GenerationContext";
 import { GenerationProgress } from "./GenerationProgress";
 import type { ClientContext } from "@/lib/clientContext";
-import { cleanPostCopy, postCopyOf } from "@/lib/postCopy";
+import { applyCopyRevisions, calendarWithRevisions, iterationMatchesPost } from "@/lib/calendarRevision";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Props {
   contentCalendar: any[];
@@ -48,11 +49,12 @@ export function ContentIdeasTab({
    *  bulletproof — no copy-slice heuristic, no realtime lag dependency. */
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const qc = useQueryClient();
+  const { isMoburstStaff } = useAuth();
   const { toast } = useToast();
 
   useRealtimePostIterations(clientId);
 
-  const { data: postIterations = [] } = useQuery({
+  const { data: postIterations = [], isLoading: iterationsLoading, isError: iterationsFailed, refetch: reloadIterations } = useQuery({
     queryKey: ["post-iterations", clientId],
     queryFn: async () => {
       if (!clientId) return [];
@@ -133,8 +135,10 @@ export function ContentIdeasTab({
     },
   });
 
-  const activeIteration = activePost
-    ? findLatestSelectedIteration(postIterations as any, activePost)
+  const revisedCalendar = useMemo(() => calendarWithRevisions(contentCalendar, reportId, postIterations), [contentCalendar, reportId, postIterations]);
+  const currentPost = activePost ? applyCopyRevisions(activePost, postIterations) : null;
+  const activeIteration = currentPost
+    ? findLatestSelectedIteration(postIterations as any, currentPost)
     : null;
 
   // Force a fresh fetch when the panel opens for a new post. Defeats the
@@ -163,13 +167,8 @@ export function ContentIdeasTab({
             it.media_urls.length > 0,
         )
       : (postIterations as any[]).filter((it) => {
-          const matchingPlatform = (activePost.platform || "").toLowerCase();
-          const matchingCopy = postCopyOf(activePost)
-            .trim()
-            .slice(0, 200);
           return (
-            (it.platform || "").toLowerCase() === matchingPlatform &&
-            cleanPostCopy(it.post_copy).trim().slice(0, 200) === matchingCopy &&
+            iterationMatchesPost(it, currentPost!) &&
             it.media_urls &&
             it.media_urls.length > 0
           );
@@ -192,7 +191,7 @@ export function ContentIdeasTab({
       }}
     >
       <div className="space-y-4">
-        {availablePlatforms.length > 0 && clientId && (
+        {isMoburstStaff && availablePlatforms.length > 0 && clientId && (
           <div className="flex justify-end">
             <CreateAdHocPost
               clientId={clientId}
@@ -230,8 +229,8 @@ export function ContentIdeasTab({
         )}
 
         <div id="ideas-calendar" className="scroll-mt-[156px]">
-          <CalendarKanban
-            contentCalendar={contentCalendar}
+          {iterationsFailed ? <div role="alert" className="glass p-4 space-y-2"><p>Saved post changes could not be loaded. Reload them before editing or scheduling.</p><button className="underline" onClick={() => reloadIterations()}>Reload saved changes</button></div> : iterationsLoading ? <p role="status">Loading saved post changes…</p> : <CalendarKanban
+            contentCalendar={revisedCalendar}
             postIterations={postIterations as any}
             scheduledPosts={scheduledPosts as any}
             filters={filters}
@@ -243,18 +242,22 @@ export function ContentIdeasTab({
               setActiveGroupId(null);
             }}
             onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
-          />
+          />}
         </div>
 
         <PostPanel
-          open={!!activePost}
+          open={!!activePost && !iterationsFailed}
           onOpenChange={(open) => {
             if (!open) {
               setActivePost(null);
               setActiveGroupId(null);
             }
           }}
-          post={activePost}
+          post={currentPost}
+          onCopySaved={(updated) => {
+            setActivePost(updated);
+            qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
+          }}
           iteration={activeIteration}
           postIterations={activePostIterations}
           clientContext={clientContext}

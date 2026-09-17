@@ -499,7 +499,8 @@ export default function Analytics() {
                           <Sparkles className="h-4 w-4 text-primary" />
                         </div>
                         <div className="space-y-1">
-                          <p className="t-body font-semibold text-white">Key takeaway</p>
+                          <p className="t-body font-semibold text-white">Takeaway from the latest monthly report</p>
+                          <p className="t-label">Report period: {latestReport?.date_range_start || "Not recorded"} to {latestReport?.date_range_end || "Not recorded"}. This commentary describes that report, not the live Sprout window above.</p>
                           <p className="t-secondary leading-relaxed">
                             {formatNumbersInText(latestAISummary)}
                           </p>

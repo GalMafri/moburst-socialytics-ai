@@ -1,0 +1,125 @@
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
+const repo=path.resolve(process.env.QA_REPO || path.join(__dirname,'..'));
+const ts=require(path.join(repo,'node_modules/typescript'));
+const results=[];
+const silent={log(){},error(){},warn(){}};
+function moduleFrom(rel,deps={},globals={},transform=x=>x){
+ const source=transform(fs.readFileSync(path.join(repo,rel),'utf8'));
+ const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+ const exports={}; const context={exports,module:{exports},console:silent,Response,Request,Headers,URL,URLSearchParams,Date,Error,Number,JSON,Set,Map,fetch:()=>{throw Error('Outbound network forbidden')},...globals,require:name=>{if(name in deps)return deps[name];throw Error('Unmocked dependency: '+name)}};
+ vm.runInNewContext(js,context,{filename:rel});return exports;
+}
+async function check(id,kind,name,fn){try{const evidence=await fn();results.push({id,kind,name,result:'pass',evidence});}catch(e){results.push({id,kind,name,result:'FAIL',error:String(e),stack:e.stack});}}
+
+async function scheduling({media=[],denied=false,missing=false,uploadFailure=false,partial=false,recordFailure=false,providerFailure=false,scopeControl=false}={}){
+ let handler;const calls=[];let uploadIndex=0;
+ const query={select(){return this},eq(){return this},async single(){return{data:{sprout_customer_id:'fixture'}}},async insert(){calls.push('record');return{error:recordFailure?{message:'fixture insert rejected'}:null}}};
+ const deps={
+  'https://deno.land/x/xhr@0.1.0/mod.ts':{},
+  'https://deno.land/std@0.168.0/http/server.ts':{serve:f=>handler=f},
+  'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>({from:()=>query})},
+  '../_shared/sprout/customer.ts':{defaultSproutCustomerId:()=> 'fixture'},
+  '../_shared/auth/requireStaff.ts':{staffGate:async()=>denied?new Response('{}',{status:401}):null},
+ };
+ moduleFrom('supabase/functions/schedule-sprout-post/index.ts',deps,{Deno:{env:{get:()=> 'fixture'}},fetch:async(url,opts)=>{
+  const kind=url.includes('/publishing/posts')?'publish':url.includes('/media')?'media':'oauth';calls.push(kind);
+  if(kind==='oauth')return new Response(JSON.stringify({access_token:'fixture'}));
+  if(kind==='media'&&(uploadFailure||(partial&&uploadIndex++===0)))return new Response('{}',{status:422});
+  if(kind==='publish'&&providerFailure)return new Response(JSON.stringify({error:'fixture rejected'}),{status:400});
+  return new Response(JSON.stringify({id:'fixture'}));
+ }},source=>scopeControl?source.replace('    if (allMediaUrls.length > 0) {\n      const uploadedMedia: { id: string }[] = [];','    const uploadedMedia: { id: string }[] = [];\n    if (allMediaUrls.length > 0) {'):source);
+ const body=missing?{}:{client_id:'fixture-client',sprout_profile_id:1,post_content:'Fixture copy',scheduled_time:'2030-09-21T15:00:00Z',media_urls:media};
+ const r=await handler(new Request('https://fixture.invalid/schedule',{method:'POST',body:JSON.stringify(body)}));
+ return{status:r.status,body:await r.json(),calls};
+}
+
+function gamma(input,analysis={content_calendar:[{posts:[{copy:'Fixture'}]}]}){
+ const source=fs.readFileSync(path.join(repo,'n8n/code/social-summary.js'),'utf8');
+ return vm.runInNewContext('(function(){'+source+'})()',{
+  $input:{first:()=>({json:input})},$:(name)=>({first:()=>({json:name==='AI Synthesis Agent'?{output:analysis}:name==='Workflow Configuration'?{current_month_start:'2026-09-01',current_month_end:'2026-09-17'}:{}})}),console:silent
+ })[0].json;
+}
+function aggregate(start,end,count){
+ const source=fs.readFileSync(path.join(repo,'n8n/code/competitive-aggregate.js'),'utf8');
+ const nodes={'Run Config':{range_start:start,range_end:end,client_name:'Fixture'},'Resolve Landscape':{focus_company_id:1},'Landscape Companies':{companies:[{id:1,name:'Fixture'}]}};
+ return vm.runInNewContext('(function(){'+source+'})()',{$:name=>({first:()=>({json:nodes[name]||{}})}),$input:{first:()=>({json:{socialPosts:Array.from({length:count},(_,i)=>({companyId:1,channel:'instagram',message:'Fixture '+i,publishedAt:start+'T12:00:00Z'}))}})},console:silent})[0].json;
+}
+
+function database({order=['competitive','social'],due=true,feedError=false}={}){
+ const client={id:'fixture-client',name:'Fixture',primary_platforms:['instagram'],archived_at:null};
+ const old={id:'old-complete',client_id:client.id,status:'complete',created_at:'2026-08-07T07:00:00Z',report_data:{ai_analysis:{executive_summary:'Prior cycle'},aggregates:{companies:[]}}};
+ const tables={reports:[],competitive_reports:[old],app_settings:[{key:'n8n_webhook_url',value:'https://fixture.invalid/social'},{key:'competitive_n8n_webhook_url',value:'https://fixture.invalid/competitive'}],report_schedules:due?order.map((kind,i)=>({id:'schedule-'+i,client_id:client.id,clients:client,report_kind:kind,is_active:true,next_run_at:'2020-01-01T00:00:00Z',frequency:'monthly',range_mode:'previous_month',run_day_of_month:7})):[],clients:[client],competitor_sets:[{id:'fixture-set',client_id:client.id,status:'confirmed',confirmed_at:'2026-01-01',clients:client}],rivaliq_snapshots:feedError?[]:[{client_id:client.id,endpoint:'feed',fetched_at:new Date().toISOString()}],sprout_profiles:[],competitive_insight_feedback:[],competitors:[]};
+ const operations=[];
+ const db={async rpc(name,args){if(name!=='claim_report_schedule')throw Error('Unmocked RPC');const row=tables.report_schedules.find(r=>r.id===args.schedule_id && r.next_run_at===args.expected_next_run_at && r.is_active && !r.dispatch_claimed_at);if(row)row.dispatch_claimed_at=new Date().toISOString();return{data:!!row,error:null}},from(table){const filters=[];let mode='select',payload,one=false,limit=Infinity,sort;const q={
+  select(){return q},throwOnError(){return q},is(k,v){filters.push(r=>v===null?r[k]==null:r[k]===v);return q},eq(k,v){filters.push(r=>r[k]===v);return q},neq(k,v){filters.push(r=>r[k]!==v);return q},in(k,vs){filters.push(r=>vs.includes(r[k]));return q},lt(k,v){filters.push(r=>r[k]<v);return q},lte(k,v){filters.push(r=>r[k]<=v);return q},order(k,opt){sort={k,desc:opt?.ascending===false};return q},limit(v){limit=v;return q},insert(v){mode='insert';payload=v;return q},update(v){mode='update';payload=v;return q},single(){one=true;return q},maybeSingle(){one=true;return q},
+  then(resolve,reject){try{
+   const data=tables[table]||[];let rows=data.filter(r=>filters.every(fn=>fn(r)));
+   if(mode==='insert'){const row={id:'new-'+table+'-'+data.length,created_at:new Date().toISOString(),...payload};data.push(row);rows=[row];operations.push({table,mode,id:row.id});}
+   if(mode==='update'){rows.forEach(r=>Object.assign(r,payload));operations.push({table,mode,payload});}
+   if(sort)rows.sort((a,b)=>(a[sort.k]<b[sort.k]?-1:a[sort.k]>b[sort.k]?1:0)*(sort.desc?-1:1));rows=rows.slice(0,limit);
+   return Promise.resolve({data:one?(rows[0]||null):rows,error:null}).then(resolve,reject);
+  }catch(e){return Promise.reject(e).then(resolve,reject)}}};return q}};
+ return{db,tables,operations};
+}
+function payloadModule(){return moduleFrom('supabase/functions/_shared/reports/payloads.ts',{'../sprout/customer.ts':{defaultSproutCustomerId:()=> 'fixture'},'../competitive/reportMetrics.ts':moduleFrom('supabase/functions/_shared/competitive/reportMetrics.ts')});}
+function actualStaffGuard({staff=true,valid=true,canWrite=true,roleError=false}={}){
+ const authz=moduleFrom('supabase/functions/_shared/auth/authz.ts');
+ const caller={auth:{getUser:async()=>({data:{user:valid?{id:'fixture-user'}:null},error:null})},rpc:async(name)=>({data:name==='is_moburst_staff'?staff:canWrite,error:roleError?{message:'Fixture role lookup failed'}:null})};
+ return moduleFrom('supabase/functions/_shared/auth/requireStaff.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>caller},'./authz.ts':authz},{Deno:{env:{get:()=> 'fixture'}}});
+}
+async function runScheduler(options={}){
+ const state=options.state || database(options);let handler;const requests=[];
+ moduleFrom('supabase/functions/trigger-scheduled-reports/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/auth/secretEquals.ts':{secretEquals:async()=>options.authorized!==false}},{Deno:{env:{get:()=> 'https://fixture.invalid'},serve:f=>handler=f},fetch:async(url,opts)=>{
+  requests.push({url,payload:JSON.parse(opts.body),newCompetitiveStatus:state.tables.competitive_reports.at(-1).status});
+  if(url.includes('refresh-competitor-feed'))return new Response(JSON.stringify({error:'Fixture landscape missing'}),{status:422});
+  if(options.transport==='throw')throw Error('Fixture network failure');
+  if(options.transport==='reject')return new Response('{}',{status:503});
+  if(options.immediate && url.endsWith('/competitive'))Object.assign(state.tables.competitive_reports.at(-1),{status:'complete',report_data:{ai_analysis:{executive_summary:'Fresh analysis'}}});
+  return new Response(JSON.stringify({accepted:true}),{status:200});
+ }});
+ const response=await handler(new Request('https://fixture.invalid/scheduler'+(options.dryRun?'?dry_run=1':''),{method:'POST',body:JSON.stringify(options.body||{})}));return{...state,requests,status:response.status,body:await response.json()};
+}
+async function runManual(transport){
+ const state=database();let handler;
+ class AuthzError extends Error{constructor(status,message){super(message);this.status=status;}}
+ moduleFrom('supabase/functions/run-report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>({userId:'fixture-user'})},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/competitive/rivaliqLandscape.ts':{bestLandscapeMatch(){},summarizeLandscapes(){}}},{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},fetch:async()=>{if(transport==='late-completed'){state.tables.reports.at(-1).status='completed';throw new Error('Timeout after callback')};if(transport==='throw')throw new Error('Fixture network failure');return new Response('{}',{status:transport==='reject'?503:200})}});
+ const response=await handler(new Request('https://fixture.invalid/run',{method:'POST',body:JSON.stringify({client_id:'fixture-client',kind:'social',date_range_start:'2026-09-01',date_range_end:'2026-09-15'})}));
+ return{status:response.status,body:await response.json(),reportStatus:state.tables.reports.at(-1)?.status};
+}
+
+async function runCallback(state,kind,status,reportId,{authorized=true,resume=true}={}){
+ let handler;const requests=[];
+ moduleFrom('supabase/functions/update-'+(kind==='competitive'?'competitive-':'')+'report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/secretEquals.ts':{secretEquals:async()=>authorized}},{Deno:{env:{get:()=> 'https://fixture.invalid'},serve:f=>handler=f},fetch:async(url,opts)=>{requests.push({url,body:JSON.parse(opts.body)});if(!resume)throw Error('Scheduler unavailable');const r=await runScheduler({state,body:JSON.parse(opts.body)});return new Response(JSON.stringify(r.body),{status:r.status});}});
+ const response=await handler(new Request('https://fixture.invalid/callback',{method:'POST',body:JSON.stringify({op:'report',report_id:reportId,status,report_data:{ai_analysis:{executive_summary:'Completed fixture'}}})}));
+ return{status:response.status,body:await response.json(),requests};
+}
+(async()=>{
+ for(const [name,options,header,expected] of [['client rejected',{staff:false},'Bearer fixture',403],['staff allowed',{},'Bearer fixture',null],['expired session rejected',{valid:false},'Bearer fixture',401],['missing session rejected',{},null,401],['role error fails closed',{roleError:true},'Bearer fixture',500]])await check('QA-13','control','actual staff guard: '+name,async()=>{const g=actualStaffGuard(options);const response=await g.staffGate(new Request('https://fixture.invalid',{headers:header?{Authorization:header}:{}}),{});assert.equal(response?.status??null,expected);});
+ for(const options of [{},{media:['https://fixture.invalid/image.png']},{media:['a','b'],partial:true},{media:['a'],uploadFailure:true},{recordFailure:true},{providerFailure:true},{missing:true},{denied:true}])await check('QA-01','regression','publishing '+JSON.stringify(options),async()=>{const r=await scheduling(options);assert.equal(r.status,options.denied?401:options.missing?400:options.uploadFailure?502:options.providerFailure?500:200);assert.equal(r.calls.filter(x=>x==='publish').length,options.denied||options.missing||options.uploadFailure?0:1);if(options.recordFailure)assert.equal(r.body.recorded,false);if(options.partial)assert.equal(r.body.media_dropped,1);});
+ for(const status of ['pending','failed','completed'])await check('QA-07','regression',status+' never fabricates a presentation URL',()=>{const r=gamma({status,generationId:'fixture-job'});assert.equal(r.gamma_url,null);assert.equal(r.gamma_status,'failed');assert.equal(r.status,'success');assert.equal(r.warnings.length,1);});
+ await check('QA-07','control','completed uses real document URL',()=>{const r=gamma({status:'completed',gammaUrl:'https://gamma.app/docs/fixture-document'});assert.equal(r.gamma_url,'https://gamma.app/docs/fixture-document');assert.equal(r.gamma_status,'success');assert.equal(r.warnings.length,0);});
+ await check('QA-07','control','missing analysis is a report failure',()=>assert.equal(gamma({status:'failed'},{}).status,'failed'));
+ await check('QA-07','regression','timeout retains usable analysis with warning',()=>{const r=gamma({status:'pending',_gamma_timeout:true});assert.equal(r.status,'success');assert.equal(r.gamma_status,'timed_out');assert.match(r.warnings[0],/timed out/);});
+ for(const [start,end,count,days,cadence] of [['2026-09-09','2026-09-15',16,7,16],['2024-02-01','2024-02-29',29,29,7],['2026-09-09','2026-09-09',7,1,49],['2026-09-09','2026-09-15',0,7,0]])await check('QA-08','regression','inclusive cadence '+start+' '+end,()=>{const r=aggregate(start,end,count);assert.equal(r.period.days,days);assert.equal(r.companies[0].cadence_per_week,cadence);});
+ for(const order of [['competitive','social'],['social','competitive']])await check('QA-10','regression','hold social until fresh competitive completes '+order,async()=>{const r=await runScheduler({order});assert.equal(r.status,200);assert.equal(r.requests.filter(x=>x.url.endsWith('/social')).length,0);assert.equal(r.body.triggered,1);const comp=r.tables.competitive_reports.at(-1);assert.equal(comp.status,'running');const schedule=r.tables.report_schedules.find(x=>x.report_kind==='social');assert.equal(schedule.pending_competitive_report_id,comp.id);assert.equal(schedule.next_run_at,'2020-01-01T00:00:00Z');comp.status='complete';comp.report_data={ai_analysis:{executive_summary:'Fresh cycle'}};const resumed=await runScheduler({state:r,body:{resume_competitive_report_id:comp.id}});assert.equal(resumed.body.triggered,1);const social=resumed.requests.find(x=>x.url.endsWith('/social'));assert.equal(social.payload.competitive_report_id,comp.id);assert.equal(social.payload.competitive_context.executive_summary,'Fresh cycle');assert.equal(schedule.pending_competitive_report_id,null);const duplicate=await runScheduler({state:r,body:{resume_competitive_report_id:comp.id}});assert.equal(duplicate.requests.length,0);});
+ await check('QA-10','control','social-only schedule still runs',async()=>{const r=await runScheduler({order:['social']});assert.equal(r.body.triggered,1);assert.equal(r.requests[0].payload.competitive_report_id,'old-complete');});
+ await check('QA-10','control','immediate competitive completion uses fresh result',async()=>{const r=await runScheduler({immediate:true});assert.equal(r.body.triggered,2);assert.equal(r.requests[1].payload.competitive_context.executive_summary,'Fresh analysis');});
+ await check('QA-10','control','missing competitor set holds both due schedules',async()=>{const state=database();state.tables.competitor_sets=[];const r=await runScheduler({state});assert.equal(r.requests.length,0);assert(r.tables.report_schedules.every(x=>x.next_run_at==='2020-01-01T00:00:00Z'));});
+ await check('QA-10','control','already claimed schedule is not dispatched',async()=>{const state=database({order:['social']});state.tables.report_schedules[0].dispatch_claimed_at='2026-09-01';const r=await runScheduler({state});assert.equal(r.requests.length,0);assert.equal(r.body.triggered,0);});
+ await check('QA-10','control','dry run makes no writes or outbound calls',async()=>{const r=await runScheduler({dryRun:true,feedError:true});assert.equal(r.operations.length,0);assert.equal(r.requests.length,0);assert.equal(r.body.triggered,0);});
+ await check('QA-10','control','wrong secret is rejected before writes',async()=>{const r=await runScheduler({authorized:false});assert.equal(r.status,401);assert.equal(r.operations.length,0);assert.equal(r.requests.length,0);});
+ await check('QA-10','control','explicit dependency cannot use another client report',async()=>{const state=database();state.tables.competitive_reports[0].client_id='other';await assert.rejects(()=>payloadModule().buildSocialPayload({supabase:state.db,client:state.tables.clients[0],reportId:'fixture',range:{},competitiveReportId:'old-complete'}),/required competitive/);});
+ await check('QA-11','regression','failed feed returns a failing scheduler response',async()=>{const r=await runScheduler({due:false,feedError:true});assert.equal(r.status,502);assert.equal(r.body.failed,1);assert.equal(r.body.triggered,0);});
+ for(const transport of ['throw','reject'])await check('QA-11','regression','failed scheduler dispatch '+transport,async()=>{const r=await runScheduler({order:['social'],transport});assert.equal(r.status,502);assert.equal(r.tables.reports[0].status,'failed');assert.equal(r.body.triggered,0);});
+ for(const transport of ['throw','reject','accept','late-completed'])await check('QA-11','regression','manual dispatch '+transport,async()=>{const r=await runManual(transport);assert.equal(r.status,transport==='reject'?502:transport==='accept'?200:500);assert.equal(r.reportStatus,transport==='accept'?'running':transport==='late-completed'?'completed':'failed');});
+
+ await check('QA-10','regression','actual completion callback resumes the pinned social schedule',async()=>{const r=await runScheduler();const id=r.tables.competitive_reports.at(-1).id;const callback=await runCallback(r,'competitive','complete',id);assert.equal(callback.status,200);assert.equal(callback.requests[0].body.resume_competitive_report_id,id);assert.equal(r.tables.reports.length,1);await runCallback(r,'competitive','complete',id);assert.equal(r.tables.reports.length,1);});
+ await check('QA-10','regression','failed competitive dependency blocks social with visible failure',async()=>{const r=await runScheduler();r.tables.competitive_reports.at(-1).status='failed';const blocked=await runScheduler({state:r});assert.equal(blocked.status,502);assert.equal(blocked.requests.length,0);assert.equal(r.tables.reports.length,0);assert.equal(r.tables.report_schedules.find(s=>s.report_kind==='social').next_run_at,'2020-01-01T00:00:00Z');});
+ await check('QA-10','control','callback scheduler failure preserves completed competitive report',async()=>{const r=await runScheduler();const id=r.tables.competitive_reports.at(-1).id;const callback=await runCallback(r,'competitive','complete',id,{resume:false});assert.equal(callback.status,200);assert(callback.body.warning);assert.equal(r.tables.competitive_reports.at(-1).status,'complete');assert.equal(r.tables.reports.length,0);});
+ await check('QA-11','regression','social failure callback closes running row',async()=>{const state=database();state.tables.reports.push({id:'fixture',status:'running'});const callback=await runCallback(state,'social','failed','fixture');assert.equal(callback.status,200);assert.equal(state.tables.reports[0].status,'failed');});
+ await check('QA-11','regression','late social failure cannot erase a completed report',async()=>{const state=database();state.tables.reports.push({id:'fixture',status:'completed',report_data:{keep:'original'}});const callback=await runCallback(state,'social','failed','fixture');assert.equal(callback.status,200);assert.equal(state.tables.reports[0].status,'completed');assert.equal(state.tables.reports[0].report_data.keep,'original');});
+ await check('QA-11','control','unauthorized callback cannot change report',async()=>{const state=database();state.tables.reports.push({id:'fixture',status:'running'});const callback=await runCallback(state,'social','failed','fixture',{authorized:false});assert.equal(callback.status,401);assert.equal(state.tables.reports[0].status,'running');});
+ await check('QA-10','regression','delayed completion retains the competitive report period',async()=>{const r=await runScheduler();const comp=r.tables.competitive_reports.at(-1);comp.status='complete';comp.date_range_start='2026-07-01';comp.date_range_end='2026-07-31';const resumed=await runScheduler({state:r,body:{resume_competitive_report_id:comp.id}});assert.equal(resumed.requests[0].payload.date_range_start,'2026-07-01');assert.equal(resumed.requests[0].payload.date_range_end,'2026-07-31');});
+ const report={checks:results.length,passed:results.filter(x=>x.result==='pass').length,failed:results.filter(x=>x.result==='FAIL')};
+ console.log(JSON.stringify(report,null,2));if(report.failed.length)process.exitCode=1;
+})();

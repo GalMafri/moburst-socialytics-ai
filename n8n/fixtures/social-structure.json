@@ -1,0 +1,865 @@
+{
+  "id": "SZbRTV7yOdXTNHHf",
+  "name": "Socialytics - AI Social Media Trend Analysis + Insights Agent - Loveable - Final",
+  "versionId": "9bea04c7-81c8-40b7-8ecc-179847c5f5d5",
+  "nodes": [
+    {
+      "id": "9055fa15-76dd-4665-b47c-9da80d3e5391",
+      "name": "Get Previous Month Sprout Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "retryOnFail": true,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "760557f3-8296-4c29-801d-b29f5f8a2d88",
+      "name": "Run TikTok Scraper",
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "onError": "continueRegularOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "apifyOAuth2Api": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "cdfb3259-8af0-4812-bb78-075d59f49686",
+      "name": "Run IG Scraper",
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "onError": "continueRegularOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "apifyOAuth2Api": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "5b52586a-8344-4245-a7cf-55fd5db7f454",
+      "name": "Combine Brief Context with Client Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "ebb964d5-3072-411c-a642-4b79d4ecd863",
+      "name": "Get Sprout Social Post Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "retryOnFail": true,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "842ed79c-fc78-4199-ad5a-6f2a8958b509",
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "697ccb94-9588-4b92-b250-8496a8d9b6e2",
+      "name": "Get Client Brief from Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "old-expression"
+        }
+      },
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "d827524c-1967-446b-b3d0-435bd41f50a2",
+      "name": "Brief Context Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "40ff9b3d-6606-4e32-a505-7a3b4fc66131",
+      "name": "OpenAI GPT-4 for Brief Analysis",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "b8c570cb-c2e4-4ef8-9ada-4a3f6e1fc2f0",
+      "name": "Analyze Client Brief Context",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "onError": "continueRegularOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "d5795ff5-376e-46c2-b4d9-7ef01f0ea375",
+      "name": "Format Report Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "76976ef8-f58e-4ef6-b266-fdff8db1767f",
+      "name": "Structured JSON Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "04f84e87-7a80-4629-bde2-ad81895e24bc",
+      "name": "OpenAI GPT-4",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "1b765107-1072-4aef-933b-c0b2363ead19",
+      "name": "AI Synthesis Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "onError": "continueRegularOutput",
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "88449ce6-138f-43a9-bf49-498a7f792115",
+      "name": "Build Normalized Client Object",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "45e07451-5302-4612-b37b-25edd64b1fe4",
+      "name": "Merge All Data Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "cb760ffa-f101-49b0-8d3b-08fc437b234a",
+      "name": "Normalize Instagram Trends",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "431de934-3ecb-41d2-b7ce-bee5337a9319",
+      "name": "Normalize TikTok Trends",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "72c525cb-6fb4-4d15-9770-aacb533ad05f",
+      "name": "Aggregate Sprout Social Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "cdc67178-b8b0-45d9-b827-0f0339cd8e77",
+      "name": "Get Sprout Social Analytics Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "retryOnFail": true,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "a9d976ce-9d39-49af-a2f6-ebf8ed35e4b0",
+      "name": "Workflow Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "40416608-c0cb-4521-833c-5150321e4feb",
+      "name": "Build Presentation Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "7dd5e439-ef7c-475e-88f3-d4d96e4fc18b",
+      "name": "Create Gamma Presentation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "bebb445b-b0c5-42e0-9119-a8c1e15dcfad",
+      "name": "Generate Run Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "5f9f6bbe-0c60-4e94-b310-4920f9e165c9",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "cf0c9f9d-e0de-499f-a7a7-64b9a47ecd80",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "3cce552b-3638-4d6f-bd0b-98fa1c6e3914",
+      "name": "Merge1",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "0b60e614-0d7c-401b-9541-fe8e5afefb5e",
+      "name": "Fetch Gamma Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "retryOnFail": true,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "6bf0a458-a946-43e5-8dbc-5a6a0aadf492",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "retryOnFail": true,
+      "parameters": {
+        "url": "https://fixture.invalid/update-report",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Socialytics-Secret",
+              "value": "fixture-secret"
+            }
+          ]
+        },
+        "jsonBody": "old-expression"
+      },
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "69b2e4ed-a238-47ed-9eda-ab8e129983f4",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "4372f9fa-7616-4de4-93db-b5f27ccdf28a",
+      "name": "Get Previous Month Post Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "retryOnFail": true,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "fixture",
+          "name": "Fixture only"
+        }
+      }
+    },
+    {
+      "id": "51b750df-27d8-45fa-b5e9-1dc64d81d4d2",
+      "name": "Attach Competitive Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "12bdc892-10fd-48e5-81d7-6148e2f6c686",
+      "name": "Stagger scheduled runs",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "0c800442-0691-4884-95e8-099c0d99c4f8",
+      "name": "Attach Post Thumbnails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {},
+      "position": [
+        0,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Combine Brief Context with Client Data": {
+      "main": [
+        [
+          {
+            "node": "Run TikTok Scraper",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Run IG Scraper",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Get Sprout Social Analytics Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Previous Month Sprout Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Previous Month Sprout Analytics": {
+      "main": [
+        [
+          {
+            "node": "Get Previous Month Post Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Sprout Social Post Analytics": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Client Brief from Drive": {
+      "main": [
+        [
+          {
+            "node": "Analyze Client Brief Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Client Brief Context": {
+      "main": [
+        [
+          {
+            "node": "Combine Brief Context with Client Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brief Context Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Analyze Client Brief Context",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI GPT-4 for Brief Analysis": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analyze Client Brief Context",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Report Content": {
+      "main": [
+        [
+          {
+            "node": "Build Presentation Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Synthesis Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Report Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured JSON Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Synthesis Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI GPT-4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Synthesis Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run TikTok Scraper": {
+      "main": [
+        [
+          {
+            "node": "Normalize TikTok Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run IG Scraper": {
+      "main": [
+        [
+          {
+            "node": "Normalize Instagram Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge All Data Sources": {
+      "main": [
+        [
+          {
+            "node": "Build Normalized Client Object",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Instagram Trends": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Normalize TikTok Trends": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Sprout Social Analytics Data": {
+      "main": [
+        [
+          {
+            "node": "Get Sprout Social Post Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Configuration": {
+      "main": [
+        [
+          {
+            "node": "Get Client Brief from Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Presentation Content": {
+      "main": [
+        [
+          {
+            "node": "Create Gamma Presentation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Gamma Presentation": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Run Summary": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Fetch Gamma Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Sprout Social Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Gamma Result": {
+      "main": [
+        [
+          {
+            "node": "Generate Run Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured JSON Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Previous Month Post Analytics": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Normalized Client Object": {
+      "main": [
+        [
+          {
+            "node": "Attach Competitive Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Competitive Context": {
+      "main": [
+        [
+          {
+            "node": "AI Synthesis Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Stagger scheduled runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stagger scheduled runs": {
+      "main": [
+        [
+          {
+            "node": "Workflow Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Sprout Social Data": {
+      "main": [
+        [
+          {
+            "node": "Attach Post Thumbnails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Post Thumbnails": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

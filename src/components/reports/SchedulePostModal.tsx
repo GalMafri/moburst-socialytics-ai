@@ -10,6 +10,8 @@ import { Calendar, Clock, Send, Loader2, Image as ImageIcon, AlertCircle } from 
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { localDateString, scheduledInstant } from "@/lib/calendarDate";
+import { postCopyOf } from "@/lib/postCopy";
 
 interface SchedulePostModalProps {
   open: boolean;
@@ -48,6 +50,7 @@ export function SchedulePostModal({
   const [postContent, setPostContent] = useState("");
   const [mediaUrls, setMediaUrls] = useState<string[]>([]);
   const [scheduling, setScheduling] = useState(false);
+  const mediaSignature = JSON.stringify(generatedMediaUrls);
 
   const postPlatform = (post?.platform || "").toLowerCase();
   const matchingNetworkTypes = platformToNetworkTypes[postPlatform] || [postPlatform];
@@ -138,7 +141,7 @@ export function SchedulePostModal({
   useEffect(() => {
     if (open && post) {
       // Build full post content: copy + hashtags (only if not already in copy)
-      let content = (post.copy || "").trim();
+      let content = postCopyOf(post).trim();
       if (post.hashtags?.length) {
         const tags = post.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`);
         // Check if hashtags are already present in the copy to avoid duplication
@@ -148,11 +151,13 @@ export function SchedulePostModal({
         }
       }
       setPostContent(content);
-      setMediaUrls(generatedMediaUrls.length > 0 ? generatedMediaUrls : []);
+      setMediaUrls(JSON.parse(mediaSignature));
+      setScheduledDate("");
+      setScheduledTime("");
       if (post.date_label) {
         try {
           const d = new Date(post.date_label);
-          if (!isNaN(d.getTime())) setScheduledDate(d.toISOString().split("T")[0]);
+          if (!isNaN(d.getTime())) setScheduledDate(/^\d{4}-\d{2}-\d{2}$/.test(post.date_label) ? post.date_label : localDateString(d));
         } catch { setScheduledDate(""); }
       }
       if (post.posting_time) {
@@ -166,7 +171,7 @@ export function SchedulePostModal({
         }
       }
     }
-  }, [open, post, generatedMediaUrls]);
+  }, [open, post, mediaSignature]);
 
   const selectedProfile = displayProfiles.find((p: any) => String(p.id) === selectedProfileId);
 
@@ -176,14 +181,15 @@ export function SchedulePostModal({
     if (!scheduledDate || !scheduledTime) { toast.error("Please set date and time"); return; }
     setScheduling(true);
     try {
-      const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`);
+      const scheduledTimeIso = scheduledInstant(scheduledDate, scheduledTime, clientTimezone);
+      if (new Date(scheduledTimeIso).getTime() <= Date.now()) throw new Error("Choose a future date and time.");
       const { data, error } = await supabase.functions.invoke("schedule-sprout-post", {
         body: {
           client_id: clientId,
           report_id: reportId,
           sprout_profile_id: Number(selectedProfileId),
           platform: post.platform,
-          scheduled_time: scheduledDateTime.toISOString(),
+          scheduled_time: scheduledTimeIso,
           post_content: postContent,
           media_urls: mediaUrls.length > 0 ? mediaUrls : undefined,
           media_url: mediaUrls.length === 1 ? mediaUrls[0] : undefined,

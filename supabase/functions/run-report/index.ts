@@ -26,6 +26,8 @@ type Kind = "social" | "competitive";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  let closeStartedRun: ((message: string) => Promise<void>) | undefined;
+  const attemptStartedAt = new Date().toISOString();
   try {
     const body = await req.json();
     const retryId: string | undefined = body.report_id || undefined;
@@ -121,6 +123,16 @@ Deno.serve(async (req) => {
     let payload: Record<string, unknown>;
     /** Set moved to 'analyzing' by this call, so it can be released again. */
     let startedSetId: string | null = null;
+    const rememberStartedRun = (id: string, setId?: string) => {
+      const table = kind === "competitive" ? "competitive_reports" : "reports";
+      closeStartedRun = async (message) => {
+        const { error } = await admin.from(table)
+          .update({ status: "failed", report_data: { error: message } })
+          .eq("id", id).eq("status", "running").eq("created_at", attemptStartedAt);
+        if (error) console.error("Could not record run failure:", error.message);
+        if (setId) await admin.from("competitor_sets").update({ status: "failed" }).eq("id", setId).eq("status", "analyzing");
+      };
+    };
 
     if (kind === "competitive") {
       // The set the failed run used, or the client's current confirmed one.
@@ -175,7 +187,7 @@ Deno.serve(async (req) => {
           .from("competitive_reports")
           // The clock restarts with the run: the row now IS this attempt, and
           // a stale created_at would leave a fresh run reading as stuck.
-          .update({ status: "running", report_data: {}, set_id: set.id, date_range_start: range.start, date_range_end: range.end, created_at: new Date().toISOString() })
+          .update({ status: "running", report_data: {}, set_id: set.id, date_range_start: range.start, date_range_end: range.end, created_at: attemptStartedAt })
           .eq("id", reportId);
         if (error) throw new Error(error.message);
       } else {
@@ -184,13 +196,14 @@ Deno.serve(async (req) => {
           // created_by defaults to auth.uid(), which is NULL under the
           // service role, so the author is set explicitly. The browser-side
           // insert this path replaced got one for free.
-          .insert({ client_id: clientId, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: caller.userId })
+          .insert({ client_id: clientId, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: caller.userId, created_at: attemptStartedAt })
           .select("id")
           .single();
         if (error) throw new Error(error.message);
         reportId = data.id;
       }
       // The set follows its run, so a retry takes it out of 'failed'.
+      rememberStartedRun(reportId, set.id);
       await admin.from("competitor_sets").update({ status: "analyzing" }).eq("id", set.id).in("status", ["confirmed", "complete", "failed"]);
       startedSetId = set.id;
       payload = await buildCompetitivePayload({ supabase: admin, client, reportId, set, range });
@@ -200,19 +213,20 @@ Deno.serve(async (req) => {
         const { error } = await admin
           .from("reports")
           // Same here: the row is this attempt, so its clock starts now.
-          .update({ status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_at: new Date().toISOString() })
+          .update({ status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_at: attemptStartedAt })
           .eq("id", reportId);
         if (error) throw new Error(error.message);
       } else {
         const { data, error } = await admin
           .from("reports")
           // Same here: under the service role auth.uid() is NULL.
-          .insert({ client_id: clientId, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: caller.userId })
+          .insert({ client_id: clientId, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: caller.userId, created_at: attemptStartedAt })
           .select("id")
           .single();
         if (error) throw new Error(error.message);
         reportId = data.id;
       }
+      rememberStartedRun(reportId);
       payload = await buildSocialPayload({ supabase: admin, client, reportId, range, skipTrends });
     }
 
@@ -229,7 +243,7 @@ Deno.serve(async (req) => {
       await admin
         .from(table)
         .update({ status: "failed", report_data: { error: `The workflow did not accept the run (${resp.status}).` } })
-        .eq("id", reportId);
+        .eq("id", reportId).eq("status", "running").eq("created_at", attemptStartedAt);
       // The set was moved to 'analyzing' in anticipation of a run that never
       // started. Only an n8n callback ever moves it out of that state, and
       // none is coming, so it would sit there for ever — and a set stuck on
@@ -244,6 +258,10 @@ Deno.serve(async (req) => {
   } catch (err) {
     if (err instanceof AuthzError) return json({ error: err.message }, err.status);
     const msg = err instanceof Error ? err.message : String(err);
+    if (closeStartedRun) {
+      try { await closeStartedRun(`Dispatch could not be confirmed: ${msg}. Check the workflow before retrying.`); }
+      catch (cleanupError) { console.error("Failed to close run:", cleanupError); }
+    }
     console.error("[run-report]", msg);
     return json({ error: msg }, 500);
   }

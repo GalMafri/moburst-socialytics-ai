@@ -10,6 +10,7 @@
 // run. Every run now goes through here: manual, scheduled, and retried.
 
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
+import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
 /**
  * How long a run may sit on "running" before it is treated as dead.
  *
@@ -63,7 +64,7 @@ export function competitiveContext(
   feedback: InsightFeedbackRow[] = [],
 ): Record<string, unknown> | null {
   if (!reportRow?.report_data) return null;
-  const rd = reportRow.report_data as any;
+  const rd: any = normalizedCompetitiveMetrics(reportRow.report_data);
   const ai = rd.ai_analysis || {};
   const companies: any[] = rd.aggregates?.companies || [];
   const me = companies.find((c) => c.is_client);
@@ -143,6 +144,7 @@ export async function buildSocialPayload(args: {
   client: any;
   reportId: string;
   range: ReportRange;
+  competitiveReportId?: string;
   skipTrends?: boolean;
   scheduled?: boolean;
   staggerSeconds?: number;
@@ -153,14 +155,18 @@ export async function buildSocialPayload(args: {
     .select("*")
     .eq("client_id", client.id)
     .neq("is_active", false);
-  const { data: latestCompetitive } = await supabase
+  let competitiveQuery = supabase
     .from("competitive_reports")
     .select("id, created_at, report_data")
     .eq("client_id", client.id)
-    .eq("status", "complete")
+    .eq("status", "complete");
+  if (args.competitiveReportId) competitiveQuery = competitiveQuery.eq("id", args.competitiveReportId);
+  const { data: latestCompetitive, error: competitiveError } = await competitiveQuery
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (competitiveError) throw competitiveError;
+  if (args.competitiveReportId && !latestCompetitive) throw new Error("The required competitive report is not complete for this client.");
   const { data: feedback } = await supabase
     .from("competitive_insight_feedback")
     .select("insight_key, verdict, gap_text")
@@ -197,6 +203,7 @@ export async function buildSocialPayload(args: {
     date_range_end: range.end || "",
     skip_trends: args.skipTrends === true,
     timezone: client.timezone || "UTC",
+    competitive_report_id: latestCompetitive?.id || null,
     competitive_context: competitiveContext(latestCompetitive, (feedback || []) as InsightFeedbackRow[]),
     ...(args.scheduled ? { scheduled: true } : {}),
     ...(args.staggerSeconds ? { stagger_seconds: args.staggerSeconds } : {}),

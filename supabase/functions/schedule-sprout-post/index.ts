@@ -100,8 +100,8 @@ serve(async (req) => {
     };
 
     // Attach media if URLs provided (supports both https:// and data:image URLs)
+    const uploadedMedia: { id: string }[] = [];
     if (allMediaUrls.length > 0) {
-      const uploadedMedia: { id: string }[] = [];
       for (const url of allMediaUrls) {
         try {
           const mediaResponse = await fetch(`${SPROUT_API_BASE}/${customerId}/media`, {

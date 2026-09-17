@@ -1,0 +1,21 @@
+import fs from 'node:fs';
+const read=n=>fs.readFileSync(new URL('./code/'+n+'.js',import.meta.url),'utf8');
+const content='BT /F1 12 Tf 72 720 Td (Fixture PDF brief words) Tj ET';
+const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`];
+let pdf='%PDF-1.4\n';const offsets=[0];objects.forEach((o,i)=>{offsets.push(Buffer.byteLength(pdf));pdf+=`${i+1} 0 obj\n${o}\nendobj\n`});const xref=Buffer.byteLength(pdf);pdf+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n`+offsets.slice(1).map(n=>String(n).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+const code=["import {workflow,node,trigger,ifElse} from '@n8n/workflow-sdk';","const start=trigger({type:'n8n-nodes-base.manualTrigger',version:1,config:{name:'Manual fixture test'}});"];
+function add(v,name,js){code.push(`const ${v}=node(${JSON.stringify({type:'n8n-nodes-base.code',version:2,config:{name,parameters:{mode:'runOnceForAllItems',jsCode:js}}})});`)}
+add('config','Workflow Configuration',`return [{json:{body:{brief_file_id:'fixture'}},binary:{data:{data:'${Buffer.from('Fixture text brief words').toString('base64')}',mimeType:'text/plain',fileName:'brief.txt'}}}];`);
+add('brief','Prepare Brief Text',read('prepare-brief'));
+add('assertText','Assert Text Brief',"if ($json.brief_text !== 'Fixture text brief words' || $json.brief_warning) throw new Error('Text extraction failed'); return $input.all();");
+add('makePdf','Make PDF Fixture',`return [{json:{},binary:{data:{data:'${Buffer.from(pdf).toString('base64')}',mimeType:'application/pdf',fileName:'brief.pdf'}}}];`);
+code.push("const pdf=node({type:'n8n-nodes-base.extractFromFile',version:1,config:{name:'Extract Brief PDF',parameters:{operation:'pdf',options:{joinPages:true,keepSource:'both'}}}});");
+add('pdfBrief','Prepare PDF Brief Text',read('prepare-brief'));
+add('assertPdf','Assert PDF Brief',"if (!$json.brief_text.includes('Fixture PDF brief words') || $json.brief_warning) throw new Error('PDF extraction failed'); return [{json:{status:'pending'}}];");
+add('mockGamma','Pending Gamma Fixture',"return [{json:{status:'pending'}}];");
+add('check','Check Gamma State',read('check-gamma'));
+code.push("const again=ifElse({version:2.2,config:{name:'Poll Gamma Again',parameters:{conditions:{options:{caseSensitive:true,leftValue:'',typeValidation:'strict'},conditions:[{leftValue:'={{ $json._gamma_poll_again }}',operator:{type:'boolean',operation:'true',singleValue:true}}],combinator:'and'},options:{}}}});");
+add('assertPoll','Assert Bounded Polling',"if ($json._gamma_attempt !== 20 || !$json._gamma_timeout || $json._gamma_poll_again) throw new Error('Polling bound failed'); return [{json:{passed:true,plain_text_brief:true,pdf_brief:true,poll_attempts:$json._gamma_attempt,external_calls:0}}];");
+code.push("export default workflow('qa-socialytics-runtime','TEMP QA Socialytics isolated runtime').add(start.to(config).to(brief).to(assertText).to(makePdf).to(pdf).to(pdfBrief).to(assertPdf).to(mockGamma).to(check).to(again.onTrue(mockGamma).onFalse(assertPoll)));");
+if (!process.argv[2]) throw new Error('Usage: node n8n/runtime-qa.mjs OUTPUT.mjs');
+fs.writeFileSync(process.argv[2],code.join('\n'),{flag:'wx'});

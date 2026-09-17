@@ -302,7 +302,7 @@ export default function CompetitiveFeed() {
             {visible.length === 0 ? (
               <div className="glass-inner p-4"><p className="t-body">No posts match these filters.</p></div>
             ) : (
-              <div className="grid gap-4 grid-cols-2 md:grid-cols-3 xl:grid-cols-4 items-start">
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start">
                 {visible.map((p, i) => (
                   <div key={`${p.postLink || i}`} className="glass p-3 space-y-2.5">
                     <PostVisual url={p.postLink} image={p.image} preview={p.postLink ? previews[p.postLink] : null} mediaType={p.type} platform={p.channel} />
@@ -319,12 +319,12 @@ export default function CompetitiveFeed() {
                       {p.estimatedImpressions ? <span>· {fmt(p.estimatedImpressions)} est. impr.</span> : null}
                       {p.views ? <span>· {fmt(p.views)} views</span> : null}
                     </div>
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       {p.postLink ? (
                         <a href={p.postLink} target="_blank" rel="noreferrer" className="t-label text-primary hover:underline inline-flex items-center gap-1">Open <ExternalLink className="h-3 w-3" /></a>
                       ) : <span />}
                       {canRunAnalysis && (
-                        <Button size="sm" variant="outline" className="h-7 t-label" disabled={draft.isPending} onClick={() => draft.mutate({ topic: topicFor(p), platform: platformLabel(p.channel) })}>
+                        <Button size="sm" variant="outline" className="min-h-10 h-auto t-label whitespace-normal" disabled={draft.isPending} onClick={() => draft.mutate({ topic: topicFor(p), platform: platformLabel(p.channel) })}>
                           <Sparkles className="h-3 w-3 mr-1" /> Draft our take
                         </Button>
                       )}

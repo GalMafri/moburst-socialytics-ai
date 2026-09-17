@@ -29,33 +29,26 @@ function fmt(n: number | null): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
-/** Funnel with per-step conversion, measured against the widest step. */
+/** Independent activity counts; shared-report readers are not an analysis cohort. */
 export function FunnelCard({ rows }: { rows: FunnelRow[] }) {
   const top = Math.max(1, ...rows.map((r) => r.users));
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="t-h3">Journey drop-off</CardTitle>
+        <CardTitle className="t-h3">People by activity</CardTitle>
+        <p className="t-secondary">Each activity counts its own users. People can read reports created by others, so these are not conversion steps.</p>
       </CardHeader>
       <CardContent className="space-y-4">
         {rows.length === 0 && (
           <p className="t-secondary">No events in this window yet.</p>
         )}
-        {rows.map((r, i) => {
-          const prev = i > 0 ? rows[i - 1].users : r.users;
-          const conv = prev > 0 ? Math.round((r.users / prev) * 100) : 0;
-          const drop = prev - r.users;
+        {rows.map((r) => {
           return (
             <div key={r.step}>
               <div className="mb-1 flex items-baseline justify-between gap-3 t-body">
-                <span>{r.step}</span>
+                <span>{r.step === "Signed in" ? "Visited the app" : r.step}</span>
                 <span className="tabular-nums text-muted-foreground">
                   {r.users} {r.users === 1 ? "person" : "people"}
-                  {i > 0 && (
-                    <span className={drop > 0 ? "ml-2 text-rose-400" : "ml-2 text-emerald-400"}>
-                      {conv}%{drop > 0 ? ` · −${drop}` : ""}
-                    </span>
-                  )}
                 </span>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-muted">

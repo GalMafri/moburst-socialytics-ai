@@ -34,6 +34,7 @@ import { Section, SectionNav } from "@/components/ui/section";
 import { RankedBars, compactNumber } from "@/components/ui/bars";
 import { ChangeCards } from "@/components/competitive/ChangeCards";
 import { companiesFromReport, diffCompanies, pickComparableReport, reportPeriod as periodOf } from "@/lib/competitiveChanges";
+import { comparisonScale, normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images, Users } from "lucide-react";
 
 type TopPost = {
@@ -245,7 +246,7 @@ export default function CompetitiveReportView() {
     enabled: !!clientId && !!report?.id,
   });
 
-  const rd: any = report?.report_data || {};
+  const rd: any = useMemo(() => normalizedCompetitiveMetrics(report?.report_data), [report?.report_data]);
   const ai = rd.ai_analysis || {};
   const companies: Company[] = rd.aggregates?.companies || [];
   const previous = useMemo(() => (report ? pickComparableReport(report as any, (priorReports || []) as any[]) : null), [report, priorReports]);
@@ -590,6 +591,7 @@ export default function CompetitiveReportView() {
           </div>
         )}
 
+        {(report.report_data as { period?: { days?: number } })?.period?.days && (report.report_data as { period?: { days?: number } }).period.days !== rd.period?.days && <p className="t-body text-amber-400">Cadence figures have been corrected to include both dates in the period. The original AI commentary below may still quote older figures.</p>}
         {rd.schema_note && <p className="t-body text-amber-400">{rd.schema_note}</p>}
 
         {/* Executive summary */}
@@ -624,18 +626,18 @@ export default function CompetitiveReportView() {
 
         {/* Scorecard */}
         {scorecard?.dimensions?.length > 0 && (
-            <Section id="scorecard" index={num("scorecard")} style={{ order: orderOf("scorecard") }} title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Client (bar) versus the competitive set average (marker), per dimension, across all platforms.</>} action={acrossAll}>
+            <Section id="scorecard" index={num("scorecard")} style={{ order: orderOf("scorecard") }} title={<><Gauge className="h-5 w-5" /> Where {clientName} stands</>} description={<>Measured totals across all platforms for {period}. Each row is scaled to its larger value; the marker is the average of competitors with available data.</>} action={acrossAll}>
             <Card>
               <CardContent className="pt-5 space-y-5">
                 {scorecard.dimensions.map((d: any, i: number) => (
                   <div key={i} className="space-y-2">
                     <div className="flex justify-between items-baseline gap-4">
                       <span className="font-medium">{d.dimension}</span>
-                      <span className="t-secondary whitespace-nowrap">{d.client} <span className="opacity-60">vs</span> {d.competitor_avg}</span>
+                      <span className="t-secondary text-right">{Number(d.client).toLocaleString(undefined, { maximumFractionDigits: 1 })} <span className="opacity-60">vs</span> {Number(d.competitor_avg).toLocaleString(undefined, { maximumFractionDigits: 1 })} {d.unit}</span>
                     </div>
                     <div className="relative h-3 rounded-full bg-[rgba(255,255,255,0.06)]">
-                      <div className="absolute left-0 top-0 h-3 rounded-full" style={{ width: `${Math.min(100, d.client || 0)}%`, backgroundColor: `rgb(${ACCENT})` }} />
-                      <div className="absolute top-[-4px] h-5 w-[3px] rounded bg-white/80" style={{ left: `${Math.min(100, d.competitor_avg || 0)}%` }} title="competitor average" />
+                      <div className="absolute left-0 top-0 h-3 rounded-full" style={{ width: `${comparisonScale(d.client, d.competitor_avg).client}%`, backgroundColor: `rgb(${ACCENT})` }} />
+                      <div className="absolute top-[-4px] h-5 w-[3px] -translate-x-1/2 rounded bg-white/80" style={{ left: `${comparisonScale(d.client, d.competitor_avg).competitor}%` }} title="competitor average" />
                     </div>
                     {d.note && <p className="t-secondary">{nameifyDomains(d.note)}</p>}
                   </div>

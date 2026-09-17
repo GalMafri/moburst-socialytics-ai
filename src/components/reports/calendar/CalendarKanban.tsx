@@ -3,6 +3,7 @@ import { resolvePostStatus } from "./postStatus";
 import type { PostStatus } from "./PostStatusChip";
 import type { CalendarFilterState } from "./CalendarFilters";
 import { postCopyOf } from "@/lib/postCopy";
+import { iterationMatchesPost, type CalendarPost } from "@/lib/calendarRevision";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -41,13 +42,10 @@ interface Props {
  */
 export function findLatestSelectedIteration(
   iterations: Iteration[],
-  post: { platform?: string; copy?: string; caption_angle?: string },
+  post: CalendarPost,
 ): Iteration | null {
-  const matchingPlatform = (post.platform || "").toLowerCase();
-  const matchingCopy = postCopyOf(post).trim().slice(0, 200);
   const candidates = iterations
-    .filter((it) => (it.platform || "").toLowerCase() === matchingPlatform)
-    .filter((it) => (it.post_copy || "").trim().slice(0, 200) === matchingCopy)
+    .filter((it) => iterationMatchesPost(it, post))
     .filter((it) => it.media_urls && it.media_urls.length > 0);
 
   // Prefer selected; among ties, latest by created_at.

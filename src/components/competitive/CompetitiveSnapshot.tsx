@@ -21,6 +21,7 @@ import { formatRange } from "@/lib/dateRange";
 import { Prose } from "@/components/ui/prose";
 import { InsightGrid } from "@/components/ui/insight-card";
 import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
+import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
 
@@ -80,7 +81,7 @@ export function CompetitiveSnapshot({
     );
   }
 
-  const rd: any = latest.report_data || {};
+  const rd: any = normalizedCompetitiveMetrics(latest.report_data);
   const ai = rd.ai_analysis || {};
   const companies: any[] = rd.aggregates?.companies || [];
   const me = companies.find((c) => c.is_client);
@@ -182,7 +183,7 @@ export function buildCompetitiveContext(
   feedback?: InsightFeedbackRow[] | null,
 ) {
   if (!reportRow) return null;
-  const rd: any = reportRow.report_data || {};
+  const rd: any = normalizedCompetitiveMetrics(reportRow.report_data);
   const ai = rd.ai_analysis || {};
   const companies: any[] = rd.aggregates?.companies || [];
   const me = companies.find((c) => c.is_client);

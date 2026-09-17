@@ -1156,11 +1156,11 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
     },
   });
 
-  // Next 7th of the month at 07:00 UTC, which is when the daily scheduler fires.
+  // Next 7th of the month at 07:15 UTC, which is when the daily scheduler fires.
   const nextRun = () => {
     const now = new Date();
-    let next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 7, 7, 0, 0));
-    if (next <= now) next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 7, 7, 0, 0));
+    let next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 7, 7, 15, 0));
+    if (next <= now) next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 7, 7, 15, 0));
     return next.toISOString();
   };
 
@@ -1202,7 +1202,7 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
           <CalendarClock className="h-4 w-4" /> Monthly schedules
         </CardTitle>
         <CardDescription>
-          Both reports run automatically on the 7th of each month at 07:00 UTC and cover the previous calendar month. The competitive analysis runs first so the social report can use it.
+          Both reports run automatically on the 7th of each month at 07:15 UTC and cover the previous calendar month. The competitive analysis runs first so the social report can use it.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

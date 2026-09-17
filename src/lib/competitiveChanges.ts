@@ -4,6 +4,7 @@
 // Cadence is per week so periods of different lengths compare fairly.
 
 import { normalizePlatform, platformLabel } from "@/lib/platform";
+import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
 
 export type MixEntry = { key: string; count: number };
 export type CompanyStats = {
@@ -115,6 +116,7 @@ export function aggregatePosts(posts: RawPost[], days: number, clientName?: stri
 
 /** The companies of a competitive report, on the shared stats shape. */
 export function companiesFromReport(rd: any): CompanyStats[] {
+  rd = normalizedCompetitiveMetrics(rd || {});
   const list: any[] = Array.isArray(rd?.aggregates?.companies) ? rd.aggregates.companies : [];
   return list.map((c) => ({
     name: String(c.name || c.company_id || "Unknown"),

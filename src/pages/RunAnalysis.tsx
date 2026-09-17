@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { Loading } from "@/components/ui/loading";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { Navigate } from "react-router-dom";
+import { localDateString } from "@/lib/calendarDate";
 
 const STEPS_FULL = [
   "Fetching Sprout Social performance data...",
@@ -46,8 +47,8 @@ export default function RunAnalysis() {
   const [reportId, setReportId] = useState<string | null>(null);
   // Date range defaults: current month start -> today
   const now = new Date();
-  const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
-  const defaultEnd = now.toISOString().split("T")[0];
+  const defaultStart = localDateString(new Date(now.getFullYear(), now.getMonth(), 1));
+  const defaultEnd = localDateString(now);
   const [dateRangeStart, setDateRangeStart] = useState(defaultStart);
   const [dateRangeEnd, setDateRangeEnd] = useState(defaultEnd);
   const [skipTrends, setSkipTrends] = useState(false);
@@ -515,7 +516,7 @@ export default function RunAnalysis() {
                       </Badge>
                       <span className="t-body">{new Date(r.created_at).toLocaleString()}</span>
                     </div>
-                    {r.duration_minutes && <span className="t-secondary">{r.duration_minutes}m</span>}
+                    {Number(r.duration_minutes) > 0 ? <span className="t-secondary">Duration: {r.duration_minutes}m</span> : null}
                   </div>
                 ))}
               </div>
