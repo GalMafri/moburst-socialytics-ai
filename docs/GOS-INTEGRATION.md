@@ -60,12 +60,14 @@ slug. Staff/admin bypass company scoping (`is_moburst_staff()`), as before.
 
 ## Security notes (from adversarial review)
 
-- **No dev bypass in the bridge.** `gos-auth-bridge` only accepts a real handoff
-  token — there is no `devEmail`/Origin-gated path (that pattern is spoofable when
-  `verify_jwt=false`). UI-only preview still uses the frontend dev user.
-  ⚠️ The **legacy** `hub-auth-bridge` still has the origin-gated `devEmail` path; it
-  was left untouched here but should be hardened separately (gate on a server-only
-  secret, not the `Origin` header).
+- **No dev bypass in either bridge.** `gos-auth-bridge` only ever accepted a real
+  handoff token, because an `Origin`-gated `devEmail` path is spoofable when
+  `verify_jwt=false`. UI-only preview still uses the frontend dev user.
+  The legacy `hub-auth-bridge` carried that path until 2026-09-17, where it minted
+  an admin session for any email to anyone who sent `Origin: http://localhost`.
+  It has been removed; `devEmail` is now refused outright. If a preview
+  convenience is ever wanted again, gate it on a server-only secret, never on a
+  request header.
 - **Company-scope isolation.** The gOS slug branch of `is_client_member()` fires only
   when `profiles.hub_company_name IS NULL` (a gOS session). Since the legacy bridge
   always sets `hub_company_name`, a later legacy login makes the slug branch inert —

@@ -1,9 +1,20 @@
 // Hub → Supabase auth bridge for Socialytics.
 //
-// Two code paths:
-//   1. Production: {hubToken} → validate against Hub → mint session with resolved tool role
-//   2. Dev preview: {devEmail} → ONLY if the request originates from a Lovable preview
-//      domain. Provisions a dev user and grants admin.
+// One code path: {hubToken} → validate against Hub → mint a session with the
+// resolved tool role. There is no devEmail path any more, and there must never
+// be one again.
+//
+// What was here until 2026-09-17: a {devEmail} body with no hubToken minted a
+// working admin session for any address, gated only by isDevOrigin(), which
+// read the Origin request header. Origin is set by the caller on any direct
+// HTTP call, so the gate stopped a browser and nothing else: one curl with
+// `Origin: http://localhost` returned admin access and refresh tokens for an
+// arbitrary email. gos-auth-bridge was written without this path for exactly
+// that reason and says so in its own header. Two accounts in auth.users
+// (x@x.com, dev@moburst.local) still carry the dev- hub ids it created.
+//
+// If a preview convenience is ever wanted again, gate it on a server-side
+// secret the caller cannot see, never on a request header.
 //
 // Response envelope: this function ALWAYS returns HTTP 200 with a JSON body. Success
 // bodies have {access_token, refresh_token, tool_role, user_id, debug}; error bodies
@@ -21,26 +32,10 @@ const corsHeaders = {
 const HUB_BACKEND_URL = "https://tools-server.moburst.com";
 const TOOL_NAME = Deno.env.get("HUB_TOOL_NAME") || "Socialytics";
 
-// Production hostnames MUST use the Hub token path — never dev sign-in.
-const PRODUCTION_HOSTNAMES = new Set([
-  "moburst-socialytics-ai.lovable.app",
-  "socialytics.moburst.com",
-]);
-
-function isDevOrigin(origin: string): boolean {
-  if (!origin) return false;
-  let host: string;
-  try {
-    host = new URL(origin).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
-  if (PRODUCTION_HOSTNAMES.has(host)) return false;
-  if (host.endsWith(".lovable.app")) return true;
-  if (host.endsWith(".lovableproject.com")) return true;
-  if (host === "localhost" || host === "127.0.0.1") return true;
-  return false;
-}
+// isDevOrigin and its allowlist lived here. They are gone on purpose: an
+// Origin-based check cannot authenticate anything, because the caller writes
+// that header. Origin is still read below, but only to log where a request
+// came from.
 
 type HubUser = {
   _id: string;
@@ -219,34 +214,13 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // ── Dev path (Lovable preview only) ────────────────────────────────────────
-    if (devEmail && !hubToken) {
-      if (!isDevOrigin(origin)) {
-        console.log(`[bridge] Rejected dev sign-in from origin="${origin}"`);
-        return json({
-          error: "dev_origin_not_allowed",
-          debug: { origin, tool_name: TOOL_NAME },
-        });
-      }
-
-      const synthHubUser: HubUser = {
-        _id: `dev-${devEmail}`,
-        name: "Dev User",
-        email: devEmail,
-        role: "admin",
-        company: "Moburst",
-        isActive: true,
-        tools: [],
-      };
-
-      const result = await provisionAndSignIn(supabase, serviceRoleKey, synthHubUser, "admin");
-      if (!result.ok) return json({ error: result.error, debug: { origin, tool_name: TOOL_NAME } });
+    // A Hub token is the only credential this function accepts. Anything else,
+    // devEmail included, is refused before a session can be minted.
+    if (devEmail) {
+      console.log(`[bridge] Refused a devEmail sign-in from origin="${origin}"`);
       return json({
-        access_token: result.access_token,
-        refresh_token: result.refresh_token,
-        tool_role: "admin",
-        user_id: result.user_id,
-        debug: { source: "dev", origin, tool_name: TOOL_NAME, mapped_clients: result.mapped_clients },
+        error: "dev_sign_in_removed",
+        debug: { origin, tool_name: TOOL_NAME },
       });
     }
 
