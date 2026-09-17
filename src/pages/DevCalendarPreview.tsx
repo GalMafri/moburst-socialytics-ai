@@ -8,6 +8,7 @@ import { WeeklyHighlights } from "@/components/reports/calendar/WeeklyHighlights
 import { PostPanel } from "@/components/reports/calendar/PostPanel";
 import { AppLayout } from "@/components/layout/AppLayout";
 import type { ClientContext } from "@/lib/clientContext";
+import { postCopyOf } from "@/lib/postCopy";
 
 const MOCK_CLIENT_CONTEXT: ClientContext = {
   client_id: "dev-client",
@@ -268,7 +269,7 @@ export default function DevCalendarPreview() {
   const activePostIterations = activePost
     ? MOCK_ITERATIONS.filter((it) => {
         const mp = (activePost.platform || "").toLowerCase();
-        const mc = (activePost.copy || activePost.caption_angle || "")
+        const mc = postCopyOf(activePost)
           .trim()
           .slice(0, 200);
         return (

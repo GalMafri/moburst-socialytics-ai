@@ -4,6 +4,7 @@ import { PlatformBadge } from "@/lib/platform-config";
 import { Clock, ImagePlus, Loader2, Sparkles, Video as VideoIcon } from "lucide-react";
 import { PostStatusChip, type PostStatus } from "./PostStatusChip";
 import { useGenerationForPost } from "./GenerationContext";
+import { postCopyOf } from "@/lib/postCopy";
 
 interface Iteration {
   id?: string;
@@ -30,7 +31,7 @@ interface Props {
 }
 
 export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: Props) {
-  const copy = post.copy || post.caption_angle || "";
+  const copy = postCopyOf(post);
   const thumb = iteration?.media_urls?.[0] || null;
   const isVideo = !!thumb && /\.(mp4|webm|mov)/.test(thumb);
 

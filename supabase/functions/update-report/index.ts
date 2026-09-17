@@ -44,6 +44,29 @@ Deno.serve(async (req) => {
     if (gamma_url !== undefined) updates.gamma_url = gamma_url;
     if (duration_minutes !== undefined) updates.duration_minutes = duration_minutes;
 
+    // Every one of the 69 reports stored duration_minutes = 0, including a run
+    // that took 34 minutes. The workflow's summary node reads a start time that
+    // nothing ever writes, so it falls back to "now" at the moment the LAST
+    // node runs and subtracts it from itself.
+    //
+    // Computing it here instead fixes both pipelines at once and uses the only
+    // authoritative start there is: reports.created_at, which is set when the
+    // row is created and reset on every re-run. A workflow that sends a real
+    // number still wins; this only fills in the zero.
+    if (!Number(duration_minutes)) {
+      const { data: row } = await supabase
+        .from("reports")
+        .select("created_at")
+        .eq("id", report_id)
+        .maybeSingle();
+      if (row?.created_at) {
+        const minutes = Math.round((Date.now() - new Date(row.created_at).getTime()) / 60000);
+        // A clock skew or a re-used id could produce a negative or absurd
+        // figure; better to leave it unset than to print a lie on the report.
+        if (minutes >= 0 && minutes < 24 * 60) updates.duration_minutes = minutes;
+      }
+    }
+
     const { data, error } = await supabase
       .from("reports")
       .update(updates)

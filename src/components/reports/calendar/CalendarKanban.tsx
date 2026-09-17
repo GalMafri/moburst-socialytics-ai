@@ -2,6 +2,7 @@ import { PostCard } from "./PostCard";
 import { resolvePostStatus } from "./postStatus";
 import type { PostStatus } from "./PostStatusChip";
 import type { CalendarFilterState } from "./CalendarFilters";
+import { postCopyOf } from "@/lib/postCopy";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -43,7 +44,7 @@ export function findLatestSelectedIteration(
   post: { platform?: string; copy?: string; caption_angle?: string },
 ): Iteration | null {
   const matchingPlatform = (post.platform || "").toLowerCase();
-  const matchingCopy = (post.copy || post.caption_angle || "").trim().slice(0, 200);
+  const matchingCopy = postCopyOf(post).trim().slice(0, 200);
   const candidates = iterations
     .filter((it) => (it.platform || "").toLowerCase() === matchingPlatform)
     .filter((it) => (it.post_copy || "").trim().slice(0, 200) === matchingCopy)
@@ -69,7 +70,7 @@ function hasMatchingScheduledPost(
   post: { platform?: string; copy?: string; caption_angle?: string },
 ): boolean {
   const matchingPlatform = (post.platform || "").toLowerCase();
-  const matchingCopy = (post.copy || post.caption_angle || "").trim().slice(0, 200);
+  const matchingCopy = postCopyOf(post).trim().slice(0, 200);
   return scheduledPosts.some(
     (s) =>
       (s.platform || "").toLowerCase() === matchingPlatform &&

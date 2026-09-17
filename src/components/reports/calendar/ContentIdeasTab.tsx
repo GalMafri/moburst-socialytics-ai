@@ -11,6 +11,7 @@ import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
 import { GenerationProvider } from "./GenerationContext";
 import { GenerationProgress } from "./GenerationProgress";
 import type { ClientContext } from "@/lib/clientContext";
+import { cleanPostCopy, postCopyOf } from "@/lib/postCopy";
 
 interface Props {
   contentCalendar: any[];
@@ -163,12 +164,12 @@ export function ContentIdeasTab({
         )
       : (postIterations as any[]).filter((it) => {
           const matchingPlatform = (activePost.platform || "").toLowerCase();
-          const matchingCopy = (activePost.copy || activePost.caption_angle || "")
+          const matchingCopy = postCopyOf(activePost)
             .trim()
             .slice(0, 200);
           return (
             (it.platform || "").toLowerCase() === matchingPlatform &&
-            (it.post_copy || "").trim().slice(0, 200) === matchingCopy &&
+            cleanPostCopy(it.post_copy).trim().slice(0, 200) === matchingCopy &&
             it.media_urls &&
             it.media_urls.length > 0
           );

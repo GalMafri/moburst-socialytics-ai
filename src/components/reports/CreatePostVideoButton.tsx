@@ -16,6 +16,7 @@ import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/G
 import { brandAdviceFrom, brandWarning } from "@/lib/designGuard";
 import { useMediaBackend } from "@/hooks/useMediaBackend";
 import { tileAspectFor } from "@/lib/tileAspect";
+import { postCopyOf } from "@/lib/postCopy";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -290,7 +291,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     const { error } = await supabase.from("post_iterations").insert({
       client_id: clientId,
       platform: post.platform || null,
-      post_copy: post.copy || null,
+      post_copy: postCopyOf(post) || null,
       visual_direction: post.visual_direction || post.ai_visual_prompt || null,
       format: post.format || null,
       source: "calendar",
@@ -339,7 +340,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     setBriefing(true);
     setStartedAt(Date.now());
     const rawDirection = post.ai_visual_prompt || post.visual_direction || post.copy || post.concept || "";
-    const postCopy = post.copy || post.caption_angle || "";
+    const postCopy = postCopyOf(post);
     const sceneDescription = await distillForVeo(rawDirection, postCopy);
     const brief = buildVideoPrompt(sceneDescription);
     setPrompt(brief);

@@ -15,6 +15,7 @@
  */
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { postCopyOf } from "@/lib/postCopy";
 
 export type GenerationType = "design" | "video";
 
@@ -26,7 +27,7 @@ export function postKeyOf(post: {
   caption_angle?: string | null;
 }): string {
   const platform = (post.platform || "").toLowerCase();
-  const copy = (post.copy || post.caption_angle || "").trim().slice(0, 200);
+  const copy = postCopyOf(post).trim().slice(0, 200);
   return `${platform}::${copy}`;
 }
 
@@ -37,7 +38,7 @@ export function postLabelOf(post: {
   caption_angle?: string | null;
   posting_time?: string | null;
 }): string {
-  const copy = (post.copy || post.caption_angle || "").trim();
+  const copy = postCopyOf(post).trim();
   const head = copy.slice(0, 60);
   return head.length === copy.length ? head : `${head}…`;
 }

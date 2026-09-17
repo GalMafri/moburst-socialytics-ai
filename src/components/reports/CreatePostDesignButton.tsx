@@ -16,6 +16,7 @@ import { DesignEditor } from "@/components/editor/DesignEditor";
 import type { ClientContext } from "@/lib/clientContext";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 import { brandAdviceFrom, brandWarning, correctionFor, verdictIsDirty, verdictSummary } from "@/lib/designGuard";
+import { postCopyOf } from "@/lib/postCopy";
 
 export interface BrandIdentity {
   primary_color?: string;
@@ -285,7 +286,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     const { error } = await supabase.from("post_iterations").insert({
       client_id: clientId,
       platform: post.platform || null,
-      post_copy: post.copy || null,
+      post_copy: postCopyOf(post) || null,
       visual_direction: post.visual_direction || post.ai_visual_prompt || null,
       format: post.format || null,
       source: "calendar",
@@ -595,7 +596,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           total: slides,
           platform: post.platform,
           format: post.format,
-          post_copy: post.copy,
+          post_copy: postCopyOf(post),
           design_language: clientContext?.design_style_synthesis || null,
         },
       });
@@ -759,7 +760,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           const { error: insertErr } = await supabase.from("post_iterations").insert({
             client_id: clientId,
             platform: post.platform || null,
-            post_copy: post.copy || null,
+            post_copy: postCopyOf(post) || null,
             visual_direction: post.visual_direction || post.ai_visual_prompt || null,
             format: post.format || null,
             source: "calendar",

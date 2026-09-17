@@ -76,6 +76,21 @@ Deno.serve(async (req) => {
       if (gamma_url !== undefined) updates.gamma_url = gamma_url;
       if (duration_minutes !== undefined) updates.duration_minutes = duration_minutes;
 
+      // Same as update-report: derive the runtime from created_at when the
+      // workflow does not send a real one, because created_at is the only
+      // authoritative start and a code node's idea of it has proven wrong.
+      if (!Number(duration_minutes)) {
+        const { data: row } = await supabase
+          .from("competitive_reports")
+          .select("created_at")
+          .eq("id", report_id)
+          .maybeSingle();
+        if (row?.created_at) {
+          const minutes = Math.round((Date.now() - new Date(row.created_at).getTime()) / 60000);
+          if (minutes >= 0 && minutes < 24 * 60) updates.duration_minutes = minutes;
+        }
+      }
+
       // A finished report is never downgraded. Every error output in the
       // workflow lands in one "Mark Report Failed" node, including the error
       // output of the POST that writes the finished report — so a timeout on

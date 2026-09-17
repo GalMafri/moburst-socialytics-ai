@@ -5,6 +5,7 @@ import { Loader2, Pencil, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { track, editDistancePct } from "@/lib/telemetry";
+import { postCopyOf } from "@/lib/postCopy";
 
 interface Props {
   post: any;
@@ -13,7 +14,7 @@ interface Props {
 }
 
 export function CopyEditor({ post, clientId, reportId }: Props) {
-  const initialCopy = post.copy || post.caption_angle || post.concept || "";
+  const initialCopy = postCopyOf(post);
   const [isEditing, setIsEditing] = useState(false);
   const [editedCopy, setEditedCopy] = useState(initialCopy);
   const [displayCopy, setDisplayCopy] = useState(initialCopy);
