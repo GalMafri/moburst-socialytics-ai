@@ -1,6 +1,6 @@
 # Socialytics QA fixes
 
-These are versioned patches for the existing Socialytics and Competitive Analysis workflows. They have **not been published**. `code/` contains n8n Code-node bodies, not standalone JavaScript modules. ESLint excludes those fragments; `npm run test:qa` executes them in a fixture sandbox instead.
+These are versioned patches for the existing Socialytics and Competitive Analysis workflows. The production workflows were patched and published on 17 September 2026; the latest verified versions are recorded below. The transformers remain tied to their audited baselines and must not be reapplied to the current production graph. `code/` contains n8n Code-node bodies, not standalone JavaScript modules. ESLint excludes those fragments; `npm run test:qa` executes them in a fixture sandbox instead.
 
 ## What changes
 
@@ -56,3 +56,16 @@ The isolated runtime tests passed in n8n executions **451759** and **451774** on
 ## Deliberately unchanged
 
 The withdrawn client-access finding (QA-03) is not a fix target. Portal login and external user management stay intact. Webhook perimeter protection (QA-04) remains unverified: do not enable receiver authentication without coordinating and testing all senders. Neither finding justifies a speculative production permission change.
+
+## Release verification — 17 September 2026, 16:04 IDT
+
+Fresh connector reads confirmed both published graphs match their current drafts:
+
+- Socialytics: `1a8b6f71-2ec4-4cf7-ba74-d8646f2e2a49`.
+- Competitive Analysis: `4e2a3d14-b94b-40b3-b5c9-e930faa6ceb8`.
+
+The later metric patches use Sprout profile-period comments/shares instead of lifetime post substitutions, validate pagination and date ranges, preserve metric scope and collection timestamps, and identify the actual tracked RivalIQ client independently of the focus company. The competitive parser has schema-repair enabled; its repair branch still needs an explicit runtime test.
+
+Production execution 451859 completed with both enabled trend scrapers. Execution 451933 regenerated Moburst August 1–31 with trends deliberately disabled; all seven aggregate metrics matched the verified Sprout source. Two Subliy reports were marked failed because their landscape tracked Jobber, not Subliy; existing payloads were retained for audit. No real Sprout post was scheduled.
+
+As of this check, 417 app tests and 116 backend/workflow checks passed. The live frontend bundle `index-BBwSuJON.js` matched the local tested build byte-for-byte. Final downloaded-PDF acceptance checks across all report types remain outstanding.
