@@ -15,6 +15,7 @@
 // copy is what gets cached. Any signed-in user may call this (read-only data).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isPubliclyFetchable } from "../_shared/net/safeUrl.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -208,7 +209,9 @@ async function resolve(supabase: Db, hint: Hint): Promise<Preview> {
         }
       }
     }
-    let image = hint.image || null;
+    // The caller supplies this one too, and it is fetched and copied into the
+    // public bucket exactly like the permalink, so it gets the same check.
+    let image = hint.image && isPubliclyFetchable(hint.image) ? hint.image : null;
     let media_type = mediaTypeOf(hint.media_type);
     let title: string | null = null;
     if (platform === "instagram") {
@@ -272,7 +275,12 @@ Deno.serve(async (req) => {
     const hints = new Map<string, Hint>();
     const add = (h: Hint) => {
       const u = String(h.url || "").trim();
-      if (/^https?:\/\//i.test(u) && !hints.has(u) && hints.size < MAX_PER_CALL) hints.set(u, { url: u, image: h.image || null, media_type: h.media_type || null });
+      // These URLs come straight from the request body and are fetched
+      // server-side, from inside Supabase's network, and what comes back is
+      // copied into a PUBLIC bucket. Any signed-in user could aim that at a
+      // private address, so anything that is not an ordinary public http(s)
+      // host is refused here rather than at the fetch.
+      if (isPubliclyFetchable(u) && !hints.has(u) && hints.size < MAX_PER_CALL) hints.set(u, { url: u, image: h.image || null, media_type: h.media_type || null });
     };
     if (Array.isArray(body.posts)) for (const p of body.posts) if (p && typeof p === "object") add({ url: p.url, image: p.image ?? p.image_url ?? null, media_type: p.media_type ?? p.mediaType ?? null });
     if (Array.isArray(body.urls)) for (const u of body.urls) add({ url: String(u || "") });

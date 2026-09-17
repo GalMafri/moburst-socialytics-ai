@@ -68,38 +68,49 @@ Deno.serve(async (req) => {
 
     const rivals = chosen.companies.filter((c) => !c.is_focus);
     let handleCount = 0;
-    for (let i = 0; i < rivals.length; i++) {
-      const c = rivals[i];
-      const { data: comp, error: compErr } = await supabase
-        .from("competitors")
-        .insert({
-          set_id: set.id,
-          client_id,
-          name: c.name,
-          website_url: c.url,
-          rationale: `Tracked in RivalIQ landscape "${chosen.name}".`,
-          source: "manual",
-          is_selected: i < 3,
-          selected_rank: i < 3 ? i + 1 : null,
-          rivaliq_company_id: c.id,
-        })
-        .select("id")
-        .single();
-      if (compErr) throw new Error(compErr.message);
-      if (c.handles.length > 0) {
-        const { error: hErr } = await supabase.from("competitor_handles").insert(
-          c.handles.map((h) => ({
-            competitor_id: comp.id, client_id, platform: h.platform, handle: h.handle,
-            profile_url: h.profile_url, is_active: true, detection_confidence: 1,
-            // RivalIQ tracks these profiles; they are not a guess from a
-            // website, and a handle refresh must not overwrite them. Without
-            // this they took the column default 'auto' and were replaced.
-            source: "rivaliq",
-          })),
-        );
-        if (hErr) throw new Error(hErr.message);
-        handleCount += c.handles.length;
+    // The set row exists from here on. A throw part-way through the loop used
+    // to leave it behind with however many competitors had landed, and the
+    // review page would then show a half-imported set as if it were real.
+    // Anything that fails now takes the set with it; the foreign keys cascade
+    // to competitors and handles.
+    try {
+      for (let i = 0; i < rivals.length; i++) {
+        const c = rivals[i];
+        const { data: comp, error: compErr } = await supabase
+          .from("competitors")
+          .insert({
+            set_id: set.id,
+            client_id,
+            name: c.name,
+            website_url: c.url,
+            rationale: `Tracked in RivalIQ landscape "${chosen.name}".`,
+            source: "manual",
+            is_selected: i < 3,
+            selected_rank: i < 3 ? i + 1 : null,
+            rivaliq_company_id: c.id,
+          })
+          .select("id")
+          .single();
+        if (compErr) throw new Error(compErr.message);
+        if (c.handles.length > 0) {
+          const { error: hErr } = await supabase.from("competitor_handles").insert(
+            c.handles.map((h) => ({
+              competitor_id: comp.id, client_id, platform: h.platform, handle: h.handle,
+              profile_url: h.profile_url, is_active: true, detection_confidence: 1,
+              // RivalIQ tracks these profiles; they are not a guess from a
+              // website, and a handle refresh must not overwrite them. Without
+              // this they took the column default 'auto' and were replaced.
+              source: "rivaliq",
+            })),
+          );
+          if (hErr) throw new Error(hErr.message);
+          handleCount += c.handles.length;
+        }
       }
+    } catch (partial) {
+      await supabase.from("competitor_sets").delete().eq("id", set.id);
+      const why = partial instanceof Error ? partial.message : String(partial);
+      throw new Error(`The landscape imported partly and was rolled back, so nothing half-built was left behind. ${why}`);
     }
 
     return jsonResp({ set_id: set.id, landscape: chosen.name, competitors: rivals.length, handles: handleCount, preselected: Math.min(3, rivals.length) });

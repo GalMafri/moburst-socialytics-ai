@@ -15,19 +15,15 @@
 // company-scoped staff — apply exactly as they do to direct table access.
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { AuthzError, authzResponse, bearerToken } from "./authz.ts";
+
+// Re-exported so all 31 importers of this path keep working unchanged.
+export { AuthzError } from "./authz.ts";
 
 export interface StaffCaller {
   userId: string;
   /** Client bound to the caller's JWT — queries through it hit RLS as them. */
   asCaller: SupabaseClient;
-}
-
-export class AuthzError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
 }
 
 /**
@@ -39,8 +35,7 @@ export async function requireStaff(
   req: Request,
   opts: { writeClientId?: string } = {},
 ): Promise<StaffCaller> {
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const jwt = authHeader.replace(/^Bearer\s+/i, "");
+  const jwt = bearerToken(req.headers.get("Authorization"));
   if (!jwt) throw new AuthzError(401, "Sign-in required.");
 
   const url = Deno.env.get("SUPABASE_URL")!;
@@ -88,11 +83,8 @@ export async function staffGate(
     await requireStaff(req);
     return null;
   } catch (err) {
-    const status = err instanceof AuthzError ? err.status : 500;
-    const message = err instanceof Error ? err.message : "Authentication failed.";
-    return new Response(JSON.stringify({ error: message }), {
-      status,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    // Never null here. Returning null on a failure is the one regression that
+    // would silently re-open all 18 gated functions, so it is pinned by a test.
+    return authzResponse(err, corsHeaders);
   }
 }
