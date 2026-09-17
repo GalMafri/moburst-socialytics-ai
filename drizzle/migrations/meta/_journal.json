@@ -29,6 +29,13 @@
       "when": 1789645328136,
       "tag": "0003_calendar_copy_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789645341681,
+      "tag": "0004_schedule_dependencies",
+      "breakpoints": true
     }
   ]
 }
