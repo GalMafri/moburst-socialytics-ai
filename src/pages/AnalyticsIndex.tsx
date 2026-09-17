@@ -8,13 +8,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ClickableCard } from "@/components/ui/clickable-card";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/ui/load-error";
 import { BarChart3 } from "lucide-react";
 
 export default function AnalyticsIndex() {
   const navigate = useNavigate();
   const { isClient, user, isGosSession } = useAuth();
 
-  const { data: clients, isLoading } = useQuery({
+  const { data: clients, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["clients-for-analytics"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -49,6 +50,8 @@ export default function AnalyticsIndex() {
 
         {isLoading ? (
           <Loading label="Loading clients" />
+        ) : isError ? (
+          <LoadError title="Could not load the clients" error={error} onRetry={() => refetch()} />
         ) : !clients?.length ? (
           <EmptyState
             icon={BarChart3}

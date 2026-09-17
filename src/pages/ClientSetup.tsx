@@ -141,11 +141,12 @@ export default function ClientSetup() {
   const { data: voiceLearnings } = useQuery({
     queryKey: ["brand-voice-learnings", id],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("brand_voice_learnings")
         .select("*")
         .eq("client_id", id)
         .order("confidence", { ascending: false });
+      if (error) throw error;
       return data || [];
     },
     enabled: !!id && !isNew,

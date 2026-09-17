@@ -14,6 +14,7 @@ import { ReportActions } from "@/components/reports/ReportActions";
 import { useAuth } from "@/hooks/useAuth";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/ui/load-error";
 
 export default function ReportHistory() {
   const { id } = useParams();
@@ -31,7 +32,7 @@ export default function ReportHistory() {
     enabled: !!id,
   });
 
-  const { data: reports, isLoading } = useQuery({
+  const { data: reports, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["reports-history", id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -56,6 +57,11 @@ export default function ReportHistory() {
           <CardContent>
             {isLoading ? (
               <Loading label="Loading reports" />
+            ) : isError ? (
+              // Never the empty state here. "No reports yet" tells a client
+              // their work does not exist, on the strength of a request that
+              // never answered.
+              <LoadError title="Could not load the reports" error={error} onRetry={() => refetch()} />
             ) : reports && reports.length > 0 ? (
               <Table>
                 <TableHeader>

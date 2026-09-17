@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/ui/load-error";
 import { Eye, ExternalLink, Crosshair, FileText } from "lucide-react";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { formatRange } from "@/lib/dateRange";
@@ -56,7 +57,7 @@ export default function AllReports() {
     enabled: ready,
   });
 
-  const { data: reports, isLoading } = useQuery({
+  const { data: reports, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["all-reports", isClient ? clientAccess : "all", clientFilter],
     queryFn: async () => {
       let query = supabase
@@ -139,6 +140,8 @@ export default function AllReports() {
               <CardContent>
                 {isLoading ? (
                   <Loading label="Loading reports" />
+                ) : isError ? (
+                  <LoadError title="Could not load the reports" error={error} onRetry={() => refetch()} />
                 ) : reports && reports.length > 0 ? (
                   <Table>
                     <TableHeader>

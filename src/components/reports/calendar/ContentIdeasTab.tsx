@@ -57,25 +57,33 @@ export function ContentIdeasTab({
       if (!clientId) return [];
       // Rejected and archived designs stay in the table (the learnings point
       // at them) but leave the board.
-      const { data } = await (supabase.from("post_iterations") as any)
+      const { data, error } = await (supabase.from("post_iterations") as any)
         .select("*")
         .eq("client_id", clientId)
         .is("rejected_at", null)
         .is("archived_at", null)
         .order("created_at", { ascending: false });
+      // Swallowing this made a failed read indistinguishable from a client who
+      // has generated nothing, and react-query reported success either way, so
+      // no error state downstream could ever have caught it.
+      if (error) throw error;
       return data || [];
     },
     enabled: !!clientId,
   });
 
-  const { data: scheduledPosts = [] } = useQuery({
+  const {
+    data: scheduledPosts = [],
+    isError: scheduledPostsFailed,
+  } = useQuery({
     queryKey: ["scheduled-posts", clientId],
     queryFn: async () => {
       if (!clientId) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("scheduled_posts")
         .select("id, client_id, report_id, platform, post_content, status")
         .eq("client_id", clientId);
+      if (error) throw error;
       return data || [];
     },
     enabled: !!clientId,
@@ -85,12 +93,13 @@ export function ContentIdeasTab({
     mutationFn: async (iterationId: string) => {
       if (!clientId) return;
       // Read current state
-      const { data: current } = await supabase
+      const { data: current, error: readErr } = await supabase
         .from("post_iterations")
         .select("variant_group_id, is_approved")
         .eq("id", iterationId)
         .maybeSingle();
-      if (!current) return;
+      if (readErr) throw readErr;
+      if (!current) throw new Error("That post is no longer on the board.");
 
       const variantGroupId = (current as any).variant_group_id;
       const newApproved = !((current as any).is_approved);
@@ -103,20 +112,23 @@ export function ContentIdeasTab({
       };
 
       // Apply to entire variant group if it exists; otherwise to the single row.
-      if (variantGroupId) {
-        await supabase
-          .from("post_iterations")
-          .update(update)
-          .eq("variant_group_id", variantGroupId);
-      } else {
-        await supabase
-          .from("post_iterations")
-          .update(update)
-          .eq("id", iterationId);
-      }
+      // Both writes have to be checked: unchecked, a refused update still
+      // resolved, the board refetched the unchanged row, and the chip flipped
+      // back with nothing said to the person who clicked it.
+      const { error: writeErr } = variantGroupId
+        ? await supabase.from("post_iterations").update(update).eq("variant_group_id", variantGroupId)
+        : await supabase.from("post_iterations").update(update).eq("id", iterationId);
+      if (writeErr) throw writeErr;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Could not change approval",
+        description: err?.message || "The change was not saved. Try again.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -202,6 +214,19 @@ export function ContentIdeasTab({
           availablePlatforms={availablePlatforms}
           availableLanguages={availableLanguages}
         />
+
+        {scheduledPostsFailed && (
+          <div
+            role="alert"
+            className="glass-inner p-4 border-[rgba(239,68,68,0.25)] bg-[rgba(239,68,68,0.06)]"
+          >
+            <p className="t-body">
+              The schedule could not be loaded, so a post already queued in Sprout will show here as
+              approved rather than scheduled. Reload before scheduling anything, or you may queue it
+              twice.
+            </p>
+          </div>
+        )}
 
         <div id="ideas-calendar" className="scroll-mt-[156px]">
           <CalendarKanban

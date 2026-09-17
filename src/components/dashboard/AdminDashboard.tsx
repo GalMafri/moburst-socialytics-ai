@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/ui/load-error";
 import { Loading } from "@/components/ui/loading";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -101,7 +102,7 @@ export function AdminDashboard() {
     };
   }, [queryClient]);
 
-  const { data: clients, isLoading } = useQuery({
+  const { data: clients, isLoading, isError: clientsFailed, error: clientsError, refetch: refetchClients } = useQuery({
     queryKey: ["clients"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -130,7 +131,11 @@ export function AdminDashboard() {
     <div className="space-y-6">
       <PageHeader
         title="Clients"
-        description={`${active.length} active ${active.length === 1 ? "client" : "clients"}. Open a client for its setup, analytics and competitive view, or run this month's report.`}
+        description={
+          clientsFailed
+            ? "The client list could not be loaded, so nothing below is the real roster."
+            : `${active.length} active ${active.length === 1 ? "client" : "clients"}. Open a client for its setup, analytics and competitive view, or run this month's report.`
+        }
         actions={
           canManageClients ? (
             <Button onClick={() => navigate("/clients/new/setup")}>
@@ -140,7 +145,10 @@ export function AdminDashboard() {
         }
       />
 
-      {!isLoading && (
+      {/* A failed load leaves `clients` undefined, and every tile below counts
+          off it. Rendering them would put four confident zeros on the staff
+          landing page for an agency with a full roster. */}
+      {!isLoading && !clientsFailed && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 stagger-children">
           <StatCard label="Active clients" value={active.length} icon={<Users className="h-3.5 w-3.5" />} />
           <StatCard label="Completed reports" value={completedReports} icon={<BarChart3 className="h-3.5 w-3.5" />} />
@@ -169,7 +177,13 @@ export function AdminDashboard() {
         </Button>
       </div>
 
-      {isLoading ? (
+      {clientsFailed ? (
+        <LoadError
+          title="Could not load the clients"
+          error={clientsError}
+          onRetry={() => refetchClients()}
+        />
+      ) : isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3].map((i) => (
             <Card key={i} className="animate-pulse">

@@ -34,6 +34,7 @@ import { AIDeepInsights } from "@/components/analytics/AIDeepInsights";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
 import { Loading } from "@/components/ui/loading";
+import { LoadError } from "@/components/ui/load-error";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 type TimeRange = "7d" | "30d" | "90d" | "all" | "custom";
@@ -56,7 +57,7 @@ export default function Analytics() {
     enabled: !!id,
   });
 
-  const { data: reports, isLoading } = useQuery({
+  const { data: reports, isLoading, isError: reportsFailed, error: reportsError, refetch: refetchReports } = useQuery({
     queryKey: ["analytics-reports", id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -376,6 +377,14 @@ export default function Analytics() {
 
         {isLoading ? (
           <Loading label="Loading analytics" />
+        ) : reportsFailed ? (
+          // "No completed reports yet" would be a claim about this client's
+          // history made on the strength of a request that never answered.
+          <LoadError
+            title="Could not load this client's reports"
+            error={reportsError}
+            onRetry={() => refetchReports()}
+          />
         ) : filtered.length === 0 && !viewWindow ? (
           <Card className="p-12 text-center">
             <div className="space-y-3">

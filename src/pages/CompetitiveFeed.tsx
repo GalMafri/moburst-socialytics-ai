@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/ui/load-error";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { describeInvokeError } from "@/lib/invokeError";
@@ -61,7 +62,7 @@ export default function CompetitiveFeed() {
   });
 
   // The newest pull drives the page; the one before it is the baseline for "Since last week".
-  const { data: snaps, isLoading } = useQuery({
+  const { data: snaps, isLoading, isError: feedFailed, error: feedError, refetch: refetchFeed } = useQuery({
     queryKey: ["competitor-feed", id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -214,6 +215,8 @@ export default function CompetitiveFeed() {
 
         {isLoading ? (
           <Loading label="Loading the feed" />
+        ) : feedFailed ? (
+          <LoadError title="Could not load the feed" error={feedError} onRetry={() => refetchFeed()} />
         ) : !snapshot ? (
           <EmptyState
             icon={Rss}

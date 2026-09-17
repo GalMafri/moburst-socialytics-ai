@@ -74,14 +74,18 @@ export function SchedulePostModal({
 
   // ── DB-assigned profiles: used only for auto-detection ──────────────────────
   // Independent query — does NOT gate the API profiles query above.
-  const { data: dbProfiles } = useQuery({
+  const { data: dbProfiles, isError: assignedProfilesFailed } = useQuery({
     queryKey: ["sprout-profiles-assigned", clientId],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("sprout_profiles")
         .select("*")
         .eq("client_id", clientId)
         .neq("is_active", false);
+      // Unchecked, a failed read looked exactly like "this client has no
+      // assigned profiles", and the fallback below then offered every profile
+      // on the agency's Sprout account as a target for someone else's post.
+      if (error) throw error;
       return (data || []) as any[];
     },
     enabled: open && !!clientId,
@@ -102,7 +106,12 @@ export function SchedulePostModal({
   // Otherwise show all API profiles for this platform (or all API if none match).
   const hasDbAssigned = assignedForPlatform.length > 0;
 
-  const displayProfiles = hasDbAssigned
+  const displayProfiles = assignedProfilesFailed
+    ? // The fallback below is only correct for a client we KNOW has no
+      // assignments. When the read failed we do not know that, so offer
+      // nothing rather than every profile on the agency's account.
+      []
+    : hasDbAssigned
     ? // Enrich DB records with full API profile data by matching sprout_profile_id
       assignedForPlatform.map((dbP: any) => {
         const apiMatch = (apiProfiles || []).find(
@@ -234,6 +243,17 @@ export function SchedulePostModal({
                 </Badge>
                 <span className="ml-auto t-secondary">auto-detected</span>
               </div>
+            )}
+
+            {assignedProfilesFailed && (
+              <p
+                role="alert"
+                className="t-body text-[rgb(248,113,113)] bg-[rgba(239,68,68,0.10)] rounded-md px-2 py-1"
+              >
+                This client's assigned profiles could not be loaded, so there is no way to tell
+                which account this post belongs on. Close this and try again rather than risk
+                publishing to the wrong brand.
+              </p>
             )}
 
             {/* Dropdown: multiple profiles or API fallback */}
