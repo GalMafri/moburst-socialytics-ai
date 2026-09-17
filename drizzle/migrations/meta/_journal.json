@@ -15,6 +15,13 @@
       "when": 1789626026373,
       "tag": "0001_close_admin_escalation",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789627180539,
+      "tag": "0002_tighten_events_previews_defaults",
+      "breakpoints": true
     }
   ]
 }
