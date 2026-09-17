@@ -191,7 +191,26 @@ export function SchedulePostModal({
       });
       if (error) throw new Error((data as any)?.error || error.message);
       if ((data as any)?.error) throw new Error((data as any).error);
-      toast.success("Post scheduled successfully!");
+
+      // The post is live in Sprout either way, so these are warnings rather
+      // than failures. Both used to be invisible: a post could go out with
+      // half its creative missing, or without the row the calendar reads to
+      // know it is already queued.
+      const d = data as any;
+      if (d?.media_dropped > 0) {
+        toast.warning(
+          `Scheduled, but Sprout rejected ${d.media_dropped} of ${d.media_requested} attachments.`,
+          { description: "The post will publish with only the creative it accepted.", duration: 12000 },
+        );
+      } else if (d?.recorded === false) {
+        toast.warning("Scheduled in Sprout, but not recorded here.", {
+          description:
+            "The calendar will still show this post as approved rather than scheduled. Check Sprout before queueing it again.",
+          duration: 12000,
+        });
+      } else {
+        toast.success("Post scheduled successfully!");
+      }
       onOpenChange(false);
     } catch (err: any) {
       console.error("Schedule error:", err);

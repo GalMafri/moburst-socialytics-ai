@@ -24,6 +24,7 @@
 // The debug object is intentionally minimal (no email / org / slug allowlist).
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { findAuthUserByEmail } from "../_shared/auth/findUser.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -111,8 +112,7 @@ async function provisionAndSignIn(
     auth_source: "gos",
   };
 
-  const { data: existingUsers } = await supabase.auth.admin.listUsers();
-  const existingUser = existingUsers?.users?.find((u) => u.email?.toLowerCase() === email);
+  const existingUser = await findAuthUserByEmail(supabase, email);
 
   let supabaseUserId: string;
   if (existingUser) {

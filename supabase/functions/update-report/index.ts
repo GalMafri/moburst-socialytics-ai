@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,7 +16,7 @@ Deno.serve(async (req) => {
     // Only the n8n workflow may write reports: it sends the shared secret.
     // Anyone who knew a report id could overwrite it before this check.
     const secret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
-    if (!secret || req.headers.get("X-Socialytics-Secret") !== secret) {
+    if (!(await secretEquals(req.headers.get("X-Socialytics-Secret"), secret))) {
       return new Response(JSON.stringify({ error: "unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

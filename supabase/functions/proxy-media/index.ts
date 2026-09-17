@@ -25,8 +25,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Download the media file
-    const response = await fetch(url);
+    // A hung host used to hold this request until the platform killed it at
+    // 150s, and a large file was read into memory whole and then again as a
+    // base64 string, roughly 2.4x its size.
+    const MAX_BYTES = 40 * 1024 * 1024;
+
+    const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
     if (!response.ok) {
       return new Response(
         JSON.stringify({ error: `Failed to fetch: ${response.status}` }),
@@ -34,8 +38,25 @@ Deno.serve(async (req) => {
       );
     }
 
+    const declared = Number(response.headers.get("content-length") || 0);
+    if (declared > MAX_BYTES) {
+      return new Response(
+        JSON.stringify({
+          error: `That file is ${Math.round(declared / 1024 / 1024)}MB, larger than the ${MAX_BYTES / 1024 / 1024}MB this can carry.`,
+        }),
+        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const contentType = response.headers.get("content-type") || "video/mp4";
     const arrayBuffer = await response.arrayBuffer();
+    // Hosts that send no content-length only get caught here.
+    if (arrayBuffer.byteLength > MAX_BYTES) {
+      return new Response(
+        JSON.stringify({ error: "That file is too large to carry through this proxy." }),
+        { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // Convert to base64 data URL
     const uint8 = new Uint8Array(arrayBuffer);

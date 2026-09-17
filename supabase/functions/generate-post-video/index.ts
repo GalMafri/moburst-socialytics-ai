@@ -201,6 +201,36 @@ async function generateSeedImage(args: {
   }
 }
 
+/**
+ * Pull a finished Veo clip and put it somewhere the browser can read without
+ * a credential.
+ *
+ * The key travels in a header, never in the URL, so it cannot end up in a
+ * response body, a database row, a log line or a referer.
+ */
+async function storeVeoClip(
+  supabase: any,
+  videoUri: string,
+  geminiKey: string,
+  clientId: string,
+): Promise<string> {
+  const res = await fetch(videoUri, {
+    headers: { "x-goog-api-key": geminiKey },
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) throw new Error(`Could not download the finished clip from Veo (${res.status}).`);
+
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const path = `${clientId}/veo-${Date.now()}.mp4`;
+  const { error: upErr } = await supabase.storage
+    .from("generated-media")
+    .upload(path, bytes, { contentType: "video/mp4", upsert: false });
+  if (upErr) throw new Error(`The clip generated but could not be saved: ${upErr.message}`);
+
+  const { data } = supabase.storage.from("generated-media").getPublicUrl(path);
+  return data.publicUrl;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -529,11 +559,18 @@ serve(async (req) => {
       );
     }
 
-    // Poll for completion (Veo is async — takes 30-120 seconds)
+    // Poll for completion (Veo is async, 30 to 120 seconds).
+    //
+    // The old budget was 60 attempts at 3 seconds, which is 180 seconds inside
+    // a request the platform kills at 150. A long render therefore ended as a
+    // dropped connection rather than an error, with the generation paid for
+    // and no media_jobs row to collect it from later. Stop with time left to
+    // answer, and say what happened.
+    const POLL_DEADLINE_MS = 115_000;
+    const pollStartedAt = Date.now();
     let attempts = 0;
-    const maxAttempts = 60; // 2 minutes at 2-second intervals
 
-    while (attempts < maxAttempts) {
+    while (Date.now() - pollStartedAt < POLL_DEADLINE_MS) {
       await new Promise((resolve) => setTimeout(resolve, 3000));
       attempts++;
 
@@ -558,10 +595,17 @@ serve(async (req) => {
           pollData.response?.generatedSamples?.[0]?.video?.uri;
 
         if (videoUri) {
-          // The video URI requires the API key to access
-          const authenticatedUrl = videoUri.includes("?")
-            ? `${videoUri}&key=${geminiKey}`
-            : `${videoUri}?key=${geminiKey}`;
+          // Veo's URI needs the API key to read. It used to be appended as
+          // ?key= and returned, which put the agency's Gemini key in the
+          // browser and, whenever the frontend's re-upload failed, wrote it
+          // into a post_iterations row. Fetch it here with the key in a
+          // header instead and hand back a storage URL that carries nothing.
+          const authenticatedUrl = await storeVeoClip(
+            supabase,
+            videoUri,
+            geminiKey,
+            client_id || client_context?.client_id || "unknown",
+          );
 
           // Return diagnostic info too: whether the seed image was generated
           // and a data-URL preview of it. If the user reports the video looks
@@ -595,10 +639,14 @@ serve(async (req) => {
         );
       }
 
-      console.log(`Polling attempt ${attempts}/${maxAttempts}...`);
+      console.log(`Polling attempt ${attempts} (${Math.round((Date.now() - pollStartedAt) / 1000)}s elapsed)...`);
     }
 
-    throw new Error("Video generation timed out after 3 minutes. Please try again.");
+    throw new Error(
+      "Veo was still rendering after about two minutes, which is longer than this request can wait. " +
+        "The clip may still finish on Google's side. Try again, or switch this client to Higgsfield in Client Setup, " +
+        "where a long render is collected in the background instead of being waited out.",
+    );
   } catch (error: any) {
     console.error("Error generating video:", error);
     const status = error instanceof AuthzError ? error.status : error instanceof HiggsfieldError ? 502 : 500;

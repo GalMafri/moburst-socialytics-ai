@@ -12,6 +12,7 @@
 //   { op: "report", ... }    update a competitive_reports row (status/data/deck)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -28,7 +29,7 @@ Deno.serve(async (req) => {
     console.error("[update-competitive-report] SOCIALYTICS_N8N_SECRET is not set");
     return jsonResp({ error: "not configured" }, 500);
   }
-  if (req.headers.get("x-socialytics-secret") !== secret) {
+  if (!(await secretEquals(req.headers.get("x-socialytics-secret"), secret))) {
     return jsonResp({ error: "unauthorized" }, 401);
   }
 

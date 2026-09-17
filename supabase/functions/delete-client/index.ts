@@ -66,7 +66,20 @@ serve(async (req) => {
     await supabase.from("competitor_sets").delete().eq("client_id", client_id);
     await supabase.from("post_iterations").delete().eq("client_id", client_id);
     await supabase.from("design_learnings").delete().eq("client_id", client_id);
-    await supabase.from("clients").delete().eq("id", client_id);
+
+    // The one delete whose failure actually matters. Unchecked, a refused
+    // delete still returned success, so the client vanished from the UI on
+    // the refetch and came back on the next load, with every dependent row
+    // above already gone.
+    const { error: clientDeleteError } = await supabase.from("clients").delete().eq("id", client_id);
+    if (clientDeleteError) {
+      return new Response(
+        JSON.stringify({
+          error: `The client's data was removed but the client itself could not be deleted: ${clientDeleteError.message}`,
+        }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // Clean up storage
     const bookPaths = [client?.brand_book_file_path, (client as any)?.strategy_doc_file_path].filter(Boolean) as string[];

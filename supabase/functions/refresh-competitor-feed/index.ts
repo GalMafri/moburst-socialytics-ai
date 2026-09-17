@@ -11,6 +11,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { bestLandscapeMatch, summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
 import { harvestedPaths, type HarvestedRef } from "../_shared/design-prompts/designRefs.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
+import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -193,7 +194,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const clientId = String(body.client_id || "");
     const secret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
-    const viaSecret = !!secret && req.headers.get("X-Socialytics-Secret") === secret;
+    const viaSecret = await secretEquals(req.headers.get("X-Socialytics-Secret"), secret);
     if (!clientId) return json({ error: "client_id is required" }, 400);
     // Scoped to the client, not merely to staff. This was the only competitive
     // function that checked the role and not the client, so a company-scoped

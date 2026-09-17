@@ -86,8 +86,8 @@ async function persist(supabase: Db, sourceUrl: string, postUrl: string): Promis
     // Facebook's crawler image host only answers link-preview crawlers.
     const crawlerFirst = /lookaside\.fbsbx\.com|media\.licdn\.com/i.test(sourceUrl);
     const first = /lookaside\.fbsbx\.com/i.test(sourceUrl) ? FB_CRAWLER_UA : crawlerFirst ? CRAWLER_UA : UA;
-    let r = await fetch(sourceUrl, { headers: { "User-Agent": first, Accept: "image/*" } });
-    if (!r.ok) r = await fetch(sourceUrl, { headers: { "User-Agent": first === UA ? CRAWLER_UA : UA, Accept: "image/*" } });
+    let r = await fetch(sourceUrl, { headers: { "User-Agent": first, Accept: "image/*" }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) r = await fetch(sourceUrl, { headers: { "User-Agent": first === UA ? CRAWLER_UA : UA, Accept: "image/*" }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null;
     const ct = (r.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
     if (!ct.startsWith("image/")) return null;
@@ -112,7 +112,7 @@ async function persist(supabase: Db, sourceUrl: string, postUrl: string): Promis
  */
 async function persistVideoHead(supabase: Db, sourceUrl: string, postUrl: string): Promise<string | null> {
   try {
-    const r = await fetch(sourceUrl, { headers: { "User-Agent": UA, Range: "bytes=0-1999999" } });
+    const r = await fetch(sourceUrl, { headers: { "User-Agent": UA, Range: "bytes=0-1999999" }, signal: AbortSignal.timeout(12000) });
     if (!(r.status === 200 || r.status === 206)) return null;
     const ct = (r.headers.get("content-type") || "video/mp4").split(";")[0].trim();
     if (!ct.startsWith("video/")) return null;
@@ -140,14 +140,14 @@ function instagramShortcode(url: string): string | null {
 async function instagramMedia(supabase: Db, url: string): Promise<string | null> {
   const code = instagramShortcode(url);
   if (!code) return null;
-  const r = await fetch(`https://www.instagram.com/p/${code}/media/?size=l`, { headers: { "User-Agent": UA }, redirect: "manual" });
+  const r = await fetch(`https://www.instagram.com/p/${code}/media/?size=l`, { headers: { "User-Agent": UA }, redirect: "manual", signal: AbortSignal.timeout(8000) });
   const target = r.headers.get("location");
   if (!(r.status >= 300 && r.status < 400) || !target || !/^https?:\/\//i.test(target)) return null;
   return (await persist(supabase, target, url)) || target;
 }
 
 async function ogPreview(url: string, userAgent: string = UA): Promise<Partial<Preview>> {
-  const resp = await fetch(url, { headers: { "User-Agent": userAgent, Accept: "text/html" }, redirect: "follow" });
+  const resp = await fetch(url, { headers: { "User-Agent": userAgent, Accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
   if (!resp.ok) return { status: "unavailable" };
   const html = (await resp.text()).slice(0, 400_000);
   const meta = (prop: string) => {
@@ -198,7 +198,7 @@ async function resolve(supabase: Db, hint: Hint): Promise<Preview> {
       if (id) return { ...base, media_type: "video", image_url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, status: "ok" };
     }
     if (platform === "tiktok") {
-      const r = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`, { headers: { "User-Agent": UA } });
+      const r = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8000) });
       if (r.ok) {
         const j = await r.json();
         if (j.thumbnail_url) {

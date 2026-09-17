@@ -17,6 +17,7 @@
 // present a Supabase JWT — same rationale as gos-auth-bridge.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
 const TERMINAL = new Set(["completed", "failed", "nsfw", "canceled"]);
 
@@ -33,7 +34,7 @@ Deno.serve(async (req) => {
     return new Response("not configured", { status: 500 });
   }
   const token = new URL(req.url).searchParams.get("t");
-  if (token !== secret) {
+  if (!(await secretEquals(token, secret))) {
     return new Response("unauthorized", { status: 401 });
   }
 

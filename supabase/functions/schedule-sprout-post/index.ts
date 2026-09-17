@@ -133,6 +133,25 @@ serve(async (req) => {
       }
     }
 
+    // Every attachment failure above was logged and stepped over, so a post
+    // whose creative Sprout refused went out to the client's real account as
+    // plain text while the person who scheduled it was told it worked. If
+    // nothing survived, do not publish at all.
+    const mediaRequested = allMediaUrls.length;
+    const mediaDropped = mediaRequested - uploadedMedia.length;
+    if (mediaRequested > 0 && uploadedMedia.length === 0) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "Sprout would not accept the image or video for this post, so nothing was scheduled. " +
+            "Publishing it as text only was almost certainly not what you wanted. Check the creative and try again.",
+          media_requested: mediaRequested,
+          media_attached: 0,
+        }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const response = await fetch(`${SPROUT_API_BASE}/${customerId}/publishing/posts`, {
       method: "POST",
       headers: {
@@ -160,13 +179,27 @@ serve(async (req) => {
       media_url: allMediaUrls.length > 0 ? `${allMediaUrls.length} attached` : null,
     });
 
+    // The post IS live in Sprout by this point, so a failed insert must not
+    // read as a failed schedule. It is still worth saying out loud: without
+    // the row, the calendar shows the post as merely approved and somebody
+    // can queue it a second time.
     if (insertError) {
       console.error("Failed to save scheduled post:", insertError);
     }
 
-    return new Response(JSON.stringify({ success: true, sprout_post: responseData }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        success: true,
+        sprout_post: responseData,
+        recorded: !insertError,
+        record_error: insertError ? insertError.message : null,
+        // Partial attachment: some creative made it, some did not.
+        media_requested: mediaRequested,
+        media_attached: uploadedMedia.length,
+        media_dropped: mediaDropped,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   } catch (error: any) {
     console.error("Error scheduling post:", error);
     return new Response(JSON.stringify({ error: error.message }), {

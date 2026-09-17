@@ -19,6 +19,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCompetitivePayload, buildSocialPayload, STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
+import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -136,7 +137,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const secret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
   if (!secret) return json({ error: "not configured" }, 500);
-  if (req.headers.get("x-socialytics-secret") !== secret) return json({ error: "unauthorized" }, 401);
+  if (!(await secretEquals(req.headers.get("x-socialytics-secret"), secret))) return json({ error: "unauthorized" }, 401);
 
   try {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -173,6 +174,13 @@ Deno.serve(async (req) => {
         await supabase.from("report_schedules").update({ last_run_at: now.toISOString(), next_run_at: nextRun(now, schedule.run_day_of_month, schedule.frequency), last_result: result.slice(0, 500) }).eq("id", schedule.id);
       };
 
+      // The report row is created BEFORE the webhook call, so a webhook that
+      // refuses used to leave it sitting on "running" (and a competitor set on
+      // "analyzing") until closeAbandonedRuns noticed hours later. Remember
+      // what this iteration created so the catch can close it straight away.
+      let openReport: { table: string; id: string } | null = null;
+      let openSetId: string | null = null;
+
       try {
         if (schedule.report_kind === "competitive") {
           if (!competitiveUrl) throw new Error("competitive webhook URL not configured");
@@ -185,6 +193,8 @@ Deno.serve(async (req) => {
           if (dryRun) { results.push({ client: client.name, kind: "competitive", status: "would run", range }); continue; }
           const { data: report, error: repErr } = await supabase.from("competitive_reports").insert({ client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: schedule.created_by }).select("id").single();
           if (repErr) throw repErr;
+          openReport = { table: "competitive_reports", id: report.id };
+          openSetId = set.id;
           await supabase.from("competitor_sets").update({ status: "analyzing" }).eq("id", set.id).in("status", ["confirmed", "complete", "failed"]);
           const payload = await buildCompetitivePayload({
             supabase, client, reportId: report.id, set, range,
@@ -203,6 +213,7 @@ Deno.serve(async (req) => {
 
         const { data: report, error: reportErr } = await supabase.from("reports").insert({ client_id: client.id, status: "running", report_data: {}, created_by: schedule.created_by, date_range_start: range.start, date_range_end: range.end }).select("id").single();
         if (reportErr) throw reportErr;
+        openReport = { table: "reports", id: report.id };
 
         const payload = await buildSocialPayload({
           supabase, client, reportId: report.id, range,
@@ -214,6 +225,20 @@ Deno.serve(async (req) => {
         results.push({ client: client.name, kind: "social", status: "triggered", report_id: report.id, range, competitive_context: !!payload.competitive_context });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        // Close what this iteration opened, rather than leaving a run that
+        // nobody started showing as in progress. Both updates are guarded on
+        // the status we set, so a webhook that actually landed and reported
+        // back first is never overwritten.
+        if (openReport) {
+          await supabase
+            .from(openReport.table)
+            .update({ status: "failed", report_data: { error: `The run could not be started: ${msg}` } })
+            .eq("id", openReport.id)
+            .eq("status", "running");
+        }
+        if (openSetId) {
+          await supabase.from("competitor_sets").update({ status: "failed" }).eq("id", openSetId).eq("status", "analyzing");
+        }
         await advance(`error: ${msg}`);
         results.push({ client: client?.name || schedule.client_id, kind: schedule.report_kind, status: "error", error: msg });
       }
