@@ -147,6 +147,3 @@ verify_jwt = false
 
 [functions.media-job-status]
 verify_jwt = false
-
-[functions.tmp-signup-flag-probe]
-verify_jwt = false
