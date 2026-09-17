@@ -109,6 +109,33 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   // (a filter's "showing Instagram only" line, for instance) is kept.
   content.querySelectorAll('[data-print="hide"]').forEach((el) => el.remove());
 
+  // Screen media frames reserve a tall aspect-ratio box even when their image
+  // is reduced for print. Reset the frame too, and omit decorative duplicates.
+  content.querySelectorAll('img[aria-hidden="true"]').forEach(el => el.remove());
+  content.querySelectorAll('[class*="aspect-"]').forEach(el => {
+    if (el.querySelector('img, video')) el.setAttribute('data-pdf-media', '');
+  });
+  // Keep compact metrics side by side; only prose/card grids need one column.
+  content.querySelectorAll('.grid').forEach(el => {
+    const children = Array.from(el.children);
+    if (children.length > 1 && children.length <= 12 && children.every(child =>
+      (child.textContent || '').trim().length < 160 && !child.querySelector('img, video, table, .recharts-wrapper, article'))
+    ) {
+      el.setAttribute('data-pdf-compact', '');
+      (el as HTMLElement).style.setProperty('--pdf-columns', String(Math.min(children.length, 3)));
+    } else if (children.length > 12 && children.every(child => (child.textContent || '').trim().length < 12)) {
+      el.setAttribute('data-pdf-data-grid', '');
+    }
+  });
+  // Competitive sections use CSS order for platform filtering. Once print
+  // switches flex columns to block flow, preserve that visible reading order.
+  content.querySelectorAll('.flex-col').forEach(el => {
+    const children = Array.from(el.children) as HTMLElement[];
+    if (children.some(child => child.style.order)) children
+      .sort((a, b) => Number(a.style.order || 0) - Number(b.style.order || 0))
+      .forEach(child => el.appendChild(child));
+  });
+
   content.querySelectorAll('[role="tabpanel"]').forEach((panel) => {
     const el = panel as HTMLElement;
     el.style.display = "block";
@@ -420,6 +447,8 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
        flex items otherwise become unbreakable fragments in Chromium. */
     .pdf-root { width: 100%; max-width: 190mm; min-height: 0 !important; margin: 0 auto; }
     .pdf-root .grid, .pdf-root .flex-col { display: block !important; }
+    .pdf-root .grid[data-pdf-compact] { display: grid !important; grid-template-columns: repeat(var(--pdf-columns), minmax(0, 1fr)) !important; break-inside: avoid; }
+    .pdf-root .grid[data-pdf-data-grid] { display: grid !important; break-inside: avoid; }
     .pdf-root .grid > *, .pdf-root .flex-col > * { margin-bottom: 12px; }
     .pdf-root .flex { flex-wrap: wrap; }
     .pdf-root * { min-width: 0; }
@@ -432,6 +461,10 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     .pdf-root tr { break-inside: avoid; }
     .pdf-root th, .pdf-root td { white-space: normal !important; overflow-wrap: anywhere; font-size: 10px; padding: 6px; }
     .pdf-root img { max-width: 100% !important; max-height: 65mm !important; object-fit: contain !important; }
+    .pdf-root [data-pdf-media] { aspect-ratio: auto !important; height: auto !important; min-height: 0 !important; max-height: 65mm !important; padding: 0 !important; break-inside: avoid; }
+    .pdf-root [data-pdf-media] img, .pdf-root [data-pdf-media] video { position: static !important; display: block; width: auto !important; height: auto !important; max-width: 100% !important; max-height: 65mm !important; margin: 0 auto; object-fit: contain !important; }
+    .pdf-root [data-pdf-media] button, .pdf-root [data-pdf-media] .absolute { display: none !important; }
+    .pdf-root .blur-2xl, .pdf-root .backdrop-blur, .pdf-root .backdrop-blur-sm { filter: none !important; backdrop-filter: none !important; }
     .pdf-root .recharts-wrapper { max-height: 95mm !important; }
     .pdf-root p, .pdf-root li { orphans: 3; widows: 3; }
     .pdf-root [data-pdf-splittable] { break-inside: auto !important; page-break-inside: auto !important; height: auto !important; overflow: visible !important; }
@@ -458,7 +491,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       await Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 3000))]);
       await Promise.race([Promise.all(Array.from(document.images).map(image => image.decode().catch(() => {}))), new Promise(resolve => setTimeout(resolve, 5000))]);
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const usablePageHeight = 250 * 96 / 25.4; // conservative A4/Letter content height
+      const usablePageHeight = 130 * 96 / 25.4; // long cards flow instead of wasting most of a page
       document.querySelectorAll('.pdf-root article, .pdf-root .glass, .pdf-root .glass-inner, .pdf-root .glass-accent, .pdf-root blockquote, .pdf-root tr').forEach(el => {
         el.setAttribute(el.getBoundingClientRect().height > usablePageHeight ? 'data-pdf-splittable' : 'data-pdf-keep', '');
       });
