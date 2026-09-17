@@ -8,6 +8,13 @@
       "when": 1789542515663,
       "tag": "0000_competitive_qa_fixes",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789626026373,
+      "tag": "0001_close_admin_escalation",
+      "breakpoints": true
     }
   ]
 }
