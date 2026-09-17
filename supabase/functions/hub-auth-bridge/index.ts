@@ -148,7 +148,15 @@ async function provisionAndSignIn(
   const { error: roleErr } = await supabase
     .from("user_roles")
     .insert({ user_id: supabaseUserId, role: toolRole });
-  if (roleErr) console.error("Role insert error:", roleErr);
+  // The delete above already ran, so a failed insert leaves this account with
+  // no role at all. Logging and carrying on would hand back a working session
+  // for a user that is_moburst_staff() now says no to: they sign in, see an
+  // empty app, and have nothing to go on. Refuse instead. The next attempt
+  // re-runs the whole reconcile from scratch, so a transient failure heals.
+  if (roleErr) {
+    console.error("Role insert error:", roleErr);
+    return { ok: false, error: `Could not assign your role (${roleErr.message}). Try signing in again.` };
+  }
 
   // Reconcile client_users mapping: wipe ALL existing rows for this user, then
   // auto-populate based on current hub company. This prevents stale mappings from
