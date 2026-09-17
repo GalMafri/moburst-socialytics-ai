@@ -1067,13 +1067,13 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           dispatch_claimed_at: string | null
-          pending_competitive_report_id: string | null
           frequency: string
           id: string
           is_active: boolean | null
           last_result: string | null
           last_run_at: string | null
           next_run_at: string | null
+          pending_competitive_report_id: string | null
           range_mode: string
           report_kind: string
           run_day_of_month: number
@@ -1086,13 +1086,13 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           dispatch_claimed_at?: string | null
-          pending_competitive_report_id?: string | null
           frequency?: string
           id?: string
           is_active?: boolean | null
           last_result?: string | null
           last_run_at?: string | null
           next_run_at?: string | null
+          pending_competitive_report_id?: string | null
           range_mode?: string
           report_kind?: string
           run_day_of_month?: number
@@ -1105,13 +1105,13 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           dispatch_claimed_at?: string | null
-          pending_competitive_report_id?: string | null
           frequency?: string
           id?: string
           is_active?: boolean | null
           last_result?: string | null
           last_run_at?: string | null
           next_run_at?: string | null
+          pending_competitive_report_id?: string | null
           range_mode?: string
           report_kind?: string
           run_day_of_month?: number
@@ -1120,17 +1120,17 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "report_schedules_pending_competitive_report_id_fkey"
-            columns: ["pending_competitive_report_id"]
-            isOneToOne: false
-            referencedRelation: "competitive_reports"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "report_schedules_client_id_fkey"
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_schedules_pending_competitive_report_id_fkey"
+            columns: ["pending_competitive_report_id"]
+            isOneToOne: false
+            referencedRelation: "competitive_reports"
             referencedColumns: ["id"]
           },
         ]
@@ -1416,10 +1416,6 @@ export type Database = {
       }
     }
     Functions: {
-      claim_report_schedule: {
-        Args: { schedule_id: string; expected_next_run_at: string }
-        Returns: boolean
-      }
       attribution_health: {
         Args: never
         Returns: {
@@ -1431,6 +1427,10 @@ export type Database = {
       can_access_client: { Args: { _client_id: string }; Returns: boolean }
       can_manage_roster: { Args: never; Returns: boolean }
       can_write_client: { Args: { _client_id: string }; Returns: boolean }
+      claim_report_schedule: {
+        Args: { expected_next_run_at: string; schedule_id: string }
+        Returns: boolean
+      }
       freeze_quarter: {
         Args: { p_quarter: string }
         Returns: {

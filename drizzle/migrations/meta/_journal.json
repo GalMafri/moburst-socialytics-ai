@@ -22,6 +22,20 @@
       "when": 1789627180539,
       "tag": "0002_tighten_events_previews_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789645328136,
+      "tag": "0003_calendar_copy_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789645341681,
+      "tag": "0004_schedule_dependencies",
+      "breakpoints": true
     }
   ]
 }
