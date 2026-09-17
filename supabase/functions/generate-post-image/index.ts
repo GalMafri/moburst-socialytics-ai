@@ -162,6 +162,16 @@ Deno.serve(async (req) => {
       return jsonResp({ error: "prompt is required" }, 400);
     }
 
+    // Being staff is not the same as being allowed to spend on THIS client.
+    // The sibling functions (run-report, identify-competitors, media-job-status)
+    // all check the client too; these two generators only checked the role, so
+    // any staff member could bill a design to a client they cannot open.
+    // Checked before shipping that this locks nobody out: every company-scoped
+    // profile holds the admin role, and can_access_client short-circuits on
+    // is_admin, so can_write_client passes for all of them.
+    const resolvedClientId = client_id || client_context?.client_id;
+    if (resolvedClientId) await requireStaff(req, { writeClientId: resolvedClientId });
+
     // Resolve the brand from the caller, falling back to the client row. A call
     // that arrives without context used to generate a perfectly generic image
     // and say nothing about it.

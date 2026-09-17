@@ -261,6 +261,12 @@ serve(async (req) => {
       });
     }
 
+    // Being staff is not the same as being allowed to spend on THIS client.
+    // See the note in generate-post-image: verified against the live roles
+    // that this locks nobody out before shipping it.
+    const resolvedClientId = client_id || client_context?.client_id;
+    if (resolvedClientId) await requireStaff(req, { writeClientId: resolvedClientId });
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
