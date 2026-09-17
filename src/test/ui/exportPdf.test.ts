@@ -65,4 +65,26 @@ describe("PDF export content preservation", () => {
     await expect(exportReportToPdf({ contentRef: { current: root }, filename: "blocked" })).rejects.toThrow("Pop-up blocked");
     expect(root.textContent).toBe("Saved report");
   });
+
+  it("keeps absolutely positioned post images visible while hiding their overlays", async () => {
+    const capture = captureExport();
+    const root = document.createElement("div");
+    // PostVisual uses absolute positioning for both the real image and overlays.
+    root.innerHTML = `<div class="aspect-video">
+      <img aria-hidden="true" class="absolute blur-2xl" src="blur.png">
+      <img alt="Post creative" class="absolute inset-0 h-full w-full" loading="lazy" src="post.png">
+      <span class="absolute">Play overlay</span><button>Open media</button>
+    </div>`;
+    await exportReportToPdf({ contentRef: { current: root }, filename: "media" });
+    const exported = capture.document();
+    const style = exported.querySelector("style")!.cloneNode(true);
+    const printed = exported.querySelector(".pdf-root")!.cloneNode(true) as HTMLElement;
+    document.body.append(style, printed);
+    const image = printed.querySelector("img")!;
+    expect(getComputedStyle(image).display).not.toBe("none");
+    expect(image.getAttribute("loading")).toBe("eager");
+    expect(getComputedStyle(printed.querySelector("span")!).display).toBe("none");
+    expect(getComputedStyle(printed.querySelector("button")!).display).toBe("none");
+    expect(root.querySelector('img[alt="Post creative"]')?.getAttribute("loading")).toBe("lazy");
+  });
 });

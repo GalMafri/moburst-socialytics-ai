@@ -112,6 +112,9 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   // Screen media frames reserve a tall aspect-ratio box even when their image
   // is reduced for print. Reset the frame too, and omit decorative duplicates.
   content.querySelectorAll('img[aria-hidden="true"]').forEach(el => el.remove());
+  // Every page must load its images, including media below the first viewport.
+  // This changes only the print clone; the app keeps lazy loading on screen.
+  content.querySelectorAll('img').forEach(el => el.setAttribute('loading', 'eager'));
   content.querySelectorAll('[class*="aspect-"]').forEach(el => {
     if (el.querySelector('img, video')) el.setAttribute('data-pdf-media', '');
   });
@@ -468,7 +471,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     .pdf-root img { max-width: 100% !important; max-height: 65mm !important; object-fit: contain !important; }
     .pdf-root [data-pdf-media] { aspect-ratio: auto !important; height: auto !important; min-height: 0 !important; max-height: 65mm !important; padding: 0 !important; break-inside: avoid; }
     .pdf-root [data-pdf-media] img, .pdf-root [data-pdf-media] video { position: static !important; display: block; width: auto !important; height: auto !important; max-width: 100% !important; max-height: 65mm !important; margin: 0 auto; object-fit: contain !important; }
-    .pdf-root [data-pdf-media] button, .pdf-root [data-pdf-media] .absolute { display: none !important; }
+    .pdf-root [data-pdf-media] button, .pdf-root [data-pdf-media] .absolute:not(img):not(video) { display: none !important; }
     .pdf-root .blur-2xl, .pdf-root .backdrop-blur, .pdf-root .backdrop-blur-sm { filter: none !important; backdrop-filter: none !important; }
     .pdf-root .recharts-wrapper { max-height: 95mm !important; }
     .pdf-root p, .pdf-root li { orphans: 3; widows: 3; }
