@@ -888,6 +888,7 @@ export type Database = {
           approved_at: string | null
           approved_by: string | null
           archived_at: string | null
+          calendar_post_key: string | null
           client_id: string
           concept: string | null
           created_at: string | null
@@ -917,6 +918,7 @@ export type Database = {
           approved_at?: string | null
           approved_by?: string | null
           archived_at?: string | null
+          calendar_post_key?: string | null
           client_id: string
           concept?: string | null
           created_at?: string | null
@@ -946,6 +948,7 @@ export type Database = {
           approved_at?: string | null
           approved_by?: string | null
           archived_at?: string | null
+          calendar_post_key?: string | null
           client_id?: string
           concept?: string | null
           created_at?: string | null
