@@ -525,9 +525,16 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       // gaps seen in the monthly and analytics exports; 65mm keeps the small
       // repeating units together and lets the rest flow.
       const usablePageHeight = 65 * 96 / 25.4;
+      // A chart cannot be cut in half: splitting one leaves its title alone on
+      // the previous page above an empty plot box. Keep chart cards whole up to
+      // a full page of content.
+      const fullPageHeight = 240 * 96 / 25.4;
       document.querySelectorAll('.pdf-root article, .pdf-root .glass, .pdf-root .glass-inner, .pdf-root .glass-accent, .pdf-root blockquote, .pdf-root tr').forEach(el => {
-        el.setAttribute(el.getBoundingClientRect().height > usablePageHeight ? 'data-pdf-splittable' : 'data-pdf-keep', '');
+        const height = el.getBoundingClientRect().height;
+        const limit = el.querySelector('.recharts-surface') ? fullPageHeight : usablePageHeight;
+        el.setAttribute(height > limit ? 'data-pdf-splittable' : 'data-pdf-keep', '');
       });
+
       try { window.focus(); window.print(); }
       catch (err) { console.error("Print dialog failed:", err); }
     });
