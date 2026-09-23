@@ -279,6 +279,23 @@ export default function CompetitiveRun() {
   return (
     <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
       <div className="max-w-4xl mx-auto space-y-6">
+        {/* What this run will actually use. When someone re-identified
+            competitors, the newest selection on the review page is a draft and
+            is NOT what runs — saying so beats silently analysing older names. */}
+        {newerDraft && (
+          <Card>
+            <CardContent className="pt-5 space-y-2">
+              <p className="t-body font-medium">This report would use the older confirmed competitors</p>
+              <p className="t-secondary">
+                A newer set of three is waiting for review and will not be used until it is confirmed.
+              </p>
+              <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${id}/competitive`)}>
+                Review the newer selection
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Confirmed set summary */}
         <Card>
           <CardHeader>
@@ -295,6 +312,10 @@ export default function CompetitiveRun() {
               </div>
             ))}
             <p className="t-secondary pt-1">
+              <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
+              {trackingState.detail ? ` ${trackingState.detail}` : ""}
+            </p>
+            <p className="t-secondary">
               Confirmed {confirmedSet.confirmed_at ? new Date(confirmedSet.confirmed_at).toLocaleDateString() : ""}
               {" · "}
               <button className="underline underline-offset-2" onClick={() => navigate(`/clients/${id}/competitive`)}>
@@ -303,6 +324,7 @@ export default function CompetitiveRun() {
             </p>
           </CardContent>
         </Card>
+
 
         {/* Period */}
         <Card>
