@@ -14,6 +14,8 @@ import { RUN_ESTIMATE, canRetry } from "@/lib/reportRun";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { describeInvokeError } from "@/lib/invokeError";
+import { describeTracking, pickRunSelection, plainCompetitiveError, type SetRow } from "@/lib/competitiveFlow";
+
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -75,22 +77,24 @@ export default function CompetitiveRun() {
   // Deep analysis runs against the newest confirmed set. A set keeps its
   // confirmation through later runs (its status moves to analyzing, complete
   // or failed), so every post-confirmation status counts; only drafts do not.
-  const { data: confirmedSet, isLoading: setLoading } = useQuery({
+  // The full list is read so a newer unconfirmed draft can be pointed out
+  // instead of the page quietly running an older selection.
+  const { data: sets, isLoading: setLoading } = useQuery({
     queryKey: ["confirmed-competitor-set", id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("competitor_sets")
         .select("*")
         .eq("client_id", id!)
-        .in("status", ["confirmed", "analyzing", "complete", "failed"])
-        .order("confirmed_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order("created_at", { ascending: false });
       if (error) throw error;
-      return data;
+      return data || [];
     },
     enabled: !!id,
   });
+  const { runnable: confirmedSet, newerDraft } = pickRunSelection((sets || []) as SetRow[]);
+  const trackingState = describeTracking(confirmedSet);
+
 
   const { data: selectedCompetitors } = useQuery({
     queryKey: ["confirmed-competitors", confirmedSet?.id],
