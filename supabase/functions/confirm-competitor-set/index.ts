@@ -12,6 +12,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
+import { isReviewReadyHandle } from "../_shared/competitive/extractSocialHandles.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -75,17 +76,26 @@ Deno.serve(async (req) => {
 
     // Every selected competitor needs at least one active handle to analyze.
     const missing: string[] = [];
+    const unreviewed: string[] = [];
     for (const s of selected) {
-      const { count } = await supabase
+      const { data: activeHandles, error: handlesErr } = await supabase
         .from("competitor_handles")
-        .select("id", { count: "exact", head: true })
+        .select("source, detection_confidence, is_active")
         .eq("competitor_id", s.id)
         .eq("is_active", true);
-      if (!count) missing.push(s.name);
+      if (handlesErr) throw new Error(`Could not verify handles for ${s.name}: ${handlesErr.message}`);
+      if (!activeHandles?.length) missing.push(s.name);
+      else if (!activeHandles.some(isReviewReadyHandle)) unreviewed.push(s.name);
     }
     if (missing.length > 0) {
       return jsonResp(
         { error: `No active social handles for: ${missing.join(", ")}. Detect or add handles first.` },
+        422,
+      );
+    }
+    if (unreviewed.length > 0) {
+      return jsonResp(
+        { error: `Only low-confidence automatic profiles were found for: ${unreviewed.join(", ")}. Verify and add at least one profile manually before confirming.` },
         422,
       );
     }

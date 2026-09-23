@@ -148,6 +148,29 @@ async function detectHandlesQa({html='',existing=[],readError=false}={}) {
  const r=await handler(new Request('https://fixture.invalid',{method:'POST',body:JSON.stringify({competitor_id:'rival',refresh:true})}));return{status:r.status,body:await r.json(),writes,requests};
 }
 
+async function confirmCompetitorsQa({handlesById={},handlesError=false}={}) {
+ let handler,updated=false;
+ const selected=[1,2,3].map(i=>({id:'competitor-'+i,name:'Competitor '+i,selected_rank:i,set_id:'set'}));
+ const db={from(table){const filters=[];let mode='select',payload=null,one=false;const q={
+  select(){return q},eq(k,v){filters.push([k,v]);return q},order(){return q},maybeSingle(){one=true;return q},update(v){mode='update';payload=v;return q},
+  then(resolve,reject){let response;
+   if(table==='competitor_sets'&&mode==='select')response={data:{id:'set',client_id:'client',status:'draft'},error:null};
+   else if(table==='competitors')response={data:selected,error:null};
+   else if(table==='competitor_handles'){const id=filters.find(([k])=>k==='competitor_id')?.[1];response={data:handlesById[id]||[],error:handlesError?{message:'fixture handle read failed'}:null};}
+   else if(table==='competitor_sets'&&mode==='update'){updated=true;response={data:null,error:null};}
+   else response={data:one?null:[],error:null};
+   return Promise.resolve(response).then(resolve,reject);
+  }};return q}};
+ class AuthzError extends Error {}
+ moduleFrom('supabase/functions/confirm-competitor-set/index.ts',{
+  'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>db},
+  '../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>({userId:'staff',asCaller:{rpc:async()=>({data:true,error:null})}})},
+  '../_shared/competitive/extractSocialHandles.ts':moduleFrom('supabase/functions/_shared/competitive/extractSocialHandles.ts'),
+ },{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f}});
+ const response=await handler(new Request('https://fixture.invalid',{method:'POST',body:JSON.stringify({set_id:'set'})}));
+ return{status:response.status,body:await response.json(),updated};
+}
+
 (async()=>{
  for(const [name,options,header,expected] of [['client rejected',{staff:false},'Bearer fixture',403],['staff allowed',{},'Bearer fixture',null],['expired session rejected',{valid:false},'Bearer fixture',401],['missing session rejected',{},null,401],['role error fails closed',{roleError:true},'Bearer fixture',500]])await check('QA-13','control','actual staff guard: '+name,async()=>{const g=actualStaffGuard(options);const response=await g.staffGate(new Request('https://fixture.invalid',{headers:header?{Authorization:header}:{}}),{});assert.equal(response?.status??null,expected);});
  for(const options of [{},{media:['https://fixture.invalid/image.png']},{media:['a','b'],partial:true},{media:['a'],uploadFailure:true},{recordFailure:true},{providerFailure:true},{missing:true},{denied:true}])await check('QA-01','regression','publishing '+JSON.stringify(options),async()=>{const r=await scheduling(options);assert.equal(r.status,options.denied?401:options.missing?400:options.uploadFailure?502:options.providerFailure?500:200);assert.equal(r.calls.filter(x=>x==='publish').length,options.denied||options.missing||options.uploadFailure?0:1);if(options.recordFailure)assert.equal(r.body.recorded,false);if(options.partial)assert.equal(r.body.media_dropped,1);});
@@ -216,6 +239,13 @@ async function detectHandlesQa({html='',existing=[],readError=false}={}) {
  for(const source of ['manual','rivaliq','rejected']) await check('QA-HANDLES','regression','refresh preserves '+source+' decisions',async()=>{const r=await detectHandlesQa({html:'<footer><a href="https://instagram.com/acme">Acme</a></footer>',existing:[{competitor_id:'rival',platform:'instagram',source}]});assert.equal(r.status,200);assert.equal(r.writes.length,0);});
  await check('QA-HANDLES','regression','failed protection lookup aborts before overwriting handles',async()=>{const r=await detectHandlesQa({html:'https://instagram.com/acme',readError:true});assert.equal(r.status,500);assert.equal(r.writes.length,0);assert.equal(r.requests.length,0);});
  await check('QA-HANDLES','control','company site profile still saves after discovery-page rejection',async()=>{const r=await detectHandlesQa({html:'<footer><a href="https://instagram.com/popular/">Popular</a><a href="https://instagram.com/acme/">Acme</a></footer>'});assert.equal(r.status,200);assert.equal(r.writes.length,1);assert.equal(r.writes[0].handle,'acme');});
+ await check('QA-HANDLES','regression','confirmation rejects competitors backed only by weak automatic guesses',async()=>{const weak=Object.fromEntries([1,2,3].map(i=>['competitor-'+i,[{source:'auto',detection_confidence:0.45,is_active:true}]]));const r=await confirmCompetitorsQa({handlesById:weak});assert.equal(r.status,422);assert.match(r.body.error,/low-confidence automatic profiles/);assert.equal(r.updated,false);});
+ await check('QA-HANDLES','control','confirmation accepts reviewed and strongly evidenced profiles',async()=>{const ready={
+  'competitor-1':[{source:'manual',detection_confidence:1,is_active:true}],
+  'competitor-2':[{source:'rivaliq',detection_confidence:null,is_active:true}],
+  'competitor-3':[{source:'auto',detection_confidence:0.8,is_active:true}],
+ };const r=await confirmCompetitorsQa({handlesById:ready});assert.equal(r.status,200);assert.equal(r.updated,true);});
+ await check('QA-HANDLES','regression','confirmation fails closed when handle verification cannot be read',async()=>{const r=await confirmCompetitorsQa({handlesError:true});assert.equal(r.status,500);assert.equal(r.updated,false);});
  const report={checks:results.length,passed:results.filter(x=>x.result==='pass').length,failed:results.filter(x=>x.result==='FAIL')};
  console.log(JSON.stringify(report,null,2));if(report.failed.length)process.exitCode=1;
 })();

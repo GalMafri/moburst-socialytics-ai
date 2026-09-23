@@ -216,3 +216,19 @@ describe('observed false profile detections', () => {
     expect(out[0].handle).toBe('acme');
   });
 });
+
+describe('review-ready handles', () => {
+  it('accepts manual, RivalIQ and strongly evidenced profiles', async () => {
+    const { isReviewReadyHandle } = await import('../../../supabase/functions/_shared/competitive/extractSocialHandles');
+    expect(isReviewReadyHandle({ source: 'manual', detection_confidence: 0.1, is_active: true })).toBe(true);
+    expect(isReviewReadyHandle({ source: 'rivaliq', detection_confidence: null, is_active: true })).toBe(true);
+    expect(isReviewReadyHandle({ source: 'auto', detection_confidence: '0.80', is_active: true })).toBe(true);
+  });
+
+  it('rejects weak, inactive and explicitly rejected profiles', async () => {
+    const { isReviewReadyHandle } = await import('../../../supabase/functions/_shared/competitive/extractSocialHandles');
+    expect(isReviewReadyHandle({ source: 'auto', detection_confidence: 0.79, is_active: true })).toBe(false);
+    expect(isReviewReadyHandle({ source: 'manual', detection_confidence: 1, is_active: false })).toBe(false);
+    expect(isReviewReadyHandle({ source: 'rejected', detection_confidence: 1, is_active: true })).toBe(false);
+  });
+});

@@ -33,6 +33,16 @@ export interface DetectedHandle {
   confidence: number;
 }
 
+export function isReviewReadyHandle(handle: {
+  source?: string | null;
+  detection_confidence?: number | string | null;
+  is_active?: boolean | null;
+}): boolean {
+  if (handle.is_active === false || handle.source === "rejected") return false;
+  if (handle.source === "manual" || handle.source === "rivaliq") return true;
+  return Number(handle.detection_confidence ?? 0) >= 0.8;
+}
+
 /** Path segments that match the shape of a profile but never are one. */
 const RESERVED: Record<string, Set<string>> = {
   instagram: new Set(["p", "reel", "reels", "tv", "stories", "explore", "accounts", "direct", "challenge", "about", "legal", "developer", "privacy", "terms", "s", "web", "emails", "lite", "create", "topics", "popular"]),

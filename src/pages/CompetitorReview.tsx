@@ -13,6 +13,7 @@
 import { useMemo, useState } from "react";
 import { RivalIqSetup } from "@/components/competitive/RivalIqSetup";
 import { classifyProfileUrl, isProfileUrlInput } from "@/lib/profileUrl";
+import { isReviewReadyHandle } from "../../supabase/functions/_shared/competitive/extractSocialHandles";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -203,6 +204,16 @@ export default function CompetitorReview() {
     () =>
       selected
         .filter((c) => (handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active !== false).length === 0)
+        .map((c) => displayCompanyName(c.name)),
+    [selected, handlesByCompetitor],
+  );
+  const withoutReviewedHandles = useMemo(
+    () =>
+      selected
+        .filter((c) => {
+          const active = (handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active !== false);
+          return active.length > 0 && !active.some(isReviewReadyHandle);
+        })
         .map((c) => displayCompanyName(c.name)),
     [selected, handlesByCompetitor],
   );
@@ -784,7 +795,7 @@ export default function CompetitorReview() {
                     // competitor has no active handle. The button used to be
                     // enabled anyway, so the only way to learn was to press it
                     // and read a 422.
-                    disabled={selected.length !== 3 || withoutHandles.length > 0 || confirmSet.isPending}
+                    disabled={selected.length !== 3 || withoutHandles.length > 0 || withoutReviewedHandles.length > 0 || confirmSet.isPending}
                     className="gap-2"
                   >
                     <ShieldCheck className="h-4 w-4" />
@@ -813,6 +824,12 @@ export default function CompetitorReview() {
                 <p className="t-secondary">
                   {withoutHandles.join(" and ")} {withoutHandles.length === 1 ? "has" : "have"} no social handle yet.
                   Add one on the row below, or swap in another competitor, before confirming.
+                </p>
+              )}
+              {isDraft && selected.length === 3 && withoutReviewedHandles.length > 0 && (
+                <p className="t-secondary text-amber-400/90">
+                  {withoutReviewedHandles.join(" and ")} only {withoutReviewedHandles.length === 1 ? "has" : "have"} low-confidence automatic profiles.
+                  Open and verify one, then remove the guess and add the verified profile manually before confirming.
                 </p>
               )}
             </CardContent>
