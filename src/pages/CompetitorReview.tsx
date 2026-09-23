@@ -217,6 +217,7 @@ export default function CompetitorReview() {
         .map((c) => displayCompanyName(c.name)),
     [selected, handlesByCompetitor],
   );
+  const runNeedsProfileReview = withoutHandles.length > 0 || withoutReviewedHandles.length > 0;
 
   const isDraft = currentSet?.status === "draft";
   const refreshAll = () => {
@@ -804,7 +805,11 @@ export default function CompetitorReview() {
                 )}
                 {!isDraft && (
                   <>
-                    <Button className="gap-2" onClick={() => navigate(`/clients/${clientId}/competitive/run`)}>
+                    <Button
+                      className="gap-2"
+                      onClick={() => navigate(`/clients/${clientId}/competitive/run`)}
+                      disabled={runNeedsProfileReview}
+                    >
                       <Play className="h-4 w-4" /> Run deep analysis
                     </Button>
                     {/* Offered for every non-draft status, not just
@@ -830,6 +835,15 @@ export default function CompetitorReview() {
                 <p className="t-secondary text-amber-400/90">
                   {withoutReviewedHandles.join(" and ")} only {withoutReviewedHandles.length === 1 ? "has" : "have"} low-confidence automatic profiles.
                   Open and verify one, then remove the guess and add the verified profile manually before confirming.
+                </p>
+              )}
+              {!isDraft && runNeedsProfileReview && (
+                <p className="t-secondary text-amber-400/90">
+                  Deep analysis is paused because {[
+                    ...withoutHandles.map((name) => `${name} has no active profile`),
+                    ...withoutReviewedHandles.map((name) => `${name} only has low-confidence automatic profiles`),
+                  ].join("; ")}.
+                  Reopen the set, verify or replace those profiles, and confirm it again before running a report.
                 </p>
               )}
             </CardContent>

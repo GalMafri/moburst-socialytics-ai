@@ -16,6 +16,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { buildCompetitivePayload, buildSocialPayload, isStuckRun, STUCK_AFTER_MINUTES, type ReportRange } from "../_shared/reports/payloads.ts";
 import { bestLandscapeMatch, summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
+import { isReviewReadyHandle } from "../_shared/competitive/extractSocialHandles.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -187,6 +188,43 @@ Deno.serve(async (req) => {
         set = data;
       }
       if (!set) return json({ error: `${client.name} has no confirmed competitor set to analyse.` }, 422);
+
+      // Older sets may have been confirmed before profile verification was
+      // required. Refuse those here as well as in the UI, before creating a
+      // report row or dispatching the workflow. This also protects callers
+      // using an older cached frontend or invoking the function directly.
+      const { data: selected, error: selectedErr } = await admin
+        .from("competitors")
+        .select("id, name")
+        .eq("set_id", set.id)
+        .eq("is_selected", true);
+      if (selectedErr) throw new Error(`Could not verify selected competitors: ${selectedErr.message}`);
+      if (!selected || selected.length !== 3) {
+        return json({ error: "The competitor set must contain exactly three selected competitors before analysis." }, 422);
+      }
+      const missingProfiles: string[] = [];
+      const unreviewedProfiles: string[] = [];
+      for (const competitor of selected) {
+        const { data: activeHandles, error: handlesErr } = await admin
+          .from("competitor_handles")
+          .select("source, detection_confidence, is_active")
+          .eq("competitor_id", competitor.id)
+          .eq("is_active", true);
+        if (handlesErr) throw new Error(`Could not verify profiles for ${competitor.name}: ${handlesErr.message}`);
+        if (!activeHandles?.length) missingProfiles.push(competitor.name);
+        else if (!activeHandles.some(isReviewReadyHandle)) unreviewedProfiles.push(competitor.name);
+      }
+      if (missingProfiles.length || unreviewedProfiles.length) {
+        const reasons = [
+          missingProfiles.length ? `no active profiles for ${missingProfiles.join(", ")}` : "",
+          unreviewedProfiles.length
+            ? `only low-confidence automatic profiles for ${unreviewedProfiles.join(", ")}`
+            : "",
+        ].filter(Boolean).join("; ");
+        return json({
+          error: `Deep analysis is paused: ${reasons}. Reopen the set, verify or replace those profiles, and confirm it again.`,
+        }, 422);
+      }
 
       // The analysis reads a RivalIQ landscape, not the competitor list in
       // the app. A client with no landscape used to spend a whole run to be
