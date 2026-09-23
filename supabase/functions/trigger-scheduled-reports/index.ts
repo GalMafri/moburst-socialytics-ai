@@ -229,7 +229,7 @@ Deno.serve(async (req) => {
             supabase, client, reportId: report.id, set, range,
             scheduled: true, staggerSeconds: competitiveIndex++ * 150,
           });
-          const r = await fetch(competitiveUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+          const r = await fetch(competitiveUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret }, body: JSON.stringify(payload) });
           if (!r.ok) throw new Error(`competitive webhook ${r.status}`);
           await advance(`triggered competitive report ${report.id}`);
           results.push({ client: client.name, kind: "competitive", status: "triggered", report_id: report.id, range });
@@ -271,7 +271,7 @@ Deno.serve(async (req) => {
           supabase, client, reportId: report.id, range,
           scheduled: true, staggerSeconds: socialIndex++ * 180, competitiveReportId: dependencyId,
         });
-        const r = await fetch(socialUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        const r = await fetch(socialUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret }, body: JSON.stringify(payload) });
         if (!r.ok) throw new Error(`social webhook ${r.status}`);
         await advance(`triggered social report ${report.id}`);
         results.push({ client: client.name, kind: "social", status: "triggered", report_id: report.id, range, competitive_context: !!payload.competitive_context });

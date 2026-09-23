@@ -76,6 +76,8 @@ Deno.serve(async (req) => {
     // Staff, with write access to this client. Checked before anything is
     // read back to the caller.
     const caller = await requireStaff(req, { writeClientId: clientId });
+    const dispatchSecret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
+    if (!dispatchSecret) return json({ error: "Workflow authentication is not configured." }, 503);
 
     if (existing && ["running", "failed"].includes(existing.status)) {
       const started = Date.parse(existing.created_at || "");
@@ -268,7 +270,7 @@ Deno.serve(async (req) => {
 
     const resp = await fetch(setting.value, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Socialytics-Secret": dispatchSecret },
       body: JSON.stringify(payload),
     });
     if (!resp.ok) {

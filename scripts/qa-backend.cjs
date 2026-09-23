@@ -70,7 +70,7 @@ function actualStaffGuard({staff=true,valid=true,canWrite=true,roleError=false}=
 async function runScheduler(options={}){
  const state=options.state || database(options);let handler;const requests=[];
  moduleFrom('supabase/functions/trigger-scheduled-reports/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/auth/secretEquals.ts':{secretEquals:async()=>options.authorized!==false}},{Deno:{env:{get:()=> 'https://fixture.invalid'},serve:f=>handler=f},fetch:async(url,opts)=>{
-  requests.push({url,payload:JSON.parse(opts.body),newCompetitiveStatus:state.tables.competitive_reports.at(-1).status});
+  requests.push({url,headers:opts.headers,payload:JSON.parse(opts.body),newCompetitiveStatus:state.tables.competitive_reports.at(-1).status});
   if(url.includes('refresh-competitor-feed'))return new Response(JSON.stringify(options.feedResponse || {error:'Fixture landscape missing'}),{status:options.feedStatus || 422});
   if(options.transport==='throw')throw Error('Fixture network failure');
   if(options.transport==='reject')return new Response('{}',{status:503});
@@ -124,11 +124,11 @@ async function runImport({matches=true}={}) {
  return{status:r.status,body:await r.json(),state};
 }
 async function runManual(transport, options={}){
- const state=options.state || database();let handler;let dispatches=0;
+ const state=options.state || database();let handler;let dispatches=0;const sentHeaders=[];
  class AuthzError extends Error{constructor(status,message){super(message);this.status=status;}}
- moduleFrom('supabase/functions/run-report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>({userId:'fixture-user'})},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/competitive/rivaliqLandscape.ts':options.landscapes ? moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts') : {bestLandscapeMatch(){},summarizeLandscapes(){}}},{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},fetch:async(url)=>{if(options.landscapes && url.startsWith('https://api.rivaliq.com/v3/landscapes'))return new Response(JSON.stringify({landscapes:options.landscapes}));dispatches++;if(transport==='late-completed'){state.tables.reports.at(-1).status='completed';throw new Error('Timeout after callback')};if(transport==='throw')throw new Error('Fixture network failure');return new Response('{}',{status:transport==='reject'?503:200})}});
+ moduleFrom('supabase/functions/run-report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>({userId:'fixture-user'})},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/competitive/rivaliqLandscape.ts':options.landscapes ? moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts') : {bestLandscapeMatch(){},summarizeLandscapes(){}}},{Deno:{env:{get:n=>n==='SOCIALYTICS_N8N_SECRET'&&options.missingDispatchSecret?undefined:'fixture'},serve:f=>handler=f},fetch:async(url,opts)=>{if(options.landscapes && url.startsWith('https://api.rivaliq.com/v3/landscapes'))return new Response(JSON.stringify({landscapes:options.landscapes}));sentHeaders.push(opts.headers);dispatches++;if(transport==='late-completed'){state.tables.reports.at(-1).status='completed';throw new Error('Timeout after callback')};if(transport==='throw')throw new Error('Fixture network failure');return new Response('{}',{status:transport==='reject'?503:200})}});
  const response=await handler(new Request('https://fixture.invalid/run',{method:'POST',body:JSON.stringify(options.body || {client_id:'fixture-client',kind:'social',date_range_start:'2026-09-01',date_range_end:'2026-09-15'})}));
- return{state,dispatches,status:response.status,body:await response.json(),reportStatus:state.tables.reports.at(-1)?.status};
+ return{state,dispatches,sentHeaders,status:response.status,body:await response.json(),reportStatus:state.tables.reports.at(-1)?.status};
 }
 
 async function runCallback(state,kind,status,reportId,{authorized=true,resume=true}={}){
@@ -165,6 +165,9 @@ async function runCallback(state,kind,status,reportId,{authorized=true,resume=tr
  await check('QA-SETUP','control','review contains client and three confirmed URLs without writes',async()=>{const r=await setupPreview();assert.equal(r.status,200);assert.equal(r.body.plan.companies.length,4);assert.equal(r.body.plan.companies[0].url,'https://client.com/');assert.match(r.body.fingerprint,/^[a-f0-9]{64}$/);assert.equal(r.outbound,0);assert.equal(r.state.operations.length,0);});
  await check('QA-IMPORT','regression','unrelated landscape cannot create a competitor set',async()=>{const r=await runImport({matches:false});assert.equal(r.status,422);assert.equal(r.state.operations.length,0);});
  await check('QA-IMPORT','regression','non-focus client is excluded and focus competitor retained',async()=>{const r=await runImport();assert.equal(r.status,200);assert.equal(r.state.tables.competitors.length,1);assert.equal(r.state.tables.competitors[0].name,'Jobber');});
+ await check('QA-04','regression','manual dispatch includes workflow authentication',async()=>{const r=await runManual('accept');assert.equal(r.status,200);assert.equal(r.sentHeaders[0]['X-Socialytics-Secret'],'fixture');});
+ await check('QA-04','regression','missing workflow secret cannot create or dispatch reports',async()=>{const r=await runManual('accept',{missingDispatchSecret:true});assert.equal(r.status,503);assert.equal(r.dispatches,0);assert.equal(r.state.operations.length,0);});
+ await check('QA-04','regression','both scheduled dispatch types carry workflow authentication',async()=>{const r=await runScheduler({immediate:true});assert.equal(r.body.triggered,2);assert(r.requests.every(q=>q.headers['X-Socialytics-Secret']==='https://fixture.invalid'));});
  for(const transport of ['throw','reject'])await check('QA-11','regression','failed scheduler dispatch '+transport,async()=>{const r=await runScheduler({order:['social'],transport});assert.equal(r.status,502);assert.equal(r.tables.reports[0].status,'failed');assert.equal(r.body.triggered,0);});
  for(const transport of ['throw','reject','accept','late-completed'])await check('QA-11','regression','manual dispatch '+transport,async()=>{const r=await runManual(transport);assert.equal(r.status,transport==='reject'?502:transport==='accept'?200:500);assert.equal(r.reportStatus,transport==='accept'?'running':transport==='late-completed'?'completed':'failed');});
 
