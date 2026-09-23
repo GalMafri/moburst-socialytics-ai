@@ -64,7 +64,7 @@ describe('RivalIQ API-only setup', () => {
  it('rejects partial follow failures, even with overall success', async () => {
   const f = fixture('following');
   await expect(advanceRivalIqSetup(f.persisted, async () => ({ status: 2, urls: { a: { status: 3 } } }), f.save)).rejects.toThrow('every reviewed website');
-  expect(f.persisted.phase).toBe('following');
+  expect(f.persisted.phase).toBe('following_failed');
  });
  it('does not link incomplete companies', async () => {
   const f = fixture('verify');
@@ -77,7 +77,14 @@ describe('RivalIQ API-only setup', () => {
    'http://www.one.com/': {status:3,error:'Company allowance reached'},
    'https://client.com/': {status:2,companyId:1},
   } }), f.save)).rejects.toThrow('one: Company allowance reached');
-  expect(f.persisted.phase).toBe('following');
+  expect(f.persisted.phase).toBe('following_failed');
+ });
+ it('preserves structured provider error details and marks attention required', async () => {
+  const f = fixture('following');
+  await expect(advanceRivalIqSetup(f.persisted, async () => ({status:3, urls: {
+   'https://one.com/': {status:3,error:{code:'CompanyNotFound',message:'No public profiles found'}}
+  }}),f.save)).rejects.toThrow('CompanyNotFound');
+  expect(f.persisted.phase).toBe('following_failed');
  });
  it('reuses an exact existing set without provider writes', async () => {
   const f = fixture();

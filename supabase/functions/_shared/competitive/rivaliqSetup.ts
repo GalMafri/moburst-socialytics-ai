@@ -65,7 +65,7 @@ export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): 
     await update({ operation_token: String(followed.token), phase: 'following' });
     return job;
   }
-  if (job.phase === 'following') {
+  if (['following', 'following_failed'].includes(job.phase)) {
     const pending = await api(`/pendingOperations/${encodeURIComponent(job.operation_token || '')}`);
     if (pending.status === 1) return job;
     if (pending.status !== 2 || Object.values(pending.urls || {}).some((u: any) => u.status !== 2)) {
@@ -73,9 +73,11 @@ export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): 
         .map(([url, result]: any) => {
           let company = job.plan.companies.find(c => c.url === url);
           try { company ||= job.plan.companies.find(c => c.url === publicCompanyUrl(url)); } catch { /* unknown provider URL */ }
-          return `${company?.name || 'Reviewed company'}: ${String(result.error || 'tracking failed').slice(0, 200)}`;
+          const error = typeof result.error === 'string' ? result.error : JSON.stringify(result.error || 'tracking failed');
+          return `${company?.name || 'Reviewed company'}: ${error.slice(0, 300)}`;
         });
-      const detail = failures.join('; ') || String(pending.error || 'Check account capacity and company URLs.').slice(0, 200);
+      const detail = failures.join('; ') || (typeof pending.error === 'string' ? pending.error : JSON.stringify(pending.error || 'Check account capacity and company URLs.')).slice(0, 300);
+      await update({ phase: 'following_failed' });
       throw new Error(`RivalIQ could not finish tracking every reviewed website. ${detail}`);
     }
     await update({ phase: 'verify' });

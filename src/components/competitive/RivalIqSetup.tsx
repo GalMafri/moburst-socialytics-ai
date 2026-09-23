@@ -11,6 +11,7 @@ const phaseLabel: Record<string, string> = {
  created: 'Landscape created. Continue to add the reviewed companies.',
  follow_requested: 'Checking whether RivalIQ added the companies',
  following: 'RivalIQ is preparing company tracking', verify: 'Ready to verify tracked companies',
+ following_failed: 'RivalIQ could not track every company. This selection has not been connected.',
  verified: 'Tracking verified. Continue to link it to this selection.', complete: 'Tracking verified and connected',
 };
 
