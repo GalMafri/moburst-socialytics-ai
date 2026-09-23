@@ -35,7 +35,7 @@ export interface DetectedHandle {
 
 /** Path segments that match the shape of a profile but never are one. */
 const RESERVED: Record<string, Set<string>> = {
-  instagram: new Set(["p", "reel", "reels", "tv", "stories", "explore", "accounts", "direct", "challenge", "about", "legal", "developer", "privacy", "terms", "s", "web", "emails", "lite", "create", "topics"]),
+  instagram: new Set(["p", "reel", "reels", "tv", "stories", "explore", "accounts", "direct", "challenge", "about", "legal", "developer", "privacy", "terms", "s", "web", "emails", "lite", "create", "topics", "popular"]),
   // facebook.com/marketplace was reaching production as a competitor's page.
   facebook: new Set(["sharer", "share", "sharer.php", "dialog", "plugins", "tr", "profile.php", "pages", "groups", "events", "watch", "story.php", "help", "policies", "legal", "privacy", "login", "search", "photo", "video", "media", "people", "hashtag", "marketplace", "gaming", "business", "ads", "settings", "bookmarks", "friends", "notes", "reel", "reels", "permalink.php", "directory", "home.php", "games", "jobs", "fundraisers", "live"]),
   tiktok: new Set(["video", "tag", "music", "discover", "foryou", "explore", "legal", "about", "embed", "live", "upload", "following", "friends", "search", "business", "ads", "effect", "t", "creators", "trending"]),
@@ -125,12 +125,19 @@ export function classifyUrl(url: string): { platform: string; handle: string; yo
   } catch {
     return null;
   }
+  if (!["https:", "http:"].includes(parsed.protocol) || parsed.username || parsed.password) return null;
   const platform = platformOf(parsed.hostname);
   if (!platform) return null;
   if (EMBED_HINT.test(parsed.pathname)) return null;
   const segments = parsed.pathname.split("/").filter(Boolean);
   if (segments.length === 0) return null;
-  const first = decodeURIComponent(segments[0]);
+  let decoded: string[];
+  try { decoded = segments.map(decodeURIComponent); } catch { return null; }
+  const first = decoded[0];
+  if (platform === "facebook" && first === "profile.php") {
+    const id = parsed.searchParams.get("id");
+    return id && /^\d+$/.test(id) ? { platform, handle: id } : null;
+  }
 
   let handle = "";
   let youtubeKind: string | undefined;
@@ -139,13 +146,13 @@ export function classifyUrl(url: string): { platform: string; handle: string; yo
     handle = first.slice(1);
   } else if (platform === "linkedin") {
     if (!["company", "showcase", "school"].includes(first)) return null;
-    handle = segments[1] ? decodeURIComponent(segments[1]) : "";
+    handle = decoded[1] || "";
   } else if (platform === "youtube") {
     if (first.startsWith("@")) {
       handle = first.slice(1);
       youtubeKind = "@";
     } else if (["channel", "c", "user"].includes(first)) {
-      handle = segments[1] ? decodeURIComponent(segments[1]) : "";
+      handle = decoded[1] || "";
       youtubeKind = `${first}/`;
     } else return null;
   } else {
@@ -233,11 +240,14 @@ export function confidenceFor(score: number): number {
   return 0.25;
 }
 
-/** Merge results from several sources, keeping the first hit per platform. */
+/** Merge results from several sources, keeping the strongest evidence per platform (first on ties). */
 export function mergeHandles(...groups: DetectedHandle[][]): DetectedHandle[] {
   const out = new Map<string, DetectedHandle>();
   for (const group of groups) {
-    for (const h of group) if (!out.has(h.platform)) out.set(h.platform, h);
+    for (const h of group) {
+      const previous = out.get(h.platform);
+      if (!previous || h.confidence > previous.confidence) out.set(h.platform, h);
+    }
   }
   return [...out.values()];
 }

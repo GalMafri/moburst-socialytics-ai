@@ -12,7 +12,7 @@
 
 import { useMemo, useState } from "react";
 import { RivalIqSetup } from "@/components/competitive/RivalIqSetup";
-import { classifyProfileUrl } from "@/lib/profileUrl";
+import { classifyProfileUrl, isProfileUrlInput } from "@/lib/profileUrl";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -57,6 +57,8 @@ type HandleRow = {
   handle: string;
   profile_url: string | null;
   is_active: boolean;
+  source?: string;
+  detection_confidence?: number | null;
 };
 
 /**
@@ -472,6 +474,7 @@ export default function CompetitorReview() {
       // A pasted profile URL is read for its handle; anything else is taken
       // as the handle itself.
       const fromUrl = classifyProfileUrl(raw);
+      if (isProfileUrlInput(raw) && !fromUrl) throw new Error("Enter a social profile URL, not a post, discovery page or unrelated website.");
       const platform = fromUrl?.platform || newHandlePlatform;
       const handle = (fromUrl?.handle || raw).replace(/^@/, "").trim();
       if (!handle) throw new Error("That does not look like a handle");
@@ -860,7 +863,11 @@ export default function CompetitorReview() {
                             <span key={h.id} className="inline-flex items-center gap-1">
                               <a href={h.profile_url || undefined} target="_blank" rel="noreferrer" className="inline-flex items-center min-h-[24px]" title={`@${h.handle}`}>
                                 <PlatformBadge platform={h.platform} size="sm" />
+                                <span className="ml-1 text-xs">@{h.handle}</span>
                               </a>
+                              {h.source === "auto" && Number(h.detection_confidence ?? 0) < 0.8 && (
+                                <span className="text-xs text-amber-400" title="Automatically detected with limited evidence. Open the profile and verify it belongs to this company.">Check profile</span>
+                              )}
                               {isDraft && (
                                 <button
                                   type="button"

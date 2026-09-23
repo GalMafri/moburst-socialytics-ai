@@ -84,47 +84,6 @@ async function fetchRendered(url: string): Promise<string> {
   }
 }
 
-/**
- * Last resort: ask the web where the brand's profile is.
- *
- * A brand whose site links nothing (a one-page builder site, an app-store
- * landing page) still has profiles, and a site: search finds them. Only the
- * platforms still missing are searched, and the results are written at a
- * lower confidence so a person can tell them apart.
- */
-async function searchForHandles(brandName: string, missing: string[]): Promise<DetectedHandle[]> {
-  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
-  if (!firecrawlKey || !brandName || missing.length === 0) return [];
-  const SITE: Record<string, string> = {
-    instagram: "instagram.com",
-    facebook: "facebook.com",
-    tiktok: "tiktok.com",
-    linkedin: "linkedin.com",
-    youtube: "youtube.com",
-    x: "x.com",
-  };
-  const out: DetectedHandle[] = [];
-  for (const platform of missing.slice(0, 4)) {
-    const site = SITE[platform];
-    if (!site) continue;
-    try {
-      const resp = await fetch("https://api.firecrawl.dev/v1/search", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${firecrawlKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ query: `"${brandName}" site:${site}`, limit: 5 }),
-      });
-      if (!resp.ok) continue;
-      const data = await resp.json();
-      const urls: string[] = (data.data || data.results || []).map((r: any) => r.url).filter(Boolean);
-      const hits = extractSocialHandles(urls.join("\n"), brandName).filter((h) => h.platform === platform);
-      if (hits[0]) out.push(hits[0]);
-    } catch {
-      // A search that fails leaves the platform empty, which is the honest answer.
-    }
-  }
-  return out;
-}
-
 /** Pages that carry the social links when the homepage does not. */
 const FALLBACK_PATHS = ["/contact", "/about", "/about-us", "/company"];
 
@@ -170,10 +129,8 @@ async function detectForSite(websiteUrl: string, brandName?: string): Promise<De
     if (html) groups.push(extractSocialHandles(html, brandName));
   }
 
-  const still = missing();
-  if (still.length > 0 && brandName) {
-    groups.push(await searchForHandles(brandName, still));
-  }
+  // Search result rank does not establish company ownership. Leave missing
+  // profiles empty for staff review rather than saving unrelated search hits.
 
   return mergeHandles(...groups);
 }
@@ -233,11 +190,12 @@ Deno.serve(async (req) => {
     {
       const ids = competitors.map((c: any) => c.id);
       if (ids.length > 0) {
-        const { data: rows } = await supabase
+        const { data: rows, error: protectedRowsError } = await supabase
           .from("competitor_handles")
           .select("competitor_id, platform, source")
           .in("competitor_id", ids)
           .in("source", ["manual", "rivaliq", "rejected"]);
+        if (protectedRowsError) throw new Error("Could not verify existing handle decisions. No handles were changed.");
         for (const r of rows || []) {
           const k = `${r.competitor_id}:${r.platform}`;
           if (r.source === "rejected") rejected.add(k);

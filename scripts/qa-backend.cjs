@@ -137,6 +137,17 @@ async function runCallback(state,kind,status,reportId,{authorized=true,resume=tr
  const response=await handler(new Request('https://fixture.invalid/callback',{method:'POST',body:JSON.stringify({op:'report',report_id:reportId,status,report_data:{ai_analysis:{executive_summary:'Completed fixture'}}})}));
  return{status:response.status,body:await response.json(),requests};
 }
+async function detectHandlesQa({html='',existing=[],readError=false}={}) {
+ let handler;const writes=[],requests=[];
+ const db={from(table){const q={select(){return q},eq(){return q},in(){return q},async upsert(value){writes.push(value);return{error:null}},then(resolve,reject){return Promise.resolve(table==='competitors'?{data:[{id:'rival',client_id:'client',name:'Acme',website_url:'https://acme.example'}],error:null}:{data:existing,error:readError?{message:'fixture read error'}:null}).then(resolve,reject)}};return q}};
+ moduleFrom('supabase/functions/detect-competitor-handles/index.ts',{
+  'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>db},
+  '../_shared/auth/requireStaff.ts':{AuthzError:class extends Error{},requireStaff:async()=>({asCaller:{rpc:async()=>({data:true,error:null})}})},
+  '../_shared/competitive/extractSocialHandles.ts':moduleFrom('supabase/functions/_shared/competitive/extractSocialHandles.ts'),
+ },{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},AbortSignal,fetch:async(url)=>{requests.push(url);if(url.includes('/search'))return new Response(JSON.stringify({data:[{url:'https://instagram.com/popular/'},{url:'https://tiktok.com/@unrelated'}]}));if(url.includes('firecrawl'))return new Response(JSON.stringify({data:{rawHtml:'',links:[]}}));return new Response(html);}});
+ const r=await handler(new Request('https://fixture.invalid',{method:'POST',body:JSON.stringify({competitor_id:'rival',refresh:true})}));return{status:r.status,body:await r.json(),writes,requests};
+}
+
 (async()=>{
  for(const [name,options,header,expected] of [['client rejected',{staff:false},'Bearer fixture',403],['staff allowed',{},'Bearer fixture',null],['expired session rejected',{valid:false},'Bearer fixture',401],['missing session rejected',{},null,401],['role error fails closed',{roleError:true},'Bearer fixture',500]])await check('QA-13','control','actual staff guard: '+name,async()=>{const g=actualStaffGuard(options);const response=await g.staffGate(new Request('https://fixture.invalid',{headers:header?{Authorization:header}:{}}),{});assert.equal(response?.status??null,expected);});
  for(const options of [{},{media:['https://fixture.invalid/image.png']},{media:['a','b'],partial:true},{media:['a'],uploadFailure:true},{recordFailure:true},{providerFailure:true},{missing:true},{denied:true}])await check('QA-01','regression','publishing '+JSON.stringify(options),async()=>{const r=await scheduling(options);assert.equal(r.status,options.denied?401:options.missing?400:options.uploadFailure?502:options.providerFailure?500:200);assert.equal(r.calls.filter(x=>x==='publish').length,options.denied||options.missing||options.uploadFailure?0:1);if(options.recordFailure)assert.equal(r.body.recorded,false);if(options.partial)assert.equal(r.body.media_dropped,1);});
@@ -201,6 +212,10 @@ async function runCallback(state,kind,status,reportId,{authorized=true,resume=tr
   const r=await runManual('accept',{state,landscapes,body:{client_id:'fixture-client',kind:'competitive',date_range_start:'2026-09-10',date_range_end:'2026-09-16'}});
   assert.equal(r.status,422);assert.match(r.body.error,/No RivalIQ landscape tracks Subliy/);assert.equal(r.dispatches,0);assert.equal(state.tables.competitive_reports.length,before);assert.equal(state.operations.length,0);
  });
+ await check('QA-HANDLES','regression','empty company site cannot adopt unrelated search profiles',async()=>{const r=await detectHandlesQa();assert.equal(r.status,200);assert.equal(r.writes.length,0);assert.equal(r.requests.some(url=>url.includes('/search')),false);});
+ for(const source of ['manual','rivaliq','rejected']) await check('QA-HANDLES','regression','refresh preserves '+source+' decisions',async()=>{const r=await detectHandlesQa({html:'<footer><a href="https://instagram.com/acme">Acme</a></footer>',existing:[{competitor_id:'rival',platform:'instagram',source}]});assert.equal(r.status,200);assert.equal(r.writes.length,0);});
+ await check('QA-HANDLES','regression','failed protection lookup aborts before overwriting handles',async()=>{const r=await detectHandlesQa({html:'https://instagram.com/acme',readError:true});assert.equal(r.status,500);assert.equal(r.writes.length,0);assert.equal(r.requests.length,0);});
+ await check('QA-HANDLES','control','company site profile still saves after discovery-page rejection',async()=>{const r=await detectHandlesQa({html:'<footer><a href="https://instagram.com/popular/">Popular</a><a href="https://instagram.com/acme/">Acme</a></footer>'});assert.equal(r.status,200);assert.equal(r.writes.length,1);assert.equal(r.writes[0].handle,'acme');});
  const report={checks:results.length,passed:results.filter(x=>x.result==='pass').length,failed:results.filter(x=>x.result==='FAIL')};
  console.log(JSON.stringify(report,null,2));if(report.failed.length)process.exitCode=1;
 })();

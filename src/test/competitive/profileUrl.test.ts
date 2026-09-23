@@ -19,3 +19,13 @@ describe("classifyProfileUrl", () => {
     expect(classifyProfileUrl("https://www.usaa.com/about")).toBeNull();
   });
 });
+
+describe('pasted profile validation', () => {
+  it.each(['https://notinstagram.com/acme','https://instagram.com.evil.example/acme','https://examplex.com/acme','https://instagram.com/popular/','https://instagram.com/p/abc','https://facebook.com/profile.php','https://linkedin.com/jobs/','https://instagram.com/%ZZ'])('rejects %s without throwing', url => {
+    expect(() => classifyProfileUrl(url)).not.toThrow();
+    expect(classifyProfileUrl(url)).toBeNull();
+  });
+  it('preserves an explicit numeric Facebook profile ID', () => {
+    expect(classifyProfileUrl('https://www.facebook.com/profile.php?id=123456789')).toMatchObject({platform:'facebook',handle:'123456789'});
+  });
+});

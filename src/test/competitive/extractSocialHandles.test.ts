@@ -98,7 +98,7 @@ describe("the shapes real brand sites emit", () => {
   it("never takes a share widget, a post, or a login page for a profile", () => {
     const noise = wrap(`
       <a href="https://www.facebook.com/sharer/sharer.php?u=x">share</a>
-      <a href="https://www.facebook.com/profile.php?id=100064123456789">profile</a>
+      <a href="https://www.facebook.com/profile.php">profile</a>
       <a href="https://www.facebook.com/pages/Acme/123">pages</a>
       <a href="https://www.instagram.com/p/Cxy12345/">post</a>
       <a href="https://www.instagram.com/tv/Cxy12345/">tv</a>
@@ -192,5 +192,27 @@ describe("confidence reflects the evidence", () => {
     const tiktok = out.find((h) => h.platform === "tiktok");
     expect(tiktok?.handle).toBe("kat_ayala8");
     expect(tiktok!.confidence).toBeLessThan(0.5);
+  });
+});
+
+describe('observed false profile detections', () => {
+  it('preserves a numeric Facebook profile rather than dropping its ID', () => {
+    expect(extractSocialHandles('https://facebook.com/profile.php?id=100064123456789')[0]?.handle).toBe('100064123456789');
+  });
+  it('rejects Instagram discovery pages while keeping an actual adjacent profile', () => {
+    const out = extractSocialHandles('https://www.instagram.com/popular/\nhttps://www.instagram.com/acme/', 'Acme');
+    expect(out.map(h => h.handle)).toEqual(['acme']);
+  });
+  it('ignores malformed escaped links without losing later valid profiles', () => {
+    expect(() => extractSocialHandles('https://instagram.com/%ZZ\nhttps://instagram.com/acme/')).not.toThrow();
+    expect(extractSocialHandles('https://instagram.com/%ZZ\nhttps://instagram.com/acme/')[0]?.handle).toBe('acme');
+  });
+  it('uses corroborated footer evidence instead of an earlier loose body match', async () => {
+    const { mergeHandles } = await import('../../../supabase/functions/_shared/competitive/extractSocialHandles');
+    const out = mergeHandles(
+      [{platform:'instagram',handle:'someone_else',profile_url:'https://instagram.com/someone_else',confidence:0.45}],
+      [{platform:'instagram',handle:'acme',profile_url:'https://instagram.com/acme',confidence:0.95}],
+    );
+    expect(out[0].handle).toBe('acme');
   });
 });
