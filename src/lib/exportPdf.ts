@@ -119,7 +119,12 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     if (el.querySelector('img, video')) el.setAttribute('data-pdf-media', '');
   });
   // Keep compact metrics side by side; only prose/card grids need one column.
+  // A grid the page marks data-pdf-flow is prose or media: it always gets the
+  // full reading width, whatever its cards happen to measure. Short trend
+  // captions used to look like KPI tiles to the heuristic below, which then
+  // squeezed a post card with a 128px thumbnail into a third of the page.
   content.querySelectorAll('.grid').forEach(el => {
+    if (el.hasAttribute('data-pdf-flow')) return;
     const children = Array.from(el.children);
     if ((el as HTMLElement).style.gridTemplateColumns && children.every(child => (child.textContent || '').trim().length < 12)) {
       el.setAttribute('data-pdf-data-grid', '');
@@ -477,6 +482,22 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     .pdf-root p, .pdf-root li { orphans: 3; widows: 3; }
     .pdf-root [data-pdf-splittable] { break-inside: auto !important; page-break-inside: auto !important; height: auto !important; overflow: visible !important; }
     .pdf-root [data-pdf-keep] { break-inside: avoid !important; page-break-inside: avoid !important; }
+    /* Prose and media grids read across the whole page, never in KPI columns. */
+    .pdf-root .grid[data-pdf-flow] { display: block !important; }
+    .pdf-root .grid[data-pdf-flow] > * { margin-bottom: 12px; }
+    /* A thumbnail next to its caption keeps the row, but the caption gets the
+       rest of the width instead of the leftovers of a squeezed column. */
+    .pdf-root [data-pdf-media-row] { display: flex !important; flex-wrap: nowrap !important; align-items: flex-start; gap: 12px; }
+    .pdf-root [data-pdf-media-row] > [data-pdf-media-visual] { flex: 0 0 34mm; width: 34mm !important; max-width: 34mm !important; }
+    .pdf-root [data-pdf-media-row] > :not([data-pdf-media-visual]) { flex: 1 1 auto; min-width: 0; }
+    /* A score badge is one unbreakable token on screen; on paper it may wrap
+       onto a second line rather than be cut off at the card edge. */
+    .pdf-root [data-slot="badge"], .pdf-root .rounded-full.border {
+      max-width: 100% !important;
+      white-space: normal !important;
+      overflow: visible !important;
+      height: auto !important;
+    }
     @media print {
       html, body, .pdf-root {
         background: #0b0c10 !important;
@@ -499,7 +520,11 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       await Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 3000))]);
       await Promise.race([Promise.all(Array.from(document.images).map(image => image.decode().catch(() => {}))), new Promise(resolve => setTimeout(resolve, 5000))]);
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const usablePageHeight = 130 * 96 / 25.4; // long cards flow instead of wasting most of a page
+      // Keeping a card whole is only worth a gap the card could have filled.
+      // At 130mm a half-page card still got pushed to a fresh page, leaving the
+      // gaps seen in the monthly and analytics exports; 65mm keeps the small
+      // repeating units together and lets the rest flow.
+      const usablePageHeight = 65 * 96 / 25.4;
       document.querySelectorAll('.pdf-root article, .pdf-root .glass, .pdf-root .glass-inner, .pdf-root .glass-accent, .pdf-root blockquote, .pdf-root tr').forEach(el => {
         el.setAttribute(el.getBoundingClientRect().height > usablePageHeight ? 'data-pdf-splittable' : 'data-pdf-keep', '');
       });
