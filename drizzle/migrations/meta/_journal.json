@@ -43,6 +43,13 @@
       "when": 1790150400000,
       "tag": "0005_rivaliq_setup_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790150102638,
+      "tag": "0006_rivaliq_setup_jobs",
+      "breakpoints": true
     }
   ]
 }
