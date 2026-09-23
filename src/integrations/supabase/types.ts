@@ -1185,6 +1185,60 @@ export type Database = {
           },
         ]
       }
+      rivaliq_setup_jobs: {
+        Row: {
+          client_id: string
+          fingerprint: string
+          landscape_id: string | null
+          lease_id: string | null
+          lease_until: string | null
+          operation_token: string | null
+          phase: string
+          plan: Json
+          set_id: string
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          fingerprint: string
+          landscape_id?: string | null
+          lease_id?: string | null
+          lease_until?: string | null
+          operation_token?: string | null
+          phase?: string
+          plan: Json
+          set_id: string
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          fingerprint?: string
+          landscape_id?: string | null
+          lease_id?: string | null
+          lease_until?: string | null
+          operation_token?: string | null
+          phase?: string
+          plan?: Json
+          set_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rivaliq_setup_jobs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rivaliq_setup_jobs_set_id_fkey"
+            columns: ["set_id"]
+            isOneToOne: true
+            referencedRelation: "competitor_sets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rivaliq_snapshots: {
         Row: {
           client_id: string | null
