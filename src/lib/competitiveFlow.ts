@@ -42,7 +42,8 @@ export function pickRunSelection(sets: SetRow[]): {
 } {
   const ordered = [...sets].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   const latest = ordered[0] || null;
-  const runnable = ordered.find((s) => RUNNABLE_SET_STATUSES.includes(s.status)) || null;
+  const runnable = ordered.filter((s) => RUNNABLE_SET_STATUSES.includes(s.status))
+    .sort((a, b) => (b.confirmed_at || '').localeCompare(a.confirmed_at || ''))[0] || null;
   const newerDraft = latest && runnable && latest.id !== runnable.id && latest.status === "draft" ? latest : null;
   return { latest, runnable, newerDraft };
 }
@@ -60,7 +61,7 @@ export type FlowState = {
 export function describeSelection(sets: SetRow[]): FlowState {
   const { latest, runnable, newerDraft } = pickRunSelection(sets);
   if (!latest) return { headline: "No competitors chosen yet", detail: "Propose or import three competitors to start.", ready: false };
-  if (!runnable) return { headline: "Three competitors drafted, not confirmed yet", detail: "Review the profiles and confirm the top three.", ready: false };
+  if (!runnable) return { headline: "Selection awaiting review", detail: "Choose three competitors, review their profiles, and confirm the selection.", ready: false };
   if (newerDraft) {
     return {
       headline: "A report would use the older confirmed selection",
@@ -118,21 +119,20 @@ export function plainCompetitiveError(raw: string | null | undefined): string {
   const message = String(raw || "").trim();
   if (!message) return "The request did not complete. Try again.";
   const low = message.toLowerCase();
-  if (/\b429\b/.test(low) || low.includes("rate limit") || low.includes("too many requests")) {
-    return "RivalIQ was busy and turned this request away: the account allows one request at a time and 100 an hour. This usually means another client's analysis was running. Nothing was saved — wait a few minutes and run it again.";
+  if (/\b429\b/.test(low) || low.includes("rate limit") || low.includes("too many requests") || low.includes("spacing your requests")) {
+    return "RivalIQ temporarily limited this request. The account allows one request at a time and 100 an hour. The report could not finish. Use the report's Retry control when its 90-minute wait has ended; an hourly limit may also need time to reset.";
   }
   if (low.includes("not tracked") || low.includes("rivaliq_client_not_tracked")) {
     return "This client is not tracked in RivalIQ yet. Connect tracking for the confirmed selection, then run the report.";
   }
   if (low.includes("timed out") || low.includes("timeout") || /\b504\b/.test(low)) {
-    return "RivalIQ took too long to answer. Nothing was saved — try again in a few minutes.";
+    return "The request timed out, but the report may still be processing. Check its status before starting another run. Retry remains locked until 90 minutes after the run started.";
   }
-  if (/\b401\b/.test(low) || low.includes("session has expired")) {
+  if (low.includes("session has expired")) {
     return "Your session has expired. Re-open the tool from the portal and try again.";
   }
-  if (/\b403\b/.test(low)) return "You do not have access to this client.";
   if (/\b5\d\d\b/.test(low) && low.includes("server error")) {
-    return "RivalIQ or the report service returned an error. Nothing was saved — try again in a few minutes.";
+    return "The report service returned an error. Check the saved report status; its Retry control becomes available 90 minutes after the run started.";
   }
   return message;
 }

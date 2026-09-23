@@ -325,8 +325,8 @@ export default function CompetitiveRun() {
             <p className="t-secondary">
               Confirmed {confirmedSet.confirmed_at ? new Date(confirmedSet.confirmed_at).toLocaleDateString() : ""}
               {" · "}
-              <button className="underline underline-offset-2" onClick={() => navigate(`/clients/${id}/competitive`)}>
-                edit set
+              <button className="underline underline-offset-2" onClick={() => navigate(`/clients/${id}/competitive?set=${confirmedSet.id}`)}>
+                Review this selection and tracking
               </button>
             </p>
           </CardContent>
@@ -380,7 +380,7 @@ export default function CompetitiveRun() {
           <CardContent className="pt-5 text-center space-y-6">
             {!running && !error && currentStep < 0 && (
               <>
-                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!rangeOk || !activeRun.isSuccess || activeRun.isFetching || !!activeRun.data}>
+                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!trackingState.ready || !rangeOk || !activeRun.isSuccess || activeRun.isFetching || !!activeRun.data}>
                   <Play className="h-5 w-5" /> Run competitive analysis
                 </Button>
                 <p className="t-secondary">

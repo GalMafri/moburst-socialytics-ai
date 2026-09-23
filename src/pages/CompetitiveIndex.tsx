@@ -91,8 +91,8 @@ export default function CompetitiveIndex() {
                       size="sm"
                       variant="outline"
                       onClick={() => navigate(`/clients/${c.id}/competitive/run`)}
-                      disabled={!c.runnable}
-                      title={c.runnable ? undefined : "Confirm three competitors before running a report"}
+                      disabled={!c.runnable || (!c.tracking.ready && c.report?.status !== 'running')}
+                      title={!c.runnable ? "Confirm three competitors before running a report" : !c.tracking.ready ? "Connect tracking from Review competitors first" : undefined}
                     >
                       <Play className="h-3.5 w-3.5 mr-1" /> Choose period and run
                     </Button>
@@ -116,4 +116,3 @@ export default function CompetitiveIndex() {
     </AppLayout>
   );
 }
-

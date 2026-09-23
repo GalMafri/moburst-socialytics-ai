@@ -4,6 +4,13 @@ import { describeReport, describeSelection, describeTracking, pickRunSelection, 
 const set = (o: Partial<SetRow> & { id: string; status: string; created_at: string }): SetRow => o as SetRow;
 
 describe("pickRunSelection", () => {
+  it('uses confirmation date rather than creation date, matching the backend', () => {
+    const result = pickRunSelection([
+      set({id:'newer-created',status:'confirmed',created_at:'2026-09-20',confirmed_at:'2026-09-20'}),
+      set({id:'recently-reconfirmed',status:'complete',created_at:'2026-09-01',confirmed_at:'2026-09-23'}),
+    ]);
+    expect(result.runnable?.id).toBe('recently-reconfirmed');
+  });
   it("runs the newest confirmed set and names a newer draft instead of hiding it", () => {
     const sets = [
       set({ id: "draft", status: "draft", created_at: "2026-09-10" }),
@@ -63,12 +70,19 @@ describe("plainCompetitiveError", () => {
     const msg = plainCompetitiveError("List RivalIQ Landscapes: HTTP 429");
     expect(msg).toMatch(/one request at a time/i);
     expect(msg).toMatch(/100 an hour/i);
-    expect(msg).toMatch(/run it again/i);
+    expect(msg).toMatch(/90-minute/i);
+    expect(msg).not.toMatch(/nothing was saved|few minutes|usually means/i);
+    expect(plainCompetitiveError("List RivalIQ Landscapes failed. Try spacing your requests out using the batching settings under 'Options'")).toBe(msg);
     expect(msg).not.toMatch(/429/);
   });
 
   it("points a missing-tracking failure at the setup step", () => {
     expect(plainCompetitiveError("RIVALIQ_CLIENT_NOT_TRACKED")).toMatch(/Connect tracking/i);
+  });
+  it("does not mistake a provider or website 401 for an expired portal session", () => {
+    expect(plainCompetitiveError("Website returned HTTP 401")).toBe("Website returned HTTP 401");
+    expect(plainCompetitiveError("Provider returned HTTP 403")).toBe("Provider returned HTTP 403");
+    expect(plainCompetitiveError("Request timeout")).toMatch(/may still be processing/);
   });
 
   it("rewrites timeouts and expired sessions, and keeps an already-plain message", () => {

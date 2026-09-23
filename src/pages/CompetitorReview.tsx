@@ -18,7 +18,7 @@ import { describeSelection, describeTracking, pickRunSelection, type SetRow } fr
 import { classifyProfileUrl, isProfileUrlInput } from "@/lib/profileUrl";
 import { isReviewReadyHandle } from "../../supabase/functions/_shared/competitive/extractSocialHandles";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -155,10 +155,12 @@ export default function CompetitorReview() {
     },
     enabled: !!clientId,
   });
-  const currentSet = sets?.[0] ?? null;
+  const [selectionParams] = useSearchParams();
+  const requestedSet = selectionParams.get('set');
+  const currentSet = (requestedSet ? sets?.find(s => s.id === requestedSet) : sets?.[0]) ?? null;
   const { runnable: runnableSet } = pickRunSelection((sets || []) as SetRow[]);
   const selectionState = describeSelection((sets || []) as SetRow[]);
-  const trackingState = describeTracking(runnableSet);
+  const trackingState = describeTracking(currentSet);
 
 
   const { data: competitors, isLoading: competitorsLoading, isError: competitorsFailed, error: competitorsError, refetch: refetchCompetitors } = useQuery({
@@ -848,7 +850,7 @@ export default function CompetitorReview() {
                     <Button
                       className="gap-2"
                       onClick={() => navigate(`/clients/${clientId}/competitive/run`)}
-                      disabled={runNeedsProfileReview}
+                      disabled={runNeedsProfileReview || !trackingState.ready || currentSet?.id !== runnableSet?.id}
                     >
                       <Play className="h-4 w-4" /> Run deep analysis
                     </Button>
