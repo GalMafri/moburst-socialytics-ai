@@ -204,8 +204,8 @@ Deno.serve(async (req) => {
             if (!wanted?.is_match) {
               return json({
                 error:
-                  `No RivalIQ landscape tracks ${client.name}. Create one in RivalIQ with ${client.name} as the focus company, ` +
-                  `then import it on the Competitors screen. The analysis reads the landscape, not the competitor list here.`,
+                  `No RivalIQ landscape tracks ${client.name}. Use Set up RivalIQ tracking on the Competitors screen ` +
+                  `to connect the reviewed companies, or import an existing matching landscape. No RivalIQ sign-in is required.`,
               }, 422);
             }
           }
