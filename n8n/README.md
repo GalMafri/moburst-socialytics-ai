@@ -55,7 +55,7 @@ The isolated runtime tests passed in n8n executions **451759** and **451774** on
 
 ## Deliberately unchanged
 
-The withdrawn client-access finding (QA-03) is not a fix target. Portal login and external user management stay intact. Webhook perimeter protection (QA-04) remains unverified: do not enable receiver authentication without coordinating and testing all senders. Neither finding justifies a speculative production permission change.
+The withdrawn client-access finding (QA-03) is not a fix target. Portal login and external user management stay intact. Webhook perimeter protection (QA-04) was subsequently coordinated and tested on 23 September, as recorded below. Portal permissions were not changed.
 
 ## Release verification — 17 September 2026, 16:04 IDT
 
@@ -69,3 +69,15 @@ The later metric patches use Sprout profile-period comments/shares instead of li
 Production execution 451859 completed with both enabled trend scrapers. Execution 451933 regenerated Moburst August 1–31 with trends deliberately disabled; all seven aggregate metrics matched the verified Sprout source. Two Subliy reports were marked failed because their landscape tracked Jobber, not Subliy; existing payloads were retained for audit. No real Sprout post was scheduled.
 
 As of this check, 422 app/patch tests and 116 backend/workflow checks passed. The live frontend bundle `index-BBwSuJON.js` matched the local tested build byte-for-byte. Final downloaded-PDF acceptance checks across all report types remain outstanding.
+
+## Webhook authentication — 23 September 2026
+
+App sender headers were deployed first (3371807, included in d30da96). Both report webhooks now use native header authentication with the dedicated `Socialytics App Webhook` credential and existing `X-Socialytics-Secret` value. Only trigger authentication and credential assignment changed; all other nodes, connections and settings were compared unchanged. No in-flight executions or intervening version edits were present.
+
+Isolated native HTTP tests returned 200 with the correct secret and 403 with missing/incorrect headers. Both live endpoints then rejected missing/incorrect headers with 403 and created no executions. A new full paid report was not replayed for this change. The isolated test workflow 8VtLnAcpPUP6g3T7 was unpublished and archived.
+
+Published versions (active equals draft):
+- Socialytics: `97ccb734-1155-4f5c-9d70-0c491a7ab593`.
+- Competitive: `26834222-cd01-4fc1-8c85-364701df4d29`.
+
+Rollback versions are the 17 September versions above. Sender headers are additive and compatible with those versions; do not delete the shared secret on rollback. Existing model-node validation warnings remain unchanged.
