@@ -1011,7 +1011,9 @@ function TrendsSection({
 
       {shown.length > 0 && (
         <Section id={`${platform}-posts`} title="Trending posts" description="The posts driving the trend, with the creative and the numbers behind each.">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* data-pdf-flow / data-pdf-media-row are print-only hints: on screen
+              these stay a two-column grid with a fixed-width visual. */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-pdf-flow>
             {shown.map((post: any, i: number) => {
               const sl = post.engagement_score != null ? getScoreLabel(post.engagement_score, platform) : null;
               return (
