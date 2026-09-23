@@ -11,28 +11,35 @@ describe('reviewed provider setup', () => {
  it('only previews until the reviewed connect button is pressed', async () => {
   mocks.invoke.mockResolvedValue({ data:preview });
   render(<RivalIqSetup setId="set" onComplete={()=>{}} />);
-  fireEvent.click(screen.getByRole('button',{name:'Set up RivalIQ tracking'}));
+  fireEvent.click(screen.getByRole('button',{name:'Connect RivalIQ tracking'}));
   await screen.findByText('https://client.com/');
   expect(mocks.invoke).toHaveBeenCalledTimes(1);
   expect(mocks.invoke.mock.calls[0][1].body.mode).toBe('preview');
   expect(screen.getByRole('button',{name:'Connect these companies'})).toBeEnabled();
  });
- it('continues durable steps and stops when the provider is pending', async () => {
+ it('says whether tracking is already connected before the dialog is opened', () => {
+  render(<RivalIqSetup setId="set" connected onComplete={()=>{}} />);
+  expect(screen.getByRole('button',{name:'Check RivalIQ tracking'})).toBeInTheDocument();
+ });
+ it('continues durable steps and stops with a plain pending explanation', async () => {
   mocks.invoke.mockResolvedValueOnce({data:preview}).mockResolvedValueOnce({data:{job:{phase:'created'}}}).mockResolvedValueOnce({data:{job:{phase:'following'}}});
   render(<RivalIqSetup setId="set" onComplete={()=>{}} />);
-  fireEvent.click(screen.getByRole('button',{name:'Set up RivalIQ tracking'}));
+  fireEvent.click(screen.getByRole('button',{name:'Connect RivalIQ tracking'}));
   fireEvent.click(await screen.findByRole('button',{name:'Connect these companies'}));
-  await screen.findByRole('button',{name:'Check status'});
+  await screen.findByRole('button',{name:'Check again'});
+  // No internal phase word ("following") is ever shown to staff.
+  expect(screen.getByRole('status').textContent).toMatch(/still adding the companies/i);
   expect(mocks.invoke).toHaveBeenCalledTimes(3);
   expect(mocks.invoke.mock.calls[1][1].body.fingerprint).toBe('hash');
  });
  it('reads status after a lost response and never repeats a POST automatically', async () => {
   mocks.invoke.mockResolvedValueOnce({data:preview}).mockRejectedValueOnce(Error('Response lost')).mockResolvedValueOnce({data:{...preview,job:{phase:'create_requested'}}});
   render(<RivalIqSetup setId="set" onComplete={()=>{}} />);
-  fireEvent.click(screen.getByRole('button',{name:'Set up RivalIQ tracking'}));
+  fireEvent.click(screen.getByRole('button',{name:'Connect RivalIQ tracking'}));
   fireEvent.click(await screen.findByRole('button',{name:'Connect these companies'}));
   await screen.findByText('Response lost');
   await waitFor(()=>expect(mocks.invoke).toHaveBeenCalledTimes(3));
   expect(mocks.invoke.mock.calls.map(c=>c[1].body.mode)).toEqual(['preview','advance','preview']);
  });
 });
+
