@@ -40,6 +40,8 @@ export interface LandscapeSummary {
   name: string;
   focus_company: string | null;
   is_match: boolean;
+  /** Present only when exactly one tracked company matches the client. */
+  client_company_id: string | null;
   /** Why it matched, so the import screen can say so: "focus company", "website", "landscape name". */
   match_reason: string | null;
   companies: Array<{
@@ -151,6 +153,10 @@ export function summarizeLandscape(
   const focusName = focus?.name || null;
   const clientStem = domainStem(clientWebsite) || domainStem(clientName);
   const focusStem = domainStem(focus?.url) || domainStem(focusName);
+  const clientCompanies = companies.filter((c) =>
+    (!!clientStem && domainStem(c.url) === clientStem) || namesOverlap(String(c.name || ""), clientName)
+  );
+  const uniqueClient = clientCompanies.length === 1 ? clientCompanies[0] : null;
   let matchReason: string | null = null;
   if (!!focusName && namesOverlap(focusName, clientName)) matchReason = "focus company";
   else if (!!clientStem && clientStem === focusStem) matchReason = "website";
@@ -164,8 +170,9 @@ export function summarizeLandscape(
     id: String(landscape.id),
     name: String(landscape.name || landscape.id),
     focus_company: focusName,
-    is_match: matchReason !== null,
-    match_reason: matchReason,
+    is_match: uniqueClient !== null,
+    client_company_id: uniqueClient ? String(uniqueClient.id) : null,
+    match_reason: uniqueClient ? matchReason : null,
     companies: companies.map((c) => ({
       id: String(c.id),
       name: String(c.name || c.id),

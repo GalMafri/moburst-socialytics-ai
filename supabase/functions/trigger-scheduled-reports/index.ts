@@ -122,7 +122,11 @@ async function refreshStaleFeeds(supabase: any, now: Date, dryRun: boolean, secr
           body: JSON.stringify({ client_id: clientId }),
         });
         const j = await r.json().catch(() => ({}));
-        out.push({ client_id: clientId, status: r.ok ? "refreshed" : "error", posts: j.posts, alerts: j.alerts, error: j.error });
+        // An unconfigured client needs setup, not a daily gateway-failure
+        // notification. Only this explicit contract is downgraded; provider,
+        // authentication, database and unknown 422 failures still fail the run.
+        const needsSetup = r.status === 422 && j.code === "RIVALIQ_CLIENT_NOT_TRACKED";
+        out.push({ client_id: clientId, status: r.ok ? "refreshed" : needsSetup ? "configuration_required" : "error", code: j.code, posts: j.posts, alerts: j.alerts, error: j.error });
       } catch (e) {
         out.push({ client_id: clientId, status: "error", error: e instanceof Error ? e.message : String(e) });
       }
@@ -158,7 +162,8 @@ Deno.serve(async (req) => {
     const feeds = resumeId ? [] : await refreshStaleFeeds(supabase, now, dryRun, secret);
     const finish = (results: Array<Record<string, unknown>>) => {
       const failed = [...results, ...feeds].filter((r: any) => r.status === "error").length;
-      return json({ status: failed ? "partial_failure" : "ok", failed, triggered: results.filter(r => r.status === "triggered").length, dry_run: dryRun, results, feeds, abandoned }, failed ? 502 : 200);
+      const configurationRequired = feeds.filter((r: any) => r.status === "configuration_required").length;
+      return json({ status: failed ? "partial_failure" : configurationRequired ? "configuration_required" : "ok", failed, configuration_required: configurationRequired, triggered: results.filter(r => r.status === "triggered").length, dry_run: dryRun, results, feeds, abandoned }, failed ? 502 : 200);
     };
     if (!due || due.length === 0) return finish([]);
 

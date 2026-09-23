@@ -95,28 +95,18 @@ const HARVEST_MAX_BYTES = 4 * 1024 * 1024;
 /**
  * Stores the client's own recent creative as design references.
  *
- * Selection is by RivalIQ's focusCompanyId, never by name: the focus company
- * IS the client, and matching names would pull a competitor whose name
- * happens to contain the client's.
+ * Selection uses the uniquely verified tracked client, which need not be
+ * the landscape's focus company.
  */
 async function harvestOwnCreative(
   admin: any,
   clientId: string,
-  landscapeId: string,
-  key: string,
+  clientCompanyId: string,
   socialPosts: any[],
   clientName: string,
 ): Promise<{ added: number; kept: number; skipped: string[] }> {
   const skipped: string[] = [];
   try {
-    // Which company in this landscape is the client.
-    const list = await rivaliq("/landscapes", key);
-    const landscape = (list?.landscapes || []).find((l: any) => String(l.id) === String(landscapeId));
-    const focusId = landscape?.focusCompanyId;
-    if (!focusId) {
-      return { added: 0, kept: 0, skipped: ["the landscape names no focus company, so the client's own posts cannot be told apart"] };
-    }
-
     const { data: row } = await admin
       .from("clients")
       .select("harvested_design_references")
@@ -128,7 +118,7 @@ async function harvestOwnCreative(
     const seen = new Set(existing.map((r) => String(r.source_post_id || "")));
 
     const mine = socialPosts
-      .filter((p) => String(p?.companyId) === String(focusId))
+      .filter((p) => String(p?.companyId) === clientCompanyId)
       // Non-empty, not merely a string: RivalIQ sends "" for a post with no
       // image, which passed this test and then threw "Invalid URL" inside the
       // loop. Four posts a run were being reported as failures for it.
@@ -217,17 +207,17 @@ Deno.serve(async (req) => {
       .order("confirmed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    let landscapeId = set?.rivaliq_landscape_id ? String(set.rivaliq_landscape_id) : null;
-    if (!landscapeId) {
-      // Same resolution the import screen and the analysis workflow use:
-      // focus-company name, then website, then landscape name. Matching on
-      // the name alone missed clients whose RivalIQ company carries a suffix
-      // or is stored as a domain.
-      const list = await rivaliq("/landscapes", key);
-      const match = bestLandscapeMatch(summarizeLandscapes(list.landscapes || [], client.name, (client as any).website_url));
-      if (!match) return json({ error: `No RivalIQ landscape tracks ${client.name}. Import or create one first.` }, 422);
-      landscapeId = match.id;
+    // An explicit ID is a selection, not proof of client identity. Validate
+    // before fetching posts, saving snapshots, generating alerts or harvesting.
+    const list = await rivaliq("/landscapes", key);
+    const landscapes = summarizeLandscapes(list.landscapes || [], client.name, client.website_url);
+    const match = set?.rivaliq_landscape_id
+      ? landscapes.find((l) => l.id === String(set.rivaliq_landscape_id))
+      : bestLandscapeMatch(landscapes);
+    if (!match?.is_match || !match.client_company_id) {
+      return json({ code: "RIVALIQ_CLIENT_NOT_TRACKED", error: `No uniquely matched RivalIQ company tracks ${client.name} in the selected landscape. Configure tracking or import a matching landscape first.` }, 422);
     }
+    const landscapeId = match.id;
 
     const days = Math.min(30, Math.max(1, Number(body.days) || 7));
     const end = new Date(Date.now() - DAY);
@@ -252,7 +242,7 @@ Deno.serve(async (req) => {
     // images from the day the client was set up, going stale from then on.
     // The client's own recent posts are in hand here already, at no extra
     // RivalIQ call, so the newest of them become references too.
-    const harvest = await harvestOwnCreative(admin, clientId, landscapeId, key, socialPosts, client.name);
+    const harvest = await harvestOwnCreative(admin, clientId, match.client_company_id, socialPosts, client.name);
 
     const topics = await detectTopics(client.name, socialPosts, window.start, window.end);
 

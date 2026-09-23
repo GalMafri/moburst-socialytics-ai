@@ -51,7 +51,7 @@ function database({order=['competitive','social'],due=true,feedError=false}={}){
  const tables={reports:[],competitive_reports:[old],app_settings:[{key:'n8n_webhook_url',value:'https://fixture.invalid/social'},{key:'competitive_n8n_webhook_url',value:'https://fixture.invalid/competitive'}],report_schedules:due?order.map((kind,i)=>({id:'schedule-'+i,client_id:client.id,clients:client,report_kind:kind,is_active:true,next_run_at:'2020-01-01T00:00:00Z',frequency:'monthly',range_mode:'previous_month',run_day_of_month:7})):[],clients:[client],competitor_sets:[{id:'fixture-set',client_id:client.id,status:'confirmed',confirmed_at:'2026-01-01',clients:client}],rivaliq_snapshots:feedError?[]:[{client_id:client.id,endpoint:'feed',fetched_at:new Date().toISOString()}],sprout_profiles:[],competitive_insight_feedback:[],competitors:[]};
  const operations=[];
  const db={async rpc(name,args){if(name!=='claim_report_schedule')throw Error('Unmocked RPC');const row=tables.report_schedules.find(r=>r.id===args.schedule_id && r.next_run_at===args.expected_next_run_at && r.is_active && !r.dispatch_claimed_at);if(row)row.dispatch_claimed_at=new Date().toISOString();return{data:!!row,error:null}},from(table){const filters=[];let mode='select',payload,one=false,limit=Infinity,sort;const q={
-  select(){return q},throwOnError(){return q},is(k,v){filters.push(r=>v===null?r[k]==null:r[k]===v);return q},eq(k,v){filters.push(r=>r[k]===v);return q},neq(k,v){filters.push(r=>r[k]!==v);return q},in(k,vs){filters.push(r=>vs.includes(r[k]));return q},lt(k,v){filters.push(r=>r[k]<v);return q},lte(k,v){filters.push(r=>r[k]<=v);return q},order(k,opt){sort={k,desc:opt?.ascending===false};return q},limit(v){limit=v;return q},insert(v){mode='insert';payload=v;return q},update(v){mode='update';payload=v;return q},single(){one=true;return q},maybeSingle(){one=true;return q},
+  select(){return q},throwOnError(){return q},is(k,v){filters.push(r=>v===null?r[k]==null:r[k]===v);return q},eq(k,v){filters.push(r=>r[k]===v);return q},neq(k,v){filters.push(r=>r[k]!==v);return q},in(k,vs){filters.push(r=>vs.includes(r[k]));return q},lt(k,v){filters.push(r=>r[k]<v);return q},lte(k,v){filters.push(r=>r[k]<=v);return q},gte(k,v){filters.push(r=>r[k]>=v);return q},order(k,opt){sort={k,desc:opt?.ascending===false};return q},limit(v){limit=v;return q},insert(v){mode='insert';payload=v;return q},update(v){mode='update';payload=v;return q},single(){one=true;return q},maybeSingle(){one=true;return q},
   then(resolve,reject){try{
    const data=tables[table]||[];let rows=data.filter(r=>filters.every(fn=>fn(r)));
    if(mode==='insert'){const row={id:'new-'+table+'-'+data.length,created_at:new Date().toISOString(),...payload};data.push(row);rows=[row];operations.push({table,mode,id:row.id});}
@@ -71,13 +71,33 @@ async function runScheduler(options={}){
  const state=options.state || database(options);let handler;const requests=[];
  moduleFrom('supabase/functions/trigger-scheduled-reports/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/auth/secretEquals.ts':{secretEquals:async()=>options.authorized!==false}},{Deno:{env:{get:()=> 'https://fixture.invalid'},serve:f=>handler=f},fetch:async(url,opts)=>{
   requests.push({url,payload:JSON.parse(opts.body),newCompetitiveStatus:state.tables.competitive_reports.at(-1).status});
-  if(url.includes('refresh-competitor-feed'))return new Response(JSON.stringify({error:'Fixture landscape missing'}),{status:422});
+  if(url.includes('refresh-competitor-feed'))return new Response(JSON.stringify(options.feedResponse || {error:'Fixture landscape missing'}),{status:options.feedStatus || 422});
   if(options.transport==='throw')throw Error('Fixture network failure');
   if(options.transport==='reject')return new Response('{}',{status:503});
   if(options.immediate && url.endsWith('/competitive'))Object.assign(state.tables.competitive_reports.at(-1),{status:'complete',report_data:{ai_analysis:{executive_summary:'Fresh analysis'}}});
   return new Response(JSON.stringify({accepted:true}),{status:200});
  }});
  const response=await handler(new Request('https://fixture.invalid/scheduler'+(options.dryRun?'?dry_run=1':''),{method:'POST',body:JSON.stringify(options.body||{})}));return{...state,requests,status:response.status,body:await response.json()};
+}
+async function runFeed({landscapes,explicit,posts=[],providerStatus=200}) {
+ const state=database({due:false});Object.assign(state.tables.clients[0],{name:'Subliy',website_url:'https://subliy.com'});
+ if(explicit)state.tables.competitor_sets[0].rivaliq_landscape_id=explicit;
+ let handler;const requests=[];
+ moduleFrom('supabase/functions/refresh-competitor-feed/index.ts',{
+ 'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},
+ '../_shared/competitive/rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts'),
+ '../_shared/auth/requireStaff.ts':{requireStaff:async()=>({})},
+ '../_shared/auth/secretEquals.ts':{secretEquals:async()=>true},
+ '../_shared/design-prompts/designRefs.ts':{harvestedPaths:()=>[]}
+ },{AbortSignal,Deno:{env:{get:n=>n==='ANTHROPIC_API_KEY'?undefined:'fixture'},serve:f=>handler=f},fetch:async url=>{
+ requests.push(url);
+ if(url.includes('/landscapes?'))return new Response(JSON.stringify({landscapes}),{status:providerStatus});
+ if(url.includes('/socialposts?'))return new Response(JSON.stringify({socialPosts:posts}));
+ if(url.startsWith('https://fixture.invalid/'))return new Response('',{status:404});
+ throw Error('Unexpected outbound call');
+ }});
+ const response=await handler(new Request('https://fixture.invalid/feed',{method:'POST',body:JSON.stringify({client_id:'fixture-client'})}));
+ return {...state,requests,status:response.status,body:await response.json()};
 }
 async function runManual(transport, options={}){
  const state=options.state || database();let handler;let dispatches=0;
@@ -110,6 +130,13 @@ async function runCallback(state,kind,status,reportId,{authorized=true,resume=tr
  await check('QA-10','control','wrong secret is rejected before writes',async()=>{const r=await runScheduler({authorized:false});assert.equal(r.status,401);assert.equal(r.operations.length,0);assert.equal(r.requests.length,0);});
  await check('QA-10','control','explicit dependency cannot use another client report',async()=>{const state=database();state.tables.competitive_reports[0].client_id='other';await assert.rejects(()=>payloadModule().buildSocialPayload({supabase:state.db,client:state.tables.clients[0],reportId:'fixture',range:{},competitiveReportId:'old-complete'}),/required competitive/);});
  await check('QA-11','regression','failed feed returns a failing scheduler response',async()=>{const r=await runScheduler({due:false,feedError:true});assert.equal(r.status,502);assert.equal(r.body.failed,1);assert.equal(r.body.triggered,0);});
+ for(const feedStatus of [401,403,429,500,502]) await check('QA-11','regression','real feed failure stays visible '+feedStatus,async()=>{const r=await runScheduler({due:false,feedError:true,feedStatus,feedResponse:{error:'Provider failed',code:'RIVALIQ_CLIENT_NOT_TRACKED'}});assert.equal(r.status,502);assert.equal(r.body.failed,1);});
+ await check('QA-11','regression','missing tracking is explicit configuration status without gateway failure',async()=>{const r=await runScheduler({due:false,feedError:true,feedResponse:{code:'RIVALIQ_CLIENT_NOT_TRACKED',error:'Client missing'}});assert.equal(r.status,200);assert.equal(r.body.status,'configuration_required');assert.equal(r.body.configuration_required,1);assert.equal(r.body.failed,0);assert.equal(r.body.feeds[0].error,'Client missing');assert.equal(r.operations.length,0);});
+ await check('QA-11','regression','missing feed tracking does not prevent a due social dispatch',async()=>{const r=await runScheduler({order:['social'],feedError:true,feedResponse:{code:'RIVALIQ_CLIENT_NOT_TRACKED',error:'Client missing'}});assert.equal(r.status,200);assert.equal(r.body.triggered,1);assert.equal(r.body.configuration_required,1);});
+ for(const explicit of [null,'612909']) await check('QA-FEED','regression','unrelated Subliy landscape rejected before all writes '+explicit,async()=>{const r=await runFeed({explicit,landscapes:[{id:612909,name:'Subliy',focusCompanyId:1,companies:[{id:1,name:'Jobber',url:'https://getjobber.com'}]}]});assert.equal(r.status,422);assert.equal(r.body.code,'RIVALIQ_CLIENT_NOT_TRACKED');assert.equal(r.requests.length,1);assert.equal(r.operations.length,0);});
+ await check('QA-FEED','regression','ambiguous identity is rejected before writes',async()=>{const r=await runFeed({explicit:'1',landscapes:[{id:1,focusCompanyId:1,companies:[{id:1,name:'Subliy',url:'https://subliy.com'},{id:2,name:'Subliy LLC',url:'https://another.com'}]}]});assert.equal(r.status,422);assert.equal(r.operations.length,0);});
+ await check('QA-FEED','regression','provider failure remains an error with no writes',async()=>{const r=await runFeed({landscapes:[],providerStatus:429});assert.equal(r.status,500);assert.equal(r.body.code,undefined);assert.equal(r.operations.length,0);});
+ await check('QA-FEED','regression','non-focus client harvest uses client identity, never focus company',async()=>{const r=await runFeed({explicit:'1',landscapes:[{id:1,focusCompanyId:1,companies:[{id:1,name:'Jobber',url:'https://getjobber.com'},{id:2,name:'Subliy',url:'https://subliy.com'}]}],posts:[{companyId:1,postId:'rival',image:'https://fixture.invalid/rival.jpg'},{companyId:2,postId:'client',image:'https://fixture.invalid/client.jpg'}]});assert.equal(r.status,200);assert.equal(r.body.posts,2);assert(r.requests.includes('https://fixture.invalid/client.jpg'));assert(!r.requests.includes('https://fixture.invalid/rival.jpg'));assert.equal(r.requests.filter(u=>u.includes('/landscapes?')).length,1);});
  for(const transport of ['throw','reject'])await check('QA-11','regression','failed scheduler dispatch '+transport,async()=>{const r=await runScheduler({order:['social'],transport});assert.equal(r.status,502);assert.equal(r.tables.reports[0].status,'failed');assert.equal(r.body.triggered,0);});
  for(const transport of ['throw','reject','accept','late-completed'])await check('QA-11','regression','manual dispatch '+transport,async()=>{const r=await runManual(transport);assert.equal(r.status,transport==='reject'?502:transport==='accept'?200:500);assert.equal(r.reportStatus,transport==='accept'?'running':transport==='late-completed'?'completed':'failed');});
 
