@@ -59,6 +59,44 @@ describe("PDF export content preservation", () => {
     expect(root.querySelectorAll("img")).toHaveLength(2);
   });
 
+  it("gives prose and media grids the full width while keeping KPI grids compact", async () => {
+    const capture = captureExport();
+    const root = document.createElement("div");
+    root.innerHTML = `<div id="posts" class="grid" data-pdf-flow><div class="card"><div class="flex" data-pdf-media-row>
+        <div class="w-32" data-pdf-media-visual><div class="aspect-video"><img alt="Cover" src="cover.png"></div></div>
+        <div><span data-slot="badge" class="whitespace-nowrap">Score: 1,284 Very strong</span><p>Short caption</p></div>
+      </div></div><div class="card"><div class="flex" data-pdf-media-row><div class="w-32" data-pdf-media-visual></div><div><p>Another short caption</p></div></div></div></div>
+      <div id="kpis" class="grid"><div>Impressions 9,673</div><div>Comments 5</div><div>Shares 2</div></div>`;
+    await exportReportToPdf({ contentRef: { current: root }, filename: "trends" });
+    const exported = capture.document();
+    const posts = exported.querySelector("#posts")!;
+    expect(posts.hasAttribute("data-pdf-compact")).toBe(false);
+    expect(posts.hasAttribute("data-pdf-data-grid")).toBe(false);
+    expect(exported.querySelector("#kpis")?.hasAttribute("data-pdf-compact")).toBe(true);
+
+    const style = exported.querySelector("style")!.cloneNode(true);
+    const printed = exported.querySelector(".pdf-root")!.cloneNode(true) as HTMLElement;
+    document.body.append(style, printed);
+    expect(getComputedStyle(printed.querySelector("#posts")!).display).toBe("block");
+    const row = printed.querySelector("[data-pdf-media-row]")!;
+    expect(getComputedStyle(row).display).toBe("flex");
+    expect(getComputedStyle(row).flexWrap).toBe("nowrap");
+    expect(getComputedStyle(printed.querySelector("[data-pdf-media-visual]")!).maxWidth).toBe("34mm");
+    const badge = printed.querySelector('[data-slot="badge"]')!;
+    expect(getComputedStyle(badge).whiteSpace).toBe("normal");
+    expect(getComputedStyle(badge).maxWidth).toBe("100%");
+  });
+
+  it("only keeps blocks whole when the gap they would leave is small", async () => {
+    const capture = captureExport();
+    const root = document.createElement("div");
+    root.innerHTML = `<article>Trend card</article>`;
+    await exportReportToPdf({ contentRef: { current: root }, filename: "gaps" });
+    const script = capture.document().querySelector("script")!.textContent || "";
+    expect(script).toContain("const usablePageHeight = 65 * 96 / 25.4;");
+    expect(script).not.toContain("130 * 96");
+  });
+
   it("reports a blocked popup without changing the report", async () => {
     vi.spyOn(window, "open").mockReturnValue(null);
     const root = document.createElement("div"); root.textContent = "Saved report";
