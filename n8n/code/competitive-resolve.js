@@ -84,4 +84,17 @@ const host = value => String(value || '').toLowerCase().replace(/^[a-z]+:\/\//, 
 const clientHost = host(body.website_url);
 const clientMatches = companies.filter(c => nameHit(String(c.name || '').toLowerCase(), clientNeedle) || (!!clientHost && host(c.url) === clientHost));
 if (clientMatches.length !== 1) throw new Error("CLIENT_IDENTITY_UNVERIFIED — " + cfg.client_name + " is not uniquely tracked in the selected RivalIQ landscape. Its focus company must not be used as a substitute. Add the client's own company and profiles in RivalIQ.");
+// A new confirmed selection can share the client but contain different rivals.
+// Never silently analyse the client's old landscape as the new selection.
+const selectedMatches = selected.map(s => companies.filter(c => {
+  if (String(c.id) === String(clientMatches[0].id)) return false;
+  if (s.rivaliq_company_id != null) return String(c.id) === String(s.rivaliq_company_id);
+  const website = host(s.website_url);
+  if (website) return host(c.url) === website;
+  return String(c.name || '').trim().toLowerCase() === String(s.name || '').trim().toLowerCase();
+}));
+if (selectedMatches.some(matches => matches.length !== 1) ||
+    new Set(selectedMatches.flatMap(matches => matches.map(c => String(c.id)))).size !== selected.length) {
+  throw new Error('TRACKING_SELECTION_MISMATCH — the RivalIQ landscape does not contain every confirmed competitor exactly once. Connect RivalIQ tracking for this selection before running the report.');
+}
 return [{ json: { landscape_id: match.id, landscape_name: match.name, matched_by: matchedBy, focus_company_id: match.focusCompanyId, client_company_id: clientMatches[0].id, companies } }];

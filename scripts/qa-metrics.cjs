@@ -35,10 +35,17 @@ check('RivalIQ rejects mismatched metric periods',()=>assert.throws(()=>runCompe
 check('RivalIQ refuses to attribute an unrelated focus company to the client',()=>assert.throws(()=>runCompetitive({'Run Config':{client_name:'Subliy',range_start:'2026-08-01',range_end:'2026-08-31'},'Landscape Companies':{companies:[{id:1,name:'Jobber',url:'https://getjobber.com'}]}}),/CLIENT_IDENTITY_UNVERIFIED/));
 check('RivalIQ selects the tracked client even when another company is the focus',()=>{const r=runCompetitive({'Landscape Companies':{companies:[{id:1,name:'Rival'},{id:2,name:'Fixture'}]}});assert.equal(r.companies.find(c=>c.is_client).company_id,'2')});
 for(const field of ['failed_windows','truncated_pages'])check('RivalIQ refuses partial '+field,()=>assert.throws(()=>runCompetitive({input:{socialPosts:[],[field]:1}}),/incomplete/));
-function resolveClient(companies) {
- const cfg={client_name:'Subliy',landscape_hint:612909,competitors_json:'[]'};
+function resolveClient(companies, selected=[]) {
+ const cfg={client_name:'Subliy',landscape_hint:612909,competitors_json:JSON.stringify(selected)};
  return vm.runInNewContext('(function(){'+read('competitive-resolve')+'})()',{$input:{first:()=>({json:{landscapes:[{id:612909,name:'Subliy',focusCompanyId:1955162,companies}]}})},$:name=>({first:()=>({json:name==='Run Config'?cfg:{body:{website_url:'https://www.subliy.com/'}}})})})[0].json;
 }
 check('actual resolver rejects the observed Subliy landscape containing Jobber as focus',()=>assert.throws(()=>resolveClient([{id:1955162,name:'Jobber',url:'http://getjobber.com/'}]),/CLIENT_IDENTITY_UNVERIFIED/));
 check('actual resolver identifies a tracked client independently of the focus company',()=>assert.equal(resolveClient([{id:1955162,name:'Jobber',url:'http://getjobber.com/'},{id:99,name:'Subliy',url:'https://subliy.com'}]).client_company_id,99));
+check('resolver rejects a changed selection using an old client landscape',()=>assert.throws(()=>resolveClient([{id:99,name:'Subliy',url:'https://subliy.com'},{id:1,name:'Old rival',url:'https://old.example.com'}],[{name:'New rival',website_url:'https://new.example.com'}]),/TRACKING_SELECTION_MISMATCH/));
+check('resolver matches competitor website despite provider company naming',()=>assert.equal(resolveClient([{id:99,name:'Subliy',url:'https://subliy.com'},{id:1,name:'Different legal name',url:'http://www.rival.example.com/'}],[{name:'Rival',website_url:'https://rival.example.com/path'}]).client_company_id,99));
+check('resolver rejects stale provider IDs and duplicate competitor identities',()=>{
+ const companies=[{id:99,name:'Subliy',url:'https://subliy.com'},{id:1,name:'Rival',url:'https://rival.example.com'}];
+ assert.throws(()=>resolveClient(companies,[{name:'Rival',website_url:'https://rival.example.com',rivaliq_company_id:2}]),/TRACKING_SELECTION_MISMATCH/);
+ assert.throws(()=>resolveClient(companies,[{name:'Rival'},{name:'Rival'}]),/TRACKING_SELECTION_MISMATCH/);
+});
 console.log(JSON.stringify({passed:output.length,checks:output},null,2));
