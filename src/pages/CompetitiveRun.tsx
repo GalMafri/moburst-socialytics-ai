@@ -169,7 +169,10 @@ export default function CompetitiveRun() {
             // The workflow records why it stopped; showing it beats sending
             // someone to the execution log for a reason we already hold.
             const why = String((data as any)?.report_data?.error || "").trim();
-            setError(why ? `Analysis failed: ${why}` : "Analysis failed on the server, with no reason recorded.");
+            // Provider wording like "List RivalIQ Landscapes: HTTP 429" reads
+            // as a broken app; say what happened and what to do instead.
+            setError(why ? plainCompetitiveError(why) : "The analysis stopped on the server and no reason was recorded. Nothing was saved — try again.");
+
             refetchRuns();
           }
         } catch {
@@ -218,7 +221,7 @@ export default function CompetitiveRun() {
           date_range_end: range.end,
         },
       });
-      if (runErr || started?.error) throw new Error(await describeInvokeError(runErr, started));
+      if (runErr || started?.error) throw new Error(plainCompetitiveError(await describeInvokeError(runErr, started)));
       const reportRowId: string = started.report_id;
       setReportId(reportRowId);
       setStartedAt(started.created_at || new Date().toISOString());
