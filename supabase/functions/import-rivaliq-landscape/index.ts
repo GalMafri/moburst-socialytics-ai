@@ -51,6 +51,7 @@ Deno.serve(async (req) => {
 
     const chosen = summaries.find((l) => l.id === String(landscape_id));
     if (!chosen) return jsonResp({ error: "landscape_id not found on this RivalIQ account" }, 404);
+    if (!chosen.is_match || !chosen.client_company_id) return jsonResp({ error: "This landscape does not uniquely track this client. Choose a matching landscape or set up tracking first." }, 422);
 
     const { data: set, error: setErr } = await supabase
       .from("competitor_sets")
@@ -66,7 +67,7 @@ Deno.serve(async (req) => {
       .single();
     if (setErr) throw new Error(setErr.message);
 
-    const rivals = chosen.companies.filter((c) => !c.is_focus);
+    const rivals = chosen.companies.filter((c) => c.id !== chosen.client_company_id);
     let handleCount = 0;
     // The set row exists from here on. A throw part-way through the loop used
     // to leave it behind with however many competitors had landed, and the

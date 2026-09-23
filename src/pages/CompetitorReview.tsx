@@ -11,6 +11,7 @@
 // creates a fresh draft set and leaves history behind (sets are cheap rows).
 
 import { useMemo, useState } from "react";
+import { RivalIqSetup } from "@/components/competitive/RivalIqSetup";
 import { classifyProfileUrl } from "@/lib/profileUrl";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
@@ -75,7 +76,7 @@ function LandscapeRow({
   importingId: string | null;
   onImport: (id: string) => void;
 }) {
-  const rivals = (landscape.companies || []).filter((c: any) => !c.is_focus);
+  const rivals = (landscape.companies || []).filter((c: any) => c.id !== landscape.client_company_id);
   const empty = rivals.length === 0;
   return (
     <div className="glass-inner p-4 flex items-start justify-between gap-3">
@@ -88,8 +89,8 @@ function LandscapeRow({
       <Button
         size="sm"
         onClick={() => onImport(landscape.id)}
-        disabled={!!importingId || empty}
-        title={empty ? "This set has no competitors to import" : undefined}
+        disabled={!!importingId || empty || !landscape.is_match}
+        title={!landscape.is_match ? "This landscape does not uniquely track this client" : empty ? "This set has no competitors to import" : undefined}
         className="shrink-0"
       >
         {importingId === landscape.id ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
@@ -560,7 +561,7 @@ export default function CompetitorReview() {
     onSuccess: () => {
       track("competitor_set_confirmed", { client_id: clientId, entity_id: currentSet?.id, ok: true });
       refreshAll();
-      toast({ title: "Competitor set confirmed", description: "Top 3 locked in for deep analysis." });
+      toast({ title: "Competitor set confirmed", description: "Top 3 saved. Connect RivalIQ tracking before running analysis." });
     },
     onError: (err: any) => toast({ title: "Confirm failed", description: err.message, variant: "destructive" }),
   });
@@ -652,11 +653,11 @@ export default function CompetitorReview() {
                   ) : (
                     <div className="glass-inner p-4 space-y-3">
                       <p className="t-body text-white">
-                        RivalIQ has no set with {client?.name || "this client"} as its focus company.
+                        No RivalIQ landscape uniquely identifies {client?.name || "this client"} as a tracked company.
                       </p>
                       <p className="t-secondary">
-                        Either build one in RivalIQ and come back, or let the app propose competitors from this
-                        client's website and brief. You review the list before anything is tracked.
+                        Propose and confirm three competitors, then use Set up RivalIQ tracking on this page.
+                        Confirming a selection alone does not add companies to RivalIQ.
                       </p>
                       <Button
                         size="sm"
@@ -723,6 +724,9 @@ export default function CompetitorReview() {
                 <Button variant="outline" size="sm" onClick={openImport} disabled={identifying}>
                   <Download className="h-3.5 w-3.5 mr-1" /> Import from RivalIQ
                 </Button>
+                {currentSet && ["confirmed", "complete", "failed"].includes(currentSet.status) && (
+                  <RivalIqSetup key={currentSet.id} setId={currentSet.id} onComplete={refreshAll} />
+                )}
                 {currentSet && (
                   <Button variant="outline" size="sm" onClick={redetectHandles} disabled={detecting || !isDraft}>
                     {detecting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Search className="h-3.5 w-3.5 mr-1" />}

@@ -147,3 +147,6 @@ verify_jwt = false
 
 [functions.media-job-status]
 verify_jwt = false
+
+[functions.setup-rivaliq-landscape]
+verify_jwt = false

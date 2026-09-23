@@ -99,6 +99,30 @@ async function runFeed({landscapes,explicit,posts=[],providerStatus=200}) {
  const response=await handler(new Request('https://fixture.invalid/feed',{method:'POST',body:JSON.stringify({client_id:'fixture-client'})}));
  return {...state,requests,status:response.status,body:await response.json()};
 }
+async function setupPreview({authorized=true,canWrite=true,mode='preview',website='https://client.com',fingerprint='wrong',status='confirmed'}={}) {
+ const state=database({due:false});state.tables.clients[0].website_url=website;state.tables.competitor_sets[0].status=status;
+ state.tables.competitors=['one','two','three'].map((n,i)=>({id:n,set_id:'fixture-set',name:n,website_url:'https://'+n+'.com',is_selected:true,selected_rank:i+1}));
+ let handler;let outbound=0;class AuthzError extends Error {constructor(status,message){super(message);this.status=status;}}
+ moduleFrom('supabase/functions/setup-rivaliq-landscape/index.ts',{
+ 'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},
+ '../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>{if(!authorized)throw new AuthzError(401,'Unauthorized');return{asCaller:{rpc:async()=>({data:canWrite,error:null})}};}},
+ '../_shared/competitive/rivaliqSetup.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqSetup.ts')
+ },{crypto:require('node:crypto').webcrypto,TextEncoder,Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},fetch:async()=>{outbound++;throw Error('Unexpected provider call')}});
+ const r=await handler(new Request('https://fixture.invalid/setup',{method:'POST',body:JSON.stringify({set_id:'fixture-set',mode,fingerprint})}));
+ return{status:r.status,body:await r.json(),state,outbound};
+}
+async function runImport({matches=true}={}) {
+ const state=database({due:false});Object.assign(state.tables.clients[0],{name:'Subliy',website_url:'https://subliy.com'});
+ let handler;const companies=[{id:1,name:'Jobber',url:'https://getjobber.com'}];if(matches)companies.push({id:2,name:'Subliy',url:'https://subliy.com'});
+ class AuthzError extends Error{}
+ moduleFrom('supabase/functions/import-rivaliq-landscape/index.ts',{
+ 'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},
+ '../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>({userId:'fixture-user',asCaller:{rpc:async()=>({data:true,error:null})}})},
+ '../_shared/competitive/rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts')
+ },{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},fetch:async()=>new Response(JSON.stringify({landscapes:[{id:42,name:'Fixture',focusCompanyId:1,companies}]}))});
+ const r=await handler(new Request('https://fixture.invalid/import',{method:'POST',body:JSON.stringify({client_id:'fixture-client',mode:'import',landscape_id:'42'})}));
+ return{status:r.status,body:await r.json(),state};
+}
 async function runManual(transport, options={}){
  const state=options.state || database();let handler;let dispatches=0;
  class AuthzError extends Error{constructor(status,message){super(message);this.status=status;}}
@@ -137,6 +161,10 @@ async function runCallback(state,kind,status,reportId,{authorized=true,resume=tr
  await check('QA-FEED','regression','ambiguous identity is rejected before writes',async()=>{const r=await runFeed({explicit:'1',landscapes:[{id:1,focusCompanyId:1,companies:[{id:1,name:'Subliy',url:'https://subliy.com'},{id:2,name:'Subliy LLC',url:'https://another.com'}]}]});assert.equal(r.status,422);assert.equal(r.operations.length,0);});
  await check('QA-FEED','regression','provider failure remains an error with no writes',async()=>{const r=await runFeed({landscapes:[],providerStatus:429});assert.equal(r.status,500);assert.equal(r.body.code,undefined);assert.equal(r.operations.length,0);});
  await check('QA-FEED','regression','non-focus client harvest uses client identity, never focus company',async()=>{const r=await runFeed({explicit:'1',landscapes:[{id:1,focusCompanyId:1,companies:[{id:1,name:'Jobber',url:'https://getjobber.com'},{id:2,name:'Subliy',url:'https://subliy.com'}]}],posts:[{companyId:1,postId:'rival',image:'https://fixture.invalid/rival.jpg'},{companyId:2,postId:'client',image:'https://fixture.invalid/client.jpg'}]});assert.equal(r.status,200);assert.equal(r.body.posts,2);assert(r.requests.includes('https://fixture.invalid/client.jpg'));assert(!r.requests.includes('https://fixture.invalid/rival.jpg'));assert.equal(r.requests.filter(u=>u.includes('/landscapes?')).length,1);});
+ for(const [options,status] of [[{authorized:false},401],[{canWrite:false},403],[{status:'draft'},409],[{status:'analyzing'},409],[{website:'https://nd-main-qa.moburst.org'},422],[{mode:'advance'},409]]) await check('QA-SETUP','regression','provider setup gate '+JSON.stringify(options),async()=>{const r=await setupPreview(options);assert.equal(r.status,status);assert.equal(r.outbound,0);assert.equal(r.state.operations.length,0);});
+ await check('QA-SETUP','control','review contains client and three confirmed URLs without writes',async()=>{const r=await setupPreview();assert.equal(r.status,200);assert.equal(r.body.plan.companies.length,4);assert.equal(r.body.plan.companies[0].url,'https://client.com/');assert.match(r.body.fingerprint,/^[a-f0-9]{64}$/);assert.equal(r.outbound,0);assert.equal(r.state.operations.length,0);});
+ await check('QA-IMPORT','regression','unrelated landscape cannot create a competitor set',async()=>{const r=await runImport({matches:false});assert.equal(r.status,422);assert.equal(r.state.operations.length,0);});
+ await check('QA-IMPORT','regression','non-focus client is excluded and focus competitor retained',async()=>{const r=await runImport();assert.equal(r.status,200);assert.equal(r.state.tables.competitors.length,1);assert.equal(r.state.tables.competitors[0].name,'Jobber');});
  for(const transport of ['throw','reject'])await check('QA-11','regression','failed scheduler dispatch '+transport,async()=>{const r=await runScheduler({order:['social'],transport});assert.equal(r.status,502);assert.equal(r.tables.reports[0].status,'failed');assert.equal(r.body.triggered,0);});
  for(const transport of ['throw','reject','accept','late-completed'])await check('QA-11','regression','manual dispatch '+transport,async()=>{const r=await runManual(transport);assert.equal(r.status,transport==='reject'?502:transport==='accept'?200:500);assert.equal(r.reportStatus,transport==='accept'?'running':transport==='late-completed'?'completed':'failed');});
 
