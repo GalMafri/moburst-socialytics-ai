@@ -95,7 +95,11 @@ describe("PDF export content preservation", () => {
     const script = capture.document().querySelector("script")!.textContent || "";
     expect(script).toContain("const usablePageHeight = 65 * 96 / 25.4;");
     expect(script).not.toContain("130 * 96");
+    // Chart cards keep a taller allowance so a plot never splits from its title.
+    expect(script).toContain("const fullPageHeight = 240 * 96 / 25.4;");
+    expect(script).toContain("el.querySelector('.recharts-surface') ? fullPageHeight : usablePageHeight");
   });
+
 
   it("reports a blocked popup without changing the report", async () => {
     vi.spyOn(window, "open").mockReturnValue(null);
