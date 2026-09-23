@@ -1019,8 +1019,10 @@ function TrendsSection({
               return (
                 <Card key={i} className="overflow-hidden">
                   <CardContent className="pt-5">
-                    <div className="flex gap-4">
-                      <PostVisual url={post.url} preview={previews[post.url]} mediaType={post.type || (platform.toLowerCase().includes("tiktok") ? "video" : null)} platform={platform} className="w-32 shrink-0 self-start" compact />
+                    <div className="flex gap-4" data-pdf-media-row>
+                      <div className="w-32 shrink-0 self-start" data-pdf-media-visual>
+                        <PostVisual url={post.url} preview={previews[post.url]} mediaType={post.type || (platform.toLowerCase().includes("tiktok") ? "video" : null)} platform={platform} className="w-full" compact />
+                      </div>
                       <div className="flex-1 min-w-0 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0">
