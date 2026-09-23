@@ -111,6 +111,8 @@ export default function ReportView() {
       return data;
     },
     enabled: !!reportId,
+    refetchInterval: (query) => query.state.data?.status === "running" ? 5000 : false,
+    refetchIntervalInBackground: true,
   });
 
   const overviewPostUrls = useMemo(() => {

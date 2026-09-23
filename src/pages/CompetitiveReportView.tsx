@@ -45,7 +45,7 @@ type TopPost = {
   likely_boosted?: boolean;
 };
 /** A RivalIQ period total with the previous equal-length period beside it. */
-type Both = { current: number; previous: number | null };
+type Both = { current: number | null; previous: number | null };
 type RivalIQMetrics = {
   period?: { start: string; end: string };
   previous_period?: { start: string; end: string } | null;
@@ -170,7 +170,7 @@ function TileNote({ label, text }: { label: string; text: string }) {
   );
 }
 
-const deltaPct = (v: Both | null | undefined): number | null => (v && v.previous != null && v.previous > 0 ? ((v.current - v.previous) / v.previous) * 100 : null);
+const deltaPct = (v: Both | null | undefined): number | null => (v && v.current != null && v.previous != null && v.previous > 0 ? ((v.current - v.previous) / v.previous) * 100 : null);
 const fmtDelta = (pctChange: number) => `${pctChange > 0 ? "+" : pctChange < 0 ? "-" : ""}${Math.abs(pctChange) >= 100 ? Math.round(Math.abs(pctChange)) : Math.abs(pctChange).toFixed(1).replace(/\.0$/, "")}%`;
 
 /**
@@ -182,7 +182,7 @@ const fmtDelta = (pctChange: number) => `${pctChange > 0 ? "+" : pctChange < 0 ?
  * cards. A change that rounds to zero wears no colour either.
  */
 function MetricRow({ label, value, format = compactNumber, signed = false }: { label: string; value: Both | null | undefined; format?: (v: number) => string; signed?: boolean }) {
-  if (!value) return <Stat label={label} value="–" />;
+  if (!value || value.current == null) return <Stat label={label} value="Not available" />;
   const change = deltaPct(value);
   const rounded = change == null ? null : Number(fmtDelta(change).replace(/[+%]/g, ""));
   const tone = !signed || !rounded ? "text-[#b1b7c1]" : change! > 0 ? "text-success" : "text-[#f87171]";
@@ -215,6 +215,8 @@ export default function CompetitiveReportView() {
       return data;
     },
     enabled: !!reportId,
+    refetchInterval: (query) => query.state.data?.status === "running" ? 5000 : false,
+    refetchIntervalInBackground: true,
   });
 
   const { data: client } = useQuery({
@@ -289,6 +291,14 @@ export default function CompetitiveReportView() {
     );
   }
 
+  if (report.status === "running") return <AppLayout>
+    <Loading label="Competitive analysis in progress" />
+    <p className="text-muted-foreground">Allow up to 90 minutes. This page updates automatically when the report is ready.</p>
+    <div className="flex gap-2 mt-4">
+      <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
+      {canRetry(report) && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
+    </div>
+  </AppLayout>;
   if (report.status === "failed") return <AppLayout>
     <EmptyState icon={Crosshair} title="This report needs attention" description={rd.error || "The analysis did not complete. Its figures are unavailable."} />
     <div className="flex gap-2 mt-4">
@@ -590,7 +600,7 @@ export default function CompetitiveReportView() {
               sub={effectivePlat === "all" ? "out of 100 vs. the set" : "out of 100 vs. the set · all platforms"}
             />
             {meM?.audience && (
-              <StatCard label="Followers" value={compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across networks, per RivalIQ" : `on ${platformLabel(effectivePlat)}, per RivalIQ`} />
+              <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across networks, per RivalIQ" : `on ${platformLabel(effectivePlat)}, per RivalIQ`} />
             )}
             <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} posts`} />
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`set avg ${avg((b) => b.cadence_per_week).toFixed(1)}/wk`} />

@@ -105,7 +105,7 @@ export function RetryReportButton({
             </p>
             <p className="t-secondary">
               {kind === "competitive"
-                ? "It reads the client's RivalIQ landscape and the confirmed competitor set as they stand now."
+                ? "It keeps this report's original competitor selection and date range, and fetches fresh RivalIQ data."
                 : "It reads the client's Sprout profiles, brief and latest competitive analysis as they stand now."}
             </p>
           </>

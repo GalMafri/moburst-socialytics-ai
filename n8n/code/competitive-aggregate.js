@@ -24,7 +24,8 @@ for (const [rows, start, end] of [[mRows, cfg.range_start, cfg.range_end], [mPre
 const byCompanyId = (rows) => { const o = {}; for (const r of rows) o[String(r.companyId)] = r; return o; };
 const mCur = byCompanyId(mRows);
 const mPrev = byCompanyId(mPrevRows);
-const pick = (r, k) => { if (!r || r[k] == null) return 0; const n = Number(r[k]); return isFinite(n) ? n : 0; };
+// A missing provider observation is unknown, not a measured zero.
+const pick = (r, k) => { if (!r || r[k] == null || r[k] === '') return null; const n = Number(r[k]); return isFinite(n) ? n : null; };
 const NETS = {
   instagram: { followers: "instagramFollowedBy", posts: "instagramPosts", engagement: "instagramPostsEngagementTotal", impressions: "instagramEstimatedImpressions", rate: "instagramAverageEngagementRatePerPost" },
   tiktok: { followers: "tikTokFollowers", posts: "tikTokPosts", engagement: "tikTokPostsEngagementTotal", impressions: "tikTokEstimatedImpressions", views: "tikTokViews", rate: "tikTokEngagementRateByFollower" },
@@ -40,7 +41,7 @@ const metricsFor = (id) => {
   const by_network = {};
   for (const net of Object.keys(NETS)) {
     const keys = NETS[net]; const n = {}; let any = false;
-    for (const field of Object.keys(keys)) { const v = both(keys[field]); n[field] = v; if (v.current || v.previous) any = true; }
+    for (const field of Object.keys(keys)) { const v = both(keys[field]); n[field] = v; if (v.current != null || v.previous != null) any = true; }
     if (any) by_network[net] = n;
   }
   const daily = sRows.filter((r) => String(r.companyId) === id && day(r.date) >= cfg.range_start && day(r.date) <= cfg.range_end).map((r) => ({ date: String(r.date || "").slice(0, 10), posts: pick(r, "crossChannelSocialActivity"), engagement: pick(r, "crossChannelSocialEngagement"), audience: pick(r, "crossChannelSocialAudience") })).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));

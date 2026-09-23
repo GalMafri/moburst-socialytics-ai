@@ -18,6 +18,19 @@ function runCompetitive(overrides={}){
  return vm.runInNewContext('(function(){'+read('competitive-aggregate')+'})()',{$input:{first:()=>({json:input})},$:name=>({first:()=>({json:nodes[name]||{}})})})[0].json;
 }
 check('RivalIQ includes end date, excludes next date, deduplicates posts',()=>assert.equal(runCompetitive().total_posts_analyzed,1));
+check('RivalIQ unavailable audience remains null while measured zero remains zero',()=>{
+ const r=runCompetitive({'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelSocialAudience:null,instagramFollowedBy:null,crossChannelSocialActivity:0,instagramPosts:0}]}});
+ const m=r.companies[0].rivaliq_metrics;
+ assert.equal(m.audience.current,null);assert.equal(m.posts.current,0);
+ assert.equal(m.by_network.instagram.followers.current,null);assert.equal(m.by_network.instagram.posts.current,0);
+ assert.equal(m.audience.previous,null);
+});
+check('RivalIQ missing and invalid metrics are not fabricated as zeros',()=>{
+ const r=runCompetitive({'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelSocialAudience:'',crossChannelSocialEngagement:'invalid'}]}});
+ assert.equal(r.companies[0].rivaliq_metrics.audience.current,null);
+ assert.equal(r.companies[0].rivaliq_metrics.engagement.current,null);
+ assert.equal(r.companies[0].rivaliq_metrics.posts.current,null);
+});
 check('RivalIQ rejects mismatched metric periods',()=>assert.throws(()=>runCompetitive({'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-07-01',mainPeriodEnd:'2026-07-31'}]}}),/different period/));
 check('RivalIQ refuses to attribute an unrelated focus company to the client',()=>assert.throws(()=>runCompetitive({'Run Config':{client_name:'Subliy',range_start:'2026-08-01',range_end:'2026-08-31'},'Landscape Companies':{companies:[{id:1,name:'Jobber',url:'https://getjobber.com'}]}}),/CLIENT_IDENTITY_UNVERIFIED/));
 check('RivalIQ selects the tracked client even when another company is the focus',()=>{const r=runCompetitive({'Landscape Companies':{companies:[{id:1,name:'Rival'},{id:2,name:'Fixture'}]}});assert.equal(r.companies.find(c=>c.is_client).company_id,'2')});
