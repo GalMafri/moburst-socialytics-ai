@@ -15,7 +15,10 @@ vi.mock('@/integrations/supabase/client',()=>({supabase:{functions:{invoke:f.inv
  const filters:any={};let one=false;
  const q:any={select:()=>q,eq(k:string,v:any){filters[k]=v;return q},in:()=>q,order:()=>q,limit:()=>q,maybeSingle(){one=true;return q},then(resolve:any){
   const report={id:'existing',status:f.status,created_at:f.started,date_range_start:'2026-09-01',date_range_end:'2026-09-17'};
-  let data:any=table==='clients'?{id:'client',name:'Fixture',social_keywords:['test']}:table==='competitor_sets'?{id:'set'}:table==='sprout_profiles'?[{id:'profile'}]:table==='competitors'?[]:one?((filters.status&&filters.status!==f.status)?null:report):[report];
+   // competitor_sets is read as a list now: the run page has to be able to see
+   // a newer unconfirmed draft behind the confirmed set it would actually use.
+   let data:any=table==='clients'?{id:'client',name:'Fixture',social_keywords:['test']}:table==='competitor_sets'?[{id:'set',status:'confirmed',created_at:'2026-09-01',confirmed_at:'2026-09-01',rivaliq_landscape_id:'612909'}]:table==='sprout_profiles'?[{id:'profile'}]:table==='competitors'?[]:one?((filters.status&&filters.status!==f.status)?null:report):[report];
+
   return Promise.resolve({data,error:f.readError&&filters.status==='running'?new Error('offline'):null}).then(resolve);
  }};return q;
 }}}));
