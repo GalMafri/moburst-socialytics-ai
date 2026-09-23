@@ -12,6 +12,9 @@
 
 import { useMemo, useState } from "react";
 import { RivalIqSetup } from "@/components/competitive/RivalIqSetup";
+import { CompetitiveSteps } from "@/components/competitive/CompetitiveSteps";
+import { describeSelection, describeTracking, pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
+
 import { classifyProfileUrl, isProfileUrlInput } from "@/lib/profileUrl";
 import { isReviewReadyHandle } from "../../supabase/functions/_shared/competitive/extractSocialHandles";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -136,22 +139,27 @@ export default function CompetitorReview() {
     enabled: !!clientId,
   });
 
-  // Newest set for this client, whatever its status.
-  const { data: currentSet, isLoading: setLoading } = useQuery({
+  // Every set for this client, newest first. The whole (short) list is needed
+  // because a newer draft and the older confirmed set that a report would
+  // actually use are different rows, and both have to be shown.
+  const { data: sets, isLoading: setLoading } = useQuery({
     queryKey: ["competitor-set", clientId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("competitor_sets")
         .select("*")
         .eq("client_id", clientId!)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order("created_at", { ascending: false });
       if (error) throw error;
-      return data;
+      return data || [];
     },
     enabled: !!clientId,
   });
+  const currentSet = sets?.[0] ?? null;
+  const { runnable: runnableSet } = pickRunSelection((sets || []) as SetRow[]);
+  const selectionState = describeSelection((sets || []) as SetRow[]);
+  const trackingState = describeTracking(runnableSet);
+
 
   const { data: competitors, isLoading: competitorsLoading, isError: competitorsFailed, error: competitorsError, refetch: refetchCompetitors } = useQuery({
     queryKey: ["competitors", currentSet?.id],
