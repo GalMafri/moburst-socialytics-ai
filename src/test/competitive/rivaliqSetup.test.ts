@@ -71,6 +71,14 @@ describe('RivalIQ API-only setup', () => {
   await expect(advanceRivalIqSetup(f.persisted, async () => ({ companies: companies.slice(1) }), f.save)).rejects.toThrow('Nothing was linked');
   expect(f.persisted.phase).toBe('verify');
  });
+ it('identifies the failed reviewed company and provider reason', async () => {
+  const f = fixture('following');
+  await expect(advanceRivalIqSetup(f.persisted, async () => ({ status: 3, urls: {
+   'http://www.one.com/': {status:3,error:'Company allowance reached'},
+   'https://client.com/': {status:2,companyId:1},
+  } }), f.save)).rejects.toThrow('one: Company allowance reached');
+  expect(f.persisted.phase).toBe('following');
+ });
  it('reuses an exact existing set without provider writes', async () => {
   const f = fixture();
   await advanceRivalIqSetup(f.persisted, async (p, m = 'GET') => {

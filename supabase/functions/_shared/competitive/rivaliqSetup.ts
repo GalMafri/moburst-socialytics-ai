@@ -69,7 +69,14 @@ export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): 
     const pending = await api(`/pendingOperations/${encodeURIComponent(job.operation_token || '')}`);
     if (pending.status === 1) return job;
     if (pending.status !== 2 || Object.values(pending.urls || {}).some((u: any) => u.status !== 2)) {
-      throw new Error('RivalIQ could not finish tracking every reviewed website. Check account capacity and company URLs.');
+      const failures = Object.entries(pending.urls || {}).filter(([, result]: any) => result.status === 3)
+        .map(([url, result]: any) => {
+          let company = job.plan.companies.find(c => c.url === url);
+          try { company ||= job.plan.companies.find(c => c.url === publicCompanyUrl(url)); } catch { /* unknown provider URL */ }
+          return `${company?.name || 'Reviewed company'}: ${String(result.error || 'tracking failed').slice(0, 200)}`;
+        });
+      const detail = failures.join('; ') || String(pending.error || 'Check account capacity and company URLs.').slice(0, 200);
+      throw new Error(`RivalIQ could not finish tracking every reviewed website. ${detail}`);
     }
     await update({ phase: 'verify' });
     return job;

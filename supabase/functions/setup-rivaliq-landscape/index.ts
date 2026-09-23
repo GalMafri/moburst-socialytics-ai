@@ -68,7 +68,10 @@ Deno.serve(async req => {
     ...(payload ? { body: JSON.stringify(payload) } : {}), signal: AbortSignal.timeout(25000),
    });
    if (!response.ok) throw new Error(`RivalIQ returned HTTP ${response.status}. Check API permissions or account capacity, then check setup status. No automatic POST retry was sent.`);
-   return await response.json();
+   // Provider validation messages can contain request URLs. Remove the key
+   // before any message can reach a caller or logs; operation tokens stay server-side.
+   return JSON.parse(JSON.stringify(await response.json(), (_name, value) => typeof value === 'string'
+    ? value.replaceAll(key, '[redacted]').replaceAll(encodeURIComponent(key), '[redacted]') : value));
   };
   const next = await advanceRivalIqSetup(job, api, save);
   if (next.phase === 'verified') {
