@@ -718,21 +718,41 @@ export default function CompetitorReview() {
             )}
           </DialogContent>
         </Dialog>
+        {/* Where this client is in the four steps, before any control. */}
+        <CompetitiveSteps
+          current={selectionState.ready ? 1 : 0}
+          steps={[
+            { title: "Review competitors", ...selectionState },
+            { title: "Connect tracking", ...trackingState },
+            {
+              title: "Choose period and run",
+              headline: selectionState.ready && trackingState.ready ? "Ready to run" : "Not ready yet",
+              detail: selectionState.ready && trackingState.ready ? undefined : "Finish the two steps on the left first.",
+              ready: false,
+              href: selectionState.ready ? `/clients/${clientId}/competitive/run` : undefined,
+              linkLabel: "Open the run page",
+            },
+            {
+              title: "Open the result",
+              headline: "Reports stay in history",
+              ready: false,
+              href: `/clients/${clientId}/competitive/reports`,
+              linkLabel: "Report history",
+            },
+          ]}
+        />
+
         {/* Status / primary actions */}
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <CardTitle className="t-h3 flex items-center gap-2">
-                  <Crosshair className="h-4 w-4" /> Competitor Set
-                  {currentSet && (
-                    <Badge variant={currentSet.status === "confirmed" ? "default" : "secondary"}>
-                      {currentSet.status}
-                    </Badge>
-                  )}
+                  <Crosshair className="h-4 w-4" /> Step 1 · The three competitors
                 </CardTitle>
                 <CardDescription className="mt-1">
-                  AI proposes, you decide. Swap out misfits, add your own, then lock the top 3.
+                  {selectionState.headline}
+                  {selectionState.detail ? ` ${selectionState.detail}` : ""}
                 </CardDescription>
               </div>
               <div className="flex gap-2 flex-wrap">
@@ -740,7 +760,12 @@ export default function CompetitorReview() {
                   <Download className="h-3.5 w-3.5 mr-1" /> Import from RivalIQ
                 </Button>
                 {currentSet && ["confirmed", "complete", "failed"].includes(currentSet.status) && (
-                  <RivalIqSetup key={currentSet.id} setId={currentSet.id} onComplete={refreshAll} />
+                  <RivalIqSetup
+                    key={currentSet.id}
+                    setId={currentSet.id}
+                    connected={!!currentSet.rivaliq_landscape_id}
+                    onComplete={refreshAll}
+                  />
                 )}
                 {currentSet && (
                   <Button variant="outline" size="sm" onClick={redetectHandles} disabled={detecting || !isDraft}>
@@ -759,14 +784,21 @@ export default function CompetitorReview() {
               </div>
             </div>
           </CardHeader>
-          {client.competitor_seed_notes ? (
-            <CardContent className="pt-0">
+          <CardContent className="pt-0 space-y-2">
+            {/* Tracking is its own fact: a confirmed selection is not a
+                connected one, and neither says anything about a report. */}
+            <p className="t-secondary">
+              <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
+              {trackingState.detail ? ` ${trackingState.detail}` : ""}
+            </p>
+            {client.competitor_seed_notes ? (
               <p className="t-secondary">
                 <span className="font-medium">Account team notes fed to the AI:</span> {client.competitor_seed_notes}
               </p>
-            </CardContent>
-          ) : null}
+            ) : null}
+          </CardContent>
         </Card>
+
 
         {/* Selected top 3 */}
         {selected.length > 0 && (
