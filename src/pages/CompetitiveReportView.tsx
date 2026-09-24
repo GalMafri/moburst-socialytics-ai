@@ -505,7 +505,7 @@ export default function CompetitiveReportView() {
     summary: "Summary",
     changes: "Since last report",
     scorecard: "Scorecard",
-    field: "The field",
+    field: "Company comparison",
     audience: "Audience",
     rhythm: "Posting rhythm",
     gaps: "Gaps",
@@ -695,7 +695,7 @@ export default function CompetitiveReportView() {
                 </div>
               </CardContent>
             </Card>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="grid gap-4 xl:grid-cols-2">
               {ordered.map((c) => {
                 const b = bucketFor(c, effectivePlat);
                 const platformNote = platformNoteFor(c.name);
@@ -727,10 +727,10 @@ export default function CompetitiveReportView() {
                           <TileStat value={compactNumber(b.views_total || 0)} exact={fmt(b.views_total)} label="Total video views" />
                         </div>
                       )}
-                      {effectivePlat === "all" && (
+                      {effectivePlat === "all" && (c.channel_mix || []).length > 0 && (
                         <div className="space-y-2">
                           <p className="t-label">Filter report by platform</p>
-                          <div className="flex flex-wrap gap-2">{(c.channel_mix || []).map((m) => <Button key={m.key} variant="outline" size="sm" onClick={() => setPlat(normalizePlatform(m.key))}>{platformLabel(m.key)} · {m.count} posts</Button>)}</div>
+                          <div className="flex flex-wrap gap-2">{(c.channel_mix || []).map((m) => <Button key={m.key} variant="outline" size="sm" onClick={() => setPlat(normalizePlatform(m.key))}>{platformLabel(m.key)} · {m.count} {m.count === 1 ? "post" : "posts"}</Button>)}</div>
                         </div>
                       )}
                       {(b.media_type_mix || []).length > 0 && (

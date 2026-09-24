@@ -55,6 +55,6 @@ it('company cards link to their supporting posts and expose platform filters as 
  mount();await tick(20);
  expect(screen.getByRole('link',{name:'View Example Rival posts'})).toHaveAttribute('href','#company-posts-rival');
  expect(document.getElementById('company-posts-rival')).toBeInTheDocument();
- expect(screen.getByRole('button',{name:'instagram · 1 posts'})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'instagram · 1 post'})).toBeInTheDocument();
  expect(screen.queryByText('top 3')).toBeNull();
 });
