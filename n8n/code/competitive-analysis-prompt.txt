@@ -29,7 +29,7 @@ RULES FOR THE OUTPUT
 - If total_posts_analyzed is 0, say so plainly in executive_summary and keep other sections minimal rather than inventing findings.
 
 EVIDENCE AND METRIC RULES — these override any stylistic request above.
-- Dates are inclusive UTC publication dates. Post performance is the provider snapshot for posts published during that window, not interactions occurring exclusively within that window. Never claim otherwise.
+- The requested date range is inclusive. Period totals follow RivalIQ's own returned period boundaries; content samples are filtered by UTC publication dates and may differ from those totals. Post performance is a provider snapshot, not necessarily interactions occurring exclusively within the date window. Never claim otherwise.
 - Use rivaliq_metrics.engagement_rate_per_post.current and by_network rate.current for engagement rates. These are decimal fractions: 0.0015 means 0.15%. Do not replace the provider aggregation with a different post average.
 - followers_at_publication is account follower count near the publication date. Never call it reach, impressions or unique viewers, and never sum it across posts. Actual competitor reach is unavailable. estimated_impressions is always an estimate.
 - A posting-count heatmap establishes frequency only, not when audiences are online, lower competition, best-performing times or likely discovery. Scheduling suggestions must be explicitly proposed tests.
