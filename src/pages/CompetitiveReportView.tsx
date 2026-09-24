@@ -1014,7 +1014,7 @@ export default function CompetitiveReportView() {
                   const examples: Array<{ url: string; post?: TopPost }> = w.examples;
                   return (
                     <div key={i} className="glass-inner p-4 space-y-3">
-                      <p className="t-h3 pb-3 border-b border-[rgba(255,255,255,0.08)]" title={w.competitor}>{displayCompanyName(w.competitor)}</p>
+                      <p data-pdf-heading className="t-h3 pb-3 border-b border-[rgba(255,255,255,0.08)]" title={w.competitor}>{displayCompanyName(w.competitor)}</p>
                       {/* The pattern is the claim, and the only prose here. */}
                       <p className="t-body text-white leading-[1.55] pt-0.5">{w.pattern}</p>
                       {/* The proof, as the numbers rather than a paragraph

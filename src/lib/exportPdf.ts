@@ -269,6 +269,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       max-height: none !important;
     }
     .pdf-root [class*="h-screen"] { height: auto !important; }
+    .pdf-root .h-full, .pdf-root [data-pdf-unit] { height: auto !important; min-height: 0 !important; }
 
     /* Soft text wrapping — break long words ONLY when they'd overflow
        (e.g. URLs, hashtags without spaces). Regular prose wraps at word
