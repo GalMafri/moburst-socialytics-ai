@@ -63,7 +63,22 @@ const companies = fromEndpoint.length > 0 ? fromEndpoint : (landscape.companies 
 const rawPosts = postsResp.socialPosts || postsResp.posts || postsResp.data || postsResp.items || (Array.isArray(postsResp) ? postsResp : []);
 if (Number(postsResp.failed_windows) > 0 || Number(postsResp.truncated_pages) > 0) throw new Error('RivalIQ post coverage is incomplete. The report cannot be presented as a complete period.');
 const seenPosts = new Set();
-const posts = rawPosts.filter(post => {
+// X omits publishedAt in RivalIQ. Its native post ID encodes the creation
+// timestamp: Twitter's published Snowflake implementation uses a 22-bit shift
+// and epoch 1288834974657. Never infer dates from RivalIQ's own decimal postId.
+// https://github.com/twitter-archive/snowflake/blob/snowflake-2010/src/main/scala/com/twitter/service/snowflake/IdWorker.scala
+const datedPost = post => {
+  if (post.publishedAt || post.published_at || post.created || post.created_at || post.date) return post;
+  if (!['twitter', 'x'].includes(String(post.channel || post.network || post.platform || '').toLowerCase())) return post;
+  const id = post.postNativeId || post.nativeId;
+  if (typeof id !== 'string' || !/^[1-9]\d{14,18}$/.test(id)) return post;
+  const value = BigInt(id);
+  if (value > 9223372036854775807n) return post;
+  const timestamp = Number((value >> 22n) + 1288834974657n);
+  if (timestamp > Date.now()) return post;
+  return { ...post, publishedAt: new Date(timestamp).toISOString(), publication_date_source: 'x_native_post_id' };
+};
+const posts = rawPosts.map(datedPost).filter(post => {
   const date = day(post.publishedAt || post.published_at || post.created || post.created_at || post.date);
   if (!date || date < cfg.range_start || date > cfg.range_end) return false;
   const key = String(post.postId || post.postLink || JSON.stringify([post.companyId, date, post.message]));

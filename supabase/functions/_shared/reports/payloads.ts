@@ -10,7 +10,7 @@
 // run. Every run now goes through here: manual, scheduled, and retried.
 
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
-import { withCompetitiveEvidenceLimits } from "../competitive/reportEvidence.ts";
+import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../competitive/reportEvidence.ts";
 import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
 /**
  * How long a run may sit on "running" before it is treated as dead.
@@ -64,7 +64,7 @@ export function competitiveContext(
   reportRow: { created_at: string; report_data: unknown } | null | undefined,
   feedback: InsightFeedbackRow[] = [],
 ): Record<string, unknown> | null {
-  if (!reportRow?.report_data) return null;
+  if (!reportRow?.report_data || !competitiveReportQuality(reportRow.report_data).ready) return null;
   const rd: any = withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(reportRow.report_data));
   const ai = rd.ai_analysis || {};
   const companies: any[] = rd.aggregates?.companies || [];

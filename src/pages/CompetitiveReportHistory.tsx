@@ -1,3 +1,4 @@
+import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
 // Every competitive analysis run for one client, newest first. Unguarded in
 // the router like the social report history: RLS shows clients only their
 // completed reports and staff everything.
@@ -95,19 +96,20 @@ export default function CompetitiveReportHistory() {
                   {reports.map((r: any) => {
                     const rd = (r.report_data || {}) as any;
                     const running = r.status === "running";
+                    const held = !running && !competitiveReportQuality(rd).ready;
                     const period = rd.period?.start ? formatRange(rd.period) : r.date_range_start ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "—";
                     return (
                       <TableRow key={r.id} className={running ? "animate-pulse" : ""}>
                         <TableCell className="t-body">{new Date(r.created_at).toLocaleString()}</TableCell>
                         <TableCell>
-                          <Badge variant={r.status === "complete" ? "default" : running ? "secondary" : "destructive"} className="gap-1">
+                          <Badge variant={held ? "secondary" : r.status === "complete" ? "default" : running ? "secondary" : "destructive"} className="gap-1">
                             {running && <Loader2 className="h-3 w-3 animate-spin" />}
-                            {r.status}
+                            {held ? "Awaiting review" : r.status}
                           </Badge>
                         </TableCell>
                         <TableCell className="t-secondary">
                           {period}
-                          {r.status === "failed" && rd.error && (
+                          {!held && r.status === "failed" && rd.error && (
                             <span className="block t-label text-destructive break-words">{String(rd.error)}</span>
                           )}
                         </TableCell>

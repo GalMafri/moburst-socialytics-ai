@@ -12,7 +12,7 @@
 //   { op: "report", ... }    update a competitive_reports row (status/data/deck)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { withCompetitiveEvidenceLimits } from "../_shared/competitive/reportEvidence.ts";
+import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../_shared/competitive/reportEvidence.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
 const corsHeaders = {
@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
       // the count can be read back here rather than by editing two large code
       // nodes in the workflow.
       if (status === "complete" && report_data && typeof report_data === "object") {
-        const { data: snap } = await supabase
+        const { data: snap, error: snapshotError } = await supabase
           .from("rivaliq_snapshots")
           .select("payload")
           .eq("report_id", report_id)
@@ -114,6 +114,12 @@ Deno.serve(async (req) => {
           .order("fetched_at", { ascending: false })
           .limit(1)
           .maybeSingle();
+        if (snapshotError) throw new Error("Could not validate saved post coverage");
+        const truncated = Number((snap?.payload as Record<string, unknown> | null)?.truncated_pages) || 0;
+        if (truncated > 0) {
+          const rd = updates.report_data as Record<string, any>;
+          rd.totals = { ...(rd.totals || {}), truncated_pages: truncated };
+        }
         const failed = Number((snap?.payload as Record<string, unknown> | null)?.failed_windows) || 0;
         const expected = Number((snap?.payload as Record<string, unknown> | null)?.expected_windows) || 0;
         if (failed > 0) {
@@ -128,6 +134,17 @@ Deno.serve(async (req) => {
           totals.windows_expected = expected;
           rd.totals = totals;
           updates.report_data = rd;
+        }
+      }
+
+      let effectiveStatus = status;
+      if (status === "complete") {
+        const quality = competitiveReportQuality(updates.report_data);
+        if (!quality.ready) {
+          effectiveStatus = "failed";
+          updates.status = effectiveStatus;
+          updates.gamma_url = null;
+          updates.report_data = { ...(updates.report_data as Record<string, unknown>), quality_check: { state: "needs_review", reasons: quality.reasons } };
         }
       }
 
@@ -149,25 +166,25 @@ Deno.serve(async (req) => {
       // supersedes an earlier failure (sets are re-runnable by design), so
       // "complete" may roll forward from failed as well; a failure only marks
       // sets that were mid-run, never one that already completed.
-      if (status === "complete" || status === "failed") {
+      if (effectiveStatus === "complete" || effectiveStatus === "failed") {
         const { data: rep } = await supabase
           .from("competitive_reports")
           .select("set_id")
           .eq("id", report_id)
           .maybeSingle();
         if (rep?.set_id) {
-          const from = status === "complete"
+          const from = effectiveStatus === "complete"
             ? ["confirmed", "analyzing", "failed"]
             : ["confirmed", "analyzing"];
           await supabase
             .from("competitor_sets")
-            .update({ status })
+            .update({ status: effectiveStatus })
             .eq("id", rep.set_id)
             .in("status", from);
         }
       }
       let schedulingWarning: string | undefined;
-      if (status === "complete") {
+      if (effectiveStatus === "complete") {
         try {
           const response = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/trigger-scheduled-reports`, {
             method: "POST",

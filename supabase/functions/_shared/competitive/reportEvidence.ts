@@ -13,10 +13,9 @@ export function withCompetitiveEvidenceLimits<T>(input: T): T {
   if (!empty.length && !mismatches.length) return input;
   const names = new Set(empty.map(c => String(c.name || "").trim().toLowerCase()));
   const client = empty.find(c => c.is_client);
-  const emptyNote = empty.length ? `RivalIQ returned no in-period posts for ${empty.map(c => c.name).join(", ")}. This does not establish that these companies did not publish or lack a content strategy. Content-style assessments are unavailable for them; verify tracking and source coverage before drawing conclusions.` : "";
-  const sampleNote = mismatches.length ? `The returned post sample differs from RivalIQ's period totals: ${mismatches.map(c => `${c.name}: ${c.post_count} posts returned, ${c.rivaliq_metrics.posts.current} in period metrics`).join("; ")}. Content examples, posting rhythm and share of voice describe returned posts, not a complete publishing census.` : "";
-  const note = [emptyNote, sampleNote].filter(Boolean).join(" ");
+  // Coverage diagnostics belong to internal validation, never the report narrative.
   const originalNote = String(report.schema_note || "");
+  const cleanNote = originalNote.replace(/(?:RivalIQ returned no in-period posts for |The returned post sample differs from RivalIQ's period totals:)[\s\S]*$/, "").trim();
   const ai = { ...(report.ai_analysis || {}) };
   if (Array.isArray(ai.competitor_breakdowns)) {
     ai.competitor_breakdowns = ai.competitor_breakdowns.filter((b: any) =>
@@ -31,5 +30,24 @@ export function withCompetitiveEvidenceLimits<T>(input: T): T {
     // performance score is not a substitute for missing content evidence.
     ai.benchmark_scorecard = { ...(ai.benchmark_scorecard || {}), client_score: null };
   }
-  return { ...report, schema_note: originalNote.includes(note) ? originalNote : [originalNote, note].filter(Boolean).join(" "), ai_analysis: ai } as T;
+  return { ...report, schema_note: cleanNote, ai_analysis: ai } as T;
+}
+
+/** An incomplete analysis must not be delivered, exported or reused as context. */
+export function competitiveReportQuality(input: unknown): { ready: boolean; reasons: string[] } {
+  const report = input as Record<string, any> | null;
+  const reasons: string[] = [];
+  if (report?.aggregates?.metrics_available === false) reasons.push("Provider period metrics did not load.");
+  if (Number(report?.totals?.windows_failed) > 0) reasons.push("Some reporting windows did not load.");
+  if (Number(report?.totals?.truncated_pages) > 0) reasons.push("Some reporting windows exceeded the retrieval limit.");
+  for (const c of report?.aggregates?.companies || []) {
+    const observed = c.post_count, total = c.rivaliq_metrics?.posts?.current;
+    if (Number.isFinite(observed) && Number.isFinite(total) && observed !== total) {
+      reasons.push(`${c.name}: ${observed} dated posts; ${total} provider period total.`);
+    }
+  }
+  if (report?.quality_check?.state === "needs_review" && !reasons.length) {
+    reasons.push(...(report.quality_check.reasons || ["Source validation is incomplete."]));
+  }
+  return { ready: reasons.length === 0, reasons };
 }

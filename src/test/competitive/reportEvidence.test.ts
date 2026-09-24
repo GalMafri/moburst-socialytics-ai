@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { withCompetitiveEvidenceLimits } from '../../../supabase/functions/_shared/competitive/reportEvidence';
+import { competitiveReportQuality, withCompetitiveEvidenceLimits } from '../../../supabase/functions/_shared/competitive/reportEvidence';
 
 const fixture = () => ({schema_note:'Existing coverage note.', aggregates:{companies:[
   {name:'Client',is_client:true,post_count:0,rivaliq_metrics:{posts:{current:0},audience:{current:9332}}},
@@ -16,7 +16,7 @@ it('withholds unsupported client strategy claims while preserving provider zeros
   expect(result.ai_analysis.benchmark_scorecard.client_score).toBeNull();
   expect(result.ai_analysis.competitor_breakdowns).toEqual([{name:'Rival',copy_style:'Observed style'}]);
   expect(result.schema_note).toContain('Existing coverage note.');
-  expect(result.schema_note).toContain('does not establish');
+  expect(result.schema_note).not.toContain('does not establish');
   expect(original.ai_analysis.executive_summary).toBe('Client has no strategy');
   expect(withCompetitiveEvidenceLimits(result)).toEqual(result);
 });
@@ -36,5 +36,17 @@ it('leaves populated reports and unknown legacy post counts unchanged',()=>{
 
 it('distinguishes an incomplete post sample from provider period totals without changing either',()=>{
  const report={aggregates:{companies:[{name:'Navy Federal',post_count:61,rivaliq_metrics:{posts:{current:73}}}]}};
- const result:any=withCompetitiveEvidenceLimits(report);expect(result.schema_note).toContain('61 posts returned, 73 in period metrics');expect(result.aggregates).toEqual(report.aggregates);
+ const result:any=withCompetitiveEvidenceLimits(report);expect(competitiveReportQuality(result)).toEqual({ready:false,reasons:['Navy Federal: 61 dated posts; 73 provider period total.']});expect(result.aggregates).toEqual(report.aggregates);
+});
+
+it('holds partial windows and preserves internal review holds',()=>{
+ expect(competitiveReportQuality({totals:{windows_failed:1}}).ready).toBe(false);
+ expect(competitiveReportQuality({quality_check:{state:'needs_review',reasons:['Verify period']}}).ready).toBe(false);
+});
+it('allows matching measured zeros without claiming missing publishing activity',()=>{
+ expect(competitiveReportQuality(fixture()).ready).toBe(true);
+});
+it('removes the old diagnostic paragraph from derived report narrative',()=>{
+ const input={...fixture(),schema_note:"RivalIQ returned no in-period posts for Client. This does not establish ..."};
+ expect(withCompetitiveEvidenceLimits(input).schema_note).toBe('');
 });

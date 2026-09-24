@@ -1,4 +1,4 @@
-import { withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
 // Renders one competitive_reports row (project step 11's in-app half).
 //
 // Open to client members for status='complete' rows via RLS, exactly like the
@@ -299,6 +299,13 @@ export default function CompetitiveReportView() {
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
       {canRetry(report) && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
     </div>
+  </AppLayout>;
+  if (!competitiveReportQuality(rd).ready) return <AppLayout title="Report awaiting review" description="This analysis is not ready to share yet.">
+    <Card><CardContent className="pt-6 space-y-4">
+      <p className="t-body">We need to verify the source data before this report can be released.</p>
+      <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to reports</Button>
+      {isMoburstStaff && <details className="t-secondary"><summary className="cursor-pointer">Internal validation details</summary><ul className="mt-3 space-y-2">{competitiveReportQuality(rd).reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></details>}
+    </CardContent></Card>
   </AppLayout>;
   if (report.status === "failed") return <AppLayout>
     <EmptyState icon={Crosshair} title="This report needs attention" description={rd.error || "The analysis did not complete. Its figures are unavailable."} />
@@ -611,7 +618,7 @@ export default function CompetitiveReportView() {
         )}
 
         {(report.report_data as { period?: { days?: number } })?.period?.days && (report.report_data as { period?: { days?: number } }).period.days !== rd.period?.days && <p className="t-body text-amber-400">Cadence figures have been corrected to include both dates in the period. The original AI commentary below may still quote older figures.</p>}
-        {rd.schema_note && <p className="t-body text-amber-400">{rd.schema_note}</p>}
+
 
         {/* Executive summary */}
         {ai.executive_summary && (
@@ -672,9 +679,9 @@ export default function CompetitiveReportView() {
             id="field"
             index={num("field")}
             style={{ order: orderOf("field") }}
-            title={<>The field</>}
+            title={<>Company comparison</>}
             action={scopeTag(true)}
-            description="Volume, engagement and reach for every company in the landscape. Averages are per post; competitor impressions are RivalIQ estimates."
+            description="Compare tracked publishing activity for the selected period. Open a company’s top posts to see the examples behind its figures."
           >
             <Card>
               <CardContent className="pt-5 grid gap-8 lg:grid-cols-2">
@@ -698,48 +705,45 @@ export default function CompetitiveReportView() {
                       <CardTitle className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>
                         {displayCompanyName(c.name)}
                         {c.is_client && <Badge>client</Badge>}
-                        {c.in_confirmed_top3 && <Badge variant="secondary">top 3</Badge>}
+                        {c.in_confirmed_top3 && <Badge variant="secondary">Competitor</Badge>}
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       {b.post_count === 0 ? (
-                        <p className="t-secondary">No posts in this period{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""}.</p>
+                        <p className="t-secondary">0 tracked posts{effectivePlat !== "all" ? ` on ${platformLabel(effectivePlat)}` : ""} for this period.</p>
                       ) : (
                         // Compact figures: "3,044,225" ran straight out of a
                         // third of a card. The exact number is on the tile.
                         <div className="grid grid-cols-3 gap-3">
-                          <TileStat value={String(b.post_count)} label="posts" />
-                          <TileStat value={String(b.cadence_per_week)} label="per week" />
-                          <TileStat value={pct(b.engagement_rate_avg)} label="eng. rate" />
-                          <TileStat value={compactNumber(b.engagement_avg || 0)} exact={fmt(b.engagement_avg)} label="avg engagements" />
+                          <TileStat value={String(b.post_count)} label="Tracked posts" />
+                          <TileStat value={String(b.cadence_per_week)} label="Posts / week" />
+                          <TileStat value={pct(b.engagement_rate_avg)} label="Engagement rate" />
+                          <TileStat value={compactNumber(b.engagement_avg || 0)} exact={fmt(b.engagement_avg)} label="Engagements / post" />
                           <TileStat
                             value={compactNumber(b.impressions_avg || (b.post_count ? b.impressions_total / b.post_count : 0))}
                             exact={fmt(b.impressions_avg || (b.post_count ? b.impressions_total / b.post_count : 0))}
-                            label="avg est. impressions"
+                            label="Est. impressions / post"
                           />
-                          <TileStat value={compactNumber(b.views_total || 0)} exact={fmt(b.views_total)} label="video views" />
+                          <TileStat value={compactNumber(b.views_total || 0)} exact={fmt(b.views_total)} label="Total video views" />
                         </div>
                       )}
                       {effectivePlat === "all" && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {(c.channel_mix || []).map((m) => <Chip key={m.key}>{platformLabel(m.key)} · {m.count}</Chip>)}
+                        <div className="space-y-2">
+                          <p className="t-label">Filter report by platform</p>
+                          <div className="flex flex-wrap gap-2">{(c.channel_mix || []).map((m) => <Button key={m.key} variant="outline" size="sm" onClick={() => setPlat(normalizePlatform(m.key))}>{platformLabel(m.key)} · {m.count} posts</Button>)}</div>
                         </div>
                       )}
                       {(b.media_type_mix || []).length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {b.media_type_mix.slice(0, 4).map((m) => <Chip key={m.key}>{m.key} · {m.count}</Chip>)}
-                        </div>
+                        <div><p className="t-label mb-1">Post formats</p><p className="t-secondary">{b.media_type_mix.slice(0, 4).map(m => `${m.key}: ${m.count}`).join(" · ")}</p></div>
                       )}
+                      {(b.top_posts || []).some(hasContent) && <Button asChild size="sm" variant="outline"><a href={`#company-posts-${c.company_id}`}>View {displayCompanyName(c.name)} posts</a></Button>}
                       {platformNote && (
                         <div className="border-t border-[rgba(255,255,255,0.06)] pt-3">
                           <TileNote label={platformLabel(effectivePlat)} text={platformNote} />
                         </div>
                       )}
                       {b.top_hashtags?.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 items-center">
-                          <Hash className="h-3.5 w-3.5 text-muted-foreground" />
-                          {b.top_hashtags.slice(0, 6).map((h) => <Chip key={h.key}>{h.key} <span className="text-muted-foreground ml-1">{h.count}</span></Chip>)}
-                        </div>
+                        <details className="t-secondary"><summary className="cursor-pointer">Most-used hashtags</summary><p className="mt-2">Number of tracked posts using each hashtag:</p><p className="mt-1 break-words">{b.top_hashtags.slice(0, 6).map(h => `${h.key} (${h.count})`).join(", ")}</p></details>
                       )}
                     </CardContent>
                   </Card>
@@ -1098,7 +1102,7 @@ export default function CompetitiveReportView() {
             <Card>
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
-                  <div key={c.company_id} className="space-y-3">
+                  <div key={c.company_id} id={`company-posts-${c.company_id}`} className="space-y-3 scroll-mt-24" tabIndex={-1}>
                     <p className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
                     <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5 items-start">
                       {b.top_posts.filter(hasContent).slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}

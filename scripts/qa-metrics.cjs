@@ -18,6 +18,19 @@ function runCompetitive(overrides={}){
  return vm.runInNewContext('(function(){'+read('competitive-aggregate')+'})()',{$input:{first:()=>({json:input})},$:name=>({first:()=>({json:nodes[name]||{}})})})[0].json;
 }
 check('RivalIQ includes end date, excludes next date, deduplicates posts',()=>assert.equal(runCompetitive().total_posts_analyzed,1));
+check('X native IDs recover dates and respect the requested period without fabricating content',()=>{
+ const input={socialPosts:[{companyId:1,postId:'0.1',channel:'twitter',postNativeId:'2092944952070181123'},{companyId:1,postId:'0.2',channel:'twitter',postNativeId:'2095410379446690116'}]};
+ const r=runCompetitive({input});assert.equal(r.total_posts_analyzed,1);
+ assert.equal(r.companies[0].top_posts[0].created,'2026-08-27T11:58:56.267Z');
+ assert.equal(r.companies[0].top_posts[0].text,'');assert.equal(r.companies[0].top_posts[0].url,null);
+});
+check('date recovery rejects wrong networks, unsafe numeric IDs, invalid and future IDs',()=>{
+ const posts=[{channel:'instagram',nativeId:'2092944952070181123'},{channel:'twitter',nativeId:2092944952070181123},{channel:'twitter',nativeId:'0.123'},{channel:'twitter',nativeId:'9223372036854775807'}];
+ assert.equal(runCompetitive({input:{socialPosts:posts.map((p,i)=>({...p,companyId:1,postId:String(i)}))}}).total_posts_analyzed,0);
+});
+check('provider dates take precedence over native-ID recovery',()=>{
+ assert.equal(runCompetitive({input:{socialPosts:[{companyId:1,postId:'0.1',channel:'twitter',nativeId:'2092944952070181123',publishedAt:'2026-09-01T00:00:00Z'}]}}).total_posts_analyzed,0);
+});
 check('RivalIQ unavailable audience remains null while measured zero remains zero',()=>{
  const r=runCompetitive({'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelSocialAudience:null,instagramFollowedBy:null,crossChannelSocialActivity:0,instagramPosts:0}]}});
  const m=r.companies[0].rivaliq_metrics;
