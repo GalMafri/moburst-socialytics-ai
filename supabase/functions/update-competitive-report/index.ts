@@ -12,6 +12,7 @@
 //   { op: "report", ... }    update a competitive_reports row (status/data/deck)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { withCompetitiveEvidenceLimits } from "../_shared/competitive/reportEvidence.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
 const corsHeaders = {
@@ -72,7 +73,7 @@ Deno.serve(async (req) => {
         }
         updates.status = status;
       }
-      if (report_data !== undefined) updates.report_data = report_data;
+      if (report_data !== undefined) updates.report_data = withCompetitiveEvidenceLimits(report_data);
       if (gamma_url !== undefined) updates.gamma_url = gamma_url;
       if (duration_minutes !== undefined) updates.duration_minutes = duration_minutes;
 
@@ -116,7 +117,7 @@ Deno.serve(async (req) => {
         const failed = Number((snap?.payload as Record<string, unknown> | null)?.failed_windows) || 0;
         const expected = Number((snap?.payload as Record<string, unknown> | null)?.expected_windows) || 0;
         if (failed > 0) {
-          const rd = report_data as Record<string, unknown>;
+          const rd = updates.report_data as Record<string, unknown>;
           const warning =
             `${failed} of ${expected} weekly windows did not load, so this report covers only part of the period ` +
             `and the comparison is incomplete.`;

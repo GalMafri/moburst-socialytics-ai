@@ -6,10 +6,19 @@ const silent={log(){},error(){},warn(){}};
 function moduleFrom(rel,deps={},globals={},transform=x=>x){
  const source=transform(fs.readFileSync(path.join(repo,rel),'utf8'));
  const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
- const exports={}; const context={exports,module:{exports},console:silent,setTimeout,DOMException,Response,Request,Headers,URL,URLSearchParams,Date,Error,Number,JSON,Set,Map,fetch:()=>{throw Error('Outbound network forbidden')},...globals,require:name=>{if(name in deps)return deps[name];if(name==='../_shared/competitive/rivaliqFetch.ts')return moduleFrom('supabase/functions/_shared/competitive/rivaliqFetch.ts',{},globals);throw Error('Unmocked dependency: '+name)}};
+ const exports={}; const context={exports,module:{exports},console:silent,setTimeout,DOMException,Response,Request,Headers,URL,URLSearchParams,Date,Error,Number,JSON,Set,Map,fetch:()=>{throw Error('Outbound network forbidden')},...globals,require:name=>{if(name in deps)return deps[name];if(name.endsWith('/competitive/reportEvidence.ts'))return moduleFrom('supabase/functions/_shared/competitive/reportEvidence.ts',{},globals);if(name==='../_shared/competitive/rivaliqFetch.ts')return moduleFrom('supabase/functions/_shared/competitive/rivaliqFetch.ts',{},globals);throw Error('Unmocked dependency: '+name)}};
  vm.runInNewContext(js,context,{filename:rel});return exports;
 }
 async function check(id,kind,name,fn){try{const evidence=await fn();results.push({id,kind,name,result:'pass',evidence});}catch(e){results.push({id,kind,name,result:'FAIL',error:String(e),stack:e.stack});}}
+
+async function competitiveWritebackQa({authorized=true,op='report',failedWindows=0}={}){
+ let handler;const state=database();state.tables.competitive_reports=[{id:'qa-report',status:'running',created_at:new Date().toISOString()}];
+ state.tables.rivaliq_snapshots=[{report_id:'qa-report',endpoint:'socialposts',fetched_at:new Date().toISOString(),payload:{failed_windows:failedWindows,expected_windows:5}}];
+ moduleFrom('supabase/functions/update-competitive-report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/secretEquals.ts':{secretEquals:async()=>authorized}},{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f}});
+ const report_data={aggregates:{companies:[{name:'Fixture',is_client:true,post_count:0,rivaliq_metrics:{posts:{current:0}}}]},ai_analysis:{executive_summary:'Unsupported absence claim',gaps_for_client:[{gap:'Missing content'}]}};
+ const response=await handler(new Request('https://fixture.invalid',{method:'POST',body:JSON.stringify(op==='snapshot'?{op,landscape_id:'123',report_id:'qa-report',endpoint:'status',payload:{status:2}}:{op,report_id:'qa-report',status:'complete',report_data,duration_minutes:1})}));
+ return{status:response.status,body:await response.json(),state};
+}
 
 async function scheduling({media=[],denied=false,missing=false,uploadFailure=false,partial=false,recordFailure=false,providerFailure=false,scopeControl=false}={}){
  let handler;const calls=[];let uploadIndex=0;
@@ -254,6 +263,9 @@ async function confirmCompetitorsQa({handlesById={},handlesError=false}={}) {
  });
  await check('QA-HANDLES','regression','identification preserves existing drafts when fewer than three sites are reachable',async()=>{const r=await identifySitesQa(2);assert.equal(r.status,422);assert.equal(r.writes.length,0);assert.equal(r.body.rejected.length,2);});
  await check('QA-HANDLES','control','identification saves reachable candidates and excludes failed AI domains',async()=>{const r=await identifySitesQa(3);assert.equal(r.status,200);assert.equal(r.writes.find(w=>w.table==='competitors').payload.length,3);assert.equal(r.body.rejected.length,1);});
+ await check('QA-EVIDENCE','regression','report callback withholds unsupported absence claims while preserving provider measurements',async()=>{const r=await competitiveWritebackQa();assert.equal(r.status,200);const rd=r.state.tables.competitive_reports[0].report_data;assert.equal(rd.ai_analysis.gaps_for_client.length,0);assert.equal(rd.aggregates.companies[0].rivaliq_metrics.posts.current,0);assert.match(rd.schema_note,/does not establish/);});
+ await check('QA-EVIDENCE','regression','partial window warning and absent-post warning are both retained',async()=>{const r=await competitiveWritebackQa({failedWindows:1});const rd=r.state.tables.competitive_reports[0].report_data;assert.match(rd.schema_note,/1 of 5/);assert.match(rd.schema_note,/does not establish/);assert.equal(rd.ai_analysis.gaps_for_client.length,0);});
+ await check('QA-EVIDENCE','control','callback secret rejection and raw snapshot storage remain intact',async()=>{const denied=await competitiveWritebackQa({authorized:false});assert.equal(denied.status,401);assert.equal(denied.state.operations.length,0);const snap=await competitiveWritebackQa({op:'snapshot'});assert.equal(snap.status,200);assert.deepEqual(snap.state.tables.rivaliq_snapshots.at(-1).payload,{status:2});});
  await check('QA-HANDLES','regression','failed website lookup is not reported as a completed empty search',async()=>{const r=await detectHandlesQa({fetchMode:'failed'});assert.equal(r.body.results[0].status,'failed');assert.match(r.body.results[0].warnings.join(' '),/403/);assert.equal(r.writes.length,0);});
  await check('QA-HANDLES','regression','rendered lookup failure is disclosed as partial when direct pages worked',async()=>{const r=await detectHandlesQa({fetchMode:'partial'});assert.equal(r.body.results[0].status,'partial');assert.match(r.body.results[0].warnings.join(' '),/503/);});
  await check('QA-HANDLES','control','completed empty lookup is distinguished from provider failure',async()=>{const r=await detectHandlesQa();assert.equal(r.body.results[0].status,'not_found');assert.equal(r.body.results[0].warnings.length,0);});

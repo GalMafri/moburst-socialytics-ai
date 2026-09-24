@@ -1,3 +1,4 @@
+import { isReviewReadyHandle } from "../../supabase/functions/_shared/competitive/extractSocialHandles";
 import { useActiveReportRun } from "@/hooks/useActiveReportRun";
 import { ReportRunStatus } from "@/components/reports/ReportRunStatus";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
@@ -79,7 +80,7 @@ export default function CompetitiveRun() {
   // or failed), so every post-confirmation status counts; only drafts do not.
   // The full list is read so a newer unconfirmed draft can be pointed out
   // instead of the page quietly running an older selection.
-  const { data: sets, isLoading: setLoading } = useQuery({
+  const { data: sets, isLoading: setLoading, isError: setsFailed, error: setsError, refetch: refetchSets } = useQuery({
     queryKey: ["confirmed-competitor-set", id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -96,7 +97,7 @@ export default function CompetitiveRun() {
   const trackingState = describeTracking(confirmedSet);
 
 
-  const { data: selectedCompetitors } = useQuery({
+  const { data: selectedCompetitors, isSuccess: profilesLoaded, isError: profilesFailed, error: profilesError, refetch: refetchProfiles } = useQuery({
     queryKey: ["confirmed-competitors", confirmedSet?.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -110,6 +111,14 @@ export default function CompetitiveRun() {
     },
     enabled: !!confirmedSet?.id,
   });
+
+  const profileIssues = (selectedCompetitors || []).flatMap(c => {
+    const active = (c.competitor_handles || []).filter(h => h.is_active === true);
+    if (!active.length) return [`${displayCompanyName(c.name)} has no active social profiles.`];
+    if (!active.some(isReviewReadyHandle)) return [`${displayCompanyName(c.name)} needs a verified social profile.`];
+    return [];
+  });
+  const profilesReady = profilesLoaded && selectedCompetitors?.length === 3 && profileIssues.length === 0;
 
   const { data: pastRuns, refetch: refetchRuns } = useQuery({
     queryKey: ["competitive-reports", id],
@@ -196,7 +205,7 @@ export default function CompetitiveRun() {
   }, [activeRun.data, running, reportId, pollForCompletion]);
 
   const runAnalysis = async () => {
-    if (submitting.current || running || activeRun.data || !activeRun.isSuccess || activeRun.isFetching) return;
+    if (submitting.current || running || activeRun.data || !activeRun.isSuccess || activeRun.isFetching || !trackingState.ready || !profilesReady || setsFailed) return;
     if (!rangeOk) {
       toast({ title: "Pick a valid period", description: "The end date must be on or after the start date, and the range at most one year.", variant: "destructive" });
       return;
@@ -265,6 +274,12 @@ export default function CompetitiveRun() {
     );
   }
 
+  if (setsFailed) {
+    return <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl">
+      <LoadError title="Could not load the competitor selection" error={setsError} onRetry={() => refetchSets()} />
+    </AppLayout>;
+  }
+
   if (!confirmedSet) {
     return (
       <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
@@ -294,7 +309,7 @@ export default function CompetitiveRun() {
             <CardContent className="pt-5 space-y-2">
               <p className="t-body font-medium">This report would use the older confirmed competitors</p>
               <p className="t-secondary">
-                A newer set of three is waiting for review and will not be used until it is confirmed.
+                A newer draft is waiting for review and will not be used until it is confirmed.
               </p>
               <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${id}/competitive`)}>
                 Review the newer selection
@@ -318,6 +333,18 @@ export default function CompetitiveRun() {
                 </span>
               </div>
             ))}
+            {profilesFailed ? (
+              <LoadError title="Could not check competitor profiles" error={profilesError} onRetry={() => refetchProfiles()} />
+            ) : !profilesLoaded ? (
+              <p role="status" className="t-secondary">Checking competitor profiles…</p>
+            ) : !profilesReady ? (
+              <div role="alert" className="rounded-lg border border-warning/30 bg-warning/5 p-3 space-y-1">
+                <p className="t-body font-medium">Review profiles before running</p>
+                {selectedCompetitors?.length !== 3 && <p className="t-secondary">Exactly three selected competitors are required.</p>}
+                {profileIssues.map(issue => <p key={issue} className="t-secondary">{issue}</p>)}
+                <p className="t-secondary">Open this selection below to review or replace the affected profiles.</p>
+              </div>
+            ) : null}
             <p className="t-secondary pt-1">
               <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
               {trackingState.detail ? ` ${trackingState.detail}` : ""}
@@ -380,7 +407,7 @@ export default function CompetitiveRun() {
           <CardContent className="pt-5 text-center space-y-6">
             {!running && !error && currentStep < 0 && (
               <>
-                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!trackingState.ready || !rangeOk || !activeRun.isSuccess || activeRun.isFetching || !!activeRun.data}>
+                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!trackingState.ready || !profilesReady || !rangeOk || !activeRun.isSuccess || activeRun.isFetching || !!activeRun.data}>
                   <Play className="h-5 w-5" /> Run competitive analysis
                 </Button>
                 <p className="t-secondary">

@@ -1,3 +1,4 @@
+import { withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
 // Renders one competitive_reports row (project step 11's in-app half).
 //
 // Open to client members for status='complete' rows via RLS, exactly like the
@@ -248,7 +249,7 @@ export default function CompetitiveReportView() {
     enabled: !!clientId && !!report?.id,
   });
 
-  const rd: any = useMemo(() => normalizedCompetitiveMetrics(report?.report_data), [report?.report_data]);
+  const rd: any = useMemo(() => withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(report?.report_data)), [report?.report_data]);
   const ai = rd.ai_analysis || {};
   const companies: Company[] = rd.aggregates?.companies || [];
   const previous = useMemo(() => (report ? pickComparableReport(report as any, (priorReports || []) as any[]) : null), [report, priorReports]);
@@ -596,16 +597,16 @@ export default function CompetitiveReportView() {
             <Kpi
               accent
               label="Benchmark score"
-              value={scorecard ? `${scorecard.client_score}` : "–"}
+              value={scorecard?.client_score == null ? "Not available" : `${scorecard.client_score}`}
               sub={effectivePlat === "all" ? "out of 100 vs. the set" : "out of 100 vs. the set · all platforms"}
             />
             {meM?.audience && (
               <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across networks, per RivalIQ" : `on ${platformLabel(effectivePlat)}, per RivalIQ`} />
             )}
-            <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} posts`} />
+            <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} observed posts`} />
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`set avg ${avg((b) => b.cadence_per_week).toFixed(1)}/wk`} />
-            <Kpi label="Engagement rate" value={pct(meB.engagement_rate_avg)} sub={`set avg ${pct(avg((b) => b.engagement_rate_avg))}`} />
-            <Kpi label="Avg engagement" value={fmt(meB.engagement_avg)} sub={`set avg ${fmt(avg((b) => b.engagement_avg))}`} />
+            <Kpi label="Engagement rate" value={meB.post_count ? pct(meB.engagement_rate_avg) : "Not available"} sub={`set avg ${pct(avg((b) => b.engagement_rate_avg))}`} />
+            <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`set avg ${fmt(avg((b) => b.engagement_avg))}`} />
           </div>
         )}
 
