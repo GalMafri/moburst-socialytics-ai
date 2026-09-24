@@ -91,6 +91,11 @@ function LandscapeRow({
         <p className="t-secondary mt-0.5">
           {empty ? "No competitors in this set" : rivals.map((c: any) => displayCompanyName(c.name)).join(", ")}
         </p>
+        {!empty && rivals.length < 3 && (
+          <p className="t-secondary text-amber-400 mt-1">
+            This imports an incomplete draft. Add {3 - rivals.length} more competitor{rivals.length === 1 ? "s" : ""} before you can confirm it and run a report.
+          </p>
+        )}
       </div>
       <Button
         size="sm"
@@ -282,7 +287,9 @@ export default function CompetitorReview() {
       if (error || data?.error) throw new Error(await describeInvokeError(error, data));
       toast({
         title: "Landscape imported as a new draft",
-        description: `${data.competitors} competitors, ${data.handles} handles from RivalIQ. Top ${data.preselected} pre-selected; adjust and confirm.`,
+        description: data.competitors < 3
+          ? `${data.competitors} competitors imported. Add ${3 - data.competitors} more before confirming; a report cannot run with this incomplete selection.`
+          : `${data.competitors} competitors, ${data.handles} handles from RivalIQ. Top ${data.preselected} pre-selected; adjust and confirm.`,
       });
       setImportOpen(false);
       refreshAll();
@@ -867,6 +874,12 @@ export default function CompetitorReview() {
                   </>
                 )}
               </div>
+              {isDraft && selected.length < 3 && (
+                <p className="t-secondary text-amber-400/90">
+                  Select {3 - selected.length} more competitor{selected.length === 1 ? "s" : ""} to enable confirmation.
+                  {competitors.length < 3 ? " Add the missing company below, verify its social profiles, then select it. Tracking must include that company before the report can run." : " Choose from the candidates below."}
+                </p>
+              )}
               {isDraft && selected.length === 3 && withoutHandles.length > 0 && (
                 <p className="t-secondary">
                   {withoutHandles.join(" and ")} {withoutHandles.length === 1 ? "has" : "have"} no social handle yet.
