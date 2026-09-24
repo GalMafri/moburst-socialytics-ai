@@ -108,6 +108,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   // marks data-print="hide" is dropped from the clone; the surrounding copy
   // (a filter's "showing Instagram only" line, for instance) is kept.
   content.querySelectorAll('[data-print="hide"]').forEach((el) => el.remove());
+  content.querySelectorAll('details').forEach(el => el.setAttribute('open', ''));
 
   // Screen media frames reserve a tall aspect-ratio box even when their image
   // is reduced for print. Reset the frame too, and omit decorative duplicates.
@@ -462,6 +463,8 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     section, .pdf-root .glass { break-inside: auto; page-break-inside: auto; }
     /* A heading never ends a page on its own. */
     h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
+    .pdf-root [data-pdf-heading] { break-after: avoid !important; page-break-after: avoid !important; }
+    .pdf-root summary { list-style: none; }
     .animate-slide-up, .stagger-children > * { animation: none !important; opacity: 1 !important; transform: none !important; }
     /* Paper uses a single reading column. Responsive screen grids and tall
        flex items otherwise become unbreakable fragments in Chromium. */
@@ -544,7 +547,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       const fullPageHeight = 240 * 96 / 25.4;
       document.querySelectorAll('.pdf-root article, .pdf-root .glass, .pdf-root .glass-inner, .pdf-root .glass-accent, .pdf-root blockquote, .pdf-root tr').forEach(el => {
         const height = el.getBoundingClientRect().height;
-        const limit = el.querySelector('.recharts-surface') ? fullPageHeight : usablePageHeight;
+        const limit = el.hasAttribute('data-pdf-unit') || el.querySelector('.recharts-surface') ? fullPageHeight : usablePageHeight;
         el.setAttribute(height > limit ? 'data-pdf-splittable' : 'data-pdf-keep', '');
       });
 

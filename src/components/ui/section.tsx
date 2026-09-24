@@ -30,7 +30,7 @@ export function Section({
 }) {
   return (
     <section id={id} style={style} className={cn("space-y-4 scroll-mt-[156px]", className)}>
-      <div className="glass px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
+      <div data-pdf-heading className="glass px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
         {/* The line of context sits beside the title on a wide band rather than
             under it. Body text is capped at 72ch, so stacked it wrapped after
             half the band and left the header looking cut short with a field of

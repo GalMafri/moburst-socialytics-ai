@@ -456,7 +456,7 @@ export default function CompetitiveReportView() {
 
   const hasContent = (p: TopPost) => !!(p.url || p.text || p.image);
   const postCard = (p: TopPost, key: string) => (
-    <div key={key} className="glass-inner p-4 space-y-2.5 h-full flex flex-col">
+    <div key={key} data-pdf-unit className="glass-inner p-4 space-y-2.5 h-full flex flex-col">
       <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} maxHeight="26rem" />
       <p className={`t-body line-clamp-2 min-h-[3rem] ${p.text ? "" : "text-[#b1b7c1]"}`}>{p.text || (normalizePlatform(p.channel) === "x" || normalizePlatform(p.channel) === "twitter" ? "X posts arrive from RivalIQ without a caption or link." : "No caption provided.")}</p>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
@@ -725,7 +725,7 @@ export default function CompetitiveReportView() {
                         </div>
                       )}
                       {effectivePlat === "all" && (c.channel_mix || []).length > 0 && (
-                        <div className="space-y-2">
+                        <div data-print="hide" className="space-y-2">
                           <p className="t-label">Filter report by platform</p>
                           <div className="flex flex-wrap gap-2">{(c.channel_mix || []).map((m) => <Button key={m.key} variant="outline" size="sm" onClick={() => setPlat(normalizePlatform(m.key))}>{platformLabel(m.key)} · {m.count} {m.count === 1 ? "post" : "posts"}</Button>)}</div>
                         </div>
@@ -813,7 +813,7 @@ export default function CompetitiveReportView() {
                     const nets = Object.entries(m.by_network).filter(([, n]) => n.followers && n.followers.current > 0);
                     const boosted = m.boosted?.current || 0;
                     return (
-                      <article key={c.company_id} className={`glass-inner p-4 space-y-3 min-w-0 ${c.is_client ? "border-[rgba(185,224,69,0.35)]" : ""}`}>
+                      <article key={c.company_id} data-pdf-unit className={`glass-inner p-4 space-y-3 min-w-0 ${c.is_client ? "border-[rgba(185,224,69,0.35)]" : ""}`}>
                         <p className="t-h3 pb-3 border-b border-[rgba(255,255,255,0.08)]" title={c.name}>
                           {displayCompanyName(c.name)}
                           {c.is_client && <span className="t-label !text-[#b9e045] ml-2 align-middle">client</span>}
@@ -1100,7 +1100,7 @@ export default function CompetitiveReportView() {
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
                   <div key={c.company_id} id={`company-posts-${c.company_id}`} className="space-y-3 scroll-mt-24" tabIndex={-1}>
-                    <p className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
+                    <p data-pdf-heading className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
                     <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5 items-start">
                       {b.top_posts.filter(hasContent).slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}
                       {b.top_posts.filter((p) => !hasContent(p)).length > 0 && (
