@@ -39,8 +39,8 @@ import { comparisonScale, normalizedCompetitiveMetrics } from "@/lib/competitive
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images, Users } from "lucide-react";
 
 type TopPost = {
-  engagement: number; engagement_rate: number; est_impressions?: number; reach?: number; followers_at_publication?: number | null; views: number;
-  applause?: number; conversation?: number; amplification?: number;
+  engagement: number; engagement_rate: number | null; est_impressions?: number | null; reach?: number; followers_at_publication?: number | null; views: number | null;
+  applause?: number | null; conversation?: number | null; amplification?: number | null;
   text: string; url: string | null; image?: string | null; created: string | null; media_type: string; channel: string;
   /** RivalIQ's paid-promotion signal, Facebook posts only. */
   likely_boosted?: boolean;
@@ -56,7 +56,7 @@ type RivalIQMetrics = {
 };
 type Bucket = {
   post_count: number; cadence_per_week: number; engagement_avg: number; engagement_rate_avg: number; impressions_avg?: number;
-  views_total: number; impressions_total: number; reach_total?: number;
+  views_total: number | null; impressions_total: number; reach_total?: number;
   by_weekday: Record<string, number>; by_hour: Record<string, number>;
   top_hashtags: Array<{ key: string; count: number }>; media_type_mix: Array<{ key: string; count: number }>;
   top_posts: TopPost[];
@@ -721,7 +721,7 @@ export default function CompetitiveReportView() {
                             exact={fmt(b.impressions_avg || (b.post_count ? b.impressions_total / b.post_count : 0))}
                             label="Est. impressions / post"
                           />
-                          <TileStat value={compactNumber(b.views_total || 0)} exact={fmt(b.views_total)} label="Total video views" />
+                          <TileStat value={b.views_total == null ? "Not available" : compactNumber(b.views_total)} exact={b.views_total == null ? undefined : fmt(b.views_total)} label="Reported video views" />
                         </div>
                       )}
                       {effectivePlat === "all" && (c.channel_mix || []).length > 0 && (

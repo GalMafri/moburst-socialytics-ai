@@ -103,7 +103,7 @@ const clean = (s) => String(s || "").replace(/[\u0000-\u001f]+/g, " ").replace(/
 const num = (v) => (typeof v === "number" && isFinite(v) ? v : (typeof v === "string" && v.trim() !== "" && isFinite(Number(v)) ? Number(v) : 0));
 // RivalIQ's paid signal on Facebook posts is a string: "Likely Boosted", "Not Likely Boosted" or "No Prediction".
 const isBoosted = (v) => (typeof v === "string" ? v.trim().toLowerCase() === "likely boosted" : v === true);
-const bucket = () => ({ post_count: 0, likely_boosted_posts: 0, engagement_sum: 0, engagement_rate_sum: 0, views_total: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, hashtags: {}, media_types: {}, top_posts: [] });
+const bucket = () => ({ post_count: 0, likely_boosted_posts: 0, engagement_sum: 0, engagement_rate_sum: 0, views_total: 0, views_observed: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, hashtags: {}, media_types: {}, top_posts: [] });
 const blank = (key, name, url) => ({ company_id: key, name, url: url || null, is_client: false, in_confirmed_top3: false, ...bucket(), channels: {}, by_channel: {} });
 const byCompany = {};
 for (const c of companies) {
@@ -120,12 +120,12 @@ const addPost = (agg, p) => {
   const boosted = isBoosted(p.facebookLikelyBoosted);
   if (boosted) agg.likely_boosted_posts += 1;
   const engagement = num(p.engagementTotal) || num(p.engagement_total) || (num(p.applause) + num(p.conversation) + num(p.amplification));
-  const rate = num(p.engagementRate);
-  const views = num(p.views) || num(p.youtubeViews) || num(p.tiktokViews) || num(p.facebookPostViews) || 0;
-  const impressions = num(p.estimatedImpressions);
+  const rate = pick(p, "engagementRate");
+  const views = pick(p, "views") ?? pick(p, "youtubeViews") ?? pick(p, "tiktokViews") ?? pick(p, "facebookPostViews");
+  const impressions = pick(p, "estimatedImpressions");
   // RivalIQ presenceReach is follower count near publication, not post reach.
   const followers_at_publication = pick(p, "presenceReach");
-  agg.engagement_sum += engagement; agg.engagement_rate_sum += rate; agg.views_total += views; agg.impressions_total += impressions;
+  agg.engagement_sum += engagement; agg.engagement_rate_sum += rate; agg.views_total += views || 0; if (views != null) agg.views_observed += 1; agg.impressions_total += impressions;
   const created = p.publishedAt || p.published_at || p.created || p.created_at || p.date;
   if (created) { const d = new Date(created); if (!isNaN(d)) { const wd = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getUTCDay()]; agg.by_weekday[wd] = (agg.by_weekday[wd] || 0) + 1; const hr = String(d.getUTCHours()); agg.by_hour[hr] = (agg.by_hour[hr] || 0) + 1; } }
   const text = clean(p.message || p.text || p.caption || p.content || "");
@@ -134,7 +134,7 @@ const addPost = (agg, p) => {
   agg.media_types[mtype] = (agg.media_types[mtype] || 0) + 1;
   const channel = p.channel || p.network || p.platform || "unknown";
   if (agg.channels) agg.channels[channel] = (agg.channels[channel] || 0) + 1;
-  agg.top_posts.push({ engagement, engagement_rate: rate, est_impressions: impressions, followers_at_publication, views, applause: num(p.applause), conversation: num(p.conversation), amplification: num(p.amplification), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null });
+  agg.top_posts.push({ engagement, engagement_rate: rate, est_impressions: impressions, followers_at_publication, views, applause: pick(p, "applause"), conversation: pick(p, "conversation"), amplification: pick(p, "amplification"), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null });
   return channel;
 };
 for (const p of posts) {
@@ -148,6 +148,8 @@ for (const p of posts) {
 const topN = (obj, n) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ key: k, count: v }));
 const days = Math.max(1, Math.round((new Date(cfg.range_end) - new Date(cfg.range_start)) / 86400000) + 1);
 const finalize = (b) => {
+  if (!b.views_observed) b.views_total = null;
+  delete b.views_observed;
   b.engagement_avg = b.post_count ? Math.round((b.engagement_sum / b.post_count) * 10) / 10 : 0;
   b.engagement_rate_avg = b.post_count ? Math.round((b.engagement_rate_sum / b.post_count) * 10000) / 10000 : 0;
   b.impressions_avg = b.post_count ? Math.round(b.impressions_total / b.post_count) : 0;
