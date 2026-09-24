@@ -592,6 +592,7 @@ export default function CompetitorReview() {
       if ((handlesByCompetitor.get(c.id) || []).length) return false;
       if (!check) return true;
       const age = Date.now() - Date.parse(check.checked_at || "");
+      if (check.status === "unverified") return Number.isFinite(age) && age > 24 * 60 * 60 * 1000;
       return check.status === "running" ? !Number.isFinite(age) || age > 120000
         : ["failed", "partial"].includes(check.status) && (!Number.isFinite(age) || age > 15 * 60 * 1000);
     });

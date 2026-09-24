@@ -77,6 +77,8 @@ async function fetchRendered(url: string): Promise<SiteRead> {
       return { html: "", ok: false, warning: `Rendered website lookup returned HTTP ${fcResp.status}.` };
     }
     const fcData = await fcResp.json();
+    const siteStatus = Number(fcData.data?.metadata?.statusCode || 200);
+    if (siteStatus >= 400) return { html: "", ok: false, warning: `Company website returned HTTP ${siteStatus}.` };
     const html = fcData.data?.rawHtml || fcData.data?.html || fcData.rawHtml || fcData.html || "";
     const links: string[] = fcData.data?.links || fcData.links || [];
     // The links go in as plain text; the extractor treats them as URLs.
