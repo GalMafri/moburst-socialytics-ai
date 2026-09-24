@@ -68,3 +68,10 @@ it('calculates the summary from provider metrics instead of preserving unsupport
  const out=withCompetitiveEvidenceLimits(input);
  expect(out.ai_analysis.executive_summary).toContain('0.15%');expect(out.ai_analysis.executive_summary).toContain('up 10');expect(out.ai_analysis.executive_summary).not.toContain('Guaranteed');expect(input.ai_analysis.executive_summary).toContain('Guaranteed');
 });
+
+it('does not recommend copying a competitor with no observed posts', () => {
+ const report={aggregates:{companies:[{name:'Kiron Interactive',post_count:0},{name:'GoldenRace',post_count:11}]},ai_analysis:{winner_teardown:[{competitor:'Kiron Interactive',pattern:'No observed content'},{competitor:'GoldenRace',pattern:'Product demonstrations'}]}};
+ const result=withCompetitiveEvidenceLimits(report);
+ expect(result.ai_analysis.winner_teardown).toEqual([{competitor:'GoldenRace',pattern:'Product demonstrations'}]);
+ expect(report.ai_analysis.winner_teardown).toHaveLength(2);
+});

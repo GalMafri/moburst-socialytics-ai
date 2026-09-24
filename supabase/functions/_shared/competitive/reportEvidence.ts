@@ -41,6 +41,10 @@ export function withCompetitiveEvidenceLimits<T>(input: T): T {
     ai.competitor_breakdowns = ai.competitor_breakdowns.filter((b: any) =>
       !names.has(String(b.name || "").trim().toLowerCase()) && !(client && b.is_client));
   }
+  if (Array.isArray(ai.winner_teardown)) {
+    ai.winner_teardown = ai.winner_teardown.filter((item: any) =>
+      !names.has(String(item.competitor || "").trim().toLowerCase()));
+  }
   if (client) {
     ai.executive_summary = `No posts for ${client.name} were returned for the selected period. The report retains RivalIQ's supplied metrics and the observed competitor posts. Client content gaps, strategy assessments and posting recommendations are withheld because there is no client post sample to support them.`;
     ai.gaps_for_client = [];
