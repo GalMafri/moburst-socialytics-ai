@@ -55,6 +55,15 @@ type CompetitorRow = {
   profile_detection?: { status: string; detail?: string; checked_at?: string } | null;
 };
 
+function readProfileCheck(value: unknown): CompetitorRow["profile_detection"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.status !== "string") return null;
+  return { status: record.status,
+    detail: typeof record.detail === "string" ? record.detail : undefined,
+    checked_at: typeof record.checked_at === "string" ? record.checked_at : undefined };
+}
+
 type HandleRow = {
   id: string;
   competitor_id: string;
@@ -115,13 +124,15 @@ function LandscapeRow({
 export default function CompetitorReview() {
   const { id: clientId } = useParams();
   const navigate = useNavigate();
-  const { canRunAnalysis } = useAuth();
+  const { canRunAnalysis, isGosSession } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [identifying, setIdentifying] = useState(false);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   const [detecting, setDetecting] = useState(false);
   const attemptedProfiles = useRef(new Set<string>());
+  const profileSessionExpired = useRef(false);
+  const [needsPortalSession, setNeedsPortalSession] = useState(false);
   const [profileChecks, setProfileChecks] = useState<Record<string, { state: string; detail?: string }>>({});
   const [removingHandle, setRemovingHandle] = useState<HandleRow | null>(null);
   const [detectProgress, setDetectProgress] = useState<{ done: number; total: number } | null>(null);
@@ -180,7 +191,7 @@ export default function CompetitorReview() {
         .eq("set_id", currentSet!.id)
         .order("similarity_score", { ascending: false, nullsFirst: false });
       if (error) throw error;
-      return data as CompetitorRow[];
+      return (data || []).map(row => ({ ...row, profile_detection: readProfileCheck(row.profile_detection) }));
     },
     enabled: !!currentSet?.id,
     refetchInterval: query => (query.state.data || []).some(c => c.profile_detection?.status === "running") ? 5000 : false,
@@ -350,11 +361,21 @@ export default function CompetitorReview() {
 
   const detectProfile = async (id: string, refresh = false) => {
     attemptedProfiles.current.add(id);
+    if (profileSessionExpired.current) {
+      setProfileChecks(prev => ({ ...prev, [id]: { state: "session_required" } }));
+      return { id, found: 0, failed: "Reopen Socialytics from your portal to resume profile discovery." };
+    }
     setProfileChecks(prev => ({ ...prev, [id]: { state: "searching" } }));
     try {
       const { data, error } = await supabase.functions.invoke("detect-competitor-handles", {
         body: { competitor_id: id, refresh },
       });
+      if ((error as { context?: { status?: number } } | null)?.context?.status === 401) {
+        profileSessionExpired.current = true;
+        setNeedsPortalSession(true);
+        setProfileChecks(prev => ({ ...prev, [id]: { state: "session_required" } }));
+        return { id, found: 0, failed: "Reopen Socialytics from your portal to resume profile discovery." };
+      }
       if (error || data?.error) throw new Error(await describeInvokeError(error, data));
       if (data?.write_errors?.length) throw new Error("Profiles were found but could not be saved. Please try again.");
       const result = data?.results?.[0];
@@ -767,6 +788,14 @@ export default function CompetitorReview() {
         </Card>
 
 
+        {needsPortalSession && (
+          <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
+            <p className="font-medium">Your portal session has expired</p>
+            <p className="t-secondary">Reopen Socialytics from the portal to resume automatic profile discovery. This is a sign-in issue, not a missing company profile.</p>
+            <a className="inline-flex underline text-sm" href={isGosSession ? "https://moburst.ai" : "https://tools.moburst.com/dashboard"}>Open Moburst portal</a>
+          </div>
+        )}
+
         {/* Selected top 3 */}
         {selected.length > 0 && (
           <Card className="border-[#b9e045]/30">
@@ -922,6 +951,7 @@ export default function CompetitorReview() {
                             <span className="t-label text-amber-500/80 inline-flex items-center gap-1.5">
                               {profileCheck?.state === "searching" || handlesLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
                               {handlesLoading ? "Loading saved profiles…" : handlesFailed ? "Could not load saved profiles" :
+                                profileCheck?.state === "session_required" ? "Waiting for portal sign-in" :
                                 profileCheck?.state === "queued" ? "Profile search queued" :
                                 profileCheck?.state === "searching" ? "Searching company pages…" :
                                 profileCheck?.state === "failed" ? "Profile lookup failed" :

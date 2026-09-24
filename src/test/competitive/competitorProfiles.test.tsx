@@ -36,3 +36,8 @@ it('does not remove a profile until the explicit confirmation',async()=>{
 it('keeps completed empty results across visits without repeating lookups or offering detection buttons',async()=>{
  f.auto=false;mount();await screen.findAllByText('No profiles found on checked pages');expect(f.calls).toHaveLength(0);expect(screen.queryByRole('button',{name:/Find missing|Re-detect|Look again/})).toBeNull();
 });
+
+it('shows an expired session once instead of blaming missing competitor profiles',async()=>{
+ f.detect=async()=>({data:null,error:{context:new Response(JSON.stringify({error:'Invalid or expired session.'}),{status:401})}});
+ mount();await screen.findByText('Your portal session has expired');expect(screen.queryByText('Profile lookup failed')).toBeNull();expect(screen.getByRole('link',{name:'Open Moburst portal'})).toHaveAttribute('href','https://tools.moburst.com/dashboard');expect(screen.getAllByText('Waiting for portal sign-in')).toHaveLength(2);
+});
