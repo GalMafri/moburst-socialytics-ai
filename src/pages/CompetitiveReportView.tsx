@@ -598,15 +598,11 @@ export default function CompetitiveReportView() {
         {/* KPI tiles */}
         {meB && (
           <div className={`grid gap-4 grid-cols-2 md:grid-cols-3 ${meM?.audience ? "2xl:grid-cols-6" : "2xl:grid-cols-5"}`}>
-            {/* The scorecard is written once for the whole account, so with a
-                platform selected this tile is the one figure in the row that
-                is not filtered. The bar above promises every section says
-                which it is; this one was silent. */}
             <Kpi
               accent
-              label="AI assessment"
-              value={scorecard?.client_score == null ? "Not available" : `${scorecard.client_score}`}
-              sub={effectivePlat === "all" ? "qualitative score, out of 100" : "qualitative score, out of 100 · all platforms"}
+              label="Companies compared"
+              value={`${ordered.length}`}
+              sub={`Client + ${rivals.length} competitor${rivals.length === 1 ? "" : "s"} · tracked accounts`}
             />
             {meM?.audience && (
               <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across networks, per RivalIQ" : `on ${platformLabel(effectivePlat)}, per RivalIQ`} />
