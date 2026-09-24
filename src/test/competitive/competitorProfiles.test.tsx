@@ -11,7 +11,7 @@ vi.mock('@/lib/telemetry',()=>({track:vi.fn()}));
 vi.mock('@/components/layout/AppLayout',()=>({AppLayout:({children}:any)=><main>{children}</main>}));
 vi.mock('@/integrations/supabase/client',()=>({supabase:{
  functions:{invoke:async(name:string,args:any)=>{f.calls.push({name,...args.body});if(name==='identify-competitors')return{data:{set_id:'set',competitors:[{id:'b'},{id:'c'}]},error:null};return f.detect?f.detect(args.body.competitor_id):{data:{results:[{status:'not_found',detected:[]}]},error:null};}},
- from(table:string){let write=false;const q:any={select(){return q},eq(){return q},in(){return q},neq(){return q},order(){return q},update(value:any){write=true;f.writes.push(value);return q},maybeSingle:async()=>({data:{id:'client',name:'Client'},error:null}),then(resolve:any,reject:any){let data:any=[];if(table==='competitor_sets')data=[{id:'set',client_id:'client',status:'draft',created_at:'2026-09-24'}];if(table==='competitors')data=['a','b','c'].map(id=>({id,set_id:'set',name:'Company '+id,website_url:'https://'+id+'.example',is_selected:false,source:'auto',profile_detection:f.auto?null:{status:'not_found',checked_at:new Date().toISOString()}}));if(table==='competitor_handles')data=[{id:'handle',competitor_id:'a',platform:'instagram',handle:'company_a',profile_url:'https://instagram.com/company_a',is_active:true,source:'rivaliq'}];return Promise.resolve({data:write?null:data,error:null}).then(resolve,reject)}};return q;}
+ from(table:string){let write=false;const q:any={select(){return q},eq(){return q},in(){return q},neq(){return q},order(){return q},update(value:any){write=true;f.writes.push(value);return q},maybeSingle:async()=>({data:{id:'client',name:'Client'},error:null}),then(resolve:any,reject:any){let data:any=[];if(table==='competitor_sets')data=[{id:'set',client_id:'client',status:'draft',created_at:'2026-09-24'}];if(table==='competitors')data=['a','b','c'].map(id=>({id,set_id:'set',name:'Company '+id,website_url:'https://'+id+'.example',is_selected:false,source:'auto',profile_detection:f.auto?null:{status:'not_found',discovery_version:2,checked_at:new Date().toISOString()}}));if(table==='competitor_handles')data=[{id:'handle',competitor_id:'a',platform:'instagram',handle:'company_a',profile_url:'https://instagram.com/company_a',is_active:true,source:'rivaliq'}];return Promise.resolve({data:write?null:data,error:null}).then(resolve,reject)}};return q;}
 }}));
 let client:QueryClient;
 beforeEach(()=>{f.auto=true;f.calls=[];f.writes=[];f.detect=null;f.toast.mockClear();client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false}}});});
@@ -40,4 +40,14 @@ it('keeps completed empty results across visits without repeating lookups or off
 it('shows an expired session once instead of blaming missing competitor profiles',async()=>{
  f.detect=async()=>({data:null,error:{context:new Response(JSON.stringify({error:'Invalid or expired session.'}),{status:401})}});
  mount();await screen.findByText('Your portal session has expired');expect(screen.queryByText('Profile lookup failed')).toBeNull();expect(screen.getByRole('link',{name:'Open Moburst portal'})).toHaveAttribute('href','https://tools.moburst.com/dashboard');expect(screen.getAllByText('Waiting for portal sign-in')).toHaveLength(2);
+});
+
+it('separates unverified suggestions and prevents selecting them without a verified profile',async()=>{
+ f.detect=async()=>({data:{results:[{status:'unverified',detected:[],warnings:['Company website unavailable.']}]},error:null});
+ mount();fireEvent.click(await screen.findByRole('button',{name:'Show unverified suggestions'}));
+ expect(screen.getAllByText('Unverified suggestion')).toHaveLength(2);
+ expect(screen.getAllByRole('button',{name:'Select'}).filter(b=>b.hasAttribute('disabled'))).toHaveLength(2);
+ expect(screen.getByRole('link',{name:/company_a/})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Hide unverified suggestions'}));
+ expect(screen.queryByText('Company b')).toBeNull();expect(f.writes).toHaveLength(0);
 });

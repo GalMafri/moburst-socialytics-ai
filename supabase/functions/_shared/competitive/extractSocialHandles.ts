@@ -164,6 +164,9 @@ export function classifyUrl(url: string): { platform: string; handle: string; yo
     } else if (["channel", "c", "user"].includes(first)) {
       handle = decoded[1] || "";
       youtubeKind = `${first}/`;
+    } else if (decoded.length === 1 && !RESERVED.youtube.has(first)) {
+      handle = first;
+      youtubeKind = "legacy";
     } else return null;
   } else {
     if (RESERVED[platform]?.has(first)) return null;
@@ -181,7 +184,7 @@ function canonicalProfileUrl(platform: string, handle: string, youtubeKind?: str
     case "tiktok": return `https://www.tiktok.com/@${handle}`;
     case "facebook": return `https://www.facebook.com/${handle}`;
     case "linkedin": return `https://www.linkedin.com/company/${handle}/`;
-    case "youtube": return `https://www.youtube.com/${youtubeKind === "@" || !youtubeKind ? "@" : youtubeKind}${handle}`;
+    case "youtube": return `https://www.youtube.com/${youtubeKind === "legacy" ? "" : youtubeKind === "@" || !youtubeKind ? "@" : youtubeKind}${handle}`;
     default: return `https://x.com/${handle}`;
   }
 }
@@ -233,6 +236,32 @@ export function extractSocialHandles(html: string, brandName?: string): Detected
     profile_url: canonicalProfileUrl(c.platform, c.handle, c.youtubeKind),
     confidence: confidenceFor(c.score),
   }));
+}
+
+/** Indexed profile pages can survive a broken company website. Never use
+ * arbitrary links from search snippets: the result itself must be a profile,
+ * its title must name the company, and conflicting handles stay unverified. */
+export function extractIndexedProfiles(results: Array<{ url?: string; title?: string }>, brandName: string): DetectedHandle[] {
+  const normalize = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const brand = normalize(brandName.replace(/\s*\([^)]*\)/g, ''));
+  if (!brand) return [];
+  const groups = new Map<string, DetectedHandle[]>();
+  for (const result of results) {
+    const title = normalize(result.title || '');
+    if (!(` ${title} `).includes(` ${brand} `) || /\b(unofficial|fanpage|parody)\b/.test(title)) continue;
+    const hit = classifyUrl(result.url || '');
+    if (!hit) continue;
+    const segments = new URL(result.url!).pathname.split('/').filter(Boolean);
+    const profileDepth = hit.platform === 'linkedin' || (hit.platform === 'youtube' && ['channel/', 'c/', 'user/'].includes(hit.youtubeKind || '')) ? 2 : 1;
+    if (segments.length !== profileDepth) continue;
+    // A one-word generic name needs an exact account-name match too.
+    if (!brand.includes(' ') && normalize(hit.handle) !== brand) continue;
+    const value = { ...hit, profile_url: canonicalProfileUrl(hit.platform, hit.handle, hit.youtubeKind), confidence: 0.8 };
+    const entries = groups.get(hit.platform) || [];
+    if (!entries.some(h => h.handle.toLowerCase() === hit.handle.toLowerCase())) entries.push(value);
+    groups.set(hit.platform, entries);
+  }
+  return [...groups.values()].filter(group => group.length === 1).map(group => group[0]);
 }
 
 /**

@@ -52,7 +52,7 @@ type CompetitorRow = {
   source: string;
   is_selected: boolean;
   selected_rank: number | null;
-  profile_detection?: { status: string; detail?: string; checked_at?: string } | null;
+  profile_detection?: { status: string; detail?: string; checked_at?: string; discovery_version?: number } | null;
 };
 
 function readProfileCheck(value: unknown): CompetitorRow["profile_detection"] {
@@ -60,6 +60,7 @@ function readProfileCheck(value: unknown): CompetitorRow["profile_detection"] {
   const record = value as Record<string, unknown>;
   if (typeof record.status !== "string") return null;
   return { status: record.status,
+    discovery_version: typeof record.discovery_version === "number" ? record.discovery_version : undefined,
     detail: typeof record.detail === "string" ? record.detail : undefined,
     checked_at: typeof record.checked_at === "string" ? record.checked_at : undefined };
 }
@@ -130,6 +131,7 @@ export default function CompetitorReview() {
   const [identifying, setIdentifying] = useState(false);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   const [detecting, setDetecting] = useState(false);
+  const [showUnverified, setShowUnverified] = useState(false);
   const attemptedProfiles = useRef(new Set<string>());
   const profileSessionExpired = useRef(false);
   const [needsPortalSession, setNeedsPortalSession] = useState(false);
@@ -582,8 +584,12 @@ export default function CompetitorReview() {
   useEffect(() => {
     if (!canRunAnalysis || !currentSet || !competitors || !handles || handlesLoading || handlesFailed || identifying || detecting) return;
     const due = competitors.filter(c => {
-      if (attemptedProfiles.current.has(c.id) || (handlesByCompetitor.get(c.id) || []).length) return false;
+      if (attemptedProfiles.current.has(c.id)) return false;
+      const savedHandles = handlesByCompetitor.get(c.id) || [];
+      if (savedHandles.length && savedHandles.every(h => h.source === "manual" || h.source === "rivaliq")) return false;
       const check = c.profile_detection;
+      if ((check?.discovery_version || 0) < 2 && c.website_url) return true;
+      if ((handlesByCompetitor.get(c.id) || []).length) return false;
       if (!check) return true;
       const age = Date.now() - Date.parse(check.checked_at || "");
       return check.status === "running" ? !Number.isFinite(age) || age > 120000
@@ -593,6 +599,11 @@ export default function CompetitorReview() {
     setDetecting(true);
     void detectForAll(due).finally(() => setDetecting(false));
   }, [canRunAnalysis, currentSet?.id, competitors, handles, handlesLoading, handlesFailed, identifying, detecting]);
+
+  const isUnverified = (c: CompetitorRow) => !c.is_selected &&
+    (profileChecks[c.id]?.state || c.profile_detection?.status) === "unverified" &&
+    !(handlesByCompetitor.get(c.id) || []).some(isReviewReadyHandle);
+  const unverifiedCount = (competitors || []).filter(isUnverified).length;
 
   if (!canRunAnalysis) return <Navigate to="/" replace />;
 
@@ -894,7 +905,11 @@ export default function CompetitorReview() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              {competitors!.map((c) => {
+              {unverifiedCount > 0 && <div className="rounded-lg border border-white/10 p-3 space-y-2">
+                <p className="t-secondary">{unverifiedCount} suggestions could not be verified and are excluded from selection. Your confirmed competitors have not changed.</p>
+                <Button variant="outline" size="sm" onClick={() => setShowUnverified(v => !v)}>{showUnverified ? "Hide unverified suggestions" : "Show unverified suggestions"}</Button>
+              </div>}
+              {competitors!.filter(c => showUnverified || !isUnverified(c)).map((c) => {
                 const profileCheck = profileChecks[c.id] || (c.profile_detection ? { state: c.profile_detection.status === "running" ? "searching" : c.profile_detection.status, detail: c.profile_detection.detail } : undefined);
                 const compHandles = (handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active);
                 return (
@@ -909,7 +924,7 @@ export default function CompetitorReview() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium t-body" title={c.name}>{displayCompanyName(c.name)}</span>
                           {c.source === "manual" && <Badge variant="outline">manual</Badge>}
-                          {typeof c.similarity_score === "number" && (
+                          {isUnverified(c) ? <Badge variant="outline">Unverified suggestion</Badge> : typeof c.similarity_score === "number" && (
                             <Badge variant="secondary">{Math.round(c.similarity_score * 100)}% match</Badge>
                           )}
                         </div>
@@ -955,6 +970,7 @@ export default function CompetitorReview() {
                                 profileCheck?.state === "queued" ? "Profile search queued" :
                                 profileCheck?.state === "searching" ? "Searching company pages…" :
                                 profileCheck?.state === "failed" ? "Profile lookup failed" :
+                                profileCheck?.state === "unverified" ? "Company could not be verified" :
                                 profileCheck?.state === "partial" ? "Profile lookup incomplete" :
                                 profileCheck?.state === "missing_website" ? "Company website needed" :
                                 profileCheck?.state === "not_found" ? "No profiles found on checked pages" : "Profile lookup will start automatically"}
@@ -1010,7 +1026,7 @@ export default function CompetitorReview() {
                             size="sm"
                             variant={c.is_selected ? "default" : "outline"}
                             onClick={() => toggleSelect.mutate(c)}
-                            disabled={toggleSelect.isPending}
+                            disabled={toggleSelect.isPending || (!c.is_selected && profileCheck?.state === "unverified" && !compHandles.some(isReviewReadyHandle))}
                           >
                             {c.is_selected ? `#${c.selected_rank}` : "Select"}
                           </Button>

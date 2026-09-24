@@ -14,7 +14,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
-import { extractSocialHandles, mergeHandles, type DetectedHandle } from "../_shared/competitive/extractSocialHandles.ts";
+import { extractSocialHandles, extractIndexedProfiles, mergeHandles, type DetectedHandle } from "../_shared/competitive/extractSocialHandles.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,7 +47,7 @@ async function fetchDirect(url: string): Promise<SiteRead> {
     return { html: await resp.text(), ok: true };
   } catch (e) {
     console.log(`[detect] fetch failed ${url}: ${(e as Error)?.name || e}`);
-    return { html: "", ok: false, warning: "Website could not be reached within 8 seconds." };
+    return { html: "", ok: false, warning: (e as Error)?.name === "TimeoutError" ? "Company website timed out." : "Company website address could not be reached." };
   }
 }
 
@@ -104,6 +104,21 @@ const FALLBACK_PATHS = ["/contact", "/about", "/about-us", "/company"];
  */
 const ALL_PLATFORMS = ["instagram", "facebook", "tiktok", "linkedin", "youtube", "x"];
 
+async function searchProfiles(name: string): Promise<{ handles: DetectedHandle[]; ok: boolean }> {
+  const key = Deno.env.get("FIRECRAWL_API_KEY");
+  if (!key) return { handles: [], ok: false };
+  try {
+    const response = await fetch("https://api.firecrawl.dev/v1/search", {
+      method: "POST", signal: AbortSignal.timeout(20000),
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ query: `"${name.replace(/["\r\n]/g, ' ')}" (site:instagram.com OR site:facebook.com OR site:linkedin.com OR site:youtube.com OR site:tiktok.com OR site:x.com)`, limit: 10 }),
+    });
+    if (!response.ok) return { handles: [], ok: false };
+    const data = await response.json();
+    return { handles: extractIndexedProfiles(Array.isArray(data.data) ? data.data : data.data?.web || [], name), ok: data.success !== false };
+  } catch { return { handles: [], ok: false }; }
+}
+
 async function detectForSite(websiteUrl: string, brandName?: string) {
   const base = normalizeUrl(websiteUrl);
   const direct = await fetchDirect(base);
@@ -119,8 +134,11 @@ async function detectForSite(websiteUrl: string, brandName?: string) {
     reads.push(...more);
     groups.push(...more.map(r => extractSocialHandles(r.html, brandName)));
   }
+  const websiteHandles = mergeHandles(...groups);
+  const indexed = websiteHandles.length || !brandName ? { handles: [], ok: false } : await searchProfiles(brandName);
   return {
-    handles: mergeHandles(...groups),
+    handles: mergeHandles(websiteHandles, indexed.handles),
+    searchedIndex: indexed.ok,
     readSucceeded: reads.some(r => r.ok),
     // Missing optional contact/about pages do not make a valid homepage
     // lookup a failure. Report failures of the two primary discovery paths.
@@ -203,7 +221,7 @@ Deno.serve(async (req) => {
     for (const comp of competitors) {
       const saveStatus = async (status: string, warnings: string[] = []) => {
         const { error } = await supabase.from("competitors").update({
-          profile_detection: { status, detail: warnings.join(" "), checked_at: new Date().toISOString() },
+          profile_detection: { status, discovery_version: 2, detail: warnings.join(" "), checked_at: new Date().toISOString() },
         }).eq("id", comp.id);
         if (error) throw new Error("Could not save profile lookup progress. Please reopen the draft to resume.");
       };
@@ -274,8 +292,8 @@ Deno.serve(async (req) => {
       // Report what was written, not what was found: the two used to differ
       // silently whenever an upsert failed.
       const retained = detected.filter(h => saved.includes(h.platform));
-      const status = writeErrors.length > previousWriteErrors ? "failed" : retained.length ? "found" : !discovery.readSucceeded ? "failed" : discovery.warnings.length ? "partial" : "not_found";
-      const warnings = writeErrors.length > previousWriteErrors ? ["Profiles could not be saved. Automatic lookup will retry later."] : discovery.warnings;
+      const status = writeErrors.length > previousWriteErrors ? "failed" : retained.length ? "found" : !discovery.readSucceeded ? (discovery.searchedIndex ? "unverified" : "failed") : discovery.warnings.length ? "partial" : "not_found";
+      const warnings = writeErrors.length > previousWriteErrors ? ["Profiles could not be saved. Automatic lookup will retry later."] : retained.length ? [] : status === "unverified" ? ["The company website is unavailable and no matching official social profile was verified. This suggestion needs a corrected website or a verified profile before selection."] : discovery.warnings;
       await saveStatus(status, warnings);
       results.push({ competitor_id: comp.id, detected: retained, status, warnings });
     }
