@@ -81,3 +81,5 @@ Published versions (active equals draft):
 - Competitive: `26834222-cd01-4fc1-8c85-364701df4d29`.
 
 Rollback versions are the 17 September versions above. Sender headers are additive and compatible with those versions; do not delete the shared secret on rollback. Existing model-node validation warnings remain unchanged.
+
+September 24 request pacing: `competitive-request-pacing.json` records a scoped parameter change for Landscape Social Posts. n8n HTTP Request V3 batch size 1 does not await each response; it spaces request starts. The old 400ms interval can overlap requests. Use 125000ms against a 120000ms request timeout to avoid within-run overlap. Preserve credentials and graph connections. This is not an account-wide lock and does not bypass hourly limits or the app's 90-minute retry lock.

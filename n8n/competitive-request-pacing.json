@@ -1,0 +1,13 @@
+{
+  "workflow_id": "EBiAwSay3H2R8krv",
+  "node_name": "Landscape Social Posts",
+  "parameters": {
+    "options": {
+      "batching": { "batch": { "batchSize": 1, "batchInterval": 125000 } },
+      "timeout": 120000
+    }
+  },
+  "scope": "Update only the saved batchInterval; retain all other node fields and connections.",
+  "reason": "HTTP Request V3 spaces request starts without awaiting prior responses. The interval exceeds the per-request timeout by five seconds, preventing within-run request overlap under that timeout. A 90-day report adds at most 25 minutes of spacing, within the existing 90-minute estimate.",
+  "source": "https://github.com/n8n-io/n8n/blob/master/packages/nodes-base/nodes/HttpRequest/V3/HttpRequestV3.node.ts"
+}
