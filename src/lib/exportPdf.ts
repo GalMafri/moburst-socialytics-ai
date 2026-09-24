@@ -132,7 +132,9 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     if (el.querySelector('img, video')) return;
     el.setAttribute('data-pdf-media', '');
     const placeholder = document.createElement('p');
-    placeholder.textContent = 'Preview unavailable — open the original post to view it.';
+    placeholder.textContent = 'View post';
+    placeholder.style.whiteSpace = 'nowrap';
+    placeholder.style.fontSize = '9pt';
     el.replaceChildren(placeholder);
   });
   content.querySelectorAll('[class*="aspect-"]').forEach(el => {
