@@ -16,7 +16,7 @@ import { RUN_ESTIMATE, canRetry } from "@/lib/reportRun";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { describeInvokeError } from "@/lib/invokeError";
-import { describeTracking, pickRunSelection, plainCompetitiveError, type SetRow } from "@/lib/competitiveFlow";
+import { describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, type SetRow } from "@/lib/competitiveFlow";
 
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -179,10 +179,7 @@ export default function CompetitiveRun() {
             });
             // The workflow records why it stopped; showing it beats sending
             // someone to the execution log for a reason we already hold.
-            const why = String((data as any)?.report_data?.error || "").trim();
-            // Provider wording like "List RivalIQ Landscapes: HTTP 429" reads
-            // as a broken app; say what happened and what to do instead.
-            setError(why ? plainCompetitiveError(why) : "The analysis stopped on the server and no reason was recorded. Nothing was saved — try again.");
+            setError(competitiveFailureMessage(data.report_data));
 
             refetchRuns();
           }
@@ -450,7 +447,7 @@ export default function CompetitiveRun() {
                   <XCircle className="h-6 w-6" />
                   <span className="font-medium">Analysis issue</span>
                 </div>
-                <p className="t-secondary">{error}</p>
+                <p className="t-secondary mx-auto">{error}</p>
                 {reportId ? (
                   canRetry({ status: "failed", created_at: startedAt }) ?
                     <RetryReportButton reportId={reportId} kind="competitive" variant="outline" onStarted={() => { setError(null); setRunning(true); setCurrentStep(0); setStartedAt(new Date().toISOString()); pollForCompletion(reportId); }} /> :

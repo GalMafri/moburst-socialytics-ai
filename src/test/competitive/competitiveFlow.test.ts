@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, type SetRow } from "@/lib/competitiveFlow";
+import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, type SetRow } from "@/lib/competitiveFlow";
 
 const set = (o: Partial<SetRow> & { id: string; status: string; created_at: string }): SetRow => o as SetRow;
 
@@ -90,5 +90,18 @@ describe("plainCompetitiveError", () => {
     expect(plainCompetitiveError("Your session has expired.")).toMatch(/portal/i);
     expect(plainCompetitiveError("Only two competitors have reviewed profiles.")).toBe("Only two competitors have reviewed profiles.");
     expect(plainCompetitiveError("")).toMatch(/did not complete/i);
+  });
+});
+
+describe("saved competitive failures", () => {
+  it("explains a withheld report without claiming no data or reason was saved", () => {
+    const message = competitiveFailureMessage({quality_check:{state:"needs_review",reasons:["49 vs 47"]}});
+    expect(message).toMatch(/analysis was saved/i);
+    expect(message).toMatch(/withheld/i);
+    expect(message).not.toMatch(/49|47|nothing was saved|try again/i);
+  });
+  it("retains provider errors and avoids unsupported claims for unknown failures", () => {
+    expect(competitiveFailureMessage({error:"HTTP 429"})).toBe(plainCompetitiveError("HTTP 429"));
+    expect(competitiveFailureMessage(null)).not.toMatch(/nothing was saved|no reason|try again/i);
   });
 });

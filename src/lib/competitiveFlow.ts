@@ -136,3 +136,13 @@ export function plainCompetitiveError(raw: string | null | undefined): string {
   }
   return message;
 }
+
+/** Explain saved validation failures without exposing internal diagnostics. */
+export function competitiveFailureMessage(data: unknown): string {
+  const report = data as { quality_check?: { state?: string }; error?: string } | null;
+  if (report?.quality_check?.state === "needs_review") {
+    return "The analysis was saved, but its source figures did not pass validation. The report is being withheld to avoid showing inaccurate results.";
+  }
+  if (typeof report?.error === "string" && report.error.trim()) return plainCompetitiveError(report.error);
+  return "The analysis could not be completed. Its saved status is available in report history.";
+}
