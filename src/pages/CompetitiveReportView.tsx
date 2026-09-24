@@ -460,18 +460,18 @@ export default function CompetitiveReportView() {
       <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} maxHeight="26rem" />
       <p className={`t-body line-clamp-2 min-h-[3rem] ${p.text ? "" : "text-[#b1b7c1]"}`}>{p.text || (normalizePlatform(p.channel) === "x" || normalizePlatform(p.channel) === "twitter" ? "X posts arrive from RivalIQ without a caption or link." : "No caption provided.")}</p>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <Stat label="Est. impr." value={p.est_impressions ? fmt(p.est_impressions) : "–"} />
+        <Stat label="Est. impr." value={p.est_impressions != null ? fmt(p.est_impressions) : "–"} />
         <Stat label="Engagements" value={fmt(p.engagement)} />
-        <Stat label="Eng. rate" value={p.engagement_rate ? pct(p.engagement_rate) : "–"} />
+        <Stat label="Eng. rate" value={p.engagement_rate != null ? pct(p.engagement_rate) : "–"} />
         <Stat label={p.views ? "Views" : "Followers at publication"} value={p.views ? fmt(p.views) : (p.followers_at_publication ?? p.reach) != null ? fmt((p.followers_at_publication ?? p.reach)!) : "–"} />
       </div>
-      <div className="flex items-center justify-between gap-2 t-secondary mt-auto">
+      <div className="flex flex-wrap items-center justify-between gap-2 t-secondary mt-auto">
         {(p.applause || p.conversation || p.amplification) ? (
           <span title="Likes and reactions · comments · shares">{fmt(p.applause || 0)} likes · {fmt(p.conversation || 0)} comments · {fmt(p.amplification || 0)} shares</span>
         ) : <span />}
         <span className="flex items-center gap-2">
           {p.likely_boosted && <Badge variant="secondary" title="RivalIQ estimates this Facebook post was paid promotion">Likely boosted</Badge>}
-          {p.created ? new Date(p.created).toLocaleDateString() : ""}
+          {p.created ? new Date(p.created).toLocaleDateString(undefined, { timeZone: "UTC" }) : ""}
         </span>
       </div>
     </div>
@@ -1101,7 +1101,7 @@ export default function CompetitiveReportView() {
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
                   <div key={c.company_id} id={`company-posts-${c.company_id}`} className="space-y-3 scroll-mt-24" tabIndex={-1}>
                     <p data-pdf-heading className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
-                    <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-5 items-start">
+                    <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] items-start">
                       {b.top_posts.filter(hasContent).slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}
                       {b.top_posts.filter((p) => !hasContent(p)).length > 0 && (
                         <p className="t-label col-span-full">{b.top_posts.filter((p) => !hasContent(p)).length} X {b.top_posts.filter((p) => !hasContent(p)).length === 1 ? "post is" : "posts are"} counted in the totals only: RivalIQ sends no link, caption or image for X.</p>
