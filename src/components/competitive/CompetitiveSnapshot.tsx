@@ -92,7 +92,7 @@ export function CompetitiveSnapshot({
   // made the snapshot say "3 competitors" and the report it links to say "4".
   const rivals = companies.filter((c) => !c.is_client);
   const active = rivals.filter((c) => c.post_count > 0);
-  const avg = (f: (c: any) => number) => (active.length ? active.reduce((s, c) => s + f(c), 0) / active.length : 0);
+  const avg = (f: (c: any) => number) => { const values = active.map(f).filter(n => typeof n === "number" && Number.isFinite(n)); return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null; };
   const totalPosts = companies.reduce((s, c) => s + (c.post_count || 0), 0);
   const share = me && totalPosts ? Math.round((me.post_count / totalPosts) * 100) : null;
   const score = ai.benchmark_scorecard?.client_score;
@@ -124,7 +124,7 @@ export function CompetitiveSnapshot({
         <div id="snapshot-numbers" className="grid gap-3 grid-cols-2 lg:grid-cols-4 scroll-mt-[156px]">
           <Tile accent label="Benchmark score" value={score != null ? `${score}` : "–"} sub="out of 100 against the set" />
           <Tile label="Share of voice" value={share == null ? "–" : `${share}%`} sub={`${me.post_count} of ${totalPosts} posts`} />
-          <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`set average ${avg((c) => c.cadence_per_week).toFixed(1)}/wk`} />
+          <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`set average ${(rivals.length ? (rivals.reduce((sum, c) => sum + c.cadence_per_week, 0) / rivals.length).toFixed(1) : "–")}/wk`} />
           <Tile label="Engagement rate" value={pct(me.engagement_rate_avg)} sub={`set average ${pct(avg((c) => c.engagement_rate_avg))}`} />
         </div>
       )}

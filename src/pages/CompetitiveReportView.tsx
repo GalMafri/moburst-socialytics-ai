@@ -320,7 +320,7 @@ export default function CompetitiveReportView() {
   const rivalBuckets = rivals.map((c) => ({ c, b: bucketFor(c, effectivePlat) }));
   const activeRivals = rivalBuckets.filter((x) => x.b.post_count > 0);
   const avgCadence = rivalBuckets.length ? rivalBuckets.reduce((sum, x) => sum + x.b.cadence_per_week, 0) / rivalBuckets.length : 0;
-  const avg = (f: (b: Bucket) => number) => (activeRivals.length ? activeRivals.reduce((s, x) => s + f(x.b), 0) / activeRivals.length : 0);
+  const avg = (f: (b: Bucket) => number) => { const values = activeRivals.map(x => f(x.b)).filter(n => typeof n === "number" && Number.isFinite(n)); return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null; };
   const totalPosts = (meB?.post_count || 0) + rivalBuckets.reduce((s, x) => s + x.b.post_count, 0);
   const shareOfVoice = meB && totalPosts ? (meB.post_count / totalPosts) * 100 : null;
   const scorecard = ai.benchmark_scorecard;
@@ -715,10 +715,10 @@ export default function CompetitiveReportView() {
                           <TileStat value={String(b.post_count)} label="Tracked posts" />
                           <TileStat value={String(b.cadence_per_week)} label="Posts / week" />
                           <TileStat value={pct(b.engagement_rate_avg)} label="Engagement rate" />
-                          <TileStat value={compactNumber(b.engagement_avg || 0)} exact={fmt(b.engagement_avg)} label="Engagements / post" />
+                          <TileStat value={b.engagement_avg == null ? "Not available" : compactNumber(b.engagement_avg)} exact={fmt(b.engagement_avg)} label="Engagements / post" />
                           <TileStat
-                            value={compactNumber(b.impressions_avg || (b.post_count ? b.impressions_total / b.post_count : 0))}
-                            exact={fmt(b.impressions_avg || (b.post_count ? b.impressions_total / b.post_count : 0))}
+                            value={b.impressions_avg == null ? "Not available" : compactNumber(b.impressions_avg)}
+                            exact={fmt(b.impressions_avg)}
                             label="Est. impressions / post"
                           />
                           <TileStat value={b.views_total == null ? "Not available" : compactNumber(b.views_total)} exact={b.views_total == null ? undefined : fmt(b.views_total)} label="Reported video views" />
