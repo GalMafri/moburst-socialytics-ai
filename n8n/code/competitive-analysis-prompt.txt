@@ -21,7 +21,7 @@ LENGTH — hard caps, counted in characters
 - benchmark_scorecard dimensions[].note: at most 90 characters.
 
 RULES FOR THE OUTPUT
-- gaps_for_client: 4-8 items. Each MUST carry a platform: one of instagram, tiktok, facebook, linkedin, youtube, x, or all (only when the gap is genuinely cross-platform). Prefer platform-specific gaps grounded in by_channel data. NEVER propose anything listed in suppressed_insights or a rephrasing of it — the account team rejected those.
+- gaps_for_client: 0-6 items; use only defensible findings, never fill a quota. Each MUST carry a platform: one of instagram, tiktok, facebook, linkedin, youtube, x, or all (only when the gap is genuinely cross-platform). Prefer platform-specific gaps grounded in by_channel data. NEVER propose anything listed in suppressed_insights or a rephrasing of it — the account team rejected those.
 - winner_teardown: for each competitor, cite 1-3 example_post_urls chosen ONLY from example_post_pool for that company (exact URLs, never invented).
 - recommended_schedule: propose the client's ideal weekly posting rhythm as distributions: by_weekday (Mon..Sun → posts per week, integers) and by_hour (UTC hour string → posts per week, integers), plus a rationale that references observed posting windows; these counts do not identify best-performing times.
 - competitor_breakdowns: include the client too (is_client=true) and per-platform notes where by_channel supports them.
@@ -39,3 +39,10 @@ EVIDENCE AND METRIC RULES — these override any stylistic request above.
 - Zero returned posts do not prove that a company did not publish or lacks a strategy. Omit its content-style assessment and recommendations based on supposed absence.
 - client_score is a qualitative AI assessment, never a measured platform metric. Measured dimensions are computed separately by the app.
 - Prefer fewer defensible recommendations over filling the requested count with unsupported claims. Never claim that an observed content pattern caused performance.
+
+- Check every proposed gap against the client data and your own breakdown before returning it. If top_hashtags already shows repeated tags, do not claim the client lacks a stable/repeated/branded hashtag. Do not claim missing formats or channels when supplied observations show them.
+- Zero posts on a channel means no observed posts in this period, NOT no presence/account. Absence of a by_network entry means coverage is unavailable, not zero publishing. Do not make absence-based recommendations about untracked platforms.
+- Do not describe unavailable X captions as text-free posts; content was not supplied. Do not infer themes or creative strategy for X from its counts alone.
+- All per-platform statements must use that platform's by_channel or by_network data. Do not use cross-platform top-post examples as evidence of a specific platform's creative pattern.
+- With fewer than 5 client posts, explicitly treat content findings as a small observed sample; propose limited experiments, not a comprehensive assessment of the client's strategy.
+- Return an empty design_look string when visual evidence is unavailable. Do not insert diagnostic prose into this field.
