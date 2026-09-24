@@ -50,3 +50,15 @@ it('removes the old diagnostic paragraph from derived report narrative',()=>{
  const input={...fixture(),schema_note:"RivalIQ returned no in-period posts for Client. This does not establish ..."};
  expect(withCompetitiveEvidenceLimits(input).schema_note).toBe('');
 });
+
+it('holds legacy narratives with incorrect rate weighting or follower-as-reach claims',()=>{
+ const report={aggregates:{companies:[{name:'Client',reach_total:2000,engagement_rate_avg:0.0136,rivaliq_metrics:{engagement_rate_per_post:{current:0.0015488}}}]},ai_analysis:{executive_summary:'2K reach'}};
+ expect(competitiveReportQuality(report).reasons).toHaveLength(2);
+ expect(competitiveReportQuality({...report,ai_analysis:undefined}).ready).toBe(true);
+ expect(competitiveReportQuality({...report,aggregates:{...report.aggregates,metric_semantics_version:2}}).ready).toBe(true);
+});
+
+it('holds a network mismatch even when cross-network counts cancel out, and missing company metrics',()=>{
+ expect(competitiveReportQuality({aggregates:{companies:[{name:'A',post_count:2,by_channel:{instagram:{post_count:2}},rivaliq_metrics:{posts:{current:2},by_network:{instagram:{posts:{current:1}},facebook:{posts:{current:1}}}}}]}}).reasons).toHaveLength(2);
+ expect(competitiveReportQuality({aggregates:{metrics_available:true,companies:[{name:'A'}]}}).ready).toBe(false);
+});

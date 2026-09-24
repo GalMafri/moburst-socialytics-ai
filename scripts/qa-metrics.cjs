@@ -17,6 +17,11 @@ function runCompetitive(overrides={}){
  const input=overrides.input||{socialPosts:[{postId:'1',companyId:1,publishedAt:'2026-08-31T23:59:59Z'},{postId:'1',companyId:1,publishedAt:'2026-08-31T23:59:59Z'},{postId:'2',companyId:1,publishedAt:'2026-09-01T00:00:00Z'}]};
  return vm.runInNewContext('(function(){'+read('competitive-aggregate')+'})()',{$input:{first:()=>({json:input})},$:name=>({first:()=>({json:nodes[name]||{}})})})[0].json;
 }
+check('follower counts never become reach and provider rates override differently weighted post means',()=>{
+ const r=runCompetitive({input:{socialPosts:[{companyId:1,postId:'1',publishedAt:'2026-08-01',channel:'instagram',presenceReach:1000,engagementRate:0.05,engagementTotal:10},{companyId:1,postId:'2',publishedAt:'2026-08-31',channel:'instagram',presenceReach:1000,engagementRate:0.01,engagementTotal:20}]},'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelAverageEngagementRatePerPost:0.002,crossChannelSocialEngagement:30,instagramAverageEngagementRatePerPost:0.004,instagramPostsEngagementTotal:30}]}});
+ const c=r.companies[0];assert.equal(c.reach_total,undefined);assert.equal(c.top_posts[0].reach,undefined);assert.equal(c.top_posts[0].followers_at_publication,1000);
+ assert.equal(c.engagement_rate_avg,0.002);assert.equal(c.by_channel.instagram.engagement_rate_avg,0.004);assert.equal(c.engagement_avg,15);assert.equal(r.metric_semantics_version,2);
+});
 check('RivalIQ includes end date, excludes next date, deduplicates posts',()=>assert.equal(runCompetitive().total_posts_analyzed,1));
 check('X native IDs recover dates and respect the requested period without fabricating content',()=>{
  const input={socialPosts:[{companyId:1,postId:'0.1',channel:'twitter',postNativeId:'2092944952070181123'},{companyId:1,postId:'0.2',channel:'twitter',postNativeId:'2095410379446690116'}]};

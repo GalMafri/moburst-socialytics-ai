@@ -49,10 +49,13 @@ it('holds mismatched completed reports without exposing narrative, export or dia
  expect(screen.queryByText('RivalIQ returned no in-period posts for Phiture.')).toBeNull();
 });
 it('company cards link to their supporting posts and expose platform filters as buttons',async()=>{
- const post={url:'https://example.com/post',text:'Example creative',engagement:4,channel:'instagram'};
+ const post={url:'https://example.com/post',text:'Example creative',engagement:4,channel:'instagram',reach:1000};
  const bucket={post_count:1,cadence_per_week:0.2,engagement_rate_avg:0.01,engagement_avg:4,impressions_total:20,top_posts:[post],media_type_mix:[{key:'photo',count:1}],top_hashtags:[{key:'#example',count:1}],by_weekday:{},by_hour:{}};
  fixture.status='complete';fixture.data={period:{start:'2026-08-24',end:'2026-09-22'},aggregates:{companies:[{...bucket,company_id:'rival',name:'Example Rival',in_confirmed_top3:true,channel_mix:[{key:'instagram',count:1}],by_channel:{instagram:bucket},rivaliq_metrics:{posts:{current:1}}}]},ai_analysis:{}};
  mount();await tick(20);
+ expect(screen.queryByText('Reach')).toBeNull();
+ expect(screen.getAllByText('Followers at publication').length).toBeGreaterThan(0);
+ expect(screen.getAllByText('1,000').length).toBeGreaterThan(0);
  expect(screen.getByRole('link',{name:'View Example Rival posts'})).toHaveAttribute('href','#company-posts-rival');
  expect(document.getElementById('company-posts-rival')).toBeInTheDocument();
  expect(screen.getByRole('button',{name:'instagram · 1 post'})).toBeInTheDocument();

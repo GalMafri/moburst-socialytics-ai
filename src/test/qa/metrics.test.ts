@@ -27,3 +27,12 @@ it("corrects historical numeric views without mutating stored input or replacing
   expect(result.ai_analysis.executive_summary).toBe("Original narrative");
   expect(original.aggregates.companies[0].cadence_per_week).toBe(18.7);
 });
+
+it("matches the provider aggregation for account and network rates without recomputing weights",()=>{
+ const input={aggregates:{companies:[{post_count:31,engagement_rate_avg:0.0136,by_channel:{instagram:{post_count:8,engagement_rate_avg:0.5}},rivaliq_metrics:{engagement_rate_per_post:{current:0.001548879},engagement:{current:207},by_network:{instagram:{rate:{current:0.002}}}}}]}};
+ const result=normalizedCompetitiveMetrics(input).aggregates.companies[0];
+ expect(result.engagement_rate_avg).toBe(0.001548879);
+ expect(result.engagement_avg).toBe(207/31);
+ expect(result.by_channel.instagram.engagement_rate_avg).toBe(0.002);
+ expect(input.aggregates.companies[0].engagement_rate_avg).toBe(0.0136);
+});

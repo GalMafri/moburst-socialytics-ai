@@ -39,7 +39,7 @@ import { comparisonScale, normalizedCompetitiveMetrics } from "@/lib/competitive
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images, Users } from "lucide-react";
 
 type TopPost = {
-  engagement: number; engagement_rate: number; est_impressions?: number; reach?: number; views: number;
+  engagement: number; engagement_rate: number; est_impressions?: number; reach?: number; followers_at_publication?: number | null; views: number;
   applause?: number; conversation?: number; amplification?: number;
   text: string; url: string | null; image?: string | null; created: string | null; media_type: string; channel: string;
   /** RivalIQ's paid-promotion signal, Facebook posts only. */
@@ -300,11 +300,11 @@ export default function CompetitiveReportView() {
       {canRetry(report) && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
     </div>
   </AppLayout>;
-  if (!competitiveReportQuality(rd).ready) return <AppLayout title="Report awaiting review" description="This analysis is not ready to share yet.">
+  if (!competitiveReportQuality(report.report_data).ready) return <AppLayout title="Report awaiting review" description="This analysis is not ready to share yet.">
     <Card><CardContent className="pt-6 space-y-4">
       <p className="t-body">We need to verify the source data before this report can be released.</p>
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to reports</Button>
-      {isMoburstStaff && <details className="t-secondary"><summary className="cursor-pointer">Internal validation details</summary><ul className="mt-3 space-y-2">{competitiveReportQuality(rd).reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></details>}
+      {isMoburstStaff && <details className="t-secondary"><summary className="cursor-pointer">Internal validation details</summary><ul className="mt-3 space-y-2">{competitiveReportQuality(report.report_data).reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></details>}
     </CardContent></Card>
   </AppLayout>;
   if (report.status === "failed") return <AppLayout>
@@ -462,7 +462,7 @@ export default function CompetitiveReportView() {
         <Stat label="Est. impr." value={p.est_impressions ? fmt(p.est_impressions) : "–"} />
         <Stat label="Engagements" value={fmt(p.engagement)} />
         <Stat label="Eng. rate" value={p.engagement_rate ? pct(p.engagement_rate) : "–"} />
-        <Stat label={p.views ? "Views" : "Reach"} value={p.views ? fmt(p.views) : p.reach ? fmt(p.reach) : "–"} />
+        <Stat label={p.views ? "Views" : "Followers at publication"} value={p.views ? fmt(p.views) : (p.followers_at_publication ?? p.reach) != null ? fmt((p.followers_at_publication ?? p.reach)!) : "–"} />
       </div>
       <div className="flex items-center justify-between gap-2 t-secondary mt-auto">
         {(p.applause || p.conversation || p.amplification) ? (
@@ -550,7 +550,7 @@ export default function CompetitiveReportView() {
               {rivals.length > 0 && <Chip>{rivals.length} competitors</Chip>}
               {effectivePlat !== "all" && <Chip>{platformLabel(effectivePlat)} only</Chip>}
             </div>
-            <p className="t-secondary">Snapshot from the report run started {new Date(report.created_at).toLocaleString()}. RivalIQ can revise historical figures after collection; competitor impressions are estimates.</p>
+            <p className="t-secondary">Snapshot from the report run started {new Date(report.created_at).toLocaleString()}. Posts were published within the selected UTC dates; their performance reflects RivalIQ’s collected snapshot, not only interactions made within those dates. Impressions are estimates.</p>
           </div>
           <div data-print="hide" className="flex gap-2 flex-wrap">
             <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}><History className="h-4 w-4 mr-2" /> All runs</Button>
@@ -603,9 +603,9 @@ export default function CompetitiveReportView() {
                 which it is; this one was silent. */}
             <Kpi
               accent
-              label="Benchmark score"
+              label="AI assessment"
               value={scorecard?.client_score == null ? "Not available" : `${scorecard.client_score}`}
-              sub={effectivePlat === "all" ? "out of 100 vs. the set" : "out of 100 vs. the set · all platforms"}
+              sub={effectivePlat === "all" ? "qualitative score, out of 100" : "qualitative score, out of 100 · all platforms"}
             />
             {meM?.audience && (
               <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across networks, per RivalIQ" : `on ${platformLabel(effectivePlat)}, per RivalIQ`} />

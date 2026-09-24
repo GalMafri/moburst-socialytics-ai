@@ -103,7 +103,7 @@ const clean = (s) => String(s || "").replace(/[\u0000-\u001f]+/g, " ").replace(/
 const num = (v) => (typeof v === "number" && isFinite(v) ? v : (typeof v === "string" && v.trim() !== "" && isFinite(Number(v)) ? Number(v) : 0));
 // RivalIQ's paid signal on Facebook posts is a string: "Likely Boosted", "Not Likely Boosted" or "No Prediction".
 const isBoosted = (v) => (typeof v === "string" ? v.trim().toLowerCase() === "likely boosted" : v === true);
-const bucket = () => ({ post_count: 0, likely_boosted_posts: 0, engagement_sum: 0, engagement_rate_sum: 0, views_total: 0, impressions_total: 0, reach_total: 0, by_weekday: {}, by_hour: {}, hashtags: {}, media_types: {}, top_posts: [] });
+const bucket = () => ({ post_count: 0, likely_boosted_posts: 0, engagement_sum: 0, engagement_rate_sum: 0, views_total: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, hashtags: {}, media_types: {}, top_posts: [] });
 const blank = (key, name, url) => ({ company_id: key, name, url: url || null, is_client: false, in_confirmed_top3: false, ...bucket(), channels: {}, by_channel: {} });
 const byCompany = {};
 for (const c of companies) {
@@ -123,8 +123,9 @@ const addPost = (agg, p) => {
   const rate = num(p.engagementRate);
   const views = num(p.views) || num(p.youtubeViews) || num(p.tiktokViews) || num(p.facebookPostViews) || 0;
   const impressions = num(p.estimatedImpressions);
-  const reach = num(p.presenceReach);
-  agg.engagement_sum += engagement; agg.engagement_rate_sum += rate; agg.views_total += views; agg.impressions_total += impressions; agg.reach_total += reach;
+  // RivalIQ presenceReach is follower count near publication, not post reach.
+  const followers_at_publication = pick(p, "presenceReach");
+  agg.engagement_sum += engagement; agg.engagement_rate_sum += rate; agg.views_total += views; agg.impressions_total += impressions;
   const created = p.publishedAt || p.published_at || p.created || p.created_at || p.date;
   if (created) { const d = new Date(created); if (!isNaN(d)) { const wd = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getUTCDay()]; agg.by_weekday[wd] = (agg.by_weekday[wd] || 0) + 1; const hr = String(d.getUTCHours()); agg.by_hour[hr] = (agg.by_hour[hr] || 0) + 1; } }
   const text = clean(p.message || p.text || p.caption || p.content || "");
@@ -133,7 +134,7 @@ const addPost = (agg, p) => {
   agg.media_types[mtype] = (agg.media_types[mtype] || 0) + 1;
   const channel = p.channel || p.network || p.platform || "unknown";
   if (agg.channels) agg.channels[channel] = (agg.channels[channel] || 0) + 1;
-  agg.top_posts.push({ engagement, engagement_rate: rate, est_impressions: impressions, reach, views, applause: num(p.applause), conversation: num(p.conversation), amplification: num(p.amplification), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null });
+  agg.top_posts.push({ engagement, engagement_rate: rate, est_impressions: impressions, followers_at_publication, views, applause: num(p.applause), conversation: num(p.conversation), amplification: num(p.amplification), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null });
   return channel;
 };
 for (const p of posts) {
@@ -162,9 +163,24 @@ const companiesOut = Object.values(byCompany).map((c) => {
   c.channel_mix = topN(c.channels, 8); delete c.channels;
   for (const ch of Object.keys(c.by_channel)) finalize(c.by_channel[ch]);
   c.rivaliq_metrics = metricsFor(String(c.company_id));
+  // Use the provider's aggregation, not a differently weighted mean of posts.
+  const applyProvider = (b, metrics) => {
+    if (!metrics) return;
+    const value = key => metrics[key]?.current;
+    if (value('rate') != null) b.engagement_rate_avg = value('rate');
+    if (value('engagement') != null && b.post_count) b.engagement_avg = value('engagement') / b.post_count;
+    if (value('impressions') != null) {
+      b.impressions_total = value('impressions');
+      b.impressions_avg = b.post_count ? value('impressions') / b.post_count : 0;
+    }
+  };
+  if (c.rivaliq_metrics) {
+    applyProvider(c, { ...c.rivaliq_metrics, rate: c.rivaliq_metrics.engagement_rate_per_post, impressions: c.rivaliq_metrics.estimated_impressions });
+    for (const [channel, b] of Object.entries(c.by_channel)) applyProvider(b, c.rivaliq_metrics.by_network[channel === 'x' ? 'twitter' : channel]);
+  }
   return c;
 });
 const allTop = companiesOut.flatMap((c) => c.top_posts.map((p) => ({ company: c.name, ...p })));
 const note = posts.length === 0 ? "RivalIQ returned zero posts for this landscape and period." : (truncatedPages > 0 ? (truncatedPages + " weekly window" + (truncatedPages === 1 ? "" : "s") + " hit RivalIQ's 500-post page limit, so some posts in the period may be missing.") : "");
 const metricsAvailable = mRows.length > 0;
-return [{ json: { client_name: cfg.client_name, landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by }, period: { start: cfg.range_start, end: cfg.range_end, days }, total_posts_analyzed: posts.length, metrics_available: metricsAvailable, metrics_note: metricsAvailable ? "" : "RivalIQ period metrics (followers, engagement, impressions) were not returned for this run.", companies: companiesOut, example_post_pool: allTop.map((p) => ({ company: p.company, url: p.url, channel: p.channel, engagement: p.engagement })), suppressed_insights: suppressed, schema_note: note } }];
+return [{ json: { metric_semantics_version: 2, metric_scope: "posts_published_in_period_at_collection", client_name: cfg.client_name, landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by }, period: { start: cfg.range_start, end: cfg.range_end, days }, total_posts_analyzed: posts.length, metrics_available: metricsAvailable, metrics_note: metricsAvailable ? "" : "RivalIQ period metrics (followers, engagement, impressions) were not returned for this run.", companies: companiesOut, example_post_pool: allTop.map((p) => ({ company: p.company, url: p.url, channel: p.channel, engagement: p.engagement })), suppressed_insights: suppressed, schema_note: note } }];

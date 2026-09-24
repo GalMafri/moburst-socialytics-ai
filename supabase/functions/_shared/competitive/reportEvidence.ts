@@ -41,9 +41,27 @@ export function competitiveReportQuality(input: unknown): { ready: boolean; reas
   if (Number(report?.totals?.windows_failed) > 0) reasons.push("Some reporting windows did not load.");
   if (Number(report?.totals?.truncated_pages) > 0) reasons.push("Some reporting windows exceeded the retrieval limit.");
   for (const c of report?.aggregates?.companies || []) {
+    if (report?.aggregates?.metrics_available === true && !c.rivaliq_metrics) reasons.push(`${c.name}: provider metrics are missing.`);
+    for (const [network, metrics] of Object.entries(c.rivaliq_metrics?.by_network || {}) as [string, any][]) {
+      const count = c.by_channel?.[network]?.post_count ?? (network === 'twitter' ? c.by_channel?.x?.post_count : undefined) ?? 0;
+      if (Number.isFinite(metrics.posts?.current) && count !== metrics.posts.current) reasons.push(`${c.name} / ${network}: ${count} dated posts; ${metrics.posts.current} provider period total.`);
+    }
     const observed = c.post_count, total = c.rivaliq_metrics?.posts?.current;
     if (Number.isFinite(observed) && Number.isFinite(total) && observed !== total) {
       reasons.push(`${c.name}: ${observed} dated posts; ${total} provider period total.`);
+    }
+  }
+  // Older narratives may quote the incorrect post-mean rate or summed
+  // follower count as reach. Correcting tiles alone would leave contradictory prose.
+  if (report?.ai_analysis && report?.aggregates?.metric_semantics_version !== 2) {
+    const companies = report?.aggregates?.companies || [];
+    if (companies.some((c: any) => Number.isFinite(c.engagement_rate_avg) &&
+      Number.isFinite(c.rivaliq_metrics?.engagement_rate_per_post?.current) &&
+      Math.abs(c.engagement_rate_avg - c.rivaliq_metrics.engagement_rate_per_post.current) > 0.000051)) {
+      reasons.push("Narrative needs regeneration using provider engagement rates.");
+    }
+    if (companies.some((c: any) => c.reach_total > 0) && /\breach\b/i.test(JSON.stringify(report.ai_analysis))) {
+      reasons.push("Narrative needs regeneration with follower counts distinguished from reach.");
     }
   }
   if (report?.quality_check?.state === "needs_review" && !reasons.length) {

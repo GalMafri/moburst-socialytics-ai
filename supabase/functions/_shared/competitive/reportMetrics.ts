@@ -1,8 +1,10 @@
 type Numeric = number | null | undefined;
+type ProviderMetric = { current?: Numeric };
+type ProviderNetwork = { rate?: ProviderMetric; engagement?: ProviderMetric; impressions?: ProviderMetric };
 type Company = {
   is_client?: boolean; post_count?: number; engagement_total?: number; engagement_sum?: number; impressions_total?: number;
   cadence_per_week?: number; by_channel?: Record<string, { post_count?: number; cadence_per_week?: number }>;
-  rivaliq_metrics?: { audience?: { current?: Numeric }; engagement?: { current?: Numeric }; estimated_impressions?: { current?: Numeric } };
+  rivaliq_metrics?: { audience?: { current?: Numeric }; engagement?: { current?: Numeric }; estimated_impressions?: ProviderMetric; engagement_rate_per_post?: ProviderMetric; by_network?: Record<string, ProviderNetwork> };
 };
 export type Dimension = { dimension: string; unit: string; client: number; competitor_avg: number; competitor_count: number };
 
@@ -43,11 +45,17 @@ export function normalizedCompetitiveMetrics<T>(input: T): T & MetricReport {
   const report = (input && typeof input === "object" ? input : {}) as MetricReport;
   const period = report.period || report.aggregates?.period;
   const days = inclusiveDays(period?.start, period?.end);
+  const providerValues = (posts: number | undefined, metrics?: ProviderNetwork) => ({
+    ...(valid(metrics?.rate?.current) ? { engagement_rate_avg: metrics.rate.current } : {}),
+    ...(posts && valid(metrics?.engagement?.current) ? { engagement_avg: metrics.engagement.current / posts } : {}),
+    ...(valid(metrics?.impressions?.current) ? { impressions_total: metrics.impressions.current, impressions_avg: posts ? metrics.impressions.current / posts : 0 } : {}),
+  });
   const companies = (report.aggregates?.companies || []).map((c) => ({
     ...c,
+    ...providerValues(c.post_count, { ...c.rivaliq_metrics, rate: c.rivaliq_metrics?.engagement_rate_per_post, impressions: c.rivaliq_metrics?.estimated_impressions }),
     ...(days ? { cadence_per_week: Math.round((c.post_count || 0) / days * 70) / 10 } : {}),
     by_channel: Object.fromEntries(Object.entries(c.by_channel || {}).map(([key, b]) => [key, {
-      ...b, ...(days ? { cadence_per_week: Math.round((b.post_count || 0) / days * 70) / 10 } : {}),
+      ...b, ...providerValues(b.post_count, c.rivaliq_metrics?.by_network?.[key === 'x' ? 'twitter' : key]), ...(days ? { cadence_per_week: Math.round((b.post_count || 0) / days * 70) / 10 } : {}),
     }])),
   }));
   return {
