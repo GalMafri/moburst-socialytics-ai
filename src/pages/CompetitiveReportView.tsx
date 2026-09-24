@@ -11,7 +11,7 @@ import { withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/
 import { useMemo, useRef, useState } from "react";
 import { canRetry, retryLabel } from "@/lib/reportRun";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, formatPercentChange } from "@/components/ui/stat-card";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -172,7 +172,7 @@ function TileNote({ label, text }: { label: string; text: string }) {
 }
 
 const deltaPct = (v: Both | null | undefined): number | null => (v && v.current != null && v.previous != null && v.previous > 0 ? ((v.current - v.previous) / v.previous) * 100 : null);
-const fmtDelta = (pctChange: number) => `${pctChange > 0 ? "+" : pctChange < 0 ? "-" : ""}${Math.abs(pctChange) >= 100 ? Math.round(Math.abs(pctChange)) : Math.abs(pctChange).toFixed(1).replace(/\.0$/, "")}%`;
+const fmtDelta = formatPercentChange;
 
 /**
  * A period total with its change against the previous period.

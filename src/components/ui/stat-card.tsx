@@ -12,9 +12,9 @@ export type StatDelta = {
   previous?: string;
 };
 
-function formatPercent(pct: number): string {
+export function formatPercentChange(pct: number): string {
   const abs = Math.abs(pct);
-  const body = abs >= 100 ? Math.round(abs).toString() : abs.toFixed(1).replace(/\.0$/, "");
+  const body = abs > 0 && abs < 0.1 ? Number(abs.toPrecision(2)).toString() : abs >= 100 ? Math.round(abs).toString() : abs.toFixed(1).replace(/\.0$/, "");
   return `${pct > 0 ? "+" : pct < 0 ? "-" : ""}${body}%`;
 }
 
@@ -55,7 +55,7 @@ export function StatCard({
             {pct != null && DeltaIcon && (
               <span className={cn("inline-flex items-center gap-1 t-label font-semibold", tone)}>
                 <DeltaIcon className="h-3.5 w-3.5" />
-                {formatPercent(pct)}
+                {formatPercentChange(pct)}
                 {delta?.label ? ` ${delta.label}` : ""}
               </span>
             )}
