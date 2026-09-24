@@ -75,3 +75,16 @@ it('does not recommend copying a competitor with no observed posts', () => {
  expect(result.ai_analysis.winner_teardown).toEqual([{competitor:'GoldenRace',pattern:'Product demonstrations'}]);
  expect(report.ai_analysis.winner_teardown).toHaveLength(2);
 });
+
+it('accepts provider totals independently of sample size only under the new period-validated policy', () => {
+ const report={aggregates:{metric_semantics_version:3,metrics_available:true,period:{start:'2026-08-25',end:'2026-09-23'},companies:[{name:'LegaBot',post_count:52,observed_post_count:54,rivaliq_metrics:{period:{start:'2026-08-25',end:'2026-09-23'},posts:{current:52},by_network:{instagram:{posts:{current:47}}}},by_channel:{instagram:{post_count:47,observed_post_count:49}}}]}};
+ expect(competitiveReportQuality(report).ready).toBe(true);
+ const wrong=structuredClone(report);wrong.aggregates.companies[0].rivaliq_metrics.period.start='2026-08-24';
+ expect(competitiveReportQuality(wrong).ready).toBe(false);
+ expect(competitiveReportQuality({...report,totals:{windows_failed:1}}).ready).toBe(false);
+ expect(competitiveReportQuality({...report,quality_check:{state:'needs_review',reasons:['Previously held; needs regeneration']}}).ready).toBe(false);
+});
+it('does not infer content strategy from provider counts without sampled posts', () => {
+ const report={aggregates:{companies:[{name:'Kiron',post_count:10,observed_post_count:0}]},ai_analysis:{winner_teardown:[{competitor:'Kiron',pattern:'Invented'}]}};
+ expect(withCompetitiveEvidenceLimits(report).ai_analysis.winner_teardown).toEqual([]);
+});

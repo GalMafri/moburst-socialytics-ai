@@ -6,7 +6,7 @@ export function sourceCompetitiveSummary(report: Record<string, any>): string | 
   const companies = report.aggregates?.companies || [];
   const client = companies.find((c: any) => c.is_client);
   const m = client?.rivaliq_metrics;
-  if (!client?.post_count || !m || report.aggregates?.metric_semantics_version !== 2) return null;
+  if (!client?.post_count || !m || !(report.aggregates?.metric_semantics_version >= 2)) return null;
   const valid = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
   const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 1 });
   const rate = (n: number) => `${(n * 100).toFixed(2)}%`;
@@ -27,7 +27,7 @@ export function withCompetitiveEvidenceLimits<T>(input: T): T {
   const report = summary ? { ...source, ai_analysis: { ...source.ai_analysis, executive_summary: summary } } : source;
   const companies = report.aggregates?.companies;
   if (!Array.isArray(companies)) return input;
-  const empty = companies.filter(c => c.post_count === 0);
+  const empty = companies.filter(c => (c.observed_post_count ?? c.post_count) === 0);
   const mismatches = companies.filter(c => Number.isFinite(c.post_count) &&
     Number.isFinite(c.rivaliq_metrics?.posts?.current) && c.post_count !== c.rivaliq_metrics.posts.current);
   if (!empty.length && !mismatches.length) return report as T;
@@ -64,20 +64,27 @@ export function competitiveReportQuality(input: unknown): { ready: boolean; reas
   if (report?.aggregates?.metrics_available === false) reasons.push("Provider period metrics did not load.");
   if (Number(report?.totals?.windows_failed) > 0) reasons.push("Some reporting windows did not load.");
   if (Number(report?.totals?.truncated_pages) > 0) reasons.push("Some reporting windows exceeded the retrieval limit.");
+  const authoritative = report?.aggregates?.metric_semantics_version >= 3;
+  const period = report?.period || report?.aggregates?.period;
   for (const c of report?.aggregates?.companies || []) {
+    if (authoritative) {
+      const sourcePeriod = c.rivaliq_metrics?.period;
+      if (!period?.start || !period?.end || sourcePeriod?.start !== period.start || sourcePeriod?.end !== period.end) reasons.push(`${c.name}: provider metrics do not match the report period.`);
+      if (!Number.isFinite(c.rivaliq_metrics?.posts?.current) || c.rivaliq_metrics.posts.current < 0) reasons.push(`${c.name}: provider post total is unavailable.`);
+    }
     if (report?.aggregates?.metrics_available === true && !c.rivaliq_metrics) reasons.push(`${c.name}: provider metrics are missing.`);
     for (const [network, metrics] of Object.entries(c.rivaliq_metrics?.by_network || {}) as [string, any][]) {
       const count = c.by_channel?.[network]?.post_count ?? (network === 'twitter' ? c.by_channel?.x?.post_count : undefined) ?? 0;
-      if (Number.isFinite(metrics.posts?.current) && count !== metrics.posts.current) reasons.push(`${c.name} / ${network}: ${count} dated posts; ${metrics.posts.current} provider period total.`);
+      if (!authoritative && Number.isFinite(metrics.posts?.current) && count !== metrics.posts.current) reasons.push(`${c.name} / ${network}: ${count} dated posts; ${metrics.posts.current} provider period total.`);
     }
     const observed = c.post_count, total = c.rivaliq_metrics?.posts?.current;
-    if (Number.isFinite(observed) && Number.isFinite(total) && observed !== total) {
+    if (!authoritative && Number.isFinite(observed) && Number.isFinite(total) && observed !== total) {
       reasons.push(`${c.name}: ${observed} dated posts; ${total} provider period total.`);
     }
   }
   // Older narratives may quote the incorrect post-mean rate or summed
   // follower count as reach. Correcting tiles alone would leave contradictory prose.
-  if (report?.ai_analysis && report?.aggregates?.metric_semantics_version !== 2) {
+  if (report?.ai_analysis && !(report?.aggregates?.metric_semantics_version >= 2)) {
     const companies = report?.aggregates?.companies || [];
     if (companies.some((c: any) => Number.isFinite(c.engagement_rate_avg) &&
       Number.isFinite(c.rivaliq_metrics?.engagement_rate_per_post?.current) &&

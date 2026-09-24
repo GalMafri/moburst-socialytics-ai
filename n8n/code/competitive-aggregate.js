@@ -3,7 +3,7 @@ const landscape = $("Resolve Landscape").first().json;
 const companiesResp = $("Landscape Companies").first().json;
 const postsResp = $input.first().json;
 // RivalIQ's own period metrics: this period, the previous period of equal length, and the daily series.
-// Optional: a failed metrics call leaves rivaliq_metrics null and the run continues on posts alone.
+// Provider period metrics are authoritative; the callback withholds missing metrics.
 const safeJson = (name) => { try { const j = $(name).first().json; return j && typeof j === "object" ? j : {}; } catch (e) { return {}; } };
 const metricsResp = safeJson("Landscape Metrics Summary");
 const metricsPrevResp = safeJson("Landscape Metrics Summary Previous");
@@ -167,17 +167,22 @@ const companiesOut = Object.values(byCompany).map((c) => {
   c.rivaliq_metrics = metricsFor(String(c.company_id));
   // Use the provider's aggregation, not a differently weighted mean of posts.
   const applyProvider = (b, metrics) => {
+    b.observed_post_count = b.post_count;
     if (!metrics) return;
     const value = key => metrics[key]?.current;
-    if (value('rate') != null) b.engagement_rate_avg = value('rate');
-    if (value('engagement') != null && b.post_count) b.engagement_avg = value('engagement') / b.post_count;
-    if (value('impressions') != null) {
-      b.impressions_total = value('impressions');
-      b.impressions_avg = b.post_count ? value('impressions') / b.post_count : 0;
-    }
+    if (value('posts') != null) b.post_count = value('posts');
+    b.cadence_per_week = Math.round(b.post_count / days * 70) / 10;
+    b.engagement_rate_avg = value('rate') ?? null;
+    b.engagement_avg = value('engagement') != null && b.post_count ? value('engagement') / b.post_count : null;
+    b.impressions_total = value('impressions') ?? null;
+    b.impressions_avg = value('impressions') != null && b.post_count ? value('impressions') / b.post_count : null;
   };
   if (c.rivaliq_metrics) {
     applyProvider(c, { ...c.rivaliq_metrics, rate: c.rivaliq_metrics.engagement_rate_per_post, impressions: c.rivaliq_metrics.estimated_impressions });
+    for (const network of Object.keys(c.rivaliq_metrics.by_network)) {
+      const key = network === 'twitter' && c.by_channel.x ? 'x' : network;
+      if (!c.by_channel[key]) c.by_channel[key] = finalize(bucket());
+    }
     for (const [channel, b] of Object.entries(c.by_channel)) applyProvider(b, c.rivaliq_metrics.by_network[channel === 'x' ? 'twitter' : channel]);
   }
   return c;
@@ -185,4 +190,4 @@ const companiesOut = Object.values(byCompany).map((c) => {
 const allTop = companiesOut.flatMap((c) => c.top_posts.map((p) => ({ company: c.name, ...p })));
 const note = posts.length === 0 ? "RivalIQ returned zero posts for this landscape and period." : (truncatedPages > 0 ? (truncatedPages + " weekly window" + (truncatedPages === 1 ? "" : "s") + " hit RivalIQ's 500-post page limit, so some posts in the period may be missing.") : "");
 const metricsAvailable = mRows.length > 0;
-return [{ json: { metric_semantics_version: 2, metric_scope: "posts_published_in_period_at_collection", client_name: cfg.client_name, landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by }, period: { start: cfg.range_start, end: cfg.range_end, days }, total_posts_analyzed: posts.length, metrics_available: metricsAvailable, metrics_note: metricsAvailable ? "" : "RivalIQ period metrics (followers, engagement, impressions) were not returned for this run.", companies: companiesOut, example_post_pool: allTop.map((p) => ({ company: p.company, url: p.url, channel: p.channel, engagement: p.engagement })), suppressed_insights: suppressed, schema_note: note } }];
+return [{ json: { metric_semantics_version: 3, metric_scope: "rivaliq_period_totals_with_separate_post_sample", client_name: cfg.client_name, landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by }, period: { start: cfg.range_start, end: cfg.range_end, days }, total_posts_analyzed: posts.length, metrics_available: metricsAvailable, metrics_note: metricsAvailable ? "" : "RivalIQ period metrics (followers, engagement, impressions) were not returned for this run.", companies: companiesOut, example_post_pool: allTop.map((p) => ({ company: p.company, url: p.url, channel: p.channel, engagement: p.engagement })), suppressed_insights: suppressed, schema_note: note } }];

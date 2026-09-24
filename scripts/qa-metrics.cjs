@@ -20,7 +20,11 @@ function runCompetitive(overrides={}){
 check('follower counts never become reach and provider rates override differently weighted post means',()=>{
  const r=runCompetitive({input:{socialPosts:[{companyId:1,postId:'1',publishedAt:'2026-08-01',channel:'instagram',presenceReach:1000,engagementRate:0.05,engagementTotal:10},{companyId:1,postId:'2',publishedAt:'2026-08-31',channel:'instagram',presenceReach:1000,engagementRate:0.01,engagementTotal:20}]},'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelAverageEngagementRatePerPost:0.002,crossChannelSocialEngagement:30,instagramAverageEngagementRatePerPost:0.004,instagramPostsEngagementTotal:30}]}});
  const c=r.companies[0];assert.equal(c.reach_total,undefined);assert.equal(c.top_posts[0].reach,undefined);assert.equal(c.top_posts[0].followers_at_publication,1000);
- assert.equal(c.engagement_rate_avg,0.002);assert.equal(c.by_channel.instagram.engagement_rate_avg,0.004);assert.equal(c.engagement_avg,15);assert.equal(r.metric_semantics_version,2);
+ assert.equal(c.engagement_rate_avg,0.002);assert.equal(c.by_channel.instagram.engagement_rate_avg,0.004);assert.equal(c.engagement_avg,15);assert.equal(r.metric_semantics_version,3);
+});
+check('RivalIQ period counts drive totals and averages independently of content samples',()=>{
+ const r=runCompetitive({input:{socialPosts:[{companyId:1,postId:'a',publishedAt:'2026-08-10',channel:'instagram'}]},'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelSocialActivity:52,crossChannelSocialEngagement:6950,instagramPosts:47,instagramPostsEngagementTotal:6610,tikTokPosts:5}]}});
+ const c=r.companies[0];assert.equal(c.post_count,52);assert.equal(c.observed_post_count,1);assert.equal(c.engagement_avg,6950/52);assert.equal(c.by_channel.instagram.post_count,47);assert.equal(c.by_channel.instagram.engagement_avg,6610/47);assert.equal(c.by_channel.tiktok.post_count,5);assert.equal(c.by_channel.tiktok.observed_post_count,0);assert.equal(r.total_posts_analyzed,1);
 });
 check('RivalIQ includes end date, excludes next date, deduplicates posts',()=>assert.equal(runCompetitive().total_posts_analyzed,1));
 check('X native IDs recover dates and respect the requested period without fabricating content',()=>{

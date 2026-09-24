@@ -46,3 +46,5 @@ EVIDENCE AND METRIC RULES — these override any stylistic request above.
 - All per-platform statements must use that platform's by_channel or by_network data. Do not use cross-platform top-post examples as evidence of a specific platform's creative pattern.
 - With fewer than 5 client posts, explicitly treat content findings as a small observed sample; propose limited experiments, not a comprehensive assessment of the client's strategy.
 - Return an empty design_look string when visual evidence is unavailable. Do not insert diagnostic prose into this field.
+
+Metric authority: RivalIQ period metrics are the source of truth for totals, averages, cadence and share of voice. post_count is the provider period total; observed_post_count is the separately retrieved content sample and may differ because the endpoints bucket dates differently. Never replace provider totals with sample counts. Hashtags, formats, publication hours and content examples describe only analyzed posts. Do not claim a complete posting census or infer absence of a strategy from a missing sample. Do not quote sampled counts as period totals.

@@ -607,7 +607,7 @@ export default function CompetitiveReportView() {
             {meM?.audience && (
               <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across networks, per RivalIQ" : `on ${platformLabel(effectivePlat)}, per RivalIQ`} />
             )}
-            <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} observed posts`} />
+            <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} tracked posts`} />
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`set avg ${avgCadence.toFixed(1)}/wk`} />
             <Kpi label="Engagement rate" value={meB.post_count ? pct(meB.engagement_rate_avg) : "Not available"} sub={`active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`} />
             <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`active peers avg ${fmt(avg((b) => b.engagement_avg))}`} />
@@ -727,11 +727,11 @@ export default function CompetitiveReportView() {
                       {effectivePlat === "all" && (c.channel_mix || []).length > 0 && (
                         <div data-print="hide" className="space-y-2">
                           <p className="t-label">Filter report by platform</p>
-                          <div className="flex flex-wrap gap-2">{(c.channel_mix || []).map((m) => <Button key={m.key} variant="outline" size="sm" onClick={() => setPlat(normalizePlatform(m.key))}>{platformLabel(m.key)} · {m.count} {m.count === 1 ? "post" : "posts"}</Button>)}</div>
+                          <div className="flex flex-wrap gap-2">{(c.channel_mix || []).map((m) => <Button key={m.key} variant="outline" size="sm" onClick={() => setPlat(normalizePlatform(m.key))}>{platformLabel(m.key)} · {m.count} analyzed</Button>)}</div>
                         </div>
                       )}
                       {(b.media_type_mix || []).length > 0 && (
-                        <div><p className="t-label mb-1">Post formats</p><p className="t-secondary">{b.media_type_mix.slice(0, 4).map(m => `${m.key}: ${m.count}`).join(" · ")}</p></div>
+                        <div><p className="t-label mb-1">Formats in analyzed posts</p><p className="t-secondary">{b.media_type_mix.slice(0, 4).map(m => `${m.key}: ${m.count}`).join(" · ")}</p></div>
                       )}
                       {(b.top_posts || []).some(hasContent) && <Button asChild size="sm" variant="outline"><a href={`#company-posts-${c.company_id}`}>View {displayCompanyName(c.name)} posts</a></Button>}
                       {platformNote && (
