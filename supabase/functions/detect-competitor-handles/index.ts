@@ -16,6 +16,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { extractSocialHandles, extractIndexedProfiles, mergeHandles, type DetectedHandle } from "../_shared/competitive/extractSocialHandles.ts";
 
+import { fetchWithRateLimitRetry } from "../_shared/competitive/fetchWithRateLimitRetry.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -66,12 +68,12 @@ async function fetchRendered(url: string): Promise<SiteRead> {
     return { html: "", ok: false, warning: "Rendered website lookup is not configured." };
   }
   try {
-    const fcResp = await fetch("https://api.firecrawl.dev/v1/scrape", {
+    const fcResp = await fetchWithRateLimitRetry("https://api.firecrawl.dev/v1/scrape", {
       method: "POST",
-      signal: AbortSignal.timeout(25000),
+
       headers: { Authorization: `Bearer ${firecrawlKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ url, formats: ["rawHtml", "links"], onlyMainContent: false, waitFor: 4000, timeout: 20000 }),
-    });
+    }, 25000);
     if (!fcResp.ok) {
       console.log(`[detect] firecrawl ${fcResp.status} for ${url}: ${(await fcResp.text().catch(() => "")).slice(0, 200)}`);
       return { html: "", ok: false, warning: `Rendered website lookup returned HTTP ${fcResp.status}.` };
@@ -110,11 +112,11 @@ async function searchProfiles(name: string): Promise<{ handles: DetectedHandle[]
   const key = Deno.env.get("FIRECRAWL_API_KEY");
   if (!key) return { handles: [], ok: false };
   try {
-    const response = await fetch("https://api.firecrawl.dev/v1/search", {
-      method: "POST", signal: AbortSignal.timeout(20000),
+    const response = await fetchWithRateLimitRetry("https://api.firecrawl.dev/v1/search", {
+      method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ query: `"${name.replace(/["\r\n]/g, ' ')}" (site:instagram.com OR site:facebook.com OR site:linkedin.com OR site:youtube.com OR site:tiktok.com OR site:x.com)`, limit: 10 }),
-    });
+    }, 20000);
     if (!response.ok) return { handles: [], ok: false };
     const data = await response.json();
     return { handles: extractIndexedProfiles(Array.isArray(data.data) ? data.data : data.data?.web || [], name), ok: data.success !== false };
