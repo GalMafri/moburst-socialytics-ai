@@ -13,6 +13,22 @@ function captureExport() {
 afterEach(() => { document.body.innerHTML = ""; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("PDF export content preservation", () => {
+  it("keeps bullet markers beside prose and chart legend icons at icon size", async () => {
+    const capture = captureExport();
+    const root = document.createElement('div');
+    root.innerHTML = '<ul><li class="flex"><span>•</span><span>Complete recommendation text</span></li></ul><div class="recharts-wrapper"><svg class="recharts-surface"></svg><div class="recharts-legend-wrapper"><span class="recharts-legend-item"><svg class="recharts-surface"></svg>Engagement</span></div></div>';
+    await exportReportToPdf({ contentRef: { current: root }, filename: 'legend' });
+    const printed = capture.document();
+    const style = document.createElement('style'); style.textContent = printed.querySelector('style')!.textContent;
+    document.head.append(style);
+    const content = document.importNode(printed.querySelector('.pdf-root')!, true); document.body.append(content);
+    expect(getComputedStyle(content.querySelector('li')!).flexWrap).toBe('nowrap');
+    expect(getComputedStyle(content.querySelector('.recharts-legend-item svg')!).width).toBe('14px');
+    expect(getComputedStyle(content.querySelector('.recharts-wrapper > svg')!).width).toBe('100%');
+    expect(getComputedStyle(content.querySelector('.recharts-legend-wrapper')!).position).toBe('static');
+    expect(content.textContent).toContain('Complete recommendation text');
+    style.remove();
+  });
   it("includes inactive panels, preserves full prose, and restores the screen DOM", async () => {
     const capture = captureExport();
     const root = document.createElement("div");

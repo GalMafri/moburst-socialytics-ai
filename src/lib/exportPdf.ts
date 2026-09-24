@@ -432,9 +432,19 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       max-width: 100% !important;
       height: auto !important;
     }
-    .pdf-root svg.recharts-surface {
+    .pdf-root .recharts-wrapper > svg.recharts-surface {
       width: 100% !important;
       height: auto !important;
+    }
+    /* Legend symbols are also recharts-surface SVGs, not full charts. */
+    .pdf-root .recharts-legend-wrapper {
+      position: static !important;
+      width: auto !important;
+      transform: none !important;
+    }
+    .pdf-root .recharts-legend-item svg.recharts-surface {
+      width: 14px !important;
+      height: 14px !important;
     }
 
     .pdf-root a { color: #b9e045 !important; }
@@ -464,6 +474,9 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     .pdf-root .grid[data-pdf-data-grid] span { white-space: nowrap !important; font-size: 9px !important; overflow-wrap: normal; }
     .pdf-root .grid > *, .pdf-root .flex-col > * { margin-bottom: 12px; }
     .pdf-root .flex { flex-wrap: wrap; }
+    .pdf-root li.flex { flex-wrap: nowrap !important; align-items: flex-start; }
+    .pdf-root li.flex > :first-child { flex-shrink: 0; }
+    .pdf-root li.flex > :last-child { min-width: 0; }
     .pdf-root * { min-width: 0; }
     .pdf-root [class*="min-w-"], .pdf-root table { min-width: 0 !important; max-width: 100% !important; }
     .pdf-root [class*="max-h-"], .pdf-root [role="tabpanel"] { height: auto !important; max-height: none !important; }

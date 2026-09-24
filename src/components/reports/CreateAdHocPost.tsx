@@ -153,7 +153,7 @@ export function CreateAdHocPost({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" data-print="hide">
           <Plus className="h-4 w-4 mr-1" /> Create Post
         </Button>
       </DialogTrigger>
