@@ -1,3 +1,4 @@
+import { competitiveRangeError } from "../_shared/reports/competitiveRange.ts";
 // supabase/functions/run-report/index.ts
 //
 // Starts a report run, or starts a failed one again.
@@ -137,10 +138,17 @@ Deno.serve(async (req) => {
     }
 
     // Default range: the last 30 days, matching what the run pages offer.
+    if (kind === "competitive" && (!!range.start !== !!range.end)) return json({ error: "Choose both start and end dates." }, 400);
     if (!range.start || !range.end) {
       const end = new Date();
+      if (kind === "competitive") end.setUTCDate(end.getUTCDate() - 1);
       const start = new Date(end.getTime() - 29 * 86400000);
       range = { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+    }
+
+    if (kind === "competitive") {
+      const rangeError = competitiveRangeError(range);
+      if (rangeError) return json({ error: rangeError }, 400);
     }
 
     if (!retryId) {

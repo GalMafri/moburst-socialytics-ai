@@ -319,6 +319,7 @@ export default function CompetitiveReportView() {
   const meB = me ? bucketFor(me, effectivePlat) : null;
   const rivalBuckets = rivals.map((c) => ({ c, b: bucketFor(c, effectivePlat) }));
   const activeRivals = rivalBuckets.filter((x) => x.b.post_count > 0);
+  const avgCadence = rivalBuckets.length ? rivalBuckets.reduce((sum, x) => sum + x.b.cadence_per_week, 0) / rivalBuckets.length : 0;
   const avg = (f: (b: Bucket) => number) => (activeRivals.length ? activeRivals.reduce((s, x) => s + f(x.b), 0) / activeRivals.length : 0);
   const totalPosts = (meB?.post_count || 0) + rivalBuckets.reduce((s, x) => s + x.b.post_count, 0);
   const shareOfVoice = meB && totalPosts ? (meB.post_count / totalPosts) * 100 : null;
@@ -508,8 +509,8 @@ export default function CompetitiveReportView() {
     field: "Company comparison",
     audience: "Audience",
     rhythm: "Posting rhythm",
-    gaps: "Gaps",
-    wins: "What wins",
+    gaps: "Suggested tests",
+    wins: "Content examples",
     moodboards: "Mood boards",
     posts: "Top posts",
   };
@@ -611,9 +612,9 @@ export default function CompetitiveReportView() {
               <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across networks, per RivalIQ" : `on ${platformLabel(effectivePlat)}, per RivalIQ`} />
             )}
             <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} observed posts`} />
-            <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`set avg ${avg((b) => b.cadence_per_week).toFixed(1)}/wk`} />
-            <Kpi label="Engagement rate" value={meB.post_count ? pct(meB.engagement_rate_avg) : "Not available"} sub={`set avg ${pct(avg((b) => b.engagement_rate_avg))}`} />
-            <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`set avg ${fmt(avg((b) => b.engagement_avg))}`} />
+            <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`set avg ${avgCadence.toFixed(1)}/wk`} />
+            <Kpi label="Engagement rate" value={meB.post_count ? pct(meB.engagement_rate_avg) : "Not available"} sub={`active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`} />
+            <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`active peers avg ${fmt(avg((b) => b.engagement_avg))}`} />
           </div>
         )}
 
@@ -926,10 +927,10 @@ export default function CompetitiveReportView() {
             id="gaps"
             index={num("gaps")}
             style={{ order: orderOf("gaps") }}
-            title={<><Lightbulb className="h-5 w-5" /> Gaps {clientName} can fill</>}
+            title={<><Lightbulb className="h-5 w-5" /> Suggested tests for {clientName}</>}
             description={
               <span data-print={isMoburstStaff ? "hide" : undefined}>
-                {isMoburstStaff ? "Thumbs up sends a gap into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Opportunities your account team is reviewing."}
+                {isMoburstStaff ? "Proposed experiments; targets are goals to test. Thumbs up sends a suggestion into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Proposed experiments based on observed posts. Targets are goals to test."}
               </span>
             }
             action={
@@ -963,7 +964,7 @@ export default function CompetitiveReportView() {
                       {g.why_it_matters && <p className="t-body">{nameifyDomains(g.why_it_matters)}</p>}
                       {g.suggested_play && (
                         <div className="glass-accent p-3 t-body">
-                          <span className="font-semibold">The play: </span>{nameifyDomains(g.suggested_play)}
+                          <span className="font-semibold">Proposed test: </span>{nameifyDomains(g.suggested_play)}
                         </div>
                       )}
                       {isMoburstStaff && (
@@ -1004,7 +1005,7 @@ export default function CompetitiveReportView() {
         {/* Kept on screen when a filter empties it: a section that vanishes is
             its own kind of confusing, and the rail loses its place too. */}
         {(teardowns.length > 0 || (effectivePlat !== "all" && Array.isArray(ai.winner_teardown) && ai.winner_teardown.length > 0)) && (
-            <Section id="wins" index={num("wins")} style={{ order: orderOf("wins") }} title={<><Trophy className="h-5 w-5" /> What wins for them</>}
+            <Section id="wins" index={num("wins")} style={{ order: orderOf("wins") }} title={<><Trophy className="h-5 w-5" /> Competitor content examples</>}
             action={scopeTag(true)} description={<>The repeatable pattern behind each competitor's best posts, with the posts that prove it.</>}>
             <Card>
               <CardContent className={teardowns.length > 0 ? "pt-5 grid gap-4 md:grid-cols-3" : "pt-5"}>

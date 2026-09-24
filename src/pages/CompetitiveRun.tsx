@@ -1,3 +1,4 @@
+import { competitiveRangeError } from "../../supabase/functions/_shared/reports/competitiveRange";
 import { isReviewReadyHandle } from "../../supabase/functions/_shared/competitive/extractSocialHandles";
 import { useActiveReportRun } from "@/hooks/useActiveReportRun";
 import { ReportRunStatus } from "@/components/reports/ReportRunStatus";
@@ -31,7 +32,7 @@ import { Loading } from "@/components/ui/loading";
 import { LoadError } from "@/components/ui/load-error";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
-import { PRESET_LABELS, presetRange, isValidRange, rangeDays, formatRange, type RangePreset, type DateRange } from "@/lib/dateRange";
+import { PRESET_LABELS, presetRange, rangeDays, formatRange, type RangePreset, type DateRange } from "@/lib/dateRange";
 import { CheckCircle2, Clock, Crosshair, History, Loader2, Play, RefreshCw, XCircle } from "lucide-react";
 
 const STEPS = [
@@ -60,7 +61,8 @@ export default function CompetitiveRun() {
   const [preset, setPreset] = useState<RangePreset>("30d");
   const [custom, setCustom] = useState<DateRange>(() => presetRange("30d"));
   const range: DateRange = preset === "custom" ? custom : presetRange(preset);
-  const rangeOk = isValidRange(range) && rangeDays(range) <= 366;
+  const rangeError = competitiveRangeError(range);
+  const rangeOk = !rangeError;
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const runStartedAt = useRef(0);
@@ -207,7 +209,7 @@ export default function CompetitiveRun() {
   const runAnalysis = async () => {
     if (submitting.current || running || activeRun.data || !activeRun.isSuccess || activeRun.isFetching || !trackingState.ready || !profilesReady || setsFailed) return;
     if (!rangeOk) {
-      toast({ title: "Pick a valid period", description: "The end date must be on or after the start date, and the range at most one year.", variant: "destructive" });
+      toast({ title: "Pick a valid period", description: rangeError || "Choose a valid period.", variant: "destructive" });
       return;
     }
     submitting.current = true;
@@ -384,11 +386,11 @@ export default function CompetitiveRun() {
               <div className="flex items-end gap-3 flex-wrap">
                 <label className="t-secondary">
                   <span className="block mb-1">Start</span>
-                  <Input type="date" value={custom.start} max={custom.end} disabled={running} onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))} className="w-44" />
+                  <Input type="date" value={custom.start} max={custom.end < presetRange("7d").end ? custom.end : presetRange("7d").end} disabled={running} onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))} className="w-44" />
                 </label>
                 <label className="t-secondary">
                   <span className="block mb-1">End</span>
-                  <Input type="date" value={custom.end} min={custom.start} disabled={running} onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))} className="w-44" />
+                  <Input type="date" value={custom.end} min={custom.start} max={presetRange("7d").end} disabled={running} onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))} className="w-44" />
                 </label>
               </div>
             )}
@@ -396,7 +398,7 @@ export default function CompetitiveRun() {
               {rangeOk ? (
                 <>{formatRange(range)} · {rangeDays(range)} days of posts from every company in the landscape.</>
               ) : (
-                <span className="text-destructive">The end date must be on or after the start date, and the range at most one year.</span>
+                <span className="text-destructive">{rangeError}</span>
               )}
             </p>
           </CardContent>

@@ -53,3 +53,11 @@ it('distinguishes a failed selection request from having no confirmed selection'
 it('allows a ready competitive selection to run with the chosen period',async()=>{
  f.status='complete';f.invokes.mockResolvedValue({data:{report_id:'new',created_at:f.started},error:null});mount('competitive');await tick();await tick();const button=screen.getByRole('button',{name:'Run competitive analysis'});expect(button).toBeEnabled();fireEvent.click(button);await tick();expect(f.invokes).toHaveBeenCalledWith('run-report',expect.objectContaining({body:expect.objectContaining({kind:'competitive',client_id:'client',date_range_start:'2026-08-18',date_range_end:'2026-09-16'})}));
 });
+
+it('custom periods reject reversed/future dates and accept a single complete day',async()=>{
+ f.status='complete';mount('competitive');await tick();await tick();fireEvent.click(screen.getByRole('button',{name:'Custom'}));
+ const start=screen.getByLabelText('Start'),end=screen.getByLabelText('End'),run=screen.getByRole('button',{name:'Run competitive analysis'});
+ fireEvent.change(start,{target:{value:'2026-09-16'}});fireEvent.change(end,{target:{value:'2026-09-15'}});expect(run).toBeDisabled();
+ fireEvent.change(end,{target:{value:'2026-09-18'}});expect(run).toBeDisabled();
+ fireEvent.change(end,{target:{value:'2026-09-16'}});expect(run).toBeEnabled();expect(screen.getByText(/1 days of posts/)).toBeInTheDocument();expect(f.invokes).not.toHaveBeenCalled();
+});

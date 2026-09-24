@@ -62,3 +62,9 @@ it('holds a network mismatch even when cross-network counts cancel out, and miss
  expect(competitiveReportQuality({aggregates:{companies:[{name:'A',post_count:2,by_channel:{instagram:{post_count:2}},rivaliq_metrics:{posts:{current:2},by_network:{instagram:{posts:{current:1}},facebook:{posts:{current:1}}}}}]}}).reasons).toHaveLength(2);
  expect(competitiveReportQuality({aggregates:{metrics_available:true,companies:[{name:'A'}]}}).ready).toBe(false);
 });
+
+it('calculates the summary from provider metrics instead of preserving unsupported AI headline claims',()=>{
+ const input={aggregates:{metric_semantics_version:2,companies:[{name:'Client',is_client:true,post_count:2,rivaliq_metrics:{posts:{current:2,previous:4},engagement_rate_per_post:{current:0.0015,previous:0.002},audience:{current:1000,previous:990}}},{name:'Rival',post_count:3,rivaliq_metrics:{posts:{current:3}}}]},ai_analysis:{executive_summary:'Guaranteed reach lift of 25%'}};
+ const out=withCompetitiveEvidenceLimits(input);
+ expect(out.ai_analysis.executive_summary).toContain('0.15%');expect(out.ai_analysis.executive_summary).toContain('up 10');expect(out.ai_analysis.executive_summary).not.toContain('Guaranteed');expect(input.ai_analysis.executive_summary).toContain('Guaranteed');
+});

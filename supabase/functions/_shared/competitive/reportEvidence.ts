@@ -2,15 +2,35 @@
  * Provider totals remain unchanged, including explicit measured zeros. The raw
  * workflow output/snapshots remain the audit source; this is a derived view.
  */
+export function sourceCompetitiveSummary(report: Record<string, any>): string | null {
+  const companies = report.aggregates?.companies || [];
+  const client = companies.find((c: any) => c.is_client);
+  const m = client?.rivaliq_metrics;
+  if (!client?.post_count || !m || report.aggregates?.metric_semantics_version !== 2) return null;
+  const valid = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+  const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 1 });
+  const rate = (n: number) => `${(n * 100).toFixed(2)}%`;
+  const lines: string[] = [];
+  if (valid(m.posts?.current)) lines.push(`Publishing: ${fmt(m.posts.current)} tracked posts from ${client.name} in this period${valid(m.posts.previous) ? `, compared with ${fmt(m.posts.previous)} in the previous equal-length period` : ""}.`);
+  if (valid(m.engagement_rate_per_post?.current)) lines.push(`Engagement: ${rate(m.engagement_rate_per_post.current)} is ${client.name}'s average engagement rate per post${valid(m.engagement_rate_per_post.previous) ? `, versus ${rate(m.engagement_rate_per_post.previous)} previously` : ""}.`);
+  if (valid(m.audience?.current)) lines.push(`Audience: ${fmt(m.audience.current)} followers across tracked networks${valid(m.audience.previous) ? `, ${m.audience.current >= m.audience.previous ? "up" : "down"} ${fmt(Math.abs(m.audience.current - m.audience.previous))} from the previous period` : ""}.`);
+  const rivals = companies.filter((c: any) => !c.is_client && valid(c.rivaliq_metrics?.posts?.current));
+  const leader = [...rivals].sort((a: any, b: any) => b.rivaliq_metrics.posts.current - a.rivaliq_metrics.posts.current)[0];
+  if (leader) lines.push(`Peer activity: ${fmt(leader.rivaliq_metrics.posts.current)} tracked posts makes ${leader.name} ${rivals.length > 1 ? "a publishing-volume leader among the selected competitors" : "the selected publishing comparison"} for this period.`);
+  return lines.join("\n\n");
+}
+
 export function withCompetitiveEvidenceLimits<T>(input: T): T {
   if (!input || typeof input !== "object") return input;
-  const report = input as Record<string, any>;
+  const source = input as Record<string, any>;
+  const summary = sourceCompetitiveSummary(source);
+  const report = summary ? { ...source, ai_analysis: { ...source.ai_analysis, executive_summary: summary } } : source;
   const companies = report.aggregates?.companies;
   if (!Array.isArray(companies)) return input;
   const empty = companies.filter(c => c.post_count === 0);
   const mismatches = companies.filter(c => Number.isFinite(c.post_count) &&
     Number.isFinite(c.rivaliq_metrics?.posts?.current) && c.post_count !== c.rivaliq_metrics.posts.current);
-  if (!empty.length && !mismatches.length) return input;
+  if (!empty.length && !mismatches.length) return report as T;
   const names = new Set(empty.map(c => String(c.name || "").trim().toLowerCase()));
   const client = empty.find(c => c.is_client);
   // Coverage diagnostics belong to internal validation, never the report narrative.
