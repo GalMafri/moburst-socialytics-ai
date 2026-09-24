@@ -16,6 +16,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { buildCompetitivePayload, buildSocialPayload, isStuckRun, STUCK_AFTER_MINUTES, type ReportRange } from "../_shared/reports/payloads.ts";
 import { bestLandscapeMatch, summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
+import { rivalIqFetch } from "../_shared/competitive/rivaliqFetch.ts";
 import { isReviewReadyHandle } from "../_shared/competitive/extractSocialHandles.ts";
 
 const corsHeaders = {
@@ -233,7 +234,10 @@ Deno.serve(async (req) => {
       const rivaliqKey = Deno.env.get("RIVALIQ_API_KEY");
       if (rivaliqKey) {
         try {
-          const resp = await fetch(`https://api.rivaliq.com/v3/landscapes?apiKey=${encodeURIComponent(rivaliqKey)}`);
+          const resp = await rivalIqFetch(`https://api.rivaliq.com/v3/landscapes?apiKey=${encodeURIComponent(rivaliqKey)}`);
+          if (resp.status === 429) {
+            return json({ error: "RivalIQ cannot accept a new request yet. No report was started; please wait before trying again.", code: "RIVALIQ_BUSY" }, 429);
+          }
           if (resp.ok) {
             const listed = summarizeLandscapes(((await resp.json()).landscapes || []), client.name, client.website_url);
             const wanted = set.rivaliq_landscape_id

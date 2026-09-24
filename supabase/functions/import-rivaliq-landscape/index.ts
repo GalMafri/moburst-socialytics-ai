@@ -13,6 +13,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireStaff, AuthzError } from "../_shared/auth/requireStaff.ts";
 import { summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
+import { rivalIqFetch } from "../_shared/competitive/rivaliqFetch.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -39,7 +40,7 @@ Deno.serve(async (req) => {
       .from("clients").select("id, name, website_url").eq("id", client_id).maybeSingle();
     if (clientErr || !client) return jsonResp({ error: "Client not found" }, 404);
 
-    const resp = await fetch(`https://api.rivaliq.com/v3/landscapes?apiKey=${encodeURIComponent(apiKey)}`);
+    const resp = await rivalIqFetch(`https://api.rivaliq.com/v3/landscapes?apiKey=${encodeURIComponent(apiKey)}`);
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
       return jsonResp({ error: `RivalIQ ${resp.status}: ${text.slice(0, 200)}` }, 502);

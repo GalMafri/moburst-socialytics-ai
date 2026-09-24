@@ -9,6 +9,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { bestLandscapeMatch, summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
+import { rivalIqFetch } from "../_shared/competitive/rivaliqFetch.ts";
 import { harvestedPaths, type HarvestedRef } from "../_shared/design-prompts/designRefs.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
@@ -24,7 +25,7 @@ const slug = (s: string) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g,
 
 async function rivaliq(path: string, key: string) {
   const sep = path.includes("?") ? "&" : "?";
-  const r = await fetch(`${RIVALIQ}${path}${sep}apiKey=${encodeURIComponent(key)}`, { headers: { Accept: "application/json" } });
+  const r = await rivalIqFetch(`${RIVALIQ}${path}${sep}apiKey=${encodeURIComponent(key)}`, { headers: { Accept: "application/json" } });
   if (!r.ok) throw new Error(`RivalIQ ${path.split("?")[0]} failed [${r.status}]: ${(await r.text()).slice(0, 200)}`);
   return await r.json();
 }

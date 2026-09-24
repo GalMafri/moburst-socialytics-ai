@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { requireStaff, AuthzError } from '../_shared/auth/requireStaff.ts';
 import { advanceRivalIqSetup, publicCompanyUrl, type SetupPlan } from '../_shared/competitive/rivaliqSetup.ts';
+import { rivalIqFetch } from '../_shared/competitive/rivaliqFetch.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version' };
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -63,7 +64,7 @@ Deno.serve(async req => {
    if (error || !data) throw new Error('Could not save setup progress. Check its status before trying again.');
   };
   const api = async (path: string, method = 'GET', payload?: unknown) => {
-   const response = await fetch(`https://api.rivaliq.com/v3${path}?apiKey=${encodeURIComponent(key)}`, {
+   const response = await rivalIqFetch(`https://api.rivaliq.com/v3${path}?apiKey=${encodeURIComponent(key)}`, {
     method, headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     ...(payload ? { body: JSON.stringify(payload) } : {}), signal: AbortSignal.timeout(25000),
    });
