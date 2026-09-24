@@ -493,6 +493,9 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     .pdf-root img { max-width: 100% !important; max-height: 65mm !important; object-fit: contain !important; }
     .pdf-root [data-pdf-media] { aspect-ratio: auto !important; height: auto !important; min-height: 0 !important; max-height: 65mm !important; padding: 0 !important; break-inside: avoid; }
     .pdf-root [data-pdf-media] img, .pdf-root [data-pdf-media] video { position: static !important; display: block; width: auto !important; height: auto !important; max-width: 100% !important; max-height: 65mm !important; margin: 0 auto; object-fit: contain !important; }
+    .pdf-root [data-pdf-unit] [data-pdf-media],
+    .pdf-root [data-pdf-unit] [data-pdf-media] img,
+    .pdf-root [data-pdf-unit] [data-pdf-media] video { max-height: 38mm !important; }
     .pdf-root [data-pdf-media] button, .pdf-root [data-pdf-media] .absolute:not(img):not(video) { display: none !important; }
     .pdf-root .blur-2xl, .pdf-root .backdrop-blur, .pdf-root .backdrop-blur-sm { filter: none !important; backdrop-filter: none !important; }
     .pdf-root .recharts-wrapper { max-height: 95mm !important; }
