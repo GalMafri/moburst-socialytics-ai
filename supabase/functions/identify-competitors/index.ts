@@ -15,6 +15,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
+import { validateCompetitorWebsites } from "../_shared/competitive/validateCompetitorWebsites.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 
 const corsHeaders = {
@@ -34,6 +35,7 @@ async function fetchSiteText(websiteUrl: string): Promise<string> {
     const resp = await fetch(url, {
       headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" },
       redirect: "follow",
+      signal: AbortSignal.timeout(8000),
     });
     if (!resp.ok) return "";
     const html = await resp.text();
@@ -128,7 +130,7 @@ async function proposeCompetitors(args: {
               `Output exactly this JSON shape, nothing else:\n` +
               `{"competitors":[{"name":"...","website_url":"https://...","rationale":"one sentence on why this is a direct competitor","similarity_score":0.0}]}\n\n` +
               `similarity_score is 0..1 — how substitutable this competitor is for the client in a customer's eyes. ` +
-              `Sort by similarity_score descending. Real companies only; if you are not confident a company exists, leave it out.`,
+              `Sort by similarity_score descending. Real independent companies only; do not list a product division separately from its parent company. Use the official company website, never invent a domain. Return fewer candidates if necessary; if you are not confident a company exists, leave it out.`,
           },
           { role: "assistant", content: PREFILL },
         ],
@@ -217,7 +219,12 @@ Deno.serve(async (req) => {
 
     const siteText = client.website_url ? await fetchSiteText(client.website_url) : "";
 
-    const proposed = await proposeCompetitors({ anthropicKey, client, siteText });
+    const suggestions = await proposeCompetitors({ anthropicKey, client, siteText });
+    const { verified: proposed, rejected } = await validateCompetitorWebsites(suggestions, client.website_url);
+    if (proposed.length < 3) return jsonResp({
+      error: `Only ${proposed.length} proposed company websites could be checked. No new draft was created. Review the client brief or add verified companies manually.`,
+      rejected,
+    }, 422);
 
     // New draft set every run — history stays; the UI works on the newest set.
     const { data: set, error: setErr } = await supabase
@@ -242,7 +249,7 @@ Deno.serve(async (req) => {
       .select("*");
     if (compErr) throw new Error(`competitors insert: ${compErr.message}`);
 
-    return jsonResp({ set_id: set.id, competitors: inserted });
+    return jsonResp({ set_id: set.id, competitors: inserted, rejected });
   } catch (err: unknown) {
     if (err instanceof AuthzError) {
       return jsonResp({ error: err.message }, err.status);

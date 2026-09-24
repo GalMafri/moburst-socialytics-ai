@@ -10,7 +10,7 @@
 // The page always works on the client's NEWEST set. Re-running identification
 // creates a fresh draft set and leaves history behind (sets are cheap rows).
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RivalIqSetup } from "@/components/competitive/RivalIqSetup";
 import { CompetitiveSteps } from "@/components/competitive/CompetitiveSteps";
 import { describeSelection, describeTracking, pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
@@ -52,6 +52,7 @@ type CompetitorRow = {
   source: string;
   is_selected: boolean;
   selected_rank: number | null;
+  profile_detection?: { status: string; detail?: string; checked_at?: string } | null;
 };
 
 type HandleRow = {
@@ -120,7 +121,9 @@ export default function CompetitorReview() {
   const [identifying, setIdentifying] = useState(false);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   const [detecting, setDetecting] = useState(false);
-  const [detectingId, setDetectingId] = useState<string | null>(null);
+  const attemptedProfiles = useRef(new Set<string>());
+  const [profileChecks, setProfileChecks] = useState<Record<string, { state: string; detail?: string }>>({});
+  const [removingHandle, setRemovingHandle] = useState<HandleRow | null>(null);
   const [detectProgress, setDetectProgress] = useState<{ done: number; total: number } | null>(null);
   const [addingHandleFor, setAddingHandleFor] = useState<string | null>(null);
   const [newHandlePlatform, setNewHandlePlatform] = useState("instagram");
@@ -180,10 +183,11 @@ export default function CompetitorReview() {
       return data as CompetitorRow[];
     },
     enabled: !!currentSet?.id,
+    refetchInterval: query => (query.state.data || []).some(c => c.profile_detection?.status === "running") ? 5000 : false,
   });
 
-  const { data: handles } = useQuery({
-    queryKey: ["competitor-handles", currentSet?.id],
+  const { data: handles, isLoading: handlesLoading, isError: handlesFailed } = useQuery({
+    queryKey: ["competitor-handles", currentSet?.id, (competitors || []).map(c => c.id).sort().join(",")],
     queryFn: async () => {
       const ids = (competitors || []).map((c) => c.id);
       if (ids.length === 0) return [] as HandleRow[];
@@ -313,7 +317,9 @@ export default function CompetitorReview() {
         props: { proposed: data.competitors?.length },
       });
       refreshAll();
-      toast({ title: "Competitors identified", description: "Now detecting social handles…" });
+      toast({ title: "Competitors identified", description: data.rejected?.length
+        ? `${data.rejected.length} suggestions were excluded because their websites could not be validated or were duplicates. Finding profiles for the remaining companies…`
+        : "Finding social profiles automatically…" });
 
       // Detect handles ONE COMPETITOR PER CALL. A whole-set call scrapes up
       // to 12 third-party sites serially inside one edge request, and the
@@ -327,7 +333,7 @@ export default function CompetitorReview() {
           title: `${empty.length} of ${(data.competitors || []).length} still have no handles`,
           description: failures.length
             ? `Detection failed: ${failures[0]}`
-            : "Two passes found nothing on those sites. Add the handle by hand on the row.",
+            : "No profiles found on the checked company pages. Add a verified profile if one is available.",
           variant: failures.length ? "destructive" : undefined,
         });
       }
@@ -342,110 +348,44 @@ export default function CompetitorReview() {
     }
   };
 
-  /**
-   * Find handles for a whole set, in one go.
-   *
-   * Four at a time rather than one after another (twelve sites serially took
-   * minutes), and anything that comes back empty is tried once more before
-   * anyone is told about it: a site that was slow, rendering its footer in
-   * JavaScript, or refusing the first request usually answers the second.
-   * Nobody should have to press "look again" on a brand that plainly has
-   * social profiles.
-   */
-  const detectForAll = async (
-    comps: Array<{ id: string; name?: string }>,
-    opts: { refresh?: boolean } = {},
-  ): Promise<{ empty: string[]; failures: string[] }> => {
-    const BATCH = 4;
-    const runOne = async (id: string): Promise<{ id: string; found: number; failed?: string }> => {
-      try {
-        const { data, error } = await supabase.functions.invoke("detect-competitor-handles", {
-          body: { competitor_id: id, refresh: opts.refresh === true },
-        });
-        // A site with no links and a server that refused the call are not the
-        // same thing, and reporting both as "those sites have nothing" sent
-        // people hunting for handles that were never looked for.
-        if (error || data?.error) return { id, found: 0, failed: await describeInvokeError(error, data) };
-        return { id, found: (data?.results?.[0]?.detected || []).length };
-      } catch (e: any) {
-        return { id, found: 0, failed: e?.message || "The request did not complete." };
-      }
-    };
-
-    const sweep = async (ids: string[]) => {
-      const results: Array<{ id: string; found: number; failed?: string }> = [];
-      for (let i = 0; i < ids.length; i += BATCH) {
-        results.push(...(await Promise.all(ids.slice(i, i + BATCH).map(runOne))));
-        setDetectProgress({ done: Math.min(i + BATCH, ids.length), total: ids.length });
-        refreshAll();
-      }
-      return results;
-    };
-
-    const ids = comps.map((c) => c.id);
-    setDetectProgress({ done: 0, total: ids.length });
-    const first = await sweep(ids);
-    let last = first;
-    let empty = first.filter((r) => r.found === 0).map((r) => r.id);
-    if (empty.length > 0) {
-      // The second pass always refreshes: the first pass may have written
-      // nothing, and a gap-fill upsert would skip a site that now answers.
-      const second = await sweep(empty);
-      last = second;
-      empty = second.filter((r) => r.found === 0).map((r) => r.id);
-    }
-    setDetectProgress(null);
-    const failures = last.filter((r) => r.failed).map((r) => r.failed!);
-    return { empty, failures };
-  };
-
-  /**
-   * Look again for one competitor's handles.
-   *
-   * A row that says "no handles" is a dead end otherwise: the set-wide
-   * re-detect re-reads every site to fix the one that failed, and a site that
-   * was slow or rendering its footer in JavaScript the first time often
-   * answers on a second pass.
-   */
-  const detectOne = async (competitorId: string) => {
-    setDetectingId(competitorId);
+  const detectProfile = async (id: string, refresh = false) => {
+    attemptedProfiles.current.add(id);
+    setProfileChecks(prev => ({ ...prev, [id]: { state: "searching" } }));
     try {
       const { data, error } = await supabase.functions.invoke("detect-competitor-handles", {
-        body: { competitor_id: competitorId, refresh: true },
+        body: { competitor_id: id, refresh },
       });
       if (error || data?.error) throw new Error(await describeInvokeError(error, data));
-      refreshAll();
-      const found = (data?.results?.[0]?.detected || []).length;
-      toast({
-        title: found > 0 ? `Found ${found} handle${found === 1 ? "" : "s"}` : "Still nothing on that site",
-        description: found > 0 ? undefined : "Add the handle by hand below, or drop the competitor.",
-      });
-    } catch (err: any) {
-      toast({ title: "Detection failed", description: err.message, variant: "destructive" });
-    } finally {
-      setDetectingId(null);
-    }
+      if (data?.write_errors?.length) throw new Error("Profiles were found but could not be saved. Please try again.");
+      const result = data?.results?.[0];
+      const found = result?.detected?.length || 0;
+      const state = result?.status || (found ? "found" : "not_found");
+      const detail = result?.warnings?.join(" ");
+      setProfileChecks(prev => ({ ...prev, [id]: { state, detail } }));
+      return { id, found, failed: ["failed", "partial", "missing_website"].includes(state) ? detail || "The profile lookup did not complete." : undefined };
+    } catch (e: any) {
+      const detail = e?.message || "The request did not complete.";
+      setProfileChecks(prev => ({ ...prev, [id]: { state: "failed", detail } }));
+      return { id, found: 0, failed: detail };
+    } finally { refreshAll(); }
   };
 
-  const redetectHandles = async () => {
-    if (!currentSet || !competitors) return;
-    setDetecting(true);
-    try {
-      const { empty, failures } = await detectForAll(competitors, { refresh: true });
-      toast({
-        title: empty.length === 0 ? "Handles refreshed" : failures.length ? "Detection failed" : "Handles refreshed with gaps",
-        description: failures.length
-          ? failures[0]
-          : empty.length > 0
-            ? `${empty.length} site(s) gave nothing after two passes.`
-            : undefined,
-        variant: failures.length ? "destructive" : undefined,
-      });
-    } catch (err: any) {
-      toast({ title: "Detection failed", description: err.message, variant: "destructive" });
-    } finally {
-      setDetecting(false);
-    }
+  // A bounded worker pool updates each row immediately. A completed empty
+  // search is not blindly repeated; the user can retry all missing profiles.
+  const detectForAll = async (comps: Array<{ id: string; name?: string }>, opts: { refresh?: boolean } = {}) => {
+    setProfileChecks(prev => ({ ...prev, ...Object.fromEntries(comps.map(c => [c.id, { state: "queued" }])) }));
+    setDetectProgress({ done: 0, total: comps.length });
+    let next = 0, done = 0;
+    const results: Array<{ id: string; found: number; failed?: string }> = [];
+    await Promise.all(Array.from({ length: Math.min(4, comps.length) }, async () => {
+      while (next < comps.length) {
+        const comp = comps[next++];
+        results.push(await detectProfile(comp.id, opts.refresh));
+        setDetectProgress({ done: ++done, total: comps.length });
+      }
+    }));
+    setDetectProgress(null);
+    return { empty: results.filter(r => !r.found).map(r => r.id), failures: results.flatMap(r => r.failed ? [r.failed] : []) };
   };
 
   const addManual = useMutation({
@@ -476,9 +416,8 @@ export default function CompetitorReview() {
       if (error) throw error;
       // Detect handles for the new row (best-effort).
       if (manualUrl.trim()) {
-        await supabase.functions.invoke("detect-competitor-handles", {
-          body: { competitor_id: comp.id },
-        });
+        refreshAll();
+        await detectProfile(comp.id);
       }
     },
     onSuccess: () => {
@@ -618,6 +557,21 @@ export default function CompetitorReview() {
     onError: (err: any) =>
       toast({ title: "Could not reopen the set", description: err.message, variant: "destructive" }),
   });
+
+  useEffect(() => {
+    if (!canRunAnalysis || !currentSet || !competitors || !handles || handlesLoading || handlesFailed || identifying || detecting) return;
+    const due = competitors.filter(c => {
+      if (attemptedProfiles.current.has(c.id) || (handlesByCompetitor.get(c.id) || []).length) return false;
+      const check = c.profile_detection;
+      if (!check) return true;
+      const age = Date.now() - Date.parse(check.checked_at || "");
+      return check.status === "running" ? !Number.isFinite(age) || age > 120000
+        : ["failed", "partial"].includes(check.status) && (!Number.isFinite(age) || age > 15 * 60 * 1000);
+    });
+    if (!due.length) return;
+    setDetecting(true);
+    void detectForAll(due).finally(() => setDetecting(false));
+  }, [canRunAnalysis, currentSet?.id, competitors, handles, handlesLoading, handlesFailed, identifying, detecting]);
 
   if (!canRunAnalysis) return <Navigate to="/" replace />;
 
@@ -773,7 +727,7 @@ export default function CompetitorReview() {
                 </CardDescription>
               </div>
               <div className="flex gap-2 flex-wrap">
-                <Button variant="outline" size="sm" onClick={openImport} disabled={identifying}>
+                <Button variant="outline" size="sm" onClick={openImport} disabled={identifying || detecting}>
                   <Download className="h-3.5 w-3.5 mr-1" /> Import from RivalIQ
                 </Button>
                 {currentSet && ["confirmed", "complete", "failed"].includes(currentSet.status) && (
@@ -784,17 +738,13 @@ export default function CompetitorReview() {
                     onComplete={refreshAll}
                   />
                 )}
-                {currentSet && (
-                  <Button variant="outline" size="sm" onClick={redetectHandles} disabled={detecting || !isDraft}>
-                    {detecting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Search className="h-3.5 w-3.5 mr-1" />}
-                    {/* The count was being tracked and never shown, on a step
-                        that takes a minute or more over ten sites. */}
-                    {detecting && detectProgress
-                      ? `Re-detecting ${detectProgress.done}/${detectProgress.total}`
-                      : "Re-detect handles"}
-                  </Button>
+                {detecting && detectProgress && (
+                  <p role="status" className="t-secondary flex items-center gap-2">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Finding profiles automatically · {detectProgress.done}/{detectProgress.total}
+                  </p>
                 )}
-                <Button size="sm" onClick={identify} disabled={identifying}>
+                <Button size="sm" onClick={identify} disabled={identifying || detecting}>
                   {identifying ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
                   {currentSet ? "Re-identify (new draft)" : "Identify competitors"}
                 </Button>
@@ -916,6 +866,7 @@ export default function CompetitorReview() {
             </CardHeader>
             <CardContent className="space-y-2">
               {competitors!.map((c) => {
+                const profileCheck = profileChecks[c.id] || (c.profile_detection ? { state: c.profile_detection.status === "running" ? "searching" : c.profile_detection.status, detail: c.profile_detection.detail } : undefined);
                 const compHandles = (handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active);
                 return (
                   <div
@@ -944,33 +895,39 @@ export default function CompetitorReview() {
                           </a>
                         )}
                         {c.rationale && <p className="t-secondary mt-1">{c.rationale}</p>}
-                        <div className="flex gap-1 mt-2 flex-wrap">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 mt-3">
                           {compHandles.map((h) => (
-                            <span key={h.id} className="inline-flex items-center gap-1">
-                              <a href={h.profile_url || undefined} target="_blank" rel="noreferrer" className="inline-flex items-center min-h-[24px]" title={`@${h.handle}`}>
+                            <div key={h.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2">
+                              <a href={h.profile_url || undefined} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-start gap-2" title={`${prettyPlatformName(h.platform)} @${h.handle}`}>
                                 <PlatformBadge platform={h.platform} size="sm" />
-                                <span className="ml-1 text-xs">@{h.handle}</span>
+                                <span className="min-w-0 break-all text-sm leading-5">@{h.handle}</span>
                               </a>
                               {h.source === "auto" && Number(h.detection_confidence ?? 0) < 0.8 && (
-                                <span className="text-xs text-amber-400" title="Automatically detected with limited evidence. Open the profile and verify it belongs to this company.">Check profile</span>
+                                <span className="text-xs text-amber-400 shrink-0" title="Automatically detected with limited evidence. Open the profile and verify it belongs to this company.">Verify</span>
                               )}
                               {isDraft && (
                                 <button
                                   type="button"
                                   aria-label={`Remove the ${h.platform} handle @${h.handle}`}
                                   title={`Remove @${h.handle}`}
-                                  onClick={() => removeHandle.mutate(h.id)}
-                                  className="text-muted-foreground hover:text-destructive leading-none px-0.5"
+                                  onClick={() => setRemovingHandle(h)}
+                                  className="shrink-0 rounded p-2 text-muted-foreground hover:text-destructive hover:bg-white/5"
                                 >
-                                  ×
+                                  <Trash2 className="h-3.5 w-3.5" />
                                 </button>
                               )}
-                            </span>
+                            </div>
                           ))}
                           {compHandles.length === 0 && (
                             <span className="t-label text-amber-500/80 inline-flex items-center gap-1.5">
-                              {detectingId === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
-                              {detectingId === c.id ? "Looking…" : "No handles found"}
+                              {profileCheck?.state === "searching" || handlesLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
+                              {handlesLoading ? "Loading saved profiles…" : handlesFailed ? "Could not load saved profiles" :
+                                profileCheck?.state === "queued" ? "Profile search queued" :
+                                profileCheck?.state === "searching" ? "Searching company pages…" :
+                                profileCheck?.state === "failed" ? "Profile lookup failed" :
+                                profileCheck?.state === "partial" ? "Profile lookup incomplete" :
+                                profileCheck?.state === "missing_website" ? "Company website needed" :
+                                profileCheck?.state === "not_found" ? "No profiles found on checked pages" : "Profile lookup will start automatically"}
                             </span>
                           )}
                           {isDraft && (
@@ -979,18 +936,11 @@ export default function CompetitorReview() {
                               onClick={() => setAddingHandleFor(addingHandleFor === c.id ? null : c.id)}
                               className="t-label text-muted-foreground hover:text-white inline-flex items-center gap-1 min-h-[24px]"
                             >
-                              <Plus className="h-3 w-3" /> Add
+                              <Plus className="h-3 w-3" /> Add profile
                             </button>
                           )}
-                          {compHandles.length === 0 && isDraft && (
-                            <button
-                              type="button"
-                              onClick={() => detectOne(c.id)}
-                              disabled={detectingId === c.id}
-                              className="t-label text-muted-foreground hover:text-white inline-flex items-center gap-1 min-h-[24px] disabled:opacity-60"
-                            >
-                              <Search className="h-3 w-3" /> Look again
-                            </button>
+                          {compHandles.length === 0 && profileCheck?.detail && (
+                            <p className="text-xs text-muted-foreground sm:col-span-2 xl:col-span-3">{profileCheck.detail}</p>
                           )}
                         </div>
                         {addingHandleFor === c.id && isDraft && (
@@ -1096,6 +1046,14 @@ export default function CompetitorReview() {
           </Card>
         )}
       </div>
+      <ConfirmDialog
+        open={!!removingHandle}
+        onOpenChange={open => !open && setRemovingHandle(null)}
+        title={`Remove @${removingHandle?.handle || "profile"}?`}
+        description={<p>This profile will stop being used for this competitor. Automatic detection will not add it back.</p>}
+        confirmLabel="Remove profile"
+        onConfirm={() => { if (removingHandle) removeHandle.mutate(removingHandle.id); setRemovingHandle(null); }}
+      />
       <ConfirmDialog
         open={!!removing}
         onOpenChange={(o) => !o && setRemoving(null)}

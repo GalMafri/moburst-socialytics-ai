@@ -140,15 +140,29 @@ async function runCallback(state,kind,status,reportId,{authorized=true,resume=tr
  const response=await handler(new Request('https://fixture.invalid/callback',{method:'POST',body:JSON.stringify({op:'report',report_id:reportId,status,report_data:{ai_analysis:{executive_summary:'Completed fixture'}}})}));
  return{status:response.status,body:await response.json(),requests};
 }
-async function detectHandlesQa({html='',existing=[],readError=false}={}) {
+async function detectHandlesQa({html='',existing=[],readError=false,fetchMode='ok',writeError=false}={}) {
  let handler;const writes=[],requests=[];
- const db={from(table){const q={select(){return q},eq(){return q},in(){return q},async upsert(value){writes.push(value);return{error:null}},then(resolve,reject){return Promise.resolve(table==='competitors'?{data:[{id:'rival',client_id:'client',name:'Acme',website_url:'https://acme.example'}],error:null}:{data:existing,error:readError?{message:'fixture read error'}:null}).then(resolve,reject)}};return q}};
+ const db={from(table){const q={select(){return q},update(){return q},eq(){return q},in(){return q},async upsert(value){writes.push(value);return{error:writeError?{message:'fixture save failed'}:null}},then(resolve,reject){return Promise.resolve(table==='competitors'?{data:[{id:'rival',client_id:'client',name:'Acme',website_url:'https://acme.example'}],error:null}:{data:existing,error:readError?{message:'fixture read error'}:null}).then(resolve,reject)}};return q}};
  moduleFrom('supabase/functions/detect-competitor-handles/index.ts',{
   'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>db},
   '../_shared/auth/requireStaff.ts':{AuthzError:class extends Error{},requireStaff:async()=>({asCaller:{rpc:async()=>({data:true,error:null})}})},
   '../_shared/competitive/extractSocialHandles.ts':moduleFrom('supabase/functions/_shared/competitive/extractSocialHandles.ts'),
- },{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},AbortSignal,fetch:async(url)=>{requests.push(url);if(url.includes('/search'))return new Response(JSON.stringify({data:[{url:'https://instagram.com/popular/'},{url:'https://tiktok.com/@unrelated'}]}));if(url.includes('firecrawl'))return new Response(JSON.stringify({data:{rawHtml:'',links:[]}}));return new Response(html);}});
+ },{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},AbortSignal,fetch:async(url,opts)=>{requests.push(url);assert.ok(opts.signal,'Every website request has a deadline');if(fetchMode==='failed')return new Response('',{status:403});if(fetchMode==='partial'&&url.includes('firecrawl'))return new Response('',{status:503});if(url.includes('/search'))return new Response(JSON.stringify({data:[{url:'https://instagram.com/popular/'},{url:'https://tiktok.com/@unrelated'}]}));if(url.includes('firecrawl'))return new Response(JSON.stringify({data:{rawHtml:'',links:[]}}));return new Response(html);}});
  const r=await handler(new Request('https://fixture.invalid',{method:'POST',body:JSON.stringify({competitor_id:'rival',refresh:true})}));return{status:r.status,body:await r.json(),writes,requests};
+}
+
+async function identifySitesQa(validCount) {
+ let handler;const writes=[];
+ const proposed=Array.from({length:4},(_,i)=>({name:'Company '+i,website_url:'https://site'+i+'.example',rationale:'Fixture',similarity_score:.8}));
+ const db={from(table){let payload;const q={select(){return q},eq(){return q},insert(v){payload=v;writes.push({table,payload:v});return q},async maybeSingle(){return{data:{id:'client',name:'Client'},error:null}},async single(){return{data:{id:'set'},error:null}},then(resolve,reject){return Promise.resolve({data:payload,error:null}).then(resolve,reject)}};return q}};
+ moduleFrom('supabase/functions/identify-competitors/index.ts',{
+  'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>db},
+  '../_shared/auth/requireStaff.ts':{AuthzError:class extends Error{},requireStaff:async()=>({})},
+  '../_shared/anthropic.ts':{anthropicMessages:async()=>({text:JSON.stringify({competitors:proposed}),stopReason:'end_turn'})},
+  '../_shared/competitive/validateCompetitorWebsites.ts':moduleFrom('supabase/functions/_shared/competitive/validateCompetitorWebsites.ts',{}, {AbortSignal,fetch:async(url)=>{if(Number(url.match(/site(\d+)/)[1])>=validCount)throw new TypeError('DNS');return new Response('<html><title>Company</title><body>'+('Company information '.repeat(20))+'</body></html>')}}),
+ },{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},AbortSignal});
+ const response=await handler(new Request('https://fixture.invalid',{method:'POST',body:JSON.stringify({client_id:'client'})}));
+ return{status:response.status,body:await response.json(),writes};
 }
 
 async function confirmCompetitorsQa({handlesById={},handlesError=false}={}) {
@@ -238,6 +252,12 @@ async function confirmCompetitorsQa({handlesById={},handlesError=false}={}) {
   const r=await runManual('accept',{state,landscapes,body:{client_id:'fixture-client',kind:'competitive',date_range_start:'2026-09-10',date_range_end:'2026-09-16'}});
   assert.equal(r.status,422);assert.match(r.body.error,/No RivalIQ landscape tracks Subliy/);assert.equal(r.dispatches,0);assert.equal(state.tables.competitive_reports.length,before);assert.equal(state.operations.length,0);
  });
+ await check('QA-HANDLES','regression','identification preserves existing drafts when fewer than three sites are reachable',async()=>{const r=await identifySitesQa(2);assert.equal(r.status,422);assert.equal(r.writes.length,0);assert.equal(r.body.rejected.length,2);});
+ await check('QA-HANDLES','control','identification saves reachable candidates and excludes failed AI domains',async()=>{const r=await identifySitesQa(3);assert.equal(r.status,200);assert.equal(r.writes.find(w=>w.table==='competitors').payload.length,3);assert.equal(r.body.rejected.length,1);});
+ await check('QA-HANDLES','regression','failed website lookup is not reported as a completed empty search',async()=>{const r=await detectHandlesQa({fetchMode:'failed'});assert.equal(r.body.results[0].status,'failed');assert.match(r.body.results[0].warnings.join(' '),/403/);assert.equal(r.writes.length,0);});
+ await check('QA-HANDLES','regression','rendered lookup failure is disclosed as partial when direct pages worked',async()=>{const r=await detectHandlesQa({fetchMode:'partial'});assert.equal(r.body.results[0].status,'partial');assert.match(r.body.results[0].warnings.join(' '),/503/);});
+ await check('QA-HANDLES','control','completed empty lookup is distinguished from provider failure',async()=>{const r=await detectHandlesQa();assert.equal(r.body.results[0].status,'not_found');assert.equal(r.body.results[0].warnings.length,0);});
+ await check('QA-HANDLES','regression','save failure returns write errors instead of a false found result',async()=>{const r=await detectHandlesQa({html:'<footer><a href="https://instagram.com/acme">Acme</a></footer>',writeError:true});assert.equal(r.body.results[0].detected.length,0);assert.equal(r.body.write_errors.length,1);});
  await check('QA-HANDLES','regression','empty company site cannot adopt unrelated search profiles',async()=>{const r=await detectHandlesQa();assert.equal(r.status,200);assert.equal(r.writes.length,0);assert.equal(r.requests.some(url=>url.includes('/search')),false);});
  for(const source of ['manual','rivaliq','rejected']) await check('QA-HANDLES','regression','refresh preserves '+source+' decisions',async()=>{const r=await detectHandlesQa({html:'<footer><a href="https://instagram.com/acme">Acme</a></footer>',existing:[{competitor_id:'rival',platform:'instagram',source}]});assert.equal(r.status,200);assert.equal(r.writes.length,0);});
  await check('QA-HANDLES','regression','failed protection lookup aborts before overwriting handles',async()=>{const r=await detectHandlesQa({html:'https://instagram.com/acme',readError:true});assert.equal(r.status,500);assert.equal(r.writes.length,0);assert.equal(r.requests.length,0);});

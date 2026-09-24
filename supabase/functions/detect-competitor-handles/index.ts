@@ -30,7 +30,9 @@ function normalizeUrl(websiteUrl: string): string {
   return /^https?:\/\//i.test(url) ? url : `https://${url}`;
 }
 
-async function fetchDirect(url: string): Promise<string> {
+type SiteRead = { html: string; ok: boolean; warning?: string };
+
+async function fetchDirect(url: string): Promise<SiteRead> {
   try {
     const resp = await fetch(url, {
       headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" },
@@ -40,12 +42,12 @@ async function fetchDirect(url: string): Promise<string> {
     });
     if (!resp.ok) {
       console.log(`[detect] ${resp.status} ${url}`);
-      return "";
+      return { html: "", ok: false, warning: `Website returned HTTP ${resp.status}.` };
     }
-    return await resp.text();
+    return { html: await resp.text(), ok: true };
   } catch (e) {
     console.log(`[detect] fetch failed ${url}: ${(e as Error)?.name || e}`);
-    return "";
+    return { html: "", ok: false, warning: "Website could not be reached within 8 seconds." };
   }
 }
 
@@ -57,30 +59,32 @@ async function fetchDirect(url: string): Promise<string> {
  * its social links — and the HTML still has to be parsed. The `links` array
  * is the footer's hrefs already extracted, whatever JavaScript built them.
  */
-async function fetchRendered(url: string): Promise<string> {
+async function fetchRendered(url: string): Promise<SiteRead> {
   const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
   if (!firecrawlKey) {
     console.log("[detect] no FIRECRAWL_API_KEY; skipping the rendered pass");
-    return "";
+    return { html: "", ok: false, warning: "Rendered website lookup is not configured." };
   }
   try {
     const fcResp = await fetch("https://api.firecrawl.dev/v1/scrape", {
       method: "POST",
+      signal: AbortSignal.timeout(25000),
       headers: { Authorization: `Bearer ${firecrawlKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ url, formats: ["rawHtml", "links"], onlyMainContent: false, waitFor: 4000, timeout: 20000 }),
     });
     if (!fcResp.ok) {
       console.log(`[detect] firecrawl ${fcResp.status} for ${url}: ${(await fcResp.text().catch(() => "")).slice(0, 200)}`);
-      return "";
+      return { html: "", ok: false, warning: `Rendered website lookup returned HTTP ${fcResp.status}.` };
     }
     const fcData = await fcResp.json();
     const html = fcData.data?.rawHtml || fcData.data?.html || fcData.rawHtml || fcData.html || "";
     const links: string[] = fcData.data?.links || fcData.links || [];
     // The links go in as plain text; the extractor treats them as URLs.
-    return `${html}\n${links.join("\n")}`;
+    return { html: `${html}\n${links.join("\n")}`, ok: fcData.success !== false,
+      ...(fcData.success === false ? { warning: "Rendered website lookup did not complete." } : {}) };
   } catch (e) {
     console.log(`[detect] firecrawl threw for ${url}: ${(e as Error)?.message || e}`);
-    return "";
+    return { html: "", ok: false, warning: "Rendered website lookup timed out or could not complete." };
   }
 }
 
@@ -100,39 +104,29 @@ const FALLBACK_PATHS = ["/contact", "/about", "/about-us", "/company"];
  */
 const ALL_PLATFORMS = ["instagram", "facebook", "tiktok", "linkedin", "youtube", "x"];
 
-async function detectForSite(websiteUrl: string, brandName?: string): Promise<DetectedHandle[]> {
+async function detectForSite(websiteUrl: string, brandName?: string) {
   const base = normalizeUrl(websiteUrl);
-  const groups: DetectedHandle[][] = [];
-  const missing = () => ALL_PLATFORMS.filter((p) => !groups.some((g) => g.some((h) => h.platform === p)));
-
-  // Every source is read and merged. Returning on the first non-empty result
-  // meant one LinkedIn badge in the raw HTML suppressed the rendered pass and
-  // the contact pages, so a brand with five profiles was recorded as having
-  // one.
   const direct = await fetchDirect(base);
-  if (direct) groups.push(extractSocialHandles(direct, brandName));
-
-  if (missing().length > 0) {
-    const rendered = await fetchRendered(base);
-    if (rendered) groups.push(extractSocialHandles(rendered, brandName));
+  const groups = [extractSocialHandles(direct.html, brandName)];
+  const reads: SiteRead[] = [direct];
+  if (ALL_PLATFORMS.some(p => !groups[0].some(h => h.platform === p))) {
+    // These independent reads used to run serially, then the UI repeated
+    // the entire sweep even when it was a completed, empty search.
+    const more = await Promise.all([
+      fetchRendered(base),
+      ...FALLBACK_PATHS.map(path => fetchDirect(new URL(path, base).toString())),
+    ]);
+    reads.push(...more);
+    groups.push(...more.map(r => extractSocialHandles(r.html, brandName)));
   }
-
-  for (const path of FALLBACK_PATHS) {
-    if (missing().length === 0) break;
-    let target: string;
-    try {
-      target = new URL(path, base).toString();
-    } catch {
-      continue;
-    }
-    const html = await fetchDirect(target);
-    if (html) groups.push(extractSocialHandles(html, brandName));
-  }
-
-  // Search result rank does not establish company ownership. Leave missing
-  // profiles empty for staff review rather than saving unrelated search hits.
-
-  return mergeHandles(...groups);
+  return {
+    handles: mergeHandles(...groups),
+    readSucceeded: reads.some(r => r.ok),
+    // Missing optional contact/about pages do not make a valid homepage
+    // lookup a failure. Report failures of the two primary discovery paths.
+    warnings: [direct, reads[1]].filter((r): r is SiteRead => !!r && !r.ok)
+      .map(r => r.warning!).filter(Boolean),
+  };
 }
 
 Deno.serve(async (req) => {
@@ -172,7 +166,7 @@ Deno.serve(async (req) => {
     if (writeErr) throw new Error(`Access check failed: ${writeErr.message}`);
     if (!canWrite) return jsonResp({ error: "You do not have access to this client." }, 403);
 
-    const results: Array<{ competitor_id: string; detected: DetectedHandle[] }> = [];
+    const results: Array<{ competitor_id: string; detected: DetectedHandle[]; status: string; warnings?: string[] }> = [];
 
     // Handles a person entered. These are never overwritten by a refresh.
     const manual = new Set<string>();
@@ -207,11 +201,21 @@ Deno.serve(async (req) => {
     // Serial on purpose: target sites are third parties, and a review set is
     // at most ~12 rows. Parallel fan-out buys seconds and risks rate limiting.
     for (const comp of competitors) {
+      const saveStatus = async (status: string, warnings: string[] = []) => {
+        const { error } = await supabase.from("competitors").update({
+          profile_detection: { status, detail: warnings.join(" "), checked_at: new Date().toISOString() },
+        }).eq("id", comp.id);
+        if (error) throw new Error("Could not save profile lookup progress. Please reopen the draft to resume.");
+      };
       if (!comp.website_url) {
-        results.push({ competitor_id: comp.id, detected: [] });
+        await saveStatus("missing_website", ["Add a company website to find its profiles automatically."]);
+        results.push({ competitor_id: comp.id, detected: [], status: "missing_website", warnings: ["Add a company website to find its profiles automatically."] });
         continue;
       }
-      const detected = await detectForSite(comp.website_url, comp.name);
+      await saveStatus("running");
+      const previousWriteErrors = writeErrors.length;
+      const discovery = await detectForSite(comp.website_url, comp.name);
+      const detected = discovery.handles;
       const saved: string[] = [];
 
       for (const h of detected) {
@@ -269,7 +273,11 @@ Deno.serve(async (req) => {
       }
       // Report what was written, not what was found: the two used to differ
       // silently whenever an upsert failed.
-      results.push({ competitor_id: comp.id, detected: detected.filter((h) => saved.includes(h.platform)) });
+      const retained = detected.filter(h => saved.includes(h.platform));
+      const status = writeErrors.length > previousWriteErrors ? "failed" : retained.length ? "found" : !discovery.readSucceeded ? "failed" : discovery.warnings.length ? "partial" : "not_found";
+      const warnings = writeErrors.length > previousWriteErrors ? ["Profiles could not be saved. Automatic lookup will retry later."] : discovery.warnings;
+      await saveStatus(status, warnings);
+      results.push({ competitor_id: comp.id, detected: retained, status, warnings });
     }
 
     return jsonResp(writeErrors.length ? { results, write_errors: writeErrors } : { results });
