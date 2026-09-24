@@ -1080,7 +1080,7 @@ export default function CompetitiveReportView() {
                   const posts = moodPosts(c).filter(hasContent);
                   if (!posts.length) return null;
                   return (
-                    <div key={c.company_id} className="space-y-2">
+                    <div key={c.company_id} data-pdf-company className="space-y-2">
                       <p className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
                       <div className="grid gap-2 grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
                         {posts.map((p, i) => <PostVisual key={i} url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} compact />)}
@@ -1099,7 +1099,7 @@ export default function CompetitiveReportView() {
             <Card>
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
-                  <div key={c.company_id} id={`company-posts-${c.company_id}`} className="space-y-3 scroll-mt-24" tabIndex={-1}>
+                  <div key={c.company_id} data-pdf-company id={`company-posts-${c.company_id}`} className="space-y-3 scroll-mt-24" tabIndex={-1}>
                     <p data-pdf-heading className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
                     <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] items-start">
                       {b.top_posts.filter(hasContent).slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}

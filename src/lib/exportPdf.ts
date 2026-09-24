@@ -109,6 +109,18 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   // (a filter's "showing Instagram only" line, for instance) is kept.
   content.querySelectorAll('[data-print="hide"]').forEach((el) => el.remove());
   content.querySelectorAll('details').forEach(el => el.setAttribute('open', ''));
+  // Chromium can ignore keep-with-next across a nested grid boundary. Put a
+  // company label and its first example in one print-only fragment instead.
+  content.querySelectorAll('[data-pdf-company]').forEach(company => {
+    const heading = company.firstElementChild;
+    const grid = heading?.nextElementSibling;
+    const first = grid?.firstElementChild;
+    if (!heading || !grid?.classList.contains('grid') || !first) return;
+    const fragment = document.createElement('div');
+    fragment.setAttribute('data-pdf-keep', '');
+    company.insertBefore(fragment, heading);
+    fragment.append(heading, first);
+  });
 
   // Screen media frames reserve a tall aspect-ratio box even when their image
   // is reduced for print. Reset the frame too, and omit decorative duplicates.
