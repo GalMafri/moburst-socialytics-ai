@@ -687,8 +687,8 @@ export default function CompetitiveReportView() {
                   <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => v.toFixed(1)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).cadence_per_week || 0), emphasized: !!c.is_client }))} />
                 </div>
                 <div className="space-y-3">
-                  <p className="t-subhead">Engagement rate</p>
-                  <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => pct(v)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).engagement_rate_avg || 0), emphasized: !!c.is_client }))} />
+                  <p className="t-subhead">Engagement rate</p><p className="t-secondary">Companies with tracked posts and an available rate.</p>
+                  <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => pct(v)} rows={ordered.filter(c => { const b = bucketFor(c, effectivePlat); return b.post_count > 0 && b.engagement_rate_avg != null; }).map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).engagement_rate_avg || 0), emphasized: !!c.is_client }))} />
                 </div>
               </CardContent>
             </Card>
