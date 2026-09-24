@@ -88,3 +88,14 @@ it('does not infer content strategy from provider counts without sampled posts',
  const report={aggregates:{companies:[{name:'Kiron',post_count:10,observed_post_count:0}]},ai_analysis:{winner_teardown:[{competitor:'Kiron',pattern:'Invented'}]}};
  expect(withCompetitiveEvidenceLimits(report).ai_analysis.winner_teardown).toEqual([]);
 });
+
+
+it('withholds contradictory or invalid AI schedules without changing the source report', () => {
+ for (const by_hour of [{ '12': 11 }, { '24': 13 }, { '12': -1 }, { '12': 13.5 }]) {
+  const input={ai_analysis:{recommended_schedule:{by_weekday:{Mon:13},by_hour}}};
+  expect(withCompetitiveEvidenceLimits(input).ai_analysis.recommended_schedule).toBeNull();
+  expect(input.ai_analysis.recommended_schedule).not.toBeNull();
+ }
+ const valid={ai_analysis:{recommended_schedule:{by_weekday:{Mon:2,Tue:1},by_hour:{'12':2,'18':1}}}};
+ expect(withCompetitiveEvidenceLimits(valid)).toEqual(valid);
+});

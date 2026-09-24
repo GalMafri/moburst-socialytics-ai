@@ -24,9 +24,23 @@ export function withCompetitiveEvidenceLimits<T>(input: T): T {
   if (!input || typeof input !== "object") return input;
   const source = input as Record<string, any>;
   const summary = sourceCompetitiveSummary(source);
-  const report = summary ? { ...source, ai_analysis: { ...source.ai_analysis, executive_summary: summary } } : source;
+  let report = summary ? { ...source, ai_analysis: { ...source.ai_analysis, executive_summary: summary } } : source;
+  const schedule = report.ai_analysis?.recommended_schedule;
+  if (schedule) {
+    const count = (values: unknown, keys: string[]) => {
+      if (!values || typeof values !== 'object' || Array.isArray(values)) return null;
+      const entries = Object.entries(values);
+      if (!entries.length || entries.some(([key, value]) => !keys.includes(key) || typeof value !== 'number' || !Number.isInteger(value) || value < 0)) return null;
+      return entries.reduce((total, [, value]) => total + (value as number), 0);
+    };
+    const weekdays = count(schedule.by_weekday, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+    const hours = count(schedule.by_hour, Array.from({ length: 24 }, (_, i) => String(i)));
+    if (weekdays == null || hours == null || weekdays !== hours) {
+      report = { ...report, ai_analysis: { ...report.ai_analysis, recommended_schedule: null } };
+    }
+  }
   const companies = report.aggregates?.companies;
-  if (!Array.isArray(companies)) return input;
+  if (!Array.isArray(companies)) return report as T;
   const empty = companies.filter(c => (c.observed_post_count ?? c.post_count) === 0);
   const mismatches = companies.filter(c => Number.isFinite(c.post_count) &&
     Number.isFinite(c.rivaliq_metrics?.posts?.current) && c.post_count !== c.rivaliq_metrics.posts.current);
