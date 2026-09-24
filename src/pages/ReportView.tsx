@@ -442,7 +442,7 @@ export default function ReportView() {
                     )}
                     {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
                       <div className="pt-4 border-t space-y-2">
-                        <p className="t-subhead">Top performing content types</p>
+                        <h3 className="t-subhead">Top performing content types</h3>
                         <InsightGrid items={aiAnalysis.sprout_performance_analysis.top_performing_content} numbered={false} />
                       </div>
                     )}

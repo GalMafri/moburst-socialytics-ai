@@ -145,14 +145,14 @@ function PlatformTrendCard({ platform, data }: { platform: "TikTok" | "Instagram
             <h4 className="t-body font-medium flex items-center gap-1.5">
               <Lightbulb className="h-3.5 w-3.5" /> Key Takeaways
             </h4>
-            <div className="space-y-2">
+            <ul className="space-y-2">
               {data.key_takeaways.map((t, i) => (
-                <div key={i} className="t-secondary leading-relaxed flex gap-2">
-                  <span className="text-foreground font-medium shrink-0">•</span>
-                  {t}
-                </div>
+                <li key={i} className="t-secondary leading-relaxed flex gap-2">
+                  <span aria-hidden="true" className="text-foreground font-medium shrink-0">•</span>
+                  <span className="min-w-0">{t}</span>
+                </li>
               ))}
-            </div>
+            </ul>
           </div>
         )}
 
