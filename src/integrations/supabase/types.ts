@@ -572,6 +572,7 @@ export type Database = {
           id: string
           is_selected: boolean
           name: string
+          profile_detection: Json | null
           rationale: string | null
           rivaliq_company_id: string | null
           selected_rank: number | null
@@ -586,6 +587,7 @@ export type Database = {
           id?: string
           is_selected?: boolean
           name: string
+          profile_detection?: Json | null
           rationale?: string | null
           rivaliq_company_id?: string | null
           selected_rank?: number | null
@@ -600,6 +602,7 @@ export type Database = {
           id?: string
           is_selected?: boolean
           name?: string
+          profile_detection?: Json | null
           rationale?: string | null
           rivaliq_company_id?: string | null
           selected_rank?: number | null
