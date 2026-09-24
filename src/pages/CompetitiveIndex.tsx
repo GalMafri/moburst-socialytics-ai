@@ -3,7 +3,9 @@
 // each in plain words, and one click into the step that comes next.
 // Mirrors AnalyticsIndex; RLS scopes company-restricted staff automatically.
 
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { ClientPicker } from "@/components/clients/ClientPicker";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -17,6 +19,9 @@ import { Crosshair, FileText, History, Play, Rss } from "lucide-react";
 
 export default function CompetitiveIndex() {
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const [search, setSearch] = useState("");
+
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["competitive-index"],
@@ -53,8 +58,12 @@ export default function CompetitiveIndex() {
     },
   });
 
+  const visibleClients = (data || []).filter(c => c.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const selectedClient = visibleClients.find(c => c.id === params.get("client")) || visibleClients[0];
+  const chooseClient = (id: string) => setParams(prev => { prev.set("client", id); return prev; }, { replace: true });
+
   return (
-    <AppLayout title="Competitive Analysis" description="Review each client's three competitors, connect RivalIQ tracking, run the analysis, then open the result.">
+    <AppLayout title="Competitive Analysis" description="Choose a client to edit its competitors, run a report, or open previous results.">
       <div className="w-full space-y-4">
         {isLoading ? (
           <Loading label="Loading clients" />
@@ -65,12 +74,15 @@ export default function CompetitiveIndex() {
         ) : !data?.length ? (
           <EmptyState icon={Crosshair} title="No clients yet" description="Add a client to start competitive analysis." />
         ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {data.map((c) => (
-              <Card key={c.id}>
+          <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+            <ClientPicker clients={visibleClients} selectedId={selectedClient?.id} onSelect={chooseClient} search={search} onSearch={setSearch} />
+            <div className="min-w-0">
+            {!selectedClient && <p className="t-secondary py-6">Try another client name.</p>}
+            {(selectedClient ? [selectedClient] : []).map((c) => (
+              <Card key={c.id} className="border-white/15">
                 <CardContent className="pt-5 space-y-3">
-                  <div className="font-medium">{c.name}</div>
-                  <dl className="space-y-1.5">
+                  <div className="border-b border-white/10 pb-4"><p className="t-label uppercase tracking-wider">Selected client</p><h2 className="t-h2 mt-1">{c.name}</h2><p className="t-secondary mt-1">Competitors and reports for this client only.</p></div>
+                  <dl className="grid gap-4 py-2 md:grid-cols-3">
                     <div>
                       <dt className="t-label">Saved selection</dt>
                       <dd className="t-body">{c.selection.headline}</dd>
@@ -86,15 +98,15 @@ export default function CompetitiveIndex() {
                     </div>
                   </dl>
                   <div className="flex gap-2 flex-wrap">
-                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${c.id}/competitive`)}><Crosshair className="h-3.5 w-3.5 mr-1" /> Review competitors</Button>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${c.id}/competitive`)}><Crosshair className="h-3.5 w-3.5 mr-1" /> Edit competitors</Button>
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => navigate(`/clients/${c.id}/competitive/run`)}
                       disabled={!c.runnable || (!c.tracking.ready && c.report?.status !== 'running')}
-                      title={!c.runnable ? "Confirm three competitors before running a report" : !c.tracking.ready ? "Connect tracking from Review competitors first" : undefined}
+                      title={!c.runnable ? "Confirm three competitors before running a report" : !c.tracking.ready ? "Connect tracking from Edit competitors first" : undefined}
                     >
-                      <Play className="h-3.5 w-3.5 mr-1" /> Choose period and run
+                      <Play className="h-3.5 w-3.5 mr-1" /> {c.report?.status === "running" ? "View running report" : "Run competitive report"}
                     </Button>
                     {c.report?.status === "complete" && (
                       <Button size="sm" onClick={() => navigate(`/clients/${c.id}/competitive/reports/${c.report.id}`)}><FileText className="h-3.5 w-3.5 mr-1" /> Latest report</Button>
@@ -110,6 +122,7 @@ export default function CompetitiveIndex() {
                 </CardContent>
               </Card>
             ))}
+            </div>
           </div>
         )}
       </div>

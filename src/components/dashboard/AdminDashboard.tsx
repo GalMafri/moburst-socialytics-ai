@@ -1,4 +1,5 @@
-import { useNavigate } from "react-router-dom";
+import { ClientPicker } from "@/components/clients/ClientPicker";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,7 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, Search, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair, Users, Settings, FileText } from "lucide-react";
+import { Plus, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair, Users, Settings, FileText } from "lucide-react";
 import { PlatformBadge } from "@/lib/platform-config";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
@@ -36,6 +37,7 @@ import { Label } from "@/components/ui/label";
 
 export function AdminDashboard() {
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { canManageClients, canRunAnalysis, canDelete } = useAuth();
   const [search, setSearch] = useState("");
@@ -108,17 +110,20 @@ export function AdminDashboard() {
       const { data, error } = await supabase
         .from("clients")
         .select("*, reports(id, status, created_at)")
-        .order("created_at", { ascending: false });
+        .order("name");
       if (error) throw error;
       return data;
     },
   });
 
   const filtered = clients?.filter((c: any) => {
-    const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = c.name.toLowerCase().includes(search.trim().toLowerCase());
     const isArchived = !!(c as any).archived_at;
     return matchesSearch && (showArchived ? isArchived : !isArchived);
   });
+
+  const selectedClient = filtered?.find(c => c.id === params.get("client")) || filtered?.[0];
+  const chooseClient = (id: string) => setParams(prev => { prev.set("client", id); return prev; }, { replace: true });
 
   const active = (clients ?? []).filter((c: any) => !c.archived_at);
   const allReports = (clients ?? []).flatMap((c: any) => c.reports ?? []);
@@ -134,7 +139,7 @@ export function AdminDashboard() {
         description={
           clientsFailed
             ? "The client list could not be loaded, so nothing below is the real roster."
-            : `${active.length} active ${active.length === 1 ? "client" : "clients"}. Open a client for its setup, analytics and competitive view, or run this month's report.`
+            : `${active.length} active ${active.length === 1 ? "client" : "clients"}. Choose a client below to edit its setup, manage competitors or run a report.`
         }
         actions={
           canManageClients ? (
@@ -158,15 +163,6 @@ export function AdminDashboard() {
       )}
 
       <div className="flex items-center gap-3">
-        <div className="relative max-w-sm flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search clients..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-          />
-        </div>
         <Button
           variant={showArchived ? "secondary" : "outline"}
           size="sm"
@@ -197,9 +193,12 @@ export function AdminDashboard() {
             </Card>
           ))}
         </div>
-      ) : filtered && filtered.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((client: any) => {
+      ) : clients && clients.length > 0 ? (
+        <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <ClientPicker clients={filtered || []} selectedId={selectedClient?.id} onSelect={chooseClient} search={search} onSearch={setSearch} />
+          <div className="min-w-0">
+          {!selectedClient && <p className="t-secondary py-6">{search ? "Try another client name." : showArchived ? "No archived clients." : "No active clients."}</p>}
+          {(selectedClient ? [selectedClient] : []).map((client: any) => {
             // PostgREST returns an embedded resource in no particular order, so
             // pick the newest row here rather than trusting reports[0].
             const lastReport = (client.reports ?? []).reduce(
@@ -208,15 +207,16 @@ export function AdminDashboard() {
             );
             const reportCount = client.reports?.length ?? 0;
             return (
-              <Card key={client.id} className="hover-lift transition-shadow">
-                <CardHeader className="pb-3">
+              <Card key={client.id} className="border-white/15">
+                <CardHeader className="pb-4 border-b border-white/10">
+                  <p className="t-label uppercase tracking-wider">Selected client</p>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       {/* The name opens setup. The card itself is no longer a
                           control: a button wrapping five other buttons is a
                           control inside a control, and screen readers and the
                           Tab key both lose track of which one they are on. */}
-                      <CardTitle className="t-h3">
+                      <CardTitle className="t-h2">
                         <button
                           type="button"
                           onClick={() => navigate(`/clients/${client.id}/setup`)}
@@ -272,7 +272,7 @@ export function AdminDashboard() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-4 pt-5">
                   <div className="flex items-center gap-2 t-secondary">
                     <Calendar className="h-3.5 w-3.5" />
                     {lastReport
@@ -287,9 +287,11 @@ export function AdminDashboard() {
                   <div className="space-y-2 pt-2">
                     <span className="t-secondary whitespace-nowrap">{reportCount} report{reportCount === 1 ? "" : "s"}</span>
                     {/* Straight to this client's work: the two report shelves,
-                        the analytics view, and a new run. The card itself still
-                        opens setup. */}
-                    <div className="flex gap-1.5 flex-wrap">
+                        the analytics view, and a new run. */}
+                    <div className="flex gap-2 flex-wrap">
+                      <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/setup`)}><Settings className="h-3.5 w-3.5 mr-1.5" /> Edit client</Button>
+                      {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive`)}><Crosshair className="h-3.5 w-3.5 mr-1.5" /> Edit competitors</Button>}
+                      {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive/run`)}><Play className="h-3.5 w-3.5 mr-1.5" /> Run competitive report</Button>}
                       <Button
                         size="sm"
                         variant="outline"
@@ -312,7 +314,7 @@ export function AdminDashboard() {
                           navigate(`/clients/${client.id}/competitive/reports`);
                         }}
                       >
-                        <Crosshair className="h-3.5 w-3.5" /><span className="ml-1.5">Competitive</span>
+                        <Crosshair className="h-3.5 w-3.5" /><span className="ml-1.5">Competitive reports</span>
                       </Button>
                       <Button
                         size="sm"
@@ -337,7 +339,7 @@ export function AdminDashboard() {
                               navigate(`/clients/${client.id}/analyze`);
                             }}
                           >
-                            <Play className="h-3.5 w-3.5" /><span className="ml-1.5">Run</span>
+                            <Play className="h-3.5 w-3.5" /><span className="ml-1.5">Run monthly report</span>
                           </Button>
                         </>
                       )}
@@ -347,6 +349,7 @@ export function AdminDashboard() {
               </Card>
             );
           })}
+          </div>
         </div>
       ) : (
         <EmptyState
