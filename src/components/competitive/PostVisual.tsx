@@ -266,10 +266,10 @@ export function PostVisual({ url, image, preview, mediaType, platform, className
   const base = `group relative block ${width} ${aspect} overflow-hidden rounded-[12px] bg-black/50 ${className}`;
   if (url) {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className={base} aria-label="Open the original post">
+      <a data-post-visual="" href={url} target="_blank" rel="noreferrer" className={base} aria-label="Open the original post">
         {body}
       </a>
     );
   }
-  return <div className={base}>{body}</div>;
+  return <div data-post-visual="" className={base}>{body}</div>;
 }

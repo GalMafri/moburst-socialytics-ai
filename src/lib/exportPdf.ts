@@ -128,6 +128,13 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   // Every page must load its images, including media below the first viewport.
   // This changes only the print clone; the app keeps lazy loading on screen.
   content.querySelectorAll('img').forEach(el => el.setAttribute('loading', 'eager'));
+  content.querySelectorAll('[data-post-visual]').forEach(el => {
+    if (el.querySelector('img, video')) return;
+    el.setAttribute('data-pdf-media', '');
+    const placeholder = document.createElement('p');
+    placeholder.textContent = 'Preview unavailable — open the original post to view it.';
+    el.replaceChildren(placeholder);
+  });
   content.querySelectorAll('[class*="aspect-"]').forEach(el => {
     if (el.querySelector('img, video')) el.setAttribute('data-pdf-media', '');
   });
