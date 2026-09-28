@@ -82,6 +82,9 @@ export async function discoverReferences(db: any, client: any, apiKey: string, f
   }
   const selectionStarted = Date.now();
   const candidates = sproutCandidates(posts, ids).slice(0, 24);
+  console.info('[brand-discovery] provider shape', JSON.stringify({ posts: posts.length, candidates: candidates.length,
+    sample: posts.slice(0, 3).map(p => ({ keys: Object.keys(p), profile: p.customer_profile_id ?? p.dimensions?.customer_profile_id,
+      category: p.content_category, media: p.visual_media?.slice?.(0, 1) })) }));
   const refs: any[] = [];
   let inspected = 0, skipped = 0;
   const hashes = new Set<string>();
@@ -111,7 +114,7 @@ export async function discoverReferences(db: any, client: any, apiKey: string, f
         if (uploadError) throw new Error('Reference storage failed');
         const { image_url: _, ...provenance } = candidate;
         return { ...provenance, path, source: 'sprout', quality_checked: true, classification: value.reason, confidence: value.confidence, content_hash: hash };
-      } catch { skipped++; return null; }
+      } catch (error) { console.warn('[brand-discovery] skipped', candidate.source_post_id, error instanceof Error ? error.message : 'unknown'); skipped++; return null; }
     }));
     refs.push(...batch.filter(Boolean));
   }
