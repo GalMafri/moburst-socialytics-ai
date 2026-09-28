@@ -15,6 +15,8 @@
 // API so it can be bundled either way.
 
 export interface DesignVerdict {
+  /** Specific observed defects, for review and targeted retries. */
+  reason?: string;
   has_hex_codes?: boolean;
   has_logo?: boolean;
   has_garbled_text?: boolean;
@@ -107,5 +109,6 @@ export function correctionFor(
   }
 
   if (notes.length === 0) return "";
+  if (v.reason) notes.unshift(`Observed defect to correct: ${v.reason.slice(0, 1200)}`);
   return `\n\nCRITICAL CORRECTIONS, the previous attempt failed review:\n- ${notes.join("\n- ")}`;
 }

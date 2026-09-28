@@ -138,6 +138,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const [variantUrls, setVariantUrls] = useState<VariantSlot[]>([]);
   // What the brand review still objected to on a variant that shipped anyway.
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [failedPreviews, setFailedPreviews] = useState<Record<number, string>>({});
   const [reviewFlags, setReviewFlags] = useState<Record<number, string>>({});
   const [revisedPrompt, setRevisedPrompt] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -348,6 +349,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     setVariantGroupId(groupId);
     setLoading(true);
     setReviewFlags({});
+    setFailedPreviews({});
     setGenerationError(null);
     if (!startedAt || !loading) setStartedAt(Date.now());
     setStage(1);
@@ -479,7 +481,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           flag = "Quality review unavailable";
         }
         if (flag) {
-          setGenerationError(`Design withheld: ${flag}. Retry after refreshing the client’s social references.`);
+          setGenerationError(`Design withheld: ${flag}`);
+          setFailedPreviews(prev => ({ ...prev, [i]: dataUrl }));
+          setReviewFlags(prev => ({ ...prev, [i]: flag }));
           setVariantUrls(prev => prev.map((value, index) => index === i ? "FAILED" : value));
           generation.progressGeneration(postKey, { failed: true });
           continue;
@@ -956,8 +960,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                         </div>
                       )}
                       {url === "FAILED" && (
-                        <div className="absolute inset-0 flex items-center justify-center t-label text-destructive p-2 text-center">
-                          Could not be made
+                        <div className="absolute inset-0">
+                          {failedPreviews[i] && <img src={failedPreviews[i]} alt={`Rejected variant ${i + 1}, not available for use`} className="w-full h-full object-contain opacity-60" />}
+                          <span className="absolute bottom-0 inset-x-0 bg-black/90 text-white t-label p-2">{failedPreviews[i] ? "Rejected by quality review" : "Could not be made"}</span>
                         </div>
                       )}
                       {typeof url === "string" && url !== "FAILED" && (

@@ -74,7 +74,7 @@ describe("brandWarning", () => {
   it("names the client and points at onboarding", () => {
     const w = brandWarning(ctx({ client_name: "MyRxProfile" }))!;
     expect(w).toContain("MyRxProfile");
-    expect(w).toContain("Design References");
+    expect(w).toContain("Brand references from social posts");
     expect(w).toContain("onboarding");
   });
 
@@ -141,3 +141,5 @@ describe("off-brand verdicts", () => {
     expect(fix).toContain("smiling professionals in boardrooms");
   });
 });
+
+ it("does not call requested text unwanted lettering", () => { expect(verdictSummary({ has_text: true })).toBe(""); expect(verdictSummary({ has_text: true }, { expectNoText: true })).toContain("lettering"); });

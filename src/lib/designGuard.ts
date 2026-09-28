@@ -56,9 +56,9 @@ export function brandWarning(ctx: ClientContext | null | undefined): string | nu
   if (f.strong) return null;
   const name = ctx?.client_name || "This client";
   if (f.none) {
-    return `${name} has no brand material on file, so designs will be generic rather than on-brand. Upload design references in the client's onboarding (Client Setup → Brief → Design References) and run "Brand design language".`;
+    return `${name} has no brand material on file, so designs will be generic rather than on-brand. Open the client's onboarding (Client Setup → Brand references from social posts) to discover references from connected accounts automatically.`;
   }
-  return `${name} has only written brand notes, with no design references, so designs follow the description but cannot match the real look. Upload design references in the client's onboarding (Client Setup → Brief → Design References).`;
+  return `${name} has only written brand notes, with no design references, so designs follow the description but cannot match the real look. Open the client's onboarding (Client Setup → Brand references from social posts) to discover references automatically.`;
 }
 
 // One source of truth, shared with the edge functions. Two copies of this
@@ -66,13 +66,15 @@ export function brandWarning(ctx: ClientContext | null | undefined): string | nu
 export type { DesignVerdict } from "../../supabase/functions/_shared/design-prompts/correction";
 export { correctionFor, verdictIsDirty } from "../../supabase/functions/_shared/design-prompts/correction";
 import type { DesignVerdict } from "../../supabase/functions/_shared/design-prompts/correction";
+import { verdictIsDirty as verdictIsDirtyForSummary } from "../../supabase/functions/_shared/design-prompts/correction";
 
-export function verdictSummary(v: DesignVerdict): string {
+export function verdictSummary(v: DesignVerdict, opts: { expectNoText?: boolean } = {}): string {
+  if (v.reason && verdictIsDirtyForSummary(v, opts)) return v.reason;
   const bits: string[] = [];
   if (v.off_brand) bits.push("an off-brand scene, a blank placeholder or a photo grid");
   if (v.has_logo) bits.push("an invented logo");
   if (v.has_garbled_text) bits.push("malformed text");
-  if (v.has_text && !v.has_garbled_text) bits.push("lettering where none was asked for");
+  if (opts.expectNoText && v.has_text && !v.has_garbled_text) bits.push("lettering where none was asked for");
   if (v.has_hex_codes) bits.push("visible colour codes");
   return bits.join(" and ");
 }
