@@ -24,6 +24,7 @@ import { Navigate } from "react-router-dom";
 import { Switch } from "@/components/ui/switch";
 import { BrandBookUpload } from "@/components/onboarding/BrandBookUpload";
 import { DesignReferencesUpload } from "@/components/onboarding/DesignReferencesUpload";
+import { AutomaticBrandReferences } from "@/components/onboarding/AutomaticBrandReferences";
 import { DesignSynthesisCard } from "@/components/onboarding/DesignSynthesisCard";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
@@ -131,6 +132,7 @@ export default function ClientSetup() {
   // Counts design uploads and removals made in this session; the synthesis card
   // auto-runs only after one of those, never on merely opening the tab.
   const [designInputsVersion, setDesignInputsVersion] = useState(0);
+  const [savedVersion, setSavedVersion] = useState(0);
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -240,7 +242,7 @@ export default function ClientSetup() {
       const serializedBrandNotes = form.brand_voice_preset
         ? `[VOICE:${form.brand_voice_preset}]\n${form.brand_notes}`
         : form.brand_notes;
-      const { brand_voice_preset, design_references, ...formWithoutPreset } = form;
+      const { brand_voice_preset, design_references, design_style_synthesis, ...formWithoutPreset } = form;
       const payload = {
         ...formWithoutPreset,
         brand_notes: serializedBrandNotes,
@@ -320,6 +322,7 @@ export default function ClientSetup() {
       return { id: clientId };
     },
     onSuccess: (data: any) => {
+      setSavedVersion(v => v + 1);
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       queryClient.invalidateQueries({ queryKey: ["client", isNew ? data.id : id] });
       queryClient.invalidateQueries({ queryKey: ["sprout-profiles"] });
@@ -405,6 +408,11 @@ export default function ClientSetup() {
     >
       <div className="max-w-5xl mx-auto space-y-6">
 
+        <AutomaticBrandReferences
+          clientId={!isNew && client ? id : undefined}
+          savedVersion={savedVersion}
+          onReady={(synthesis) => setForm(f => ({ ...f, design_style_synthesis: synthesis }))}
+        />
         <Tabs defaultValue="info">
           {/* On mobile (<sm), tabs scroll horizontally to keep labels readable.
               From sm and up, they fill the row in a 5-column grid. */}
@@ -995,6 +1003,7 @@ export default function ClientSetup() {
                     rows={3}
                   />
                 </div>
+                <details className="space-y-3"><summary className="cursor-pointer t-secondary">Optional brand documents and reference overrides</summary>
                 <BrandBookUpload
                   clientId={isNew ? undefined : id}
                   clientName={form.name}
@@ -1025,9 +1034,11 @@ export default function ClientSetup() {
                   designReferencesCount={form.design_references.length}
                   hasBrandBook={!!form.brand_book_file_path}
                   existingSynthesis={form.design_style_synthesis}
+                  autoTrigger={false}
                   inputsVersion={designInputsVersion}
                   onSynthesized={(s) => setForm((f) => ({ ...f, design_style_synthesis: s }))}
                 />
+                </details>
                 <div className="space-y-2">
                   <Label htmlFor="brief-text">Brief Text</Label>
                   <Textarea id="brief-text"

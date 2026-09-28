@@ -118,14 +118,14 @@ export function DesignSynthesisCard({
 
         {!hasInputs && (
           <p className="t-secondary">
-            Upload design references or a brand book above, then synthesize. The
-            result is used to guide every generated design.
+            Social references are discovered automatically above. You may optionally
+            add a brand book or specific references here.
           </p>
         )}
 
         {hasInputs && !existingSynthesis && !running && !error && (
           <p className="t-secondary">
-            No synthesis yet. Auto-runs ~10s after upload, or click Synthesize.
+            Optional uploaded references can be analyzed with Synthesize.
           </p>
         )}
 

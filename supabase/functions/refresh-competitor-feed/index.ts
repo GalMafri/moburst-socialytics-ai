@@ -116,6 +116,9 @@ async function harvestOwnCreative(
     const existing: HarvestedRef[] = Array.isArray(row?.harvested_design_references)
       ? (row!.harvested_design_references as HarvestedRef[]).filter((r) => r && typeof r.path === "string")
       : [];
+    // Onboarded clients use quality-reviewed Sprout references. The legacy
+    // competitor-feed thumbnail harvest must never overwrite that corpus.
+    if (existing.some(r => r.quality_checked === true)) return { added: 0, kept: existing.length, skipped };
     const seen = new Set(existing.map((r) => String(r.source_post_id || "")));
 
     const mine = socialPosts

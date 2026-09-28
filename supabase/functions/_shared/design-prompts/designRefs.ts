@@ -18,6 +18,8 @@ export interface HarvestedRef {
   source_post_id?: string;
   platform?: string;
   posted_at?: string;
+  quality_checked?: boolean;
+  source_url?: string;
 }
 
 const asPaths = (value: unknown): string[] =>
@@ -46,7 +48,9 @@ export function referencesFor(
 ): string[] {
   const chosen = asPaths(manual);
   const pulled = harvestedPaths(harvested).filter((p) => !chosen.includes(p));
-  return [...chosen, ...pulled].slice(0, Math.max(0, limit));
+  const verified = Array.isArray(harvested) ? harvested.filter((r) => r?.quality_checked === true).map((r) => r.path) : [];
+  // Reviewed social evidence leads; legacy unvetted harvest remains fallback.
+  return [...new Set([...verified, ...chosen, ...pulled])].slice(0, Math.max(0, limit));
 }
 
 /** How many references a client has of each kind, for the setup screen. */

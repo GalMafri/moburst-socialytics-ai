@@ -1,6 +1,6 @@
 // supabase/functions/propose-design-angles/index.ts
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { staffGate } from "../_shared/auth/requireStaff.ts";
+import { staffGate, requireStaff } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -48,7 +48,15 @@ Deno.serve(async (req) => {
   if (denied) return denied;
 
   try {
-    const { brief, platform, format, design_language } = await req.json();
+    const { brief, platform, format, client_id, design_language: suppliedLanguage } = await req.json();
+    let design_language = suppliedLanguage;
+    if (client_id) {
+      await requireStaff(req, { writeClientId: client_id });
+      const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const { data, error } = await db.from("clients").select("design_style_synthesis").eq("id", client_id).single();
+      if (error) throw new Error("Could not load current brand style");
+      design_language = data.design_style_synthesis;
+    }
     if (!brief) return json({ error: "brief required" }, 400);
 
     let anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -94,6 +102,6 @@ Generate 6 distinct angles. Every angle stays inside the brand's imagery rules a
     if (!Array.isArray(parsed.angles) || parsed.angles.length === 0) return json({ error: "no angles" }, 500);
     return json({ angles: parsed.angles });
   } catch (e: any) {
-    return json({ error: e.message || String(e) }, 500);
+    return json({ error: e.message || String(e) }, typeof e.status === "number" ? e.status : 500);
   }
 });

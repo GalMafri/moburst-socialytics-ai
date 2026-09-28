@@ -99,7 +99,7 @@ export async function resolveBrandContext(args: {
     source: "caller",
   };
 
-  if (footingOf(fromCaller).strong || !args.clientId || !args.supabase) {
+  if (!args.clientId || !args.supabase) {
     if (footingOf(fromCaller).none) fromCaller.source = "none";
     return fromCaller;
   }
@@ -117,13 +117,9 @@ export async function resolveBrandContext(args: {
     if (error || !data) return fromCaller;
 
     const fromDb: ResolvedBrand = {
-      brandIdentity: fromCaller.brandIdentity ?? data.brand_identity ?? null,
-      synthesis: fromCaller.synthesis ?? data.design_style_synthesis ?? null,
-      designReferences: fromCaller.designReferences.length
-        ? fromCaller.designReferences
-        // Staff uploads lead; the weekly harvest of the client's own posts
-        // fills the rest, so a generation sees the current work too.
-        : referencesFor(data.design_references, (data as any).harvested_design_references, 8),
+      brandIdentity: data.brand_identity ?? fromCaller.brandIdentity ?? null,
+      synthesis: data.design_style_synthesis ?? null,
+      designReferences: referencesFor(data.design_references, data.harvested_design_references, 8),
       brandBookPath: fromCaller.brandBookPath ?? data.brand_book_file_path ?? null,
       pillars: fromCaller.pillars.length
         ? fromCaller.pillars
@@ -159,13 +155,13 @@ export function brandFootingAdvice(footing: BrandFooting, clientName?: string | 
   if (footing.none) {
     return (
       `${who} has no brand material on file, so this design is generic rather than on-brand. ` +
-      `Upload design references in the client's onboarding (Client Setup → Brief → Design References) ` +
-      `and run "Brand design language" — every later generation then follows the real look.`
+      `Save the client’s assigned social accounts in Client Setup to discover references automatically ` +
+      `and review "Brand references from social posts" — every later generation then follows the real look.`
     );
   }
   return (
     `${who} has only written brand notes — no design references — so this design follows the ` +
-    `description but cannot match the real look. Upload design references in the client's ` +
-    `onboarding (Client Setup → Brief → Design References) for on-brand output.`
+    `description but cannot match the real look. Discover references automatically from the client’s assigned social accounts in ` +
+    `Client Setup for on-brand output.`
   );
 }

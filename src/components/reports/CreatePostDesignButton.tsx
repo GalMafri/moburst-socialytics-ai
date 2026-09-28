@@ -212,6 +212,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           brief: editablePrompt || defaultPrompt,
           platform: post.platform,
           format: post.format,
+          client_id: clientId || clientContext?.client_id,
           design_language: clientContext?.design_style_synthesis || null,
         },
       });
@@ -442,9 +443,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         // Single designs get the same review the carousel slides get: an
         // invented wordmark or broken lettering on a client's post is worse
         // than a plain one, and it is cheap to catch and regenerate once.
-        // A design that still fails review after the retries ships with the
-        // objection on it. Three minutes and nothing to show is worse than a
-        // flagged draft the person can judge and reject in one tap.
+        // Failed or unavailable review must not become a selectable saved design.
         let flag = "";
         try {
           // Up to two regenerations: a smeared word or a stray letterform
@@ -473,12 +472,17 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             dataUrl = retry.image_url;
             verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           }
-          if (verdictIsDirty(verdict, { expectNoText: !modelDrawsText })) {
-            flag = verdictSummary(verdict);
-            setReviewFlags((prev) => ({ ...prev, [i]: flag }));
+          if (!verdict || verdict.skipped || verdict.error || verdictIsDirty(verdict, { expectNoText: !modelDrawsText })) {
+            flag = !verdict || verdict.skipped || verdict.error ? "Quality review unavailable" : verdictSummary(verdict);
           }
         } catch {
-          // Review or retry failed — keep the original rather than lose it.
+          flag = "Quality review unavailable";
+        }
+        if (flag) {
+          setGenerationError(`Design withheld: ${flag}. Retry after refreshing the client’s social references.`);
+          setVariantUrls(prev => prev.map((value, index) => index === i ? "FAILED" : value));
+          generation.progressGeneration(postKey, { failed: true });
+          continue;
         }
         // The words go on now, in the brand's face, so the tile arrives as a
         // post rather than a picture. The editor can still move them.
@@ -604,6 +608,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           platform: post.platform,
           format: post.format,
           post_copy: postCopyOf(post),
+          client_id: clientId || clientContext?.client_id,
           design_language: clientContext?.design_style_synthesis || null,
         },
       });
@@ -706,7 +711,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               );
             }
             try {
-              const { data: validation } = await supabase.functions.invoke("validate-design-output", {
+              let { data: validation, error: validationError } = await supabase.functions.invoke("validate-design-output", {
                 body: { image_data: data.image_url, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined },
               });
               if (verdictIsDirty(validation, { expectNoText: !modelDrawsText })) {
@@ -729,10 +734,22 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                     variant_angle: variantAngle.instruction || undefined,
                   },
                 });
-                if (retryData?.image_url) finalImageUrl = retryData.image_url;
+                if (retryData?.image_url) {
+                  finalImageUrl = retryData.image_url;
+                  const reviewed = await supabase.functions.invoke("validate-design-output", {
+                    body: { image_data: finalImageUrl, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id },
+                  });
+                  validation = reviewed.data; validationError = reviewed.error;
+                }
+              }
+              if (validationError || !validation || validation.skipped || validation.error || verdictIsDirty(validation, { expectNoText: !modelDrawsText })) {
+                throw new Error("Slide did not pass quality review");
               }
             } catch {
-              // Validation/retry failed — keep the original image.
+              setGenerationError("Carousel withheld: a slide did not pass quality review. Refresh the client’s social references and retry.");
+              setVariantUrls(prev => prev.map((value, index) => index === globalIdx ? "FAILED" : value));
+              generation.progressGeneration(postKey, { failed: true });
+              continue;
             }
 
             // The cover carries the headline; interior slides carry their own copy.
@@ -763,7 +780,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         // All variants share the same variant_group_id so the panel groups
         // them together; first variant is pre-selected for the SchedulePost
         // path that picks one set to publish.
-        if (clientId && variantSlides.length > 0) {
+        if (clientId && variantSlides.length === slides) {
           const { error: insertErr } = await supabase.from("post_iterations").insert({
             client_id: clientId,
             platform: post.platform || null,
@@ -782,7 +799,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           }
         }
 
-        if (v === 0 && variantSlides.length > 0 && onImagesGenerated) {
+        if (v === 0 && variantSlides.length === slides && onImagesGenerated) {
           onImagesGenerated(variantSlides);
         }
       }
