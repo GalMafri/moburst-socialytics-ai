@@ -6,7 +6,12 @@ const CAP = 8;
 const DAY = 86400000;
 
 async function responseJson(response: Response, label: string) {
-  if (!response.ok) throw new Error(`${label} failed (${response.status}). Retry after checking the connection.`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const detail = [body.message, body.error?.message, ...(Array.isArray(body.errors) ? body.errors.map((e: any) => e.message) : [])]
+      .filter((s) => typeof s === 'string').join(' ').replace(/Bearer\s+\S+/gi, '[redacted]').slice(0, 300);
+    throw new Error(`${label} failed (${response.status}). ${detail || 'Retry after checking the connection.'}`);
+  }
   return response.json();
 }
 
