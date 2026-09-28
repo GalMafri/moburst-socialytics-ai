@@ -165,3 +165,11 @@ describe("buildImagePrompt", () => {
     expect(out).toContain("## Underlying palette");
   });
 });
+
+ it("fresh discovered references replace stale report props and restrict visible copy", () => {
+ const result = buildImagePrompt({ basePrompt: "Draw a Professional growth scorecard with gems and a phone", post: {copy: "A strong media plan starts before the campaign launches. At Moburst we plan."}, synthesis: { reference_pipeline_version: 1, composition_patterns: "A centered frosted headline card.", color_usage: "Deep navy with white type."} });
+ expect(result).toContain('THE ONLY VISIBLE TEXT, reproduce exactly in sentence case: "A strong media plan starts before the campaign launches"');
+ expect(result).not.toContain('Professional growth scorecard');
+ expect(result).not.toContain('At Moburst we plan');
+ expect(result).toContain('centered frosted headline card');
+ });

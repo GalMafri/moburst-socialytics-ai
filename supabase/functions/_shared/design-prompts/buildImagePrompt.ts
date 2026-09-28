@@ -69,6 +69,23 @@ function stripHex(text: string): string {
  * codes it may contain.
  */
 export function buildImagePrompt(input: BuildImagePromptInput): string {
+  // Fresh social references supersede report-era art direction. Keep this
+  // route concise: long historic prompts recreated their props and copy even
+  // when later instructions explicitly overrode them.
+  if (input.synthesis?.reference_pipeline_version === 1 && input.post?.copy && !input.slideContext && !input.noText) {
+    const headline = headlineFrom(input.post.copy);
+    const guide = flattenSynthesis(input.synthesis);
+    const compactGuide = guide.split(/(?=### )/).map(section => section.length > 650 ? section.slice(0, 650).replace(/\s+\S*$/, "") + "." : section).join("\n");
+    return [
+      "Create ONE polished social graphic matching the attached client social-post references. They define visual design, not content to copy.",
+      `THE ONLY VISIBLE TEXT, reproduce exactly in sentence case: "${headline}". Break into balanced lines, large and legible. No other words, caption, CTA, labels, statistics or microcopy.`,
+      `Format: ${input.platform || "social"} ${input.format || "single image"}. Language: ${input.post.language || "same as headline"}.`,
+      "Build the composition around this headline and one restrained visual metaphor for its meaning. Do not render a literal dashboard, scorecard, phone, product interface or fabricated performance chart. Do not use stock portraits unless this post identifies that person. Avoid generic growth arrows and scattered decorative gems. Give the headline generous breathing room.",
+      stripHex(compactGuide),
+      "Use the reference typography, contrast, spacing, background treatment and text containers. Follow recurring patterns; do not copy campaign props or text from a reference. A frosted headline card is allowed when present in the references. Keep the focal point clear and the composition uncluttered.",
+      "No logos, wordmarks, initials, watermarks or technical color notation. No fake UI, blank placeholders, collage or tiny unreadable copy. The headline above is the complete text. No added or omitted words."
+    ].join("\n\n");
+  }
   const sections: string[] = [];
 
   const synthesisMd = flattenSynthesis(input.synthesis);

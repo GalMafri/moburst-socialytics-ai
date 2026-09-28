@@ -1,6 +1,7 @@
 // supabase/functions/_shared/design-prompts/flattenSynthesis.ts
 
 export interface DesignStyleSynthesis {
+  reference_pipeline_version?: number;
   composition_patterns?: string;
   typography_treatment?: string;
   imagery_style?: string;
