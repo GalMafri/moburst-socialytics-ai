@@ -75,12 +75,13 @@ export async function discoverReferences(db: any, client: any, apiKey: string, f
     posts.push(...result.data);
     if (page >= Number(result.paging?.total_pages || 1)) break;
   }
+  const selectionStarted = Date.now();
   const candidates = sproutCandidates(posts, ids).slice(0, 24);
   const refs: any[] = [];
   let inspected = 0, skipped = 0;
   const hashes = new Set<string>();
   // Four at a time keeps onboarding within the edge request deadline.
-  for (let at = 0; at < candidates.length && refs.length < CAP; at += 4) {
+  for (let at = 0; at < candidates.length && refs.length < CAP && Date.now() - selectionStarted < 55000; at += 4) {
     const batch = await Promise.all(candidates.slice(at, at + 4).map(async (candidate) => {
       try {
         const image = await imageBytes(candidate.image_url);

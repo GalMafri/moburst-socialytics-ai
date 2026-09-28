@@ -90,7 +90,7 @@ export async function renderImageWithHiggsfield(args: RenderImageArgs): Promise<
 
   const referenceIds = args.referenceUrls?.length ? await importReferences(mcp, args.referenceUrls, "image") : [];
   if (args.referenceUrls?.length && !referenceIds.length) {
-    console.warn("[higgsfield/renderImage] no reference survived import; generating from the prompt alone");
+    throw new HiggsfieldError("The brand reference images could not be loaded. Refresh the client’s social references and retry; no design was generated.");
   }
 
   const jobs = await submitImage(mcp, {

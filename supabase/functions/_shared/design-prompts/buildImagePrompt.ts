@@ -130,6 +130,10 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
     );
   }
 
+  if (!input.noText && input.post?.copy) {
+    sections.push(`## Approved message\n${input.post.copy}\n\nUse only a short verbatim excerpt from this approved message for visible headline text. Do not invent a slogan, offer, statistic, score, claim or call-to-action. Reference images supply design treatment only: never copy their campaign wording, subjects, props or products. Any visual direction from an older report is subordinate to the current reference images and brand language.`);
+  }
+
   // Picture-only generations never see the copy: wording in the brief is
   // wording the model paints, and the app's typed headline then lands on top.
   const sanitizedBase = input.noText ? pictureBrief(stripHex(input.basePrompt)) : stripHex(input.basePrompt);
