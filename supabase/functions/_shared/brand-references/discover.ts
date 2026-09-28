@@ -10,7 +10,7 @@ async function responseJson(response: Response, label: string) {
     const body = await response.json().catch(() => ({}));
     const detail = [body.message, body.error?.message, ...(Array.isArray(body.errors) ? body.errors.map((e: any) => e.message) : [])]
       .filter((s) => typeof s === 'string').join(' ').replace(/Bearer\s+\S+/gi, '[redacted]').slice(0, 300);
-    throw new Error(`${label} failed (${response.status}). ${detail || 'Retry after checking the connection.'}`);
+    throw new Error(`${label} failed (${response.status}). ${detail || (label === 'Published-post lookup' ? JSON.stringify(body).slice(0, 400) : 'Retry after checking the connection.')}`);
   }
   return response.json();
 }
@@ -73,7 +73,7 @@ export async function discoverReferences(db: any, client: any, apiKey: string, f
       method: 'POST', headers: { Authorization: `Bearer ${tokenResult.access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ filters: [`customer_profile_id.eq(${ids.join(',')})`, `created_time.in(${start}T00:00:00...${end}T23:59:59)`],
         fields: ['guid', 'customer_profile_id', 'sent', 'network', 'created_time', 'perma_link', 'content_category', 'visual_media'],
-        metrics: ['lifetime.impressions'], sort: ['created_time:desc'], timezone: 'UTC', page, limit: 50 }),
+        metrics: ['lifetime.impressions'], sort: ['lifetime.impressions:desc'], timezone: 'UTC', page, limit: 50 }),
       signal: AbortSignal.timeout(15000),
     }), 'Published-post lookup');
     if (!Array.isArray(result.data)) throw new Error('Published-post lookup returned invalid data');
