@@ -1,3 +1,4 @@
+import { fetchSocialImage } from './mediaFetch.ts';
 import { defaultSproutCustomerId } from '../sprout/customer.ts';
 import { sproutCandidates, usableClassification, referenceFingerprint } from './candidates.ts';
 
@@ -17,12 +18,7 @@ async function responseJson(response: Response, label: string) {
 
 /** Provider-owned public media only; no caller-supplied URL enters this fetch. */
 async function imageBytes(url: string) {
-  const parsed = new URL(url);
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password ||
-      !/\.(fbcdn\.net|cdninstagram\.com|licdn\.com|twimg\.com|sproutsocial\.com)$/.test(parsed.hostname)) {
-    throw new Error('Unsupported social media host');
-  }
-  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(10000) });
+  const response = await fetchSocialImage(url);
   if (!response.ok) throw new Error('Image unavailable');
   const mime = (response.headers.get('content-type') || '').split(';')[0];
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(mime)) throw new Error('Not a supported still image');
@@ -84,7 +80,7 @@ export async function discoverReferences(db: any, client: any, apiKey: string, f
   const candidates = sproutCandidates(posts, ids).slice(0, 24);
   console.info('[brand-discovery] provider shape', JSON.stringify({ posts: posts.length, candidates: candidates.length,
     sample: posts.slice(0, 3).map(p => ({ keys: Object.keys(p), profile: p.customer_profile_id ?? p.dimensions?.customer_profile_id,
-      category: p.content_category, media: p.visual_media?.slice?.(0, 1) })) }));
+      category: p.content_category, media: p.visual_media?.slice?.(0, 1).map((m: any) => ({ type: m.media_type, keys: Object.keys(m), host: typeof m.media_url === 'string' ? new URL(m.media_url).hostname : null })) })) }));
   const refs: any[] = [];
   let inspected = 0, skipped = 0;
   const hashes = new Set<string>();
