@@ -2,16 +2,8 @@
 //
 // Which design references a generation actually sees.
 //
-// There are two pools. `design_references` is what staff uploaded: chosen,
-// few, and authoritative. `harvested_design_references` is what the app
-// pulled from the client's own published posts, weekly: plentiful, current,
-// and unvetted. They are kept in separate columns because the setup page
-// writes the first one wholesale — appending a harvest to it would be
-// erased by the next edit, and would erase the uploads on the next harvest.
-//
-// A generation wants the chosen ones first and the harvested ones to fill
-// the rest of the budget, so the brand's own eye leads and the recent work
-// keeps it current.
+// Reviewed social references are the current visual corpus. Legacy uploads and
+// unvetted harvests remain a fallback only until automatic onboarding succeeds.
 
 export interface HarvestedRef {
   path: string;
@@ -49,8 +41,8 @@ export function referencesFor(
   const chosen = asPaths(manual);
   const pulled = harvestedPaths(harvested).filter((p) => !chosen.includes(p));
   const verified = Array.isArray(harvested) ? harvested.filter((r) => r?.quality_checked === true).map((r) => r.path) : [];
-  // Reviewed social evidence leads; legacy unvetted harvest remains fallback.
-  return [...new Set([...verified, ...chosen, ...pulled])].slice(0, Math.max(0, limit));
+  // Do not fill spare slots with an older, contradictory manual campaign.
+  return [...new Set(verified.length ? verified : [...chosen, ...pulled])].slice(0, Math.max(0, limit));
 }
 
 /** How many references a client has of each kind, for the setup screen. */

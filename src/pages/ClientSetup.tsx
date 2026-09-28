@@ -1003,7 +1003,7 @@ export default function ClientSetup() {
                     rows={3}
                   />
                 </div>
-                <details className="space-y-3"><summary className="cursor-pointer t-secondary">Optional brand documents and reference overrides</summary>
+                <details className="space-y-3"><summary className="cursor-pointer t-secondary">Optional brand documents and additional references</summary>
                 <BrandBookUpload
                   clientId={isNew ? undefined : id}
                   clientName={form.name}

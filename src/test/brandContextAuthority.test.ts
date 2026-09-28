@@ -10,5 +10,5 @@ it('uses the current client corpus even when an old report supplied a complete s
   } });
   expect(result.source).toBe('database');
   expect(result.synthesis?.imagery_style).toBe('Current evidence');
-  expect(result.designReferences).toEqual(['social.png', 'manual.png']);
+  expect(result.designReferences).toEqual(['social.png']);
 });
