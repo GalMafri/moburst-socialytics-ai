@@ -18,6 +18,7 @@ export interface DesignVerdict {
   /** Specific observed defects, for review and targeted retries. */
   reason?: string;
   has_hex_codes?: boolean;
+  has_unapproved_text?: boolean;
   has_logo?: boolean;
   has_garbled_text?: boolean;
   /** Any readable word at all. A failure only when the design was asked for text-free. */
@@ -32,6 +33,7 @@ export interface DesignVerdict {
 
 export const CLEAN_VERDICT: DesignVerdict = {
   has_hex_codes: false,
+  has_unapproved_text: false,
   has_logo: false,
   has_garbled_text: false,
   has_text: false,
@@ -50,7 +52,7 @@ export function verdictIsDirty(
 ): boolean {
   if (!v || v.skipped) return false;
   return Boolean(
-    v.off_brand || v.has_logo || v.has_garbled_text || v.has_hex_codes || (opts.expectNoText && v.has_text),
+    v.has_unapproved_text || v.off_brand || v.has_logo || v.has_garbled_text || v.has_hex_codes || (opts.expectNoText && v.has_text),
   );
 }
 
@@ -100,6 +102,9 @@ export function correctionFor(
         "Use fewer words, at most 6 per line and 12 in total, set larger, each spelled exactly as in the brief, " +
         "with clear space around every line. Never invent lettering.",
     );
+  }
+  if (v.has_unapproved_text) {
+    notes.push("Remove every extra label, platform name, subtitle and invented sentence. Render only the exact approved headline, with no added or missing words.");
   }
   if (v.has_hex_codes) {
     notes.push(

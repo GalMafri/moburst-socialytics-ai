@@ -46,14 +46,14 @@ Deno.serve(async (req) => {
   if (denied) return denied;
 
   try {
-    const { image_data, media_type, expect_no_text, client_id } = await req.json();
+    const { image_data, media_type, expect_no_text, client_id, expected_text } = await req.json();
 
     if (!image_data) {
       return jsonResp({ error: "image_data is required" }, 400);
     }
 
     const avoid = await antiPatternsFor(client_id);
-    const verdict = await validateDesignImage(image_data, { mediaType: media_type, avoid });
+    const verdict = await validateDesignImage(image_data, { mediaType: media_type, avoid, expectedText: typeof expected_text === "string" ? expected_text.slice(0, 500) : null });
     // The client decides what counts; it gets the raw answers plus the two views of them.
     const dirty = verdictIsDirty(verdict, { expectNoText: expect_no_text === true });
     return jsonResp({ ...verdict, dirty, avoid: avoid || undefined });

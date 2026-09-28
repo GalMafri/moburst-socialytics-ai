@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseDesignVerdict, questionFor } from '../../../supabase/functions/_shared/design-prompts/validateImage';
 
 describe('structured creative review', () => {
-  const clean = { has_hex_codes: false, has_logo: false, has_garbled_text: false, has_text: true, off_brand: false, reason: '' };
+  const clean = { has_hex_codes: false, has_logo: false, has_garbled_text: false, has_text: true, off_brand: false, has_unapproved_text: false, reason: '' };
   it('retains observed text without declaring it a defect', () => {
     expect(parseDesignVerdict(JSON.stringify(clean))).toEqual(clean);
   });
@@ -23,4 +23,9 @@ it('defines demonstrated false-positive boundaries without skipping review', () 
  expect(prompt).toContain('is NEVER a blank placeholder');
  expect(prompt).toContain('actual controls');
  expect(prompt).toContain('Never render an all-caps headline.');
+});
+
+it('flags added platform labels as unapproved copy', () => {
+ const result = parseDesignVerdict(JSON.stringify({has_hex_codes:false,has_logo:false,has_garbled_text:false,has_text:true,off_brand:false,has_unapproved_text:true,reason:'Extra Facebook Single Image label.'}));
+ expect(result.has_unapproved_text).toBe(true);
 });

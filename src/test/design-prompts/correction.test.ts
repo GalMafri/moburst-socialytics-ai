@@ -99,3 +99,9 @@ describe("verdictIsDirty", () => {
     expect(verdictIsDirty({ has_text: true }, { expectNoText: true })).toBe(true);
   });
 });
+
+it('withholds and corrects otherwise clean images with unapproved copy', () => {
+ const verdict = { ...CLEAN_VERDICT, has_text: true, has_unapproved_text: true };
+ expect(verdictIsDirty(verdict)).toBe(true);
+ expect(correctionFor(verdict)).toContain('exact approved headline');
+});

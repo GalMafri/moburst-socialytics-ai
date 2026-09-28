@@ -17,6 +17,7 @@ import { DesignEditor } from "@/components/editor/DesignEditor";
 import type { ClientContext } from "@/lib/clientContext";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 import { brandAdviceFrom, brandWarning, correctionFor, verdictIsDirty, verdictSummary } from "@/lib/designGuard";
+import { headlineFrom } from "../../../supabase/functions/_shared/design-prompts/headline";
 import { postCopyOf } from "@/lib/postCopy";
 
 export interface BrandIdentity {
@@ -451,7 +452,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           // Up to two regenerations: a smeared word or a stray letterform
           // sometimes survives the first correction, and a third image is
           // cheaper than a client seeing either.
-          let verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
+          let verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expected_text: modelDrawsText ? headlineFrom(post.copy) : undefined, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           for (let pass = 0; pass < 2 && verdictIsDirty(verdict, { expectNoText: !modelDrawsText }); pass++) {
             toast({ title: pass === 0 ? "Refining design" : "Refining design again", description: `Caught ${verdictSummary(verdict)}, regenerating.` });
             const { data: retry } = await supabase.functions.invoke("generate-post-image", {
@@ -472,7 +473,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             });
             if (!retry?.image_url) break;
             dataUrl = retry.image_url;
-            verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
+            verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expected_text: modelDrawsText ? headlineFrom(post.copy) : undefined, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           }
           if (!verdict || verdict.skipped || verdict.error || verdictIsDirty(verdict, { expectNoText: !modelDrawsText })) {
             flag = !verdict || verdict.skipped || verdict.error ? "Quality review unavailable" : verdictSummary(verdict);

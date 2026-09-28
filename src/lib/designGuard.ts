@@ -71,6 +71,7 @@ import { verdictIsDirty as verdictIsDirtyForSummary } from "../../supabase/funct
 export function verdictSummary(v: DesignVerdict, opts: { expectNoText?: boolean } = {}): string {
   if (v.reason && verdictIsDirtyForSummary(v, opts)) return v.reason;
   const bits: string[] = [];
+  if (v.has_unapproved_text) bits.push("text outside the approved headline");
   if (v.off_brand) bits.push("an off-brand scene, a blank placeholder or a photo grid");
   if (v.has_logo) bits.push("an invented logo");
   if (v.has_garbled_text) bits.push("malformed text");
