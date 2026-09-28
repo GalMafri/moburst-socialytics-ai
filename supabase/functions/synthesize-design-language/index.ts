@@ -2,6 +2,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { referencesFor } from "../_shared/design-prompts/designRefs.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
 
+import { referenceFingerprint } from "../_shared/brand-references/candidates.ts";
+import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
 import { discoverReferences } from "../_shared/brand-references/discover.ts";
 
 const corsHeaders = {
@@ -204,6 +206,16 @@ Deno.serve(async (req) => {
     synthesis.synthesized_at = new Date().toISOString();
     synthesis.source_count = sourceCount;
 
+    // Do not commit evidence from accounts that were reassigned mid-run.
+    if (discovery) {
+      const { data: currentProfiles, error: profilesError } = await supabase.from("sprout_profiles")
+        .select("sprout_profile_id").eq("client_id", client_id).eq("is_active", true);
+      const { data: currentClient } = await supabase.from("clients").select("sprout_customer_id").eq("id", client_id).single();
+      const currentFingerprint = referenceFingerprint((currentProfiles || []).map((p: any) => String(p.sprout_profile_id)), String(currentClient?.sprout_customer_id || defaultSproutCustomerId()));
+      if (profilesError || !currentClient || currentFingerprint !== discovery.fingerprint) {
+        return json({ error: "Social account assignments changed during discovery. Refresh references to use the saved accounts." }, 409);
+      }
+    }
     // Persist
     const { error: updateErr } = await supabase
       .from("clients")

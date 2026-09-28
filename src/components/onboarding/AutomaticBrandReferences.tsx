@@ -14,6 +14,8 @@ export function AutomaticBrandReferences({ clientId, savedVersion, onReady }: {
   const [error, setError] = useState('');
   const [refs, setRefs] = useState<any[]>([]);
   const [previews, setPreviews] = useState<Record<string, string>>({});
+  const activeClient = useRef(clientId);
+  activeClient.current = clientId;
   const callback = useRef(onReady);
   callback.current = onReady;
   const run = async (force = false) => {
@@ -33,6 +35,7 @@ export function AutomaticBrandReferences({ clientId, savedVersion, onReady }: {
         request.finally(() => pending.delete(clientId)).catch(() => {});
       }
       const data = await request;
+      if (activeClient.current !== clientId) return;
       setRefs(data.harvested_design_references || []);
       callback.current(data.design_style_synthesis);
       const paths = (data.harvested_design_references || []).map((r: any) => r.path);
@@ -40,10 +43,10 @@ export function AutomaticBrandReferences({ clientId, savedVersion, onReady }: {
         const { data: signed } = await supabase.storage.from('design-references').createSignedUrls(paths, 3600);
         setPreviews(Object.fromEntries((signed || []).filter(r => r.signedUrl).map(r => [r.path!, r.signedUrl])));
       }
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not discover references. Please retry.'); }
-    finally { setRunning(false); }
+    } catch (e) { if (activeClient.current === clientId) setError(e instanceof Error ? e.message : 'Could not discover references. Please retry.'); }
+    finally { if (activeClient.current === clientId) setRunning(false); }
   };
-  useEffect(() => { void run(); }, [clientId, savedVersion]); // saved assignments are the source of truth
+  useEffect(() => { setRefs([]); setPreviews({}); void run(); }, [clientId, savedVersion]); // saved assignments are the source of truth
   return <Card><CardContent className="pt-5 space-y-3">
     <div className="flex items-center justify-between gap-3">
       <h3 className="font-semibold">Brand references from social posts</h3>
