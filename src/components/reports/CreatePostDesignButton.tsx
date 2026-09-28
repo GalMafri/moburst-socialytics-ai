@@ -920,10 +920,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                   isCarousel
                     ? `${Math.max(1, Math.ceil((slideCount * variantCount * (slowBackend ? 35 : 20)) / 60))} to ${Math.max(2, Math.ceil((slideCount * variantCount * (slowBackend ? 55 : 30)) / 60))} minutes`
                     : slowBackend
-                      ? "1 to 2 minutes"
+                      ? "2 to 8 minutes including review"
                       : "2 to 3 minutes"
                 }
-                note="You can close this window. The run continues and the card in the corner says when it is done."
+                note="Brand review may regenerate a variant up to twice. You can close this dialog while it runs; keep this browser tab open."
                 done={variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
                 total={variantUrls.length}
                 failed={variantUrls.filter((u) => u === "FAILED").length}

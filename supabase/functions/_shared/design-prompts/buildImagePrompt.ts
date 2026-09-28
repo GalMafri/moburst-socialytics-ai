@@ -1,6 +1,7 @@
 // supabase/functions/_shared/design-prompts/buildImagePrompt.ts
 
 import { flattenSynthesis, type DesignStyleSynthesis } from "./flattenSynthesis.ts";
+import { headlineFrom } from "./headline.ts";
 import { pictureBrief } from "./pictureBrief.ts";
 import {
   getPlaybookEntry,
@@ -131,7 +132,7 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
   }
 
   if (!input.noText && input.post?.copy) {
-    sections.push(`## Approved message\n${input.post.copy}\n\nUse only a short verbatim excerpt from this approved message for visible headline text. Do not invent a slogan, offer, statistic, score, claim or call-to-action. Reference images supply design treatment only: never copy their campaign wording, subjects, props or products. Any visual direction from an older report is subordinate to the current reference images and brand language.`);
+    sections.push(`## Approved message\n${input.post.copy}\n\nVisible headline, reproduce exactly: "${headlineFrom(input.post.copy)}". Render this headline only, with no supporting sentence, trailing word, CTA or extra caption. Do not invent a slogan, offer, statistic, score, claim or call-to-action. Reference images supply design treatment only: never copy their campaign wording, subjects, props or products. Any visual direction from an older report is subordinate to the current reference images and brand language.`);
   }
 
   // Picture-only generations never see the copy: wording in the brief is

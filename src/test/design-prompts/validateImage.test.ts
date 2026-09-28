@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDesignVerdict } from '../../../supabase/functions/_shared/design-prompts/validateImage';
+import { parseDesignVerdict, questionFor } from '../../../supabase/functions/_shared/design-prompts/validateImage';
 
 describe('structured creative review', () => {
   const clean = { has_hex_codes: false, has_logo: false, has_garbled_text: false, has_text: true, off_brand: false, reason: '' };
@@ -15,4 +15,12 @@ describe('structured creative review', () => {
       expect(parseDesignVerdict(value).skipped).toBe(true);
     }
   });
+});
+
+it('defines demonstrated false-positive boundaries without skipping review', () => {
+ const prompt = questionFor('Never render an all-caps headline.');
+ expect(prompt).toContain('is NOT all-caps');
+ expect(prompt).toContain('is NEVER a blank placeholder');
+ expect(prompt).toContain('actual controls');
+ expect(prompt).toContain('Never render an all-caps headline.');
 });
