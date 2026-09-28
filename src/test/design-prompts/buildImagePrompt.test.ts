@@ -173,3 +173,9 @@ describe("buildImagePrompt", () => {
  expect(result).not.toContain('At Moburst we plan');
  expect(result).toContain('centered frosted headline card');
  });
+
+it("keeps targeted review corrections in the concise reference route", () => {
+ const prompt = buildImagePrompt({basePrompt: "Old style\n\nCRITICAL CORRECTIONS, the previous attempt failed review:\n- Remove the stray word.", post: {copy: "Plan before launch."}, synthesis: {reference_pipeline_version: 1, color_usage: "Navy."}});
+ expect(prompt).toContain("Remove the stray word.");
+ expect(prompt).not.toContain("Old style");
+});

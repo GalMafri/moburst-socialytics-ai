@@ -74,6 +74,7 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
   // when later instructions explicitly overrode them.
   if (input.synthesis?.reference_pipeline_version === 1 && input.post?.copy && !input.slideContext && !input.noText) {
     const headline = headlineFrom(input.post.copy);
+    const correction = input.basePrompt.includes("CRITICAL CORRECTIONS,") ? input.basePrompt.slice(input.basePrompt.indexOf("CRITICAL CORRECTIONS,"), input.basePrompt.indexOf("CRITICAL CORRECTIONS,") + 1800) : "";
     const guide = flattenSynthesis(input.synthesis);
     const compactGuide = guide.split(/(?=### )/).map(section => section.length > 650 ? section.slice(0, 650).replace(/\s+\S*$/, "") + "." : section).join("\n");
     return [
@@ -82,6 +83,7 @@ export function buildImagePrompt(input: BuildImagePromptInput): string {
       `Format: ${input.platform || "social"} ${input.format || "single image"}. Language: ${input.post.language || "same as headline"}.`,
       "Build the composition around this headline and one restrained visual metaphor for its meaning. Do not render a literal dashboard, scorecard, phone, product interface or fabricated performance chart. Do not use stock portraits unless this post identifies that person. Avoid generic growth arrows and scattered decorative gems. Give the headline generous breathing room.",
       stripHex(compactGuide),
+      correction ? stripHex(correction) : "",
       "Use the reference typography, contrast, spacing, background treatment and text containers. Follow recurring patterns; do not copy campaign props or text from a reference. A frosted headline card is allowed when present in the references. Keep the focal point clear and the composition uncluttered.",
       "No logos, wordmarks, initials, watermarks or technical color notation. No fake UI, blank placeholders, collage or tiny unreadable copy. The headline above is the complete text. No added or omitted words."
     ].join("\n\n");
