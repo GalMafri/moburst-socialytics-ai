@@ -2,7 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
-import { staffGate } from "../_shared/auth/requireStaff.ts";
+import { staffGate, requireStaff, AuthzError } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -59,7 +59,6 @@ serve(async (req) => {
     const {
       client_id,
       report_id,
-      profile_id,
       sprout_profile_id,
       platform,
       scheduled_time,
@@ -73,9 +72,9 @@ serve(async (req) => {
       ? media_urls
       : media_url ? [media_url] : [];
 
-    if (!sprout_profile_id || !scheduled_time || !post_content) {
+    if (!client_id || !sprout_profile_id || !scheduled_time || !post_content) {
       return new Response(
-        JSON.stringify({ error: "sprout_profile_id, scheduled_time, and post_content are required" }),
+        JSON.stringify({ error: "client_id, sprout_profile_id, scheduled_time, and post_content are required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -90,7 +89,23 @@ serve(async (req) => {
       .eq("id", client_id)
       .single();
 
-    const customerId = client?.sprout_customer_id || defaultSproutCustomerId();
+    await requireStaff(req, { writeClientId: client_id });
+    if (!client) throw new AuthzError(404, "Client not found.");
+    const { data: assigned, error: assignmentError } = await supabase.from("sprout_profiles")
+      .select("id, network_type").eq("client_id", client_id)
+      .eq("sprout_profile_id", sprout_profile_id).neq("is_active", false).maybeSingle();
+    if (assignmentError) throw new Error("Could not verify the assigned publishing profile.");
+    if (!assigned) throw new AuthzError(403, "Assign this social profile to the client before scheduling.");
+    if (report_id) {
+      const { data: report, error: reportError } = await supabase.from("reports")
+        .select("id").eq("id", report_id).eq("client_id", client_id).maybeSingle();
+      if (reportError) throw new Error("Could not verify the report's client.");
+      if (!report) throw new AuthzError(403, "The report does not belong to this client.");
+    }
+    if (!Number.isFinite(Date.parse(scheduled_time)) || Date.parse(scheduled_time) <= Date.now()) {
+      throw new AuthzError(400, "Choose a future date and time.");
+    }
+    const customerId = client.sprout_customer_id || defaultSproutCustomerId();
     const token = await getSproutToken();
 
     const publishPayload: any = {
@@ -171,7 +186,7 @@ serve(async (req) => {
       client_id,
       report_id,
       sprout_post_id: responseData.id || responseData.data?.id || null,
-      profile_id,
+      profile_id: assigned.id,
       platform,
       scheduled_time,
       status: "scheduled",
@@ -203,7 +218,7 @@ serve(async (req) => {
   } catch (error: any) {
     console.error("Error scheduling post:", error);
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
+      status: error instanceof AuthzError ? error.status : 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

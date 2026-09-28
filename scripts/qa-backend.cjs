@@ -20,15 +20,15 @@ async function competitiveWritebackQa({authorized=true,op='report',failedWindows
  return{status:response.status,body:await response.json(),state};
 }
 
-async function scheduling({media=[],denied=false,missing=false,uploadFailure=false,partial=false,recordFailure=false,providerFailure=false,scopeControl=false}={}){
+async function scheduling({media=[],denied=false,missing=false,uploadFailure=false,partial=false,recordFailure=false,providerFailure=false,scopeControl=false,wrongProfile=false,wrongReport=false,restricted=false,assignmentError=false}={}){
  let handler;const calls=[];let uploadIndex=0;
- const query={select(){return this},eq(){return this},async single(){return{data:{sprout_customer_id:'fixture'}}},async insert(){calls.push('record');return{error:recordFailure?{message:'fixture insert rejected'}:null}}};
+ const query=table=>({select(){return this},eq(){return this},neq(){return this},async maybeSingle(){return{data:table==='sprout_profiles'?(wrongProfile?null:{id:'assigned-profile',network_type:'linkedin_company'}):table==='reports'?(wrongReport?null:{id:'fixture-report'}):{},error:assignmentError?{message:'fixture denied'}:null}},async single(){return{data:{sprout_customer_id:'fixture'}}},async insert(){calls.push('record');return{error:recordFailure?{message:'fixture insert rejected'}:null}}});
  const deps={
   'https://deno.land/x/xhr@0.1.0/mod.ts':{},
   'https://deno.land/std@0.168.0/http/server.ts':{serve:f=>handler=f},
-  'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>({from:()=>query})},
+  'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>({from:query})},
   '../_shared/sprout/customer.ts':{defaultSproutCustomerId:()=> 'fixture'},
-  '../_shared/auth/requireStaff.ts':{staffGate:async()=>denied?new Response('{}',{status:401}):null},
+  '../_shared/auth/requireStaff.ts':{...moduleFrom('supabase/functions/_shared/auth/authz.ts'),staffGate:async()=>denied?new Response('{}',{status:401}):null,requireStaff:async()=>{if(restricted)throw new (deps['../_shared/auth/requireStaff.ts'].AuthzError)(403,'Client access denied');}},
  };
  moduleFrom('supabase/functions/schedule-sprout-post/index.ts',deps,{Deno:{env:{get:()=> 'fixture'}},fetch:async(url,opts)=>{
   const kind=url.includes('/publishing/posts')?'publish':url.includes('/media')?'media':'oauth';calls.push(kind);
@@ -37,7 +37,7 @@ async function scheduling({media=[],denied=false,missing=false,uploadFailure=fal
   if(kind==='publish'&&providerFailure)return new Response(JSON.stringify({error:'fixture rejected'}),{status:400});
   return new Response(JSON.stringify({id:'fixture'}));
  }},source=>scopeControl?source.replace('    if (allMediaUrls.length > 0) {\n      const uploadedMedia: { id: string }[] = [];','    const uploadedMedia: { id: string }[] = [];\n    if (allMediaUrls.length > 0) {'):source);
- const body=missing?{}:{client_id:'fixture-client',sprout_profile_id:1,post_content:'Fixture copy',scheduled_time:'2030-09-21T15:00:00Z',media_urls:media};
+ const body=missing?{}:{client_id:'fixture-client',report_id:'fixture-report',sprout_profile_id:1,post_content:'Fixture copy',scheduled_time:'2030-09-21T15:00:00Z',media_urls:media};
  const r=await handler(new Request('https://fixture.invalid/schedule',{method:'POST',body:JSON.stringify(body)}));
  return{status:r.status,body:await r.json(),calls};
 }
@@ -199,6 +199,7 @@ async function confirmCompetitorsQa({handlesById={},handlesError=false}={}) {
 
 (async()=>{
  for(const [name,options,header,expected] of [['client rejected',{staff:false},'Bearer fixture',403],['staff allowed',{},'Bearer fixture',null],['expired session rejected',{valid:false},'Bearer fixture',401],['missing session rejected',{},null,401],['role error fails closed',{roleError:true},'Bearer fixture',500]])await check('QA-13','control','actual staff guard: '+name,async()=>{const g=actualStaffGuard(options);const response=await g.staffGate(new Request('https://fixture.invalid',{headers:header?{Authorization:header}:{}}),{});assert.equal(response?.status??null,expected);});
+ for(const options of [{wrongProfile:true},{wrongReport:true},{restricted:true},{assignmentError:true}])await check('QA-PUBLISH-SCOPE','regression','reject before provider side effects '+JSON.stringify(options),async()=>{const r=await scheduling(options);assert.equal(r.status,options.assignmentError?500:403);assert.deepEqual(r.calls,[]);});
  for(const options of [{},{media:['https://fixture.invalid/image.png']},{media:['a','b'],partial:true},{media:['a'],uploadFailure:true},{recordFailure:true},{providerFailure:true},{missing:true},{denied:true}])await check('QA-01','regression','publishing '+JSON.stringify(options),async()=>{const r=await scheduling(options);assert.equal(r.status,options.denied?401:options.missing?400:options.uploadFailure?502:options.providerFailure?500:200);assert.equal(r.calls.filter(x=>x==='publish').length,options.denied||options.missing||options.uploadFailure?0:1);if(options.recordFailure)assert.equal(r.body.recorded,false);if(options.partial)assert.equal(r.body.media_dropped,1);});
  for(const status of ['pending','failed','completed'])await check('QA-07','regression',status+' never fabricates a presentation URL',()=>{const r=gamma({status,generationId:'fixture-job'});assert.equal(r.gamma_url,null);assert.equal(r.gamma_status,'failed');assert.equal(r.status,'success');assert.equal(r.warnings.length,1);});
  await check('QA-07','control','completed uses real document URL',()=>{const r=gamma({status:'completed',gammaUrl:'https://gamma.app/docs/fixture-document'});assert.equal(r.gamma_url,'https://gamma.app/docs/fixture-document');assert.equal(r.gamma_status,'success');assert.equal(r.warnings.length,0);});

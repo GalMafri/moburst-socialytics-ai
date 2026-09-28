@@ -1,3 +1,4 @@
+import { describeInvokeError } from "@/lib/invokeError";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -136,6 +137,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // For carousels these are slide slots; for non-carousels they are variant slots.
   const [variantUrls, setVariantUrls] = useState<VariantSlot[]>([]);
   // What the brand review still objected to on a variant that shipped anyway.
+  const [generationError, setGenerationError] = useState<string | null>(null);
   const [reviewFlags, setReviewFlags] = useState<Record<number, string>>({});
   const [revisedPrompt, setRevisedPrompt] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -345,6 +347,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     setVariantGroupId(groupId);
     setLoading(true);
     setReviewFlags({});
+    setGenerationError(null);
     if (!startedAt || !loading) setStartedAt(Date.now());
     setStage(1);
     setRevisedPrompt(null);
@@ -501,6 +504,10 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         await persistVariantRow(uploadedUrl, angleInstructions[i].instruction, groupId, false);
         generation.progressGeneration(postKey);
       } else {
+        setGenerationError(await describeInvokeError(
+          r.status === "fulfilled" ? r.value.error : r.reason,
+          r.status === "fulfilled" ? r.value.data : undefined,
+        ));
         setVariantUrls((prev) => {
           const next = [...prev];
           next[i] = "FAILED";
@@ -879,6 +886,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               </div>
             )}
 
+            {generationError && <p role="alert" className="text-destructive">{generationError}</p>}
             {loading && (
               <GenerationStages
                 stages={runStages}
