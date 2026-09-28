@@ -435,10 +435,10 @@ Deno.serve(async (req) => {
         prompt: designPrompt,
         aspectRatio,
         referenceUrls,
-        // Bounded so a carousel slide, which can render twice with a vision
-        // check in between, still finishes inside the 150 seconds the
-        // platform allows. A measured render is about 48s.
-        budgetMs: 80_000,
+        // Single images have no in-function retry and can use more of the
+        // 150-second request window. Reference imports consume part of this
+        // budget; carousel slides still reserve time for their layout retry.
+        budgetMs: slide_context ? 80_000 : 115_000,
       });
       imageB64 = rendered.imageB64;
       imageMime = rendered.imageMime;
