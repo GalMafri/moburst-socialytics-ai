@@ -1,5 +1,8 @@
-import { expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { fetchSocialImage } from '../../supabase/functions/_shared/brand-references/mediaFetch';
+// jsdom predates AbortSignal.timeout; requests are mocked in these redirect tests.
+beforeEach(() => vi.stubGlobal('AbortSignal', { timeout: () => new AbortController().signal }));
+afterEach(() => vi.unstubAllGlobals());
 it('follows Sprout media redirects to the public social CDN', async () => {
   const send = vi.fn().mockResolvedValueOnce(new Response(null, { status: 302, headers: { location: 'https://scontent.cdninstagram.com/photo.jpg' } }))
     .mockResolvedValueOnce(new Response('image', { headers: { 'content-type': 'image/jpeg' } }));
