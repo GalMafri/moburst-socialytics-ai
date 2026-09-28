@@ -8,7 +8,10 @@ const post = { guid: 'ig:1', customer_profile_id: 7, sent: true, perma_link: 'ht
 
 describe('automatic brand evidence', () => {
   it('rejects foreign accounts, received messages and unknown ownership', () => {
-    expect(sproutCandidates([{ ...post, customer_profile_id: 8 }, { ...post, sent: false }, { ...post, sent: undefined }], ['7'])).toEqual([]);
+    expect(sproutCandidates([{ ...post, customer_profile_id: 8 }, { ...post, sent: false }, { ...post, customer_profile_id: undefined }], ['7'])).toEqual([]);
+  });
+  it('accepts owned analytics posts when Sprout omits its unsupported sent field', () => {
+    expect(sproutCandidates([{ ...post, sent: undefined }], ['7'])).toHaveLength(1);
   });
   it('does not learn static layouts from video thumbnails or link previews', () => {
     expect(sproutCandidates([{ ...post, content_category: 'VIDEO' }, { ...post, content_category: 'LINK' }], ['7'])).toEqual([]);

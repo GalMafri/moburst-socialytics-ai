@@ -7,13 +7,16 @@ export interface Candidate {
   image_url: string;
 }
 
-/** Only published media from the client's assigned accounts, never inbox or competitor images. */
+/** Input must come from Sprout analytics/posts (owned published posts), never messages/inbox.
+ * The posts endpoint does not accept the documented `sent` field. Bind every
+ * returned profile to the saved assignment and reject explicit received rows.
+ */
 export function sproutCandidates(rows: any[], profileIds: string[]): Candidate[] {
   const allowed = new Set(profileIds);
   const seen = new Set<string>();
   return rows.flatMap((p): Candidate[] => {
     const profile = String(p.customer_profile_id ?? p.dimensions?.customer_profile_id ?? "");
-    if (!allowed.has(profile) || p.sent !== true || !p.guid || !p.perma_link) return [];
+    if (!allowed.has(profile) || p.sent === false || !p.guid || !p.perma_link) return [];
     if (!['PHOTO', 'ALBUM'].includes(String(p.content_category).toUpperCase())) return [];
     // One frame per post prevents one carousel from defining the entire brand.
     const media = (Array.isArray(p.visual_media) ? p.visual_media : []).find((m: any) =>

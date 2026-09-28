@@ -72,7 +72,7 @@ export async function discoverReferences(db: any, client: any, apiKey: string, f
     const result = await responseJson(await fetch(`https://api.sproutsocial.com/v1/${encodeURIComponent(customer)}/analytics/posts`, {
       method: 'POST', headers: { Authorization: `Bearer ${tokenResult.access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ filters: [`customer_profile_id.eq(${ids.join(',')})`, `created_time.in(${start}T00:00:00...${end}T23:59:59)`],
-        fields: ['guid', 'customer_profile_id', 'sent', 'network', 'created_time', 'perma_link', 'content_category', 'visual_media'],
+        fields: ['guid', 'customer_profile_id', 'network', 'created_time', 'perma_link', 'content_category', 'visual_media'],
         metrics: ['lifetime.impressions'], sort: ['lifetime.impressions:desc'], timezone: 'UTC', page, limit: 50 }),
       signal: AbortSignal.timeout(15000),
     }), 'Published-post lookup');
