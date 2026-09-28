@@ -103,6 +103,11 @@ describe('QA-03 counterexamples through actual permitted client routes',()=>{
 });
 
 describe('QA-06 actual schedule form',()=>{
+ it('keeps missing hashtags when one is already in the copy',async()=>{
+  mount(<SchedulePostModal open onOpenChange={()=>{}} post={{...original,copy:'Test #Moburst',hashtags:['#Moburst','#AEO','#AISearch']}} clientId="fixture-client" reportId="fixture-report"/>);
+  expect(await screen.findByLabelText('Post copy (includes hashtags)')).toHaveValue('Test #Moburst\n\n#AEO #AISearch');
+ });
+
  it('submits the client timezone independently of the browser zone',async()=>{
   mount(<SchedulePostModal open onOpenChange={()=>{}} post={original} clientId="fixture-client" reportId="fixture-report" clientTimezone="UTC" generatedMediaUrls={[]}/>);
   await waitFor(()=>expect(screen.getByRole('button',{name:'Schedule Post'})).toBeEnabled());

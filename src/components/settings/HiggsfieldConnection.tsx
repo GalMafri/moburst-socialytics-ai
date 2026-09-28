@@ -68,7 +68,7 @@ export function HiggsfieldConnection() {
         {isLoading ? (
           <p className="t-secondary flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Checking the connection
+            Checking the saved connection
           </p>
         ) : isError ? (
           // Not the same thing as "not connected": saying so would send
@@ -81,8 +81,9 @@ export function HiggsfieldConnection() {
           <div className="space-y-2">
             <p className="t-body flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-[#b9e045]" aria-hidden="true" />
-              Connected as {data?.account_email ?? "an unnamed account"}
+              Account linked as {data?.account_email ?? "an unnamed account"}
             </p>
+            <p className="t-secondary">This is the saved account link. If generation reports an expired session, sign in again below.</p>
             {data?.linked_at && (
               <p className="t-secondary">Signed in on {new Date(data.linked_at).toLocaleDateString()}.</p>
             )}

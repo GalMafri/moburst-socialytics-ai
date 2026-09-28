@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { localDateString, scheduledInstant } from "@/lib/calendarDate";
+import { describeInvokeError } from "@/lib/invokeError";
 import { postCopyOf } from "@/lib/postCopy";
 
 interface SchedulePostModalProps {
@@ -56,7 +57,7 @@ export function SchedulePostModal({
   const matchingNetworkTypes = platformToNetworkTypes[postPlatform] || [postPlatform];
 
   // ── Always fetch all Sprout API profiles when modal opens ───────────────────
-  // This is the reliable source; DB-assigned profiles are an enhancement on top.
+  // API data enriches the profiles explicitly assigned to this client.
   const {
     data: apiProfiles,
     isLoading: loadingApi,
@@ -67,7 +68,7 @@ export function SchedulePostModal({
       // No customer id: sprout-profiles resolves the account itself, so the
       // screen does not carry its own copy of that identity.
       const { data, error } = await supabase.functions.invoke("sprout-profiles", { body: {} });
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(await describeInvokeError(error, data));
       if (data?.error) throw new Error(data.error);
       return (data?.profiles || []) as any[];
     },
@@ -75,7 +76,7 @@ export function SchedulePostModal({
     staleTime: 60_000,
   });
 
-  // ── DB-assigned profiles: used only for auto-detection ──────────────────────
+  // ── DB-assigned profiles: required publishing allowlist ──────────────────────
   // Independent query — does NOT gate the API profiles query above.
   const { data: dbProfiles, isError: assignedProfilesFailed } = useQuery({
     queryKey: ["sprout-profiles-assigned", clientId],
@@ -95,24 +96,17 @@ export function SchedulePostModal({
   });
 
   // ── Compute which profiles to show ─────────────────────────────────────────
-  // API profiles filtered to this platform
-  const apiForPlatform = (apiProfiles || []).filter((p: any) =>
-    matchingNetworkTypes.includes((p.network_type || "").toLowerCase())
-  );
-
   // DB-assigned profiles matched to this platform (for auto-detection)
   const assignedForPlatform = (dbProfiles || []).filter((p: any) =>
     matchingNetworkTypes.includes((p.network_type || "").toLowerCase())
   );
 
   // If client has DB-assigned profiles for this platform, show only those.
-  // Otherwise show all API profiles for this platform (or all API if none match).
+  // No assignment means no publishing target. Never offer another client's profiles.
   const hasDbAssigned = assignedForPlatform.length > 0;
 
   const displayProfiles = assignedProfilesFailed
-    ? // The fallback below is only correct for a client we KNOW has no
-      // assignments. When the read failed we do not know that, so offer
-      // nothing rather than every profile on the agency's account.
+    ? // A failed assignment lookup cannot authorize a publishing target.
       []
     : hasDbAssigned
     ? // Enrich DB records with full API profile data by matching sprout_profile_id
@@ -122,11 +116,8 @@ export function SchedulePostModal({
         );
         return apiMatch ?? { ...dbP, id: dbP.sprout_profile_id };
       })
-    : apiForPlatform.length > 0
-    ? apiForPlatform
-    : (apiProfiles || []);
+    : [];
 
-  const noMatchWarning = !hasDbAssigned && apiForPlatform.length === 0 && (apiProfiles || []).length > 0;
   const autoSelected = hasDbAssigned && assignedForPlatform.length === 1;
 
   // ── Auto-select when exactly one profile matches ────────────────────────────
@@ -145,10 +136,9 @@ export function SchedulePostModal({
       if (post.hashtags?.length) {
         const tags = post.hashtags.map((h: string) => h.startsWith('#') ? h : `#${h}`);
         // Check if hashtags are already present in the copy to avoid duplication
-        const hasHashtagsInCopy = tags.some((tag: string) => content.includes(tag));
-        if (!hasHashtagsInCopy) {
-          content += "\n\n" + tags.join(" ");
-        }
+        const existingTags = new Set((content.match(/#[\p{L}\p{N}_]+/gu) || []).map(tag => tag.toLowerCase()));
+        const missingTags = [...new Set(tags)].filter((tag: string) => !existingTags.has(tag.toLowerCase()));
+        if (missingTags.length) content += "\n\n" + missingTags.join(" ");
       }
       setPostContent(content);
       setMediaUrls(JSON.parse(mediaSignature));
@@ -177,7 +167,7 @@ export function SchedulePostModal({
 
   // ── Schedule ────────────────────────────────────────────────────────────────
   const handleSchedule = async () => {
-    if (!selectedProfileId) { toast.error("Please select a profile"); return; }
+    if (!selectedProfile) { toast.error("Please select an assigned profile"); return; }
     if (!scheduledDate || !scheduledTime) { toast.error("Please set date and time"); return; }
     setScheduling(true);
     try {
@@ -195,7 +185,7 @@ export function SchedulePostModal({
           media_url: mediaUrls.length === 1 ? mediaUrls[0] : undefined,
         },
       });
-      if (error) throw new Error((data as any)?.error || error.message);
+      if (error) throw new Error(await describeInvokeError(error, data));
       if ((data as any)?.error) throw new Error((data as any).error);
 
       // The post is live in Sprout either way, so these are warnings rather
@@ -281,20 +271,9 @@ export function SchedulePostModal({
               </p>
             )}
 
-            {/* Dropdown: multiple profiles or API fallback */}
+            {/* Dropdown: multiple assigned profiles */}
             {!loadingApi && !autoSelected && displayProfiles.length > 0 && (
               <>
-                {noMatchWarning && (
-                  <p className="t-body text-amber-300 bg-amber-500/10 rounded-md px-2 py-1">
-                    No {post?.platform} profiles found — showing all connected profiles.
-                    Assign the correct one in <strong>Client Setup → Sprout Social</strong>.
-                  </p>
-                )}
-                {!hasDbAssigned && !noMatchWarning && (
-                  <p className="t-body text-amber-300 bg-amber-500/10 rounded-md px-2 py-1">
-                    Assign profiles in <strong>Client Setup → Sprout Social</strong> to enable auto-detection.
-                  </p>
-                )}
                 <Select value={selectedProfileId} onValueChange={setSelectedProfileId}>
                   <SelectTrigger id="schedule-profile">
                     <SelectValue placeholder="Select profile" />
@@ -313,7 +292,7 @@ export function SchedulePostModal({
             {!loadingApi && !apiError && displayProfiles.length === 0 && (
               <div className="flex items-start gap-2 t-body text-amber-300 bg-amber-500/10 rounded-md p-2">
                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                <span>No Sprout Social profiles found. Check your credentials.</span>
+                <span>No active profile is assigned to this client for this platform. Assign it in Client Setup → Sprout Social.</span>
               </div>
             )}
           </div>
@@ -364,7 +343,7 @@ export function SchedulePostModal({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleSchedule} disabled={scheduling || !selectedProfileId || loadingApi}>
+          <Button onClick={handleSchedule} disabled={scheduling || !!apiError || !selectedProfile || loadingApi}>
             {scheduling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
             Schedule Post
           </Button>

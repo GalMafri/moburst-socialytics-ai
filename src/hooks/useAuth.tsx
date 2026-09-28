@@ -85,10 +85,11 @@ async function bridgeHubSession(
       return { toolRole: null, error: body?.error || `Bridge failed (${res.status})`, debug: body?.debug };
     }
     if (body.access_token && body.refresh_token) {
-      await supabase.auth.setSession({
+      const { error: sessionError } = await supabase.auth.setSession({
         access_token: body.access_token,
         refresh_token: body.refresh_token,
       });
+      if (sessionError) throw sessionError;
     }
     return { toolRole: (body.tool_role as UserRole) || null, debug: body?.debug };
   } catch (err) {
@@ -112,10 +113,11 @@ async function bridgeGosSession(handoffToken: string): Promise<{ error?: string 
     if (body?.debug && import.meta.env.DEV) console.log("[Auth] gos-bridge debug:", body.debug);
     if (!res.ok || body?.error) return { error: body?.error || `Bridge failed (${res.status})` };
     if (body.access_token && body.refresh_token) {
-      await supabase.auth.setSession({
+      const { error: sessionError } = await supabase.auth.setSession({
         access_token: body.access_token,
         refresh_token: body.refresh_token,
       });
+      if (sessionError) throw sessionError;
     }
     return {};
   } catch (err) {
@@ -140,23 +142,25 @@ async function bridgeGosSession(handoffToken: string): Promise<{ error?: string 
 //
 // isGosSession stays keyed strictly on auth_source, because it changes how
 // client-side company scoping behaves and must not be inferred loosely.
-async function reconstructSession(): Promise<
+export async function reconstructSession(): Promise<
   { user: HubUser; role: UserRole; isGos: boolean } | null
 > {
   const { data: { session } } = await supabase.auth.getSession();
-  const su = session?.user;
-  if (!su) return null;
+  if (!session) return null;
+  const { data: verified, error: verificationError } = await supabase.auth.getUser();
+  const su = verified?.user;
+  if (verificationError || !su) return null;
   const meta = (su.user_metadata || {}) as Record<string, unknown>;
   const isGos = meta.auth_source === "gos";
 
-  // Role: prefer the authoritative DB row, fall back to session metadata.
+  // Roles must come from the current database row, never cached metadata.
   let role: UserRole = null;
-  const { data: roleRows } = await supabase.from("user_roles").select("role").eq("user_id", su.id);
+  const { data: roleRows, error: roleError } = await supabase.from("user_roles").select("role").eq("user_id", su.id);
+  if (roleError) throw roleError;
   const roles = (roleRows || []).map((r: { role: string }) => r.role);
   if (roles.includes("admin")) role = "admin";
   else if (roles.includes("moburst_user")) role = "moburst_user";
   else if (roles.includes("client")) role = "client";
-  else if (typeof meta.tool_role === "string") role = meta.tool_role as UserRole;
   if (!role) return null;
 
   // Legacy sessions carry no hub_company_name in metadata, so read the profile.
@@ -286,9 +290,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!cancelled) setIsLoading(false);
     }
 
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT" && !cancelled) {
+        cancelled = true; // Do not let in-flight reconstruction restore a signed-out user.
+        clearHubToken();
+        setUser(null);
+        setUserRole(null);
+        setIsGosSession(false);
+        setAuthError("Your session has expired. Re-open Socialytics from the portal.");
+        setIsLoading(false);
+      }
+    });
     authenticate();
     return () => {
       cancelled = true;
+      subscription.unsubscribe();
     };
   }, []);
 
