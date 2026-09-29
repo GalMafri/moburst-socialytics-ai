@@ -117,13 +117,18 @@ async function invokeVideo(
 
   const jobId = first.data.job_id as string;
   const deadline = Date.now() + VIDEO_JOB_TIMEOUT_MS;
+  let failedPolls=0;
   while (Date.now() < deadline) {
     if (isCancelled()) return { data: { error: "Cancelled." }, error: null };
     await new Promise((r) => setTimeout(r, VIDEO_POLL_MS));
     const { data, error } = await supabase.functions.invoke("media-job-status", { body: { job_id: jobId } });
     // A single failed poll is a blip, not a lost clip: the job keeps running
     // and the row keeps the result, so try again rather than give up.
-    if (error || !data) continue;
+    if (error || !data || (data.error && !data.status)) {
+      if(++failedPolls>=3) throw new Error(`The saved video job could not be checked: ${await describeInvokeError(error,data)} Reopen this post to resume the same job.`);
+      continue;
+    }
+    failedPolls=0;
     if (data.status === "completed" && data.video_url) {
       return { data: { ...first.data, ...data }, error: null };
     }

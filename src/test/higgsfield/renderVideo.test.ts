@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { HOLD_THE_FRAME } from "../../../supabase/functions/_shared/higgsfield/renderVideo";
+import { HOLD_THE_FRAME, videoJobSnapshot } from "../../../supabase/functions/_shared/higgsfield/renderVideo";
+
+describe('provider collection status',()=>{
+  const snapshot=(status:string,extra={})=>({outcomes:[{index:0,job_id:'paid-job',status,...extra}],allTerminal:['lookup_failed','ip_detected','completed'].includes(status),waitedMs:0});
+  it('does not disguise a permanent lookup failure as a running film',()=>{
+    expect(()=>videoJobSnapshot(snapshot('lookup_failed',{error:'Session expired'}))).toThrow('Session expired');
+  });
+  it('treats provider IP rejection as terminal and preserves its reason',()=>{
+    expect(videoJobSnapshot(snapshot('ip_detected',{error:'Provider rejected input'}))).toEqual({status:'failed',url:null,error:'Provider rejected input'});
+  });
+  it('collects completed jobs and preserves real active states',()=>{
+    expect(videoJobSnapshot(snapshot('completed',{result_url:'finished.mp4'})).url).toBe('finished.mp4');
+    expect(videoJobSnapshot(snapshot('queued')).status).toBe('running');
+  });
+});
 
 describe("HOLD_THE_FRAME", () => {
   it("forbids the camera moves that walked the headline out of shot", () => {

@@ -96,6 +96,18 @@ export interface JobSnapshot {
   error: string | null;
 }
 
+export function videoJobSnapshot(waited:Awaited<ReturnType<typeof awaitJobs>>):JobSnapshot {
+  const out=waited.outcomes[0];
+  if(!out) throw new HiggsfieldError('Higgsfield returned no status for this saved job.');
+  if(out.status==='completed'&&out.result_url) return {status:'completed',url:out.result_url,error:null};
+  if(['failed','nsfw','canceled','ip_detected'].includes(out.status)) return {status:'failed',url:null,error:out.error||`Higgsfield reported the clip as ${out.status}.`};
+  // A lookup or authentication failure is not evidence that a paid render
+  // failed. Preserve the job and surface the collection error for recovery.
+  if(out.status==='lookup_failed'||waited.allTerminal) throw new HiggsfieldError(out.error||'Higgsfield could not retrieve this saved job.');
+  if(!['pending','waiting','queued','dna','script','visuals','vision','flow','in_progress','ip_detect','running'].includes(out.status)) throw new HiggsfieldError(`Higgsfield returned an unrecognised job status: ${out.status}.`);
+  return {status:out.status==='pending'?'pending':'running',url:null,error:null};
+}
+
 /**
  * Where one job has got to, right now.
  *
@@ -107,11 +119,5 @@ export async function checkVideoJob(supabase: any, jobId: string): Promise<JobSn
   const token = await accessTokenFor(supabase);
   const mcp = new McpClient({ url: MCP_URL, accessToken: token, timeoutMs: 30_000 });
   const waited = await awaitJobs(mcp, [{ index: 0, job_id: jobId }], { budgetMs: 0, pollSeconds: 0 });
-  const out = waited.outcomes[0];
-  if (!out) return { status: "pending", url: null, error: null };
-  if (out.status === "completed" && out.result_url) return { status: "completed", url: out.result_url, error: null };
-  if (out.status === "failed" || out.status === "nsfw" || out.status === "canceled") {
-    return { status: "failed", url: null, error: out.error || `Higgsfield reported the clip as ${out.status}.` };
-  }
-  return { status: "running", url: null, error: null };
+  return videoJobSnapshot(waited);
 }
