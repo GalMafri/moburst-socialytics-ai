@@ -1,9 +1,17 @@
+import { clearSourceLettering } from './sourceLettering';
 import { loadImage } from './composeText';
 import type { EditRegion, TemplateHeadline } from '../../supabase/functions/_shared/design-prompts/referenceTemplate';
 
 const loadedFonts=new Map<string,Promise<void>>();
 function loadTemplateFont(family:string):Promise<void> {
   if (family==='Arial'||family==='Georgia') return Promise.resolve();
+  if (family==='Open Sans') {
+    if (!loadedFonts.has(family)) loadedFonts.set(family,Promise.race([
+      Promise.all([400,700].map(async weight=>{const face=new FontFace('Open Sans',`url(/fonts/open-sans-${weight}.ttf)`,{weight:String(weight)});await face.load();document.fonts.add(face);})).then(()=>undefined),
+      new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error('The source font could not be loaded.')),8000)),
+    ]));
+    return loadedFonts.get(family)!;
+  }
   if (!['Roboto','Open Sans','Montserrat','Poppins','Inter','Lato','Oswald'].includes(family)) return Promise.reject(new Error('Unsupported source font.'));
   if (!loadedFonts.has(family)) loadedFonts.set(family,(async()=>{
     await new Promise<void>((resolve,reject)=>{
@@ -32,21 +40,20 @@ export function wrapTemplateWords(words:TemplateWord[],maxWidth:number,measure:(
   return lines;
 }
 
-/** Source pixels are locked; the image model only supplies erased text backgrounds. */
-export async function applyReferenceTemplate(sourceUrl:string, editedUrl:string, regions:EditRegion[],headline?:TemplateHeadline,copy?:string):Promise<string> {
+/** Adapt the real source directly: clear detected lettering and typeset approved copy. */
+export async function applyReferenceTemplate(sourceUrl:string, _editedUrl:string, regions:EditRegion[],headline?:TemplateHeadline,copy?:string):Promise<string> {
   if (!regions.length || regions.some(r=>![r.x,r.y,r.width,r.height].every(Number.isFinite)||r.x<0||r.y<0||r.width<=0||r.height<=0||r.x+r.width>1||r.y+r.height>1)||regions.reduce((a,r)=>a+r.width*r.height,0)>0.35) throw new Error('Invalid client template edit regions.');
   if(!headline || !copy?.trim()) throw new Error('Measured source typography and approved headline are required.');
   await loadTemplateFont(headline.font_family);
-  const [source,edit]=await Promise.all([loadImage(sourceUrl),loadImage(editedUrl)]);
+  const source=await loadImage(sourceUrl);
   const canvas=document.createElement('canvas');
   canvas.width=source.naturalWidth; canvas.height=source.naturalHeight;
   const ctx=canvas.getContext('2d');
   if(!ctx) throw new Error('Cannot compose the client template.');
   ctx.drawImage(source,0,0);
-  for(const r of regions){
-    const x=Math.round(r.x*canvas.width),y=Math.round(r.y*canvas.height),w=Math.round(r.width*canvas.width),h=Math.round(r.height*canvas.height);
-    ctx.drawImage(edit,r.x*edit.naturalWidth,r.y*edit.naturalHeight,r.width*edit.naturalWidth,r.height*edit.naturalHeight,x,y,w,h);
-  }
+  const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
+  headline=clearSourceLettering(pixels,regions,headline);
+  ctx.putImageData(pixels,0,0);
   const words=copy.trim().split(/\s+/).map((text,i,all)=>({text,bold:headline.font_weight===700||i>=all.length-headline.emphasis_words}));
   const width=headline.width*canvas.width,height=headline.height*canvas.height;
   const baseSize=headline.font_size*canvas.width;

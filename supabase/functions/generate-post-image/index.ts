@@ -1,4 +1,4 @@
-import { selectReferenceTemplate, templateEditPrompt, type ReferenceTemplate } from "../_shared/design-prompts/referenceTemplate.ts";
+import { selectReferenceTemplate } from "../_shared/design-prompts/referenceTemplate.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
@@ -220,6 +220,18 @@ Deno.serve(async (req) => {
 
     // Which provider renders this. Read from the clients row, never from the
     // body: this endpoint spends the team's Higgsfield credits.
+    // Actual social artwork is the canvas. This path never invokes an image generator.
+    if (resolvedSynthesis?.reference_pipeline_version === 1 && post?.copy && !slide_context && render_text !== false) {
+      const key = Deno.env.get("ANTHROPIC_API_KEY");
+      if (!key || !resolvedRefs.length) throw new Error("A usable client social reference is required.");
+      const template = await selectReferenceTemplate({db:brandDb,paths:resolvedRefs,preferredPath:reference_path,copy:post.copy,apiKey:key});
+      const configuredFont=resolvedBrand?.font_family?.split(',')[0]?.trim().replace(/["']/g,'');
+      if (['Arial','Roboto','Open Sans','Montserrat','Poppins','Inter','Lato','Oswald','Georgia'].includes(configuredFont)) template.headline.font_family=configuredFont;
+      const {data,error}=await brandDb.storage.from("design-references").createSignedUrl(template.path,3600);
+      if(error||!data?.signedUrl) throw new Error("The client source artwork could not be opened.");
+      return jsonResp({image_url:data.signedUrl,reference_preview_url:data.signedUrl,reference_path:template.path,template_regions:template.regions,template_headline:template.headline,rendered_by:"source_artwork",brand_footing:"strong"});
+    }
+
     const backend = await mediaBackendFor(brandDb, client_id || client_context?.client_id);
     console.log("[generate-post-image] backend:", backend);
 
@@ -270,15 +282,6 @@ Deno.serve(async (req) => {
       variantAngle: variant_angle || null,
     });
 
-    let referenceDirection: ReferenceTemplate | null = null;
-    if (resolvedSynthesis?.reference_pipeline_version === 1 && post?.copy && !slide_context && render_text !== false) {
-      const key = Deno.env.get("ANTHROPIC_API_KEY");
-      if (!key || !resolvedRefs.length) throw new Error("Reference art direction is unavailable; no generic design was generated.");
-      referenceDirection = await selectReferenceTemplate({db: brandDb, paths: resolvedRefs, preferredPath: reference_path, copy: post.copy, apiKey: key});
-      resolvedRefs = [referenceDirection.path];
-      designPrompt = templateEditPrompt(referenceDirection, post.copy, prompt);
-      aspectRatio = referenceDirection.aspect;
-    }
     console.log("[generate-post-image] prompt (first 2000 chars):", designPrompt.slice(0, 2000));
     console.log("[generate-post-image] prompt total length:", designPrompt.length);
 
@@ -289,7 +292,7 @@ Deno.serve(async (req) => {
       const storageClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
       contentParts.push({
-        text: referenceDirection ? "This is the single source design. Follow its specific design system and preserve its authentic branding; replace its old campaign message with the approved headline." :
+        text:
           "These are the client's own published designs. Match their visual SYSTEM exactly — the same layout zones, " +
           "the same colour fields in the same proportions, the same photographic treatment, the same placement of type — " +
           "so the new image looks like the same designer made it. Do not copy their photographs or their words; " +
@@ -320,7 +323,7 @@ Deno.serve(async (req) => {
     }
 
     // Attach the brand book file as an inline part. Gemini 3.1 supports inline PDF/PNG/JPG.
-    if (resolvedBrandBookPath && !referenceDirection) {
+    if (resolvedBrandBookPath) {
       try {
         const storageClient = createClient(
           Deno.env.get("SUPABASE_URL")!,
@@ -434,7 +437,7 @@ Deno.serve(async (req) => {
       const { referenceUrls, brandGroundingMissing } = await resolveContextImageUrls(
         {
           design_references: resolvedRefs,
-          brand_book_file_path: referenceDirection ? null : resolvedBrandBookPath,
+          brand_book_file_path: resolvedBrandBookPath,
           design_style_synthesis: resolvedSynthesis,
         },
         brandDb,
@@ -541,13 +544,12 @@ Deno.serve(async (req) => {
 
     const imageUrl = `data:${imageMime};base64,${imageB64}`;
 
-    const sourcePreview = referenceDirection ? await brandDb.storage.from("design-references").createSignedUrl(referenceDirection.path, 3600) : null;
     return jsonResp({
       image_url: imageUrl,
-      reference_preview_url: sourcePreview?.data?.signedUrl || null,
-      reference_path: referenceDirection?.path || null,
-      template_regions: referenceDirection?.regions || null,
-      template_headline: referenceDirection?.headline || null,
+      reference_preview_url: null,
+      reference_path: null,
+      template_regions: null,
+      template_headline: null,
       revised_prompt: textResponse,
       // Diagnostics so the frontend can show "this slide was auto-fixed" etc.
       was_retried: wasRetried,

@@ -1,4 +1,4 @@
-import { sourceImage } from "../_shared/design-prompts/referenceDirection.ts";
+import { sourceImage } from "../_shared/design-prompts/sourceImage.ts";
 import { referencesFor } from "../_shared/design-prompts/designRefs.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";

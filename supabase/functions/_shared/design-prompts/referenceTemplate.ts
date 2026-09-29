@@ -1,4 +1,4 @@
-import { sourceImage } from './referenceDirection.ts';
+import { sourceImage } from './sourceImage.ts';
 import { headlineFrom } from './headline.ts';
 
 export interface EditRegion { x: number; y: number; width: number; height: number; }
@@ -39,8 +39,4 @@ export async function selectReferenceTemplate(args: {db:any; paths:string[]; cop
   if (!response.ok) throw new Error(`Client design selection unavailable (${response.status}).`);
   const result=await response.json();
   return templateFromResponse(result,paths);
-}
-
-export function templateEditPrompt(template:ReferenceTemplate,_copy:string,_correction='') {
-  return `Remove the old campaign lettering from the ATTACHED ACTUAL CLIENT POST to prepare a clean reusable template. This is text erasure only. Do NOT write any replacement words. The software will typeset the new headline using real fonts. Keep source dimensions, composition, original imagery, authentic logo, multicolored frame, card edges and background unchanged. Erase all headline/subtitle letters and all page/slide counters (such as 01 / 10) within these bounded rectangles: ${JSON.stringify(template.regions)}. Restore only the plain underlying card or background beneath the removed letters, with matching gradient/color/texture. Do not move, resize or redraw any card or object. Do not remove the authentic client logo. Return the whole original canvas with these areas clean of campaign text. Pixels outside these rectangles will be copied from the original by software.`;
 }
