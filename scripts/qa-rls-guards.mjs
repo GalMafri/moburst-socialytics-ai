@@ -32,7 +32,10 @@ for (const table of ['clients','reports','post_iterations','sprout_profiles']) {
       if(table!=='clients') {
         await assert.rejects(()=>db.query(`INSERT INTO ${table} VALUES ('00000000-0000-0000-0000-000000000003','${b}','forbidden')`),/row-level security/); checks++;
       }
-      if(role==='client') {await assert.rejects(()=>db.query(`UPDATE ${table} SET content='forbidden' WHERE id='${a}'`),/row-level security/);checks++;}
+      if(role==='client') {
+        await assert.rejects(()=>db.query(`UPDATE ${table} SET content='forbidden' WHERE id='${a}'`),/row-level security/);checks++;
+        assert.equal((await db.query(`DELETE FROM ${table} WHERE id='${a}' RETURNING id`)).rows.length,0);checks++;
+      }
       else {assert.equal((await db.query(`UPDATE ${table} SET content='allowed' WHERE id='${a}' RETURNING id`)).rows.length,1);checks++;}
     }
   }
