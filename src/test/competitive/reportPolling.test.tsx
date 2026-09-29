@@ -63,15 +63,12 @@ it('company cards link to their supporting posts and expose platform filters as 
  expect(screen.queryByText('top 3')).toBeNull();
 });
 
-it('explains a source wait and unlocks retry when its guard expires without reloading', async () => {
+it('allows an isolated retry immediately after a failed competitive attempt', async () => {
  fixture.status='failed'; fixture.createdAt=new Date(Date.now()-89*60000).toISOString();
  fixture.data={provider_status:2,quality_check:{state:'needs_review',reasons:['RivalIQ is still collecting source data.']}};
  mount(); await tick(20);
  expect(screen.getByText(/RivalIQ had not finished collecting/)).toBeInTheDocument();
  expect(screen.getByRole('button',{name:'Review tracked profiles'})).toBeInTheDocument();
- expect(screen.getByRole('status')).toHaveTextContent('Retry becomes available at');
- expect(screen.queryByRole('button',{name:'Retry'})).toBeNull();
- await tick(61000);
  expect(screen.getByRole('button',{name:'Retry'})).toBeInTheDocument();
  expect(screen.queryByRole('status')).toBeNull();
 });

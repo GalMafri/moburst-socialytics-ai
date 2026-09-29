@@ -1,0 +1,230 @@
+{
+  "workflowId": "EBiAwSay3H2R8krv",
+  "baseVersion": "a2d09ebe-13d4-4a11-846d-ea09ed7fb41c",
+  "operations": [
+    {
+      "type": "addNode",
+      "node": {
+        "name": "Prepare LinkedIn Sources",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1240,
+          480
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const cfg = $('Run Config').first().json;\nconst body = $('Competitive Webhook').first().json.body || {};\nconst landscape = $('Resolve Landscape').first().json;\nconst profile = value => {\n  const raw = String(value || '').trim();\n  const match = raw.match(/^https:\\/\\/(?:[a-z]{2,3}\\.)?linkedin\\.com\\/company\\/([a-z0-9_-]+)(?:\\/|\\?|$)/i);\n  return match ? 'https://www.linkedin.com/company/' + match[1].toLowerCase() : '';\n};\nconst host = value => String(value || '').trim().toLowerCase().replace(/^[a-z]+:\\/\\//, '').replace(/^www\\./, '').split(/[/?#]/)[0];\nconst sources = [];\nconst add = (company, handles) => {\n  const urls = [...new Set((handles || []).filter(h => ['linkedin','linkedin_company'].includes(h.platform || h.network_type)).map(h => profile(h.url || h.native_link) || (/^[a-z0-9_-]+$/i.test(h.handle || '') ? profile('https://www.linkedin.com/company/' + h.handle) : '')).filter(Boolean))];\n  if (urls.length > 1) throw new Error(company.name + ' has multiple reviewed LinkedIn company pages. Choose one primary profile.');\n  if (urls.length === 1) sources.push({company_id:String(company.id),name:company.name,profile_url:urls[0]});\n};\nconst own = landscape.companies.find(c => String(c.id) === String(landscape.client_company_id));\nif (own) add(own, body.client_profiles || []);\nfor (const selected of body.competitors || []) {\n  const company = landscape.companies.find(c => host(c.url) === host(selected.website_url));\n  if (!company) throw new Error('LinkedIn source company is not in the verified selection.');\n  add(company, selected.handles);\n}\nif (new Set(sources.map(s => s.profile_url)).size !== sources.length) throw new Error('The same LinkedIn page is assigned to different companies.');\nreturn [{json:{sources,has_sources:sources.length>0,input:{targetUrls:sources.map(s=>s.profile_url),maxPosts:150,postedLimitDate:cfg.range_start,scrapeComments:false,scrapeReactions:false,includeReposts:false,includeQuotePosts:true}}}];\n"
+        }
+      }
+    },
+    {
+      "type": "addNode",
+      "node": {
+        "name": "Has LinkedIn Sources",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1460,
+          480
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "has-linkedin",
+                "leftValue": "={{ $json.has_sources }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      }
+    },
+    {
+      "type": "addNode",
+      "node": {
+        "name": "Collect LinkedIn Posts",
+        "type": "@apify/n8n-nodes-apify.apify",
+        "typeVersion": 1,
+        "position": [
+          1680,
+          420
+        ],
+        "credentials": {
+          "apifyOAuth2Api": {
+            "id": "UDEw5qEJhODlzTMY",
+            "name": "Apify account 2"
+          }
+        },
+        "parameters": {
+          "resource": "Actors",
+          "operation": "Run actor and get dataset",
+          "actorSource": "store",
+          "actorId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "WI0tj4Ieb5Kq458gB",
+            "cachedResultName": "LinkedIn Company Posts Scraper (No Cookies) (harvestapi/linkedin-company-posts)"
+          },
+          "customBody": "={{ JSON.stringify($json.input) }}",
+          "timeout": 240,
+          "memory": 512,
+          "authentication": "apifyOAuth2Api"
+        }
+      }
+    },
+    {
+      "type": "addNode",
+      "node": {
+        "name": "Merge LinkedIn Posts",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1900,
+          480
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const cfg = $('Run Config').first().json;\nconst sourcePlan = $('Prepare LinkedIn Sources').first().json;\nconst rival = $('Merge Post Pages').first().json;\nconst profile = value => {\n  const m = String(value || '').match(/^https:\\/\\/(?:[a-z]{2,3}\\.)?linkedin\\.com\\/company\\/([a-z0-9_-]+)(?:\\/|\\?|$)/i);\n  return m ? 'https://www.linkedin.com/company/' + m[1].toLowerCase() : '';\n};\nconst rows = sourcePlan.has_sources ? $input.all().map(i=>i.json).filter(j=>Object.keys(j).length) : [];\nconst byUrl = new Map(sourcePlan.sources.map(s=>[s.profile_url,s]));\nconst counts = new Map(); const seen = new Set(); const posts = [];\nconst metrics = Object.fromEntries(sourcePlan.sources.map(s=>[s.company_id,{provider:'apify/harvestapi',profile_url:s.profile_url,period:{start:cfg.range_start,end:cfg.range_end},posts:0,engagement:0,coverage:'complete',reposts_included:false}]));\nfor (const row of rows) {\n  if (row.error || row.type === 'error') throw new Error('LinkedIn collection returned an error; the report must not treat it as zero activity.');\n  if (row.type !== 'post') throw new Error('LinkedIn collection returned an unexpected result; source coverage could not be verified.');\n  const source = byUrl.get(profile(row.query?.targetUrl));\n  if (!source || profile(row.author?.linkedinUrl) !== source.profile_url) throw new Error('LinkedIn post author does not match the reviewed company page.');\n  counts.set(source.profile_url,(counts.get(source.profile_url)||0)+1);\n  const published = row.postedAt?.date;\n  if (!published || !Number.isFinite(Date.parse(published)) || !/^https:\\/\\/www\\.linkedin\\.com\\/(?:posts|feed\\/update)\\//.test(row.linkedinUrl || '')) throw new Error('LinkedIn post is missing its source URL or publication date.');\n  const date = new Date(published).toISOString().slice(0,10);\n  if (date < cfg.range_start || date > cfg.range_end) continue;\n  const key = String(row.id || row.linkedinUrl);\n  if (seen.has(key)) continue; seen.add(key);\n  const values = ['likes','comments','shares'].map(k=>row.engagement?.[k]);\n  if (values.some(n=>typeof n !== 'number' || !Number.isFinite(n) || n<0)) throw new Error('LinkedIn post engagement counts are incomplete.');\n  const engagement = values.reduce((sum,n)=>sum+n,0);\n  metrics[source.company_id].posts++; metrics[source.company_id].engagement += engagement;\n  const image = row.postImages?.[0]?.url || row.document?.coverPages?.[0]?.imageUrls?.[0] || null;\n  posts.push({postId:'linkedin:'+key,companyId:source.company_id,companyName:source.name,channel:'linkedin',publishedAt:new Date(published).toISOString(),message:String(row.content||''),postLink:row.linkedinUrl,image,engagementTotal:engagement,applause:values[0],conversation:values[1],amplification:values[2],type:row.document?'carousel':row.video?'video':image?'image':'text',source:'apify/harvestapi',source_profile_url:source.profile_url});\n}\nif ([...counts.values()].some(n=>n>=150)) throw new Error('LinkedIn collection reached its per-company limit; this period needs a larger paginated retrieval.');\nreturn [{json:{...rival,socialPosts:[...(rival.socialPosts||[]),...posts],additional_metrics:metrics,linkedin_sources:sourcePlan.sources,linkedin_posts:posts.length}}];\n"
+        }
+      }
+    },
+    {
+      "type": "setNodeSettings",
+      "nodeName": "Prepare LinkedIn Sources",
+      "settings": {
+        "onError": "continueErrorOutput",
+        "retryOnFail": false
+      }
+    },
+    {
+      "type": "setNodeSettings",
+      "nodeName": "Collect LinkedIn Posts",
+      "settings": {
+        "onError": "continueErrorOutput",
+        "retryOnFail": false,
+        "alwaysOutputData": true
+      }
+    },
+    {
+      "type": "setNodeSettings",
+      "nodeName": "Merge LinkedIn Posts",
+      "settings": {
+        "onError": "continueErrorOutput",
+        "retryOnFail": false
+      }
+    },
+    {
+      "type": "removeConnection",
+      "source": "Merge Post Pages",
+      "target": "Cache Posts Snapshot"
+    },
+    {
+      "type": "addConnection",
+      "source": "Merge Post Pages",
+      "target": "Prepare LinkedIn Sources"
+    },
+    {
+      "type": "addConnection",
+      "source": "Prepare LinkedIn Sources",
+      "target": "Has LinkedIn Sources"
+    },
+    {
+      "type": "addConnection",
+      "source": "Has LinkedIn Sources",
+      "sourceIndex": 0,
+      "target": "Collect LinkedIn Posts"
+    },
+    {
+      "type": "addConnection",
+      "source": "Has LinkedIn Sources",
+      "sourceIndex": 1,
+      "target": "Merge LinkedIn Posts"
+    },
+    {
+      "type": "addConnection",
+      "source": "Collect LinkedIn Posts",
+      "target": "Merge LinkedIn Posts"
+    },
+    {
+      "type": "addConnection",
+      "source": "Merge LinkedIn Posts",
+      "target": "Cache Posts Snapshot"
+    },
+    {
+      "type": "addConnection",
+      "source": "Prepare LinkedIn Sources",
+      "sourceIndex": 1,
+      "target": "Mark Report Failed"
+    },
+    {
+      "type": "addConnection",
+      "source": "Collect LinkedIn Posts",
+      "sourceIndex": 1,
+      "target": "Mark Report Failed"
+    },
+    {
+      "type": "addConnection",
+      "source": "Merge LinkedIn Posts",
+      "sourceIndex": 1,
+      "target": "Mark Report Failed"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Resolve Landscape",
+      "parameters": {
+        "jsCode": "const cfg = $(\"Run Config\").first().json;\nconst body = (() => { try { return $(\"Competitive Webhook\").first().json.body || {}; } catch (e) { return {}; } })();\nconst resp = $input.first().json;\nconst list = resp.landscapes || resp.data || resp.items || (Array.isArray(resp) ? resp : []);\nif (!Array.isArray(list) || list.length === 0) {\n  throw new Error(\"NO_LANDSCAPES on this RivalIQ account\");\n}\nconst host = value => {\n  const raw = String(value || '').trim();\n  if (!raw || /\\s/.test(raw)) return '';\n  const hostname = raw.replace(/^[a-z]+:\\/\\//i, '').split(/[/?#]/)[0].toLowerCase().replace(/^www\\./, '').replace(/\\.$/, '');\n  return hostname.includes('.') && /^[a-z0-9.-]+$/.test(hostname) ? hostname : '';\n};\nconst normalizedName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/(?:\\s+(?:inc|incorporated|ltd|limited|llc|llp|plc|corp|corporation))+$/, '').trim();\nconst clientHost = host(body.website_url) || host(cfg.client_name);\nconst clientMatchesIn = l => (l.companies || []).filter(c => clientHost ? host(c.url) === clientHost : !!normalizedName(cfg.client_name) && normalizedName(c.name) === normalizedName(cfg.client_name));\nlet selected = [];\ntry { selected = JSON.parse(cfg.competitors_json || '[]'); } catch { selected = []; }\nconst selectedMatchesIn = l => selected.map(s => (l.companies || []).filter(c => {\n  if (clientMatchesIn(l).some(client => String(client.id) === String(c.id))) return false;\n  const website = host(s.website_url);\n  // A saved provider id does not override a conflicting reviewed website.\n  if (s.rivaliq_company_id != null && String(c.id) !== String(s.rivaliq_company_id)) return false;\n  return website ? host(c.url) === website : normalizedName(c.name) === normalizedName(s.name);\n}));\nconst selectionFits = l => {\n  const matches = selectedMatchesIn(l);\n  return matches.every(a => a.length === 1) && new Set(matches.flat().map(c => String(c.id))).size === selected.length;\n};\nlet match;\nlet matchedBy;\nif (cfg.landscape_hint) {\n  match = list.find(l => String(l.id) === String(cfg.landscape_hint));\n  matchedBy = 'explicit id';\n} else {\n  const candidates = list.filter(l => clientMatchesIn(l).length === 1 && selectionFits(l));\n  candidates.sort((a, b) => Number(String(clientMatchesIn(b)[0].id) === String(b.focusCompanyId)) - Number(String(clientMatchesIn(a)[0].id) === String(a.focusCompanyId)));\n  match = candidates[0];\n  matchedBy = 'verified client and selected companies';\n}\nif (!match) throw new Error('LANDSCAPE_NOT_FOUND \u2014 no RivalIQ landscape tracks the client and the confirmed competitors. Connect tracking for this selection.');\nconst clientMatches = clientMatchesIn(match);\nif (clientMatches.length !== 1) throw new Error('CLIENT_IDENTITY_UNVERIFIED \u2014 the selected landscape does not uniquely track the client website.');\nif (!selectionFits(match)) throw new Error('TRACKING_SELECTION_MISMATCH \u2014 the selected landscape must track every confirmed competitor with the reviewed website exactly once.');\nconst companies = (match.companies || []).map((c) => ({\n  id: c.id,\n  name: c.name,\n  url: c.url || null,\n  is_focus: String(c.id) === String(match.focusCompanyId),\n  handles: {\n    instagram: c.instagram ? c.instagram.handle : null,\n    facebook: c.facebook ? c.facebook.handle : null,\n    tiktok: c.tikTok ? c.tikTok.handle : null,\n    twitter: c.twitter ? c.twitter.handle : null,\n    youtube: c.youTube ? c.youTube.url : null,\n    linkedin: c.linkedin ? c.linkedin.handle : null\n  }\n}));\nreturn [{ json: { landscape_id: match.id, landscape_name: match.name, matched_by: matchedBy, focus_company_id: match.focusCompanyId, client_company_id: clientMatches[0].id, selected_company_ids: selectedMatchesIn(match).flat().map(c => c.id), companies } }];\n"
+      }
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Aggregate Competitive Data",
+      "parameters": {
+        "jsCode": "function inclusiveDays(start, end) {\n    if (!start || !end)\n        return null;\n    const a = Date.parse(start.slice(0, 10) + \"T00:00:00Z\");\n    const b = Date.parse(end.slice(0, 10) + \"T00:00:00Z\");\n    return Number.isFinite(a) && Number.isFinite(b) && b >= a ? Math.round((b - a) / 86400000) + 1 : null;\n}\nconst valid = (value) => typeof value === \"number\" && Number.isFinite(value) && value >= 0;\nfunction competitiveCompanyMetrics(c) {\n    const r = c.rivaliq_metrics;\n    const li = c.linkedin_metrics;\n    if (!r || !li || li.coverage !== 'complete')\n        return r;\n    const add = (value, extra) => valid(value) && valid(extra) ? value + extra : null;\n    const unknown = { current: null, previous: null };\n    return {\n        ...r, previous_period: null,\n        posts: { current: add(r.posts?.current, li.posts), previous: null },\n        engagement: { current: add(r.engagement?.current, li.engagement), previous: null },\n        audience: unknown, estimated_impressions: unknown, engagement_rate_per_post: unknown,\n        by_network: { ...r.by_network, linkedin: {\n                posts: { current: li.posts, previous: null }, engagement: { current: li.engagement, previous: null },\n                followers: unknown, impressions: unknown, rate: unknown,\n                source: li.provider,\n            } },\n    };\n}\nfunction factualDimensions(companies, days) {\n    const client = companies.find((c) => c.is_client);\n    if (!client)\n        return [];\n    const rivals = companies.filter((c) => !c.is_client);\n    const definitions = [\n        [\"Audience\", \"followers\", (c) => competitiveCompanyMetrics(c)?.audience?.current],\n        [\"Cadence\", \"posts/week\", (c) => days && valid(c.post_count) ? c.post_count / days * 7 : c.cadence_per_week],\n        [\"Engagement\", \"engagements\", (c) => competitiveCompanyMetrics(c)?.engagement?.current ?? c.engagement_sum ?? c.engagement_total],\n        [\"Estimated impressions\", \"impressions\", (c) => competitiveCompanyMetrics(c)?.estimated_impressions?.current ?? c.impressions_total],\n    ];\n    return definitions.flatMap(([dimension, unit, metric]) => {\n        const value = metric(client);\n        const peers = rivals.map(metric).filter(valid);\n        if (!valid(value) || !peers.length)\n            return [];\n        return [{ dimension, unit, client: value, competitor_avg: peers.reduce((a, b) => a + b, 0) / peers.length, competitor_count: peers.length }];\n    });\n}\nfunction comparisonScale(client, average) {\n    const max = Math.max(1, client, average);\n    return { client: client / max * 100, competitor: average / max * 100 };\n}\nfunction normalizedCompetitiveMetrics(input) {\n    const report = (input && typeof input === \"object\" ? input : {});\n    const period = report.period || report.aggregates?.period;\n    const days = inclusiveDays(period?.start, period?.end);\n    const providerValues = (posts, metrics) => ({\n        ...(metrics?.rate ? { engagement_rate_avg: valid(metrics.rate.current) ? metrics.rate.current : null } : {}),\n        ...(posts && valid(metrics?.engagement?.current) ? { engagement_avg: metrics.engagement.current / posts } : {}),\n        ...(metrics?.impressions ? { impressions_total: metrics.impressions.current ?? null, impressions_avg: valid(metrics.impressions.current) && posts ? metrics.impressions.current / posts : null } : {}),\n    });\n    const authoritative = (report.aggregates?.metric_semantics_version || 0) >= 3;\n    const normalizeBucket = (b, metrics) => {\n        const count = authoritative && valid(metrics?.posts?.current) ? metrics.posts.current : b.post_count;\n        return {\n            ...b,\n            ...(authoritative ? { observed_post_count: b.observed_post_count ?? b.post_count ?? 0 } : {}),\n            post_count: count,\n            ...providerValues(count, metrics),\n            ...(days ? { cadence_per_week: Math.round((count || 0) / days * 70) / 10 } : {}),\n        };\n    };\n    const companies = (report.aggregates?.companies || []).map((c) => {\n        const metrics = competitiveCompanyMetrics(c);\n        const channels = { ...c.by_channel };\n        if (authoritative)\n            for (const network of Object.keys(metrics?.by_network || {})) {\n                const key = network === 'twitter' && channels.x ? 'x' : network;\n                channels[key] ??= { post_count: 0 };\n            }\n        return {\n            ...c,\n            comparison_metrics: metrics,\n            ...normalizeBucket(c, { ...metrics, rate: metrics?.engagement_rate_per_post, impressions: metrics?.estimated_impressions }),\n            by_channel: Object.fromEntries(Object.entries(channels).map(([key, b]) => [key,\n                normalizeBucket(b, metrics?.by_network?.[key === 'x' ? 'twitter' : key]),\n            ])),\n        };\n    });\n    return {\n        ...report,\n        ...(days ? { period: { ...period, days } } : {}),\n        aggregates: { ...report.aggregates, companies, ...(days && report.aggregates?.period ? { period: { ...report.aggregates.period, days } } : {}) },\n        ai_analysis: { ...report.ai_analysis, benchmark_scorecard: {\n                ...report.ai_analysis?.benchmark_scorecard,\n                dimensions: factualDimensions(companies, days),\n            } },\n    };\n}\n\nconst cfg = $(\"Run Config\").first().json;\nconst landscape = $(\"Resolve Landscape\").first().json;\nconst companiesResp = $(\"Landscape Companies\").first().json;\nconst postsResp = $(\"Merge LinkedIn Posts\").first().json;\n// RivalIQ's own period metrics: this period, the previous period of equal length, and the daily series.\n// Provider period metrics are authoritative; the callback withholds missing metrics.\nconst safeJson = (name) => { try { const j = $(name).first().json; return j && typeof j === \"object\" ? j : {}; } catch (e) { return {}; } };\nconst metricsResp = safeJson(\"Landscape Metrics Summary\");\nconst metricsPrevResp = safeJson(\"Landscape Metrics Summary Previous\");\nconst seriesResp = safeJson(\"Landscape Metrics Timeseries\");\nconst mRows = Array.isArray(metricsResp.metrics) ? metricsResp.metrics : [];\nconst mPrevRows = Array.isArray(metricsPrevResp.metrics) ? metricsPrevResp.metrics : [];\nconst sRows = Array.isArray(seriesResp.metrics) ? seriesResp.metrics : [];\n// Verify provider boundaries before attributing metrics to the report period.\nconst day = value => String(value || '').slice(0, 10);\nconst durationDays = Math.round((Date.parse(cfg.range_end) - Date.parse(cfg.range_start)) / 86400000) + 1;\nconst prevEnd = new Date(Date.parse(cfg.range_start) - 86400000).toISOString().slice(0, 10);\nconst prevStart = new Date(Date.parse(cfg.range_start) - durationDays * 86400000).toISOString().slice(0, 10);\nfor (const [rows, start, end] of [[mRows, cfg.range_start, cfg.range_end], [mPrevRows, prevStart, prevEnd]]) {\n  for (const row of rows) if (day(row.mainPeriodStart) !== start || day(row.mainPeriodEnd) !== end) {\n    throw new Error('RivalIQ returned summary metrics for a different period. No report was produced from mismatched dates.');\n  }\n}\nconst byCompanyId = (rows) => { const o = {}; for (const r of rows) o[String(r.companyId)] = r; return o; };\nconst mCur = byCompanyId(mRows);\nconst mPrev = byCompanyId(mPrevRows);\n// A missing provider observation is unknown, not a measured zero.\nconst pick = (r, k) => { if (!r || r[k] == null || r[k] === '') return null; const n = Number(r[k]); return isFinite(n) ? n : null; };\nconst NETS = {\n  instagram: { followers: \"instagramFollowedBy\", posts: \"instagramPosts\", engagement: \"instagramPostsEngagementTotal\", impressions: \"instagramEstimatedImpressions\", rate: \"instagramAverageEngagementRatePerPost\" },\n  tiktok: { followers: \"tikTokFollowers\", posts: \"tikTokPosts\", engagement: \"tikTokPostsEngagementTotal\", impressions: \"tikTokEstimatedImpressions\", views: \"tikTokViews\", rate: \"tikTokEngagementRateByFollower\" },\n  facebook: { followers: \"facebookPageLikes\", posts: \"facebookPosts\", engagement: \"facebookPostEngagementTotal\", impressions: \"facebookEstimatedImpressions\", rate: \"facebookAverageEngagementRatePerPost\", likely_boosted: \"facebookLikelyBoostedPosts\" },\n  youtube: { followers: \"youTubeSubscribers\", posts: \"youTubePosts\", engagement: \"youTubePostsEngagementTotal\", impressions: \"youTubeEstimatedImpressions\", views: \"youTubePostViews\", rate: \"youTubeAverageEngagementRatePerPost\" },\n  twitter: { posts: \"twitterTweets\", engagement: \"twitterTweetEngagementTotal\", impressions: \"twitterEstimatedImpressions\", rate: \"twitterAverageEngagementRatePerTweet\" }\n};\nconst metricsFor = (id) => {\n  const cur = mCur[id];\n  if (!cur) return null;\n  const prev = mPrev[id] || null;\n  const both = (k) => ({ current: pick(cur, k), previous: prev ? pick(prev, k) : null });\n  const by_network = {};\n  for (const net of Object.keys(NETS)) {\n    const keys = NETS[net]; const n = {}; let any = false;\n    for (const field of Object.keys(keys)) { const v = both(keys[field]); n[field] = v; if (v.current != null || v.previous != null) any = true; }\n    if (any) by_network[net] = n;\n  }\n  const daily = sRows.filter((r) => String(r.companyId) === id && day(r.date) >= cfg.range_start && day(r.date) <= cfg.range_end).map((r) => ({ date: String(r.date || \"\").slice(0, 10), posts: pick(r, \"crossChannelSocialActivity\"), engagement: pick(r, \"crossChannelSocialEngagement\"), audience: pick(r, \"crossChannelSocialAudience\") })).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));\n  return {\n    period: { start: String(cur.mainPeriodStart || \"\").slice(0, 10), end: String(cur.mainPeriodEnd || \"\").slice(0, 10) },\n    previous_period: prev ? { start: String(prev.mainPeriodStart || \"\").slice(0, 10), end: String(prev.mainPeriodEnd || \"\").slice(0, 10) } : null,\n    audience: both(\"crossChannelSocialAudience\"),\n    engagement: both(\"crossChannelSocialEngagement\"),\n    estimated_impressions: both(\"crossChannelEstimatedImpressions\"),\n    posts: both(\"crossChannelSocialActivity\"),\n    engagement_rate_per_post: both(\"crossChannelAverageEngagementRatePerPost\"),\n    likely_boosted_facebook_posts: both(\"facebookLikelyBoostedPosts\"),\n    by_network,\n    daily\n  };\n};\nconst fromEndpoint = companiesResp.companies || companiesResp.data || companiesResp.items || (Array.isArray(companiesResp) ? companiesResp : []);\nconst allowedIds = landscape.selected_company_ids ? new Set([landscape.client_company_id, ...landscape.selected_company_ids].map(String)) : null;\nconst companies = (fromEndpoint.length > 0 ? fromEndpoint : (landscape.companies || [])).filter(c => !allowedIds || allowedIds.has(String(c.id)));\nconst rawPosts = postsResp.socialPosts || postsResp.posts || postsResp.data || postsResp.items || (Array.isArray(postsResp) ? postsResp : []);\nif (Number(postsResp.failed_windows) > 0 || Number(postsResp.truncated_pages) > 0) throw new Error('RivalIQ post coverage is incomplete. The report cannot be presented as a complete period.');\nconst seenPosts = new Set();\n// X omits publishedAt in RivalIQ. Its native post ID encodes the creation\n// timestamp: Twitter's published Snowflake implementation uses a 22-bit shift\n// and epoch 1288834974657. Never infer dates from RivalIQ's own decimal postId.\n// https://github.com/twitter-archive/snowflake/blob/snowflake-2010/src/main/scala/com/twitter/service/snowflake/IdWorker.scala\nconst datedPost = post => {\n  if (post.publishedAt || post.published_at || post.created || post.created_at || post.date) return post;\n  if (!['twitter', 'x'].includes(String(post.channel || post.network || post.platform || '').toLowerCase())) return post;\n  const id = post.postNativeId || post.nativeId;\n  if (typeof id !== 'string' || !/^[1-9]\\d{14,18}$/.test(id)) return post;\n  const value = BigInt(id);\n  if (value > 9223372036854775807n) return post;\n  const timestamp = Number((value >> 22n) + 1288834974657n);\n  if (timestamp > Date.now()) return post;\n  return { ...post, publishedAt: new Date(timestamp).toISOString(), publication_date_source: 'x_native_post_id' };\n};\nconst posts = rawPosts.map(datedPost).filter(post => {\n  if (allowedIds && !allowedIds.has(String(post.companyId))) return false;\n  const date = day(post.publishedAt || post.published_at || post.created || post.created_at || post.date);\n  if (!date || date < cfg.range_start || date > cfg.range_end) return false;\n  const key = String(post.postId || post.postLink || JSON.stringify([post.companyId, date, post.message]));\n  if (seenPosts.has(key)) return false;\n  seenPosts.add(key); return true;\n});\nconst truncatedPages = Number(postsResp.truncated_pages) || 0;\nlet selected = []; try { selected = JSON.parse(cfg.competitors_json || \"[]\"); } catch (e) { selected = []; }\nlet suppressed = []; try { suppressed = JSON.parse(cfg.suppressed_insights_json || \"[]\"); } catch (e) { suppressed = []; }\nconst clientNeedle = String(cfg.client_name || \"\").toLowerCase();\nconst body = safeJson('Competitive Webhook').body || {};\nconst host = value => String(value || '').toLowerCase().replace(/^[a-z]+:\\/\\//, '').replace(/^www\\./, '').split(/[/?#]/)[0];\nconst clientHost = host(body.website_url);\nconst clientMatches = companies.filter(c => {\n  if (landscape.client_company_id != null) return String(c.id) === String(landscape.client_company_id);\n  const name = String(c.name || c.company_name || '').toLowerCase().trim();\n  return (!!clientHost && host(c.url) === clientHost) || (!!name && !!clientNeedle && (name.includes(clientNeedle) || clientNeedle.includes(name)));\n});\nif (clientMatches.length !== 1) throw new Error('CLIENT_IDENTITY_UNVERIFIED \u2014 the RivalIQ landscape must track exactly one company matching ' + cfg.client_name + '. A focus company is not automatically the client.');\nconst verifiedClientId = String(clientMatches[0].id ?? clientMatches[0].company_id);\nconst clean = (s) => String(s || \"\").replace(/[\\u0000-\\u001f]+/g, \" \").replace(/\\s+/g, \" \").trim();\nconst num = (v) => (typeof v === \"number\" && isFinite(v) ? v : (typeof v === \"string\" && v.trim() !== \"\" && isFinite(Number(v)) ? Number(v) : 0));\n// RivalIQ's paid signal on Facebook posts is a string: \"Likely Boosted\", \"Not Likely Boosted\" or \"No Prediction\".\nconst isBoosted = (v) => (typeof v === \"string\" ? v.trim().toLowerCase() === \"likely boosted\" : v === true);\nconst bucket = () => ({ post_count: 0, likely_boosted_posts: 0, engagement_sum: 0, engagement_rate_sum: 0, views_total: 0, views_observed: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, hashtags: {}, media_types: {}, top_posts: [] });\nconst blank = (key, name, url) => ({ company_id: key, name, url: url || null, is_client: false, in_confirmed_top3: false, ...bucket(), channels: {}, by_channel: {} });\nconst byCompany = {};\nfor (const c of companies) {\n  const key = String(c.id ?? c.company_id ?? c.name);\n  const name = clean(c.name || c.company_name || key);\n  const lower = name.toLowerCase();\n  const agg = blank(key, name, c.url);\n  agg.is_client = key === verifiedClientId;\n  agg.in_confirmed_top3 = selected.some((s) => { const sn = String(s.name || \"\").toLowerCase(); return !!sn && (lower.includes(sn) || sn.includes(lower)); });\n  byCompany[key] = agg;\n}\nconst addPost = (agg, p) => {\n  agg.post_count += 1;\n  const boosted = isBoosted(p.facebookLikelyBoosted);\n  if (boosted) agg.likely_boosted_posts += 1;\n  const engagement = num(p.engagementTotal) || num(p.engagement_total) || (num(p.applause) + num(p.conversation) + num(p.amplification));\n  const rate = pick(p, \"engagementRate\");\n  const views = pick(p, \"views\") ?? pick(p, \"youtubeViews\") ?? pick(p, \"tiktokViews\") ?? pick(p, \"facebookPostViews\");\n  const impressions = pick(p, \"estimatedImpressions\");\n  // RivalIQ presenceReach is follower count near publication, not post reach.\n  const followers_at_publication = pick(p, \"presenceReach\");\n  agg.engagement_sum += engagement; agg.engagement_rate_sum += rate; agg.views_total += views || 0; if (views != null) agg.views_observed += 1; agg.impressions_total += impressions;\n  const created = p.publishedAt || p.published_at || p.created || p.created_at || p.date;\n  if (created) { const d = new Date(created); if (!isNaN(d)) { const wd = [\"Sun\",\"Mon\",\"Tue\",\"Wed\",\"Thu\",\"Fri\",\"Sat\"][d.getUTCDay()]; agg.by_weekday[wd] = (agg.by_weekday[wd] || 0) + 1; const hr = String(d.getUTCHours()); agg.by_hour[hr] = (agg.by_hour[hr] || 0) + 1; } }\n  const text = clean(p.message || p.text || p.caption || p.content || \"\");\n  for (const t of (text.match(/#[\\p{L}0-9_]+/gu) || [])) { agg.hashtags[t.toLowerCase()] = (agg.hashtags[t.toLowerCase()] || 0) + 1; }\n  const mtype = p.type || p.post_type || p.media_type || \"unknown\";\n  agg.media_types[mtype] = (agg.media_types[mtype] || 0) + 1;\n  const channel = p.channel || p.network || p.platform || \"unknown\";\n  if (agg.channels) agg.channels[channel] = (agg.channels[channel] || 0) + 1;\n  agg.top_posts.push({ engagement, engagement_rate: rate, est_impressions: impressions, followers_at_publication, views, applause: pick(p, \"applause\"), conversation: pick(p, \"conversation\"), amplification: pick(p, \"amplification\"), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === \"string\" ? p.facebookLikelyBoosted : null });\n  return channel;\n};\nfor (const p of posts) {\n  const key = String(p.companyId ?? p.company_id ?? (p.company && p.company.id) ?? \"unknown\");\n  if (!byCompany[key]) byCompany[key] = blank(key, clean(p.companyName || p.company_name || \"Unknown \" + key), null);\n  const agg = byCompany[key];\n  const channel = addPost(agg, p);\n  if (!agg.by_channel[channel]) agg.by_channel[channel] = bucket();\n  addPost(agg.by_channel[channel], p);\n}\nconst topN = (obj, n) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ key: k, count: v }));\nconst days = Math.max(1, Math.round((new Date(cfg.range_end) - new Date(cfg.range_start)) / 86400000) + 1);\nconst finalize = (b) => {\n  if (!b.views_observed) b.views_total = null;\n  delete b.views_observed;\n  b.engagement_avg = b.post_count ? Math.round((b.engagement_sum / b.post_count) * 10) / 10 : 0;\n  b.engagement_rate_avg = b.post_count ? Math.round((b.engagement_rate_sum / b.post_count) * 10000) / 10000 : 0;\n  b.impressions_avg = b.post_count ? Math.round(b.impressions_total / b.post_count) : 0;\n  b.cadence_per_week = Math.round(((b.post_count / days) * 7) * 10) / 10;\n  b.top_hashtags = topN(b.hashtags, 10);\n  b.media_type_mix = topN(b.media_types, 8);\n  b.top_posts = b.top_posts.sort((x, y) => y.engagement - x.engagement).slice(0, 5);\n  delete b.hashtags; delete b.media_types; delete b.engagement_sum; delete b.engagement_rate_sum;\n  return b;\n};\nconst companiesOut = Object.values(byCompany).map((c) => {\n  finalize(c);\n  c.channel_mix = topN(c.channels, 8); delete c.channels;\n  for (const ch of Object.keys(c.by_channel)) finalize(c.by_channel[ch]);\n  c.rivaliq_metrics = metricsFor(String(c.company_id));\n  c.linkedin_metrics = postsResp.additional_metrics?.[String(c.company_id)] || null;\n  // Use the provider's aggregation, not a differently weighted mean of posts.\n  const applyProvider = (b, metrics) => {\n    b.observed_post_count = b.post_count;\n    if (!metrics) return;\n    const value = key => metrics[key]?.current;\n    if (value('posts') != null) b.post_count = value('posts');\n    b.cadence_per_week = Math.round(b.post_count / days * 70) / 10;\n    b.engagement_rate_avg = value('rate') ?? null;\n    b.engagement_avg = value('engagement') != null && b.post_count ? value('engagement') / b.post_count : null;\n    b.impressions_total = value('impressions') ?? null;\n    b.impressions_avg = value('impressions') != null && b.post_count ? value('impressions') / b.post_count : null;\n  };\n  if (c.rivaliq_metrics) {\n    applyProvider(c, { ...c.rivaliq_metrics, rate: c.rivaliq_metrics.engagement_rate_per_post, impressions: c.rivaliq_metrics.estimated_impressions });\n    for (const network of Object.keys(c.rivaliq_metrics.by_network)) {\n      const key = network === 'twitter' && c.by_channel.x ? 'x' : network;\n      if (!c.by_channel[key]) c.by_channel[key] = finalize(bucket());\n    }\n    for (const [channel, b] of Object.entries(c.by_channel)) applyProvider(b, c.rivaliq_metrics.by_network[channel === 'x' ? 'twitter' : channel]);\n  }\n  return c;\n});\nconst allTop = companiesOut.flatMap((c) => c.top_posts.map((p) => ({ company: c.name, ...p })));\nconst note = posts.length === 0 ? \"RivalIQ returned zero posts for this landscape and period.\" : (truncatedPages > 0 ? (truncatedPages + \" weekly window\" + (truncatedPages === 1 ? \"\" : \"s\") + \" hit RivalIQ's 500-post page limit, so some posts in the period may be missing.\") : \"\");\nconst metricsAvailable = mRows.length > 0;\nconst result = { metric_semantics_version: 4, metric_scope: \"rivaliq_period_totals_with_separate_post_sample\", client_name: cfg.client_name, landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by }, period: { start: cfg.range_start, end: cfg.range_end, days }, total_posts_analyzed: posts.length, metrics_available: metricsAvailable, metrics_note: metricsAvailable ? \"\" : \"RivalIQ period metrics (followers, engagement, impressions) were not returned for this run.\", companies: companiesOut, example_post_pool: allTop.map((p) => ({ company: p.company, url: p.url, channel: p.channel, engagement: p.engagement })), suppressed_insights: suppressed, schema_note: note };\nreturn [{json: normalizedCompetitiveMetrics({aggregates:result}).aggregates}];\n"
+      }
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Assemble Report Data",
+      "parameters": {
+        "jsCode": "function inclusiveDays(start, end) {\n    if (!start || !end)\n        return null;\n    const a = Date.parse(start.slice(0, 10) + \"T00:00:00Z\");\n    const b = Date.parse(end.slice(0, 10) + \"T00:00:00Z\");\n    return Number.isFinite(a) && Number.isFinite(b) && b >= a ? Math.round((b - a) / 86400000) + 1 : null;\n}\nconst valid = (value) => typeof value === \"number\" && Number.isFinite(value) && value >= 0;\nfunction competitiveCompanyMetrics(c) {\n    const r = c.rivaliq_metrics;\n    const li = c.linkedin_metrics;\n    if (!r || !li || li.coverage !== 'complete')\n        return r;\n    const add = (value, extra) => valid(value) && valid(extra) ? value + extra : null;\n    const unknown = { current: null, previous: null };\n    return {\n        ...r, previous_period: null,\n        posts: { current: add(r.posts?.current, li.posts), previous: null },\n        engagement: { current: add(r.engagement?.current, li.engagement), previous: null },\n        audience: unknown, estimated_impressions: unknown, engagement_rate_per_post: unknown,\n        by_network: { ...r.by_network, linkedin: {\n                posts: { current: li.posts, previous: null }, engagement: { current: li.engagement, previous: null },\n                followers: unknown, impressions: unknown, rate: unknown,\n                source: li.provider,\n            } },\n    };\n}\nfunction factualDimensions(companies, days) {\n    const client = companies.find((c) => c.is_client);\n    if (!client)\n        return [];\n    const rivals = companies.filter((c) => !c.is_client);\n    const definitions = [\n        [\"Audience\", \"followers\", (c) => competitiveCompanyMetrics(c)?.audience?.current],\n        [\"Cadence\", \"posts/week\", (c) => days && valid(c.post_count) ? c.post_count / days * 7 : c.cadence_per_week],\n        [\"Engagement\", \"engagements\", (c) => competitiveCompanyMetrics(c)?.engagement?.current ?? c.engagement_sum ?? c.engagement_total],\n        [\"Estimated impressions\", \"impressions\", (c) => competitiveCompanyMetrics(c)?.estimated_impressions?.current ?? c.impressions_total],\n    ];\n    return definitions.flatMap(([dimension, unit, metric]) => {\n        const value = metric(client);\n        const peers = rivals.map(metric).filter(valid);\n        if (!valid(value) || !peers.length)\n            return [];\n        return [{ dimension, unit, client: value, competitor_avg: peers.reduce((a, b) => a + b, 0) / peers.length, competitor_count: peers.length }];\n    });\n}\nfunction comparisonScale(client, average) {\n    const max = Math.max(1, client, average);\n    return { client: client / max * 100, competitor: average / max * 100 };\n}\nfunction normalizedCompetitiveMetrics(input) {\n    const report = (input && typeof input === \"object\" ? input : {});\n    const period = report.period || report.aggregates?.period;\n    const days = inclusiveDays(period?.start, period?.end);\n    const providerValues = (posts, metrics) => ({\n        ...(metrics?.rate ? { engagement_rate_avg: valid(metrics.rate.current) ? metrics.rate.current : null } : {}),\n        ...(posts && valid(metrics?.engagement?.current) ? { engagement_avg: metrics.engagement.current / posts } : {}),\n        ...(metrics?.impressions ? { impressions_total: metrics.impressions.current ?? null, impressions_avg: valid(metrics.impressions.current) && posts ? metrics.impressions.current / posts : null } : {}),\n    });\n    const authoritative = (report.aggregates?.metric_semantics_version || 0) >= 3;\n    const normalizeBucket = (b, metrics) => {\n        const count = authoritative && valid(metrics?.posts?.current) ? metrics.posts.current : b.post_count;\n        return {\n            ...b,\n            ...(authoritative ? { observed_post_count: b.observed_post_count ?? b.post_count ?? 0 } : {}),\n            post_count: count,\n            ...providerValues(count, metrics),\n            ...(days ? { cadence_per_week: Math.round((count || 0) / days * 70) / 10 } : {}),\n        };\n    };\n    const companies = (report.aggregates?.companies || []).map((c) => {\n        const metrics = competitiveCompanyMetrics(c);\n        const channels = { ...c.by_channel };\n        if (authoritative)\n            for (const network of Object.keys(metrics?.by_network || {})) {\n                const key = network === 'twitter' && channels.x ? 'x' : network;\n                channels[key] ??= { post_count: 0 };\n            }\n        return {\n            ...c,\n            comparison_metrics: metrics,\n            ...normalizeBucket(c, { ...metrics, rate: metrics?.engagement_rate_per_post, impressions: metrics?.estimated_impressions }),\n            by_channel: Object.fromEntries(Object.entries(channels).map(([key, b]) => [key,\n                normalizeBucket(b, metrics?.by_network?.[key === 'x' ? 'twitter' : key]),\n            ])),\n        };\n    });\n    return {\n        ...report,\n        ...(days ? { period: { ...period, days } } : {}),\n        aggregates: { ...report.aggregates, companies, ...(days && report.aggregates?.period ? { period: { ...report.aggregates.period, days } } : {}) },\n        ai_analysis: { ...report.ai_analysis, benchmark_scorecard: {\n                ...report.ai_analysis?.benchmark_scorecard,\n                dimensions: factualDimensions(companies, days),\n            } },\n    };\n}\n\nconst cfg = $(\"Run Config\").first().json;\nconst landscape = $(\"Resolve Landscape\").first().json;\nconst aggregates = $(\"Aggregate Competitive Data\").first().json;\nconst pages = Number(($(\"Merge Post Pages\").first().json || {}).pages) || 0;\nconst aiRaw = $input.first().json.output || $input.first().json;\nconst sanitizeStr = (s) => String(s)\n  .replace(/[\\ud800-\\udbff](?![\\udc00-\\udfff])/g, \"\")\n  .replace(/(^|[^\\ud800-\\udbff])[\\udc00-\\udfff]/g, \"$1\")\n  .replace(/\\\\u(?![0-9a-fA-F]{4})/g, \"\\\\\\\\u\")\n  .replace(/[\\u0000-\\b\\u000b\\f\\u000e-\\u001f]/g, \" \");\nconst sanitize = (v) => {\n  if (typeof v === \"string\") return sanitizeStr(v);\n  if (Array.isArray(v)) return v.map(sanitize);\n  if (v && typeof v === \"object\") { const o = {}; for (const k of Object.keys(v)) o[sanitizeStr(k)] = sanitize(v[k]); return o; }\n  return v;\n};\nconst startedAt = new Date(cfg.started_at);\nconst durationMinutes = Math.max(1, Math.round((Date.now() - startedAt.getTime()) / 60000));\nconst reportData = sanitize(normalizedCompetitiveMetrics({\n  source: \"rivaliq\",\n  provider_status: 1,\n  landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by, focus_company_id: landscape.focus_company_id, companies: landscape.companies },\n  period: aggregates.period,\n  // rivaliq_calls: landscapes list + status + companies + one socialposts call per weekly window.\n  totals: { posts_analyzed: aggregates.total_posts_analyzed, post_windows: pages, rivaliq_calls: 3 + pages },\n  aggregates: aggregates,\n  ai_analysis: aiRaw,\n  generated_at: new Date().toISOString(),\n  schema_note: aggregates.schema_note || \"\"\n}));\nconst body = { op: \"report\", report_id: cfg.report_id, attempt_started_at: cfg.attempt_started_at, status: \"complete\", report_data: JSON.parse(JSON.stringify(reportData)), duration_minutes: durationMinutes };\nconst bodyString = JSON.stringify(body);\nreturn [{ json: { report_id: cfg.report_id, status: \"complete\", duration_minutes: durationMinutes, body_bytes: bodyString.length, body_string: bodyString } }];\n"
+      }
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Competitive Analysis Agent",
+      "parameters": {
+        "text": "=Analyze this aggregated competitor data for the client and produce the exact JSON the schema requires.\n\nSOURCE RULES: comparison_metrics contains the combined verified period values. rivaliq_metrics remains the unchanged RivalIQ evidence; linkedin_metrics is the separately verified public company-post collection through Apify. Do not mix a source's partial totals with the combined totals. Null combined audience, rate, previous-period and impression values are unavailable, not zero. Compare the supplied observed posts; do not claim a company's unconnected channel is inactive. LinkedIn counts exclude plain reposts and retain original and quote posts.\\n\\nDATA:\n{{ JSON.stringify(Object.assign({}, $json, { companies: ($json.companies || []).map((c) => Object.assign({}, c, { rivaliq_metrics: c.rivaliq_metrics ? Object.assign({}, c.rivaliq_metrics, { daily: undefined }) : null })) })) }}"
+      }
+    },
+    {
+      "type": "setNodeSettings",
+      "nodeName": "Cache Posts Snapshot",
+      "settings": {
+        "onError": "continueErrorOutput"
+      }
+    },
+    {
+      "type": "addConnection",
+      "source": "Cache Posts Snapshot",
+      "target": "Mark Report Failed",
+      "connectionType": "main",
+      "sourceIndex": 1,
+      "targetIndex": 0
+    }
+  ]
+}

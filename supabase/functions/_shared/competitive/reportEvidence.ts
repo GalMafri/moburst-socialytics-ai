@@ -1,3 +1,5 @@
+const metricsOf = (company: any) => company?.comparison_metrics || company?.rivaliq_metrics;
+
 /** Keep an empty post sample from becoming a claim about a company's strategy.
  * Provider totals remain unchanged, including explicit measured zeros. The raw
  * workflow output/snapshots remain the audit source; this is a derived view.
@@ -5,7 +7,7 @@
 export function sourceCompetitiveSummary(report: Record<string, any>): string | null {
   const companies = report.aggregates?.companies || [];
   const client = companies.find((c: any) => c.is_client);
-  const m = client?.rivaliq_metrics;
+  const m = metricsOf(client);
   if (!client?.post_count || !m || !(report.aggregates?.metric_semantics_version >= 2)) return null;
   const valid = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
   const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 1 });
@@ -14,9 +16,9 @@ export function sourceCompetitiveSummary(report: Record<string, any>): string | 
   if (valid(m.posts?.current)) lines.push(`Publishing: ${fmt(m.posts.current)} tracked posts from ${client.name} in this period${valid(m.posts.previous) ? `, compared with ${fmt(m.posts.previous)} in the previous equal-length period` : ""}.`);
   if (valid(m.engagement_rate_per_post?.current)) lines.push(`Engagement: ${rate(m.engagement_rate_per_post.current)} is ${client.name}'s average engagement rate per post${valid(m.engagement_rate_per_post.previous) ? `, versus ${rate(m.engagement_rate_per_post.previous)} previously` : ""}.`);
   if (valid(m.audience?.current)) lines.push(`Audience: ${fmt(m.audience.current)} followers across tracked networks${valid(m.audience.previous) ? `, ${m.audience.current >= m.audience.previous ? "up" : "down"} ${fmt(Math.abs(m.audience.current - m.audience.previous))} from the previous period` : ""}.`);
-  const rivals = companies.filter((c: any) => !c.is_client && valid(c.rivaliq_metrics?.posts?.current));
-  const leader = [...rivals].sort((a: any, b: any) => b.rivaliq_metrics.posts.current - a.rivaliq_metrics.posts.current)[0];
-  if (leader?.rivaliq_metrics.posts.current > 0) lines.push(`Peer activity: ${fmt(leader.rivaliq_metrics.posts.current)} tracked posts makes ${leader.name} ${rivals.length > 1 ? "a publishing-volume leader among the selected competitors" : "the selected publishing comparison"} for this period.`);
+  const rivals = companies.filter((c: any) => !c.is_client && valid(metricsOf(c)?.posts?.current));
+  const leader = [...rivals].sort((a: any, b: any) => metricsOf(b).posts.current - metricsOf(a).posts.current)[0];
+  if (metricsOf(leader)?.posts?.current > 0) lines.push(`Peer activity: ${fmt(metricsOf(leader).posts.current)} tracked posts makes ${leader.name} ${rivals.length > 1 ? "a publishing-volume leader among the selected competitors" : "the selected publishing comparison"} for this period.`);
   return lines.join("\n\n");
 }
 
@@ -63,7 +65,7 @@ export function withCompetitiveEvidenceLimits<T>(input: T): T {
   }
   const empty = companies.filter(c => (c.observed_post_count ?? c.post_count) === 0);
   const mismatches = companies.filter(c => Number.isFinite(c.post_count) &&
-    Number.isFinite(c.rivaliq_metrics?.posts?.current) && c.post_count !== c.rivaliq_metrics.posts.current);
+    Number.isFinite(metricsOf(c)?.posts?.current) && c.post_count !== metricsOf(c).posts.current);
   if (!empty.length && !mismatches.length) return report as T;
   const names = new Set(empty.map(c => String(c.name || "").trim().toLowerCase()));
   const client = empty.find(c => c.is_client);
@@ -109,17 +111,24 @@ export function competitiveReportQuality(input: unknown): { ready: boolean; reas
   const authoritative = report?.aggregates?.metric_semantics_version >= 3;
   const period = report?.period || report?.aggregates?.period;
   for (const c of report?.aggregates?.companies || []) {
-    if (authoritative) {
-      const sourcePeriod = c.rivaliq_metrics?.period;
-      if (!period?.start || !period?.end || sourcePeriod?.start !== period.start || sourcePeriod?.end !== period.end) reasons.push(`${c.name}: provider metrics do not match the report period.`);
-      if (!Number.isFinite(c.rivaliq_metrics?.posts?.current) || c.rivaliq_metrics.posts.current < 0) reasons.push(`${c.name}: provider post total is unavailable.`);
+    if (c.linkedin_metrics && (c.linkedin_metrics.coverage !== 'complete' ||
+      c.linkedin_metrics.period?.start !== period?.start || c.linkedin_metrics.period?.end !== period?.end ||
+      !Number.isInteger(c.linkedin_metrics.posts) || c.linkedin_metrics.posts < 0 ||
+      !Number.isFinite(c.linkedin_metrics.engagement) || c.linkedin_metrics.engagement < 0)) {
+      reasons.push(`${c.name}: LinkedIn source coverage is incomplete or belongs to a different period.`);
     }
-    if (report?.aggregates?.metrics_available === true && !c.rivaliq_metrics) reasons.push(`${c.name}: provider metrics are missing.`);
-    for (const [network, metrics] of Object.entries(c.rivaliq_metrics?.by_network || {}) as [string, any][]) {
+
+    if (authoritative) {
+      const sourcePeriod = metricsOf(c)?.period;
+      if (!period?.start || !period?.end || sourcePeriod?.start !== period.start || sourcePeriod?.end !== period.end) reasons.push(`${c.name}: provider metrics do not match the report period.`);
+      if (!Number.isFinite(metricsOf(c)?.posts?.current) || metricsOf(c).posts.current < 0) reasons.push(`${c.name}: provider post total is unavailable.`);
+    }
+    if (report?.aggregates?.metrics_available === true && !metricsOf(c)) reasons.push(`${c.name}: provider metrics are missing.`);
+    for (const [network, metrics] of Object.entries(metricsOf(c)?.by_network || {}) as [string, any][]) {
       const count = c.by_channel?.[network]?.post_count ?? (network === 'twitter' ? c.by_channel?.x?.post_count : undefined) ?? 0;
       if (!authoritative && Number.isFinite(metrics.posts?.current) && count !== metrics.posts.current) reasons.push(`${c.name} / ${network}: ${count} dated posts; ${metrics.posts.current} provider period total.`);
     }
-    const observed = c.post_count, total = c.rivaliq_metrics?.posts?.current;
+    const observed = c.post_count, total = metricsOf(c)?.posts?.current;
     if (!authoritative && Number.isFinite(observed) && Number.isFinite(total) && observed !== total) {
       reasons.push(`${c.name}: ${observed} dated posts; ${total} provider period total.`);
     }
@@ -129,8 +138,8 @@ export function competitiveReportQuality(input: unknown): { ready: boolean; reas
   if (report?.ai_analysis && !(report?.aggregates?.metric_semantics_version >= 2)) {
     const companies = report?.aggregates?.companies || [];
     if (companies.some((c: any) => Number.isFinite(c.engagement_rate_avg) &&
-      Number.isFinite(c.rivaliq_metrics?.engagement_rate_per_post?.current) &&
-      Math.abs(c.engagement_rate_avg - c.rivaliq_metrics.engagement_rate_per_post.current) > 0.000051)) {
+      Number.isFinite(metricsOf(c)?.engagement_rate_per_post?.current) &&
+      Math.abs(c.engagement_rate_avg - metricsOf(c).engagement_rate_per_post.current) > 0.000051)) {
       reasons.push("Narrative needs regeneration using provider engagement rates.");
     }
     if (companies.some((c: any) => c.reach_total > 0) && /\breach\b/i.test(JSON.stringify(report.ai_analysis))) {

@@ -123,7 +123,7 @@ export default function CompetitiveReportHistory() {
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             )}
-                            {canRetry(r) && <RetryReportButton reportId={r.id} kind="competitive" label={retryLabel(r)} />}
+                            {canRetry(r, Date.now(), "competitive") && <RetryReportButton reportId={r.id} kind="competitive" label={retryLabel(r)} />}
                             <ReportActions report={r} kind="competitive" />
                           </div>
                         </TableCell>

@@ -100,7 +100,7 @@ export function RetryReportButton({
         description={
           <>
             <p>
-              Retry only after confirming the original workflow has stopped. It may still be running even after 90 minutes.
+              {kind === "competitive" ? "A new attempt will use the same selected companies and dates. Responses from the previous attempt cannot replace its result." : "Retry only after confirming the original workflow has stopped. It may still be running even after 90 minutes."}
               Retrying replaces this attempt and can duplicate work if the original is still active.
             </p>
             <p className="t-secondary">

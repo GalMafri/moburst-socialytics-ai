@@ -66,6 +66,8 @@ type Company = Bucket & {
   company_id: string; name: string; url: string | null; is_client: boolean; in_confirmed_top3: boolean;
   channel_mix: Array<{ key: string; count: number }>; by_channel?: Record<string, Bucket>;
   rivaliq_metrics?: RivalIQMetrics | null;
+  comparison_metrics?: RivalIQMetrics | null;
+  linkedin_metrics?: { provider: string; profile_url: string; posts: number; coverage: string };
 };
 
 const EMPTY: Bucket = { post_count: 0, cadence_per_week: 0, engagement_avg: 0, engagement_rate_avg: 0, impressions_avg: 0, views_total: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, top_hashtags: [], media_type_mix: [], top_posts: [] };
@@ -257,7 +259,7 @@ export default function CompetitiveReportView() {
     const timer = setInterval(() => setNow(Date.now()), 15000);
     return () => clearInterval(timer);
   }, [report?.status]);
-  const retryReady = report ? canRetry(report, now) : false;
+  const retryReady = report ? canRetry(report, now, "competitive") : false;
   const retryAt = report?.created_at ? Date.parse(report.created_at) + STUCK_AFTER_MINUTES * 60000 : NaN;
   const recovery = competitiveRecovery(report?.report_data);
   const ai = rd.ai_analysis || {};
@@ -307,7 +309,7 @@ export default function CompetitiveReportView() {
     <p className="text-muted-foreground">Allow up to 90 minutes. This page updates automatically when the report is ready.</p>
     <div className="flex gap-2 mt-4">
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
-      {canRetry(report) && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
+      {canRetry(report, Date.now(), "competitive") && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
     </div>
   </AppLayout>;
   if (!competitiveReportQuality(report.report_data).ready) return <AppLayout title={recovery.title} description="This analysis is not ready to share yet.">
@@ -326,7 +328,7 @@ export default function CompetitiveReportView() {
     <EmptyState icon={Crosshair} title="This report needs attention" description={rd.error || "The analysis did not complete. Its figures are unavailable."} />
     <div className="flex gap-2 mt-4">
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
-      {canRetry(report) && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
+      {canRetry(report, Date.now(), "competitive") && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
     </div>
   </AppLayout>;
   const me = companies.find((c) => c.is_client) || null;
@@ -351,7 +353,7 @@ export default function CompetitiveReportView() {
   // landscape or for the filtered network.
   const netKey = effectivePlat === "x" ? "twitter" : effectivePlat;
   const metricsFor = (c: Company) => {
-    const m = c.rivaliq_metrics;
+    const m = c.comparison_metrics || c.rivaliq_metrics;
     if (!m) return null;
     if (effectivePlat === "all") return { audience: m.audience, engagement: m.engagement, impressions: m.estimated_impressions, posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
     const n = m.by_network?.[netKey];
@@ -362,7 +364,8 @@ export default function CompetitiveReportView() {
   const hasMetrics = withMetrics.length > 0;
   const meM = me ? metricsFor(me) : null;
   const followersRows = withMetrics.filter((x) => x.m.audience && x.m.audience.current > 0).map((x) => ({ key: x.c.company_id, label: displayCompanyName(x.c.name), name: x.c.name, value: x.m.audience!.current, emphasized: x.c.is_client }));
-  const previousDays = me?.rivaliq_metrics?.previous_period ? Math.round((Date.parse(me.rivaliq_metrics.previous_period.end) - Date.parse(me.rivaliq_metrics.previous_period.start)) / 86400000) + 1 : null;
+  const previousPeriod = (me?.comparison_metrics || me?.rivaliq_metrics)?.previous_period;
+  const previousDays = previousPeriod ? Math.round((Date.parse(previousPeriod.end) - Date.parse(previousPeriod.start)) / 86400000) + 1 : null;
   // RivalIQ answers "No Prediction" for most Facebook pages, and the signal does
   // not exist off Facebook at all, so only explain it when a company actually
   // has boosted posts to show.
@@ -563,10 +566,11 @@ export default function CompetitiveReportView() {
               <Badge variant={report.status === "complete" ? "default" : report.status === "failed" ? "destructive" : "secondary"}>{report.status}</Badge>
               {period && <Chip>{period}{rd.period?.days ? ` · ${rd.period.days} days` : ""}</Chip>}
               {rd.landscape?.name && <Chip>RivalIQ · {rd.landscape.name}</Chip>}
+              {companies.some((c: Company) => c.linkedin_metrics) && <Chip>LinkedIn · Apify</Chip>}
               {rivals.length > 0 && <Chip>{rivals.length} competitors</Chip>}
               {effectivePlat !== "all" && <Chip>{platformLabel(effectivePlat)} only</Chip>}
             </div>
-            <p className="t-secondary">Snapshot from the report run started {new Date(report.created_at).toLocaleString()}. Posts were published within the selected UTC dates; their performance reflects RivalIQ’s collected snapshot, not only interactions made within those dates. Impressions are estimates.</p>
+            <p className="t-secondary">Snapshot from the report run started {new Date(report.created_at).toLocaleString()}. Posts were published within the selected UTC dates; their performance reflects the collected source snapshots, not only interactions made within those dates. Impressions are estimates.</p>
           </div>
           <div data-print="hide" className="flex gap-2 flex-wrap">
             <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}><History className="h-4 w-4 mr-2" /> All runs</Button>
@@ -574,7 +578,7 @@ export default function CompetitiveReportView() {
               <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/feed`)}><Rss className="h-4 w-4 mr-2" /> Latest posts</Button>
             )}
             <ExportPdfButton contentRef={printRef} filename={`${clientName.replace(/[^a-z0-9]+/gi, "_")}_competitive_${period ? period.replace(/[^a-z0-9]+/gi, "_") : report.id.slice(0, 8)}`} title={`${clientName} vs. the field${period ? ` (${period})` : ""}`} />
-            {canRetry(report) && (
+            {canRetry(report, Date.now(), "competitive") && (
               <RetryReportButton reportId={report.id} kind="competitive" variant="outline" label={retryLabel(report)} />
             )}
             <ReportActions
@@ -620,7 +624,7 @@ export default function CompetitiveReportView() {
               sub={`Client + ${rivals.length} competitor${rivals.length === 1 ? "" : "s"} · tracked accounts`}
             />
             {meM?.audience && (
-              <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across networks, per RivalIQ" : `on ${platformLabel(effectivePlat)}, per RivalIQ`} />
+              <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across measured networks" : `on ${platformLabel(effectivePlat)}`} />
             )}
             <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} tracked posts`} />
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`set avg ${avgCadence.toFixed(1)}/wk`} />
@@ -813,7 +817,7 @@ export default function CompetitiveReportView() {
             style={{ order: orderOf("audience") }}
             title={<><Users className="h-5 w-5" /> Audience and momentum</>}
             action={scopeTag(true)}
-            description={<>RivalIQ's own totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}: followers, engagement, estimated impressions and posts for every company.{anyBoosted ? " \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook." : ""}</>}
+            description={<>Verified source totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}: followers, engagement, estimated impressions and posts for every company.{anyBoosted ? " \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook." : ""}</>}
           >
             <Card>
               <CardContent className="pt-5 space-y-6">
@@ -1110,7 +1114,7 @@ export default function CompetitiveReportView() {
 
         {/* Top posts */}
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
-            <Section id="posts" index={num("posts")} style={{ order: orderOf("posts") }} action={scopeTag(true)} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come straight from RivalIQ; competitor impressions are estimates.</>}>
+            <Section id="posts" index={num("posts")} style={{ order: orderOf("posts") }} action={scopeTag(true)} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come from RivalIQ and the reviewed public LinkedIn pages collected through Apify. Competitor impressions are estimates.</>}>
             <Card>
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (

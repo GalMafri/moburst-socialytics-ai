@@ -20,7 +20,8 @@ export function isStuck(report: RunnableReport, now = Date.now()): boolean {
 }
 
 /** True when the report is worth offering a retry on. */
-export function canRetry(report: RunnableReport, now = Date.now()): boolean {
+export function canRetry(report: RunnableReport, now = Date.now(), kind?: "competitive"): boolean {
+  if (kind === "competitive" && report.status === "failed") return true;
   return (report.status === "failed" || report.status === "running") && minutesRunning(report, now) >= STUCK_AFTER_MINUTES;
 }
 

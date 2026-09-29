@@ -1,0 +1,22 @@
+{
+  "workflowId": "EBiAwSay3H2R8krv",
+  "reason": "Persist the current attempt source snapshot before aggregation and report writeback.",
+  "operations": [
+    {
+      "type": "removeConnection",
+      "source": "Merge Post Pages",
+      "target": "Aggregate Competitive Data",
+      "connectionType": "main",
+      "sourceIndex": 0,
+      "targetIndex": 0
+    },
+    {
+      "type": "addConnection",
+      "source": "Cache Posts Snapshot",
+      "target": "Aggregate Competitive Data",
+      "connectionType": "main",
+      "sourceIndex": 0,
+      "targetIndex": 0
+    }
+  ]
+}

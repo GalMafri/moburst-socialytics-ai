@@ -52,7 +52,8 @@ function gamma(input,analysis={content_calendar:[{posts:[{copy:'Fixture'}]}]}){
 function aggregate(start,end,count){
  const source=fs.readFileSync(path.join(repo,'n8n/code/competitive-aggregate.js'),'utf8');
  const nodes={'Run Config':{range_start:start,range_end:end,client_name:'Fixture'},'Resolve Landscape':{focus_company_id:1},'Landscape Companies':{companies:[{id:1,name:'Fixture'}]}};
- return vm.runInNewContext('(function(){'+source+'})()',{$:name=>({first:()=>({json:nodes[name]||{}})}),$input:{first:()=>({json:{socialPosts:Array.from({length:count},(_,i)=>({companyId:1,channel:'instagram',message:'Fixture '+i,publishedAt:start+'T12:00:00Z'}))}})},console:silent})[0].json;
+ nodes['Merge LinkedIn Posts']={socialPosts:Array.from({length:count},(_,i)=>({companyId:1,channel:'instagram',message:'Fixture '+i,publishedAt:start+'T12:00:00Z'}))};
+ return vm.runInNewContext('(function(){'+source+'})()', {...moduleFrom('supabase/functions/_shared/competitive/reportMetrics.ts'),$:name=>({first:()=>({json:nodes[name]||{}})}),console:silent})[0].json;
 }
 
 function database({order=['competitive','social'],due=true,feedError=false}={}){
@@ -244,7 +245,7 @@ async function confirmCompetitorsQa({handlesById={},handlesError=false}={}) {
  await check('QA-10','regression','delayed completion retains the competitive report period',async()=>{const r=await runScheduler();const comp=r.tables.competitive_reports.at(-1);comp.status='complete';comp.date_range_start='2026-07-01';comp.date_range_end='2026-07-31';const resumed=await runScheduler({state:r,body:{resume_competitive_report_id:comp.id}});assert.equal(resumed.requests[0].payload.date_range_start,'2026-07-01');assert.equal(resumed.requests[0].payload.date_range_end,'2026-07-31');});
  for (const kind of ['social','competitive']) {
   const table=kind==='social'?'reports':'competitive_reports';
-  for (const status of ['running','failed']) for (const age of [10,15,45,89]) await check('QA-90','regression',kind+' '+status+' retry locked at '+age+' minutes',async()=>{
+  for (const status of (kind==='competitive'?['running']:['running','failed'])) for (const age of [10,15,45,89]) await check('QA-90','regression',kind+' '+status+' retry locked at '+age+' minutes',async()=>{
     const state=database(); state.tables[table].push({id:'retry-fixture',client_id:'fixture-client',status,created_at:new Date(Date.now()-age*60000).toISOString()});
     const r=await runManual('accept',{state,body:{report_id:'retry-fixture'}});assert.equal(r.status,409);assert.equal(r.dispatches,0);assert.equal(state.tables[table].at(-1).status,status);
   });
@@ -260,7 +261,7 @@ async function confirmCompetitorsQa({handlesById={},handlesError=false}={}) {
  for(const kind of ['social','competitive']) await check('QA-90','regression',kind+' retry clears the previous presentation and duration',async()=>{
   const state=database();const table=kind==='social'?'reports':'competitive_reports';
   state.tables.clients[0].website_url='https://fixture.example';
-  state.tables[table].push({id:'stale-output',client_id:'fixture-client',set_id:'fixture-set',status:'failed',created_at:new Date(Date.now()-91*60000).toISOString(),gamma_url:'https://gamma.app/docs/old-attempt',duration_minutes:9,report_data:{old:true}});
+  state.tables[table].push({id:'stale-output',client_id:'fixture-client',set_id:'fixture-set',status:'failed',created_at:new Date(Date.now()-(kind==='competitive'?1:91)*60000).toISOString(),gamma_url:'https://gamma.app/docs/old-attempt',duration_minutes:9,report_data:{old:true}});
   state.tables.competitors.forEach((c,i)=>c.website_url='https://competitor'+i+'.example');
   const landscapes=[{id:123,name:'Fixture',focusCompanyId:1,companies:[{id:1,name:'Fixture',url:'https://fixture.example'},...state.tables.competitors.map((c,i)=>({id:i+2,name:c.name,url:c.website_url,instagram:{handle:'fixture'+i}}))]}];
   const r=await runManual('accept',{state,landscapes,body:{report_id:'stale-output'}});

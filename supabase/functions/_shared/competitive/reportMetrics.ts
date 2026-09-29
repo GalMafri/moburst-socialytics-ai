@@ -2,6 +2,8 @@ type Numeric = number | null | undefined;
 type ProviderMetric = { current?: Numeric };
 type ProviderNetwork = { posts?: ProviderMetric; rate?: ProviderMetric; engagement?: ProviderMetric; impressions?: ProviderMetric };
 type Company = {
+  linkedin_metrics?: { provider: string; period: {start: string; end: string}; posts: number; engagement: number; coverage: string };
+  comparison_metrics?: any;
   is_client?: boolean; post_count?: number; observed_post_count?: number; engagement_total?: number; engagement_sum?: number; impressions_total?: number;
   cadence_per_week?: number; by_channel?: Record<string, { post_count?: number; cadence_per_week?: number }>;
   rivaliq_metrics?: { posts?: ProviderMetric; audience?: { current?: Numeric }; engagement?: { current?: Numeric }; estimated_impressions?: ProviderMetric; engagement_rate_per_post?: ProviderMetric; by_network?: Record<string, ProviderNetwork> };
@@ -16,15 +18,36 @@ export function inclusiveDays(start?: string, end?: string): number | null {
 }
 const valid = (value: Numeric): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
+/** Preserve the raw RivalIQ measurement while adding a separately verified
+ * LinkedIn source. Unknown combined denominators remain unknown. */
+export function competitiveCompanyMetrics(c: {rivaliq_metrics?: any; linkedin_metrics?: any}): any {
+  const r = c.rivaliq_metrics;
+  const li = c.linkedin_metrics;
+  if (!r || !li || li.coverage !== 'complete') return r;
+  const add = (value: Numeric, extra: Numeric) => valid(value) && valid(extra) ? value + extra : null;
+  const unknown = { current: null, previous: null };
+  return {
+    ...r, previous_period: null,
+    posts: { current: add(r.posts?.current, li.posts), previous: null },
+    engagement: { current: add(r.engagement?.current, li.engagement), previous: null },
+    audience: unknown, estimated_impressions: unknown, engagement_rate_per_post: unknown,
+    by_network: { ...r.by_network, linkedin: {
+      posts: {current:li.posts,previous:null}, engagement:{current:li.engagement,previous:null},
+      followers:unknown, impressions:unknown, rate:unknown,
+      source:li.provider,
+    } },
+  };
+}
+
 export function factualDimensions(companies: Company[], days: number | null): Dimension[] {
   const client = companies.find((c) => c.is_client);
   if (!client) return [];
   const rivals = companies.filter((c) => !c.is_client);
   const definitions: Array<[string, string, (c: Company) => Numeric]> = [
-    ["Audience", "followers", (c) => c.rivaliq_metrics?.audience?.current],
+    ["Audience", "followers", (c) => competitiveCompanyMetrics(c)?.audience?.current],
     ["Cadence", "posts/week", (c) => days && valid(c.post_count) ? c.post_count / days * 7 : c.cadence_per_week],
-    ["Engagement", "engagements", (c) => c.rivaliq_metrics?.engagement?.current ?? c.engagement_sum ?? c.engagement_total],
-    ["Estimated impressions", "impressions", (c) => c.rivaliq_metrics?.estimated_impressions?.current ?? c.impressions_total],
+    ["Engagement", "engagements", (c) => competitiveCompanyMetrics(c)?.engagement?.current ?? c.engagement_sum ?? c.engagement_total],
+    ["Estimated impressions", "impressions", (c) => competitiveCompanyMetrics(c)?.estimated_impressions?.current ?? c.impressions_total],
   ];
   return definitions.flatMap(([dimension, unit, metric]) => {
     const value = metric(client);
@@ -46,9 +69,9 @@ export function normalizedCompetitiveMetrics<T>(input: T): T & MetricReport {
   const period = report.period || report.aggregates?.period;
   const days = inclusiveDays(period?.start, period?.end);
   const providerValues = (posts: number | undefined, metrics?: ProviderNetwork) => ({
-    ...(valid(metrics?.rate?.current) ? { engagement_rate_avg: metrics.rate.current } : {}),
+    ...(metrics?.rate ? { engagement_rate_avg: valid(metrics.rate.current) ? metrics.rate.current : null } : {}),
     ...(posts && valid(metrics?.engagement?.current) ? { engagement_avg: metrics.engagement.current / posts } : {}),
-    ...(valid(metrics?.impressions?.current) ? { impressions_total: metrics.impressions.current, impressions_avg: posts ? metrics.impressions.current / posts : 0 } : {}),
+    ...(metrics?.impressions ? { impressions_total: metrics.impressions.current ?? null, impressions_avg: valid(metrics.impressions.current) && posts ? metrics.impressions.current / posts : null } : {}),
   });
   const authoritative = (report.aggregates?.metric_semantics_version || 0) >= 3;
   const normalizeBucket = (b: { post_count?: number; observed_post_count?: number }, metrics?: ProviderNetwork) => {
@@ -62,16 +85,18 @@ export function normalizedCompetitiveMetrics<T>(input: T): T & MetricReport {
     };
   };
   const companies = (report.aggregates?.companies || []).map((c) => {
+    const metrics = competitiveCompanyMetrics(c);
     const channels = { ...c.by_channel };
-    if (authoritative) for (const network of Object.keys(c.rivaliq_metrics?.by_network || {})) {
+    if (authoritative) for (const network of Object.keys(metrics?.by_network || {})) {
       const key = network === 'twitter' && channels.x ? 'x' : network;
       channels[key] ??= { post_count: 0 };
     }
     return {
       ...c,
-      ...normalizeBucket(c, { ...c.rivaliq_metrics, rate: c.rivaliq_metrics?.engagement_rate_per_post, impressions: c.rivaliq_metrics?.estimated_impressions }),
+      comparison_metrics: metrics,
+      ...normalizeBucket(c, { ...metrics, rate: metrics?.engagement_rate_per_post, impressions: metrics?.estimated_impressions }),
       by_channel: Object.fromEntries(Object.entries(channels).map(([key, b]) => [key,
-        normalizeBucket(b, c.rivaliq_metrics?.by_network?.[key === 'x' ? 'twitter' : key]),
+        normalizeBucket(b, metrics?.by_network?.[key === 'x' ? 'twitter' : key]),
       ])),
     };
   });

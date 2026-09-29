@@ -36,6 +36,7 @@ export function applyQaPatches(input, kind) {
     setCode('Aggregate Competitive Data', 'competitive-aggregate');
     const source = readFileSync(new URL('../supabase/functions/_shared/competitive/reportMetrics.ts', import.meta.url), 'utf8');
     const helpers = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, removeComments: true } }).outputText.replace(/^export /gm, '');
+    get('Aggregate Competitive Data').parameters.jsCode = helpers + '\n' + readCode('competitive-aggregate');
     get('Assemble Report Data').parameters.jsCode = helpers + '\n' + readCode('competitive-report');
   } else {
     setCode('Generate Run Summary', 'social-summary');

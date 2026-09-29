@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
     const dispatchSecret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
     if (!dispatchSecret) return json({ error: "Workflow authentication is not configured." }, 503);
 
-    if (existing && ["running", "failed"].includes(existing.status)) {
+    if (existing && ["running", "failed"].includes(existing.status) && !(kind === "competitive" && existing.status === "failed")) {
       const started = Date.parse(existing.created_at || "");
       if (!Number.isFinite(started) || Date.now() - started < STUCK_AFTER_MINUTES * 60000) {
         return json({ error: "Retry is unavailable until 90 minutes after this run started. The original workflow may still be working." }, 409);

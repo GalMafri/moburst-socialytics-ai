@@ -1,0 +1,606 @@
+{
+  "version": "c27a9c9c-544b-4a4d-a360-02c16834bcbc",
+  "nodes": [
+    {
+      "name": "Competitive Webhook",
+      "type": "n8n-nodes-base.webhook"
+    },
+    {
+      "name": "Run Config",
+      "type": "n8n-nodes-base.set"
+    },
+    {
+      "name": "List RivalIQ Landscapes",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Resolve Landscape",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Landscape Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Landscape Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Landscape Social Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Aggregate Competitive Data",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Competitive Analysis Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Analysis Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi"
+    },
+    {
+      "name": "Competitive Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured"
+    },
+    {
+      "name": "Assemble Report Data",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Mark Report Complete",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Cache Status Snapshot",
+      "type": "n8n-nodes-base.httpRequest"
+    },
+    {
+      "name": "Cache Companies Snapshot",
+      "type": "n8n-nodes-base.httpRequest"
+    },
+    {
+      "name": "Cache Posts Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Mark Report Failed",
+      "type": "n8n-nodes-base.httpRequest"
+    },
+    {
+      "name": "Sticky Note 9bd8cdc3",
+      "type": "n8n-nodes-base.stickyNote"
+    },
+    {
+      "name": "Sticky Note 5705daee",
+      "type": "n8n-nodes-base.stickyNote"
+    },
+    {
+      "name": "Build Post Windows",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Merge Post Pages",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Stagger scheduled runs",
+      "type": "n8n-nodes-base.wait"
+    },
+    {
+      "name": "Landscape Metrics Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "Landscape Metrics Summary Previous",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "Landscape Metrics Timeseries",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "Cache Metrics Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "Schema Repair Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi"
+    },
+    {
+      "name": "Check RivalIQ Readiness",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "RivalIQ Ready",
+      "type": "n8n-nodes-base.if"
+    },
+    {
+      "name": "Wait for RivalIQ Data",
+      "type": "n8n-nodes-base.wait"
+    },
+    {
+      "name": "Prepare LinkedIn Sources",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Has LinkedIn Sources",
+      "type": "n8n-nodes-base.if"
+    },
+    {
+      "name": "Collect LinkedIn Posts",
+      "type": "@apify/n8n-nodes-apify.apify",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Merge LinkedIn Posts",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "connections": {
+    "Competitive Webhook": {
+      "main": [
+        [
+          {
+            "node": "Run Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List RivalIQ Landscapes": {
+      "main": [
+        [
+          {
+            "node": "Resolve Landscape",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Landscape": {
+      "main": [
+        [
+          {
+            "node": "Landscape Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Status": {
+      "main": [
+        [
+          {
+            "node": "Check RivalIQ Readiness",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Companies": {
+      "main": [
+        [
+          {
+            "node": "Cache Companies Snapshot",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Landscape Metrics Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Social Posts": {
+      "main": [
+        [
+          {
+            "node": "Merge Post Pages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Competitive Data": {
+      "main": [
+        [
+          {
+            "node": "Competitive Analysis Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Competitive Analysis Agent": {
+      "main": [
+        [
+          {
+            "node": "Assemble Report Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analysis Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Competitive Analysis Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Competitive Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Competitive Analysis Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Report Data": {
+      "main": [
+        [
+          {
+            "node": "Mark Report Complete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Report Complete": {
+      "main": [
+        null,
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Post Windows": {
+      "main": [
+        [
+          {
+            "node": "Landscape Social Posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Post Pages": {
+      "main": [
+        [
+          {
+            "node": "Prepare LinkedIn Sources",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Config": {
+      "main": [
+        [
+          {
+            "node": "Stagger scheduled runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stagger scheduled runs": {
+      "main": [
+        [
+          {
+            "node": "List RivalIQ Landscapes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Metrics Summary": {
+      "main": [
+        [
+          {
+            "node": "Landscape Metrics Summary Previous",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Metrics Summary Previous": {
+      "main": [
+        [
+          {
+            "node": "Landscape Metrics Timeseries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Metrics Timeseries": {
+      "main": [
+        [
+          {
+            "node": "Build Post Windows",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Cache Metrics Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schema Repair Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Competitive Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check RivalIQ Readiness": {
+      "main": [
+        [
+          {
+            "node": "RivalIQ Ready",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RivalIQ Ready": {
+      "main": [
+        [
+          {
+            "node": "Landscape Companies",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Cache Status Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait for RivalIQ Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for RivalIQ Data": {
+      "main": [
+        [
+          {
+            "node": "Landscape Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cache Posts Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Competitive Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare LinkedIn Sources": {
+      "main": [
+        [
+          {
+            "node": "Has LinkedIn Sources",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has LinkedIn Sources": {
+      "main": [
+        [
+          {
+            "node": "Collect LinkedIn Posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge LinkedIn Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect LinkedIn Posts": {
+      "main": [
+        [
+          {
+            "node": "Merge LinkedIn Posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge LinkedIn Posts": {
+      "main": [
+        [
+          {
+            "node": "Cache Posts Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

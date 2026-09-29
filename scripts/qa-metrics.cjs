@@ -1,5 +1,7 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const read=name=>fs.readFileSync('n8n/code/'+name+'.js','utf8');
+const ts=require('typescript');
+const metricsCode=ts.transpileModule(fs.readFileSync('supabase/functions/_shared/competitive/reportMetrics.ts','utf8').replace(/export /g,''),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.None}}).outputText;
 const output=[];function check(name,fn){fn();output.push(name)}
 const profiles=[{id:5034995,network:'facebook'},{id:5489335,network:'fb_instagram_account'},{id:5719052,network:'linkedin_company'}];
 const august=[{impressions:961,reactions:5,likes:5,comments_count:0,shares_count:0,post_link_clicks:1,post_content_clicks:14,post_content_clicks_other:13,video_views:120,posts_sent_count:3},{impressions:783,reactions:6,likes:6,comments_count:1,shares_count:0,video_views:15,posts_sent_count:1},{impressions:7929,reactions:110,comments_count:4,shares_count:2,post_link_clicks:599,post_content_clicks:599,video_views:446,posts_sent_count:14}];
@@ -15,12 +17,13 @@ check('post lifetime metrics remain separate and provider engagements include cl
 function runCompetitive(overrides={}){
  const nodes={'Run Config':{range_start:'2026-08-01',range_end:'2026-08-31',client_name:'Fixture'},'Resolve Landscape':{focus_company_id:1},'Landscape Companies':{companies:[{id:1,name:'Fixture'}]},'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01T00:00:00Z',mainPeriodEnd:'2026-08-31T23:59:59Z'}]},...overrides};
  const input=overrides.input||{socialPosts:[{postId:'1',companyId:1,publishedAt:'2026-08-31T23:59:59Z'},{postId:'1',companyId:1,publishedAt:'2026-08-31T23:59:59Z'},{postId:'2',companyId:1,publishedAt:'2026-09-01T00:00:00Z'}]};
- return vm.runInNewContext('(function(){'+read('competitive-aggregate')+'})()',{$input:{first:()=>({json:input})},$:name=>({first:()=>({json:nodes[name]||{}})})})[0].json;
+ nodes['Merge LinkedIn Posts']=input;
+ return vm.runInNewContext('(function(){'+metricsCode+'\n'+read('competitive-aggregate')+'})()',{$input:{first:()=>({json:input})},$:name=>({first:()=>({json:nodes[name]||{}})})})[0].json;
 }
 check('follower counts never become reach and provider rates override differently weighted post means',()=>{
  const r=runCompetitive({input:{socialPosts:[{companyId:1,postId:'1',publishedAt:'2026-08-01',channel:'instagram',presenceReach:1000,engagementRate:0.05,engagementTotal:10},{companyId:1,postId:'2',publishedAt:'2026-08-31',channel:'instagram',presenceReach:1000,engagementRate:0.01,engagementTotal:20}]},'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelAverageEngagementRatePerPost:0.002,crossChannelSocialEngagement:30,instagramAverageEngagementRatePerPost:0.004,instagramPostsEngagementTotal:30}]}});
  const c=r.companies[0];assert.equal(c.reach_total,undefined);assert.equal(c.top_posts[0].reach,undefined);assert.equal(c.top_posts[0].followers_at_publication,1000);
- assert.equal(c.engagement_rate_avg,0.002);assert.equal(c.by_channel.instagram.engagement_rate_avg,0.004);assert.equal(c.engagement_avg,15);assert.equal(r.metric_semantics_version,3);
+ assert.equal(c.engagement_rate_avg,0.002);assert.equal(c.by_channel.instagram.engagement_rate_avg,0.004);assert.equal(c.engagement_avg,15);assert.equal(r.metric_semantics_version,4);
 });
 check('RivalIQ period counts drive totals and averages independently of content samples',()=>{
  const r=runCompetitive({input:{socialPosts:[{companyId:1,postId:'a',publishedAt:'2026-08-10',channel:'instagram'}]},'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelSocialActivity:52,crossChannelSocialEngagement:6950,instagramPosts:47,instagramPostsEngagementTotal:6610,tikTokPosts:5}]}});

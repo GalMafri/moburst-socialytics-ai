@@ -449,7 +449,7 @@ export default function CompetitiveRun() {
                 </div>
                 <p className="t-secondary mx-auto">{error}</p>
                 {reportId ? (
-                  canRetry({ status: "failed", created_at: startedAt }) ?
+                  canRetry({ status: "failed", created_at: startedAt }, Date.now(), "competitive") ?
                     <RetryReportButton reportId={reportId} kind="competitive" variant="outline" onStarted={() => { setError(null); setRunning(true); setCurrentStep(0); setStartedAt(new Date().toISOString()); pollForCompletion(reportId); }} /> :
                     <p className="t-secondary">Retry becomes available 90 minutes after this run started. You can return later from report history.</p>
                 ) : (

@@ -1,7 +1,7 @@
 const cfg = $("Run Config").first().json;
 const landscape = $("Resolve Landscape").first().json;
 const companiesResp = $("Landscape Companies").first().json;
-const postsResp = $input.first().json;
+const postsResp = $("Merge LinkedIn Posts").first().json;
 // RivalIQ's own period metrics: this period, the previous period of equal length, and the daily series.
 // Provider period metrics are authoritative; the callback withholds missing metrics.
 const safeJson = (name) => { try { const j = $(name).first().json; return j && typeof j === "object" ? j : {}; } catch (e) { return {}; } };
@@ -59,7 +59,8 @@ const metricsFor = (id) => {
   };
 };
 const fromEndpoint = companiesResp.companies || companiesResp.data || companiesResp.items || (Array.isArray(companiesResp) ? companiesResp : []);
-const companies = fromEndpoint.length > 0 ? fromEndpoint : (landscape.companies || []);
+const allowedIds = landscape.selected_company_ids ? new Set([landscape.client_company_id, ...landscape.selected_company_ids].map(String)) : null;
+const companies = (fromEndpoint.length > 0 ? fromEndpoint : (landscape.companies || [])).filter(c => !allowedIds || allowedIds.has(String(c.id)));
 const rawPosts = postsResp.socialPosts || postsResp.posts || postsResp.data || postsResp.items || (Array.isArray(postsResp) ? postsResp : []);
 if (Number(postsResp.failed_windows) > 0 || Number(postsResp.truncated_pages) > 0) throw new Error('RivalIQ post coverage is incomplete. The report cannot be presented as a complete period.');
 const seenPosts = new Set();
@@ -79,6 +80,7 @@ const datedPost = post => {
   return { ...post, publishedAt: new Date(timestamp).toISOString(), publication_date_source: 'x_native_post_id' };
 };
 const posts = rawPosts.map(datedPost).filter(post => {
+  if (allowedIds && !allowedIds.has(String(post.companyId))) return false;
   const date = day(post.publishedAt || post.published_at || post.created || post.created_at || post.date);
   if (!date || date < cfg.range_start || date > cfg.range_end) return false;
   const key = String(post.postId || post.postLink || JSON.stringify([post.companyId, date, post.message]));
@@ -165,6 +167,7 @@ const companiesOut = Object.values(byCompany).map((c) => {
   c.channel_mix = topN(c.channels, 8); delete c.channels;
   for (const ch of Object.keys(c.by_channel)) finalize(c.by_channel[ch]);
   c.rivaliq_metrics = metricsFor(String(c.company_id));
+  c.linkedin_metrics = postsResp.additional_metrics?.[String(c.company_id)] || null;
   // Use the provider's aggregation, not a differently weighted mean of posts.
   const applyProvider = (b, metrics) => {
     b.observed_post_count = b.post_count;
@@ -190,4 +193,5 @@ const companiesOut = Object.values(byCompany).map((c) => {
 const allTop = companiesOut.flatMap((c) => c.top_posts.map((p) => ({ company: c.name, ...p })));
 const note = posts.length === 0 ? "RivalIQ returned zero posts for this landscape and period." : (truncatedPages > 0 ? (truncatedPages + " weekly window" + (truncatedPages === 1 ? "" : "s") + " hit RivalIQ's 500-post page limit, so some posts in the period may be missing.") : "");
 const metricsAvailable = mRows.length > 0;
-return [{ json: { metric_semantics_version: 3, metric_scope: "rivaliq_period_totals_with_separate_post_sample", client_name: cfg.client_name, landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by }, period: { start: cfg.range_start, end: cfg.range_end, days }, total_posts_analyzed: posts.length, metrics_available: metricsAvailable, metrics_note: metricsAvailable ? "" : "RivalIQ period metrics (followers, engagement, impressions) were not returned for this run.", companies: companiesOut, example_post_pool: allTop.map((p) => ({ company: p.company, url: p.url, channel: p.channel, engagement: p.engagement })), suppressed_insights: suppressed, schema_note: note } }];
+const result = { metric_semantics_version: 4, metric_scope: "rivaliq_period_totals_with_separate_post_sample", client_name: cfg.client_name, landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by }, period: { start: cfg.range_start, end: cfg.range_end, days }, total_posts_analyzed: posts.length, metrics_available: metricsAvailable, metrics_note: metricsAvailable ? "" : "RivalIQ period metrics (followers, engagement, impressions) were not returned for this run.", companies: companiesOut, example_post_pool: allTop.map((p) => ({ company: p.company, url: p.url, channel: p.channel, engagement: p.engagement })), suppressed_insights: suppressed, schema_note: note };
+return [{json: normalizedCompetitiveMetrics({aggregates:result}).aggregates}];

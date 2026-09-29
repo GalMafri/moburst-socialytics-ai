@@ -56,4 +56,4 @@ const companies = (match.companies || []).map((c) => ({
     linkedin: c.linkedin ? c.linkedin.handle : null
   }
 }));
-return [{ json: { landscape_id: match.id, landscape_name: match.name, matched_by: matchedBy, focus_company_id: match.focusCompanyId, client_company_id: clientMatches[0].id, companies } }];
+return [{ json: { landscape_id: match.id, landscape_name: match.name, matched_by: matchedBy, focus_company_id: match.focusCompanyId, client_company_id: clientMatches[0].id, selected_company_ids: selectedMatchesIn(match).flat().map(c => c.id), companies } }];
