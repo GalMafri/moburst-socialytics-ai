@@ -35,7 +35,8 @@ describe('reference review protocol',()=>{
   it('accepts a complete structured verdict and exposes provider failures without passing them',async()=>{
     const {validateDesignImage}=await import('../../../supabase/functions/_shared/design-prompts/validateImage');
     const verdict={has_hex_codes:false,has_logo:false,has_garbled_text:false,has_text:true,off_brand:false,has_unapproved_text:false,reason:''};
-    const original=globalThis.fetch;
+    const original=globalThis.fetch,originalTimeout=AbortSignal.timeout;
+    AbortSignal.timeout=()=>new AbortController().signal;
     try {
       globalThis.fetch=async(_url,init)=>{
         const body=JSON.parse(String(init?.body));
@@ -46,6 +47,6 @@ describe('reference review protocol',()=>{
       globalThis.fetch=async()=>new Response(JSON.stringify({error:{message:'Image exceeds size limit'}}),{status:400});
       const failed=await validateDesignImage('data:image/jpeg;base64,ZmFrZQ==',{apiKey:'fixture',creative:true});
       expect(failed.skipped).toBe(true);expect(failed.reason).toContain('size limit');
-    } finally {globalThis.fetch=original;}
+    } finally {globalThis.fetch=original;AbortSignal.timeout=originalTimeout;}
   });
 });
