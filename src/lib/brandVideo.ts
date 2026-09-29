@@ -43,9 +43,12 @@ export async function finishBrandVideo(url:string,plan:ProductionPlan,onProgress
       ctx.drawImage(video,0,0,width,height);
       const at=captionAt(time,seconds,plan.frames.length);
       const style=plan.caption_style;
-      // An opaque identity band prevents model-drawn reference logos from
-      // appearing beside the authentic source logo placed below.
-      ctx.fillStyle=style.surface;ctx.fillRect(0,0,width,height*0.19);
+      // Keep the identity area part of the moving scene, without a hard band.
+      ctx.save();ctx.beginPath();ctx.rect(0,0,width,height*0.22);ctx.clip();
+      ctx.filter=`blur(${Math.round(Math.min(width,height)*0.04)}px)`;ctx.drawImage(video,0,0,width,height);ctx.filter='none';
+      const shade=ctx.createLinearGradient(0,0,0,height*0.22);
+      shade.addColorStop(0,`${style.surface}fa`);shade.addColorStop(0.55,`${style.surface}f0`);shade.addColorStop(1,`${style.surface}00`);
+      ctx.fillStyle=shade;ctx.fillRect(0,0,width,height*0.22);ctx.restore();
       const size=Math.round(Math.min(width*0.053,height*0.063));
       ctx.font=`${style.font_weight} ${size}px ${font}`;
       const lines=linesFor(ctx,plan.frames[at].headline,width*0.8);
@@ -53,8 +56,11 @@ export async function finishBrandVideo(url:string,plan:ProductionPlan,onProgress
       const lineHeight=size*1.23,padding=size*0.65;
       const boxHeight=lines.length*lineHeight+padding*2;
       const top=height*0.84-boxHeight;
-      ctx.save();ctx.globalAlpha=0.87;ctx.fillStyle=style.surface;
-      ctx.beginPath();ctx.roundRect(width*0.07,top,width*0.86,boxHeight,size*0.3);ctx.fill();ctx.restore();
+      ctx.save();ctx.beginPath();ctx.roundRect(width*0.07,top,width*0.86,boxHeight,size*0.3);ctx.clip();
+      ctx.filter='blur(10px)';ctx.drawImage(video,0,0,width,height);ctx.filter='none';
+      ctx.globalAlpha=0.7;ctx.fillStyle=style.surface;ctx.fillRect(width*0.07,top,width*0.86,boxHeight);ctx.restore();
+      ctx.strokeStyle='rgba(255,255,255,0.16)';ctx.lineWidth=Math.max(1,width/1000);
+      ctx.beginPath();ctx.roundRect(width*0.07,top,width*0.86,boxHeight,size*0.3);ctx.stroke();
       ctx.fillStyle=style.color;ctx.textAlign='center';ctx.textBaseline='middle';
       lines.forEach((line,i)=>ctx.fillText(line,width/2,top+padding+(i+0.5)*lineHeight));
       const lw=Math.min(width*0.2,height*0.29),lh=lw*logo.height/logo.width;
