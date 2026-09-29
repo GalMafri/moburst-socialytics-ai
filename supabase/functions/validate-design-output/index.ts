@@ -1,3 +1,6 @@
+import { sourceImage } from "../_shared/design-prompts/referenceDirection.ts";
+import { referencesFor } from "../_shared/design-prompts/designRefs.ts";
+import { requireStaff } from "../_shared/auth/requireStaff.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { CLEAN_VERDICT, validateDesignImage, verdictIsDirty } from "../_shared/design-prompts/validateImage.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
@@ -46,14 +49,23 @@ Deno.serve(async (req) => {
   if (denied) return denied;
 
   try {
-    const { image_data, media_type, expect_no_text, client_id, expected_text } = await req.json();
+    const { image_data, media_type, expect_no_text, client_id, expected_text, reference_path } = await req.json();
 
     if (!image_data) {
       return jsonResp({ error: "image_data is required" }, 400);
     }
 
-    const avoid = await antiPatternsFor(client_id);
-    const verdict = await validateDesignImage(image_data, { mediaType: media_type, avoid, expectedText: typeof expected_text === "string" ? expected_text.slice(0, 500) : null });
+    let referenceImage: any = null;
+    if (reference_path) {
+      if (!client_id || typeof reference_path !== "string") return jsonResp({error:"A client and valid brand reference are required."},400);
+      await requireStaff(req, {writeClientId: client_id});
+      const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const {data} = await db.from("clients").select("design_references,harvested_design_references").eq("id",client_id).maybeSingle();
+      if (!referencesFor(data?.design_references,data?.harvested_design_references,8).includes(reference_path)) return jsonResp({error:"Reference does not belong to this client."},403);
+      referenceImage = await sourceImage(db, reference_path);
+    }
+    const avoid = referenceImage ? null : await antiPatternsFor(client_id);
+    const verdict = await validateDesignImage(image_data, { mediaType: media_type, avoid, referenceImage, expectedText: typeof expected_text === "string" ? expected_text.slice(0, 500) : null });
     // The client decides what counts; it gets the raw answers plus the two views of them.
     const dirty = verdictIsDirty(verdict, { expectNoText: expect_no_text === true });
     return jsonResp({ ...verdict, dirty, avoid: avoid || undefined });

@@ -139,6 +139,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const [variantUrls, setVariantUrls] = useState<VariantSlot[]>([]);
   // What the brand review still objected to on a variant that shipped anyway.
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [referencePreviews, setReferencePreviews] = useState<Record<number, string>>({});
   const [failedPreviews, setFailedPreviews] = useState<Record<number, string>>({});
   const [reviewFlags, setReviewFlags] = useState<Record<number, string>>({});
   const [revisedPrompt, setRevisedPrompt] = useState<string | null>(null);
@@ -351,6 +352,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     setLoading(true);
     setReviewFlags({});
     setFailedPreviews({});
+    setReferencePreviews({});
     setGenerationError(null);
     if (!startedAt || !loading) setStartedAt(Date.now());
     setStage(1);
@@ -443,6 +445,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       }
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.image_url) {
         let dataUrl = r.value.data.image_url;
+        let referencePath = r.value.data.reference_path;
+        if (r.value.data.reference_preview_url) setReferencePreviews(prev => ({...prev, [i]: r.value.data.reference_preview_url}));
         // Single designs get the same review the carousel slides get: an
         // invented wordmark or broken lettering on a client's post is worse
         // than a plain one, and it is cheap to catch and regenerate once.
@@ -452,12 +456,12 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           // Up to two regenerations: a smeared word or a stray letterform
           // sometimes survives the first correction, and a third image is
           // cheaper than a client seeing either.
-          let verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expected_text: modelDrawsText ? headlineFrom(post.copy) : undefined, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
+          let verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, reference_path: referencePath, expected_text: modelDrawsText ? headlineFrom(post.copy) : undefined, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           for (let pass = 0; pass < 2 && verdictIsDirty(verdict, { expectNoText: !modelDrawsText }); pass++) {
             toast({ title: pass === 0 ? "Refining design" : "Refining design again", description: `Caught ${verdictSummary(verdict)}, regenerating.` });
             const { data: retry } = await supabase.functions.invoke("generate-post-image", {
               body: {
-                prompt: (editablePrompt || defaultPrompt) + correctionFor(verdict, { expectNoText: !modelDrawsText }),
+                prompt: (editablePrompt || defaultPrompt) + (referencePath ? `\n\nCRITICAL CORRECTIONS, the previous attempt failed source comparison:\n${verdict.reason || "Faithfully preserve the source design and authentic branding with only the approved headline."}` : correctionFor(verdict, { expectNoText: !modelDrawsText })),
                 platform: post.platform,
                 format: post.format,
                 brand_context: effectiveBrandIdentity || undefined,
@@ -467,13 +471,15 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 client_id: clientId || clientContext?.client_id || undefined,
                 client_name: clientContext?.client_name || undefined,
           render_text: modelDrawsText,
+                reference_path: referencePath,
                 post: { pillar: post.pillar, language: post.language, visual_direction: post.visual_direction, copy: post.copy },
                 variant_angle: angleInstructions[i].instruction || undefined,
               },
             });
             if (!retry?.image_url) break;
             dataUrl = retry.image_url;
-            verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, expected_text: modelDrawsText ? headlineFrom(post.copy) : undefined, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
+            referencePath = retry.reference_path || referencePath;
+            verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, reference_path: referencePath, expected_text: modelDrawsText ? headlineFrom(post.copy) : undefined, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           }
           if (!verdict || verdict.skipped || verdict.error || verdictIsDirty(verdict, { expectNoText: !modelDrawsText })) {
             flag = !verdict || verdict.skipped || verdict.error ? "Quality review unavailable" : verdictSummary(verdict);
@@ -1017,6 +1023,20 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                     </button>
                   ))}
                 </div>
+
+                {Object.keys(referencePreviews).length > 0 && (
+                  <div className="space-y-2">
+                    <p className="t-secondary">Source designs from this client’s social posts</p>
+                    <div className="flex gap-3">
+                      {Object.entries(referencePreviews).map(([index, url]) => (
+                        <figure key={index} className="w-40">
+                          <img src={url} alt={`Brand source for variant ${Number(index) + 1}`} className="w-full rounded object-contain" />
+                          <figcaption className="t-label">Source for variant {Number(index) + 1}</figcaption>
+                        </figure>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {revisedPrompt && (
                   <p className="t-secondary italic">Refined prompt: {revisedPrompt}</p>

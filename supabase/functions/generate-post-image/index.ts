@@ -1,3 +1,4 @@
+import { directFromReference, referenceRenderPrompt } from "../_shared/design-prompts/referenceDirection.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
@@ -132,6 +133,7 @@ function buildStrippedRetryPrompt(args: {
 }
 
 Deno.serve(async (req) => {
+  const requestStartedAt = Date.now();
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -155,6 +157,7 @@ Deno.serve(async (req) => {
       post,                           // new — post-level brief
       slide_context,                  // new — { index, total } for carousels
       variant_angle,                  // new — creative angle override (Phase 6)
+      reference_path,
       render_text,                    // false → imagery only; the app types the words on top
     } = await req.json();
 
@@ -178,7 +181,7 @@ Deno.serve(async (req) => {
     const brandDb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const brand = await resolveBrandContext({
       supabase: brandDb,
-      clientId: client_id,
+      clientId: resolvedClientId,
       clientContext: client_context,
       legacy: {
         brandIdentity: brand_context,
@@ -189,7 +192,7 @@ Deno.serve(async (req) => {
     const footing = footingOf(brand);
 
     const resolvedBrand = brand.brandIdentity;
-    const resolvedRefs: string[] = brand.designReferences;
+    let resolvedRefs: string[] = brand.designReferences;
     const resolvedBrandBookPath: string | null = brand.brandBookPath;
     const resolvedSynthesis = brand.synthesis;
     const resolvedPillars = brand.pillars;
@@ -249,7 +252,7 @@ Deno.serve(async (req) => {
     const aspectRatio = imageAspectRatio(platform, format);
     // Rules learned from this client's rejected designs, if any.
     const learnings = await loadDesignLearnings(brandDb, client_id || client_context?.client_id);
-    const designPrompt = buildImagePrompt({
+    let designPrompt = buildImagePrompt({
       basePrompt: prompt,
       noText: render_text === false,
       learnings,
@@ -267,6 +270,14 @@ Deno.serve(async (req) => {
       variantAngle: variant_angle || null,
     });
 
+    let referenceDirection: { path: string; brief: string } | null = null;
+    if (resolvedSynthesis?.reference_pipeline_version === 1 && post?.copy && !slide_context && render_text !== false) {
+      const key = Deno.env.get("ANTHROPIC_API_KEY");
+      if (!key || !resolvedRefs.length) throw new Error("Reference art direction is unavailable; no generic design was generated.");
+      referenceDirection = await directFromReference({db: brandDb, paths: resolvedRefs, preferredPath: reference_path, copy: post.copy, aspect: aspectRatio, apiKey: key});
+      resolvedRefs = [referenceDirection.path];
+      designPrompt = referenceRenderPrompt(referenceDirection, post.copy, prompt);
+    }
     console.log("[generate-post-image] prompt (first 2000 chars):", designPrompt.slice(0, 2000));
     console.log("[generate-post-image] prompt total length:", designPrompt.length);
 
@@ -277,7 +288,7 @@ Deno.serve(async (req) => {
       const storageClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
       contentParts.push({
-        text:
+        text: referenceDirection ? "This is the single source design. Follow its specific design system and preserve its authentic branding; replace its old campaign message with the approved headline." :
           "These are the client's own published designs. Match their visual SYSTEM exactly — the same layout zones, " +
           "the same colour fields in the same proportions, the same photographic treatment, the same placement of type — " +
           "so the new image looks like the same designer made it. Do not copy their photographs or their words; " +
@@ -308,7 +319,7 @@ Deno.serve(async (req) => {
     }
 
     // Attach the brand book file as an inline part. Gemini 3.1 supports inline PDF/PNG/JPG.
-    if (resolvedBrandBookPath) {
+    if (resolvedBrandBookPath && !referenceDirection) {
       try {
         const storageClient = createClient(
           Deno.env.get("SUPABASE_URL")!,
@@ -422,7 +433,7 @@ Deno.serve(async (req) => {
       const { referenceUrls, brandGroundingMissing } = await resolveContextImageUrls(
         {
           design_references: resolvedRefs,
-          brand_book_file_path: resolvedBrandBookPath,
+          brand_book_file_path: referenceDirection ? null : resolvedBrandBookPath,
           design_style_synthesis: resolvedSynthesis,
         },
         brandDb,
@@ -438,7 +449,7 @@ Deno.serve(async (req) => {
         // Single images have no in-function retry and can use more of the
         // 150-second request window. Reference imports consume part of this
         // budget; carousel slides still reserve time for their layout retry.
-        budgetMs: slide_context ? 80_000 : 115_000,
+        budgetMs: Math.min(slide_context ? 80_000 : 115_000, Math.max(10_000, 140_000 - (Date.now() - requestStartedAt))),
       });
       imageB64 = rendered.imageB64;
       imageMime = rendered.imageMime;
@@ -529,8 +540,11 @@ Deno.serve(async (req) => {
 
     const imageUrl = `data:${imageMime};base64,${imageB64}`;
 
+    const sourcePreview = referenceDirection ? await brandDb.storage.from("design-references").createSignedUrl(referenceDirection.path, 3600) : null;
     return jsonResp({
       image_url: imageUrl,
+      reference_preview_url: sourcePreview?.data?.signedUrl || null,
+      reference_path: referenceDirection?.path || null,
       revised_prompt: textResponse,
       // Diagnostics so the frontend can show "this slide was auto-fixed" etc.
       was_retried: wasRetried,
