@@ -547,6 +547,7 @@ Deno.serve(async (req) => {
       reference_preview_url: sourcePreview?.data?.signedUrl || null,
       reference_path: referenceDirection?.path || null,
       template_regions: referenceDirection?.regions || null,
+      template_headline: referenceDirection?.headline || null,
       revised_prompt: textResponse,
       // Diagnostics so the frontend can show "this slide was auto-fixed" etc.
       was_retried: wasRetried,

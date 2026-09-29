@@ -452,6 +452,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         let referencePath = r.value.data.reference_path;
         let sourcePreview = r.value.data.reference_preview_url;
         let templateRegions = r.value.data.template_regions;
+        let templateHeadline = r.value.data.template_headline;
         if (r.value.data.reference_preview_url) setReferencePreviews(prev => ({...prev, [i]: r.value.data.reference_preview_url}));
         // Single designs get the same review the carousel slides get: an
         // invented wordmark or broken lettering on a client's post is worse
@@ -460,7 +461,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         let flag = "";
         try {
           if (clientContext?.design_style_synthesis?.reference_pipeline_version === 1 && (!templateRegions?.length || !sourcePreview)) throw new Error("Client template was not supplied; design withheld.");
-          if (templateRegions?.length && sourcePreview) dataUrl = await applyReferenceTemplate(sourcePreview, dataUrl, templateRegions);
+          if (templateRegions?.length && sourcePreview) dataUrl = await applyReferenceTemplate(sourcePreview, dataUrl, templateRegions, templateHeadline, headlineFrom(post.copy));
           // Up to two regenerations: a smeared word or a stray letterform
           // sometimes survives the first correction, and a third image is
           // cheaper than a client seeing either.
@@ -489,7 +490,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             referencePath = retry.reference_path || referencePath;
             sourcePreview = retry.reference_preview_url || sourcePreview;
             templateRegions = retry.template_regions || templateRegions;
-            if (templateRegions?.length && sourcePreview) dataUrl = await applyReferenceTemplate(sourcePreview, dataUrl, templateRegions);
+            templateHeadline = retry.template_headline || templateHeadline;
+            if (templateRegions?.length && sourcePreview) dataUrl = await applyReferenceTemplate(sourcePreview, dataUrl, templateRegions, templateHeadline, headlineFrom(post.copy));
             verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, reference_path: referencePath, expected_text: modelDrawsText ? headlineFrom(post.copy) : undefined, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           }
           if (!verdict || verdict.skipped || verdict.error || verdictIsDirty(verdict, { expectNoText: !modelDrawsText })) {
