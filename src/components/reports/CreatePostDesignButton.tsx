@@ -579,7 +579,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       const brief = {...post, copy: postCopyOf(post)};
       const plan = await planCreative(id, brief, isCarousel ? 'carousel' : 'single', count);
       if (cancelRef.current) return;
-      setReferencePreviews(Object.fromEntries(plan.frames.map((f,i)=>[i,plan.reference_previews[f.reference_indices[0]]])));
+      setReferencePreviews(Object.fromEntries([...new Set(plan.frames.flatMap(f=>f.reference_indices))].map((index,i)=>[i,plan.reference_previews[index]])));
       const images:string[]=[];
       for(let i=0;i<count;i++) {
         if(cancelRef.current) return;
@@ -1088,11 +1088,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                 {Object.keys(referencePreviews).length > 0 && (
                   <div className="space-y-2">
                     <p className="t-secondary">Client social references used for this creative</p>
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap gap-3">
                       {Object.entries(referencePreviews).map(([index, url]) => (
                         <figure key={index} className="w-40">
-                          <img src={url} alt={`Brand source for variant ${Number(index) + 1}`} className="w-full rounded object-contain" />
-                          <figcaption className="t-label">Source for variant {Number(index) + 1}</figcaption>
+                          <img src={url} alt={`Client reference ${Number(index) + 1}`} className="w-full rounded object-contain" />
+                          <figcaption className="t-label">Reference {Number(index) + 1}</figcaption>
                         </figure>
                       ))}
                     </div>

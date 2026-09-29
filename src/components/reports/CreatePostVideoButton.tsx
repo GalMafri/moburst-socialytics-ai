@@ -151,7 +151,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   // Phase 7 — multi-variant state.
   const [variantCount, setVariantCount] = useState(usesSocialTemplate ? 1 : 2);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [sourcePreview, setSourcePreview] = useState<string | null>(null);
+  const [sourcePreviews, setSourcePreviews] = useState<string[]>([]);
   const [sourceClipAspect, setSourceClipAspect] = useState("4 / 5");
   const [angles, setAngles] = useState<Array<{ label: string; instruction: string }>>([]);
   const [selectedAngleIdxs, setSelectedAngleIdxs] = useState<number[]>([]);
@@ -364,7 +364,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       if(!id) throw new Error('Choose a client before creating a video.');
       const plan=await planCreative(id,{...post,copy:postCopyOf(post)},'video',3);
       if(cancelRef.current) return;
-      setSourcePreview(plan.reference_previews[plan.frames[0].reference_indices[0]]);
+      setSourcePreviews([...new Set(plan.frames.flatMap(f=>f.reference_indices))].slice(0,4).map(i=>plan.reference_previews[i]));
       setMotionStage(1);
       const {data,error}=await invokeVideo({client_id:id,creative_plan_id:plan.id,platform:post.platform,format:post.format},()=>cancelRef.current);
       if(cancelRef.current) return;
@@ -909,7 +909,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                     </Button>
                   </div>
                 </details>}
-                {sourcePreview && <div className="space-y-2"><p className="t-secondary">Client social reference</p><img src={sourcePreview} alt="Client social reference" className="max-h-64 object-contain" /></div>}
+                {sourcePreviews.length > 0 && <div className="space-y-2"><p className="t-secondary">Client social references</p><div className="flex flex-wrap gap-2">{sourcePreviews.map((url,i)=><img key={url} src={url} alt={`Client reference ${i+1}`} className="w-32 max-h-40 object-contain" />)}</div></div>}
 
                 {/* Seed images — the brand-aligned anchor frame each video
                     was animated from. Surfacing these lets the user diagnose
