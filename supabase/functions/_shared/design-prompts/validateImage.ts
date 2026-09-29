@@ -109,13 +109,18 @@ export async function validateDesignImage(
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
-        max_tokens: 600,
+        max_tokens: 1000,
+        ...(opts.creative ? {
+          tools:[{name:'record_review',description:'Record the observed creative defects.',input_schema:{type:'object',properties:{has_hex_codes:{type:'boolean'},has_logo:{type:'boolean'},has_garbled_text:{type:'boolean'},has_text:{type:'boolean'},off_brand:{type:'boolean'},has_unapproved_text:{type:'boolean'},reason:{type:'string'}},required:['has_hex_codes','has_logo','has_garbled_text','has_text','off_brand','has_unapproved_text','reason'],additionalProperties:false}}],
+          tool_choice:{type:'tool',name:'record_review'},
+        } : {}),
         messages: [
           {
             role: "user",
             content: [
               ...(opts.referenceImages?.length ? opts.referenceImages.flatMap((im:any,i:number)=>[{type:"text",text:`REAL CLIENT REFERENCE ${i}`},im]) : []),
               ...(opts.referenceImage ? [{type: "text", text: "SOURCE: the client's published brand reference, compare design system only."}, opts.referenceImage, {type:"text",text:"CANDIDATE: the generated design to review."}] : []),
+              {type:"text",text:"CANDIDATE: review this new design."},
               { type: "image", source: { type: "base64", media_type: parts.mimeType, data: parts.base64 } },
               { type: "text", text: opts.creative ? creativeReferenceQuestion(opts.expectedText, opts.video) : opts.referenceImage ? referenceQuestion(opts.expectedText) : questionFor(opts.avoid, opts.expectedText) },
             ],
@@ -125,16 +130,20 @@ export async function validateDesignImage(
     });
 
     if (!response.ok) {
-      console.error("validateDesignImage: Anthropic error", response.status, (await response.text().catch(() => "")).slice(0, 200));
-      return { ...CLEAN_VERDICT, skipped: true };
+      const problem=await response.json().catch(()=>({}));
+      const reason=`Reference review service error ${response.status}: ${String(problem?.error?.message||'Request rejected').slice(0,220)}`;
+      console.error('validateDesignImage:',reason);
+      return { ...CLEAN_VERDICT, skipped: true, reason };
     }
 
     const result = await response.json();
-    return parseDesignVerdict(String(result.content?.[0]?.text || ""));
+    const structured=result.content?.find((c:any)=>c.type==='tool_use'&&c.name==='record_review');
+    const verdict=parseDesignVerdict(structured ? JSON.stringify(structured.input) : String(result.content?.[0]?.text || ''));
+    return verdict.skipped ? {...verdict,reason:`Reference review returned an incomplete verdict (${result.stop_reason || 'unknown'}).`} : verdict;
 
   } catch (err) {
     console.error("validateDesignImage threw:", err);
-    return { ...CLEAN_VERDICT, skipped: true };
+    return { ...CLEAN_VERDICT, skipped: true, reason: err instanceof Error ? err.message : 'Reference review unavailable.' };
   }
 }
 

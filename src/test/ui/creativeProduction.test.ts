@@ -2,9 +2,10 @@ import {describe,it,expect,vi,beforeEach} from 'vitest';
 import {supabase} from '@/integrations/supabase/client';
 import {renderCreative,planCreative,type ProductionPlan} from '@/lib/creativeProduction';
 vi.mock('@/integrations/supabase/client',()=>({supabase:{functions:{invoke:vi.fn()}}}));
+vi.mock('@/lib/composeText',()=>({loadImage:vi.fn(async()=>({naturalWidth:2048,naturalHeight:2048}))}));
 const invoke=vi.mocked(supabase.functions.invoke);
 const plan={id:'plan',frames:[{headline:'New idea',reference_indices:[0,1]}],reference_previews:['r1','r2']} as ProductionPlan;
-beforeEach(()=>vi.clearAllMocks());
+beforeEach(()=>{vi.clearAllMocks();vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue({drawImage:vi.fn()} as never);vi.spyOn(HTMLCanvasElement.prototype,'toDataURL').mockReturnValue('review-jpeg');});
 describe('creative production',()=>{
   it('rejects old source-artwork responses instead of painting the same template',async()=>{
     invoke.mockResolvedValue({data:{rendered_by:'source_artwork',image_url:'old-card'},error:null} as never);
@@ -13,7 +14,7 @@ describe('creative production',()=>{
   it('uses the persisted plan for image generation and reference review',async()=>{
     invoke.mockResolvedValueOnce({data:{rendered_by:'reference_creative',image_url:'new-art'},error:null} as never).mockResolvedValueOnce({data:{off_brand:false},error:null} as never);
     expect(await renderCreative(plan,0,'client',{copy:'new message'})).toBe('new-art');
-    expect(invoke.mock.calls[1][1]?.body).toMatchObject({creative_plan_id:'plan',creative_frame_index:0,client_id:'client',image_data:'new-art'});
+    expect(invoke.mock.calls[1][1]?.body).toMatchObject({creative_plan_id:'plan',creative_frame_index:0,client_id:'client',image_data:'review-jpeg'});
   });
   it('withholds images when visual reference review is unavailable',async()=>{
     invoke.mockResolvedValueOnce({data:{rendered_by:'reference_creative',image_url:'new-art'},error:null} as never).mockResolvedValueOnce({data:{skipped:true},error:null} as never);

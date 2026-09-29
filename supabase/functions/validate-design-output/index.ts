@@ -85,7 +85,7 @@ Deno.serve(async (req) => {
   } catch (err: any) {
     console.error("validate-design-output error:", err.message);
     // Fail open on unexpected errors — never block a good design.
-    return jsonResp({ ...CLEAN_VERDICT, skipped: true });
+    return jsonResp({ ...CLEAN_VERDICT, skipped: true, reason: String(err.message || "Reference review failed.").slice(0,280) });
   }
 });
 

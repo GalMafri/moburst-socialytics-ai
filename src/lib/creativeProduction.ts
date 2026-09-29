@@ -1,4 +1,5 @@
 import {supabase} from '@/integrations/supabase/client';
+import {loadImage} from './composeText';
 import {describeInvokeError} from './invokeError';
 import {verdictIsDirty, verdictSummary} from './designGuard';
 import type {CreativePlan} from '../../supabase/functions/_shared/design-prompts/creativePlan';
@@ -18,8 +19,14 @@ export class CreativeReviewError extends Error {
   constructor(message:string,public readonly preview:string){super(message);}
 }
 export async function reviewCreative(image:string,plan:ProductionPlan,index:number,clientId:string) {
-  const {data,error}=await supabase.functions.invoke('validate-design-output',{body:{image_data:image,creative_plan_id:plan.id,creative_frame_index:index,client_id:clientId}});
-  if(error||!data||data.skipped||data.error) throw new CreativeReviewError('The brand review is unavailable. This design was withheld.',image);
+  const pixels=await loadImage(image);
+  const canvas=document.createElement('canvas');
+  const scale=Math.min(1,1500/Math.max(pixels.naturalWidth,pixels.naturalHeight));
+  canvas.width=Math.round(pixels.naturalWidth*scale);canvas.height=Math.round(pixels.naturalHeight*scale);
+  canvas.getContext('2d')!.drawImage(pixels,0,0,canvas.width,canvas.height);
+  const reviewImage=canvas.toDataURL('image/jpeg',0.9);
+  const {data,error}=await supabase.functions.invoke('validate-design-output',{body:{image_data:reviewImage,creative_plan_id:plan.id,creative_frame_index:index,client_id:clientId}});
+  if(error||!data||data.skipped||data.error) throw new CreativeReviewError(`The brand review is unavailable. ${data?.reason || (error ? await describeInvokeError(error,data) : '')} This design was withheld.`,image);
   return data;
 }
 export async function renderCreative(plan:ProductionPlan,index:number,clientId:string,post:{copy?:string;platform?:string;format?:string}):Promise<string> {
