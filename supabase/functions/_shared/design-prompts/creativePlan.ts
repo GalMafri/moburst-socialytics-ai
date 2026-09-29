@@ -14,13 +14,13 @@ export interface CreativePlan {
   caption_style?: {color:string;surface:string;font_weight:number};
 }
 export function creativePlanSchema(count:number,references:number,video:boolean,previousHeadlinePosition?:string) {
-  const text=(maxLength:number)=>({type:'string',minLength:1,maxLength});
-  const index={type:'integer',minimum:0,maximum:references-1};
-  const fraction={type:'number',minimum:0,maximum:1};
+  const text=(maxLength:number)=>({type:'string',description:`Nonempty; at most ${maxLength} characters.`});
+  const index={type:'integer',enum:Array.from({length:references},(_,i)=>i)};
+  const fraction={type:'number',description:'Fraction between 0 and 1 of the full original image.'};
   const layout={type:'object',additionalProperties:false,properties:{reference_index:index,headline_position:{type:'string',enum:['top','bottom','left','right','center'].filter(p=>p!==previousHeadlinePosition)},subject_position:{type:'string',enum:['top','bottom','left','right','background']},logo_position:{type:'string',enum:['top-left','top-center','top-right']}},required:['reference_index','headline_position','subject_position','logo_position']};
   return {type:'object',additionalProperties:false,properties:{
     brand_system:text(1800),
-    frames:{type:'array',minItems:count,maxItems:count,items:{type:'object',additionalProperties:false,properties:{headline:text(120),subject:text(700),composition:text(900),action:text(700),reference_indices:{type:'array',minItems:2,maxItems:3,items:index},...(!video?{layout}:{})},required:['headline','subject','composition','action','reference_indices',...(!video?['layout']:[])]}},
+    frames:{type:'array',minItems:1,description:`Exactly ${count} frames.`,items:{type:'object',additionalProperties:false,properties:{headline:text(120),subject:text(700),composition:text(900),action:text(700),reference_indices:{type:'array',minItems:1,description:'Exactly two or three distinct owned reference indices.',items:index},...(!video?{layout}:{})},required:['headline','subject','composition','action','reference_indices',...(!video?['layout']:[])]}},
     logo:{type:'object',additionalProperties:false,properties:{reference_index:index,x:fraction,y:fraction,width:fraction,height:fraction},required:['reference_index','x','y','width','height']},
     ...(video?{caption_style:{type:'object',additionalProperties:false,properties:{color:{type:'string',pattern:'^#[0-9a-fA-F]{6}$'},surface:{type:'string',pattern:'^#[0-9a-fA-F]{6}$'},font_weight:{type:'integer',enum:[400,700]}},required:['color','surface','font_weight']}}:{}),
   },required:['brand_system','frames','logo',...(video?['caption_style']:[])]};
