@@ -23,22 +23,10 @@ import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
 import { isVideoFormat } from "@/lib/platform";
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { CalendarPost } from "@/lib/calendarRevision";
 import { tileAspectFor } from "@/lib/tileAspect";
-
-interface Iteration {
-  id?: string;
-  media_urls?: string[] | null;
-  is_selected?: boolean | null;
-  variant_group_id?: string | null;
-  created_at?: string | null;
-}
-
-interface MediaTile {
-  iterationId?: string;
-  url: string;
-  isSelected: boolean;
-}
+import { tilesFromIterations, type Iteration, type MediaTile } from "@/lib/postMediaTiles";
 
 interface Props {
   open: boolean;
@@ -63,59 +51,6 @@ function isVideoUrl(url: string): boolean {
   return /\.(mp4|webm|mov)/i.test(url);
 }
 
-/**
- * Resolve which variant group to display: most recent one with media. Return
- * one tile per (iteration row × url) pair so multi-url rows (carousels) all
- * surface. Falls back gracefully if no group is present.
- */
-function tilesFromIterations(
-  iterations: Iteration[],
-  filter: (url: string) => boolean,
-): MediaTile[] {
-  if (!iterations || iterations.length === 0) return [];
-
-  // Bucket by variant_group_id (or per-row when no group).
-  const byGroup = new Map<string, Iteration[]>();
-  for (const it of iterations) {
-    const key = it.variant_group_id || `solo:${it.id}`;
-    if (!byGroup.has(key)) byGroup.set(key, []);
-    byGroup.get(key)!.push(it);
-  }
-
-  // Find the group whose latest member is the most recent overall.
-  let bestGroup: Iteration[] | null = null;
-  let bestTs = "";
-  for (const group of byGroup.values()) {
-    const ts = group
-      .map((it) => it.created_at || "")
-      .sort()
-      .reverse()[0];
-    if (ts > bestTs) {
-      bestTs = ts;
-      bestGroup = group;
-    }
-  }
-  if (!bestGroup) return [];
-
-  // Stable order: created_at asc so variant #1 lands first, then variant #2, etc.
-  const ordered = [...bestGroup].sort((a, b) =>
-    (a.created_at || "").localeCompare(b.created_at || ""),
-  );
-
-  const tiles: MediaTile[] = [];
-  for (const it of ordered) {
-    for (const url of it.media_urls || []) {
-      if (!filter(url)) continue;
-      tiles.push({
-        iterationId: it.id,
-        url,
-        isSelected: !!it.is_selected,
-      });
-    }
-  }
-  return tiles;
-}
-
 export function PostPanel({
   open,
   onOpenChange,
@@ -130,6 +65,8 @@ export function PostPanel({
   onFeedback,
 }: Props) {
   const { isClient, isMoburstStaff } = useAuth();
+  const queryClient = useQueryClient();
+  const refreshMedia = () => { void queryClient.invalidateQueries({ queryKey: ["post-iterations", clientId] }); };
   const [editedPost, setEditedPost] = useState<CalendarPost | null>(null);
   useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab("copy"); }, [sourcePost?._calendarPostKey, open]);
   const post = editedPost && editedPost._calendarPostKey === sourcePost?._calendarPostKey ? editedPost : sourcePost;
@@ -226,6 +163,7 @@ export function PostPanel({
                   post={post}
                   clientContext={clientContext}
                   clientId={clientId}
+                  onImagesGenerated={refreshMedia}
                 />}
               </div>
 
@@ -233,7 +171,7 @@ export function PostPanel({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {imageTiles.map((tile, i) => (
                     <MediaTileCard
-                      key={tile.iterationId || i}
+                      key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
                       tile={tile}
                       index={i}
                       isVideo={false}
@@ -279,6 +217,7 @@ export function PostPanel({
                   post={post}
                   clientContext={clientContext}
                   clientId={clientId}
+                  onVideoGenerated={refreshMedia}
                 />}
               </div>
 
@@ -286,7 +225,7 @@ export function PostPanel({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {videoTiles.map((tile, i) => (
                     <MediaTileCard
-                      key={tile.iterationId || i}
+                      key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
                       tile={tile}
                       index={i}
                       isVideo={true}

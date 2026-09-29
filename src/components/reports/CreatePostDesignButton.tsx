@@ -335,23 +335,29 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       .map((i) => (typeof variantUrls[i] === "string" ? (variantUrls[i] as string) : null))
       .filter((u): u is string => !!u);
 
-    // Mark all variants in this group as not selected.
-    await supabase
-      .from("post_iterations")
-      .update({ is_selected: false } as any)
-      .eq("variant_group_id", variantGroupId);
-
-    // Then mark favorites as selected.
-    for (const url of favoriteUrls) {
-      await supabase
+    try {
+      // Mark all variants in this group as not selected.
+      const cleared = await supabase
         .from("post_iterations")
-        .update({ is_selected: true } as any)
-        .eq("variant_group_id", variantGroupId)
-        .contains("media_urls", [url]);
-    }
+        .update({ is_selected: false } as any)
+        .eq("variant_group_id", variantGroupId);
+      if (cleared.error) throw cleared.error;
 
-    if (onImagesGenerated) onImagesGenerated(favoriteUrls);
-    sonnerToast.success(`Saved ${favoriteUrls.length} favorite${favoriteUrls.length === 1 ? "" : "s"}`);
+      // Then mark favorites as selected.
+      for (const url of favoriteUrls) {
+        const selected = await supabase
+          .from("post_iterations")
+          .update({ is_selected: true } as any)
+          .eq("variant_group_id", variantGroupId)
+          .contains("media_urls", [url]);
+        if (selected.error) throw selected.error;
+      }
+
+      if (onImagesGenerated) onImagesGenerated(favoriteUrls);
+      sonnerToast.success(`Saved ${favoriteUrls.length} favorite${favoriteUrls.length === 1 ? "" : "s"}`);
+    } catch {
+      sonnerToast.error("Could not save your design selection. Please retry.");
+    }
   };
 
   const generateImages = async (
