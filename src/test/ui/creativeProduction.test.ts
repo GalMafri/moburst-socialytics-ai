@@ -1,7 +1,7 @@
 import {describe,it,expect,vi,beforeEach} from 'vitest';
 import {supabase} from '@/integrations/supabase/client';
 import {renderCreative,planCreative,type ProductionPlan} from '@/lib/creativeProduction';
-vi.mock('@/integrations/supabase/client',()=>({supabase:{functions:{invoke:vi.fn()}}}));
+vi.mock('@/integrations/supabase/client',()=>({supabase:{functions:{invoke:vi.fn()},storage:{from:()=>({getPublicUrl:()=>({data:{publicUrl:'https://storage/'}})})},from:()=>({update:()=>({eq:()=>Promise.resolve({error:null})})})}}));
 vi.mock('@/lib/composeText',()=>({loadImage:vi.fn(async()=>({naturalWidth:2048,naturalHeight:2048}))}));
 const invoke=vi.mocked(supabase.functions.invoke);
 const plan={id:'plan',frames:[{headline:'New idea',reference_indices:[0,1]}],reference_previews:['r1','r2']} as ProductionPlan;
