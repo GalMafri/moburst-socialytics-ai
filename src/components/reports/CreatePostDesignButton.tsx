@@ -172,7 +172,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // Phase 6 — multi-variant state. For carousels, each variant is a whole
   // N-slide deck (so 2 variants × 5 slides = 10 images total). Capped at 3
   // for carousels to keep total generation time sane (5×3=15 sequential calls).
-  const [variantCount, setVariantCount] = useState(2);
+  const [variantCount, setVariantCount] = useState(usesSocialTemplate ? 1 : 2);
   const [angles, setAngles] = useState<Array<{ label: string; instruction: string }>>([]);
   const [selectedAngleIdxs, setSelectedAngleIdxs] = useState<number[]>([]);
   const [fetchingAngles, setFetchingAngles] = useState(false);
@@ -865,7 +865,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     setShowEditor(false);
     setVariantGroupId(null);
     setFavoriteIdxs(new Set());
-    setVariantCount(2);
+    setVariantCount(usesSocialTemplate ? 1 : 2);
     void startRun();
   };
 

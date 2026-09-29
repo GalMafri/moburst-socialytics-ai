@@ -252,7 +252,7 @@ export function PostPanel({
                     No designs generated for this post yet.
                   </p>
                   <p className="t-secondary/70">
-                    Click "Design" above to generate 2–6 brand-aligned variants.
+                    Click "Design" above to create artwork for this post.
                   </p>
                 </div>
               )}
