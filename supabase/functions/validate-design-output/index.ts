@@ -1,3 +1,4 @@
+import {loadCreativePlan} from "../_shared/design-prompts/loadCreativePlan.ts";
 import { sourceImage } from "../_shared/design-prompts/sourceImage.ts";
 import { referencesFor } from "../_shared/design-prompts/designRefs.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
@@ -49,12 +50,24 @@ Deno.serve(async (req) => {
   if (denied) return denied;
 
   try {
-    const { image_data, media_type, expect_no_text, client_id, expected_text, reference_path } = await req.json();
+    const { image_data, media_type, expect_no_text, client_id, expected_text, reference_path, creative_plan_id, creative_frame_index = 0 } = await req.json();
 
     if (!image_data) {
       return jsonResp({ error: "image_data is required" }, 400);
     }
 
+    let referenceImages:any[] = [], creativeText:string|undefined;
+    let video = false;
+    if (creative_plan_id) {
+      if (!client_id) throw new Error('Client required.');
+      await requireStaff(req,{writeClientId:client_id});
+      const db=createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+      const creative=await loadCreativePlan(db,creative_plan_id,client_id);
+      const frame=creative.plan.frames[creative_frame_index];
+      if(!Number.isInteger(creative_frame_index)||!frame) throw new Error('Unknown creative scene.');
+      referenceImages=await Promise.all(frame.reference_indices.map((i:number)=>sourceImage(db,creative.reference_paths[i])));
+      creativeText=frame.headline; video=creative.mode==='video';
+    }
     let referenceImage: any = null;
     if (reference_path) {
       if (!client_id || typeof reference_path !== "string") return jsonResp({error:"A client and valid brand reference are required."},400);
@@ -65,7 +78,7 @@ Deno.serve(async (req) => {
       referenceImage = await sourceImage(db, reference_path);
     }
     const avoid = referenceImage ? null : await antiPatternsFor(client_id);
-    const verdict = await validateDesignImage(image_data, { mediaType: media_type, avoid, referenceImage, expectedText: typeof expected_text === "string" ? expected_text.slice(0, 500) : null });
+    const verdict = await validateDesignImage(image_data, { mediaType: media_type, avoid, referenceImage, referenceImages, creative: !!creative_plan_id, video, expectedText: creativeText || (typeof expected_text === "string" ? expected_text.slice(0, 500) : null) });
     // The client decides what counts; it gets the raw answers plus the two views of them.
     const dirty = verdictIsDirty(verdict, { expectNoText: expect_no_text === true });
     return jsonResp({ ...verdict, dirty, avoid: avoid || undefined });

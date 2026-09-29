@@ -1,5 +1,5 @@
+import {planCreative, renderCreative, CreativeReviewError} from "@/lib/creativeProduction";
 import { applyReferenceTemplate } from "@/lib/referenceTemplate";
-import { planSocialSequence, prepareSocialTemplate, renderReviewedSocialFrame, SourceFrameReviewError } from "@/lib/socialSequence";
 import { describeInvokeError } from "@/lib/invokeError";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -266,7 +266,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   };
 
   // Upload a base64 image URL to Supabase storage, return a public URL.
-  const uploadVariantToStorage = async (dataUrl: string, idx: number): Promise<string> => {
+  const uploadVariantToStorage = async (dataUrl: string, idx: number, strict = false): Promise<string> => {
     try {
       const res = await fetch(dataUrl);
       const blob = await res.blob();
@@ -279,6 +279,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       return data.publicUrl;
     } catch (e) {
       console.error("Upload failed:", e);
+      if (strict) throw e;
       return dataUrl;
     }
   };
@@ -311,6 +312,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     if (error) {
       console.error("[CreatePostDesignButton] persistVariantRow failed:", error);
       sonnerToast.error(`Failed to save variant: ${error.message}`);
+      throw error;
     }
   };
 
@@ -369,8 +371,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     cancelRef.current = false;
     const chosen = overrideIdxs ?? (selectedAngleIdxs.length > 0 ? selectedAngleIdxs : anglesList.map((_, i) => i).slice(0, variantCount));
 
+    if (usesSocialTemplate) return runReferenceCreativeGeneration(groupId);
     if (isCarousel) {
-      if (usesSocialTemplate) return runSocialCarouselGeneration(groupId);
       // Carousel path: sequential slide-by-slide generation, single variant set.
       return runCarouselGeneration(groupId);
     }
@@ -566,44 +568,45 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // pass the same multi-slide brief to N calls, Gemini happily returns a
   // contact sheet of all N slides for each call. So we first ask Claude to
   // decompose the brief into N focused per-slide briefs, then generate.
-  const runSocialCarouselGeneration = async (groupId: string) => {
+  const runReferenceCreativeGeneration = async (groupId: string) => {
     const id = clientId || clientContext?.client_id;
-    const slides = Math.min(Math.max(slideCount, 2), 10);
-    setVariantUrls(new Array(slides).fill(null));
+    const count = isCarousel ? Math.min(Math.max(slideCount, 2), 10) : Math.min(Math.max(variantCount, 1), 6);
+    setVariantUrls(new Array(count).fill(null));
     setStage(0);
-    const postKey = generation.startGeneration({post, type: "design", total: slides, variantGroupId: groupId, onCancel: () => { cancelRef.current = true; }});
+    const postKey = generation.startGeneration({post, type: "design", total: count, variantGroupId: groupId, onCancel: () => { cancelRef.current = true; }});
     try {
-      if (!id) throw new Error("Choose a client before creating a carousel.");
-      const copy = await planSocialSequence(postCopyOf(post), slides, id, post.platform);
+      if (!id) throw new Error("Choose a client before creating a design.");
+      const brief = {...post, copy: postCopyOf(post)};
+      const plan = await planCreative(id, brief, isCarousel ? 'carousel' : 'single', count);
       if (cancelRef.current) return;
-      setStage(1);
-      const template = await prepareSocialTemplate(copy[0], id);
-      setReferencePreviews({0: template.reference_preview_url});
-      const images: string[] = [];
-      for (let i = 0; i < slides; i++) {
-        if (cancelRef.current) return;
-        setCurrentSlide(i + 1);
+      setReferencePreviews(Object.fromEntries(plan.frames.map((f,i)=>[i,plan.reference_previews[f.reference_indices[0]]])));
+      const images:string[]=[];
+      for(let i=0;i<count;i++) {
+        if(cancelRef.current) return;
+        setCurrentSlide(i+1); setStage(1);
+        const image=await renderCreative(plan,i,id,brief);
+        if(cancelRef.current) return;
         setStage(2);
-        const image = await renderReviewedSocialFrame(template, copy[i], id);
-        if (cancelRef.current) return;
-        images.push(await uploadVariantToStorage(image, i));
+        images.push(await uploadVariantToStorage(image,i,true));
         generation.progressGeneration(postKey);
       }
-      if (cancelRef.current) return;
+      if(cancelRef.current) return;
       setStage(3);
-      const {error} = await supabase.from("post_iterations").insert({client_id: id, platform: post.platform || null, post_copy: postCopyOf(post), visual_direction: post.visual_direction || null, format: post.format || null, source: "calendar", media_urls: images, variant_group_id: groupId, variant_angle: "Actual social artwork", is_selected: true});
-      if (error) throw error;
+      if(isCarousel) {
+        const {error}=await supabase.from('post_iterations').insert({client_id:id,platform:post.platform||null,post_copy:postCopyOf(post),visual_direction:post.visual_direction||null,format:post.format||null,source:'calendar',media_urls:images,variant_group_id:groupId,variant_angle:`Reference creative ${plan.id}`,is_selected:true});
+        if(error) throw error;
+        onImagesGenerated?.(images);
+      } else {
+        for(let i=0;i<images.length;i++) await persistVariantRow(images[i],`Reference creative ${plan.id}: ${plan.frames[i].subject}`,groupId,false);
+      }
       setVariantUrls(images);
-      onImagesGenerated?.(images);
-    } catch (error) {
-      if (error instanceof SourceFrameReviewError) setFailedPreviews({0: error.preview});
-      setGenerationError(error instanceof Error ? error.message : "The carousel could not be completed. No partial draft was saved.");
-      setVariantUrls(new Array(slides).fill("FAILED"));
-      generation.progressGeneration(postKey, {failed: true});
+    } catch(error) {
+      if(error instanceof CreativeReviewError) setFailedPreviews({0:error.preview});
+      setGenerationError(error instanceof Error?error.message:'The creative could not be completed.');
+      setVariantUrls(new Array(count).fill('FAILED'));
+      generation.progressGeneration(postKey,{failed:true});
     } finally {
-      generation.completeGeneration(postKey);
-      setLoading(false);
-      setCurrentSlide(0);
+      generation.completeGeneration(postKey); setLoading(false); setCurrentSlide(0);
     }
   };
 

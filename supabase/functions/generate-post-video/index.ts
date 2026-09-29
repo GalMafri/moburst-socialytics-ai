@@ -1,3 +1,5 @@
+import {loadCreativePlan} from "../_shared/design-prompts/loadCreativePlan.ts";
+import {creativeVideoPrompt} from "../_shared/design-prompts/creativePlan.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -252,9 +254,10 @@ serve(async (req) => {
       client_name,
       post,
       variant_angle,
+      creative_plan_id,
     } = await req.json();
 
-    if (!prompt) {
+    if (!prompt && !creative_plan_id) {
       return new Response(JSON.stringify({ error: "prompt is required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -320,6 +323,34 @@ serve(async (req) => {
     }
 
     const aspectRatio = videoAspectRatio(platform, format);
+    if (creative_plan_id) {
+      const creative=await loadCreativePlan(supabase,creative_plan_id,resolvedClientId,'video');
+      const scenePrompt=creativeVideoPrompt(creative.plan);
+      const indices=[...new Set(creative.plan.frames.flatMap(f=>f.reference_indices))].slice(0,4);
+      const refs=indices.map(i=>creative.reference_paths[i]);
+      const {referenceUrls}=await resolveContextImageUrls({design_references:refs},supabase);
+      if(referenceUrls.length!==refs.length) throw new Error('The client social references could not be opened.');
+      if(backend!=='higgsfield') throw new Error('Reference-directed multi-scene video requires the connected Higgsfield renderer. Select it under Client Setup → Image & video generation.');
+      // References are style inputs, never a frozen opening card. Preserve the
+      // job before submission, and recover an existing submission on retry.
+      const {data:existing}=await supabase.from('media_jobs').select('id,request_id,status').eq('client_id',resolvedClientId).contains('input',{creative_plan_id}).order('created_at',{ascending:false}).limit(1).maybeSingle();
+      if(existing) return new Response(JSON.stringify({job_id:existing.id,status:existing.status,creative_plan_id}),{status:202,headers:{...corsHeaders,'Content-Type':'application/json'}});
+      const {data:job,error:jobError}=await supabase.from('media_jobs').insert({client_id:resolvedClientId,kind:'video',provider:'higgsfield',status:'pending',created_by:caller.userId,input:{creative_plan_id,prompt:scenePrompt,seconds:12,aspect:aspectRatio}}).select('id').single();
+      if(jobError) throw new Error('The video job could not be recorded.');
+      try {
+        const started=await startVideoWithHiggsfield({supabase,prompt:scenePrompt,aspectRatio,referenceUrls,independentScenes:true,seconds:12});
+        const {error:recordError}=await supabase.from('media_jobs').update({request_id:started.jobId,model_path:started.model,status:'submitted'}).eq('id',job.id);
+        if(recordError) throw new Error(`Video submitted as ${started.jobId} but recording failed. Do not resubmit.`);
+      } catch(error) {
+        // A timeout may have submitted a paid job. Keep it identifiable and
+        // require reconciliation rather than blindly issuing another request.
+        await supabase.from('media_jobs').update({status:'failed',error:error instanceof Error?error.message:'Submission unavailable'}).eq('id',job.id);
+        throw error;
+      }
+      return new Response(JSON.stringify({job_id:job.id,status:'running',creative_plan_id,rendered_by:'reference_video'}),{status:202,headers:{...corsHeaders,'Content-Type':'application/json'}});
+    }
+    if(resolvedSynthesis?.reference_pipeline_version===1) throw new Error('Prepare a video storyboard from the client’s social references before rendering.');
+
 
     // ── Step 1: Generate a brand-aligned anchor still via Gemini 3.1 Flash Image.
     // This still becomes Veo's `image` seed — without it, Veo only has the text

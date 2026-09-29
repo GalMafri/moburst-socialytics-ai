@@ -150,3 +150,6 @@ verify_jwt = false
 
 [functions.setup-rivaliq-landscape]
 verify_jwt = false
+
+[functions.plan-social-creative]
+verify_jwt = false

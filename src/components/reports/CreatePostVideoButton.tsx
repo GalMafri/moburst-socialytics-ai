@@ -1,3 +1,6 @@
+import {describeInvokeError} from "@/lib/invokeError";
+import {planCreative, reviewCreative} from "@/lib/creativeProduction";
+import {finishBrandVideo} from "@/lib/brandVideo";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,7 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { ClientContext } from "@/lib/clientContext";
 import { GenerationStages } from "@/components/reports/GenerationStages";
-import { clipSize, renderMotionClip, sourceClipSize } from "@/lib/motion";
+import { clipSize, renderMotionClip } from "@/lib/motion";
 import { verdictIsDirty, correctionFor, verdictSummary } from "@/lib/designGuard";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 import { brandAdviceFrom, brandWarning } from "@/lib/designGuard";
@@ -18,7 +21,6 @@ import { useMediaBackend } from "@/hooks/useMediaBackend";
 import { tileAspectFor } from "@/lib/tileAspect";
 import { postCopyOf } from "@/lib/postCopy";
 import { loadImage } from "@/lib/composeText";
-import { planSocialSequence, prepareSocialTemplate, renderReviewedSocialFrame } from "@/lib/socialSequence";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -294,7 +296,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       );
       return;
     }
-    const { error } = await supabase.from("post_iterations").insert({
+    const { data: savedIteration, error } = await supabase.from("post_iterations").insert({
       client_id: clientId,
       platform: post.platform || null,
       post_copy: postCopyOf(post) || null,
@@ -305,11 +307,12 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       variant_group_id: groupId,
       variant_angle: angle || null,
       is_selected: isSelected,
-    } as any);
+    } as any).select("id").single();
     if (error) {
       console.error("[CreatePostVideoButton] persistVariantRow failed:", error);
       throw new Error(`Failed to save video variant: ${error.message}`);
     }
+    return savedIteration?.id;
   };
 
   // "Use favorites" button: update is_selected on rows in the current variant group.
@@ -335,7 +338,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   const handleOpen = async () => {
     setOpen(true);
     if (variantUrls.length > 0 || loading || briefing) return;
-    if (usesSocialTemplate) return generateSourceMotion();
+    if (usesSocialTemplate) return generateReferenceVideo();
     // Opening is the decision: brief, angles and the videos follow without
     // another click. Everything adjustable waits behind the first result.
     setBriefing(true);
@@ -351,70 +354,49 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     else await generateVideo(brief, picked);
   };
 
-  /**
-   * A clip cut from the brand's own designs.
-   *
-   * Each clip is two designed frames of the same message, generated through
-   * the same pipeline as a static post — so the layout, palette and type are
-   * the brand's, and the words are spelled right — held with a slow move and
-   * dissolved into each other. It takes about a minute instead of five, and
-   * it cannot drift off-brand, because nothing invents motion content: the
-   * frames ARE the design.
-   */
-  const generateSourceMotion = async () => {
-    const id = clientId || clientContext?.client_id;
-    const groupId = crypto.randomUUID();
-    setVariantGroupId(groupId);
-    setLoading(true);
-    setStartedAt(Date.now());
-    setMotionStage(0);
-    setGenerationError(null);
-    setVariantUrls([null]);
-    setVariantSeeds([]);
-    setFavoriteIdxs(new Set());
-    cancelRef.current = false;
-    const postKey = generation.startGeneration({post, type: "video", total: 1, variantGroupId: groupId, onCancel: () => { cancelRef.current = true; }});
+  /** Real moving scenes, followed by exact timed typography and source-logo compositing. */
+  const generateReferenceVideo = async () => {
+    const id=clientId||clientContext?.client_id,groupId=crypto.randomUUID();
+    setVariantGroupId(groupId);setLoading(true);setStartedAt(Date.now());setMotionStage(0);
+    setGenerationError(null);setVariantUrls([null]);setVariantSeeds([]);setFavoriteIdxs(new Set());cancelRef.current=false;
+    const postKey=generation.startGeneration({post,type:'video',total:1,variantGroupId:groupId,onCancel:()=>{cancelRef.current=true;}});
     try {
-      if (!id) throw new Error("Choose a client before creating a clip.");
-      const copy = await planSocialSequence(postCopyOf(post), 3, id, post.platform);
-      if (cancelRef.current) return;
-      const template = await prepareSocialTemplate(copy[0], id);
-      setSourcePreview(template.reference_preview_url);
+      if(!id) throw new Error('Choose a client before creating a video.');
+      const plan=await planCreative(id,{...post,copy:postCopyOf(post)},'video',3);
+      if(cancelRef.current) return;
+      setSourcePreview(plan.reference_previews[plan.frames[0].reference_indices[0]]);
       setMotionStage(1);
-      const frames: string[] = [];
-      for (const words of copy) {
-        if (cancelRef.current) return;
-        frames.push(await renderReviewedSocialFrame(template, words, id));
-      }
-      if (cancelRef.current) return;
+      const {data,error}=await invokeVideo({client_id:id,creative_plan_id:plan.id,platform:post.platform,format:post.format},()=>cancelRef.current);
+      if(cancelRef.current) return;
+      if(error||data?.error||!data?.video_url) throw new Error(await describeInvokeError(error,data));
+      // Persist the rendered film before local finishing; the source remains
+      // recoverable if the browser closes while typing captions onto it.
+      const {data:saved,error:saveError}=await supabase.functions.invoke('upload-generated-media',{body:{client_id:id,media_data:data.video_url,media_type:'video',file_name:`scene-film-${plan.id}`}});
+      if(saveError||!saved?.url) throw new Error('The rendered film could not be stored.');
       setMotionStage(2);
-      const images = await Promise.all(frames.map(loadImage));
-      const size = sourceClipSize(images[0].naturalWidth, images[0].naturalHeight, spec.aspect.startsWith("9:16"));
-      setSourceClipAspect(`${size.width} / ${size.height}`);
-      const result = await renderMotionClip({...size, images, seconds: 12, preserveArtwork: true});
-      if (cancelRef.current) return;
-      if (result.mimeType !== "video/mp4") throw new Error("This browser could not encode a publishable MP4. Open the post in current Chrome and retry.");
+      const result=await finishBrandVideo(saved.url,plan,undefined,()=>cancelRef.current);
+      setSourceClipAspect(result.aspect);setVariantSeeds(result.previews);
+      for(let i=0;i<result.previews.length;i++) {
+        const verdict=await reviewCreative(result.previews[i],plan,i,id);
+        if(verdictIsDirty(verdict)) throw new Error(`Scene ${i+1} failed brand review: ${verdictSummary(verdict)}`);
+      }
+      if(cancelRef.current) return;
       setMotionStage(3);
-      const path = `${id}/${Date.now()}-social-motion.mp4`;
-      const {error} = await supabase.storage.from("generated-media").upload(path, result.blob, {contentType: result.mimeType});
-      if (error) throw error;
-      const {data} = supabase.storage.from("generated-media").getPublicUrl(path);
-      await persistVariantRow(data.publicUrl, "Actual social artwork", groupId, false);
-      setVariantUrls([data.publicUrl]);
-      setVariantSeeds(frames);
-      generation.progressGeneration(postKey);
-    } catch (error) {
-      setGenerationError(error instanceof Error ? error.message : "The source-based clip could not be completed.");
-      setVariantUrls(["FAILED"]);
-      generation.progressGeneration(postKey, {failed: true});
-    } finally {
-      generation.completeGeneration(postKey);
-      setLoading(false);
-    }
+      const path=`${id}/${Date.now()}-reference-film.mp4`;
+      const {error:uploadError}=await supabase.storage.from('generated-media').upload(path,result.blob,{contentType:'video/mp4'});
+      if(uploadError) throw uploadError;
+      const {data:publicData}=supabase.storage.from('generated-media').getPublicUrl(path);
+      const iterationId=await persistVariantRow(publicData.publicUrl,`Reference film ${plan.id}`,groupId,false);
+      if(data.job_id && iterationId) await supabase.from("media_jobs").update({post_iteration_id:iterationId}).eq("id",data.job_id);
+      setVariantUrls([publicData.publicUrl]);generation.progressGeneration(postKey);
+    } catch(error) {
+      setGenerationError(error instanceof Error?error.message:'The film could not be completed.');
+      setVariantUrls(['FAILED']);generation.progressGeneration(postKey,{failed:true});
+    } finally {generation.completeGeneration(postKey);setLoading(false);}
   };
 
   const generateMotion = async (anglesList: Array<{ label: string; instruction: string }> = angles) => {
-    if (usesSocialTemplate) return generateSourceMotion();
+    if (usesSocialTemplate) return generateReferenceVideo();
     const count = Math.min(Math.max(variantCount, 1), 3);
     const groupId = crypto.randomUUID();
     setVariantGroupId(groupId);
@@ -533,7 +515,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
 
   /** The same brief through the next angles on the list. */
   const anotherTake = () => {
-    if (usesSocialTemplate) return void generateSourceMotion();
+    if (usesSocialTemplate) return void generateReferenceVideo();
     if (engine === "motion") return void generateMotion();
     if (angles.length === 0) return void generateVideo();
     const n = Math.max(1, Math.min(variantCount, angles.length));
@@ -701,7 +683,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
               <Video className="h-4 w-4" /> Video, {spec.label}
             </DialogTitle>
             <DialogDescription>
-              Short clips cut from the client's own designs. Tap the ones to keep.
+              New scenes directed by the client’s real social references. Select a video to keep.
             </DialogDescription>
           </DialogHeader>
 
@@ -715,8 +697,8 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
             )}
             {/* Platform & format info */}
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge variant="outline">{usesSocialTemplate ? spec.aspect.startsWith("9:16") ? "9:16 · full artwork preserved" : "Original artwork proportions" : spec.aspect}</Badge>
-              <Badge variant="outline">{usesSocialTemplate ? "12 seconds · 3 cards" : spec.duration}</Badge>
+              <Badge variant="outline">{spec.aspect}</Badge>
+              <Badge variant="outline">{usesSocialTemplate ? "12 seconds · 3 scenes" : spec.duration}</Badge>
               {!usesSocialTemplate && brandColors.length > 0 && (
                 <div className="flex items-center gap-1 ml-auto">
                   {brandColors.map((color, i) => (
@@ -741,7 +723,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 <GenerationStages
                   stages={
                     motion
-                      ? usesSocialTemplate ? ["Preparing the card copy", "Adapting and reviewing actual artwork", "Cutting the clip", "Saving"] : ["Writing the brief", "Designing the frames", "Cutting the clip", "Saving"]
+                      ? usesSocialTemplate ? ["Planning the scenes from social references", "Rendering the film", "Setting typography and reviewing scenes", "Saving"] : ["Writing the brief", "Designing the frames", "Cutting the clip", "Saving"]
                       : [
                           "Writing the motion brief",
                           "Painting the opening frame with the headline",
@@ -757,7 +739,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                   // stage that named Veo, would both now be lies.
                   estimate={
                     motion
-                      ? slowBackend
+                      ? usesSocialTemplate ? "6–15 minutes" : slowBackend
                         ? "about two minutes"
                         : "about a minute"
                       : slowBackend
@@ -876,7 +858,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                       </div>
                       <p className="t-secondary">
                         {engine === "motion"
-                          ? slowBackend
+                          ? usesSocialTemplate ? "6–15 minutes" : slowBackend
                             ? "Two designed frames of this post, held with a slow move and dissolved. On brand, about two minutes."
                             : "Two designed frames of this post, held with a slow move and dissolved. On brand, about a minute."
                           : slowBackend
@@ -927,7 +909,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                     </Button>
                   </div>
                 </details>}
-                {sourcePreview && <div className="space-y-2"><p className="t-secondary">Original client social artwork</p><img src={sourcePreview} alt="Original client social artwork" className="max-h-64 object-contain" /></div>}
+                {sourcePreview && <div className="space-y-2"><p className="t-secondary">Client social reference</p><img src={sourcePreview} alt="Client social reference" className="max-h-64 object-contain" /></div>}
 
                 {/* Seed images — the brand-aligned anchor frame each video
                     was animated from. Surfacing these lets the user diagnose
@@ -938,7 +920,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 {variantSeeds.some((s) => !!s) && (
                   <div className="space-y-2 pt-2 border-t border-white/[0.06]">
                     <p className="t-secondary tracking-[-0.2px]">
-                      {engine === "motion" ? "The designed frames each clip is cut from. Click to view full size." : "Seed frames (what Veo animated from). Click to view full size."}
+                      {usesSocialTemplate ? "Reviewed moments from the film." : engine === "motion" ? "The designed frames each clip is cut from. Click to view full size." : "Seed frames (what Veo animated from). Click to view full size."}
                     </p>
                     <div className="flex gap-2 flex-wrap">
                       {variantSeeds.map((seedUrl, i) =>
@@ -948,15 +930,15 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                             type="button"
                             onClick={() => setPreviewSeedUrl(seedUrl)}
                             className="relative aspect-square w-16 rounded-md overflow-hidden border border-white/10 hover:border-primary/60 transition-colors"
-                            title={usesSocialTemplate ? `Card ${i + 1}` : `Variant ${i + 1} seed image`}
+                            title={usesSocialTemplate ? `Scene ${i + 1}` : `Variant ${i + 1} seed image`}
                           >
                             <img
                               src={seedUrl}
-                              alt={usesSocialTemplate ? `Card ${i + 1}` : `Variant ${i + 1} seed`}
+                              alt={usesSocialTemplate ? `Scene ${i + 1}` : `Variant ${i + 1} seed`}
                               className="w-full h-full object-cover"
                             />
                             <span className="absolute bottom-0 right-0 bg-black/70 text-white text-[12px] font-bold px-1">
-                              {usesSocialTemplate ? `Card ${i + 1}` : `V${i + 1}`}
+                              {usesSocialTemplate ? `Scene ${i + 1}` : `V${i + 1}`}
                             </span>
                           </button>
                         ) : null,

@@ -1,4 +1,5 @@
-import { selectReferenceTemplate } from "../_shared/design-prompts/referenceTemplate.ts";
+import { loadCreativePlan } from "../_shared/design-prompts/loadCreativePlan.ts";
+import { creativeImagePrompt } from "../_shared/design-prompts/creativePlan.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
@@ -158,6 +159,7 @@ Deno.serve(async (req) => {
       slide_context,                  // new — { index, total } for carousels
       variant_angle,                  // new — creative angle override (Phase 6)
       reference_path,
+      creative_plan_id, creative_frame_index = 0, creative_correction,
       render_text,                    // false → imagery only; the app types the words on top
     } = await req.json();
 
@@ -218,19 +220,12 @@ Deno.serve(async (req) => {
     // on-brand work, and is pointed at the fix.
     const brandAdvice = brandFootingAdvice(footing, client_name);
 
-    // Which provider renders this. Read from the clients row, never from the
-    // body: this endpoint spends the team's Higgsfield credits.
-    // Actual social artwork is the canvas. This path never invokes an image generator.
-    if (resolvedSynthesis?.reference_pipeline_version === 1 && post?.copy && render_text !== false) {
-      const key = Deno.env.get("ANTHROPIC_API_KEY");
-      if (!key || !resolvedRefs.length) throw new Error("A usable client social reference is required.");
-      const template = await selectReferenceTemplate({db:brandDb,paths:resolvedRefs,preferredPath:reference_path,copy:post.copy,apiKey:key});
-      const configuredFont=resolvedBrand?.font_family?.split(',')[0]?.trim().replace(/["']/g,'');
-      if (['Arial','Roboto','Open Sans','Montserrat','Poppins','Inter','Lato','Oswald','Georgia'].includes(configuredFont)) template.headline.font_family=configuredFont;
-      const {data,error}=await brandDb.storage.from("design-references").createSignedUrl(template.path,3600);
-      if(error||!data?.signedUrl) throw new Error("The client source artwork could not be opened.");
-      return jsonResp({image_url:data.signedUrl,reference_preview_url:data.signedUrl,reference_path:template.path,template_regions:template.regions,template_headline:template.headline,rendered_by:"source_artwork",brand_footing:"strong"});
-    }
+    // Every new composition sees real, post-relevant reference images. A
+    // published post is evidence of the brand, never a canvas to repaint.
+    const creative = creative_plan_id ? await loadCreativePlan(brandDb, creative_plan_id, resolvedClientId) : null;
+    if (creative?.mode === 'video' || (creative && (!Number.isInteger(creative_frame_index) || !creative.plan.frames[creative_frame_index]))) throw new Error('Invalid image scene.');
+    if (resolvedSynthesis?.reference_pipeline_version === 1 && !creative) throw new Error('Prepare a new creative direction from the client’s social references before rendering.');
+    if (creative) resolvedRefs = creative.plan.frames[creative_frame_index].reference_indices.map((i:number) => creative.reference_paths[i]);
 
     const backend = await mediaBackendFor(brandDb, client_id || client_context?.client_id);
     console.log("[generate-post-image] backend:", backend);
@@ -264,7 +259,7 @@ Deno.serve(async (req) => {
     let aspectRatio = imageAspectRatio(platform, format);
     // Rules learned from this client's rejected designs, if any.
     const learnings = await loadDesignLearnings(brandDb, client_id || client_context?.client_id);
-    let designPrompt = buildImagePrompt({
+    let designPrompt = creative ? creativeImagePrompt(creative.plan, creative_frame_index, typeof creative_correction === "string" ? creative_correction : "") : buildImagePrompt({
       basePrompt: prompt,
       noText: render_text === false,
       learnings,
@@ -292,7 +287,7 @@ Deno.serve(async (req) => {
       const storageClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
       contentParts.push({
-        text:
+        text: creative ? "These are the selected REAL CLIENT REFERENCES. Preserve their brand identity and design language while creating the new subject and composition specified below. Their campaign imagery and words must not be reused." :
           "These are the client's own published designs. Match their visual SYSTEM exactly — the same layout zones, " +
           "the same colour fields in the same proportions, the same photographic treatment, the same placement of type — " +
           "so the new image looks like the same designer made it. Do not copy their photographs or their words; " +
@@ -492,7 +487,7 @@ Deno.serve(async (req) => {
     let validationLayout: "single" | "multi" | "skipped" = "skipped";
     let validationReason = "";
 
-    if (slide_context && imageB64 && imageMime) {
+    if (!creative && slide_context && imageB64 && imageMime) {
       // Need an Anthropic key for validation. Try env first, then app_settings.
       let anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
       if (!anthropicKey) {
@@ -546,7 +541,10 @@ Deno.serve(async (req) => {
 
     return jsonResp({
       image_url: imageUrl,
-      reference_preview_url: null,
+      reference_preview_url: creative ? (await brandDb.storage.from("design-references").createSignedUrl(resolvedRefs[0],3600)).data?.signedUrl : null,
+      creative_plan_id: creative?.id,
+      creative_frame_index: creative ? creative_frame_index : null,
+      expected_text: creative?.plan.frames[creative_frame_index].headline,
       reference_path: null,
       template_regions: null,
       template_headline: null,
@@ -557,7 +555,7 @@ Deno.serve(async (req) => {
       validation_reason: validationReason,
       brand_footing: footing.strong ? "strong" : footing.weak ? "weak" : "none",
       brand_advice: brandAdvice,
-      rendered_by: backend,
+      rendered_by: creative ? "reference_creative" : backend,
       model: renderedModel,
     });
   } catch (err: any) {

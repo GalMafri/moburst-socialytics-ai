@@ -17,6 +17,7 @@ import {
   awaitJobs,
   creditBalance,
   submitVideo,
+  importReferences,
   videoAspect,
 } from "./generate.ts";
 
@@ -47,6 +48,8 @@ export interface StartVideoArgs {
   /** A Higgsfield job id or media id for the still the clip animates. */
   startImageId?: string | null;
   seconds?: number;
+  referenceUrls?: string[];
+  independentScenes?: boolean;
   resolution?: "480p" | "720p" | "1080p";
 }
 
@@ -71,10 +74,13 @@ export async function startVideoWithHiggsfield(args: StartVideoArgs): Promise<St
   }
 
   const aspect = videoAspect(args.aspectRatio);
+  const referenceIds = args.referenceUrls?.length ? await importReferences(mcp,args.referenceUrls,"image") : [];
+  if(args.referenceUrls?.length && referenceIds.length !== args.referenceUrls.length) throw new HiggsfieldError("The client reference images could not be loaded. No video was started.");
   const jobs = await submitVideo(mcp, {
     // The still is the design; the clip must not wander away from it.
-    prompt: args.startImageId ? `${args.prompt}${HOLD_THE_FRAME}` : args.prompt,
+    prompt: args.startImageId && !args.independentScenes ? `${args.prompt}${HOLD_THE_FRAME}` : args.prompt,
     aspect,
+    referenceIds,
     seconds: args.seconds || 5,
     resolution: args.resolution || "720p",
     startImageId: args.startImageId || undefined,
