@@ -1,5 +1,5 @@
 import { describe,it,expect,vi } from 'vitest';
-import { parseReferenceTemplate,templateEditPrompt } from '../../../supabase/functions/_shared/design-prompts/referenceTemplate';
+import { parseReferenceTemplate,templateEditPrompt,templateFromResponse } from '../../../supabase/functions/_shared/design-prompts/referenceTemplate';
 import { applyReferenceTemplate, wrapTemplateWords } from '../../lib/referenceTemplate';
 vi.mock('../../lib/composeText',()=>({loadImage:vi.fn(async (url:string)=>({naturalWidth:url==='source'?1000:2000,naturalHeight:url==='source'?1250:2500}))}));
 const headline={x:0.22,y:0.32,width:0.56,height:0.16,font_family:'Arial',font_weight:400,font_size:0.05,line_height:1.12,align:'center' as const,color:'#ffffff',emphasis_words:2};
@@ -32,3 +32,5 @@ describe('actual social artwork templates',()=>{
 });
 
 it('wraps actual typeset words without splitting or dropping any approved copy',()=>{const words='A strong media plan starts before launch'.split(' ').map(text=>({text,bold:false}));const lines=wrapTemplateWords(words,65,t=>t.length*5);expect(lines.flat().map(w=>w.text)).toEqual(words.map(w=>w.text));expect(lines.length).toBeGreaterThan(1);});
+
+it('requires structured source measurements and ignores conversational text',()=>{expect(templateFromResponse({content:[{type:'text',text:'Looking at the source'},{type:'tool_use',name:'record_source_template',input:value}],stop_reason:'tool_use'},['owned']).path).toBe('owned');expect(()=>templateFromResponse({content:[{type:'text',text:'I will analyze'}]},['owned'])).toThrow('incomplete');expect(()=>templateFromResponse({content:[{type:'tool_use',name:'record_source_template',input:value}],stop_reason:'max_tokens'},['owned'])).toThrow('incomplete');});
