@@ -23,7 +23,8 @@ describe('reference-directed creative',()=>{
   it('reserves an empty area for actual logo pixels instead of asking the image model to recreate them',()=>{
     const prompt=creativeImagePrompt(plan as never,0);
     expect(prompt).toContain('Render NO logo');
-    expect(prompt).toContain('Software places the authentic logo pixels');
+    expect(prompt).toContain('software to place the real client logo');
+    expect(prompt).toContain('do not draw any header band');
     expect(prompt).toContain('PRIMARY layout reference');
   });
   it('requires multiple distinct visual references for every frame',()=>{
