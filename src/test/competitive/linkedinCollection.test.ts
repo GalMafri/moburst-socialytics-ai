@@ -63,3 +63,10 @@ it('accepts verified company collaborations and excludes plain reposts without c
  row.header.text='Medisafe reposted this';expect(merge([row]).linkedin_posts).toBe(0);
  row.header.imageLink='https://www.linkedin.com/company/unrelated';expect(()=>merge([row])).toThrow('author does not match');
 });
+
+it('recognizes native LinkedIn videos and shared articles instead of reporting them as text posts', () => {
+ const video=structuredClone(fixture[0]);video.postImages=[];video.postVideo={thumbnailUrl:'https://media.licdn.com/video.jpg',videoUrl:'https://dms.licdn.com/video.mp4'};
+ const result=merge([video]).socialPosts[0];expect(result.type).toBe('video');expect(result.image).toBe(video.postVideo.thumbnailUrl);
+ delete video.postVideo;video.article={image:{url:'https://media.licdn.com/article.jpg'},link:'https://example.com/article'};
+ expect(merge([video]).socialPosts[0].type).toBe('link');
+});

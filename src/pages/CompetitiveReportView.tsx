@@ -40,6 +40,7 @@ import { comparisonScale, normalizedCompetitiveMetrics } from "@/lib/competitive
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images, Users } from "lucide-react";
 
 type TopPost = {
+  authorship?: string;
   engagement: number; engagement_rate: number | null; est_impressions?: number | null; reach?: number; followers_at_publication?: number | null; views: number | null;
   applause?: number | null; conversation?: number | null; amplification?: number | null;
   text: string; url: string | null; image?: string | null; created: string | null; media_type: string; channel: string;
@@ -475,6 +476,7 @@ export default function CompetitiveReportView() {
   const hasContent = (p: TopPost) => !!(p.url || p.text || p.image);
   const postCard = (p: TopPost, key: string) => (
     <div key={key} data-pdf-unit className="glass-inner p-4 space-y-2.5 h-full flex flex-col">
+      {p.authorship === "collaboration" && <Badge variant="secondary" className="self-start">Company collaboration</Badge>}
       <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} maxHeight="26rem" />
       <p className={`t-body line-clamp-2 min-h-[3rem] ${p.text ? "" : "text-[#b1b7c1]"}`}>{p.text || (normalizePlatform(p.channel) === "x" || normalizePlatform(p.channel) === "twitter" ? "X posts arrive from RivalIQ without a caption or link." : "No caption provided.")}</p>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">

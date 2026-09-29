@@ -29,8 +29,8 @@ for (const row of rows) {
   if (values.some(n=>typeof n !== 'number' || !Number.isFinite(n) || n<0)) throw new Error('LinkedIn post engagement counts are incomplete.');
   const engagement = values.reduce((sum,n)=>sum+n,0);
   metrics[source.company_id].posts++; metrics[source.company_id].engagement += engagement;
-  const image = row.postImages?.[0]?.url || row.document?.coverPages?.[0]?.imageUrls?.[0] || null;
-  posts.push({postId:'linkedin:'+key,companyId:source.company_id,companyName:source.name,channel:'linkedin',publishedAt:new Date(published).toISOString(),message:String(row.content||''),postLink:row.linkedinUrl,image,engagementTotal:engagement,applause:values[0],conversation:values[1],amplification:values[2],type:row.document?'carousel':row.video?'video':image?'image':'text',source:'apify/harvestapi',source_profile_url:source.profile_url,authorship:collaboration?'collaboration':'company'});
+  const image = row.postImages?.[0]?.url || row.document?.coverPages?.[0]?.imageUrls?.[0] || row.postVideo?.thumbnailUrl || row.article?.image?.url || null;
+  posts.push({postId:'linkedin:'+key,companyId:source.company_id,companyName:source.name,channel:'linkedin',publishedAt:new Date(published).toISOString(),message:String(row.content||''),postLink:row.linkedinUrl,image,engagementTotal:engagement,applause:values[0],conversation:values[1],amplification:values[2],type:row.document?'carousel':row.postVideo?'video':row.article?'link':image?'image':'text',source:'apify/harvestapi',source_profile_url:source.profile_url,authorship:collaboration?'collaboration':'company'});
 }
 if ([...counts.values()].some(n=>n>=150)) throw new Error('LinkedIn collection reached its per-company limit; this period needs a larger paginated retrieval.');
 return [{json:{...rival,socialPosts:[...(rival.socialPosts||[]),...posts],additional_metrics:metrics,linkedin_sources:sourcePlan.sources,linkedin_posts:posts.length}}];

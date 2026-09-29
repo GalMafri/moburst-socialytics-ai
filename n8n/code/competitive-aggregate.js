@@ -136,7 +136,7 @@ const addPost = (agg, p) => {
   agg.media_types[mtype] = (agg.media_types[mtype] || 0) + 1;
   const channel = p.channel || p.network || p.platform || "unknown";
   if (agg.channels) agg.channels[channel] = (agg.channels[channel] || 0) + 1;
-  agg.top_posts.push({ engagement, engagement_rate: rate, est_impressions: impressions, followers_at_publication, views, applause: pick(p, "applause"), conversation: pick(p, "conversation"), amplification: pick(p, "amplification"), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null });
+  agg.top_posts.push({ authorship: p.authorship || null, engagement, engagement_rate: rate, est_impressions: impressions, followers_at_publication, views, applause: pick(p, "applause"), conversation: pick(p, "conversation"), amplification: pick(p, "amplification"), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null });
   return channel;
 };
 for (const p of posts) {

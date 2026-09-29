@@ -221,7 +221,7 @@ export default function CompetitiveFeed() {
           <EmptyState
             icon={Rss}
             title="No competitor feed yet"
-            description="Pull the last week of posts for this client's RivalIQ landscape. The weekly scheduler keeps it fresh afterwards."
+            description="Pull the last week of posts from this client’s tracked social profiles. The weekly scheduler keeps it fresh afterwards."
             action={canRunAnalysis ? <Button onClick={() => refresh.mutate()} disabled={refresh.isPending}>Pull the last 7 days</Button> : undefined}
           />
         ) : (
