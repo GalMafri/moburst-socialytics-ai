@@ -216,6 +216,7 @@ export async function buildCompetitivePayload(args: {
   supabase: any;
   client: any;
   reportId: string;
+  attemptStartedAt: string;
   set: any;
   range: ReportRange;
   scheduled?: boolean;
@@ -236,6 +237,7 @@ export async function buildCompetitivePayload(args: {
 
   return {
     report_id: reportId,
+    attempt_started_at: args.attemptStartedAt,
     client_id: client.id,
     client_name: client.name,
     company_slug: client.company_slug,

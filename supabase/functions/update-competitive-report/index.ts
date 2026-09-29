@@ -41,6 +41,18 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
+    if (!body.report_id || !body.attempt_started_at || !Number.isFinite(Date.parse(body.attempt_started_at))) {
+      return jsonResp({ error: "report_id and attempt_started_at are required" }, 400);
+    }
+    const { data: attempt, error: attemptError } = await supabase.from("competitive_reports")
+      .select("id,client_id,created_at,status").eq("id", body.report_id).maybeSingle();
+    if (attemptError) throw new Error("Could not verify report attempt");
+    if (!attempt) return jsonResp({ error: "report not found" }, 404);
+    if (Date.parse(attempt.created_at) !== Date.parse(body.attempt_started_at)) {
+      return jsonResp({ ok: true, skipped: "superseded report attempt" });
+    }
+    if (body.client_id && body.client_id !== attempt.client_id) return jsonResp({ error: "report client mismatch" }, 409);
+
     if (body.op === "snapshot") {
       const { client_id, report_id, landscape_id, endpoint, params_hash, payload } = body;
       if (!landscape_id || !endpoint || payload === undefined) {
@@ -49,7 +61,8 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from("rivaliq_snapshots")
         .insert({
-          client_id: client_id || null,
+          client_id: attempt.client_id,
+          attempt_started_at: attempt.created_at,
           report_id: report_id || null,
           landscape_id: String(landscape_id),
           endpoint: String(endpoint).slice(0, 100),
@@ -111,10 +124,14 @@ Deno.serve(async (req) => {
           .select("payload")
           .eq("report_id", report_id)
           .eq("endpoint", "socialposts")
+          .eq("attempt_started_at", attempt.created_at)
           .order("fetched_at", { ascending: false })
           .limit(1)
           .maybeSingle();
         if (snapshotError) throw new Error("Could not validate saved post coverage");
+        if (!snap?.payload || Number(snap.payload.expected_windows) < 1) {
+          return jsonResp({ error: "Current attempt source coverage has not been saved" }, 409);
+        }
         const truncated = Number((snap?.payload as Record<string, unknown> | null)?.truncated_pages) || 0;
         if (truncated > 0) {
           const rd = updates.report_data as Record<string, any>;
@@ -153,13 +170,13 @@ Deno.serve(async (req) => {
       // output of the POST that writes the finished report — so a timeout on
       // a successful writeback used to replace a complete report with an
       // error stub.
-      let query = supabase.from("competitive_reports").update(updates).eq("id", report_id);
+      let query = supabase.from("competitive_reports").update(updates).eq("id", report_id).eq("created_at", attempt.created_at);
       if (status === "failed") query = query.neq("status", "complete");
       const { data, error } = await query.select("id, status");
       if (error) throw new Error(error.message);
       if (!data || data.length === 0) {
         if (status === "failed") return jsonResp({ ok: true, skipped: "report already complete" });
-        return jsonResp({ error: "report not found" }, 404);
+        return jsonResp({ ok: true, skipped: "report attempt changed during validation" });
       }
 
       // Keep the set's lifecycle in step with its latest run. A successful run

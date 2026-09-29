@@ -243,12 +243,14 @@ Deno.serve(async (req) => {
       // told so by a JavaScript error inside the workflow. Checked here, so
       // the scheduler and a retry get the same protection as the run page.
       const rivaliqKey = Deno.env.get("RIVALIQ_API_KEY");
+      if (!rivaliqKey) return json({ error: "RivalIQ is not configured. No report was started." }, 503);
       if (rivaliqKey) {
         try {
           const resp = await rivalIqFetch(`https://api.rivaliq.com/v3/landscapes?apiKey=${encodeURIComponent(rivaliqKey)}`);
           if (resp.status === 429) {
             return json({ error: "RivalIQ cannot accept a new request yet. No report was started; please wait before trying again.", code: "RIVALIQ_BUSY" }, 429);
           }
+          if (!resp.ok) return json({ error: `RivalIQ connection check failed (HTTP ${resp.status}). No report was started.` }, 502);
           if (resp.ok) {
             const landscapes = (await resp.json()).landscapes || [];
             const listed = summarizeLandscapes(landscapes, client.name, client.website_url);
@@ -279,8 +281,7 @@ Deno.serve(async (req) => {
             }
           }
         } catch {
-          // RivalIQ unreachable is not a reason to refuse the run; the
-          // workflow will report it properly if it persists.
+          return json({ error: "RivalIQ connection could not be verified. No report was started." }, 502);
         }
       }
 
@@ -290,7 +291,7 @@ Deno.serve(async (req) => {
           .from("competitive_reports")
           // The clock restarts with the run: the row now IS this attempt, and
           // a stale created_at would leave a fresh run reading as stuck.
-          .update({ status: "running", report_data: {}, set_id: set.id, date_range_start: range.start, date_range_end: range.end, created_at: attemptStartedAt })
+          .update({ status: "running", report_data: {}, gamma_url: null, duration_minutes: null, set_id: set.id, date_range_start: range.start, date_range_end: range.end, created_at: attemptStartedAt })
           .eq("id", reportId).eq("created_at", existing.created_at).eq("status", existing.status)
           .select("id").maybeSingle();
         if (error) throw new Error(error.message);
@@ -311,14 +312,14 @@ Deno.serve(async (req) => {
       rememberStartedRun(reportId, set.id);
       await admin.from("competitor_sets").update({ status: "analyzing" }).eq("id", set.id).in("status", ["confirmed", "complete", "failed"]);
       startedSetId = set.id;
-      payload = await buildCompetitivePayload({ supabase: admin, client, reportId, set, range });
+      payload = await buildCompetitivePayload({ supabase: admin, client, reportId, set, range, attemptStartedAt });
     } else {
       if (existing) {
         reportId = existing.id;
         const { data: claimed, error } = await admin
           .from("reports")
           // Same here: the row is this attempt, so its clock starts now.
-          .update({ status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_at: attemptStartedAt })
+          .update({ status: "running", report_data: {}, gamma_url: null, duration_minutes: null, date_range_start: range.start, date_range_end: range.end, created_at: attemptStartedAt })
           .eq("id", reportId).eq("created_at", existing.created_at).eq("status", existing.status)
           .select("id").maybeSingle();
         if (error) throw new Error(error.message);

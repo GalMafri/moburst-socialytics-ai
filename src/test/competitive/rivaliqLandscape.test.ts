@@ -122,3 +122,22 @@ describe("bestLandscapeMatch", () => {
     expect(bestLandscapeMatch<Summary>([{ id: "a", is_match: false, match_reason: null }])).toBeUndefined();
   });
 });
+
+
+describe("client identity is the full reviewed website", () => {
+  it("keeps similarly named competitors from invalidating the correct client", () => {
+    const [out] = summarizeLandscapes([landscape({companies: [
+      {id:10,name:"Fixture",url:"https://fixture.example"},
+      {id:11,name:"Fixture competitor",url:"https://competitor.example"},
+    ]})], "Fixture", "https://fixture.example");
+    expect(out.client_company_id).toBe("10");
+  });
+  it("does not equate companies on different TLDs or matching names with conflicting websites", () => {
+    const [out] = summarizeLandscapes([landscape({companies: [{id:10,name:"Fixture",url:"https://fixture.agency"}]})], "Fixture", "https://fixture.studio");
+    expect(out.is_match).toBe(false);
+  });
+  it("allows legal suffixes when no website is supplied, but never a name substring", () => {
+    expect(summarizeLandscapes([landscape({companies:[{id:10,name:"Moburst Ltd."}]})],"Moburst")[0].is_match).toBe(true);
+    expect(summarizeLandscapes([landscape({companies:[{id:10,name:"Moburst competitor"}]})],"Moburst")[0].is_match).toBe(false);
+  });
+});

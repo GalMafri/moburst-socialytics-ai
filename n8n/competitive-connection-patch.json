@@ -1,0 +1,385 @@
+{
+  "workflowId": "EBiAwSay3H2R8krv",
+  "baseVersion": "335dd77f-179d-4a63-8476-d7127d80cb53",
+  "operations": [
+    {
+      "type": "setNodeParameter",
+      "nodeName": "Run Config",
+      "path": "assignments",
+      "value": {
+        "assignments": [
+          {
+            "id": "a1",
+            "name": "report_id",
+            "value": "={{ $json.body?.report_id || \"\" }}",
+            "type": "string"
+          },
+          {
+            "id": "a2",
+            "name": "client_id",
+            "value": "={{ $json.body?.client_id || \"\" }}",
+            "type": "string"
+          },
+          {
+            "id": "a3",
+            "name": "client_name",
+            "value": "={{ $json.body?.client_name || \"\" }}",
+            "type": "string"
+          },
+          {
+            "id": "a4",
+            "name": "set_id",
+            "value": "={{ $json.body?.set_id || \"\" }}",
+            "type": "string"
+          },
+          {
+            "id": "a5",
+            "name": "landscape_hint",
+            "value": "={{ $json.body?.rivaliq_landscape_id || \"\" }}",
+            "type": "string"
+          },
+          {
+            "id": "a6",
+            "name": "competitors_json",
+            "value": "={{ JSON.stringify($json.body?.competitors ?? []) }}",
+            "type": "string"
+          },
+          {
+            "id": "a7",
+            "name": "range_start",
+            "value": "={{ $json.body?.date_range_start || $now.minus({ days: 30 }).toFormat(\"yyyy-MM-dd\") }}",
+            "type": "string"
+          },
+          {
+            "id": "a8",
+            "name": "range_end",
+            "value": "={{ $json.body?.date_range_end || $now.toFormat(\"yyyy-MM-dd\") }}",
+            "type": "string"
+          },
+          {
+            "id": "a9",
+            "name": "started_at",
+            "value": "={{ $now.toISO() }}",
+            "type": "string"
+          },
+          {
+            "id": "a10",
+            "name": "suppressed_insights_json",
+            "value": "={{ JSON.stringify($json.body?.suppressed_insights ?? []) }}",
+            "type": "string"
+          },
+          {
+            "id": "attempt-started-at",
+            "name": "attempt_started_at",
+            "value": "={{ $json.body?.attempt_started_at || \"\" }}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "List RivalIQ Landscapes",
+      "parameters": {
+        "url": "https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/rivaliq-request?path=/v3/landscapes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "List RivalIQ Landscapes",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Landscape Status",
+      "parameters": {
+        "url": "=https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/rivaliq-request?path=/v3/landscapes/{{ $(\"Resolve Landscape\").first().json.landscape_id }}/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Landscape Status",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Landscape Companies",
+      "parameters": {
+        "url": "=https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/rivaliq-request?path=/v3/landscapes/{{ $(\"Resolve Landscape\").first().json.landscape_id }}/companies",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Landscape Companies",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Landscape Social Posts",
+      "parameters": {
+        "url": "=https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/rivaliq-request?path=/v3/landscapes/{{ $json.landscape_id }}/socialposts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 125000
+            }
+          },
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Landscape Social Posts",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Mark Report Complete",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Mark Report Complete",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "setNodeParameter",
+      "nodeName": "Cache Status Snapshot",
+      "path": "jsonBody",
+      "value": "={{ ({ attempt_started_at: $(\"Run Config\").first().json.attempt_started_at, op: \"snapshot\", client_id: $(\"Run Config\").first().json.client_id, report_id: $(\"Run Config\").first().json.report_id, landscape_id: $(\"Resolve Landscape\").first().json.landscape_id, endpoint: \"status\", payload: $json }) }}"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Cache Status Snapshot",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Cache Status Snapshot",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "setNodeParameter",
+      "nodeName": "Cache Companies Snapshot",
+      "path": "jsonBody",
+      "value": "={{ ({ attempt_started_at: $(\"Run Config\").first().json.attempt_started_at, op: \"snapshot\", client_id: $(\"Run Config\").first().json.client_id, report_id: $(\"Run Config\").first().json.report_id, landscape_id: $(\"Resolve Landscape\").first().json.landscape_id, endpoint: \"companies\", payload: $json }) }}"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Cache Companies Snapshot",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Cache Companies Snapshot",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "setNodeParameter",
+      "nodeName": "Cache Posts Snapshot",
+      "path": "jsonBody",
+      "value": "={{ ({ attempt_started_at: $(\"Run Config\").first().json.attempt_started_at, op: \"snapshot\", client_id: $(\"Run Config\").first().json.client_id, report_id: $(\"Run Config\").first().json.report_id, landscape_id: $(\"Resolve Landscape\").first().json.landscape_id, endpoint: \"socialposts\", payload: $json }) }}"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Cache Posts Snapshot",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Cache Posts Snapshot",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "setNodeParameter",
+      "nodeName": "Mark Report Failed",
+      "path": "jsonBody",
+      "value": "={{ ({ attempt_started_at: $(\"Run Config\").first().json.attempt_started_at, op: \"report\", report_id: $(\"Run Config\").first().json.report_id, status: \"failed\", report_data: { error: (() => { const e = $json.error ?? $json.message ?? $json; let m = \"\"; if (typeof e === \"string\") m = e; else if (e && typeof e === \"object\") m = String(e.message || e.description || e.reason || \"\"); if (!m) { try { m = JSON.stringify(e); } catch (x) { m = String(e); } } m = String(m).trim(); if (!m || m === \"{}\" || m === \"null\") m = \"The workflow stopped without reporting a reason.\"; return ($prevNode.name + \" failed. \" + m).slice(0, 1200); })(), failed_node: $prevNode.name, failed_item_keys: Object.keys($json).slice(0, 20) } }) }}"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Mark Report Failed",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Mark Report Failed",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Landscape Metrics Summary",
+      "parameters": {
+        "url": "=https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/rivaliq-request?path=/v3/landscapes/{{ $(\"Resolve Landscape\").first().json.landscape_id }}/metrics/summary",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Landscape Metrics Summary",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Landscape Metrics Summary Previous",
+      "parameters": {
+        "url": "=https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/rivaliq-request?path=/v3/landscapes/{{ $(\"Resolve Landscape\").first().json.landscape_id }}/metrics/summary",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Landscape Metrics Summary Previous",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Landscape Metrics Timeseries",
+      "parameters": {
+        "url": "=https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/rivaliq-request?path=/v3/landscapes/{{ $(\"Resolve Landscape\").first().json.landscape_id }}/metrics/timeseries",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Landscape Metrics Timeseries",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "setNodeParameter",
+      "nodeName": "Cache Metrics Snapshot",
+      "path": "jsonBody",
+      "value": "={{ ({ attempt_started_at: $(\"Run Config\").first().json.attempt_started_at, op: \"snapshot\", client_id: $(\"Run Config\").first().json.client_id, report_id: $(\"Run Config\").first().json.report_id, landscape_id: $(\"Resolve Landscape\").first().json.landscape_id, endpoint: \"metrics\", payload: { summary: $(\"Landscape Metrics Summary\").first().json, summary_previous: $(\"Landscape Metrics Summary Previous\").first().json, timeseries: $json } }) }}"
+    },
+    {
+      "type": "updateNodeParameters",
+      "nodeName": "Cache Metrics Snapshot",
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        }
+      }
+    },
+    {
+      "type": "setNodeCredential",
+      "nodeName": "Cache Metrics Snapshot",
+      "credentialKey": "httpHeaderAuth",
+      "credentialId": "eSV0BS2mZ6Jjofq5",
+      "credentialName": "Socialytics App Webhook"
+    },
+    {
+      "type": "setNodeParameter",
+      "nodeName": "Assemble Report Data",
+      "path": "jsCode",
+      "value": "function inclusiveDays(start, end) {\n    if (!start || !end)\n        return null;\n    const a = Date.parse(start.slice(0, 10) + \"T00:00:00Z\");\n    const b = Date.parse(end.slice(0, 10) + \"T00:00:00Z\");\n    return Number.isFinite(a) && Number.isFinite(b) && b >= a ? Math.round((b - a) / 86400000) + 1 : null;\n}\nconst valid = (value) => typeof value === \"number\" && Number.isFinite(value) && value >= 0;\nfunction factualDimensions(companies, days) {\n    const client = companies.find((c) => c.is_client);\n    if (!client)\n        return [];\n    const rivals = companies.filter((c) => !c.is_client);\n    const definitions = [\n        [\"Audience\", \"followers\", (c) => c.rivaliq_metrics?.audience?.current],\n        [\"Cadence\", \"posts/week\", (c) => days && valid(c.post_count) ? c.post_count / days * 7 : c.cadence_per_week],\n        [\"Engagement\", \"engagements\", (c) => c.rivaliq_metrics?.engagement?.current ?? c.engagement_sum ?? c.engagement_total],\n        [\"Estimated impressions\", \"impressions\", (c) => c.rivaliq_metrics?.estimated_impressions?.current ?? c.impressions_total],\n    ];\n    return definitions.flatMap(([dimension, unit, metric]) => {\n        const value = metric(client);\n        const peers = rivals.map(metric).filter(valid);\n        if (!valid(value) || !peers.length)\n            return [];\n        return [{ dimension, unit, client: value, competitor_avg: peers.reduce((a, b) => a + b, 0) / peers.length, competitor_count: peers.length }];\n    });\n}\nfunction comparisonScale(client, average) {\n    const max = Math.max(1, client, average);\n    return { client: client / max * 100, competitor: average / max * 100 };\n}\nfunction normalizedCompetitiveMetrics(input) {\n    const report = (input && typeof input === \"object\" ? input : {});\n    const period = report.period || report.aggregates?.period;\n    const days = inclusiveDays(period?.start, period?.end);\n    const companies = (report.aggregates?.companies || []).map((c) => ({\n        ...c,\n        ...(days ? { cadence_per_week: Math.round((c.post_count || 0) / days * 70) / 10 } : {}),\n        by_channel: Object.fromEntries(Object.entries(c.by_channel || {}).map(([key, b]) => [key, {\n                ...b, ...(days ? { cadence_per_week: Math.round((b.post_count || 0) / days * 70) / 10 } : {}),\n            }])),\n    }));\n    return {\n        ...report,\n        ...(days ? { period: { ...period, days } } : {}),\n        aggregates: { ...report.aggregates, companies, ...(days && report.aggregates?.period ? { period: { ...report.aggregates.period, days } } : {}) },\n        ai_analysis: { ...report.ai_analysis, benchmark_scorecard: {\n                ...report.ai_analysis?.benchmark_scorecard,\n                dimensions: factualDimensions(companies, days),\n            } },\n    };\n}\n\nconst cfg = $(\"Run Config\").first().json;\nconst landscape = $(\"Resolve Landscape\").first().json;\nconst aggregates = $(\"Aggregate Competitive Data\").first().json;\nconst pages = Number(($(\"Merge Post Pages\").first().json || {}).pages) || 0;\nconst aiRaw = $input.first().json.output || $input.first().json;\nconst sanitizeStr = (s) => String(s)\n  .replace(/[\\ud800-\\udbff](?![\\udc00-\\udfff])/g, \"\")\n  .replace(/(^|[^\\ud800-\\udbff])[\\udc00-\\udfff]/g, \"$1\")\n  .replace(/\\\\u(?![0-9a-fA-F]{4})/g, \"\\\\\\\\u\")\n  .replace(/[\\u0000-\\b\\u000b\\f\\u000e-\\u001f]/g, \" \");\nconst sanitize = (v) => {\n  if (typeof v === \"string\") return sanitizeStr(v);\n  if (Array.isArray(v)) return v.map(sanitize);\n  if (v && typeof v === \"object\") { const o = {}; for (const k of Object.keys(v)) o[sanitizeStr(k)] = sanitize(v[k]); return o; }\n  return v;\n};\nconst startedAt = new Date(cfg.started_at);\nconst durationMinutes = Math.max(1, Math.round((Date.now() - startedAt.getTime()) / 60000));\nconst reportData = sanitize(normalizedCompetitiveMetrics({\n  source: \"rivaliq\",\n  provider_status: 1,\n  landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by, focus_company_id: landscape.focus_company_id, companies: landscape.companies },\n  period: aggregates.period,\n  // rivaliq_calls: landscapes list + status + companies + one socialposts call per weekly window.\n  totals: { posts_analyzed: aggregates.total_posts_analyzed, post_windows: pages, rivaliq_calls: 3 + pages },\n  aggregates: aggregates,\n  ai_analysis: aiRaw,\n  generated_at: new Date().toISOString(),\n  schema_note: aggregates.schema_note || \"\"\n}));\nconst body = { op: \"report\", report_id: cfg.report_id, attempt_started_at: cfg.attempt_started_at, status: \"complete\", report_data: JSON.parse(JSON.stringify(reportData)), duration_minutes: durationMinutes };\nconst bodyString = JSON.stringify(body);\nreturn [{ json: { report_id: cfg.report_id, status: \"complete\", duration_minutes: durationMinutes, body_bytes: bodyString.length, body_string: bodyString } }];\n"
+    },
+    {
+      "type": "setNodeParameter",
+      "nodeName": "Resolve Landscape",
+      "path": "jsCode",
+      "value": "const cfg = $(\"Run Config\").first().json;\nconst body = (() => { try { return $(\"Competitive Webhook\").first().json.body || {}; } catch (e) { return {}; } })();\nconst resp = $input.first().json;\nconst list = resp.landscapes || resp.data || resp.items || (Array.isArray(resp) ? resp : []);\nif (!Array.isArray(list) || list.length === 0) {\n  throw new Error(\"NO_LANDSCAPES on this RivalIQ account\");\n}\nconst host = value => {\n  const raw = String(value || '').trim();\n  if (!raw || /\\s/.test(raw)) return '';\n  const hostname = raw.replace(/^[a-z]+:\\/\\//i, '').split(/[/?#]/)[0].toLowerCase().replace(/^www\\./, '').replace(/\\.$/, '');\n  return hostname.includes('.') && /^[a-z0-9.-]+$/.test(hostname) ? hostname : ''; \n};\nconst normalizedName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/(?:\\s+(?:inc|incorporated|ltd|limited|llc|llp|plc|corp|corporation))+$/, '').trim();\nconst clientHost = host(body.website_url) || host(cfg.client_name);\nconst clientMatchesIn = l => (l.companies || []).filter(c => clientHost ? host(c.url) === clientHost : !!normalizedName(cfg.client_name) && normalizedName(c.name) === normalizedName(cfg.client_name));\nlet selected = [];\ntry { selected = JSON.parse(cfg.competitors_json || '[]'); } catch { selected = []; }\nconst selectedMatchesIn = l => selected.map(s => (l.companies || []).filter(c => {\n  if (clientMatchesIn(l).some(client => String(client.id) === String(c.id))) return false;\n  const website = host(s.website_url);\n  // A saved provider id does not override a conflicting reviewed website.\n  if (s.rivaliq_company_id != null && String(c.id) !== String(s.rivaliq_company_id)) return false;\n  return website ? host(c.url) === website : normalizedName(c.name) === normalizedName(s.name);\n}));\nconst selectionFits = l => {\n  const matches = selectedMatchesIn(l);\n  return matches.every(a => a.length === 1) && new Set(matches.flat().map(c => String(c.id))).size === selected.length;\n};\nlet match;\nlet matchedBy;\nif (cfg.landscape_hint) {\n  match = list.find(l => String(l.id) === String(cfg.landscape_hint));\n  matchedBy = 'explicit id';\n} else {\n  const candidates = list.filter(l => clientMatchesIn(l).length === 1 && selectionFits(l));\n  candidates.sort((a, b) => Number(String(clientMatchesIn(b)[0].id) === String(b.focusCompanyId)) - Number(String(clientMatchesIn(a)[0].id) === String(a.focusCompanyId)));\n  match = candidates[0];\n  matchedBy = 'verified client and selected companies';\n}\nif (!match) throw new Error('LANDSCAPE_NOT_FOUND — no RivalIQ landscape tracks the client and the confirmed competitors. Connect tracking for this selection.');\nconst clientMatches = clientMatchesIn(match);\nif (clientMatches.length !== 1) throw new Error('CLIENT_IDENTITY_UNVERIFIED — the selected landscape does not uniquely track the client website.');\nif (!selectionFits(match)) throw new Error('TRACKING_SELECTION_MISMATCH — the selected landscape must track every confirmed competitor with the reviewed website exactly once.');\nconst companies = (match.companies || []).map((c) => ({\n  id: c.id,\n  name: c.name,\n  url: c.url || null,\n  is_focus: String(c.id) === String(match.focusCompanyId),\n  handles: {\n    instagram: c.instagram ? c.instagram.handle : null,\n    facebook: c.facebook ? c.facebook.handle : null,\n    tiktok: c.tikTok ? c.tikTok.handle : null,\n    twitter: c.twitter ? c.twitter.handle : null,\n    youtube: c.youTube ? c.youTube.url : null,\n    linkedin: c.linkedin ? c.linkedin.handle : null\n  }\n}));\nreturn [{ json: { landscape_id: match.id, landscape_name: match.name, matched_by: matchedBy, focus_company_id: match.focusCompanyId, client_company_id: clientMatches[0].id, companies } }];\n"
+    },
+    {
+      "type": "setNodeSettings",
+      "nodeName": "Mark Report Complete",
+      "settings": {
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 3000
+      }
+    }
+  ]
+}

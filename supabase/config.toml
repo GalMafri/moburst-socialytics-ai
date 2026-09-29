@@ -153,3 +153,6 @@ verify_jwt = false
 
 [functions.plan-social-creative]
 verify_jwt = false
+
+[functions.rivaliq-request]
+verify_jwt = false

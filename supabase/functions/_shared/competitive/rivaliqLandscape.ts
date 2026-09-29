@@ -76,10 +76,28 @@ export function companyToHandles(company: RivalIqCompany): HandleOut[] {
   return out;
 }
 
+/** Match full hostnames. A brand stem or substring is not a company identity. */
+export function companyHost(value: string | null | undefined): string {
+  const raw = String(value || "").trim();
+  if (!raw || /\s/.test(raw)) return "";
+  try {
+    const url = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return url.hostname.includes(".") ? url.hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "") : "";
+  } catch { return ""; }
+}
+
+function companyName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+    .replace(/(?:\s+(?:inc|incorporated|ltd|limited|llc|llp|plc|corp|corporation))+$/, "").trim();
+}
 function namesOverlap(a: string, b: string): boolean {
-  const x = a.toLowerCase().trim();
-  const y = b.toLowerCase().trim();
-  return !!x && !!y && (x.includes(y) || y.includes(x));
+  return !!companyName(a) && companyName(a) === companyName(b);
+}
+
+export function matchingClientCompanies(companies: RivalIqCompany[], name: string, website?: string | null): RivalIqCompany[] {
+  const host = companyHost(website) || companyHost(name);
+  if (host) return companies.filter(c => companyHost(c.url) === host);
+  return companies.filter(c => namesOverlap(String(c.name || ""), name));
 }
 
 /**
@@ -151,21 +169,13 @@ export function summarizeLandscape(
   const companies = landscape.companies || [];
   const focus = companies.find((c) => String(c.id) === String(landscape.focusCompanyId ?? ""));
   const focusName = focus?.name || null;
-  const clientStem = domainStem(clientWebsite) || domainStem(clientName);
-  const focusStem = domainStem(focus?.url) || domainStem(focusName);
-  const clientCompanies = companies.filter((c) =>
-    (!!clientStem && domainStem(c.url) === clientStem) || namesOverlap(String(c.name || ""), clientName)
-  );
+  const clientCompanies = matchingClientCompanies(companies, clientName, clientWebsite);
   const uniqueClient = clientCompanies.length === 1 ? clientCompanies[0] : null;
-  let matchReason: string | null = null;
-  if (!!focusName && namesOverlap(focusName, clientName)) matchReason = "focus company";
-  else if (!!clientStem && clientStem === focusStem) matchReason = "website";
-  else if (
-    companies.some((c) => (!!clientStem && domainStem(c.url) === clientStem) || namesOverlap(String(c.name || ""), clientName))
-  ) {
-    // The client is in the landscape but is not its focus company. Still theirs.
-    matchReason = "client is in the set";
-  }
+  const isFocus = uniqueClient && String(uniqueClient.id) === String(focus?.id);
+  const matchReason = uniqueClient
+    ? isFocus ? namesOverlap(String(uniqueClient.name || ""), clientName) ? "focus company" : "website"
+      : "client is in the set"
+    : null;
   return {
     id: String(landscape.id),
     name: String(landscape.name || landscape.id),

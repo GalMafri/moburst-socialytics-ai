@@ -5,6 +5,7 @@ import { competitiveReportQuality } from "../../supabase/functions/_shared/compe
 
 import { useNavigate, useParams } from "react-router-dom";
 import { canRetry, retryLabel } from "@/lib/reportRun";
+import { competitiveFailureMessage } from "@/lib/competitiveFlow";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -110,11 +111,11 @@ export default function CompetitiveReportHistory() {
                         <TableCell className="t-secondary">
                           {period}
                           {!held && r.status === "failed" && rd.error && (
-                            <span className="block t-label text-destructive break-words">{String(rd.error)}</span>
+                            <span className="block t-label text-destructive break-words">{competitiveFailureMessage(rd)}</span>
                           )}
                         </TableCell>
                         <TableCell className="t-secondary">{rd.landscape?.name || "—"}</TableCell>
-                        <TableCell className="t-secondary">{r.duration_minutes ? `${r.duration_minutes}m` : "—"}</TableCell>
+                        <TableCell className="t-secondary">{!running && r.duration_minutes ? `${r.duration_minutes}m` : "—"}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             {!running && (

@@ -216,7 +216,8 @@ Deno.serve(async (req) => {
           .in("status", ["confirmed", "analyzing", "complete", "failed"]).order("confirmed_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
           if (!set) { await waitForDependency("Waiting for a confirmed competitor set; paired social report is held."); continue; }
           if (dryRun) { results.push({ client: client.name, kind: "competitive", status: "would run", range }); continue; }
-          const { data: report, error: repErr } = await supabase.from("competitive_reports").insert({ client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: schedule.created_by }).select("id").single();
+          const attemptStartedAt = new Date().toISOString();
+          const { data: report, error: repErr } = await supabase.from("competitive_reports").insert({ created_at: attemptStartedAt, client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: schedule.created_by }).select("id").single();
           if (repErr) throw repErr;
           openReport = { table: "competitive_reports", id: report.id };
           openSetId = set.id;
@@ -226,7 +227,7 @@ Deno.serve(async (req) => {
             .lte("next_run_at", now.toISOString()).is("pending_competitive_report_id", null).throwOnError();
           await supabase.from("competitor_sets").update({ status: "analyzing" }).eq("id", set.id).in("status", ["confirmed", "complete", "failed"]);
           const payload = await buildCompetitivePayload({
-            supabase, client, reportId: report.id, set, range,
+            supabase, client, reportId: report.id, set, range, attemptStartedAt,
             scheduled: true, staggerSeconds: competitiveIndex++ * 150,
           });
           const r = await fetch(competitiveUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret }, body: JSON.stringify(payload) });

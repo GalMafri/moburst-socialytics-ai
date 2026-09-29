@@ -28,6 +28,6 @@ const reportData = sanitize(normalizedCompetitiveMetrics({
   generated_at: new Date().toISOString(),
   schema_note: aggregates.schema_note || ""
 }));
-const body = { op: "report", report_id: cfg.report_id, status: "complete", report_data: JSON.parse(JSON.stringify(reportData)), duration_minutes: durationMinutes };
+const body = { op: "report", report_id: cfg.report_id, attempt_started_at: cfg.attempt_started_at, status: "complete", report_data: JSON.parse(JSON.stringify(reportData)), duration_minutes: durationMinutes };
 const bodyString = JSON.stringify(body);
 return [{ json: { report_id: cfg.report_id, status: "complete", duration_minutes: durationMinutes, body_bytes: bodyString.length, body_string: bodyString } }];

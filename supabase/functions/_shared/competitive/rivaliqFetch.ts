@@ -1,9 +1,10 @@
+import { coordinatedRivalIqFetch } from './rivaliqConnection.ts';
 /** Bounded backoff for RivalIQ reads. Never replay a provider mutation. */
 export async function rivalIqFetch(
   url: string, init: RequestInit = {},
   runtime: { fetch?: typeof fetch; sleep?: (ms: number) => Promise<void>; now?: () => number; random?: () => number } = {},
 ): Promise<Response> {
-  const send = runtime.fetch || fetch;
+  const send = runtime.fetch || coordinatedRivalIqFetch;
   const sleep = runtime.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
   const now = runtime.now || Date.now;
   const random = runtime.random || Math.random;
