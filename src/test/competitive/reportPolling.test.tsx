@@ -70,9 +70,9 @@ it('explains a source wait and unlocks retry when its guard expires without relo
  expect(screen.getByText(/RivalIQ had not finished collecting/)).toBeInTheDocument();
  expect(screen.getByRole('button',{name:'Review tracked profiles'})).toBeInTheDocument();
  expect(screen.getByRole('status')).toHaveTextContent('Retry becomes available at');
- expect(screen.queryByRole('button',{name:'Retry',exact:true})).toBeNull();
+ expect(screen.queryByRole('button',{name:'Retry'})).toBeNull();
  await tick(61000);
- expect(screen.getByRole('button',{name:'Retry',exact:true})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Retry'})).toBeInTheDocument();
  expect(screen.queryByRole('status')).toBeNull();
 });
 it('keeps a withheld analysis out of the analytics summary and monthly-report context', async () => {

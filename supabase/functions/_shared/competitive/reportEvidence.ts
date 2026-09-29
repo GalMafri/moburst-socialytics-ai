@@ -16,7 +16,7 @@ export function sourceCompetitiveSummary(report: Record<string, any>): string | 
   if (valid(m.audience?.current)) lines.push(`Audience: ${fmt(m.audience.current)} followers across tracked networks${valid(m.audience.previous) ? `, ${m.audience.current >= m.audience.previous ? "up" : "down"} ${fmt(Math.abs(m.audience.current - m.audience.previous))} from the previous period` : ""}.`);
   const rivals = companies.filter((c: any) => !c.is_client && valid(c.rivaliq_metrics?.posts?.current));
   const leader = [...rivals].sort((a: any, b: any) => b.rivaliq_metrics.posts.current - a.rivaliq_metrics.posts.current)[0];
-  if (leader) lines.push(`Peer activity: ${fmt(leader.rivaliq_metrics.posts.current)} tracked posts makes ${leader.name} ${rivals.length > 1 ? "a publishing-volume leader among the selected competitors" : "the selected publishing comparison"} for this period.`);
+  if (leader?.rivaliq_metrics.posts.current > 0) lines.push(`Peer activity: ${fmt(leader.rivaliq_metrics.posts.current)} tracked posts makes ${leader.name} ${rivals.length > 1 ? "a publishing-volume leader among the selected competitors" : "the selected publishing comparison"} for this period.`);
   return lines.join("\n\n");
 }
 
@@ -41,6 +41,26 @@ export function withCompetitiveEvidenceLimits<T>(input: T): T {
   }
   const companies = report.aggregates?.companies;
   if (!Array.isArray(companies)) return report as T;
+  if (report.aggregates?.metric_semantics_version >= 3) {
+    const client = companies.find(c => c.is_client);
+    const observed = (c: any, platform?: string) => {
+      const key = platform === 'x' ? 'twitter' : platform;
+      const bucket = key ? c?.by_channel?.[key] || (key === 'twitter' ? c?.by_channel?.x : null) : c;
+      return bucket?.observed_post_count ?? bucket?.post_count;
+    };
+    const ai = { ...(report.ai_analysis || {}) };
+    if (Array.isArray(ai.gaps_for_client)) ai.gaps_for_client = ai.gaps_for_client.filter((gap: any) => {
+      const platform = gap.platform && gap.platform !== 'all' ? gap.platform : undefined;
+      return observed(client, platform) > 0 && companies.some(c => !c.is_client && observed(c, platform) > 0);
+    });
+    if (observed(client) < 5) {
+      ai.recommended_schedule = null;
+      ai.benchmark_scorecard = { ...(ai.benchmark_scorecard || {}), client_score: null };
+    }
+    // Frequency counts do not establish audience availability or reduced competition.
+    if (ai.posting_time_insights) ai.posting_time_insights = { ...ai.posting_time_insights, empty_airtime: null };
+    report = { ...report, ai_analysis: ai };
+  }
   const empty = companies.filter(c => (c.observed_post_count ?? c.post_count) === 0);
   const mismatches = companies.filter(c => Number.isFinite(c.post_count) &&
     Number.isFinite(c.rivaliq_metrics?.posts?.current) && c.post_count !== c.rivaliq_metrics.posts.current);

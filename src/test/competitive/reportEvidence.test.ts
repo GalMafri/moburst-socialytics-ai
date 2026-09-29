@@ -105,3 +105,18 @@ it('withholds contradictory or invalid AI schedules without changing the source 
  const valid={ai_analysis:{recommended_schedule:{by_weekday:{Mon:2,Tue:1},by_hour:{'12':2,'18':1}}}};
  expect(withCompetitiveEvidenceLimits(valid)).toEqual(valid);
 });
+
+it('limits suggested tests to observed client and competitor channels and withholds a strategy score for tiny samples', () => {
+ const input={aggregates:{metric_semantics_version:3,companies:[
+  {name:'Client',is_client:true,post_count:2,observed_post_count:2,by_channel:{instagram:{post_count:2},facebook:{post_count:0}}},
+  {name:'Rival',post_count:17,by_channel:{instagram:{post_count:2},facebook:{post_count:14},youtube:{post_count:1}}},
+ ]},ai_analysis:{gaps_for_client:[{gap:'Test Instagram',platform:'instagram'},{gap:'No Facebook',platform:'facebook'},{gap:'No YouTube',platform:'youtube'}],recommended_schedule:{by_weekday:{Mon:6},by_hour:{'12':6}},benchmark_scorecard:{client_score:6.4,dimensions:[{dimension:'Audience',client:9000}]},posting_time_insights:{summary:'Observed weekday clusters',empty_airtime:'Less competition on weekends'}}};
+ const result=withCompetitiveEvidenceLimits(input);
+ expect(result.ai_analysis.gaps_for_client).toEqual([input.ai_analysis.gaps_for_client[0]]);
+ expect(result.ai_analysis.recommended_schedule).toBeNull();
+ expect(result.ai_analysis.benchmark_scorecard.client_score).toBeNull();
+ expect(result.ai_analysis.benchmark_scorecard.dimensions).toEqual(input.ai_analysis.benchmark_scorecard.dimensions);
+ expect(result.ai_analysis.posting_time_insights.empty_airtime).toBeNull();
+ expect(result.aggregates).toEqual(input.aggregates);
+ expect(withCompetitiveEvidenceLimits(result)).toEqual(result);
+});
