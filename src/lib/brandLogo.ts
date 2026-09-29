@@ -5,8 +5,8 @@ import type {ProductionPlan} from './creativeProduction';
 export function sourceLogo(image:HTMLImageElement,box:NonNullable<ProductionPlan['logo']>):HTMLCanvasElement {
   // Vision bounds are approximate. Include a safety margin, then trim the
   // transparent backdrop; this retains low wordmark baselines and icon tips.
-  const x=Math.max(0,box.x-0.04),y=Math.max(0,box.y-0.04);
-  const width=Math.min(1,box.x+box.width+0.04)-x,height=Math.min(1,box.y+box.height+0.04)-y;
+  const x=Math.max(0,box.x-0.08),y=Math.max(0,box.y-0.08);
+  const width=Math.min(1,box.x+box.width+0.08)-x,height=Math.min(1,box.y+box.height+0.08)-y;
   const c=document.createElement('canvas');
   c.width=Math.max(1,Math.round(width*image.naturalWidth)); c.height=Math.max(1,Math.round(height*image.naturalHeight));
   const ctx=c.getContext('2d')!;

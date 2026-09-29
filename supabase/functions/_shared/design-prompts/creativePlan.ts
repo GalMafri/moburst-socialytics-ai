@@ -72,9 +72,9 @@ export function creativeImagePrompt(plan: CreativePlan, index: number, correctio
 export function creativeVideoPrompt(plan: CreativePlan): string {
   return [
     'Produce a 12-second film with three distinct shots and purposeful subject movement. The attached real client posts are STYLE REFERENCES only. Do not animate those cards, hold a poster, zoom a still, or turn them into a slideshow. Create a new moving scene for each shot.',
-    `Use the photographic/illustration treatment, palette and lighting visibly supported by these references: ${plan.brand_system}`,
-    ...plan.frames.map((f, i) => `SHOT ${i + 1}, ${i * 4}-${(i + 1) * 4}s: ${f.subject}. ACTION: ${f.action}. CAMERA/COMPOSITION: ${f.composition}.`),
+    `Use the photographic/illustration treatment, palette, materials, visual effects and lighting visibly supported by the ACTUAL attached references. This description is secondary evidence; ignore all static card, logo and text-layout directions in it: ${plan.brand_system}`,
+    ...plan.frames.map((f, i) => `SHOT ${i + 1}, ${i * 4}-${(i + 1) * 4}s: ${f.subject}. ACTION: ${f.action}. `),
     'Cut between the three different shots at 4 and 8 seconds. Show visible action throughout each shot, with depth and temporal progression. No repeated opening frame. No static headline cards, frozen posters or crossfades between still images.',
-    'Render no lettering, subtitles, numbers, logos, watermarks, interfaces or text containers. The application adds exact timed typography and the authentic client logo afterwards. Keep the lower quarter relatively calm for that typography. No invented claims, portraits or testimonials.',
+    'Render no lettering, subtitles, numbers, logos, watermarks, interfaces or text containers. The application adds exact timed typography and the authentic client logo afterwards. Keep the lower quarter relatively calm for that typography. Never use a client logo, icon or wordmark as a 3-D scene subject. No invented claims, portraits or testimonials.',
   ].join('\n\n');
 }
