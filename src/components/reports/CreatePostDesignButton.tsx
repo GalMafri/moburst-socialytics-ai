@@ -129,6 +129,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const effectiveDesignReferences = clientContext?.design_references ?? designReferences ?? [];
   const effectiveBrandBookFilePath = clientContext?.brand_book_file_path ?? brandBookFilePath ?? null;
   const isCarousel = isCarouselFormat(post.format);
+  const usesSocialTemplate = !isCarousel && clientContext?.design_style_synthesis?.reference_pipeline_version === 1;
   const footingWarning = brandWarning(clientContext);
   const generation = useGenerationContext();
   const [open, setOpen] = useState(false);
@@ -203,7 +204,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
   const runStages = isCarousel
     ? ["Reading the brief and the brand", "Splitting the story into slides", "Painting the slides", "Brand review", "Saving"]
-    : ["Reading the brief and the brand", `Painting ${variantCount} variants`, "Brand review", "Saving"];
+    : usesSocialTemplate
+      ? ["Finding a matching client post", "Replacing campaign text", "Comparing with the original", "Saving"]
+      : ["Reading the brief and the brand", `Painting ${variantCount} variants`, "Brand review", "Saving"];
 
   // Fetches the 6 creative angles from the propose-design-angles edge function.
   // Angles are a bonus, never a gate: if the suggestion call takes longer
@@ -245,7 +248,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     setLoading(true);
     setStage(0);
     setStartedAt(Date.now());
-    const picked = angles.length > 0 ? angles : await fetchAngles();
+    const picked = usesSocialTemplate ? [] : angles.length > 0 ? angles : await fetchAngles();
     await generateImages(undefined, picked);
   };
 
@@ -889,7 +892,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             <DialogDescription>
               {isCarousel
                 ? "Slides in the client's design system, from this post's brief."
-                : "Designs in the client's design system, from this post's brief. Tap the ones to keep."}
+                : usesSocialTemplate ? "Adapted from the client’s actual social artwork. Original branding and imagery are preserved; campaign text is replaced." : "Designs in the client's design system, from this post's brief. Tap the ones to keep."}
             </DialogDescription>
           </DialogHeader>
 
@@ -903,7 +906,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             )}
 
             {/* Brand context indicator */}
-            {brandColors.length > 0 && (
+            {!usesSocialTemplate && brandColors.length > 0 && (
               <div className="flex items-center gap-3 t-secondary rounded-lg bg-[rgba(255,255,255,0.03)] px-3 py-2">
                 <span className="font-medium">Brand:</span>
                 <div className="flex items-center gap-1.5">
@@ -1052,7 +1055,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
                 {/* Everything that used to stand between the person and the
                     first design. Here, after it, with the result in view. */}
-                <details className="glass-inner p-3">
+                {!usesSocialTemplate && <details className="glass-inner p-3">
                   <summary className="t-body text-white cursor-pointer">Change the brief, the angle or the count</summary>
                   <div className="mt-3 space-y-4">
                     <div className="flex items-center gap-2">
@@ -1121,7 +1124,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                       <Paintbrush className="h-4 w-4 mr-1" /> Generate with these
                     </Button>
                   </div>
-                </details>
+                </details>}
 
                 <div className="flex flex-wrap gap-2">
                   {/* Favorites action — non-carousel only */}
