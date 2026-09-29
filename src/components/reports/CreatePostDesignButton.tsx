@@ -1,3 +1,4 @@
+import { applyReferenceTemplate } from "@/lib/referenceTemplate";
 import { describeInvokeError } from "@/lib/invokeError";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -446,6 +447,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.image_url) {
         let dataUrl = r.value.data.image_url;
         let referencePath = r.value.data.reference_path;
+        let sourcePreview = r.value.data.reference_preview_url;
+        let templateRegions = r.value.data.template_regions;
         if (r.value.data.reference_preview_url) setReferencePreviews(prev => ({...prev, [i]: r.value.data.reference_preview_url}));
         // Single designs get the same review the carousel slides get: an
         // invented wordmark or broken lettering on a client's post is worse
@@ -453,6 +456,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         // Failed or unavailable review must not become a selectable saved design.
         let flag = "";
         try {
+          if (clientContext?.design_style_synthesis?.reference_pipeline_version === 1 && (!templateRegions?.length || !sourcePreview)) throw new Error("Client template was not supplied; design withheld.");
+          if (templateRegions?.length && sourcePreview) dataUrl = await applyReferenceTemplate(sourcePreview, dataUrl, templateRegions);
           // Up to two regenerations: a smeared word or a stray letterform
           // sometimes survives the first correction, and a third image is
           // cheaper than a client seeing either.
@@ -479,6 +484,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             if (!retry?.image_url) break;
             dataUrl = retry.image_url;
             referencePath = retry.reference_path || referencePath;
+            sourcePreview = retry.reference_preview_url || sourcePreview;
+            templateRegions = retry.template_regions || templateRegions;
+            if (templateRegions?.length && sourcePreview) dataUrl = await applyReferenceTemplate(sourcePreview, dataUrl, templateRegions);
             verdict = (await supabase.functions.invoke("validate-design-output", { body: { image_data: dataUrl, reference_path: referencePath, expected_text: modelDrawsText ? headlineFrom(post.copy) : undefined, expect_no_text: !modelDrawsText, client_id: clientId || clientContext?.client_id || undefined } })).data;
           }
           if (!verdict || verdict.skipped || verdict.error || verdictIsDirty(verdict, { expectNoText: !modelDrawsText })) {
@@ -1026,7 +1034,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
                 {Object.keys(referencePreviews).length > 0 && (
                   <div className="space-y-2">
-                    <p className="t-secondary">Source designs from this client’s social posts</p>
+                    <p className="t-secondary">Original client designs · artwork preserved, campaign text replaced</p>
                     <div className="flex gap-3">
                       {Object.entries(referencePreviews).map(([index, url]) => (
                         <figure key={index} className="w-40">

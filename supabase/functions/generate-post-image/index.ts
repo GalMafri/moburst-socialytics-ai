@@ -1,4 +1,4 @@
-import { directFromReference, referenceRenderPrompt } from "../_shared/design-prompts/referenceDirection.ts";
+import { selectReferenceTemplate, templateEditPrompt, type ReferenceTemplate } from "../_shared/design-prompts/referenceTemplate.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
@@ -249,7 +249,7 @@ Deno.serve(async (req) => {
     }
 
     // ── Build the design prompt ──
-    const aspectRatio = imageAspectRatio(platform, format);
+    let aspectRatio = imageAspectRatio(platform, format);
     // Rules learned from this client's rejected designs, if any.
     const learnings = await loadDesignLearnings(brandDb, client_id || client_context?.client_id);
     let designPrompt = buildImagePrompt({
@@ -270,13 +270,14 @@ Deno.serve(async (req) => {
       variantAngle: variant_angle || null,
     });
 
-    let referenceDirection: { path: string; brief: string } | null = null;
+    let referenceDirection: ReferenceTemplate | null = null;
     if (resolvedSynthesis?.reference_pipeline_version === 1 && post?.copy && !slide_context && render_text !== false) {
       const key = Deno.env.get("ANTHROPIC_API_KEY");
       if (!key || !resolvedRefs.length) throw new Error("Reference art direction is unavailable; no generic design was generated.");
-      referenceDirection = await directFromReference({db: brandDb, paths: resolvedRefs, preferredPath: reference_path, copy: post.copy, aspect: aspectRatio, apiKey: key});
+      referenceDirection = await selectReferenceTemplate({db: brandDb, paths: resolvedRefs, preferredPath: reference_path, copy: post.copy, apiKey: key});
       resolvedRefs = [referenceDirection.path];
-      designPrompt = referenceRenderPrompt(referenceDirection, post.copy, prompt);
+      designPrompt = templateEditPrompt(referenceDirection, post.copy, prompt);
+      aspectRatio = referenceDirection.aspect;
     }
     console.log("[generate-post-image] prompt (first 2000 chars):", designPrompt.slice(0, 2000));
     console.log("[generate-post-image] prompt total length:", designPrompt.length);
@@ -545,6 +546,7 @@ Deno.serve(async (req) => {
       image_url: imageUrl,
       reference_preview_url: sourcePreview?.data?.signedUrl || null,
       reference_path: referenceDirection?.path || null,
+      template_regions: referenceDirection?.regions || null,
       revised_prompt: textResponse,
       // Diagnostics so the frontend can show "this slide was auto-fixed" etc.
       was_retried: wasRetried,
