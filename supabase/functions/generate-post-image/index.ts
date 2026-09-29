@@ -1,3 +1,4 @@
+import {startImageWithHiggsfield} from "../_shared/higgsfield/startImage.ts";
 import { loadCreativePlan } from "../_shared/design-prompts/loadCreativePlan.ts";
 import { creativeImagePrompt } from "../_shared/design-prompts/creativePlan.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -229,6 +230,26 @@ Deno.serve(async (req) => {
 
     const backend = await mediaBackendFor(brandDb, client_id || client_context?.client_id);
     console.log("[generate-post-image] backend:", backend);
+    if(creative && backend==='higgsfield') {
+      const attempt=creative_correction?1:0;
+      const key={creative_plan_id:creative.id,creative_frame_index,creative_attempt:attempt};
+      const {data:existing}=await brandDb.from('media_jobs').select('id,status').eq('client_id',resolvedClientId).contains('input',key).maybeSingle();
+      if(existing) return jsonResp({job_id:existing.id,status:existing.status,rendered_by:'reference_creative'},202);
+      const {data:row,error}=await brandDb.from('media_jobs').insert({client_id:resolvedClientId,kind:'image',provider:'higgsfield',created_by:(await requireStaff(req)).userId,status:'pending',input:key}).select('id').single();
+      if(error) throw new Error('The image job could not be reserved. Reopen the design to resume it.');
+      try {
+        const {referenceUrls}=await resolveContextImageUrls({design_references:resolvedRefs},brandDb);
+        if(referenceUrls.length!==resolvedRefs.length) throw new Error('The selected client references could not be opened.');
+        const started=await startImageWithHiggsfield(brandDb,creativeImagePrompt(creative.plan,creative_frame_index,typeof creative_correction==='string'?creative_correction:''),imageAspectRatio(platform,format),referenceUrls);
+        const {error:recordError}=await brandDb.from('media_jobs').update({request_id:started.jobId,model_path:started.model,status:'submitted'}).eq('id',row.id);
+        if(recordError) throw new Error(`Image submitted as ${started.jobId} but recording failed. Do not resubmit.`);
+      } catch(error) {
+        await brandDb.from('media_jobs').update({status:'failed',error:error instanceof Error?error.message:'Image submission unavailable'}).eq('id',row.id);
+        throw error;
+      }
+      return jsonResp({job_id:row.id,status:'running',rendered_by:'reference_creative'},202);
+    }
+
 
     // ── Get Gemini API key (try env, then app_settings) ──
     let geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_AI_API_KEY");

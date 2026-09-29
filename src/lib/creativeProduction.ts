@@ -29,11 +29,27 @@ export async function reviewCreative(image:string,plan:ProductionPlan,index:numb
   if(error||!data||data.skipped||data.error) throw new CreativeReviewError(`The brand review is unavailable. ${data?.reason || (error ? await describeInvokeError(error,data) : '')} This design was withheld.`,image);
   return data;
 }
-export async function renderCreative(plan:ProductionPlan,index:number,clientId:string,post:{copy?:string;platform?:string;format?:string}):Promise<string> {
+export async function renderCreative(plan:ProductionPlan,index:number,clientId:string,post:{copy?:string;platform?:string;format?:string},isCancelled=()=>false):Promise<string> {
   let correction='';
   for(let pass=0;pass<2;pass++) {
-    const {data,error}=await supabase.functions.invoke('generate-post-image',{body:{client_id:clientId,creative_plan_id:plan.id,creative_frame_index:index,creative_correction:correction,post:{copy:post.copy},platform:post.platform,format:post.format,render_text:true}});
+    let {data,error}=await supabase.functions.invoke('generate-post-image',{body:{client_id:clientId,creative_plan_id:plan.id,creative_frame_index:index,creative_correction:correction,post:{copy:post.copy},platform:post.platform,format:post.format,render_text:true}});
     if(error||data?.error) throw new Error(await describeInvokeError(error,data));
+    if(data?.job_id) {
+      const jobId=data.job_id,deadline=Date.now()+20*60*1000;
+      let imageUrl:string|undefined;
+      while(Date.now()<deadline) {
+        if(isCancelled()) throw new Error("Image review cancelled; the submitted job can be resumed later.");
+        await new Promise(r=>setTimeout(r,8000));
+        const result=await supabase.functions.invoke('media-job-status',{body:{job_id:jobId}});
+        if(result.error||!result.data) continue;
+        if(result.data.status==='failed') throw new Error(result.data.error||'Image rendering failed.');
+        if(result.data.status==='completed'&&result.data.image_url) {imageUrl=result.data.image_url;break;}
+      }
+      if(!imageUrl) throw new Error('This design is still queued. Reopen it to resume the existing job; no new generation is needed.');
+      const stored=await supabase.functions.invoke('upload-generated-media',{body:{client_id:clientId,media_data:imageUrl,media_type:'image',file_name:`creative-${plan.id}-${index}-${pass}`}});
+      if(stored.error||!stored.data?.url) throw new Error('The rendered design could not be stored. Reopen it to recover this job.');
+      data={rendered_by:'reference_creative',image_url:stored.data.url};
+    }
     if(data?.rendered_by!=='reference_creative'||!data.image_url) throw new Error('A new reference-backed design was not returned.');
     const verdict=await reviewCreative(data.image_url,plan,index,clientId);
     if(!verdictIsDirty(verdict)) return data.image_url;

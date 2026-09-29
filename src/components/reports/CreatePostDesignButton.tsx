@@ -268,6 +268,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // Upload a base64 image URL to Supabase storage, return a public URL.
   const uploadVariantToStorage = async (dataUrl: string, idx: number, strict = false): Promise<string> => {
     try {
+      if(strict && dataUrl.startsWith(supabase.storage.from("generated-media").getPublicUrl("").data.publicUrl)) return dataUrl;
       const res = await fetch(dataUrl);
       const blob = await res.blob();
       const path = `${clientId || "unknown"}/${Date.now()}-variant-${idx}.png`;
@@ -297,7 +298,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       );
       return;
     }
-    const { error } = await supabase.from("post_iterations").insert({
+    const { data: savedIteration, error } = await supabase.from("post_iterations").insert({
       client_id: clientId,
       platform: post.platform || null,
       post_copy: postCopyOf(post) || null,
@@ -308,12 +309,13 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       variant_group_id: groupId,
       variant_angle: angle || null,
       is_selected: isSelected,
-    } as any);
+    } as any).select("id").single();
     if (error) {
       console.error("[CreatePostDesignButton] persistVariantRow failed:", error);
       sonnerToast.error(`Failed to save variant: ${error.message}`);
       throw error;
     }
+    return savedIteration?.id;
   };
 
   // Toggle a variant's favorite state.
@@ -584,7 +586,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       for(let i=0;i<count;i++) {
         if(cancelRef.current) return;
         setCurrentSlide(i+1); setStage(1);
-        const image=await renderCreative(plan,i,id,brief);
+        const image=await renderCreative(plan,i,id,brief,()=>cancelRef.current);
         if(cancelRef.current) return;
         setStage(2);
         images.push(await uploadVariantToStorage(image,i,true));
@@ -593,11 +595,15 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       if(cancelRef.current) return;
       setStage(3);
       if(isCarousel) {
-        const {error}=await supabase.from('post_iterations').insert({client_id:id,platform:post.platform||null,post_copy:postCopyOf(post),visual_direction:post.visual_direction||null,format:post.format||null,source:'calendar',media_urls:images,variant_group_id:groupId,variant_angle:`Reference creative ${plan.id}`,is_selected:true});
+        const {data:iteration,error}=await supabase.from('post_iterations').insert({client_id:id,platform:post.platform||null,post_copy:postCopyOf(post),visual_direction:post.visual_direction||null,format:post.format||null,source:'calendar',media_urls:images,variant_group_id:groupId,variant_angle:`Reference creative ${plan.id}`,is_selected:true}).select("id").single();
         if(error) throw error;
+        await supabase.from("media_jobs").update({post_iteration_id:iteration.id}).eq("client_id",id).contains("input",{creative_plan_id:plan.id});
         onImagesGenerated?.(images);
       } else {
-        for(let i=0;i<images.length;i++) await persistVariantRow(images[i],`Reference creative ${plan.id}: ${plan.frames[i].subject}`,groupId,false);
+        for(let i=0;i<images.length;i++) {
+          const iterationId=await persistVariantRow(images[i],`Reference creative ${plan.id}: ${plan.frames[i].subject}`,groupId,false);
+          if(iterationId) await supabase.from("media_jobs").update({post_iteration_id:iterationId}).eq("client_id",id).contains("input",{creative_plan_id:plan.id,creative_frame_index:i});
+        }
       }
       setVariantUrls(images);
     } catch(error) {

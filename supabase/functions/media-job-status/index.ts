@@ -54,7 +54,8 @@ Deno.serve(async (req) => {
     if (TERMINAL.has(job.status)) {
       return json({
         status: job.status,
-        video_url: job.output_url,
+        video_url: job.kind === "video" ? job.output_url : null,
+        image_url: job.kind === "image" ? job.output_url : null,
         seed_image_url: job.seed_image_url,
         error: job.error,
       });
@@ -76,7 +77,8 @@ Deno.serve(async (req) => {
 
     return json({
       status: snapshot.status,
-      video_url: snapshot.url,
+      video_url: job.kind === "video" ? snapshot.url : null,
+      image_url: job.kind === "image" ? snapshot.url : null,
       seed_image_url: job.seed_image_url,
       error: snapshot.error,
     });

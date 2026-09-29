@@ -18,9 +18,10 @@ Deno.serve(async req => {
     const paths = referencesFor(client.design_references,client.harvested_design_references,8);
     if (paths.length < 3) throw new Error('Connect this client’s social profiles in Client Setup to discover at least three real brand references automatically.');
     // Reopening an unfinished video collects its existing paid job.
-    if(mode==='video') {
-      const {data:plans}=await db.from('creative_directions').select('*').eq('client_id',client_id).eq('mode','video').eq('post_copy',copy).eq('platform',platform).eq('format',format).order('created_at',{ascending:false}).limit(4);
+    {
+      const {data:plans}=await db.from('creative_directions').select('*').eq('client_id',client_id).eq('mode',mode).eq('post_copy',copy).eq('platform',platform).eq('format',format).order('created_at',{ascending:false}).limit(4);
       for(const prior of plans||[]) {
+        if(prior.plan?.frames?.length!==count) continue;
         const {data:pending}=await db.from('media_jobs').select('id').eq('client_id',client_id).contains('input',{creative_plan_id:prior.id}).is('post_iteration_id',null).in('status',['pending','submitted','completed']).limit(1).maybeSingle();
         if(pending && prior.reference_paths.every((p:string)=>paths.includes(p))) {
           const previews=await Promise.all(prior.reference_paths.map(async(p:string)=>{const {data,error}=await db.storage.from('design-references').createSignedUrl(p,3600);if(error) throw error;return data.signedUrl;}));
