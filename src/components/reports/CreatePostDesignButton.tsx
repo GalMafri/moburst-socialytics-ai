@@ -577,7 +577,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       const copy = await planSocialSequence(postCopyOf(post), slides, id, post.platform);
       if (cancelRef.current) return;
       setStage(1);
-      const template = await prepareSocialTemplate(postCopyOf(post), id);
+      const template = await prepareSocialTemplate(copy[0], id);
       setReferencePreviews({0: template.reference_preview_url});
       const images: string[] = [];
       for (let i = 0; i < slides; i++) {

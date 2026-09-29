@@ -52,6 +52,12 @@ export function sourceFrameBounds(imageWidth: number, imageHeight: number, width
   return {x: (width - w) / 2, y: (height - h) / 2, width: w, height: h};
 }
 
+export function sourceClipSize(imageWidth: number, imageHeight: number, vertical: boolean) {
+  if (vertical) return {width: 1080, height: 1920};
+  const scale = Math.min(1080 / imageWidth, 1920 / imageHeight);
+  return {width: Math.round(imageWidth * scale / 2) * 2, height: Math.round(imageHeight * scale / 2) * 2};
+}
+
 /** Draws one frame of the clip: the design, moved, with the next beat mixed in. */
 function paint(
   ctx: CanvasRenderingContext2D,

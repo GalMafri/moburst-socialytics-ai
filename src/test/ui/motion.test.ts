@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clipSize, sourceFrameBounds } from "@/lib/motion";
+import { clipSize, sourceFrameBounds, sourceClipSize } from "@/lib/motion";
 
 describe("clipSize", () => {
   it("gives each aspect its platform size, all even numbers", () => {
@@ -29,4 +29,10 @@ it('keeps every edge of portrait and landscape artwork inside video frames throu
       }
     }
   }
+});
+
+it('uses source proportions for feed video and vertical dimensions only for vertical formats', () => {
+  expect(sourceClipSize(1080,1350,false)).toEqual({width:1080,height:1350});
+  expect(sourceClipSize(1080,1350,true)).toEqual({width:1080,height:1920});
+  expect(sourceClipSize(1920,1080,false)).toEqual({width:1080,height:608});
 });

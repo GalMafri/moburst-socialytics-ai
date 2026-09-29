@@ -10,7 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { ClientContext } from "@/lib/clientContext";
 import { GenerationStages } from "@/components/reports/GenerationStages";
-import { clipSize, renderMotionClip } from "@/lib/motion";
+import { clipSize, renderMotionClip, sourceClipSize } from "@/lib/motion";
 import { verdictIsDirty, correctionFor, verdictSummary } from "@/lib/designGuard";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 import { brandAdviceFrom, brandWarning } from "@/lib/designGuard";
@@ -150,6 +150,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   const [variantCount, setVariantCount] = useState(usesSocialTemplate ? 1 : 2);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [sourcePreview, setSourcePreview] = useState<string | null>(null);
+  const [sourceClipAspect, setSourceClipAspect] = useState("4 / 5");
   const [angles, setAngles] = useState<Array<{ label: string; instruction: string }>>([]);
   const [selectedAngleIdxs, setSelectedAngleIdxs] = useState<number[]>([]);
   const [fetchingAngles, setFetchingAngles] = useState(false);
@@ -383,7 +384,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       if (!id) throw new Error("Choose a client before creating a clip.");
       const copy = await planSocialSequence(postCopyOf(post), 3, id, post.platform);
       if (cancelRef.current) return;
-      const template = await prepareSocialTemplate(postCopyOf(post), id);
+      const template = await prepareSocialTemplate(copy[0], id);
       setSourcePreview(template.reference_preview_url);
       setMotionStage(1);
       const frames: string[] = [];
@@ -394,7 +395,9 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       if (cancelRef.current) return;
       setMotionStage(2);
       const images = await Promise.all(frames.map(loadImage));
-      const result = await renderMotionClip({...clipSize(spec.aspect.split(" ")[0]), images, seconds: 12, preserveArtwork: true});
+      const size = sourceClipSize(images[0].naturalWidth, images[0].naturalHeight, spec.aspect.startsWith("9:16"));
+      setSourceClipAspect(`${size.width} / ${size.height}`);
+      const result = await renderMotionClip({...size, images, seconds: 12, preserveArtwork: true});
       if (cancelRef.current) return;
       if (result.mimeType !== "video/mp4") throw new Error("This browser could not encode a publishable MP4. Open the post in current Chrome and retry.");
       setMotionStage(3);
@@ -718,7 +721,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
             )}
             {/* Platform & format info */}
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge variant="outline">{spec.aspect}</Badge>
+              <Badge variant="outline">{usesSocialTemplate ? spec.aspect.startsWith("9:16") ? "9:16 · full artwork preserved" : "Original artwork proportions" : spec.aspect}</Badge>
               <Badge variant="outline">{usesSocialTemplate ? "12 seconds · 3 cards" : spec.duration}</Badge>
               {!usesSocialTemplate && brandColors.length > 0 && (
                 <div className="flex items-center gap-1 ml-auto">
@@ -786,12 +789,13 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 <p className="t-secondary">
                   Tap a variant to mark it as a favorite.
                 </p>
-                <div className="grid gap-2 grid-cols-2">
+                <div className={`grid gap-2 ${variantUrls.length === 1 ? "grid-cols-1 max-w-xs mx-auto" : "grid-cols-2"}`}>
                   {variantUrls.map((url, i) => (
                     <button
                       key={i}
                       type="button"
                       aria-label={`Favorite video ${i + 1}`}
+                      style={usesSocialTemplate ? {aspectRatio: sourceClipAspect} : undefined}
                       onClick={() => toggleFavorite(i)}
                       disabled={url === "FAILED" || url === null}
                       className={`relative ${clipTileAspect} rounded-md border overflow-hidden transition-all bg-black ${
@@ -954,15 +958,15 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                             type="button"
                             onClick={() => setPreviewSeedUrl(seedUrl)}
                             className="relative aspect-square w-16 rounded-md overflow-hidden border border-white/10 hover:border-primary/60 transition-colors"
-                            title={`Variant ${i + 1} seed image`}
+                            title={usesSocialTemplate ? `Card ${i + 1}` : `Variant ${i + 1} seed image`}
                           >
                             <img
                               src={seedUrl}
-                              alt={`Variant ${i + 1} seed`}
+                              alt={usesSocialTemplate ? `Card ${i + 1}` : `Variant ${i + 1} seed`}
                               className="w-full h-full object-cover"
                             />
                             <span className="absolute bottom-0 right-0 bg-black/70 text-white text-[12px] font-bold px-1">
-                              V{i + 1}
+                              {usesSocialTemplate ? `Card ${i + 1}` : `V${i + 1}`}
                             </span>
                           </button>
                         ) : null,
