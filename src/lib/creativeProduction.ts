@@ -1,4 +1,5 @@
 import {supabase} from '@/integrations/supabase/client';
+import {finishBrandImage} from './brandLogo';
 import {loadImage} from './composeText';
 import {describeInvokeError} from './invokeError';
 import {verdictIsDirty, verdictSummary} from './designGuard';
@@ -53,12 +54,13 @@ export async function renderCreative(plan:ProductionPlan,index:number,clientId:s
       data={rendered_by:'reference_creative',image_url:stored.data.url};
     }
     if(data?.rendered_by!=='reference_creative'||!data.image_url) throw new Error('A new reference-backed design was not returned.');
-    const verdict=await reviewCreative(data.image_url,plan,index,clientId);
-    if(!verdictIsDirty(verdict)) return data.image_url;
+    const finished=await finishBrandImage(data.image_url,plan,index);
+    const verdict=await reviewCreative(finished,plan,index,clientId);
+    if(!verdictIsDirty(verdict)) return finished;
     correction=verdictSummary(verdict);
     if(pass===1) {
       await supabase.from('media_jobs').update({status:'failed',error:`Brand review rejected the complete creative: ${correction}`}).eq('client_id',clientId).contains('input',{creative_plan_id:plan.id});
-      throw new CreativeReviewError(`Brand review rejected this design: ${correction}`,data.image_url);
+      throw new CreativeReviewError(`Brand review rejected this design: ${correction}`,finished);
     }
   }
   throw new Error('The design could not be completed.');

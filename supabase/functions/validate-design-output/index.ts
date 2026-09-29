@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
       return jsonResp({ error: "image_data is required" }, 400);
     }
 
-    let referenceImages:any[] = [], creativeText:string|undefined;
+    let referenceImages:any[] = [], creativeText:string|undefined, creativeDirection:string|undefined;
     let video = false;
     if (creative_plan_id) {
       if (!client_id) throw new Error('Client required.');
@@ -67,6 +67,7 @@ Deno.serve(async (req) => {
       if(!Number.isInteger(creative_frame_index)||!frame) throw new Error('Unknown creative scene.');
       referenceImages=await Promise.all(frame.reference_indices.map((i:number)=>sourceImage(db,creative.reference_paths[i])));
       creativeText=frame.headline; video=creative.mode==='video';
+      if(!video && frame.layout) creativeDirection=JSON.stringify({subject:frame.subject,headline_position:frame.layout.headline_position,subject_position:frame.layout.subject_position});
     }
     let referenceImage: any = null;
     if (reference_path) {
@@ -78,7 +79,7 @@ Deno.serve(async (req) => {
       referenceImage = await sourceImage(db, reference_path);
     }
     const avoid = referenceImage ? null : await antiPatternsFor(client_id);
-    const verdict = await validateDesignImage(image_data, { mediaType: media_type, avoid, referenceImage, referenceImages, creative: !!creative_plan_id, video, expectedText: creativeText || (typeof expected_text === "string" ? expected_text.slice(0, 500) : null) });
+    const verdict = await validateDesignImage(image_data, { mediaType: media_type, avoid, referenceImage, referenceImages, creative: !!creative_plan_id, video, creativeDirection, expectedText: creativeText || (typeof expected_text === "string" ? expected_text.slice(0, 500) : null) });
     // The client decides what counts; it gets the raw answers plus the two views of them.
     const dirty = verdictIsDirty(verdict, { expectNoText: expect_no_text === true });
     return jsonResp({ ...verdict, dirty, avoid: avoid || undefined });

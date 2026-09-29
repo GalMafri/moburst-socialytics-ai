@@ -1,28 +1,8 @@
 import {Muxer,ArrayBufferTarget} from 'mp4-muxer';
 import {loadImage,ensureBrandFont,brandFontStack} from './composeText';
+import {sourceLogo} from './brandLogo';
 import type {ProductionPlan} from './creativeProduction';
 
-/** Remove only the uniform edge-connected backdrop around an authentic lockup. */
-function sourceLogo(image:HTMLImageElement,box:NonNullable<ProductionPlan['logo']>):HTMLCanvasElement {
-  const c=document.createElement('canvas');
-  c.width=Math.max(1,Math.round(box.width*image.naturalWidth)); c.height=Math.max(1,Math.round(box.height*image.naturalHeight));
-  const ctx=c.getContext('2d')!;
-  ctx.drawImage(image,box.x*image.naturalWidth,box.y*image.naturalHeight,box.width*image.naturalWidth,box.height*image.naturalHeight,0,0,c.width,c.height);
-  const pixels=ctx.getImageData(0,0,c.width,c.height), d=pixels.data;
-  const bg=[d[0],d[1],d[2]];
-  const seen=new Uint8Array(c.width*c.height), stack:number[]=[];
-  for(let x=0;x<c.width;x++) stack.push(x,(c.height-1)*c.width+x);
-  for(let y=0;y<c.height;y++) stack.push(y*c.width,y*c.width+c.width-1);
-  while(stack.length) {
-    const at=stack.pop()!; if(seen[at]) continue; seen[at]=1;
-    const p=at*4;
-    if(Math.max(...bg.map((v,k)=>Math.abs(d[p+k]-v)))>48) continue;
-    d[p+3]=0;
-    const x=at%c.width,y=Math.floor(at/c.width);
-    if(x) stack.push(at-1);if(x<c.width-1) stack.push(at+1);if(y) stack.push(at-c.width);if(y<c.height-1) stack.push(at+c.width);
-  }
-  ctx.putImageData(pixels,0,0); return c;
-}
 export function captionAt(seconds:number,duration:number,count:number) {
   return Math.min(count-1,Math.max(0,Math.floor(seconds/duration*count)));
 }
