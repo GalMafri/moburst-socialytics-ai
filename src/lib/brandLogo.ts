@@ -20,7 +20,15 @@ export function sourceLogo(image:HTMLImageElement,box:NonNullable<ProductionPlan
     const x=at%c.width,y=Math.floor(at/c.width);
     if(x) stack.push(at-1);if(x<c.width-1) stack.push(at+1);if(y) stack.push(at-c.width);if(y<c.height-1) stack.push(at+c.width);
   }
-  ctx.putImageData(pixels,0,0); return c;
+  ctx.putImageData(pixels,0,0);
+  let left=c.width,top=c.height,right=-1,bottom=-1;
+  for(let y=0;y<c.height;y++) for(let x=0;x<c.width;x++) if(d[(y*c.width+x)*4+3]>16) {
+    left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);
+  }
+  if(right<left || bottom<top) throw new Error('The authentic logo crop was empty.');
+  const tight=document.createElement('canvas');tight.width=right-left+1;tight.height=bottom-top+1;
+  tight.getContext('2d')!.drawImage(c,left,top,tight.width,tight.height,0,0,tight.width,tight.height);
+  return tight;
 }
 export async function finishBrandImage(url:string,plan:ProductionPlan,index:number):Promise<string> {
   if(!plan.logo) return url;
