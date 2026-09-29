@@ -628,6 +628,53 @@ export type Database = {
           },
         ]
       }
+      creative_directions: {
+        Row: {
+          client_id: string
+          created_at: string
+          created_by: string
+          format: string | null
+          id: string
+          mode: string
+          plan: Json
+          platform: string | null
+          post_copy: string
+          reference_paths: Json
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          created_by: string
+          format?: string | null
+          id?: string
+          mode: string
+          plan: Json
+          platform?: string | null
+          post_copy: string
+          reference_paths: Json
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          created_by?: string
+          format?: string | null
+          id?: string
+          mode?: string
+          plan?: Json
+          platform?: string | null
+          post_copy?: string
+          reference_paths?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "creative_directions_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       design_learnings: {
         Row: {
           client_id: string
