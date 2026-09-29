@@ -5,6 +5,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Concurrent SSH runs share this checkout and node_modules. Serialize the
+# dependency install, build and publication without cancelling a live deploy.
+exec 9>.deploy.lock
+flock -x 9
+
 echo "==> git pull"
 git fetch --all
 git pull --ff-only origin main          # ship new commits (fails if history diverged)
@@ -13,7 +18,17 @@ echo "==> deps"
 npm ci --no-audit --no-fund
 
 echo "==> build"
-npm run build
+# Vite empties its output directory before building. Keep the currently served
+# dist intact, publish new hashed assets first, and switch index.html last.
+# Retain old hashed assets so tabs opened before this release still load them.
+next_dist="$(mktemp -d .deploy-dist.XXXXXX)"
+trap 'rm -rf -- "$next_dist"' EXIT
+npm run build -- --outDir "$next_dist"
+mkdir -p dist/assets
+cp -a "$next_dist/assets/." dist/assets/
+rsync -a --exclude=assets --exclude=index.html "$next_dist/" dist/
+cp "$next_dist/index.html" dist/index.html.next
+mv -f dist/index.html.next dist/index.html
 
 echo "==> restart forever"
 # restart if already running under this uid, else start fresh.
