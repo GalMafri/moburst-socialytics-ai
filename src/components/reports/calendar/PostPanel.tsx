@@ -270,7 +270,9 @@ export function PostPanel({
                   <p className="t-secondary">
                     {videoTiles.length > 0
                       ? "Click any video to preview at full size."
-                      : "Generate 2 to 3 video variants. Each takes about 30 to 120 seconds."}
+                      : clientContext?.design_style_synthesis?.reference_pipeline_version === 1
+                        ? "Create a 12-second clip from the client’s actual social artwork. Each card is reviewed before saving."
+                        : "Create short video drafts, then preview and choose a favorite."}
                   </p>
                 </div>
                 {isMoburstStaff && <CreatePostVideoButton

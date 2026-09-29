@@ -1,4 +1,5 @@
 import { applyReferenceTemplate } from "@/lib/referenceTemplate";
+import { planSocialSequence, prepareSocialTemplate, renderReviewedSocialFrame } from "@/lib/socialSequence";
 import { describeInvokeError } from "@/lib/invokeError";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -129,7 +130,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const effectiveDesignReferences = clientContext?.design_references ?? designReferences ?? [];
   const effectiveBrandBookFilePath = clientContext?.brand_book_file_path ?? brandBookFilePath ?? null;
   const isCarousel = isCarouselFormat(post.format);
-  const usesSocialTemplate = !isCarousel && clientContext?.design_style_synthesis?.reference_pipeline_version === 1;
+  const usesSocialTemplate = clientContext?.design_style_synthesis?.reference_pipeline_version === 1;
   const footingWarning = brandWarning(clientContext);
   const generation = useGenerationContext();
   const [open, setOpen] = useState(false);
@@ -202,7 +203,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // 9:16 reel is not cropped away by a square thumbnail.
   const tileAspect = tileAspectFor(post);
 
-  const runStages = isCarousel
+  const runStages = usesSocialTemplate && isCarousel
+    ? ["Preparing the slide copy", "Finding a matching client post", "Adapting and reviewing slides", "Saving the complete carousel"]
+    : isCarousel
     ? ["Reading the brief and the brand", "Splitting the story into slides", "Painting the slides", "Brand review", "Saving"]
     : usesSocialTemplate
       ? ["Finding a matching client post", "Replacing campaign text", "Comparing with the original", "Saving"]
@@ -367,6 +370,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
     const chosen = overrideIdxs ?? (selectedAngleIdxs.length > 0 ? selectedAngleIdxs : anglesList.map((_, i) => i).slice(0, variantCount));
 
     if (isCarousel) {
+      if (usesSocialTemplate) return runSocialCarouselGeneration(groupId);
       // Carousel path: sequential slide-by-slide generation, single variant set.
       return runCarouselGeneration(groupId);
     }
@@ -562,6 +566,46 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // pass the same multi-slide brief to N calls, Gemini happily returns a
   // contact sheet of all N slides for each call. So we first ask Claude to
   // decompose the brief into N focused per-slide briefs, then generate.
+  const runSocialCarouselGeneration = async (groupId: string) => {
+    const id = clientId || clientContext?.client_id;
+    const slides = Math.min(Math.max(slideCount, 2), 10);
+    setVariantUrls(new Array(slides).fill(null));
+    setStage(0);
+    const postKey = generation.startGeneration({post, type: "design", total: slides, variantGroupId: groupId, onCancel: () => { cancelRef.current = true; }});
+    try {
+      if (!id) throw new Error("Choose a client before creating a carousel.");
+      const copy = await planSocialSequence(postCopyOf(post), slides, id, post.platform);
+      if (cancelRef.current) return;
+      setStage(1);
+      const template = await prepareSocialTemplate(postCopyOf(post), id);
+      setReferencePreviews({0: template.reference_preview_url});
+      const images: string[] = [];
+      for (let i = 0; i < slides; i++) {
+        if (cancelRef.current) return;
+        setCurrentSlide(i + 1);
+        setStage(2);
+        const image = await renderReviewedSocialFrame(template, copy[i], id);
+        if (cancelRef.current) return;
+        images.push(await uploadVariantToStorage(image, i));
+        generation.progressGeneration(postKey);
+      }
+      if (cancelRef.current) return;
+      setStage(3);
+      const {error} = await supabase.from("post_iterations").insert({client_id: id, platform: post.platform || null, post_copy: postCopyOf(post), visual_direction: post.visual_direction || null, format: post.format || null, source: "calendar", media_urls: images, variant_group_id: groupId, variant_angle: "Actual social artwork", is_selected: true});
+      if (error) throw error;
+      setVariantUrls(images);
+      onImagesGenerated?.(images);
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "The carousel could not be completed. No partial draft was saved.");
+      setVariantUrls(new Array(slides).fill("FAILED"));
+      generation.progressGeneration(postKey, {failed: true});
+    } finally {
+      generation.completeGeneration(postKey);
+      setLoading(false);
+      setCurrentSlide(0);
+    }
+  };
+
   const runCarouselGeneration = async (groupId: string) => {
     const slides = Math.min(Math.max(slideCount, 2), 10);
     const variants = Math.min(Math.max(variantCount, 1), 3);
@@ -892,7 +936,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           <DialogHeader>
             <DialogTitle>{isCarousel ? "Carousel design" : "Post design"}</DialogTitle>
             <DialogDescription>
-              {isCarousel
+              {usesSocialTemplate ? "Adapted from the client’s actual social artwork. Original branding and imagery are preserved; campaign text is replaced." : isCarousel
                 ? "Slides in the client's design system, from this post's brief."
                 : usesSocialTemplate ? "Adapted from the client’s actual social artwork. Original branding and imagery are preserved; campaign text is replaced." : "Designs in the client's design system, from this post's brief. Tap the ones to keep."}
             </DialogDescription>
@@ -943,7 +987,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                       ? usesSocialTemplate ? "1 to 3 minutes including review" : "2 to 8 minutes including review"
                       : "2 to 3 minutes"
                 }
-                note="Brand review may regenerate a variant up to twice. You can close this dialog while it runs; keep this browser tab open."
+                note={usesSocialTemplate ? "Every frame is compared with the original. Keep this browser tab open until the complete draft is saved." : "Brand review may regenerate a variant up to twice. You can close this dialog while it runs; keep this browser tab open."}
                 done={variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
                 total={variantUrls.length}
                 failed={variantUrls.filter((u) => u === "FAILED").length}

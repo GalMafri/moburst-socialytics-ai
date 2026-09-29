@@ -23,6 +23,8 @@ export interface MotionOptions {
   fps?: number;
   /** Cross-dissolve between beats. */
   dissolveSeconds?: number;
+  /** Keep all of the actual artwork visible, including logos and borders. */
+  preserveArtwork?: boolean;
   onProgress?: (fraction: number) => void;
 }
 
@@ -44,6 +46,12 @@ function moveFor(index: number, t: number): { scale: number; dx: number; dy: num
   return { scale, dx: drift * e, dy: -drift * 0.6 * e };
 }
 
+export function sourceFrameBounds(imageWidth: number, imageHeight: number, width: number, height: number, progress: number) {
+  const scale = Math.min(width / imageWidth, height / imageHeight) * (0.96 + 0.04 * Math.max(0, Math.min(1, progress)));
+  const w = imageWidth * scale, h = imageHeight * scale;
+  return {x: (width - w) / 2, y: (height - h) / 2, width: w, height: h};
+}
+
 /** Draws one frame of the clip: the design, moved, with the next beat mixed in. */
 function paint(
   ctx: CanvasRenderingContext2D,
@@ -53,14 +61,23 @@ function paint(
   time: number,
   perBeat: number,
   dissolve: number,
+  preserveArtwork = false,
 ): void {
-  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#08090b';
+  ctx.fillRect(0, 0, width, height);
   const beat = Math.min(images.length - 1, Math.floor(time / perBeat));
   const local = (time - beat * perBeat) / perBeat;
 
   const drawBeat = (i: number, t: number, alpha: number) => {
     const img = images[i];
     if (!img || alpha <= 0) return;
+    if (preserveArtwork) {
+      const box = sourceFrameBounds(img.naturalWidth, img.naturalHeight, width, height, t);
+      ctx.save(); ctx.globalAlpha = alpha;
+      ctx.drawImage(img, box.x, box.y, box.width, box.height);
+      ctx.restore();
+      return;
+    }
     const { scale, dx, dy } = moveFor(i, Math.max(0, Math.min(1, t)));
     // Cover the canvas at this scale, centred, then nudge.
     const base = Math.max(width / img.naturalWidth, height / img.naturalHeight);
@@ -110,7 +127,7 @@ async function encodeMp4(o: Required<Omit<MotionOptions, "onProgress">> & { onPr
   const perBeat = seconds / images.length;
 
   for (let i = 0; i < total; i++) {
-    paint(ctx, images, width, height, (i / fps), perBeat, dissolveSeconds);
+    paint(ctx, images, width, height, (i / fps), perBeat, dissolveSeconds, o.preserveArtwork);
     const frame = new (globalThis as any).VideoFrame(canvas, { timestamp: (i * 1e6) / fps, duration: 1e6 / fps });
     encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
     frame.close();
@@ -148,7 +165,7 @@ async function encodeWebm(o: Required<Omit<MotionOptions, "onProgress">> & { onP
     const step = () => {
       const t = (performance.now() - started) / 1000;
       if (t >= seconds) return resolve();
-      paint(ctx, images, width, height, t, perBeat, dissolveSeconds);
+      paint(ctx, images, width, height, t, perBeat, dissolveSeconds, o.preserveArtwork);
       o.onProgress?.(t / seconds);
       requestAnimationFrame(step);
     };
@@ -168,6 +185,7 @@ export async function renderMotionClip(options: MotionOptions): Promise<MotionRe
     seconds: options.seconds ?? 6,
     fps: options.fps ?? 30,
     dissolveSeconds: options.dissolveSeconds ?? 0.6,
+    preserveArtwork: options.preserveArtwork ?? false,
     onProgress: options.onProgress,
   };
   if (!o.images.length) throw new Error("A clip needs at least one design");

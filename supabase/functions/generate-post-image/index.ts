@@ -161,8 +161,8 @@ Deno.serve(async (req) => {
       render_text,                    // false → imagery only; the app types the words on top
     } = await req.json();
 
-    if (!prompt) {
-      return jsonResp({ error: "prompt is required" }, 400);
+    if (!prompt && !post?.copy) {
+      return jsonResp({ error: "Post copy or a prompt is required" }, 400);
     }
 
     // Being staff is not the same as being allowed to spend on THIS client.
@@ -221,7 +221,7 @@ Deno.serve(async (req) => {
     // Which provider renders this. Read from the clients row, never from the
     // body: this endpoint spends the team's Higgsfield credits.
     // Actual social artwork is the canvas. This path never invokes an image generator.
-    if (resolvedSynthesis?.reference_pipeline_version === 1 && post?.copy && !slide_context && render_text !== false) {
+    if (resolvedSynthesis?.reference_pipeline_version === 1 && post?.copy && render_text !== false) {
       const key = Deno.env.get("ANTHROPIC_API_KEY");
       if (!key || !resolvedRefs.length) throw new Error("A usable client social reference is required.");
       const template = await selectReferenceTemplate({db:brandDb,paths:resolvedRefs,preferredPath:reference_path,copy:post.copy,apiKey:key});
@@ -573,4 +573,3 @@ function jsonResp(body: any, status = 200) {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
-

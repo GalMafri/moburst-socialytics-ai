@@ -17,6 +17,8 @@ import { brandAdviceFrom, brandWarning } from "@/lib/designGuard";
 import { useMediaBackend } from "@/hooks/useMediaBackend";
 import { tileAspectFor } from "@/lib/tileAspect";
 import { postCopyOf } from "@/lib/postCopy";
+import { loadImage } from "@/lib/composeText";
+import { planSocialSequence, prepareSocialTemplate, renderReviewedSocialFrame } from "@/lib/socialSequence";
 
 interface CreatePostVideoButtonProps {
   post: any;
@@ -135,6 +137,7 @@ async function invokeVideo(
 
 export function CreatePostVideoButton({ post, clientContext, brandIdentity, clientId, onVideoGenerated }: CreatePostVideoButtonProps) {
   const effectiveBrandIdentity = clientContext?.brand_identity ?? brandIdentity ?? null;
+  const usesSocialTemplate = clientContext?.design_style_synthesis?.reference_pipeline_version === 1;
   const generation = useGenerationContext();
   const footingWarning = brandWarning(clientContext);
   const [open, setOpen] = useState(false);
@@ -144,7 +147,9 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   const [prompt, setPrompt] = useState("");
   const [showTrimmer, setShowTrimmer] = useState(false);
   // Phase 7 — multi-variant state.
-  const [variantCount, setVariantCount] = useState(2);
+  const [variantCount, setVariantCount] = useState(usesSocialTemplate ? 1 : 2);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [sourcePreview, setSourcePreview] = useState<string | null>(null);
   const [angles, setAngles] = useState<Array<{ label: string; instruction: string }>>([]);
   const [selectedAngleIdxs, setSelectedAngleIdxs] = useState<number[]>([]);
   const [fetchingAngles, setFetchingAngles] = useState(false);
@@ -302,7 +307,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
     } as any);
     if (error) {
       console.error("[CreatePostVideoButton] persistVariantRow failed:", error);
-      toast.error(`Failed to save video variant: ${error.message}`);
+      throw new Error(`Failed to save video variant: ${error.message}`);
     }
   };
 
@@ -335,6 +340,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   const handleOpen = async () => {
     setOpen(true);
     if (variantUrls.length > 0 || loading || briefing) return;
+    if (usesSocialTemplate) return generateSourceMotion();
     // Opening is the decision: brief, angles and the videos follow without
     // another click. Everything adjustable waits behind the first result.
     setBriefing(true);
@@ -360,7 +366,58 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
    * it cannot drift off-brand, because nothing invents motion content: the
    * frames ARE the design.
    */
+  const generateSourceMotion = async () => {
+    const id = clientId || clientContext?.client_id;
+    const groupId = crypto.randomUUID();
+    setVariantGroupId(groupId);
+    setLoading(true);
+    setStartedAt(Date.now());
+    setMotionStage(0);
+    setGenerationError(null);
+    setVariantUrls([null]);
+    setVariantSeeds([]);
+    setFavoriteIdxs(new Set());
+    cancelRef.current = false;
+    const postKey = generation.startGeneration({post, type: "video", total: 1, variantGroupId: groupId, onCancel: () => { cancelRef.current = true; }});
+    try {
+      if (!id) throw new Error("Choose a client before creating a clip.");
+      const copy = await planSocialSequence(postCopyOf(post), 3, id, post.platform);
+      if (cancelRef.current) return;
+      const template = await prepareSocialTemplate(postCopyOf(post), id);
+      setSourcePreview(template.reference_preview_url);
+      setMotionStage(1);
+      const frames: string[] = [];
+      for (const words of copy) {
+        if (cancelRef.current) return;
+        frames.push(await renderReviewedSocialFrame(template, words, id));
+      }
+      if (cancelRef.current) return;
+      setMotionStage(2);
+      const images = await Promise.all(frames.map(loadImage));
+      const result = await renderMotionClip({...clipSize(spec.aspect.split(" ")[0]), images, seconds: 12, preserveArtwork: true});
+      if (cancelRef.current) return;
+      if (result.mimeType !== "video/mp4") throw new Error("This browser could not encode a publishable MP4. Open the post in current Chrome and retry.");
+      setMotionStage(3);
+      const path = `${id}/${Date.now()}-social-motion.mp4`;
+      const {error} = await supabase.storage.from("generated-media").upload(path, result.blob, {contentType: result.mimeType});
+      if (error) throw error;
+      const {data} = supabase.storage.from("generated-media").getPublicUrl(path);
+      await persistVariantRow(data.publicUrl, "Actual social artwork", groupId, false);
+      setVariantUrls([data.publicUrl]);
+      setVariantSeeds(frames);
+      generation.progressGeneration(postKey);
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "The source-based clip could not be completed.");
+      setVariantUrls(["FAILED"]);
+      generation.progressGeneration(postKey, {failed: true});
+    } finally {
+      generation.completeGeneration(postKey);
+      setLoading(false);
+    }
+  };
+
   const generateMotion = async (anglesList: Array<{ label: string; instruction: string }> = angles) => {
+    if (usesSocialTemplate) return generateSourceMotion();
     const count = Math.min(Math.max(variantCount, 1), 3);
     const groupId = crypto.randomUUID();
     setVariantGroupId(groupId);
@@ -479,6 +536,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
 
   /** The same brief through the next angles on the list. */
   const anotherTake = () => {
+    if (usesSocialTemplate) return void generateSourceMotion();
     if (engine === "motion") return void generateMotion();
     if (angles.length === 0) return void generateVideo();
     const n = Math.max(1, Math.min(variantCount, angles.length));
@@ -661,8 +719,8 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
             {/* Platform & format info */}
             <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="outline">{spec.aspect}</Badge>
-              <Badge variant="outline">{spec.duration}</Badge>
-              {brandColors.length > 0 && (
+              <Badge variant="outline">{usesSocialTemplate ? "12 seconds · 3 cards" : spec.duration}</Badge>
+              {!usesSocialTemplate && brandColors.length > 0 && (
                 <div className="flex items-center gap-1 ml-auto">
                   {brandColors.map((color, i) => (
                     <div
@@ -676,6 +734,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
               )}
             </div>
 
+            {generationError && <p role="alert" className="text-destructive">{generationError}</p>}
             {(loading || briefing) && (() => {
               const elapsed = startedAt ? (Date.now() - startedAt) / 1000 : 0;
               void tick;
@@ -685,7 +744,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                 <GenerationStages
                   stages={
                     motion
-                      ? ["Writing the brief", "Designing the frames", "Cutting the clip", "Saving"]
+                      ? usesSocialTemplate ? ["Preparing the card copy", "Adapting and reviewing actual artwork", "Cutting the clip", "Saving"] : ["Writing the brief", "Designing the frames", "Cutting the clip", "Saving"]
                       : [
                           "Writing the motion brief",
                           "Painting the opening frame with the headline",
@@ -708,7 +767,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                         ? "6 to 15 minutes"
                         : "3 to 5 minutes"
                   }
-                  note="You can close this window. The run continues and the card in the corner says when the clips are ready."
+                  note="You can close this dialog. Keep this browser tab open until the complete clip is saved."
                   done={variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
                   total={variantUrls.length}
                   failed={variantUrls.filter((u) => u === "FAILED").length}
@@ -732,6 +791,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                     <button
                       key={i}
                       type="button"
+                      aria-label={`Favorite video ${i + 1}`}
                       onClick={() => toggleFavorite(i)}
                       disabled={url === "FAILED" || url === null}
                       className={`relative ${clipTileAspect} rounded-md border overflow-hidden transition-all bg-black ${
@@ -750,7 +810,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                         </div>
                       )}
                       {typeof url === "string" && url !== "FAILED" && (
-                        <video src={url} className="w-full h-full object-contain" muted loop preload="metadata" />
+                        <video src={url} className="w-full h-full object-contain" controls onClick={event => event.stopPropagation()} muted loop preload="metadata" />
                       )}
                       {favoriteIdxs.has(i) && (
                         <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-1">
@@ -807,7 +867,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                   ))}
                 </div>
 
-                <details className="glass-inner p-3">
+                {!usesSocialTemplate && <details className="glass-inner p-3">
                   <summary className="t-body text-white cursor-pointer">Change the brief, the angle or the count</summary>
                   <div className="mt-3 space-y-4">
                     <div className="space-y-2">
@@ -872,7 +932,8 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                       <Video className="h-4 w-4 mr-1" /> Generate with these
                     </Button>
                   </div>
-                </details>
+                </details>}
+                {sourcePreview && <div className="space-y-2"><p className="t-secondary">Original client social artwork</p><img src={sourcePreview} alt="Original client social artwork" className="max-h-64 object-contain" /></div>}
 
                 {/* Seed images — the brand-aligned anchor frame each video
                     was animated from. Surfacing these lets the user diagnose
