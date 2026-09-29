@@ -861,7 +861,7 @@ export default function CompetitiveReportView() {
 
         {/* Posting rhythm */}
         {ordered.some((c) => bucketFor(c, effectivePlat).post_count > 0) && (
-            <Section id="rhythm" index={num("rhythm")} style={{ order: orderOf("rhythm") }} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description="When each company posts, by weekday and by hour (UTC), against the schedule we recommend." action={scopeTag(true)}>
+            <Section id="rhythm" index={num("rhythm")} style={{ order: orderOf("rhythm") }} title={<><Clock className="h-5 w-5" /> Posting rhythm: you vs. the field</>} description="Observed posting times by weekday and hour (UTC). These describe the collected posts, not proven best times to publish." action={scopeTag(true)}>
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {/* No summary paragraph here: the analysis wrote out each
