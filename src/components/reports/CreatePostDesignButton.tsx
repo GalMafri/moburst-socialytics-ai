@@ -989,7 +989,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                       : "2 to 3 minutes"
                 }
                 note={usesSocialTemplate ? "Every frame is compared with the original. Keep this browser tab open until the complete draft is saved." : "Brand review may regenerate a variant up to twice. You can close this dialog while it runs; keep this browser tab open."}
-                done={variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
+                done={usesSocialTemplate && isCarousel && loading ? (stage >= 3 ? variantUrls.length : Math.max(0, currentSlide - 1)) : variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
                 total={variantUrls.length}
                 failed={variantUrls.filter((u) => u === "FAILED").length}
                 onCancel={() => {
