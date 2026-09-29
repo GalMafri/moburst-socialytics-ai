@@ -19,7 +19,7 @@ export function sourceLogo(image:HTMLImageElement,box:NonNullable<ProductionPlan
   while(stack.length) {
     const at=stack.pop()!; if(seen[at]) continue; seen[at]=1;
     const p=at*4;
-    if(Math.max(...bg.map((v,k)=>Math.abs(d[p+k]-v)))>48) continue;
+    if(Math.max(...bg.map((v,k)=>Math.abs(d[p+k]-v)))>12) continue;
     d[p+3]=0;
     const x=at%c.width,y=Math.floor(at/c.width);
     if(x) stack.push(at-1);if(x<c.width-1) stack.push(at+1);if(y) stack.push(at-c.width);if(y<c.height-1) stack.push(at+c.width);
