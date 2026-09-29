@@ -88,8 +88,18 @@ export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): 
   }
   if (['follow_requested', 'verify'].includes(job.phase)) {
     const response = await api(`${path}/companies`);
-    if (!matchSetupCompanies(job.plan, response.companies || [])) {
+    const matched = matchSetupCompanies(job.plan, response.companies || []);
+    if (!matched) {
       throw new Error('RivalIQ has not returned exactly one company for every reviewed website. Nothing was linked; check status later.');
+    }
+    const { landscape } = await api(path);
+    // A bulk follow can finish competitors before the client. Only adjust a
+    // landscape created for this selection; an imported shared set keeps its focus.
+    if (landscape?.name === job.plan.name && String(landscape.focusCompanyId) !== String(matched[0].id)) {
+      const changed = await api(path, 'PUT', { focusCompanyId: Number(matched[0].id) });
+      if (String(changed.landscape?.focusCompanyId) !== String(matched[0].id)) {
+        throw new Error('The client focus could not be verified. Check tracking again before running a report.');
+      }
     }
     await update({ phase: 'verified' });
   }

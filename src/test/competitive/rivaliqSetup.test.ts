@@ -78,6 +78,31 @@ describe('RivalIQ API-only setup', () => {
   await expect(advanceRivalIqSetup(f.persisted, async () => ({ companies: companies.slice(1) }), f.save)).rejects.toThrow('Nothing was linked');
   expect(f.persisted.phase).toBe('verify');
  });
+ it('sets the client focus when bulk following chose a competitor first', async () => {
+  const f = fixture('verify');
+  await advanceRivalIqSetup(f.persisted, async (path, method = 'GET', body) => {
+   f.calls.push({path, method, body});
+   if (path.endsWith('/companies')) return {companies: [...companies].reverse()};
+   if (method === 'PUT') return {landscape: {focusCompanyId: 1}};
+   return {landscape: {name: plan.name, focusCompanyId: 3}};
+  }, f.save);
+  expect(f.calls.filter(c => c.method === 'PUT')).toEqual([{path:'/landscapes/42',method:'PUT',body:{focusCompanyId:1}}]);
+  expect(f.persisted.phase).toBe('verified');
+ });
+ it('leaves the focus of a reused shared landscape unchanged', async () => {
+  const f = fixture('verify');
+  await advanceRivalIqSetup(f.persisted, async (path, method = 'GET') => {
+   expect(method).toBe('GET');
+   return path.endsWith('/companies') ? {companies} : {landscape:{name:'Existing shared research',focusCompanyId:3}};
+  }, f.save);
+  expect(f.persisted.phase).toBe('verified');
+ });
+ it('does not verify an owned landscape if its focus update is unconfirmed', async () => {
+  const f = fixture('verify');
+  await expect(advanceRivalIqSetup(f.persisted, async (path) => path.endsWith('/companies')
+   ? {companies} : {landscape:{name:plan.name,focusCompanyId:3}}, f.save)).rejects.toThrow('client focus could not be verified');
+  expect(f.persisted.phase).toBe('verify');
+ });
  it('identifies the failed reviewed company and provider reason', async () => {
   const f = fixture('following');
   await expect(advanceRivalIqSetup(f.persisted, async () => ({ status: 3, urls: {
