@@ -32,6 +32,9 @@ export function matchSetupCompanies(plan: SetupPlan, companies: Company[]): Comp
 }
 
 export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): Promise<SetupJob> {
+  if (job.phase === 'retired') {
+    throw new Error('This abandoned tracking setup was removed. Use the current confirmed selection, or create a new draft with verified company websites.');
+  }
   const update = async (patch: Partial<SetupJob>) => { await save(patch); Object.assign(job, patch); };
   if (job.phase === 'ready') {
     const list = await api('/landscapes');

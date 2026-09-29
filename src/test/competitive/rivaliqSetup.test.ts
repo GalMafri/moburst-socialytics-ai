@@ -17,6 +17,13 @@ function fixture(phase = 'ready') {
  return { persisted, calls, save, api, step: () => advanceRivalIqSetup(structuredClone(persisted), api, save) };
 }
 describe('RivalIQ API-only setup', () => {
+ it('never recreates or polls an explicitly retired setup', async () => {
+  const f = fixture('retired');
+  f.persisted.landscape_id = null;
+  await expect(f.step()).rejects.toThrow('abandoned tracking setup was removed');
+  expect(f.calls).toEqual([]);
+  expect(f.persisted.phase).toBe('retired');
+ });
  it('creates once, follows reviewed URLs once, verifies before completion', async () => {
   const f = fixture();
   for (let i = 0; i < 4; i++) await f.step();

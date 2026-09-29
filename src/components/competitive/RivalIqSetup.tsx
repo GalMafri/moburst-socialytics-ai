@@ -24,6 +24,7 @@ const phase: Record<string, { status: string; action?: string }> = {
  following: { status: 'RivalIQ is still adding the companies. This can take a minute.', action: 'Check again' },
  verify: { status: 'The companies are in. They still need confirming as tracked.', action: 'Confirm tracking' },
  following_failed: { status: 'RivalIQ could not track every company, so nothing has been connected.', action: 'Try again' },
+ retired: { status: 'This abandoned tracking setup was removed. Use the current confirmed selection, or create a new draft with verified company websites.' },
  verified: { status: 'RivalIQ is tracking all three. One step left: link it to this selection.', action: 'Finish connecting' },
  complete: { status: 'Tracking is connected to this selection. Companies added just now may have little history before today.' },
 };
