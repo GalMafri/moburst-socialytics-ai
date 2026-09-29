@@ -36,6 +36,11 @@ export async function finishBrandImage(url:string,plan:ProductionPlan,index:numb
   const logo=sourceLogo(reference,plan.logo);
   const canvas=document.createElement('canvas');canvas.width=pixels.naturalWidth;canvas.height=pixels.naturalHeight;
   const ctx=canvas.getContext('2d')!;ctx.drawImage(pixels,0,0);
+  // Finish the reserved identity band from the artwork's own backdrop,
+  // removing any model-drawn wordmark before placing the real source pixels.
+  const ink=ctx.getImageData(Math.round(canvas.width*0.5),Math.round(canvas.height*0.015),1,1).data;
+  ctx.fillStyle=`rgb(${ink[0]},${ink[1]},${ink[2]})`;
+  ctx.fillRect(0,0,canvas.width,canvas.height*0.17);
   const width=Math.min(canvas.width*0.22,canvas.height*0.29),height=width*logo.height/logo.width;
   if(height>canvas.height*0.11) throw new Error('The authentic logo crop does not fit its reserved area.');
   const position=plan.frames[index].layout?.logo_position||'top-center';
