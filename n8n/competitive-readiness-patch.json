@@ -67,6 +67,14 @@
   ],
   "operations": [
     {
+      "type": "updateNodeParameters",
+      "nodeName": "Landscape Status",
+      "parameters": {
+        "url": "=https://api.rivaliq.com/v3/landscapes/{{ $(\"Resolve Landscape\").first().json.landscape_id }}/status"
+      },
+      "replace": false
+    },
+    {
       "type": "setNodeSettings",
       "nodeName": "Check RivalIQ Readiness",
       "settings": {

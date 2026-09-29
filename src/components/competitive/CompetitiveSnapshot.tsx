@@ -22,6 +22,8 @@ import { Prose } from "@/components/ui/prose";
 import { InsightGrid } from "@/components/ui/insight-card";
 import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
 import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
+import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../../supabase/functions/_shared/competitive/reportEvidence";
+import { competitiveRecovery } from "@/lib/competitiveFlow";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
 
@@ -81,7 +83,12 @@ export function CompetitiveSnapshot({
     );
   }
 
-  const rd: any = normalizedCompetitiveMetrics(latest.report_data);
+  if (!competitiveReportQuality(latest.report_data).ready) {
+    const recovery = competitiveRecovery(latest.report_data);
+    return <EmptyState icon={Crosshair} title={recovery.title} description={recovery.detail}
+      action={<Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports/${latest.id}`)}>View report status</Button>} />;
+  }
+  const rd: any = withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(latest.report_data));
   const ai = rd.ai_analysis || {};
   const companies: any[] = rd.aggregates?.companies || [];
   const me = companies.find((c) => c.is_client);

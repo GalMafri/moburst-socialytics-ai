@@ -8,8 +8,9 @@ import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../s
 // top posts. Reports run before per-platform aggregation existed have no
 // by_channel data, so the filter only appears when it can do something.
 
-import { useMemo, useRef, useState } from "react";
-import { canRetry, retryLabel } from "@/lib/reportRun";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { canRetry, retryLabel, STUCK_AFTER_MINUTES } from "@/lib/reportRun";
+import { competitiveRecovery } from "@/lib/competitiveFlow";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { StatCard, formatPercentChange } from "@/components/ui/stat-card";
 import { useParams, useNavigate } from "react-router-dom";
@@ -205,6 +206,7 @@ export default function CompetitiveReportView() {
   const { toast } = useToast();
   const [plat, setPlat] = useState("all");
   const [showHidden, setShowHidden] = useState(false);
+  const [now, setNow] = useState(Date.now);
   const printRef = useRef<HTMLDivElement>(null);
   const { rows: feedback, verdictFor, vote } = useInsightFeedback(clientId);
 
@@ -250,6 +252,14 @@ export default function CompetitiveReportView() {
   });
 
   const rd: any = useMemo(() => withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(report?.report_data)), [report?.report_data]);
+  useEffect(() => {
+    if (!report || !['failed', 'running'].includes(report.status)) return;
+    const timer = setInterval(() => setNow(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, [report?.status]);
+  const retryReady = report ? canRetry(report, now) : false;
+  const retryAt = report?.created_at ? Date.parse(report.created_at) + STUCK_AFTER_MINUTES * 60000 : NaN;
+  const recovery = competitiveRecovery(report?.report_data);
   const ai = rd.ai_analysis || {};
   const companies: Company[] = rd.aggregates?.companies || [];
   const previous = useMemo(() => (report ? pickComparableReport(report as any, (priorReports || []) as any[]) : null), [report, priorReports]);
@@ -300,12 +310,15 @@ export default function CompetitiveReportView() {
       {canRetry(report) && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
     </div>
   </AppLayout>;
-  if (!competitiveReportQuality(report.report_data).ready) return <AppLayout title="Report awaiting review" description="This analysis is not ready to share yet.">
+  if (!competitiveReportQuality(report.report_data).ready) return <AppLayout title={recovery.title} description="This analysis is not ready to share yet.">
     <Card><CardContent className="pt-6 space-y-4">
-      <p className="t-body">We need to verify the source data before this report can be released.</p>
+      <p className="t-body">{recovery.detail}</p>
+      {report.date_range_start && report.date_range_end && <p className="t-secondary">Period checked: {formatRange({start: report.date_range_start, end: report.date_range_end})}</p>}
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to reports</Button>
-      {canRetry(report) && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
+      {retryReady && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
+      {isMoburstStaff && !retryReady && report.status === 'failed' && Number.isFinite(retryAt) && retryAt > now && <p className="t-secondary" role="status">Retry becomes available at {new Date(retryAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}. The 90-minute wait prevents overlapping analyses.</p>}
       {isMoburstStaff && <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/run`)}>Choose another period</Button>}
+      {isMoburstStaff && <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive`)}>Review tracked profiles</Button>}
       {isMoburstStaff && <details className="t-secondary"><summary className="cursor-pointer">Internal validation details</summary><ul className="mt-3 space-y-2">{competitiveReportQuality(report.report_data).reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></details>}
     </CardContent></Card>
   </AppLayout>;

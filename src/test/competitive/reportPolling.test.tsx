@@ -4,9 +4,10 @@ import { render, screen, act, cleanup } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import CompetitiveReportView from '@/pages/CompetitiveReportView';
+import { CompetitiveSnapshot } from '@/components/competitive/CompetitiveSnapshot';
 
-const fixture = vi.hoisted(() => ({ status: 'running', reads: 0, data: null as any }));
-vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isMoburstStaff: true }) }));
+const fixture = vi.hoisted(() => ({ status: 'running', reads: 0, createdAt: '', data: null as any }));
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isMoburstStaff: true, canRunAnalysis: true }) }));
 vi.mock('@/hooks/useInsightFeedback', () => ({ useInsightFeedback: () => ({ rows: [], verdictFor: () => null, vote: vi.fn() }), partitionGaps: () => ({ visible: [], hidden: [] }) }));
 vi.mock('@/components/competitive/PostVisual', () => ({ usePostPreviews: () => ({ previews: {} }), PostVisual: () => null, normalizePlatform: (x: string) => x, platformLabel: (x: string) => x }));
 vi.mock('@/components/layout/AppLayout', () => ({ AppLayout: ({ children }: any) => <main>{children}</main> }));
@@ -20,12 +21,12 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: (table: str
       if (table === 'clients') return Promise.resolve({ data: { name: 'QA client' } }).then(resolve);
       if (!single) return Promise.resolve({ data: [] }).then(resolve);
       fixture.reads++;
-      return Promise.resolve({ data: { id: 'report', status: fixture.status, created_at: new Date().toISOString(), date_range_start: '2026-08-24', date_range_end: '2026-09-22', report_data: fixture.data || (fixture.status === 'failed' ? { error: 'Observed provider failure' } : {}) } }).then(resolve);
+      return Promise.resolve({ data: { id: 'report', status: fixture.status, created_at: fixture.createdAt, date_range_start: '2026-08-24', date_range_end: '2026-09-22', report_data: fixture.data || (fixture.status === 'failed' ? { error: 'Observed provider failure' } : {}) } }).then(resolve);
     },
   }; return query;
 } } }));
 let client: QueryClient;
-beforeEach(() => { vi.useFakeTimers(); fixture.status = 'running'; fixture.reads = 0; fixture.data = null; client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }); });
+beforeEach(() => { vi.useFakeTimers(); fixture.status = 'running'; fixture.reads = 0; fixture.data = null; fixture.createdAt = new Date().toISOString(); client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }); });
 afterEach(() => { cleanup(); client.clear(); vi.useRealTimers(); });
 async function tick(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
 function mount() { render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/clients/client/report']}><Routes><Route path='/clients/:id/:reportId' element={<CompetitiveReportView />} /></Routes></MemoryRouter></QueryClientProvider>); }
@@ -60,4 +61,24 @@ it('company cards link to their supporting posts and expose platform filters as 
  expect(document.getElementById('company-posts-rival')).toBeInTheDocument();
  expect(screen.getByRole('button',{name:'instagram · 1 analyzed'})).toBeInTheDocument();
  expect(screen.queryByText('top 3')).toBeNull();
+});
+
+it('explains a source wait and unlocks retry when its guard expires without reloading', async () => {
+ fixture.status='failed'; fixture.createdAt=new Date(Date.now()-89*60000).toISOString();
+ fixture.data={provider_status:2,quality_check:{state:'needs_review',reasons:['RivalIQ is still collecting source data.']}};
+ mount(); await tick(20);
+ expect(screen.getByText(/RivalIQ had not finished collecting/)).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Review tracked profiles'})).toBeInTheDocument();
+ expect(screen.getByRole('status')).toHaveTextContent('Retry becomes available at');
+ expect(screen.queryByRole('button',{name:'Retry',exact:true})).toBeNull();
+ await tick(61000);
+ expect(screen.getByRole('button',{name:'Retry',exact:true})).toBeInTheDocument();
+ expect(screen.queryByRole('status')).toBeNull();
+});
+it('keeps a withheld analysis out of the analytics summary and monthly-report context', async () => {
+ fixture.status='complete'; fixture.data={quality_check:{state:'needs_review',reasons:['Verify source period']},ai_analysis:{executive_summary:'Unsupported summary',gaps_for_client:[{gap:'Unsupported gap'}]}};
+ render(<QueryClientProvider client={client}><MemoryRouter><CompetitiveSnapshot clientId='client' takeaways={['Unsupported takeaway']} /></MemoryRouter></QueryClientProvider>);
+ await tick(20);
+ expect(screen.getByRole('button',{name:'View report status'})).toBeInTheDocument();
+ for (const text of ['Unsupported summary','Unsupported gap','Unsupported takeaway']) expect(screen.queryByText(text)).toBeNull();
 });

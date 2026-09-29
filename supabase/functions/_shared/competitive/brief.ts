@@ -3,6 +3,7 @@
 // complete competitive report and the team's verdicts on its gaps: endorsed
 // gaps must be addressed, hidden gaps must not be proposed, everything else is
 // context. Returns "" when the client has no competitive analysis yet.
+import { competitiveReportQuality, withCompetitiveEvidenceLimits } from './reportEvidence.ts';
 
 // deno-lint-ignore no-explicit-any
 type AnyClient = any;
@@ -19,14 +20,14 @@ export async function competitiveBrief(supabase: AnyClient, clientId: string, pl
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!report) return "";
+  if (!report || !competitiveReportQuality(report.report_data).ready) return "";
   const { data: feedback } = await supabase
     .from("competitive_insight_feedback")
     .select("insight_key, verdict, gap_text")
     .eq("client_id", clientId);
   const verdict = new Map<string, string>((feedback || []).map((f: any) => [f.insight_key, f.verdict]));
 
-  const rd: any = report.report_data || {};
+  const rd: any = withCompetitiveEvidenceLimits(report.report_data || {});
   const ai = rd.ai_analysis || {};
   const plat = String(platform || "").toLowerCase();
   const gaps: any[] = Array.isArray(ai.gaps_for_client) ? ai.gaps_for_client : [];

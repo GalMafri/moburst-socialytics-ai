@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, type SetRow } from "@/lib/competitiveFlow";
+import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, competitiveRecovery, type SetRow } from "@/lib/competitiveFlow";
 
 const set = (o: Partial<SetRow> & { id: string; status: string; created_at: string }): SetRow => o as SetRow;
 
@@ -104,4 +104,12 @@ describe("saved competitive failures", () => {
     expect(competitiveFailureMessage({error:"HTTP 429"})).toBe(plainCompetitiveError("HTTP 429"));
     expect(competitiveFailureMessage(null)).not.toMatch(/nothing was saved|no reason|try again/i);
   });
+});
+
+it('distinguishes pending collection from a completed collection with no returned posts', () => {
+ const empty={aggregates:{companies:[{name:'Client',post_count:0,observed_post_count:0}]}};
+ expect(competitiveRecovery({...empty,provider_status:2}).title).toBe('Source data was still loading');
+ expect(competitiveRecovery({...empty,provider_status:1}).title).toBe('No posts available for this period');
+ expect(competitiveRecovery(empty).detail).toContain('does not establish');
+ expect(competitiveRecovery({quality_check:{reasons:['Different provider totals']}}).title).toBe('Report awaiting review');
 });

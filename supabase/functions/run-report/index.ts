@@ -19,6 +19,7 @@ import { buildCompetitivePayload, buildSocialPayload, isStuckRun, STUCK_AFTER_MI
 import { bestLandscapeMatch, summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
 import { rivalIqFetch } from "../_shared/competitive/rivaliqFetch.ts";
 import { isReviewReadyHandle } from "../_shared/competitive/extractSocialHandles.ts";
+import { missingProfileRepairs } from "../_shared/competitive/profileRepairs.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -204,7 +205,7 @@ Deno.serve(async (req) => {
       // using an older cached frontend or invoking the function directly.
       const { data: selected, error: selectedErr } = await admin
         .from("competitors")
-        .select("id, name")
+        .select("id, name, website_url")
         .eq("set_id", set.id)
         .eq("is_selected", true);
       if (selectedErr) throw new Error(`Could not verify selected competitors: ${selectedErr.message}`);
@@ -213,15 +214,17 @@ Deno.serve(async (req) => {
       }
       const missingProfiles: string[] = [];
       const unreviewedProfiles: string[] = [];
+      const reviewedCompanies: any[] = [];
       for (const competitor of selected) {
         const { data: activeHandles, error: handlesErr } = await admin
           .from("competitor_handles")
-          .select("source, detection_confidence, is_active")
+          .select("source, detection_confidence, is_active, platform, handle")
           .eq("competitor_id", competitor.id)
           .eq("is_active", true);
         if (handlesErr) throw new Error(`Could not verify profiles for ${competitor.name}: ${handlesErr.message}`);
         if (!activeHandles?.length) missingProfiles.push(competitor.name);
         else if (!activeHandles.some(isReviewReadyHandle)) unreviewedProfiles.push(competitor.name);
+        reviewedCompanies.push({ ...competitor, handles: activeHandles || [] });
       }
       if (missingProfiles.length || unreviewedProfiles.length) {
         const reasons = [
@@ -247,7 +250,8 @@ Deno.serve(async (req) => {
             return json({ error: "RivalIQ cannot accept a new request yet. No report was started; please wait before trying again.", code: "RIVALIQ_BUSY" }, 429);
           }
           if (resp.ok) {
-            const listed = summarizeLandscapes(((await resp.json()).landscapes || []), client.name, client.website_url);
+            const landscapes = (await resp.json()).landscapes || [];
+            const listed = summarizeLandscapes(landscapes, client.name, client.website_url);
             const wanted = set.rivaliq_landscape_id
               ? listed.find((l) => String(l.id) === String(set.rivaliq_landscape_id))
               : bestLandscapeMatch(listed);
@@ -257,6 +261,21 @@ Deno.serve(async (req) => {
                   `No RivalIQ landscape tracks ${client.name}. Use Set up RivalIQ tracking on the Competitors screen ` +
                   `to connect the reviewed companies, or import an existing matching landscape. No RivalIQ sign-in is required.`,
               }, 422);
+            }
+            try {
+              const tracked = landscapes.find((l: any) => String(l.id) === wanted.id)?.companies || [];
+              for (const repair of missingProfileRepairs(reviewedCompanies, tracked)) {
+                const updated = await rivalIqFetch(`https://api.rivaliq.com/v3/landscapes/${encodeURIComponent(wanted.id)}/companies/${encodeURIComponent(String(repair.companyId))}?apiKey=${encodeURIComponent(rivaliqKey)}`, {
+                  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(repair.patch), signal: AbortSignal.timeout(25000),
+                });
+                if (!updated.ok) return json({ error: `${repair.name}'s reviewed profiles could not be connected to RivalIQ (HTTP ${updated.status}). No report was started. Review tracking before trying again.` }, 422);
+                const company = (await updated.json()).company;
+                if (Object.keys(repair.patch).some(field => !company?.[field]?.handle && !company?.[field]?.nativeId && !company?.[field]?.url)) {
+                  return json({ error: `${repair.name}'s profile update is not confirmed yet. No report was started. Check tracking again after RivalIQ finishes collecting it.` }, 422);
+                }
+              }
+            } catch (error) {
+              return json({ error: error instanceof Error ? error.message.replaceAll(rivaliqKey, '[redacted]').replaceAll(encodeURIComponent(rivaliqKey), '[redacted]') : 'Could not verify reviewed competitor profiles. No report was started.' }, 422);
             }
           }
         } catch {

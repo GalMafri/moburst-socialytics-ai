@@ -146,3 +146,16 @@ export function competitiveFailureMessage(data: unknown): string {
   if (typeof report?.error === "string" && report.error.trim()) return plainCompetitiveError(report.error);
   return "The analysis could not be completed. Its saved status is available in report history.";
 }
+
+/** Explain a source hold as a recoverable outcome, rather than an unnamed review. */
+export function competitiveRecovery(data: any): { title: string; detail: string } {
+  const reasons = (data?.quality_check?.reasons || []).join(' ');
+  if (data?.provider_status === 2 || /still collecting/i.test(reasons + ' ' + (data?.error || ''))) {
+    return { title: 'Source data was still loading', detail: 'RivalIQ had not finished collecting these profiles when this report ran. Retry after collection finishes; the original attempt is kept unavailable because its figures are incomplete.' };
+  }
+  const companies = data?.aggregates?.companies;
+  if (Array.isArray(companies) && companies.length && companies.every(c => c.post_count === 0 && (c.observed_post_count ?? c.post_count) === 0)) {
+    return { title: 'No posts available for this period', detail: 'RivalIQ returned no posts for the client or selected competitors in this date range. Choose another period or review the tracked profiles. This does not establish that these companies did not publish.' };
+  }
+  return { title: 'Report awaiting review', detail: 'We need to verify the source data before this report can be released.' };
+}
