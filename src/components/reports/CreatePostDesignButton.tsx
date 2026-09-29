@@ -204,11 +204,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const tileAspect = tileAspectFor(post);
 
   const runStages = usesSocialTemplate && isCarousel
-    ? ["Preparing the slide copy", "Finding a matching client post", "Adapting and reviewing slides", "Saving the complete carousel"]
+    ? ["Planning the carousel from references", "Creating new slide artwork", "Reviewing the visual sequence", "Saving the complete carousel"]
     : isCarousel
     ? ["Reading the brief and the brand", "Splitting the story into slides", "Painting the slides", "Brand review", "Saving"]
     : usesSocialTemplate
-      ? ["Finding a matching client post", "Replacing campaign text", "Comparing with the original", "Saving"]
+      ? ["Planning from social references", "Creating the new artwork", "Reviewing against the brand", "Saving"]
       : ["Reading the brief and the brand", `Painting ${variantCount} variants`, "Brand review", "Saving"];
 
   // Fetches the 6 creative angles from the propose-design-angles edge function.
@@ -940,9 +940,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
           <DialogHeader>
             <DialogTitle>{isCarousel ? "Carousel design" : "Post design"}</DialogTitle>
             <DialogDescription>
-              {usesSocialTemplate ? "Adapted from the client’s actual social artwork. Original branding and imagery are preserved; campaign text is replaced." : isCarousel
+              {usesSocialTemplate ? "New artwork for this post, directed by the client’s real social references." : isCarousel
                 ? "Slides in the client's design system, from this post's brief."
-                : usesSocialTemplate ? "Adapted from the client’s actual social artwork. Original branding and imagery are preserved; campaign text is replaced." : "Designs in the client's design system, from this post's brief. Tap the ones to keep."}
+                : usesSocialTemplate ? "New artwork for this post, directed by the client’s real social references." : "Designs in the client's design system, from this post's brief. Tap the ones to keep."}
             </DialogDescription>
           </DialogHeader>
 
@@ -991,7 +991,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                       ? usesSocialTemplate ? "1 to 3 minutes including review" : "2 to 8 minutes including review"
                       : "2 to 3 minutes"
                 }
-                note={usesSocialTemplate ? "Every frame is compared with the original. Keep this browser tab open until the complete draft is saved." : "Brand review may regenerate a variant up to twice. You can close this dialog while it runs; keep this browser tab open."}
+                note={usesSocialTemplate ? "Each design is reviewed against the client’s social references. Keep this browser tab open until the complete draft is saved." : "Brand review may regenerate a variant up to twice. You can close this dialog while it runs; keep this browser tab open."}
                 done={usesSocialTemplate && isCarousel && loading ? (stage >= 3 ? variantUrls.length : Math.max(0, currentSlide - 1)) : variantUrls.filter((u) => typeof u === "string" && u !== "FAILED").length}
                 total={variantUrls.length}
                 failed={variantUrls.filter((u) => u === "FAILED").length}
@@ -1087,7 +1087,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
 
                 {Object.keys(referencePreviews).length > 0 && (
                   <div className="space-y-2">
-                    <p className="t-secondary">Original client designs · artwork preserved, campaign text replaced</p>
+                    <p className="t-secondary">Client social references used for this creative</p>
                     <div className="flex gap-3">
                       {Object.entries(referencePreviews).map(([index, url]) => (
                         <figure key={index} className="w-40">

@@ -271,7 +271,7 @@ export function PostPanel({
                     {videoTiles.length > 0
                       ? "Click any video to preview at full size."
                       : clientContext?.design_style_synthesis?.reference_pipeline_version === 1
-                        ? "Create a 12-second clip from the client’s actual social artwork. Each card is reviewed before saving."
+                        ? "Create a 12-second film with three moving scenes, guided by this client’s real social references."
                         : "Create short video drafts, then preview and choose a favorite."}
                   </p>
                 </div>
