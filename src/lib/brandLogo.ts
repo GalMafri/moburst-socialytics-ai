@@ -3,10 +3,14 @@ import type {ProductionPlan} from './creativeProduction';
 
 /** Remove only the uniform edge-connected backdrop around an authentic lockup. */
 export function sourceLogo(image:HTMLImageElement,box:NonNullable<ProductionPlan['logo']>):HTMLCanvasElement {
+  // Vision bounds are approximate. Include a safety margin, then trim the
+  // transparent backdrop; this retains low wordmark baselines and icon tips.
+  const x=Math.max(0,box.x-0.04),y=Math.max(0,box.y-0.04);
+  const width=Math.min(1,box.x+box.width+0.04)-x,height=Math.min(1,box.y+box.height+0.04)-y;
   const c=document.createElement('canvas');
-  c.width=Math.max(1,Math.round(box.width*image.naturalWidth)); c.height=Math.max(1,Math.round(box.height*image.naturalHeight));
+  c.width=Math.max(1,Math.round(width*image.naturalWidth)); c.height=Math.max(1,Math.round(height*image.naturalHeight));
   const ctx=c.getContext('2d')!;
-  ctx.drawImage(image,box.x*image.naturalWidth,box.y*image.naturalHeight,box.width*image.naturalWidth,box.height*image.naturalHeight,0,0,c.width,c.height);
+  ctx.drawImage(image,x*image.naturalWidth,y*image.naturalHeight,width*image.naturalWidth,height*image.naturalHeight,0,0,c.width,c.height);
   const pixels=ctx.getImageData(0,0,c.width,c.height), d=pixels.data;
   const bg=[d[0],d[1],d[2]];
   const seen=new Uint8Array(c.width*c.height), stack:number[]=[];
