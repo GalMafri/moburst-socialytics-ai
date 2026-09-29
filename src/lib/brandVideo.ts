@@ -43,6 +43,9 @@ export async function finishBrandVideo(url:string,plan:ProductionPlan,onProgress
       ctx.drawImage(video,0,0,width,height);
       const at=captionAt(time,seconds,plan.frames.length);
       const style=plan.caption_style;
+      // An opaque identity band prevents model-drawn reference logos from
+      // appearing beside the authentic source logo placed below.
+      ctx.fillStyle=style.surface;ctx.fillRect(0,0,width,height*0.19);
       const size=Math.round(Math.min(width*0.053,height*0.063));
       ctx.font=`${style.font_weight} ${size}px ${font}`;
       const lines=linesFor(ctx,plan.frames[at].headline,width*0.8);

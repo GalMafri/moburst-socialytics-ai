@@ -378,7 +378,11 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       setSourceClipAspect(result.aspect);setVariantSeeds(result.previews);
       for(let i=0;i<result.previews.length;i++) {
         const verdict=await reviewCreative(result.previews[i],plan,i,id);
-        if(verdictIsDirty(verdict)) throw new Error(`Scene ${i+1} failed brand review: ${verdictSummary(verdict)}`);
+        if(verdictIsDirty(verdict)) {
+          const reason=`Scene ${i+1} failed brand review: ${verdictSummary(verdict)}`;
+          if(data.job_id) await supabase.from('media_jobs').update({status:'failed',error:reason}).eq('id',data.job_id);
+          throw new Error(reason);
+        }
       }
       if(cancelRef.current) return;
       setMotionStage(3);
