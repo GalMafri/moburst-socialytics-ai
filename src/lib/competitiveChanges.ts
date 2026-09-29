@@ -57,6 +57,26 @@ export function comparablePeriods(prev: Period | null | undefined, curr: Period 
   return Date.parse(prev.start) < Date.parse(curr.start) && periodOverlap(prev, curr) <= 0.25;
 }
 
+/** A newly connected source must not masquerade as a publishing increase. */
+export function sameSourceCoverage(a: any, b: any): boolean {
+  const signature = (value: any) => {
+    const companies = value?.aggregates?.companies;
+    const sources = Array.isArray(companies)
+      ? companies.map((c: any) => [String(c.company_id), c.linkedin_metrics?.provider || '', c.linkedin_metrics?.profile_url || ''].join('|'))
+      : (value?.linkedin_sources || []).map((s: any) => [String(s.company_id), s.profile_url || ''].join('|'));
+    return JSON.stringify([...new Set(sources)].sort());
+  };
+  return !a?.truncated && !b?.truncated && signature(a) === signature(b);
+}
+
+type FeedSnapshot = { landscape_id: string; payload: any };
+export function pickComparableFeed<T extends FeedSnapshot>(current: T, candidates: T[]): T | null {
+  return candidates.filter(c => c.landscape_id === current.landscape_id
+    && comparablePeriods(c.payload?.window, current.payload?.window)
+    && sameSourceCoverage(c.payload, current.payload))
+    .sort((a, b) => Date.parse(b.payload.window.start) - Date.parse(a.payload.window.start))[0] || null;
+}
+
 type RawPost = { companyId?: string | number; companyName?: string; channel?: string; type?: string; engagementTotal?: number | string; engagementRate?: number | string };
 
 /** Per-company stats from raw RivalIQ posts (the feed snapshots), on the same fields the report aggregates carry. */
@@ -149,7 +169,8 @@ export function pickComparableReport<T extends ReportLike>(current: T, candidate
   const cur = reportPeriod(current);
   const ordered = candidates
     .map((c) => ({ c, p: reportPeriod(c) }))
-    .filter((x) => x.p && String(x.c?.report_data?.landscape?.id ?? "") === landscape)
+    .filter((x) => x.p && String(x.c?.report_data?.landscape?.id ?? "") === landscape
+      && sameSourceCoverage(x.c.report_data, current.report_data))
     .sort((a, b) => Date.parse(b.p!.start) - Date.parse(a.p!.start));
   for (const { c, p } of ordered) if (comparablePeriods(p, cur)) return c;
   return null;
@@ -175,7 +196,7 @@ export function diffCompanies(prev: CompanyStats[], curr: CompanyStats[], max = 
     const mine = c.is_client;
     if (!p) {
       if (c.post_count > 0) {
-        out.push({ company: who, is_client: mine, kind: "new_company", headline: `${who} joined the landscape`, detail: `${c.post_count} post${c.post_count === 1 ? "" : "s"} this period; not in the previous one.`, magnitude: 0.5, direction: "flat", tone: "neutral" });
+        out.push({ company: who, is_client: mine, kind: "new_company", headline: `New posts observed from ${who}`, detail: `${c.post_count} post${c.post_count === 1 ? "" : "s"} in this snapshot; no posts from this company in the previous snapshot.`, magnitude: 0.5, direction: "flat", tone: "neutral" });
       }
       continue;
     }

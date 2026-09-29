@@ -20,7 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { describeInvokeError } from "@/lib/invokeError";
 import { ChangeCards } from "@/components/competitive/ChangeCards";
-import { aggregatePosts, comparablePeriods, diffCompanies } from "@/lib/competitiveChanges";
+import { aggregatePosts, pickComparableFeed, diffCompanies } from "@/lib/competitiveChanges";
 import { ArrowLeft, RefreshCw, Rss, Sparkles, TrendingUp, X, Loader2, ExternalLink, History } from "lucide-react";
 
 type FeedPost = {
@@ -28,6 +28,7 @@ type FeedPost = {
   engagementTotal?: number; engagementRate?: number; estimatedImpressions?: number; views?: number; postLink?: string | null; image?: string | null;
   /** RivalIQ's paid-promotion signal on Facebook posts: "Likely Boosted", "Not Likely Boosted" or "No Prediction". */
   facebookLikelyBoosted?: string | boolean | null;
+  authorship?: "company" | "collaboration";
 };
 const isBoosted = (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase() === "likely boosted" : v === true);
 
@@ -61,7 +62,7 @@ export default function CompetitiveFeed() {
     enabled: !!id,
   });
 
-  // The newest pull drives the page; the one before it is the baseline for "Since last week".
+  // Repeated pulls of this week must not displace the last comparable week.
   const { data: snaps, isLoading, isError: feedFailed, error: feedError, refetch: refetchFeed } = useQuery({
     queryKey: ["competitor-feed", id],
     queryFn: async () => {
@@ -71,14 +72,14 @@ export default function CompetitiveFeed() {
         .eq("client_id", id!)
         .eq("endpoint", "feed")
         .order("fetched_at", { ascending: false })
-        .limit(2);
+        .limit(30);
       if (error) throw error;
       return data || [];
     },
     enabled: !!id,
   });
   const snapshot = snaps?.[0];
-  const prevSnapshot = snaps?.[1];
+  const prevSnapshot = snapshot ? pickComparableFeed(snapshot, snaps?.slice(1) || []) : null;
   /** The window this page is showing, so its topics can be scoped to it. */
   const windowStart: string | null = (snapshot as any)?.payload?.window?.start ?? null;
 
@@ -170,7 +171,7 @@ export default function CompetitiveFeed() {
   const prevWindow: { start: string; end: string } | null = (prevSnapshot?.payload as any)?.window || null;
   const changes = useMemo(() => {
     const prev: any = prevSnapshot?.payload;
-    if (!prev?.window || !payload.window || !comparablePeriods(prev.window, payload.window)) return null;
+    if (!prev?.window || !payload.window) return null;
     const days = (w: { start: string; end: string }) => Math.max(1, Math.round((Date.parse(w.end) - Date.parse(w.start)) / 86400000) + 1);
     return diffCompanies(aggregatePosts(prev.socialPosts || [], days(prev.window), client?.name), aggregatePosts(payload.socialPosts || [], days(payload.window), client?.name), 6);
   }, [prevSnapshot, payload, client?.name]);
@@ -313,6 +314,7 @@ export default function CompetitiveFeed() {
                         {p.publishedAt ? new Date(p.publishedAt).toLocaleDateString() : ""}
                       </span>
                     </div>
+                    {p.authorship === "collaboration" && <Badge variant="secondary">Company collaboration</Badge>}
                     <p className="t-body line-clamp-3 min-h-[4.5rem]">{p.message || "(no caption)"}</p>
                     <div className="flex gap-2 flex-wrap t-secondary">
                       <span>{fmt(p.engagementTotal)} eng.</span>

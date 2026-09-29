@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregatePosts, comparablePeriods, diffCompanies, pickComparableReport, type CompanyStats } from "@/lib/competitiveChanges";
+import { aggregatePosts, comparablePeriods, diffCompanies, pickComparableReport, pickComparableFeed, sameSourceCoverage, type CompanyStats } from "@/lib/competitiveChanges";
 
 describe("comparablePeriods", () => {
   it("accepts consecutive months and a small overlap", () => {
@@ -83,6 +83,15 @@ describe("aggregatePosts", () => {
 });
 
 describe("pickComparableReport", () => {
+  it("rejects reports collected from a different source or company set", () => {
+    const report = (start: string, end: string, companies: any[]) => ({report_data:{landscape:{id:'one'},period:{start,end},aggregates:{companies}}});
+    const companies = [{company_id:'client'}, {company_id:'peer',linkedin_metrics:{provider:'apify/harvestapi',profile_url:'https://www.linkedin.com/company/peer'}}];
+    const current = report('2026-09-01','2026-09-30',companies);
+    const old = report('2026-08-01','2026-08-31',[{company_id:'client'},{company_id:'peer'}]);
+    expect(pickComparableReport(current,[old])).toBeNull();
+    expect(pickComparableReport(current,[report('2026-08-01','2026-08-31',companies.slice(1))])).toBeNull();
+    expect(pickComparableReport(current,[report('2026-08-01','2026-08-31',companies)])).not.toBeNull();
+  });
   it("picks the newest earlier report on the same landscape whose period sits before this one", () => {
     const cur = { report_data: { landscape: { id: "587615" }, period: { start: "2026-09-01", end: "2026-09-30" } } };
     const candidates = [
@@ -95,5 +104,20 @@ describe("pickComparableReport", () => {
     expect(pickComparableReport(cur, [candidates[0], candidates[1]])).toBeNull();
     // Order of arrival does not matter: the latest earlier period wins even when it was created last.
     expect(pickComparableReport(cur, [candidates[3], candidates[2]])).toBe(candidates[2]);
+  });
+});
+
+describe('feed source coverage', () => {
+  const sources = [{company_id:'peer',profile_url:'https://www.linkedin.com/company/peer'}];
+  const snapshot = (start: string, end: string, linkedin_sources = sources) => ({landscape_id:'one',payload:{window:{start,end},linkedin_sources}});
+  it('does not compare the new LinkedIn feed with an older RivalIQ-only feed', () => {
+    expect(pickComparableFeed(snapshot('2026-09-22','2026-09-28'), [snapshot('2026-09-15','2026-09-21',[])])).toBeNull();
+    expect(sameSourceCoverage({linkedin_sources:sources},{linkedin_sources:[{...sources[0],profile_url:'https://www.linkedin.com/company/other'}]})).toBe(false);
+    expect(sameSourceCoverage({linkedin_sources:sources},{linkedin_sources:sources,truncated:true})).toBe(false);
+  });
+  it('finds the previous comparable week behind repeated refreshes', () => {
+    const current = snapshot('2026-09-22','2026-09-28');
+    const previous = snapshot('2026-09-15','2026-09-21');
+    expect(pickComparableFeed(current,[current,{...previous,landscape_id:'other'},previous])).toBe(previous);
   });
 });
