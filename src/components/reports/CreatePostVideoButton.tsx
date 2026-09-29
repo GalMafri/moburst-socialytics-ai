@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Video, Loader2, Download, RefreshCw, Scissors, Check, Ban } from "lucide-react";
+import { Video, Loader2, Download, RefreshCw, Scissors, Check, Star, Ban } from "lucide-react";
 import { VideoTrimmer } from "@/components/editor/VideoTrimmer";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -319,23 +319,17 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       .map((i) => (typeof variantUrls[i] === "string" ? (variantUrls[i] as string) : null))
       .filter((u): u is string => !!u);
 
-    await supabase
-      .from("post_iterations")
-      .update({ is_selected: false } as any)
-      .eq("variant_group_id", variantGroupId);
-
-    await Promise.all(
-      favoriteUrls.map((url) =>
-        supabase
-          .from("post_iterations")
-          .update({ is_selected: true } as any)
-          .eq("variant_group_id", variantGroupId)
-          .contains("media_urls", [url]),
-      ),
-    );
-
-    if (favoriteUrls.length > 0 && onVideoGenerated) onVideoGenerated(favoriteUrls[0]);
-    toast.success(`Saved ${favoriteUrls.length} favorite${favoriteUrls.length === 1 ? "" : "s"}`);
+    try {
+      const cleared = await supabase.from("post_iterations").update({ is_selected: false } as any).eq("variant_group_id", variantGroupId);
+      if (cleared.error) throw cleared.error;
+      const selected = await Promise.all(favoriteUrls.map((url) => supabase.from("post_iterations").update({ is_selected: true } as any).eq("variant_group_id", variantGroupId).contains("media_urls", [url])));
+      const failed = selected.find(result => result.error);
+      if (failed?.error) throw failed.error;
+      if (favoriteUrls.length > 0 && onVideoGenerated) onVideoGenerated(favoriteUrls[0]);
+      toast.success(`Saved ${favoriteUrls.length} favorite${favoriteUrls.length === 1 ? "" : "s"}`);
+    } catch {
+      toast.error("Could not save your video selection. Please retry.");
+    }
   };
 
   const handleOpen = async () => {
@@ -787,17 +781,13 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
             {variantUrls.length > 0 && !loading && (
               <div className="space-y-3">
                 <p className="t-secondary">
-                  Tap a variant to mark it as a favorite.
+                  Use the star to select a video. Playback controls preview the clip.
                 </p>
                 <div className={`grid gap-2 ${variantUrls.length === 1 ? "grid-cols-1 max-w-xs mx-auto" : "grid-cols-2"}`}>
                   {variantUrls.map((url, i) => (
-                    <button
+                    <div
                       key={i}
-                      type="button"
-                      aria-label={`Favorite video ${i + 1}`}
                       style={usesSocialTemplate ? {aspectRatio: sourceClipAspect} : undefined}
-                      onClick={() => toggleFavorite(i)}
-                      disabled={url === "FAILED" || url === null}
                       className={`relative ${clipTileAspect} rounded-md border overflow-hidden transition-all bg-black ${
                         favoriteIdxs.has(i) ? "ring-2 ring-primary border-primary" : ""
                       }`}
@@ -816,17 +806,17 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                       {typeof url === "string" && url !== "FAILED" && (
                         <video src={url} className="w-full h-full object-contain" controls onClick={event => event.stopPropagation()} muted loop preload="metadata" />
                       )}
-                      {favoriteIdxs.has(i) && (
-                        <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-1">
-                          <Check className="h-3 w-3" />
-                        </div>
+                      {typeof url === "string" && url !== "FAILED" && (
+                        <button type="button" aria-label={`Favorite video ${i + 1}`} aria-pressed={favoriteIdxs.has(i)} onClick={() => toggleFavorite(i)} className="absolute top-2 right-2 z-10 rounded-full bg-black/80 text-white p-2 border border-white/30">
+                          {favoriteIdxs.has(i) ? <Check className="h-4 w-4 text-primary" /> : <Star className="h-4 w-4" />}
+                        </button>
                       )}
                       {angles[selectedAngleIdxs[i]] && (
                         <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white t-label px-2 py-1 truncate">
                           {angles[selectedAngleIdxs[i]].label}
                         </div>
                       )}
-                    </button>
+                    </div>
                   ))}
                 </div>
 
