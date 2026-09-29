@@ -1235,6 +1235,42 @@ export type Database = {
           },
         ]
       }
+      rivaliq_connection_state: {
+        Row: {
+          blocked_until: string | null
+          id: boolean
+          lease_token: string | null
+          lease_until: string | null
+        }
+        Insert: {
+          blocked_until?: string | null
+          id?: boolean
+          lease_token?: string | null
+          lease_until?: string | null
+        }
+        Update: {
+          blocked_until?: string | null
+          id?: boolean
+          lease_token?: string | null
+          lease_until?: string | null
+        }
+        Relationships: []
+      }
+      rivaliq_request_log: {
+        Row: {
+          id: string
+          started_at: string
+        }
+        Insert: {
+          id: string
+          started_at?: string
+        }
+        Update: {
+          id?: string
+          started_at?: string
+        }
+        Relationships: []
+      }
       rivaliq_setup_jobs: {
         Row: {
           client_id: string
@@ -1291,6 +1327,7 @@ export type Database = {
       }
       rivaliq_snapshots: {
         Row: {
+          attempt_started_at: string | null
           client_id: string | null
           endpoint: string
           fetched_at: string
@@ -1301,6 +1338,7 @@ export type Database = {
           report_id: string | null
         }
         Insert: {
+          attempt_started_at?: string | null
           client_id?: string | null
           endpoint: string
           fetched_at?: string
@@ -1311,6 +1349,7 @@ export type Database = {
           report_id?: string | null
         }
         Update: {
+          attempt_started_at?: string | null
           client_id?: string | null
           endpoint?: string
           fetched_at?: string
@@ -1535,6 +1574,7 @@ export type Database = {
         Args: { expected_next_run_at: string; schedule_id: string }
         Returns: boolean
       }
+      claim_rivaliq_request: { Args: { request_token: string }; Returns: Json }
       freeze_quarter: {
         Args: { p_quarter: string }
         Returns: {
@@ -1655,6 +1695,10 @@ export type Database = {
           note: string
           status: string
         }[]
+      }
+      release_rivaliq_request: {
+        Args: { cooldown_seconds?: number; request_token: string }
+        Returns: undefined
       }
       verify_quarter: {
         Args: { p_quarter: string }
