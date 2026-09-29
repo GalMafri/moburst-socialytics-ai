@@ -1,8 +1,13 @@
 import {describe,expect,it} from 'vitest';
-import {parseCreativePlan,creativeImagePrompt,creativeVideoPrompt} from '../../../supabase/functions/_shared/design-prompts/creativePlan';
+import {parseCreativePlan,creativePlanSchema,creativeImagePrompt,creativeVideoPrompt} from '../../../supabase/functions/_shared/design-prompts/creativePlan';
 const frames=Array.from({length:3},(_,i)=>({headline:`Message ${i}`,subject:`Subject ${i}`,composition:`Composition ${i}`,action:`Movement ${i}`,reference_indices:[i,(i+1)%3],layout:{reference_index:i,headline_position:["top","left","center"][i],subject_position:["bottom","right","background"][i],logo_position:"top-center"}}));
 const plan={brand_system:'A measured brand system',frames,logo:{reference_index:0,x:0.1,y:0.1,width:0.2,height:0.06},caption_style:{color:'#ffffff',surface:'#101820',font_weight:400}};
 describe('reference-directed creative',()=>{
+  it('excludes the latest single headline position from the next structured plan',()=>{
+    const schema=creativePlanSchema(1,8,false,'left');
+    expect(schema.properties.frames.items.properties.layout?.properties.headline_position.enum).not.toContain('left');
+    expect(schema.properties.frames.items.required).toContain('layout');
+  });
   it('rejects incomplete plans, cross-library indices and duplicate scenes',()=>{
     expect(parseCreativePlan(plan,3,3,true)).toEqual(plan);
     expect(()=>parseCreativePlan({...plan,frames:frames.slice(0,2)},3,3)).toThrow();

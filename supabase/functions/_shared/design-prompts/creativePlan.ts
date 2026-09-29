@@ -13,11 +13,11 @@ export interface CreativePlan {
   logo?: {reference_index:number;x:number;y:number;width:number;height:number};
   caption_style?: {color:string;surface:string;font_weight:number};
 }
-export function creativePlanSchema(count:number,references:number,video:boolean) {
+export function creativePlanSchema(count:number,references:number,video:boolean,previousHeadlinePosition?:string) {
   const text=(maxLength:number)=>({type:'string',minLength:1,maxLength});
   const index={type:'integer',minimum:0,maximum:references-1};
   const fraction={type:'number',minimum:0,maximum:1};
-  const layout={type:'object',additionalProperties:false,properties:{reference_index:index,headline_position:{type:'string',enum:['top','bottom','left','right','center']},subject_position:{type:'string',enum:['top','bottom','left','right','background']},logo_position:{type:'string',enum:['top-left','top-center','top-right']}},required:['reference_index','headline_position','subject_position','logo_position']};
+  const layout={type:'object',additionalProperties:false,properties:{reference_index:index,headline_position:{type:'string',enum:['top','bottom','left','right','center'].filter(p=>p!==previousHeadlinePosition)},subject_position:{type:'string',enum:['top','bottom','left','right','background']},logo_position:{type:'string',enum:['top-left','top-center','top-right']}},required:['reference_index','headline_position','subject_position','logo_position']};
   return {type:'object',additionalProperties:false,properties:{
     brand_system:text(1800),
     frames:{type:'array',minItems:count,maxItems:count,items:{type:'object',additionalProperties:false,properties:{headline:text(120),subject:text(700),composition:text(900),action:text(700),reference_indices:{type:'array',minItems:2,maxItems:3,items:index},...(!video?{layout}:{})},required:['headline','subject','composition','action','reference_indices',...(!video?['layout']:[])]}},
