@@ -1,11 +1,11 @@
 import { describe,it,expect,vi } from 'vitest';
 import { parseReferenceTemplate,templateFromResponse, selectReferenceTemplate } from '../../../supabase/functions/_shared/design-prompts/referenceTemplate';
-import { applyReferenceTemplate, wrapTemplateWords } from '../../lib/referenceTemplate';
+import { applyReferenceTemplate, wrapTemplateWords, templateWords } from '../../lib/referenceTemplate';
 vi.mock('../../lib/sourceLettering',()=>({clearSourceLettering:vi.fn((_pixels,_regions,headline)=>headline)}));
 vi.mock('../../../supabase/functions/_shared/design-prompts/sourceImage',()=>({sourceImage:vi.fn(async()=>({type:'image',source:{type:'base64',data:'source'}}))}));
 vi.mock('../../lib/composeText',()=>({loadImage:vi.fn(async (url:string)=>({naturalWidth:url==='source'?1000:2000,naturalHeight:url==='source'?1250:2500}))}));
 const headline={x:0.22,y:0.32,width:0.56,height:0.16,font_family:'Arial',font_weight:400,font_size:0.05,line_height:1.12,align:'center' as const,color:'#ffffff',emphasis_words:2};
-const value={reference_index:0,aspect:'4:5',regions:[{x:0.2,y:0.3,width:0.6,height:0.2}],headline};
+const value={single_text_block:true,has_inline_artwork:false,reference_index:0,aspect:'4:5',regions:[{x:0.2,y:0.3,width:0.6,height:0.2}],headline};
 describe('actual social artwork templates',()=>{
  it('binds template to owned source and rejects broad redraws or invalid coordinates',()=>{
   expect(parseReferenceTemplate(JSON.stringify(value),['owned']).path).toBe('owned');
@@ -44,3 +44,6 @@ it('remeasures invalid regions once without relaxing the area limit',async()=>{
   expect(fetcher).toHaveBeenCalledTimes(2);
  } finally {vi.unstubAllGlobals();}
 });
+
+it('preserves selective emphasis even when a measured heading includes bold words',()=>{const words=templateWords('The source uses selective emphasis',{...headline,font_weight:700,emphasis_words:1});expect(words.map(w=>w.bold)).toEqual([false,false,false,false,true]);});
+it('rejects templates whose lettering is mixed with artwork or separate body text',()=>{for(const extra of [{single_text_block:false},{has_inline_artwork:true}]) expect(()=>parseReferenceTemplate(JSON.stringify({...value,...extra}),['owned'])).toThrow('one headline block');});

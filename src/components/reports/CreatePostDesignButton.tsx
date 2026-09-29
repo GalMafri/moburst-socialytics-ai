@@ -1,5 +1,5 @@
 import { applyReferenceTemplate } from "@/lib/referenceTemplate";
-import { planSocialSequence, prepareSocialTemplate, renderReviewedSocialFrame } from "@/lib/socialSequence";
+import { planSocialSequence, prepareSocialTemplate, renderReviewedSocialFrame, SourceFrameReviewError } from "@/lib/socialSequence";
 import { describeInvokeError } from "@/lib/invokeError";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -596,6 +596,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       setVariantUrls(images);
       onImagesGenerated?.(images);
     } catch (error) {
+      if (error instanceof SourceFrameReviewError) setFailedPreviews({0: error.preview});
       setGenerationError(error instanceof Error ? error.message : "The carousel could not be completed. No partial draft was saved.");
       setVariantUrls(new Array(slides).fill("FAILED"));
       generation.progressGeneration(postKey, {failed: true});

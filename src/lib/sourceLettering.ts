@@ -47,7 +47,7 @@ export function clearSourceLettering(image:ImageData,regions:EditRegion[],headli
  const glyphs=headingRows.flat();if(!glyphs.length)throw new Error('The source headline could not be measured.');
  const left=Math.min(...glyphs.map(g=>g.x)),right=Math.max(...glyphs.map(g=>g.right)),top=Math.min(...glyphs.map(g=>g.y)),bottom=Math.max(...glyphs.map(g=>g.bottom));
  const heights=headingRows.map(row=>Math.max(...row.map(g=>g.bottom))-Math.min(...row.map(g=>g.y))+1).sort((a,b)=>a-b);
- const fontSize=heights[Math.floor(heights.length/2)]/0.76;
+ const fontSize=Math.min(heights[Math.floor(heights.length/2)]/0.76,headline.font_size*W);
  const centers=headingRows.map(row=>(Math.min(...row.map(g=>g.x))+Math.max(...row.map(g=>g.right)))/2);
  const align=Math.max(...centers)-Math.min(...centers)<W*0.04?'center':headline.align;
  // Diffuse background inward from the glyph boundaries. Original pixels outside the mask never change.

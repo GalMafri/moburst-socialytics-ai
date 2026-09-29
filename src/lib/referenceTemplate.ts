@@ -28,6 +28,9 @@ function loadTemplateFont(family:string):Promise<void> {
 }
 
 export interface TemplateWord {text:string;bold:boolean;}
+export function templateWords(copy:string,headline:TemplateHeadline):TemplateWord[] {
+  return copy.trim().split(/\s+/).map((text,i,all)=>({text,bold:headline.emphasis_words>0 ? i>=all.length-headline.emphasis_words : headline.font_weight===700}));
+}
 export function wrapTemplateWords(words:TemplateWord[],maxWidth:number,measure:(text:string,bold:boolean)=>number):TemplateWord[][] {
   const lines:TemplateWord[][]=[];let line:TemplateWord[]=[];let width=0;
   for(const word of words){
@@ -54,7 +57,7 @@ export async function applyReferenceTemplate(sourceUrl:string, _editedUrl:string
   const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
   headline=clearSourceLettering(pixels,regions,headline);
   ctx.putImageData(pixels,0,0);
-  const words=copy.trim().split(/\s+/).map((text,i,all)=>({text,bold:headline.font_weight===700||i>=all.length-headline.emphasis_words}));
+  const words=templateWords(copy,headline);
   const width=headline.width*canvas.width,height=headline.height*canvas.height;
   const baseSize=headline.font_size*canvas.width;
   let size=baseSize,lines:TemplateWord[][]=[];

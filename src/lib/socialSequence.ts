@@ -11,6 +11,10 @@ export interface SocialTemplate {
   template_headline: TemplateHeadline;
 }
 
+export class SourceFrameReviewError extends Error {
+  constructor(message: string, public readonly preview: string) {super(message);}
+}
+
 export function sequenceHeadlines(value: unknown, count: number): string[] {
   if (!Array.isArray(value) || value.length !== count) throw new Error('The complete sequence could not be prepared. No partial draft was saved.');
   const words = value.map(slide => typeof slide?.headline === 'string' ? slide.headline.trim() : '');
@@ -46,6 +50,6 @@ export async function renderReviewedSocialFrame(template: SocialTemplate, copy: 
     body: {image_data: image, reference_path: template.reference_path, expected_text: copy, client_id: clientId},
   });
   if (error || !verdict || verdict.skipped || verdict.error) throw new Error('Source comparison was unavailable. The draft was withheld.');
-  if (verdictIsDirty(verdict)) throw new Error(`Source comparison rejected this frame: ${verdictSummary(verdict)}`);
+  if (verdictIsDirty(verdict)) throw new SourceFrameReviewError(`Source comparison rejected this frame: ${verdictSummary(verdict)}`, image);
   return image;
 }
