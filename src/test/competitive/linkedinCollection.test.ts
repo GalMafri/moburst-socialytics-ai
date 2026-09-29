@@ -47,3 +47,11 @@ it('saves source evidence before analysis and handles snapshot failures', () => 
   expect(targets('Cache Posts Snapshot',1)).toEqual(['Mark Report Failed']);
   expect(graph.nodes.find((n:any)=>n.name==='Cache Posts Snapshot').onError).toBe('continueErrorOutput');
 });
+
+it('uses connected LinkedIn company handles when Sprout provides no native URL', () => {
+ const prepare=readFileSync('n8n/code/prepare-linkedin-sources.js','utf8');
+ const nodes:any={'Run Config':{range_start:period.start},'Competitive Webhook':{body:{client_profiles:[{platform:'linkedin',url:'',handle:'moburst'}],competitors:[]}},'Resolve Landscape':{client_company_id:1,companies:[{id:1,name:'Moburst'}]}};
+ const result=runInNewContext('(function(){'+prepare+'})()',{$:(n:string)=>({first:()=>({json:nodes[n]})})})[0].json;
+ expect(result.sources[0].profile_url).toBe('https://www.linkedin.com/company/moburst');
+ expect(result.input.targetUrls).toEqual(['https://www.linkedin.com/company/moburst']);
+});

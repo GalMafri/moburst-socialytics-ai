@@ -236,11 +236,11 @@ export async function buildCompetitivePayload(args: {
     .eq("verdict", "down");
 
   const { data: ownProfiles, error: ownError } = await supabase.from("sprout_profiles")
-    .select("network_type,native_link").eq("client_id", client.id).neq("is_active", false);
+    .select("network_type,native_link,native_name").eq("client_id", client.id).neq("is_active", false);
   if (ownError) throw ownError;
   return {
     client_profiles: (ownProfiles || []).filter((p: any) => p.network_type === "linkedin" || p.network_type === "linkedin_company")
-      .map((p: any) => ({ platform: "linkedin", url: p.native_link })),
+      .map((p: any) => ({ platform: "linkedin", url: p.native_link, handle: p.native_name })),
     report_id: reportId,
     attempt_started_at: args.attemptStartedAt,
     client_id: client.id,

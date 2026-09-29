@@ -101,11 +101,11 @@ export function RetryReportButton({
           <>
             <p>
               {kind === "competitive" ? "A new attempt will use the same selected companies and dates. Responses from the previous attempt cannot replace its result." : "Retry only after confirming the original workflow has stopped. It may still be running even after 90 minutes."}
-              Retrying replaces this attempt and can duplicate work if the original is still active.
+              {kind !== "competitive" && "Retrying replaces this attempt and can duplicate work if the original is still active."}
             </p>
             <p className="t-secondary">
               {kind === "competitive"
-                ? "It keeps this report's original competitor selection and date range, and fetches fresh RivalIQ data."
+                ? "It keeps this report's original competitor selection and date range, and fetches fresh data from the connected sources."
                 : "It reads the client's Sprout profiles, brief and latest competitive analysis as they stand now."}
             </p>
           </>

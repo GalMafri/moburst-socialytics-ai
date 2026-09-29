@@ -255,7 +255,7 @@ export default function CompetitiveRun() {
 
   if (clientLoading || setLoading) {
     return (
-      <AppLayout title="Competitive Analysis" width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
+      <AppLayout title="Competitive Analysis" width="max-w-4xl" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
         <Loading label="Loading" />
       </AppLayout>
     );
@@ -263,7 +263,7 @@ export default function CompetitiveRun() {
 
   if (clientFailed || !client) {
     return (
-      <AppLayout title="Competitive Analysis" width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
+      <AppLayout title="Competitive Analysis" width="max-w-4xl" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
         <LoadError
           title={clientFailed ? "Could not load this client" : "That client is not available"}
           error={clientFailed ? clientError : "It may have been deleted, or your account may not have access to it."}
@@ -281,7 +281,7 @@ export default function CompetitiveRun() {
 
   if (!confirmedSet) {
     return (
-      <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
+      <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
         <div className="max-w-4xl mx-auto">
           <Card>
             <CardContent className="pt-5 text-center space-y-4">
@@ -298,7 +298,7 @@ export default function CompetitiveRun() {
   }
 
   return (
-    <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl" description="Run the RivalIQ deep analysis for the confirmed competitor set over the period you choose.">
+    <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
       <div className="max-w-4xl mx-auto space-y-6">
         {/* What this run will actually use. When someone re-identified
             competitors, the newest selection on the review page is a draft and
