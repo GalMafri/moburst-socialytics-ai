@@ -27,6 +27,7 @@ export interface ContentPillar {
 }
 
 export interface DesignStyleSynthesis {
+  reference_pipeline_version?: number;
   composition_patterns?: string;
   typography_treatment?: string;
   imagery_style?: string;
