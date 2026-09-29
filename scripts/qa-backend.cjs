@@ -95,10 +95,12 @@ async function runScheduler(options={}){
 async function runFeed({landscapes,explicit,posts=[],providerStatus=200}) {
  const state=database({due:false});Object.assign(state.tables.clients[0],{name:'Subliy',website_url:'https://subliy.com'});
  if(explicit)state.tables.competitor_sets[0].rivaliq_landscape_id=explicit;
+ state.tables.competitors=[{set_id:'fixture-set',name:'Jobber',website_url:'https://getjobber.com',is_selected:true}];
  let handler;const requests=[];
  moduleFrom('supabase/functions/refresh-competitor-feed/index.ts',{
  'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},
  '../_shared/competitive/rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts'),
+ '../_shared/competitive/linkedinSource.ts':moduleFrom('supabase/functions/_shared/competitive/linkedinSource.ts',{'./rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts')}),
  '../_shared/auth/requireStaff.ts':{requireStaff:async()=>({})},
  '../_shared/auth/secretEquals.ts':{secretEquals:async()=>true},
  '../_shared/design-prompts/designRefs.ts':{harvestedPaths:()=>[]}

@@ -23,7 +23,7 @@ export function useActiveReportRun(clientId: string | undefined, kind: "monthly"
         .eq("client_id", clientId!).eq("status", "failed")
         .order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (failed.error) throw failed.error;
-      return failed.data && !canRetry(failed.data) ? failed.data : null;
+      return failed.data && !canRetry(failed.data, Date.now(), kind === "competitive" ? "competitive" : undefined) ? failed.data : null;
     },
     enabled: !!clientId,
     staleTime: 0,

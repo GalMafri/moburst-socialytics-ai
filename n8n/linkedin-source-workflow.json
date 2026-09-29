@@ -1,0 +1,128 @@
+{
+  "id": "xm3ZFPjysyQCkWsc",
+  "name": "Socialytics - Verified LinkedIn Source",
+  "versionId": "f3adbbb4-d9fb-4a38-b93f-325fc17aea06",
+  "activeVersionId": "f3adbbb4-d9fb-4a38-b93f-325fc17aea06",
+  "nodes": [
+    {
+      "id": "1ea86cba-a7eb-4750-a2c7-4ab79e525607",
+      "name": "LinkedIn Source Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "socialytics-linkedin-source",
+        "authentication": "headerAuth",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson",
+        "options": {}
+      },
+      "webhookId": "3e334081-05c0-4b47-9b33-75d5786c69fb",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "eSV0BS2mZ6Jjofq5",
+          "name": "Socialytics App Webhook"
+        }
+      }
+    },
+    {
+      "id": "50df02c7-62c4-467a-8b7e-1c376ad7024e",
+      "name": "Prepare Source Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $input.first().json.body || {};\nconst period = body.period || {};\nconst start = Date.parse(period.start + 'T00:00:00Z');\nconst end = Date.parse(period.end + 'T00:00:00Z');\nif (!Number.isFinite(start) || !Number.isFinite(end) || end < start || end-start > 365*86400000) throw new Error('Invalid LinkedIn source period.');\nconst sources = body.sources;\nif (!Array.isArray(sources) || !sources.length || sources.length > 10 || sources.some(s=>!s.company_id || !/^https:\\/\\/www\\.linkedin\\.com\\/company\\/[a-z0-9_-]+$/.test(s.profile_url || ''))) throw new Error('Verified LinkedIn company sources are required.');\nif (new Set(sources.map(s=>s.profile_url)).size !== sources.length || new Set(sources.map(s=>s.company_id)).size !== sources.length) throw new Error('Duplicate LinkedIn source identities.');\nreturn [{json:{range_start:period.start,range_end:period.end,sources,has_sources:true,input:{targetUrls:sources.map(s=>s.profile_url),maxPosts:150,postedLimitDate:period.start,scrapeComments:false,scrapeReactions:false,includeReposts:false,includeQuotePosts:true}}}];\n"
+      }
+    },
+    {
+      "id": "6ce1ca9f-a6da-4de7-ab1e-d84b35878fa1",
+      "name": "Collect Public Company Posts",
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "resource": "Actors",
+        "operation": "Run actor and get dataset",
+        "actorSource": "store",
+        "actorId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "WI0tj4Ieb5Kq458gB",
+          "cachedResultName": "LinkedIn Company Posts Scraper (No Cookies) (harvestapi/linkedin-company-posts)"
+        },
+        "customBody": "={{ JSON.stringify($json.input) }}",
+        "timeout": 240,
+        "memory": 512,
+        "authentication": "apifyOAuth2Api"
+      },
+      "alwaysOutputData": true,
+      "credentials": {
+        "apifyOAuth2Api": {
+          "id": "UDEw5qEJhODlzTMY",
+          "name": "Apify account 2"
+        }
+      }
+    },
+    {
+      "id": "657a1eed-5913-47f6-828c-9d7b3394e93c",
+      "name": "Verify Source Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const cfg = $('Prepare Source Request').first().json;\nconst sourcePlan = cfg;\nconst rival = {socialPosts:[]};\nconst profile = value => {\n  const m = String(value || '').match(/^https:\\/\\/(?:[a-z]{2,3}\\.)?linkedin\\.com\\/company\\/([a-z0-9_-]+)(?:\\/|\\?|$)/i);\n  return m ? 'https://www.linkedin.com/company/' + m[1].toLowerCase() : '';\n};\nconst rows = sourcePlan.has_sources ? $input.all().map(i=>i.json).filter(j=>Object.keys(j).length) : [];\nconst byUrl = new Map(sourcePlan.sources.map(s=>[s.profile_url,s]));\nconst counts = new Map(); const seen = new Set(); const posts = [];\nconst metrics = Object.fromEntries(sourcePlan.sources.map(s=>[s.company_id,{provider:'apify/harvestapi',profile_url:s.profile_url,period:{start:cfg.range_start,end:cfg.range_end},posts:0,engagement:0,coverage:'complete',reposts_included:false}]));\nfor (const row of rows) {\n  if (row.error || row.type === 'error') throw new Error('LinkedIn collection returned an error; the report must not treat it as zero activity.');\n  if (row.type !== 'post') throw new Error('LinkedIn collection returned an unexpected result; source coverage could not be verified.');\n  const source = byUrl.get(profile(row.query?.targetUrl));\n  if (!source) throw new Error('LinkedIn post query does not match a reviewed company page.');\n  const headerMatches = profile(row.header?.imageLink) === source.profile_url;\n  const collaboration = headerMatches && /collaborated on this/i.test(row.header?.text || '');\n  if (headerMatches && /reposted this/i.test(row.header?.text || '')) continue;\n  if (profile(row.author?.linkedinUrl) !== source.profile_url && !collaboration) throw new Error('LinkedIn post author does not match the reviewed company page.');\n  counts.set(source.profile_url,(counts.get(source.profile_url)||0)+1);\n  const published = row.postedAt?.date;\n  if (!published || !Number.isFinite(Date.parse(published)) || !/^https:\\/\\/www\\.linkedin\\.com\\/(?:posts|feed\\/update)\\//.test(row.linkedinUrl || '')) throw new Error('LinkedIn post is missing its source URL or publication date.');\n  const date = new Date(published).toISOString().slice(0,10);\n  if (date < cfg.range_start || date > cfg.range_end) continue;\n  const key = source.company_id + ':' + String(row.id || row.linkedinUrl);\n  if (seen.has(key)) continue; seen.add(key);\n  const values = ['likes','comments','shares'].map(k=>row.engagement?.[k]);\n  if (values.some(n=>typeof n !== 'number' || !Number.isFinite(n) || n<0)) throw new Error('LinkedIn post engagement counts are incomplete.');\n  const engagement = values.reduce((sum,n)=>sum+n,0);\n  metrics[source.company_id].posts++; metrics[source.company_id].engagement += engagement;\n  const image = row.postImages?.[0]?.url || row.document?.coverPages?.[0]?.imageUrls?.[0] || null;\n  posts.push({postId:'linkedin:'+key,companyId:source.company_id,companyName:source.name,channel:'linkedin',publishedAt:new Date(published).toISOString(),message:String(row.content||''),postLink:row.linkedinUrl,image,engagementTotal:engagement,applause:values[0],conversation:values[1],amplification:values[2],type:row.document?'carousel':row.video?'video':image?'image':'text',source:'apify/harvestapi',source_profile_url:source.profile_url,authorship:collaboration?'collaboration':'company'});\n}\nif ([...counts.values()].some(n=>n>=150)) throw new Error('LinkedIn collection reached its per-company limit; this period needs a larger paginated retrieval.');\nreturn [{json:{...rival,socialPosts:[...(rival.socialPosts||[]),...posts],additional_metrics:metrics,linkedin_sources:sourcePlan.sources,linkedin_posts:posts.length}}];\n"
+      }
+    }
+  ],
+  "connections": {
+    "LinkedIn Source Request": {
+      "main": [
+        [
+          {
+            "node": "Prepare Source Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Source Request": {
+      "main": [
+        [
+          {
+            "node": "Collect Public Company Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Public Company Posts": {
+      "main": [
+        [
+          {
+            "node": "Verify Source Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

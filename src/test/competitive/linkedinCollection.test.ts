@@ -55,3 +55,11 @@ it('uses connected LinkedIn company handles when Sprout provides no native URL',
  expect(result.sources[0].profile_url).toBe('https://www.linkedin.com/company/moburst');
  expect(result.input.targetUrls).toEqual(['https://www.linkedin.com/company/moburst']);
 });
+
+it('accepts verified company collaborations and excludes plain reposts without claiming authorship', () => {
+ const row=structuredClone(fixture[0]);row.author.linkedinUrl='https://www.linkedin.com/in/author';
+ row.header={imageLink:profile+'/?miniCompanyUrn=verified',text:'Medisafe collaborated on this'};
+ expect(merge([row]).socialPosts[0].authorship).toBe('collaboration');
+ row.header.text='Medisafe reposted this';expect(merge([row]).linkedin_posts).toBe(0);
+ row.header.imageLink='https://www.linkedin.com/company/unrelated';expect(()=>merge([row])).toThrow('author does not match');
+});

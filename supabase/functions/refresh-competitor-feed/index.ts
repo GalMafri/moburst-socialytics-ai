@@ -9,6 +9,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { bestLandscapeMatch, summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
+import { selectedFeedSources, collectLinkedInSource } from "../_shared/competitive/linkedinSource.ts";
 import { rivalIqFetch } from "../_shared/competitive/rivaliqFetch.ts";
 import { harvestedPaths, type HarvestedRef } from "../_shared/design-prompts/designRefs.ts";
 import { requireStaff } from "../_shared/auth/requireStaff.ts";
@@ -230,14 +231,26 @@ Deno.serve(async (req) => {
     // RivalIQ caps socialposts at 100 unless `limit` is sent (verified 2026-09-06: limit=500 returned 357).
     const PAGE_LIMIT = 500;
     const resp = await rivaliq(`/landscapes/${landscapeId}/socialposts?mainPeriodStart=${window.start}&mainPeriodEnd=${window.end}&limit=${PAGE_LIMIT}`, key);
-    const socialPosts: any[] = Array.isArray(resp?.socialPosts) ? resp.socialPosts : [];
+    const rivalPosts: any[] = Array.isArray(resp?.socialPosts) ? resp.socialPosts : [];
+    if (rivalPosts.length >= PAGE_LIMIT) throw new Error('The feed source reached its result limit. No partial refresh was saved.');
+    const {data: selected, error: selectionError} = await admin.from("competitors").select("*,competitor_handles(*)").eq("set_id",set?.id).eq("is_selected",true);
+    const {data: own, error: ownError} = await admin.from("sprout_profiles").select("network_type,native_link,native_name").eq("client_id",clientId).neq("is_active",false);
+    if (selectionError || ownError) throw new Error('Could not load reviewed feed profiles.');
+    const plan = selectedFeedSources(match.companies, match.client_company_id, selected || [], own || []);
+    const {data: setting, error: settingError} = await admin.from("app_settings").select("value").eq("key","competitive_linkedin_webhook_url").maybeSingle();
+    if (settingError) throw new Error('Could not load the LinkedIn source connection.');
+    const linkedin = await collectLinkedInSource(plan.sources, window, secret || '', setting?.value || '');
+    const selectedIds = new Set(plan.companyIds);
+    const socialPosts = [...rivalPosts.filter(p=>selectedIds.has(String(p.companyId))), ...linkedin.socialPosts];
 
-    await admin.from("rivaliq_snapshots").insert({
+    const {error: snapshotError} = await admin.from("rivaliq_snapshots").insert({
       client_id: clientId,
       landscape_id: landscapeId,
       endpoint: "feed",
-      payload: { window, socialPosts, fetched_at: new Date().toISOString(), truncated: socialPosts.length >= PAGE_LIMIT },
+      payload: { window, socialPosts, linkedin_sources: plan.sources, additional_metrics: linkedin.additional_metrics, fetched_at: new Date().toISOString(), truncated: false },
     });
+
+    if (snapshotError) throw new Error('Could not save the refreshed feed.');
 
     // The client's own creative, pulled from the same response.
     //
