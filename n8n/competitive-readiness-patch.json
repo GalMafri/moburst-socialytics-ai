@@ -1,0 +1,131 @@
+{
+  "workflow_id": "EBiAwSay3H2R8krv",
+  "base_version": "780a8d93-6061-4d79-b7ea-0d4f1746d4e9",
+  "poll_seconds": 60,
+  "max_pending_checks": 30,
+  "nodes": [
+    {
+      "name": "Check RivalIQ Readiness",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const status = $input.first().json.status;\nif (status !== 1 && status !== 2) {\n  throw new Error('RivalIQ did not return a valid data-readiness status. No analysis was started.');\n}\nif (status === 2 && $runIndex >= 30) {\n  throw new Error('RivalIQ is still collecting source data after 30 minutes. Retry this report after tracking has finished; no incomplete figures were released.');\n}\nreturn [{ json: { status, ready: status === 1, checks: $runIndex + 1 } }];\n"
+      },
+      "position": [
+        -200,
+        640
+      ]
+    },
+    {
+      "name": "RivalIQ Ready",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "provider-ready",
+              "leftValue": "={{ $json.ready }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "position": [
+        20,
+        640
+      ]
+    },
+    {
+      "name": "Wait for RivalIQ Data",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 60,
+        "unit": "seconds"
+      },
+      "position": [
+        20,
+        840
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "type": "setNodeSettings",
+      "nodeName": "Check RivalIQ Readiness",
+      "settings": {
+        "onError": "continueErrorOutput"
+      }
+    },
+    {
+      "type": "removeConnection",
+      "source": "Landscape Status",
+      "target": "Landscape Companies",
+      "sourceIndex": 0,
+      "targetIndex": 0
+    },
+    {
+      "type": "removeConnection",
+      "source": "Landscape Status",
+      "target": "Cache Status Snapshot",
+      "sourceIndex": 0,
+      "targetIndex": 0
+    },
+    {
+      "type": "addConnection",
+      "source": "Landscape Status",
+      "target": "Check RivalIQ Readiness"
+    },
+    {
+      "type": "addConnection",
+      "source": "Check RivalIQ Readiness",
+      "target": "RivalIQ Ready",
+      "sourceIndex": 0
+    },
+    {
+      "type": "addConnection",
+      "source": "Check RivalIQ Readiness",
+      "target": "Mark Report Failed",
+      "sourceIndex": 1
+    },
+    {
+      "type": "addConnection",
+      "source": "RivalIQ Ready",
+      "target": "Landscape Companies",
+      "sourceIndex": 0
+    },
+    {
+      "type": "addConnection",
+      "source": "RivalIQ Ready",
+      "target": "Cache Status Snapshot",
+      "sourceIndex": 0
+    },
+    {
+      "type": "addConnection",
+      "source": "RivalIQ Ready",
+      "target": "Wait for RivalIQ Data",
+      "sourceIndex": 1
+    },
+    {
+      "type": "addConnection",
+      "source": "Wait for RivalIQ Data",
+      "target": "Landscape Status"
+    }
+  ]
+}

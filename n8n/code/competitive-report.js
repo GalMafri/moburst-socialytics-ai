@@ -18,6 +18,7 @@ const startedAt = new Date(cfg.started_at);
 const durationMinutes = Math.max(1, Math.round((Date.now() - startedAt.getTime()) / 60000));
 const reportData = sanitize(normalizedCompetitiveMetrics({
   source: "rivaliq",
+  provider_status: 1,
   landscape: { id: landscape.landscape_id, name: landscape.landscape_name, matched_by: landscape.matched_by, focus_company_id: landscape.focus_company_id, companies: landscape.companies },
   period: aggregates.period,
   // rivaliq_calls: landscapes list + status + companies + one socialposts call per weekly window.

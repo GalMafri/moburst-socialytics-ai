@@ -46,6 +46,12 @@ it('holds partial windows and preserves internal review holds',()=>{
 it('allows matching measured zeros without claiming missing publishing activity',()=>{
  expect(competitiveReportQuality(fixture()).ready).toBe(true);
 });
+it('withholds an entirely empty analysis and a provider update in progress',()=>{
+ const empty={aggregates:{companies:[{name:'MyRxProfile',post_count:0,observed_post_count:0},{name:'Medisafe',post_count:0,observed_post_count:0}]}};
+ expect(competitiveReportQuality(empty).ready).toBe(false);
+ expect(competitiveReportQuality({...fixture(),provider_status:2}).reasons).toContain('RivalIQ is still collecting source data. Retry once tracking is ready.');
+ expect(competitiveReportQuality({...fixture(),provider_status:1}).ready).toBe(true);
+});
 it('removes the old diagnostic paragraph from derived report narrative',()=>{
  const input={...fixture(),schema_note:"RivalIQ returned no in-period posts for Client. This does not establish ..."};
  expect(withCompetitiveEvidenceLimits(input).schema_note).toBe('');

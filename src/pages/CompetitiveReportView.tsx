@@ -304,6 +304,8 @@ export default function CompetitiveReportView() {
     <Card><CardContent className="pt-6 space-y-4">
       <p className="t-body">We need to verify the source data before this report can be released.</p>
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to reports</Button>
+      {canRetry(report) && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
+      {isMoburstStaff && <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/run`)}>Choose another period</Button>}
       {isMoburstStaff && <details className="t-secondary"><summary className="cursor-pointer">Internal validation details</summary><ul className="mt-3 space-y-2">{competitiveReportQuality(report.report_data).reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></details>}
     </CardContent></Card>
   </AppLayout>;

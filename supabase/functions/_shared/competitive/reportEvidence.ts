@@ -75,6 +75,14 @@ export function withCompetitiveEvidenceLimits<T>(input: T): T {
 export function competitiveReportQuality(input: unknown): { ready: boolean; reasons: string[] } {
   const report = input as Record<string, any> | null;
   const reasons: string[] = [];
+  if (report?.provider_status != null && report.provider_status !== 1) {
+    reasons.push("RivalIQ is still collecting source data. Retry once tracking is ready.");
+  }
+  const companies = report?.aggregates?.companies;
+  if (Array.isArray(companies) && companies.length > 0 && companies.every((c: any) =>
+    (c.observed_post_count ?? c.post_count) === 0 && c.post_count === 0)) {
+    reasons.push("No posts were returned for any selected company. Verify tracking or choose a period with available posts before generating a competitive analysis.");
+  }
   if (report?.aggregates?.metrics_available === false) reasons.push("Provider period metrics did not load.");
   if (Number(report?.totals?.windows_failed) > 0) reasons.push("Some reporting windows did not load.");
   if (Number(report?.totals?.truncated_pages) > 0) reasons.push("Some reporting windows exceeded the retrieval limit.");
