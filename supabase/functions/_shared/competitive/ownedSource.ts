@@ -82,9 +82,12 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
   }));
   const snapshotDay=day(collectedAt);
   const audience_snapshot={by_network:Object.fromEntries(networks.map(network=>{
+    // Each profile's latest reading inside the window; Sprout dates them a
+    // day apart for different profiles, so the snapshot is dated by the
+    // most recent reading rather than requiring every profile to share a day.
     const rows=profiles.filter(p=>ownedNetwork(p.network_type)===network).map(p=>followers(String(p.sprout_profile_id),new Date(Date.parse(snapshotDay)-2*DAY).toISOString().slice(0,10),snapshotDay));
-    const dates=[...new Set(rows.filter(Boolean).map(r=>r.date))];
-    return [network,{followers:dates.length===1?sum(rows.map(r=>r?.followers??null)):null,as_of:dates.length===1?dates[0]:null}];
+    const complete=rows.length>0 && rows.every(Boolean);
+    return [network,{followers:complete?sum(rows.map(r=>r!.followers)):null,as_of:complete?rows.map(r=>r!.date).sort().slice(-1)[0]:null}];
   }))};
   return {provider:'sprout',coverage:'complete',period,previous_period:previous,collected_at:collectedAt,
     profiles:profiles.map(p=>({id:String(p.sprout_profile_id),name:p.profile_name||p.native_name,network:ownedNetwork(p.network_type)})),
