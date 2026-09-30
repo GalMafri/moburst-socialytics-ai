@@ -35,8 +35,12 @@ Deno.serve(async req => {
       reviewedLogo={...logo,reference_index:index};break;
     }
     // Reopening collects the same paid job and refreshes unverified logo measurements.
+    // A plan whose jobs were never attached to a saved design within three hours
+    // was abandoned (the browser that ran it went away); a new plan is made so the
+    // current planning rules apply rather than the abandoned plan's.
     {
-      const {data:plans}=await db.from('creative_directions').select('*').eq('client_id',client_id).eq('mode',mode).eq('post_copy',copy).eq('platform',platform).eq('format',format).order('created_at',{ascending:false}).limit(4);
+      const resumable=new Date(Date.now()-3*60*60*1000).toISOString();
+      const {data:plans}=await db.from('creative_directions').select('*').eq('client_id',client_id).eq('mode',mode).eq('post_copy',copy).eq('platform',platform).eq('format',format).gte('created_at',resumable).order('created_at',{ascending:false}).limit(4);
       for(const prior of plans||[]) {
         if(prior.plan?.frames?.length!==count || (mode!=='video' && (!prior.plan?.logo || prior.plan.frames.some((f:any)=>!f.layout)))) continue;
         const {data:pending}=await db.from('media_jobs').select('id').eq('client_id',client_id).contains('input',{creative_plan_id:prior.id}).is('post_iteration_id',null).in('status',['pending','submitted','completed']).limit(1).maybeSingle();
