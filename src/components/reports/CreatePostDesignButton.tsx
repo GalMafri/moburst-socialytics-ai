@@ -1,7 +1,7 @@
 import {planCreative, renderCreative, CreativeReviewError} from "@/lib/creativeProduction";
 import { applyReferenceTemplate } from "@/lib/referenceTemplate";
 import { describeInvokeError } from "@/lib/invokeError";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,7 +17,7 @@ import { toast as sonnerToast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { DesignEditor } from "@/components/editor/DesignEditor";
 import type { ClientContext } from "@/lib/clientContext";
-import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
+import { useGenerationContext, useGenerationForPost, postKeyOf } from "@/components/reports/calendar/GenerationContext";
 import { brandAdviceFrom, brandWarning, correctionFor, verdictIsDirty, verdictSummary } from "@/lib/designGuard";
 import { headlineFrom } from "../../../supabase/functions/_shared/design-prompts/headline";
 import { postCopyOf } from "@/lib/postCopy";
@@ -133,6 +133,11 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   const usesSocialTemplate = clientContext?.design_style_synthesis?.reference_pipeline_version === 1;
   const footingWarning = brandWarning(clientContext);
   const generation = useGenerationContext();
+  // A run started from an earlier mount of this button (the post panel was
+  // closed and reopened) is still going in the background. This dialog then
+  // shows that run instead of starting a second copy of it.
+  const backgroundRun = useGenerationForPost(post);
+  const attachedRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   // Only so the dialog can tell the truth about how long this will take.
@@ -310,6 +315,12 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       variant_angle: angle || null,
       is_selected: isSelected,
     } as any).select("id").single();
+    if (error?.code === "23505" && angle) {
+      // Another copy of this run already saved the same design (the panel
+      // was reopened while it ran). That row is the design.
+      const { data: existing } = await supabase.from("post_iterations").select("id").eq("client_id", clientId).eq("variant_angle", angle).maybeSingle();
+      return existing?.id;
+    }
     if (error) {
       console.error("[CreatePostDesignButton] persistVariantRow failed:", error);
       sonnerToast.error(`Failed to save variant: ${error.message}`);
@@ -601,7 +612,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       if(cancelRef.current) return;
       setStage(3);
       if(isCarousel) {
-        const {data:iteration,error}=await supabase.from('post_iterations').insert({client_id:id,platform:post.platform||null,post_copy:postCopyOf(post),visual_direction:post.visual_direction||null,format:post.format||null,source:'calendar',media_urls:images,variant_group_id:groupId,variant_angle:`Reference creative ${plan.id}`,is_selected:true}).select("id").single();
+        const angle=`Reference creative ${plan.id}`;
+        let {data:iteration,error}=await supabase.from('post_iterations').insert({client_id:id,platform:post.platform||null,post_copy:postCopyOf(post),visual_direction:post.visual_direction||null,format:post.format||null,source:'calendar',media_urls:images,variant_group_id:groupId,variant_angle:angle,is_selected:true}).select("id").single();
+        if(error?.code==='23505') ({data:iteration,error}=await supabase.from('post_iterations').select("id").eq("client_id",id).eq("variant_angle",angle).single());
         if(error) throw error;
         await supabase.from("media_jobs").update({post_iteration_id:iteration.id}).eq("client_id",id).contains("input",{creative_plan_id:plan.id});
         onImagesGenerated?.(images);
@@ -911,10 +924,35 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       setSlideCount(isCarousel ? 5 : 1);
     }
     setOpen(true);
+    if (fresh && !loading && backgroundRun?.type === "design" && backgroundRun.status === "running") {
+      attachedRef.current = true;
+      setLoading(true);
+      setStage(1);
+      setStartedAt(backgroundRun.startedAt);
+      setVariantUrls(new Array(Math.max(1, backgroundRun.total)).fill(null));
+      return;
+    }
     // Opening is the decision. The defaults are the brand's; anything else
     // can be changed after the first result, with the result in view.
     if (fresh && !loading) void startRun();
   };
+
+  // The attached run finishes in its own closure; this dialog only mirrors
+  // its outcome. Saved designs reach the panel through post_iterations.
+  useEffect(() => {
+    if (!attachedRef.current || !backgroundRun || backgroundRun.status === "running") return;
+    attachedRef.current = false;
+    setLoading(false);
+    if (backgroundRun.status === "completed") {
+      setVariantUrls([]);
+      setOpen(false);
+      onImagesGenerated?.([]);
+      sonnerToast.success("The designs were saved to this post.");
+    } else {
+      setGenerationError(backgroundRun.status === "cancelled" ? "The design run was cancelled." : "The design run could not be completed. Run it again.");
+      setVariantUrls(new Array(Math.max(1, backgroundRun.total)).fill("FAILED"));
+    }
+  }, [backgroundRun?.status]);
 
   const handleStartOver = () => {
     setEditablePrompt(defaultPrompt);

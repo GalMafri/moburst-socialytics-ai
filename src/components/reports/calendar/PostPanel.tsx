@@ -18,6 +18,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { PlatformBadge } from "@/lib/platform-config";
 import { CopyEditor } from "./CopyEditor";
 import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
+import { useGenerationForPost } from "@/components/reports/calendar/GenerationContext";
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
 import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
@@ -70,6 +71,7 @@ export function PostPanel({
   const [editedPost, setEditedPost] = useState<CalendarPost | null>(null);
   useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab("copy"); }, [sourcePost?._calendarPostKey, open]);
   const post = editedPost && editedPost._calendarPostKey === sourcePost?._calendarPostKey ? editedPost : sourcePost;
+  const designRun = useGenerationForPost(post);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewIsVideo, setPreviewIsVideo] = useState(false);
@@ -151,12 +153,16 @@ export function PostPanel({
                   <p className="text-sm font-semibold">
                     {imageTiles.length > 0
                       ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
-                      : "No designs yet"}
+                      : designRun?.status === "running"
+                        ? `Generating designs · ${designRun.completed}/${designRun.total} done`
+                        : "No designs yet"}
                   </p>
                   <p className="t-secondary">
                     {imageTiles.length > 0
                       ? "Click any design to preview at full size. Star your favorites."
-                      : "Generate brand-aligned variants to get started."}
+                      : designRun?.status === "running"
+                        ? "The run continues while this panel is closed. Open Design to follow it."
+                        : "Generate brand-aligned variants to get started."}
                   </p>
                 </div>
                 {isMoburstStaff && <CreatePostDesignButton
