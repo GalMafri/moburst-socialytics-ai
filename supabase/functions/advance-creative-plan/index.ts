@@ -1,0 +1,181 @@
+// The creative run, owned by the server.
+//
+// A plan (creative_directions) has N frames. For each frame this worker
+// submits the artwork job, collects the provider's result into storage,
+// reviews it against the client's references, submits one corrected attempt
+// when the review fails, and when every frame is approved it creates the
+// design record (post_iterations) with the raw artwork. The app then sets the
+// headline card, type and logo ("finishing") whenever the post is opened.
+//
+// It is idempotent and re-entrant: the browser polls it while a dialog is
+// open, and a schedule calls it without a browser, so a closed tab never
+// loses a paid render.
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
+import { secretEquals } from '../_shared/auth/secretEquals.ts';
+import { loadCreativePlan } from '../_shared/design-prompts/loadCreativePlan.ts';
+import { creativeImagePrompt, frameReferenceIndices } from '../_shared/design-prompts/creativePlan.ts';
+import { imageAspectRatio, platformDesignSpec } from '../_shared/design-prompts/aspect.ts';
+import { sourceImage } from '../_shared/design-prompts/sourceImage.ts';
+import { validateDesignImage, verdictIsDirty } from '../_shared/design-prompts/validateImage.ts';
+import { correctionFor } from '../_shared/design-prompts/correction.ts';
+import { resolveContextImageUrls } from '../_shared/higgsfield/context.ts';
+import { startImageWithHiggsfield } from '../_shared/higgsfield/startImage.ts';
+import { checkVideoJob } from '../_shared/higgsfield/renderVideo.ts';
+import { storeRemoteImage } from '../_shared/media/storeRemote.ts';
+
+const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+const MAX_ATTEMPTS = 2;
+const REVIEWS_PER_TICK = 2;
+const STALE_PENDING_MS = 5 * 60 * 1000;
+
+type Job = { id: string; status: string; request_id: string | null; output_url: string | null; error: string | null; review: any; input: any; post_iteration_id: string | null; created_at: string };
+type FrameState = { index: number; state: 'rendering' | 'reviewing' | 'approved' | 'failed'; attempt: number; url: string | null; preview: string | null; error: string | null };
+
+async function jobsFor(db: any, clientId: string, planId: string): Promise<Job[]> {
+  const { data, error } = await db.from('media_jobs').select('id,status,request_id,output_url,error,review,input,post_iteration_id,created_at').eq('client_id', clientId).contains('input', { creative_plan_id: planId }).order('created_at');
+  if (error) throw new Error('The creative jobs could not be read.');
+  return data || [];
+}
+
+async function submitFrame(db: any, creative: any, index: number, attempt: number, correction: string): Promise<Job> {
+  const key = { creative_plan_id: creative.id, creative_frame_index: index, creative_attempt: attempt };
+  const { data: row, error } = await db.from('media_jobs').insert({ client_id: creative.client_id, kind: 'image', provider: 'higgsfield', status: 'pending', input: key }).select('id,status,request_id,output_url,error,review,input,post_iteration_id,created_at').single();
+  if (error) {
+    if (error.code === '23505') { const { data } = await db.from('media_jobs').select('id,status,request_id,output_url,error,review,input,post_iteration_id,created_at').eq('client_id', creative.client_id).contains('input', key).single(); return data; }
+    throw new Error('The image job could not be reserved.');
+  }
+  try {
+    const frame = creative.plan.frames[index];
+    const refs = frameReferenceIndices(frame).map((i: number) => creative.reference_paths[i]);
+    const { referenceUrls } = await resolveContextImageUrls({ design_references: refs }, db);
+    if (referenceUrls.length !== refs.length) throw new Error('The selected client references could not be opened.');
+    const prompt = creativeImagePrompt(creative.plan, index, correction, platformDesignSpec(creative.platform, creative.format));
+    const started = await startImageWithHiggsfield(db, prompt, imageAspectRatio(creative.platform, creative.format), referenceUrls);
+    const { error: recordError } = await db.from('media_jobs').update({ request_id: started.jobId, model_path: started.model, status: 'submitted', updated_at: new Date().toISOString() }).eq('id', row.id);
+    if (recordError) throw new Error(`Image submitted as ${started.jobId} but recording failed.`);
+    return { ...row, status: 'submitted', request_id: started.jobId };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Image submission unavailable';
+    await db.from('media_jobs').update({ status: 'failed', error: message, updated_at: new Date().toISOString() }).eq('id', row.id);
+    return { ...row, status: 'failed', error: message };
+  }
+}
+
+async function reviewJob(db: any, creative: any, index: number, job: Job) {
+  const frame = creative.plan.frames[index];
+  const references = await Promise.all(frameReferenceIndices(frame).map((i: number) => sourceImage(db, creative.reference_paths[i])));
+  const direction = frame.layout ? JSON.stringify({ subject: frame.subject, headline_position: frame.layout.headline_position, subject_position: frame.layout.subject_position }) : undefined;
+  const verdict = await validateDesignImage(job.output_url!, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText: '' });
+  const dirty = verdictIsDirty(verdict, { expectNoText: true });
+  await db.from('media_jobs').update({ review: { ...verdict, dirty }, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
+  return { verdict, dirty };
+}
+
+async function advancePlan(db: any, creative: any, budget: { reviews: number }): Promise<{ frames: FrameState[]; done: boolean; failed: boolean; iterations: Array<{ id: string; media_urls: string[]; frames: number[]; finishing?: string }> }> {
+  const count = creative.plan.frames.length;
+  const jobs = await jobsFor(db, creative.client_id, creative.id);
+  const attached = jobs.filter(j => j.post_iteration_id);
+  if (attached.length) {
+    const ids = [...new Set(attached.map(j => j.post_iteration_id))];
+    const { data } = await db.from('post_iterations').select('id,media_urls,variant_angle,finishing').in('id', ids);
+    return { frames: creative.plan.frames.map((_: unknown, i: number) => ({ index: i, state: 'approved', attempt: 0, url: null, preview: null, error: null })), done: true, failed: false, iterations: (data || []).map((it: any) => ({ ...it, frames: creative.mode === 'carousel' ? creative.plan.frames.map((_: unknown, i: number) => i) : [creative.plan.frames.findIndex((f: any) => String(it.variant_angle || '').endsWith(f.subject.slice(0, 80)))].map(i => Math.max(0, i)) })) };
+  }
+  const frames: FrameState[] = [];
+  for (let index = 0; index < count; index++) {
+    const mine = jobs.filter(j => j.input?.creative_frame_index === index).sort((a, b) => (a.input?.creative_attempt ?? 0) - (b.input?.creative_attempt ?? 0));
+    let job = mine[mine.length - 1];
+    let attempt = job ? Number(job.input?.creative_attempt ?? 0) : 0;
+    if (!job) { job = await submitFrame(db, creative, index, 0, ''); }
+    if (job.status === 'pending' && Date.now() - Date.parse(job.created_at) > STALE_PENDING_MS) {
+      await db.from('media_jobs').update({ status: 'failed', error: 'The submission did not complete.', updated_at: new Date().toISOString() }).eq('id', job.id);
+      job = { ...job, status: 'failed', error: 'The submission did not complete.' };
+    }
+    if (job.status === 'submitted' && job.request_id) {
+      try {
+        const snapshot = await checkVideoJob(db, job.request_id);
+        if (snapshot.status === 'completed' && snapshot.url) {
+          const stored = await storeRemoteImage(db, creative.client_id, snapshot.url, `creative-${creative.id}-${index}-${attempt}`);
+          await db.from('media_jobs').update({ status: 'completed', output_url: stored, updated_at: new Date().toISOString() }).eq('id', job.id);
+          job = { ...job, status: 'completed', output_url: stored };
+        } else if (snapshot.status === 'failed') {
+          await db.from('media_jobs').update({ status: 'failed', error: snapshot.error, updated_at: new Date().toISOString() }).eq('id', job.id);
+          job = { ...job, status: 'failed', error: snapshot.error };
+        }
+      } catch (err) {
+        // A lookup failure is not evidence about the render; try again next tick.
+        console.warn('[advance-creative-plan] provider check failed:', err instanceof Error ? err.message : err);
+      }
+    }
+    if (job.status === 'completed' && job.output_url && !job.review && budget.reviews > 0) {
+      budget.reviews--;
+      const { verdict, dirty } = await reviewJob(db, creative, index, job);
+      job = { ...job, review: { ...verdict, dirty } };
+      if (dirty) {
+        const reason = correctionFor(verdict, { expectNoText: true });
+        if (attempt + 1 < MAX_ATTEMPTS) { job = await submitFrame(db, creative, index, attempt + 1, reason); attempt += 1; }
+        else { await db.from('media_jobs').update({ status: 'failed', error: `Brand review rejected the artwork: ${reason}`.slice(0, 1000), updated_at: new Date().toISOString() }).eq('id', job.id); job = { ...job, status: 'failed', error: `Brand review rejected the artwork: ${reason}` }; }
+      }
+    }
+    const approved = job.status === 'completed' && job.review && !job.review.dirty;
+    const state: FrameState['state'] = approved ? 'approved' : job.status === 'failed' ? 'failed' : job.status === 'completed' ? 'reviewing' : 'rendering';
+    frames.push({ index, state, attempt, url: approved ? job.output_url : null, preview: job.output_url || null, error: job.status === 'failed' ? job.error : null });
+  }
+  const failed = frames.some(f => f.state === 'failed');
+  const done = !failed && frames.every(f => f.state === 'approved');
+  const iterations: Array<{ id: string; media_urls: string[]; frames: number[]; finishing?: string }> = [];
+  if (done) {
+    const base = { client_id: creative.client_id, platform: creative.platform || null, post_copy: creative.post_copy || null, format: creative.format || null, source: 'calendar', finishing: 'pending', variant_group_id: crypto.randomUUID() };
+    const rows = creative.mode === 'carousel'
+      ? [{ ...base, media_urls: frames.map(f => f.url!), variant_angle: `Reference creative ${creative.id}`, is_selected: true, frames: frames.map(f => f.index) }]
+      : frames.map(f => ({ ...base, media_urls: [f.url!], variant_angle: `Reference creative ${creative.id}: ${creative.plan.frames[f.index].subject}`.slice(0, 500), is_selected: false, frames: [f.index] }));
+    for (const row of rows) {
+      const { frames: owned, ...insert } = row;
+      let { data, error } = await db.from('post_iterations').insert(insert).select('id,media_urls,finishing').single();
+      if (error?.code === '23505') ({ data, error } = await db.from('post_iterations').select('id,media_urls,finishing').eq('client_id', creative.client_id).eq('variant_angle', insert.variant_angle).single());
+      if (error || !data) throw new Error('The design record could not be created.');
+      iterations.push({ ...data, frames: owned });
+      for (const index of owned) await db.from('media_jobs').update({ post_iteration_id: data.id }).eq('client_id', creative.client_id).contains('input', { creative_plan_id: creative.id, creative_frame_index: index });
+    }
+  }
+  return { frames, done, failed, iterations };
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
+  try {
+    const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+    const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const scheduled = await secretEquals(req.headers.get('x-socialytics-secret'), Deno.env.get('SOCIALYTICS_N8N_SECRET'));
+    const budget = { reviews: REVIEWS_PER_TICK };
+    if (body.plan_id) {
+      const clientId = String(body.client_id || '');
+      if (!clientId) return json({ error: 'client_id is required' }, 400);
+      if (!scheduled) await requireStaff(req, { writeClientId: clientId });
+      const creative = await loadCreativePlan(db, body.plan_id, clientId);
+      if (creative.mode === 'video') return json({ error: 'Video runs are collected by the video dialog.' }, 400);
+      const result = await advancePlan(db, creative, budget);
+      return json({ plan_id: creative.id, mode: creative.mode, count: creative.plan.frames.length, ...result });
+    }
+    if (!scheduled) return json({ error: 'unauthorized' }, 401);
+    // Sweep: every plan with an open still job from the last six hours.
+    const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    const { data: open } = await db.from('media_jobs').select('client_id,input').eq('kind', 'image').is('post_iteration_id', null).in('status', ['pending', 'submitted', 'completed']).gte('created_at', since).limit(200);
+    const plans = new Map<string, string>();
+    for (const j of open || []) if (j.input?.creative_plan_id) plans.set(j.input.creative_plan_id, j.client_id);
+    const swept: Array<{ plan_id: string; done: boolean; failed: boolean; error?: string }> = [];
+    for (const [planId, clientId] of [...plans.entries()].slice(0, 4)) {
+      try {
+        const creative = await loadCreativePlan(db, planId, clientId);
+        if (creative.mode === 'video') continue;
+        const result = await advancePlan(db, creative, budget);
+        swept.push({ plan_id: planId, done: result.done, failed: result.failed });
+      } catch (err) { swept.push({ plan_id: planId, done: false, failed: false, error: err instanceof Error ? err.message : String(err) }); }
+    }
+    return json({ swept });
+  } catch (err) {
+    if (err instanceof AuthzError) return json({ error: err.message }, err.status);
+    return json({ error: err instanceof Error ? err.message : 'The creative run could not be advanced.' }, 500);
+  }
+});

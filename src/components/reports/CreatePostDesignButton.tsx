@@ -1,4 +1,4 @@
-import {planCreative, renderCreative, CreativeReviewError} from "@/lib/creativeProduction";
+import {planCreative, produceCreative, CreativeReviewError} from "@/lib/creativeProduction";
 import { applyReferenceTemplate } from "@/lib/referenceTemplate";
 import { describeInvokeError } from "@/lib/invokeError";
 import { useEffect, useRef, useState } from "react";
@@ -599,31 +599,19 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       const plan = await planCreative(id, brief, isCarousel ? 'carousel' : 'single', count);
       if (cancelRef.current) return;
       setReferencePreviews(Object.fromEntries([...new Set(plan.frames.flatMap(f=>f.reference_indices))].map((index,i)=>[i,plan.reference_previews[index]])));
-      const images:string[]=[];
-      for(let i=0;i<count;i++) {
-        if(cancelRef.current) return;
-        setCurrentSlide(i+1); setStage(1);
-        const image=await renderCreative(plan,i,id,brief,()=>cancelRef.current);
-        if(cancelRef.current) return;
-        setStage(2);
-        images.push(await uploadVariantToStorage(image,i,true));
-        generation.progressGeneration(postKey);
-      }
+      setStage(1);
+      let seen=0;
+      const images=await produceCreative({...plan,client_id:id},id,brief,{
+        onProgress:(approved,total,frames)=>{
+          setCurrentSlide(Math.min(total,approved+1));
+          setStage(frames.some(f=>f.state==='reviewing')?2:approved>=total?3:1);
+          for(;seen<approved;seen++) generation.progressGeneration(postKey);
+        },
+        isCancelled:()=>cancelRef.current,
+      });
       if(cancelRef.current) return;
       setStage(3);
-      if(isCarousel) {
-        const angle=`Reference creative ${plan.id}`;
-        let {data:iteration,error}=await supabase.from('post_iterations').insert({client_id:id,platform:post.platform||null,post_copy:postCopyOf(post),visual_direction:post.visual_direction||null,format:post.format||null,source:'calendar',media_urls:images,variant_group_id:groupId,variant_angle:angle,is_selected:true}).select("id").single();
-        if(error?.code==='23505') ({data:iteration,error}=await supabase.from('post_iterations').select("id").eq("client_id",id).eq("variant_angle",angle).single());
-        if(error) throw error;
-        await supabase.from("media_jobs").update({post_iteration_id:iteration.id}).eq("client_id",id).contains("input",{creative_plan_id:plan.id});
-        onImagesGenerated?.(images);
-      } else {
-        for(let i=0;i<images.length;i++) {
-          const iterationId=await persistVariantRow(images[i],`Reference creative ${plan.id}: ${plan.frames[i].subject}`,groupId,false);
-          if(iterationId) await supabase.from("media_jobs").update({post_iteration_id:iterationId}).eq("client_id",id).contains("input",{creative_plan_id:plan.id,creative_frame_index:i});
-        }
-      }
+      onImagesGenerated?.(images);
       setVariantUrls(images);
     } catch(error) {
       if(error instanceof CreativeReviewError) setFailedPreviews({0:error.preview});

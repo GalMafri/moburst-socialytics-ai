@@ -23,11 +23,13 @@ import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButto
 import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
 import { isVideoFormat } from "@/lib/platform";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { CalendarPost } from "@/lib/calendarRevision";
 import { tileAspectFor } from "@/lib/tileAspect";
 import { tilesFromIterations, type Iteration, type MediaTile } from "@/lib/postMediaTiles";
+import { supabase } from "@/integrations/supabase/client";
+import { finishIterations, type ProductionPlan } from "@/lib/creativeProduction";
 
 interface Props {
   open: boolean;
@@ -72,6 +74,29 @@ export function PostPanel({
   useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab("copy"); }, [sourcePost?._calendarPostKey, open]);
   const post = editedPost && editedPost._calendarPostKey === sourcePost?._calendarPostKey ? editedPost : sourcePost;
   const designRun = useGenerationForPost(post);
+  // Artwork the server completed while nobody was watching still needs its
+  // headline card, type and logo. Finish it here, once per row.
+  const finishingRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (!isMoburstStaff || !clientId) return;
+    const pending = postIterations.filter((it) => it.id && it.finishing === "pending" && /^Reference creative ([0-9a-f-]{36})/.test(String(it.variant_angle || "")) && !finishingRef.current.has(it.id));
+    if (!pending.length) return;
+    const byPlan = new Map<string, Iteration[]>();
+    for (const it of pending) { const planId = String(it.variant_angle).match(/^Reference creative ([0-9a-f-]{36})/)![1]; byPlan.set(planId, [...(byPlan.get(planId) || []), it]); finishingRef.current.add(it.id!); }
+    (async () => {
+      for (const [planId, rows] of byPlan) {
+        try {
+          const { data: plan, error } = await supabase.functions.invoke("get-creative-plan", { body: { plan_id: planId, client_id: clientId } });
+          if (error || !plan?.id) throw new Error("plan unavailable");
+          await finishIterations(rows.map((r, i) => ({ id: r.id!, media_urls: r.media_urls || [], frames: [], finishing: r.finishing || undefined })), { ...(plan as ProductionPlan), client_id: clientId }, { platform: plan.platform || post?.platform, format: plan.format || post?.format });
+          refreshMedia();
+        } catch (e) {
+          console.warn("[PostPanel] finishing failed:", e);
+          for (const r of rows) finishingRef.current.delete(r.id!);
+        }
+      }
+    })();
+  }, [postIterations, isMoburstStaff, clientId]);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewIsVideo, setPreviewIsVideo] = useState(false);

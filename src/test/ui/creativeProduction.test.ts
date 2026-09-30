@@ -1,44 +1,37 @@
 import {describe,it,expect,vi,beforeEach} from 'vitest';
 import {supabase} from '@/integrations/supabase/client';
-import {renderCreative,planCreative,type ProductionPlan} from '@/lib/creativeProduction';
-vi.mock('@/integrations/supabase/client',()=>({supabase:{functions:{invoke:vi.fn()},storage:{from:()=>({getPublicUrl:()=>({data:{publicUrl:'https://storage/'}})})},from:()=>({update:()=>({eq:()=>Promise.resolve({error:null})})})}}));
+import {produceCreative,planCreative,frameIndexFor,type ProductionPlan} from '@/lib/creativeProduction';
+vi.mock('@/integrations/supabase/client',()=>({supabase:{functions:{invoke:vi.fn()},storage:{from:()=>({getPublicUrl:(p:string)=>({data:{publicUrl:'https://storage/'+p}}),upload:vi.fn(async()=>({error:null}))})},from:()=>({update:()=>({eq:()=>Promise.resolve({error:null})})})}}));
 vi.mock('@/lib/composeText',()=>({loadImage:vi.fn(async()=>({naturalWidth:2048,naturalHeight:2048}))}));
+vi.mock('@/lib/brandLogo',()=>({finishBrandStatic:vi.fn(async(url:string)=>'data:image/png;base64,'+url)}));
 const invoke=vi.mocked(supabase.functions.invoke);
-const plan={id:'plan',frames:[{headline:'New idea',reference_indices:[0,1]}],reference_previews:['r1','r2']} as ProductionPlan;
-beforeEach(()=>{vi.useRealTimers();vi.clearAllMocks();vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue({drawImage:vi.fn()} as never);vi.spyOn(HTMLCanvasElement.prototype,'toDataURL').mockReturnValue('review-jpeg');});
-describe('creative production',()=>{
-  it('rejects old source-artwork responses instead of painting the same template',async()=>{
-    invoke.mockResolvedValue({data:{rendered_by:'source_artwork',image_url:'old-card'},error:null} as never);
-    await expect(renderCreative(plan,0,'client',{copy:'new message'})).rejects.toThrow('new reference-backed design');
+const plan={id:'plan',frames:[{headline:'New idea',subject:'A lens',reference_indices:[0,1]}],reference_previews:['r1','r2']} as ProductionPlan;
+beforeEach(()=>{vi.useRealTimers();vi.clearAllMocks();globalThis.fetch=vi.fn(async()=>({blob:async()=>new Blob(['x'])})) as never;});
+describe('server-owned creative production',()=>{
+  it('follows the run until the server completes it, then finishes and saves the design',async()=>{
+    vi.useFakeTimers();
+    invoke.mockResolvedValueOnce({data:{count:1,frames:[{index:0,state:'rendering',attempt:0,url:null,preview:null,error:null}],done:false,failed:false,iterations:[]},error:null} as never)
+      .mockResolvedValueOnce({data:{count:1,frames:[{index:0,state:'approved',attempt:0,url:'https://storage/art.png',preview:'https://storage/art.png',error:null}],done:true,failed:false,iterations:[{id:'it1',media_urls:['https://storage/art.png'],frames:[0],finishing:'pending'}]},error:null} as never);
+    const progress=vi.fn();
+    const pending=produceCreative(plan,'client',{copy:'new message',platform:'LinkedIn',format:'Single Image'},{onProgress:progress});
+    await vi.advanceTimersByTimeAsync(8000);
+    const urls=await pending;
+    expect(urls).toHaveLength(1);expect(urls[0]).toContain('https://storage/client/');
+    expect(invoke.mock.calls.map(c=>c[0])).toEqual(['advance-creative-plan','advance-creative-plan']);
+    expect(invoke.mock.calls[0][1]?.body).toMatchObject({plan_id:'plan',client_id:'client'});
+    expect(progress).toHaveBeenLastCalledWith(1,1,expect.any(Array));
+    vi.useRealTimers();
   });
-  it('uses the persisted plan for image generation and reference review',async()=>{
-    invoke.mockResolvedValueOnce({data:{rendered_by:'reference_creative',image_url:'new-art'},error:null} as never).mockResolvedValueOnce({data:{off_brand:false},error:null} as never);
-    expect(await renderCreative(plan,0,'client',{copy:'new message'})).toBe('new-art');
-    expect(invoke.mock.calls[1][1]?.body).toMatchObject({creative_plan_id:'plan',creative_frame_index:0,client_id:'client',image_data:'review-jpeg'});
+  it('surfaces a failed frame with its artwork preview',async()=>{
+    invoke.mockResolvedValueOnce({data:{count:1,frames:[{index:0,state:'failed',attempt:1,url:null,preview:'https://storage/bad.png',error:'Brand review rejected the artwork: lettering'}],done:false,failed:true,iterations:[]},error:null} as never);
+    await expect(produceCreative(plan,'client',{copy:'x'})).rejects.toThrow('lettering');
   });
-  it('withholds images when visual reference review is unavailable',async()=>{
-    invoke.mockResolvedValueOnce({data:{rendered_by:'reference_creative',image_url:'new-art'},error:null} as never).mockResolvedValueOnce({data:{skipped:true},error:null} as never);
-    await expect(renderCreative(plan,0,'client',{copy:'new message'})).rejects.toThrow('withheld');
-    expect(invoke).toHaveBeenCalledTimes(2);
+  it('maps a saved single design back to its plan frame by subject',()=>{
+    expect(frameIndexFor(plan,{variant_angle:'Reference creative plan: A lens'},3)).toBe(0);
+    expect(frameIndexFor(plan,{variant_angle:'Reference creative 00000000-0000-0000-0000-000000000000'},2)).toBe(2);
   });
   it('does not accept a partial storyboard',async()=>{
     invoke.mockResolvedValue({data:plan,error:null} as never);
     await expect(planCreative('client',{copy:'copy'},'video',3)).rejects.toThrow('incomplete');
-  });
-});
-
-
-describe('durable image jobs',()=>{
-  it('collects and stores the submitted job before reference review without resubmitting',async()=>{
-    vi.useFakeTimers();
-    invoke.mockResolvedValueOnce({data:{rendered_by:'reference_creative',job_id:'job'},error:null} as never)
-      .mockResolvedValueOnce({data:{status:'completed',image_url:'provider-output'},error:null} as never)
-      .mockResolvedValueOnce({data:{url:'stored-output'},error:null} as never)
-      .mockResolvedValueOnce({data:{off_brand:false},error:null} as never);
-    const pending=renderCreative(plan,0,'client',{copy:'new message'});
-    await vi.advanceTimersByTimeAsync(8000);
-    expect(await pending).toBe('stored-output');
-    expect(invoke.mock.calls.map(c=>c[0])).toEqual(['generate-post-image','media-job-status','upload-generated-media','validate-design-output']);
-    vi.useRealTimers();
   });
 });

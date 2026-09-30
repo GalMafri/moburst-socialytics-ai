@@ -1,6 +1,8 @@
 export interface Iteration {
   id?: string;
   media_urls?: string[] | null;
+  variant_angle?: string | null;
+  finishing?: string | null;
   is_selected?: boolean | null;
   variant_group_id?: string | null;
   created_at?: string | null;
