@@ -48,11 +48,14 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
     const key=String(row.guid || row.perma_link || '');
     if(!key) throw new Error('Sprout post identity is missing');
     if(seen.has(key)) continue; seen.add(key);
-    const applause=network==='instagram'||network==='youtube'||network==='twitter' ? metric(row,'lifetime.likes','lifetime.reactions') : metric(row,'lifetime.reactions','lifetime.likes');
-    const conversation=metric(row,'lifetime.comments_count');
-    const amplification=['instagram','youtube'].includes(network)?0:metric(row,'lifetime.shares_count','lifetime.post_shares_count');
-    const engagement=sum([applause,conversation,amplification]);
-    if(engagement===null) throw new Error('Sprout public engagement is incomplete for '+profile.profile_name+' on '+date);
+    // Sprout reports a missing public action as null (for example no reactions
+    // on a shared link). Missing means none observed, so it counts as 0 rather
+    // than invalidating the whole client collection; the same reading the
+    // monthly Sprout report applies.
+    const applause=(network==='instagram'||network==='youtube'||network==='twitter' ? metric(row,'lifetime.likes','lifetime.reactions') : metric(row,'lifetime.reactions','lifetime.likes')) ?? 0;
+    const conversation=metric(row,'lifetime.comments_count') ?? 0;
+    const amplification=['instagram','youtube'].includes(network)?0:(metric(row,'lifetime.shares_count','lifetime.post_shares_count') ?? 0);
+    const engagement=applause+conversation+amplification;
     const audience=followers(id,previous.start,date);
     const media=(row.visual_media||[]).find((m:any)=>m.thumbnail_url||m.media_url);
     const category=String(row.content_category||'').toLowerCase();

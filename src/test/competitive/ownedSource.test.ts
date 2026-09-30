@@ -29,7 +29,8 @@ describe('owned competitive sources',()=>{
   expect(()=>normalize([post(999,'2026-08-02')])).toThrow('unassigned');
   expect(()=>normalize([{...post(1,'2026-08-02'),network:'FACEBOOK'}])).toThrow('network');
   expect(()=>normalize([post(1,'2026-09-01')])).toThrow('outside');
-  expect(()=>normalize([{...post(1,'2026-08-02'),metrics:{'lifetime.likes':10}}])).toThrow('incomplete');
+  const partial=normalize([{...post(1,'2026-08-02'),metrics:{'lifetime.likes':10}}]);
+  expect(partial.posts[0].engagementTotal).toBe(10);expect(partial.posts[0].conversation).toBe(0);
  });
  it('replaces own public copies only for collected networks, preserves rivals and uncovered networks',()=>{
   const result=normalize([post(1,'2026-08-02'),post(2,'2026-08-03')]);
