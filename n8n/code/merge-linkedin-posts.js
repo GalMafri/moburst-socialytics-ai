@@ -9,6 +9,8 @@ const rows = sourcePlan.has_sources ? $input.all().map(i=>i.json).filter(j=>Obje
 const byUrl = new Map(sourcePlan.sources.map(s=>[s.profile_url,s]));
 const counts = new Map(); const seen = new Set(); const posts = [];
 const metrics = Object.fromEntries(sourcePlan.sources.map(s=>[s.company_id,{provider:'apify/harvestapi',profile_url:s.profile_url,period:{start:cfg.range_start,end:cfg.range_end},posts:0,engagement:0,coverage:'complete',reposts_included:false}]));
+const previous = sourcePlan.previous_period;
+if (previous) for (const m of Object.values(metrics)) m.previous = {period:previous,posts:0,engagement:0,coverage:'complete'};
 for (const row of rows) {
   if (row.error || row.type === 'error') throw new Error('LinkedIn collection returned an error; the report must not treat it as zero activity.');
   if (row.type !== 'post') throw new Error('LinkedIn collection returned an unexpected result; source coverage could not be verified.');
@@ -23,16 +25,24 @@ for (const row of rows) {
   const sameCompanyId = reviewedId && row.author?.type === 'company'
     && String(row.author.companyId || '') === reviewedId && !!profile(row.author.linkedinUrl);
   if (profile(row.author?.linkedinUrl) !== source.profile_url && !sameCompanyId && !collaboration) throw new Error('LinkedIn post author does not match the reviewed company page.');
+  // This is a profile observation at collection time, never a historical
+  // follower count at the post's publication date. Ignore abbreviated counts.
+  const followers = !collaboration && row.author?.type === 'company' && String(row.author.info || '').match(/^([\d,]+) followers$/);
+  if (followers) metrics[source.company_id].audience_snapshot = {followers:Number(followers[1].replaceAll(',','')),as_of:new Date().toISOString().slice(0,10),source:'apify/harvestapi'};
   counts.set(source.profile_url,(counts.get(source.profile_url)||0)+1);
   const published = row.postedAt?.date;
   if (!published || !Number.isFinite(Date.parse(published)) || !/^https:\/\/www\.linkedin\.com\/(?:posts|feed\/update)\//.test(row.linkedinUrl || '')) throw new Error('LinkedIn post is missing its source URL or publication date.');
   const date = new Date(published).toISOString().slice(0,10);
-  if (date < cfg.range_start || date > cfg.range_end) continue;
+  if (date < (previous?.start || cfg.range_start) || date > cfg.range_end) continue;
   const key = source.company_id + ':' + String(row.id || row.linkedinUrl);
   if (seen.has(key)) continue; seen.add(key);
   const values = ['likes','comments','shares'].map(k=>row.engagement?.[k]);
   if (values.some(n=>typeof n !== 'number' || !Number.isFinite(n) || n<0)) throw new Error('LinkedIn post engagement counts are incomplete.');
   const engagement = values.reduce((sum,n)=>sum+n,0);
+  if (date < cfg.range_start) {
+    if (previous && date <= previous.end) { metrics[source.company_id].previous.posts++; metrics[source.company_id].previous.engagement += engagement; }
+    continue;
+  }
   metrics[source.company_id].posts++; metrics[source.company_id].engagement += engagement;
   const image = row.postImages?.[0]?.url || row.document?.coverPages?.[0]?.imageUrls?.[0] || row.postVideo?.thumbnailUrl || row.article?.image?.url || null;
   posts.push({postId:'linkedin:'+key,companyId:source.company_id,companyName:source.name,channel:'linkedin',publishedAt:new Date(published).toISOString(),message:String(row.content||''),postLink:row.linkedinUrl,image,engagementTotal:engagement,applause:values[0],conversation:values[1],amplification:values[2],type:row.document?'carousel':row.postVideo?'video':row.article?'link':image?'image':'text',source:'apify/harvestapi',source_profile_url:source.profile_url,authorship:collaboration?'collaboration':'company'});

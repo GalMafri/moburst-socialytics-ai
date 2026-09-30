@@ -1,5 +1,5 @@
 {
-  "version": "c27a9c9c-544b-4a4d-a360-02c16834bcbc",
+  "version": "core-owned-profile-collection",
   "nodes": [
     {
       "name": "Competitive Webhook",
@@ -154,6 +154,21 @@
     },
     {
       "name": "Merge LinkedIn Posts",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Landscape Audience Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Collect Owned Client Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Merge Owned Posts",
       "type": "n8n-nodes-base.code",
       "onError": "continueErrorOutput"
     }
@@ -437,12 +452,7 @@
       "main": [
         [
           {
-            "node": "Build Post Windows",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Cache Metrics Snapshot",
+            "node": "Landscape Audience Snapshot",
             "type": "main",
             "index": 0
           }
@@ -585,6 +595,65 @@
       ]
     },
     "Merge LinkedIn Posts": {
+      "main": [
+        [
+          {
+            "node": "Collect Owned Client Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Landscape Audience Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Build Post Windows",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Cache Metrics Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Owned Client Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Owned Posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Owned Posts": {
       "main": [
         [
           {

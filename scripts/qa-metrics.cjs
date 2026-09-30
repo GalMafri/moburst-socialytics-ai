@@ -17,7 +17,7 @@ check('post lifetime metrics remain separate and provider engagements include cl
 function runCompetitive(overrides={}){
  const nodes={'Run Config':{range_start:'2026-08-01',range_end:'2026-08-31',client_name:'Fixture'},'Resolve Landscape':{focus_company_id:1},'Landscape Companies':{companies:[{id:1,name:'Fixture'}]},'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01T00:00:00Z',mainPeriodEnd:'2026-08-31T23:59:59Z'}]},...overrides};
  const input=overrides.input||{socialPosts:[{postId:'1',companyId:1,publishedAt:'2026-08-31T23:59:59Z'},{postId:'1',companyId:1,publishedAt:'2026-08-31T23:59:59Z'},{postId:'2',companyId:1,publishedAt:'2026-09-01T00:00:00Z'}]};
- nodes['Merge LinkedIn Posts']=input;
+ nodes['Merge Owned Posts']=input;
  return vm.runInNewContext('(function(){'+metricsCode+'\n'+read('competitive-aggregate')+'})()',{$input:{first:()=>({json:input})},$:name=>({first:()=>({json:nodes[name]||{}})})})[0].json;
 }
 check('follower counts never become reach and provider rates override differently weighted post means',()=>{

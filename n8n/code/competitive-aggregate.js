@@ -1,13 +1,14 @@
 const cfg = $("Run Config").first().json;
 const landscape = $("Resolve Landscape").first().json;
 const companiesResp = $("Landscape Companies").first().json;
-const postsResp = $("Merge LinkedIn Posts").first().json;
+const postsResp = $("Merge Owned Posts").first().json;
 // RivalIQ's own period metrics: this period, the previous period of equal length, and the daily series.
 // Provider period metrics are authoritative; the callback withholds missing metrics.
 const safeJson = (name) => { try { const j = $(name).first().json; return j && typeof j === "object" ? j : {}; } catch (e) { return {}; } };
 const metricsResp = safeJson("Landscape Metrics Summary");
 const metricsPrevResp = safeJson("Landscape Metrics Summary Previous");
 const seriesResp = safeJson("Landscape Metrics Timeseries");
+const audienceResp = safeJson("Landscape Audience Snapshot");
 const mRows = Array.isArray(metricsResp.metrics) ? metricsResp.metrics : [];
 const mPrevRows = Array.isArray(metricsPrevResp.metrics) ? metricsPrevResp.metrics : [];
 const sRows = Array.isArray(seriesResp.metrics) ? seriesResp.metrics : [];
@@ -136,7 +137,7 @@ const addPost = (agg, p) => {
   agg.media_types[mtype] = (agg.media_types[mtype] || 0) + 1;
   const channel = p.channel || p.network || p.platform || "unknown";
   if (agg.channels) agg.channels[channel] = (agg.channels[channel] || 0) + 1;
-  agg.top_posts.push({ authorship: p.authorship || null, engagement, engagement_rate: rate, est_impressions: impressions, followers_at_publication, views, applause: pick(p, "applause"), conversation: pick(p, "conversation"), amplification: pick(p, "amplification"), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null });
+  agg.top_posts.push({ source:p.source || "rivaliq", source_profile_name:p.source_profile_name || null, actual_impressions:pick(p,"ownedImpressions"), authorship: p.authorship || null, engagement, engagement_rate: rate, est_impressions: impressions, followers_at_publication, views, applause: pick(p, "applause"), conversation: pick(p, "conversation"), amplification: pick(p, "amplification"), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null });
   return channel;
 };
 for (const p of posts) {
@@ -167,7 +168,16 @@ const companiesOut = Object.values(byCompany).map((c) => {
   c.channel_mix = topN(c.channels, 8); delete c.channels;
   for (const ch of Object.keys(c.by_channel)) finalize(c.by_channel[ch]);
   c.rivaliq_metrics = metricsFor(String(c.company_id));
+  const audience = (audienceResp.metrics || []).find(row => String(row.companyId) === String(c.company_id));
+  if (audience && pick(audience, 'crossChannelSocialAudience') != null) {
+    c.rivaliq_audience_snapshot = {
+      as_of: day(audience.mainPeriodEnd), source: 'rivaliq',
+      audience: pick(audience, 'crossChannelSocialAudience'),
+      by_network: Object.fromEntries(Object.entries(NETS).filter(([, fields]) => fields.followers && pick(audience, fields.followers) != null).map(([network, fields]) => [network, pick(audience, fields.followers)])),
+    };
+  }
   c.linkedin_metrics = postsResp.additional_metrics?.[String(c.company_id)] || null;
+  c.owned_metrics = postsResp.owned_metrics?.[String(c.company_id)] || null;
   // Use the provider's aggregation, not a differently weighted mean of posts.
   const applyProvider = (b, metrics) => {
     b.observed_post_count = b.post_count;

@@ -52,7 +52,7 @@ function gamma(input,analysis={content_calendar:[{posts:[{copy:'Fixture'}]}]}){
 function aggregate(start,end,count){
  const source=fs.readFileSync(path.join(repo,'n8n/code/competitive-aggregate.js'),'utf8');
  const nodes={'Run Config':{range_start:start,range_end:end,client_name:'Fixture'},'Resolve Landscape':{focus_company_id:1},'Landscape Companies':{companies:[{id:1,name:'Fixture'}]}};
- nodes['Merge LinkedIn Posts']={socialPosts:Array.from({length:count},(_,i)=>({companyId:1,channel:'instagram',message:'Fixture '+i,publishedAt:start+'T12:00:00Z'}))};
+ nodes['Merge Owned Posts']={socialPosts:Array.from({length:count},(_,i)=>({companyId:1,channel:'instagram',message:'Fixture '+i,publishedAt:start+'T12:00:00Z'}))};
  return vm.runInNewContext('(function(){'+source+'})()', {...moduleFrom('supabase/functions/_shared/competitive/reportMetrics.ts'),$:name=>({first:()=>({json:nodes[name]||{}})}),console:silent})[0].json;
 }
 
@@ -99,6 +99,7 @@ async function runFeed({landscapes,explicit,posts=[],providerStatus=200}) {
  let handler;const requests=[];
  moduleFrom('supabase/functions/refresh-competitor-feed/index.ts',{
  'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},
+ '../_shared/competitive/ownedSource.ts':{collectOwnedCompetitive:async()=>({coverage:'not_connected',profiles:[],posts:[],metrics:null}),...moduleFrom('supabase/functions/_shared/competitive/ownedMerge.ts')},
  '../_shared/competitive/rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts'),
  '../_shared/competitive/linkedinSource.ts':moduleFrom('supabase/functions/_shared/competitive/linkedinSource.ts',{'./rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts')}),
  '../_shared/auth/requireStaff.ts':{requireStaff:async()=>({})},
@@ -134,6 +135,7 @@ async function runImport({matches=true}={}) {
  moduleFrom('supabase/functions/import-rivaliq-landscape/index.ts',{
  'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},
  '../_shared/auth/requireStaff.ts':{AuthzError,requireStaff:async()=>({userId:'fixture-user',asCaller:{rpc:async()=>({data:true,error:null})}})},
+ '../_shared/competitive/ownedSource.ts':{collectOwnedCompetitive:async()=>({coverage:'not_connected',profiles:[],posts:[],metrics:null}),...moduleFrom('supabase/functions/_shared/competitive/ownedMerge.ts')},
  '../_shared/competitive/rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts')
  },{Deno:{env:{get:()=> 'fixture'},serve:f=>handler=f},fetch:async()=>new Response(JSON.stringify({landscapes:[{id:42,name:'Fixture',focusCompanyId:1,companies}]}))});
  const r=await handler(new Request('https://fixture.invalid/import',{method:'POST',body:JSON.stringify({client_id:'fixture-client',mode:'import',landscape_id:'42'})}));

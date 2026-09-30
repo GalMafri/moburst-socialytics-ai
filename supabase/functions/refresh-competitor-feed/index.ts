@@ -1,3 +1,4 @@
+import {collectOwnedCompetitive,mergeOwnedCompetitivePosts} from '../_shared/competitive/ownedSource.ts';
 // Milestone 4, steps 12 and 13: the competitor feed and trend detection.
 //
 // Pulls the last few days of posts for the client's RivalIQ landscape (one
@@ -197,7 +198,7 @@ Deno.serve(async (req) => {
     if (!viaSecret) await requireStaff(req, { writeClientId: clientId });
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { data: client } = await admin.from("clients").select("id, name, website_url").eq("id", clientId).maybeSingle();
+    const { data: client } = await admin.from("clients").select("id, name, website_url, sprout_customer_id").eq("id", clientId).maybeSingle();
     if (!client) return json({ error: "Client not found" }, 404);
     const key = Deno.env.get("RIVALIQ_API_KEY");
     if (!key) return json({ error: "RIVALIQ_API_KEY is not configured" }, 500);
@@ -234,20 +235,19 @@ Deno.serve(async (req) => {
     const rivalPosts: any[] = Array.isArray(resp?.socialPosts) ? resp.socialPosts : [];
     if (rivalPosts.length >= PAGE_LIMIT) throw new Error('The feed source reached its result limit. No partial refresh was saved.');
     const {data: selected, error: selectionError} = await admin.from("competitors").select("*,competitor_handles(*)").eq("set_id",set?.id).eq("is_selected",true);
-    const {data: own, error: ownError} = await admin.from("sprout_profiles").select("network_type,native_link,native_name").eq("client_id",clientId).neq("is_active",false);
-    if (selectionError || ownError) throw new Error('Could not load reviewed feed profiles.');
-    const plan = selectedFeedSources(match.companies, match.client_company_id, selected || [], own || []);
+    if (selectionError) throw new Error('Could not load reviewed feed profiles.');
+    const plan = selectedFeedSources(match.companies, match.client_company_id, selected || [], []);
     const {data: setting, error: settingError} = await admin.from("app_settings").select("value").eq("key","competitive_linkedin_webhook_url").maybeSingle();
     if (settingError) throw new Error('Could not load the LinkedIn source connection.');
-    const linkedin = await collectLinkedInSource(plan.sources, window, secret || '', setting?.value || '');
+    const [linkedin,owned] = await Promise.all([collectLinkedInSource(plan.sources, window, secret || '', setting?.value || ''),collectOwnedCompetitive(admin,client,window)]);
     const selectedIds = new Set(plan.companyIds);
-    const socialPosts = [...rivalPosts.filter(p=>selectedIds.has(String(p.companyId))), ...linkedin.socialPosts];
+    const socialPosts = mergeOwnedCompetitivePosts([...rivalPosts.filter(p=>selectedIds.has(String(p.companyId))), ...linkedin.socialPosts],owned,{id:match.client_company_id,name:client.name});
 
     const {error: snapshotError} = await admin.from("rivaliq_snapshots").insert({
       client_id: clientId,
       landscape_id: landscapeId,
       endpoint: "feed",
-      payload: { window, socialPosts, linkedin_sources: plan.sources, additional_metrics: linkedin.additional_metrics, fetched_at: new Date().toISOString(), truncated: false },
+      payload: { window, socialPosts, owned_source: {profiles:owned.profiles,coverage:owned.coverage}, owned_metrics:owned.metrics, linkedin_sources: plan.sources, additional_metrics: linkedin.additional_metrics, fetched_at: new Date().toISOString(), truncated: false },
     });
 
     if (snapshotError) throw new Error('Could not save the refreshed feed.');

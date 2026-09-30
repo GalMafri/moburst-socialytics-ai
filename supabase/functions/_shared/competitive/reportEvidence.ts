@@ -14,8 +14,8 @@ export function sourceCompetitiveSummary(report: Record<string, any>): string | 
   const rate = (n: number) => `${(n * 100).toFixed(2)}%`;
   const lines: string[] = [];
   if (valid(m.posts?.current)) lines.push(`Publishing: ${fmt(m.posts.current)} tracked posts from ${client.name} in this period${valid(m.posts.previous) ? `, compared with ${fmt(m.posts.previous)} in the previous equal-length period` : ""}.`);
-  if (valid(m.engagement_rate_per_post?.current)) lines.push(`Engagement: ${rate(m.engagement_rate_per_post.current)} is ${client.name}'s average engagement rate per post${valid(m.engagement_rate_per_post.previous) ? `, versus ${rate(m.engagement_rate_per_post.previous)} previously` : ""}.`);
-  if (valid(m.audience?.current)) lines.push(`Audience: ${fmt(m.audience.current)} followers across tracked networks${valid(m.audience.previous) ? `, ${m.audience.current >= m.audience.previous ? "up" : "down"} ${fmt(Math.abs(m.audience.current - m.audience.previous))} from the previous period` : ""}.`);
+  if (valid(m.engagement_rate_per_post?.current)) lines.push(`Engagement: ${rate(m.engagement_rate_per_post.current)} is ${client.name}'s average engagement rate per post on RivalIQ-tracked networks (excluding LinkedIn)${valid(m.engagement_rate_per_post.previous) ? `, versus ${rate(m.engagement_rate_per_post.previous)} previously` : ""}.`);
+  if (valid(m.audience?.current)) lines.push(`Audience: ${fmt(m.audience.current)} followers across tracked networks (excluding LinkedIn)${m.audience_as_of ? ` as of ${m.audience_as_of}` : ''}${valid(m.audience.previous) ? `, ${m.audience.current >= m.audience.previous ? "up" : "down"} ${fmt(Math.abs(m.audience.current - m.audience.previous))} from the previous period` : ""}.`);
   const rivals = companies.filter((c: any) => !c.is_client && valid(metricsOf(c)?.posts?.current));
   const leader = [...rivals].sort((a: any, b: any) => metricsOf(b).posts.current - metricsOf(a).posts.current)[0];
   if (metricsOf(leader)?.posts?.current > 0) lines.push(`Peer activity: ${fmt(metricsOf(leader).posts.current)} tracked posts makes ${leader.name} ${rivals.length > 1 ? "a publishing-volume leader among the selected competitors" : "the selected publishing comparison"} for this period.`);
@@ -111,6 +111,11 @@ export function competitiveReportQuality(input: unknown): { ready: boolean; reas
   const authoritative = report?.aggregates?.metric_semantics_version >= 3;
   const period = report?.period || report?.aggregates?.period;
   for (const c of report?.aggregates?.companies || []) {
+    if(c.owned_metrics && (c.owned_metrics.coverage!=='complete' || c.owned_metrics.period?.start!==period?.start || c.owned_metrics.period?.end!==period?.end)) reasons.push(`${c.name}: connected profile coverage is incomplete or belongs to a different period.`);
+    for(const [network,m] of Object.entries(c.owned_metrics?.by_network||{}) as [string,any][]) {
+      const observed=c.by_channel?.[network]?.observed_post_count??c.by_channel?.[network]?.post_count??0;
+      if(observed!==m.posts?.current || !m.profiles?.length) reasons.push(`${c.name} / ${network}: connected profile posts did not reconcile.`);
+    }
     if (c.linkedin_metrics && (c.linkedin_metrics.coverage !== 'complete' ||
       c.linkedin_metrics.period?.start !== period?.start || c.linkedin_metrics.period?.end !== period?.end ||
       !Number.isInteger(c.linkedin_metrics.posts) || c.linkedin_metrics.posts < 0 ||

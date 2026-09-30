@@ -14,11 +14,16 @@ const add = (company, handles) => {
   if (urls.length === 1) sources.push({company_id:String(company.id),name:company.name,profile_url:urls[0]});
 };
 const own = landscape.companies.find(c => String(c.id) === String(landscape.client_company_id));
-if (own) add(own, body.client_profiles || []);
+if (own && body.owned_source !== "sprout") add(own, body.client_profiles || []);
 for (const selected of body.competitors || []) {
   const company = landscape.companies.find(c => host(c.url) === host(selected.website_url));
   if (!company) throw new Error('LinkedIn source company is not in the verified selection.');
   add(company, selected.handles);
 }
 if (new Set(sources.map(s => s.profile_url)).size !== sources.length) throw new Error('The same LinkedIn page is assigned to different companies.');
-return [{json:{sources,has_sources:sources.length>0,input:{targetUrls:sources.map(s=>s.profile_url),maxPosts:150,postedLimitDate:cfg.range_start,scrapeComments:false,scrapeReactions:false,includeReposts:false,includeQuotePosts:true}}}];
+const days = Math.round((Date.parse(cfg.range_end) - Date.parse(cfg.range_start)) / 86400000) + 1;
+const previous_period = Number.isFinite(days) && days > 0 ? {
+  start: new Date(Date.parse(cfg.range_start) - days * 86400000).toISOString().slice(0,10),
+  end: new Date(Date.parse(cfg.range_start) - 86400000).toISOString().slice(0,10),
+} : null;
+return [{json:{sources,previous_period,has_sources:sources.length>0,input:{targetUrls:sources.map(s=>s.profile_url),maxPosts:150,postedLimitDate:previous_period?.start || cfg.range_start,scrapeComments:false,scrapeReactions:false,includeReposts:false,includeQuotePosts:true}}}];

@@ -2,6 +2,8 @@ type Numeric = number | null | undefined;
 type ProviderMetric = { current?: Numeric };
 type ProviderNetwork = { posts?: ProviderMetric; rate?: ProviderMetric; engagement?: ProviderMetric; impressions?: ProviderMetric };
 type Company = {
+  owned_metrics?: any;
+  rivaliq_audience_snapshot?: { as_of: string; audience: number; by_network?: Record<string, number> };
   linkedin_metrics?: { provider: string; period: {start: string; end: string}; posts: number; engagement: number; coverage: string };
   comparison_metrics?: any;
   is_client?: boolean; post_count?: number; observed_post_count?: number; engagement_total?: number; engagement_sum?: number; impressions_total?: number;
@@ -18,24 +20,76 @@ export function inclusiveDays(start?: string, end?: string): number | null {
 }
 const valid = (value: Numeric): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
-/** Preserve the raw RivalIQ measurement while adding a separately verified
- * LinkedIn source. Unknown combined denominators remain unknown. */
-export function competitiveCompanyMetrics(c: {rivaliq_metrics?: any; linkedin_metrics?: any}): any {
+/** Retain each measured metric at its actual source scope. Adding LinkedIn
+ * activity must not erase RivalIQ audience, impressions, or engagement rates. */
+export function competitiveCompanyMetrics(c: {rivaliq_metrics?: any; linkedin_metrics?: any; rivaliq_audience_snapshot?: any;owned_metrics?:any}): any {
   const r = c.rivaliq_metrics;
   const li = c.linkedin_metrics;
-  if (!r || !li || li.coverage !== 'complete') return r;
+  if (!r) return r;
+  const snapshot = c.rivaliq_audience_snapshot;
+  const useSnapshot = !valid(r.audience?.current) && valid(snapshot?.audience) && /^\d{4}-\d{2}-\d{2}$/.test(snapshot?.as_of || '');
+  const base = {
+    ...r,
+    engagement_rate_per_post: r.posts?.current === 0 ? {...r.engagement_rate_per_post,current:null} : r.engagement_rate_per_post,
+    audience: useSnapshot ? {current:snapshot.audience,previous:null} : r.audience,
+    audience_as_of: useSnapshot ? snapshot.as_of : undefined,
+    metric_scopes: {audience:'rivaliq',estimated_impressions:'rivaliq',engagement_rate_per_post:'rivaliq'},
+    impression_post_count: r.posts?.current,
+    by_network: Object.fromEntries(Object.entries(r.by_network || {}).map(([network, value]: [string, any]) => [network,
+      useSnapshot && !valid(value.followers?.current) && valid(snapshot.by_network?.[network])
+        ? {...value,followers:{current:snapshot.by_network[network],previous:null},audience_as_of:snapshot.as_of} : value,
+    ])),
+  };
+  if (!li || li.coverage !== 'complete') return applyOwnedMetrics(base,c.owned_metrics);
   const add = (value: Numeric, extra: Numeric) => valid(value) && valid(extra) ? value + extra : null;
   const unknown = { current: null, previous: null };
-  return {
-    ...r, previous_period: null,
-    posts: { current: add(r.posts?.current, li.posts), previous: null },
-    engagement: { current: add(r.engagement?.current, li.engagement), previous: null },
-    audience: unknown, estimated_impressions: unknown, engagement_rate_per_post: unknown,
-    by_network: { ...r.by_network, linkedin: {
-      posts: {current:li.posts,previous:null}, engagement:{current:li.engagement,previous:null},
-      followers:unknown, impressions:unknown, rate:unknown,
+  const previous = li.previous?.coverage === 'complete' && r.previous_period
+    && li.previous.period?.start === r.previous_period.start && li.previous.period?.end === r.previous_period.end ? li.previous : null;
+  return applyOwnedMetrics({
+    ...base,
+    posts: { current: add(r.posts?.current, li.posts), previous: previous ? add(r.posts?.previous, previous.posts) : null },
+    engagement: { current: add(r.engagement?.current, li.engagement), previous: previous ? add(r.engagement?.previous, previous.engagement) : null },
+    by_network: { ...base.by_network, linkedin: {
+      posts: {current:li.posts,previous:previous?.posts ?? null}, engagement:{current:li.engagement,previous:previous?.engagement ?? null},
+      followers:valid(li.audience_snapshot?.followers) ? {current:li.audience_snapshot.followers,previous:null} : unknown,
+      audience_as_of:li.audience_snapshot?.as_of,
+      impressions:unknown, rate:unknown,
       source:li.provider,
     } },
+  },c.owned_metrics);
+}
+
+function applyOwnedMetrics(base:any,owned:any) {
+  if(owned?.coverage!=='complete') return base;
+  if(owned.period?.start!==base.period?.start||owned.period?.end!==base.period?.end) throw new Error('Owned client source period does not match the competitive report');
+  const by_network={...base.by_network,...Object.fromEntries(Object.entries(owned.by_network).map(([network,value]:[string,any])=>{
+    const snapshot=owned.audience_snapshot?.by_network?.[network];
+    return [network,!valid(value.followers?.current)&&valid(snapshot?.followers)&&snapshot?.as_of
+      ? {...value,followers:{current:snapshot.followers,previous:null},audience_as_of:snapshot.as_of}:value];
+  }))};
+  const combined=(key:string,which:string,networks=Object.values(by_network) as any[])=>{
+    const values=networks.map(n=>n[key]?.[which]);
+    return values.length&&values.every(valid)?values.reduce((a,b)=>a+b,0):null;
+  };
+  const both=(key:string)=>({current:combined(key,'current'),previous:combined(key,'previous')});
+  const publicNetworks=Object.entries(by_network).filter(([key])=>key!=='linkedin');
+  const audienceNets=publicNetworks.filter(([,n]:[string,any])=>valid(n.followers?.current));
+  const rate=(which:string)=>{
+    const active=publicNetworks.map(([,n])=>n as any).filter(n=>n.posts?.[which]>0);
+    return active.length&&active.every(n=>valid(n.rate?.[which]))?active.reduce((sum,n)=>sum+n.rate[which]*n.posts[which],0)/active.reduce((sum,n)=>sum+n.posts[which],0):null;
+  };
+  const audience=audienceNets.length?{
+    current:combined('followers','current',audienceNets.map(([,n])=>n)),
+    previous:audienceNets.some(([,n]:[string,any])=>n.audience_as_of)?null:combined('followers','previous',audienceNets.map(([,n])=>n)),
+  }:base.audience;
+  const ownedNetworks=Object.values(owned.by_network) as any[];
+  return {...base,by_network,posts:both('posts'),engagement:both('engagement'),audience,
+    audience_as_of:audienceNets.some(([,n]:[string,any])=>n.audience_as_of)?[...new Set(audienceNets.map(([,n]:[string,any])=>n.audience_as_of||base.period.end))].sort().join(' / '):undefined,
+    metric_scopes:{...base.metric_scopes,audience:'connected_and_public',engagement_rate_per_post:'connected_and_public'},
+    audience_networks:audienceNets.map(([key])=>key),
+    engagement_rate_per_post:{current:rate('current'),previous:rate('previous')},
+    actual_impressions:{current:combined('impressions','current',ownedNetworks),previous:combined('impressions','previous',ownedNetworks)},
+    owned_profile_scope:Object.values(owned.by_network).flatMap((n:any)=>n.profiles||[]),
   };
 }
 
@@ -68,10 +122,10 @@ export function normalizedCompetitiveMetrics<T>(input: T): T & MetricReport {
   const report = (input && typeof input === "object" ? input : {}) as MetricReport;
   const period = report.period || report.aggregates?.period;
   const days = inclusiveDays(period?.start, period?.end);
-  const providerValues = (posts: number | undefined, metrics?: ProviderNetwork) => ({
+  const providerValues = (posts: number | undefined, metrics?: ProviderNetwork & {impression_post_count?: Numeric}) => ({
     ...(metrics?.rate ? { engagement_rate_avg: valid(metrics.rate.current) ? metrics.rate.current : null } : {}),
     ...(posts && valid(metrics?.engagement?.current) ? { engagement_avg: metrics.engagement.current / posts } : {}),
-    ...(metrics?.impressions ? { impressions_total: metrics.impressions.current ?? null, impressions_avg: valid(metrics.impressions.current) && posts ? metrics.impressions.current / posts : null } : {}),
+    ...(metrics?.impressions ? { impressions_total: metrics.impressions.current ?? null, impressions_avg: valid(metrics.impressions.current) && (metrics.impression_post_count ?? posts) ? metrics.impressions.current / (metrics.impression_post_count ?? posts)! : null } : {}),
   });
   const authoritative = (report.aggregates?.metric_semantics_version || 0) >= 3;
   const normalizeBucket = (b: { post_count?: number; observed_post_count?: number }, metrics?: ProviderNetwork) => {

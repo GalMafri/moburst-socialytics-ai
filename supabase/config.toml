@@ -156,3 +156,6 @@ verify_jwt = false
 
 [functions.rivaliq-request]
 verify_jwt = false
+
+[functions.competitive-owned-source]
+verify_jwt = false

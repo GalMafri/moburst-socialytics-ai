@@ -50,10 +50,13 @@ type TopPost = {
 /** A RivalIQ period total with the previous equal-length period beside it. */
 type Both = { current: number | null; previous: number | null };
 type RivalIQMetrics = {
+  actual_impressions?: Both;
+  owned_profile_scope?: Array<{id:string;name:string}>;
+  audience_as_of?: string;
   period?: { start: string; end: string };
   previous_period?: { start: string; end: string } | null;
   audience?: Both; engagement?: Both; estimated_impressions?: Both; posts?: Both; engagement_rate_per_post?: Both; likely_boosted_facebook_posts?: Both;
-  by_network?: Record<string, { followers?: Both; posts?: Both; engagement?: Both; impressions?: Both; views?: Both; rate?: Both; likely_boosted?: Both }>;
+  by_network?: Record<string, { audience_as_of?: string; followers?: Both; posts?: Both; engagement?: Both; impressions?: Both; views?: Both; rate?: Both; likely_boosted?: Both }>;
   daily?: Array<{ date: string; posts: number; engagement: number; audience: number }>;
 };
 type Bucket = {
@@ -356,10 +359,10 @@ export default function CompetitiveReportView() {
   const metricsFor = (c: Company) => {
     const m = c.comparison_metrics || c.rivaliq_metrics;
     if (!m) return null;
-    if (effectivePlat === "all") return { audience: m.audience, engagement: m.engagement, impressions: m.estimated_impressions, posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
+    if (effectivePlat === "all") return { audience: m.audience, audience_as_of:m.audience_as_of, engagement: m.engagement, actual_impressions:m.actual_impressions, profiles:m.owned_profile_scope, impressions: m.estimated_impressions, posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
     const n = m.by_network?.[netKey];
     if (!n) return null;
-    return { audience: n.followers, engagement: n.engagement, impressions: n.impressions, posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
+    return { audience: n.followers, audience_as_of:n.audience_as_of, engagement: n.engagement, actual_impressions:(n as {source?:string}).source==='sprout'?n.impressions:undefined, profiles:(n as {profiles?:Array<{id:string;name:string}>}).profiles, impressions:(n as {source?:string}).source==='sprout'?undefined:n.impressions, posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
   };
   const withMetrics = ordered.map((c) => ({ c, m: metricsFor(c) })).filter((x) => x.m) as { c: Company; m: NonNullable<ReturnType<typeof metricsFor>> }[];
   const hasMetrics = withMetrics.length > 0;
@@ -572,7 +575,7 @@ export default function CompetitiveReportView() {
               {rivals.length > 0 && <Chip>{rivals.length} competitors</Chip>}
               {effectivePlat !== "all" && <Chip>{platformLabel(effectivePlat)} only</Chip>}
             </div>
-            <p className="t-secondary">Snapshot from the report run started {new Date(report.created_at).toLocaleString()}. Posts were published within the selected UTC dates; their performance reflects the collected source snapshots, not only interactions made within those dates. Impressions are estimates.</p>
+            <p className="t-secondary">Snapshot from the report run started {new Date(report.created_at).toLocaleString()}. Posts were published within the selected UTC dates; their performance reflects the collected source snapshots, not only interactions made within those dates. Client impressions from connected profiles are measured; competitor impressions are estimates.</p>
           </div>
           <div data-print="hide" className="flex gap-2 flex-wrap">
             <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}><History className="h-4 w-4 mr-2" /> All runs</Button>
@@ -626,11 +629,11 @@ export default function CompetitiveReportView() {
               sub={`Client + ${rivals.length} competitor${rivals.length === 1 ? "" : "s"} · tracked accounts`}
             />
             {meM?.audience && (
-              <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={effectivePlat === "all" ? "across measured networks" : `on ${platformLabel(effectivePlat)}`} />
+              <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={`${effectivePlat === "all" ? "Tracked networks · excluding LinkedIn" : `on ${platformLabel(effectivePlat)}`}${meM.audience_as_of ? ` · as of ${meM.audience_as_of}` : ""}`} />
             )}
             <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} tracked posts`} />
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`set avg ${avgCadence.toFixed(1)}/wk`} />
-            <Kpi label="Engagement rate" value={meB.post_count ? pct(meB.engagement_rate_avg) : "Not available"} sub={`active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`} />
+            <Kpi label="Engagement rate" value={meB.post_count ? pct(meB.engagement_rate_avg) : "Not available"} sub={`${effectivePlat === "all" ? "Excluding LinkedIn · " : ""}active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`} />
             <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`active peers avg ${fmt(avg((b) => b.engagement_avg))}`} />
           </div>
         )}
@@ -708,7 +711,7 @@ export default function CompetitiveReportView() {
                   <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => v.toFixed(1)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).cadence_per_week || 0), emphasized: !!c.is_client }))} />
                 </div>
                 <div className="space-y-3">
-                  <p className="t-subhead">Engagement rate</p><p className="t-secondary">Companies with tracked posts and an available rate.</p>
+                    <p className="t-subhead">Engagement rate</p><p className="t-secondary">Companies with tracked posts and an available rate.{effectivePlat === "all" ? " Tracked networks, excluding LinkedIn." : ""}</p>
                   <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => pct(v)} rows={ordered.filter(c => { const b = bucketFor(c, effectivePlat); return b.post_count > 0 && b.engagement_rate_avg != null; }).map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).engagement_rate_avg || 0), emphasized: !!c.is_client }))} />
                 </div>
               </CardContent>
@@ -740,7 +743,7 @@ export default function CompetitiveReportView() {
                           <TileStat
                             value={b.impressions_avg == null ? "Not available" : compactNumber(b.impressions_avg)}
                             exact={fmt(b.impressions_avg)}
-                            label="Est. impressions / post"
+                            label={effectivePlat === "all" ? "Est. impressions / RivalIQ post" : "Est. impressions / post"}
                           />
                           <TileStat value={b.views_total == null ? "Not available" : compactNumber(b.views_total)} exact={b.views_total == null ? undefined : fmt(b.views_total)} label="Reported video views" />
                         </div>
@@ -819,13 +822,13 @@ export default function CompetitiveReportView() {
             style={{ order: orderOf("audience") }}
             title={<><Users className="h-5 w-5" /> Audience and momentum</>}
             action={scopeTag(true)}
-            description={<>Verified source totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}: followers, engagement, estimated impressions and posts for every company.{anyBoosted ? " \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook." : ""}</>}
+            description={<>Verified source totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}.{effectivePlat === "all" ? " Posts and engagement include collected LinkedIn activity. Followers, estimated impressions and engagement rates cover Tracked networks, excluding LinkedIn." : ""} Dated audience snapshots show the latest measurement when historical counts are unavailable.{anyBoosted ? " \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook." : ""}</>}
           >
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {followersRows.length > 0 && (
                   <div className="space-y-2">
-                    <p className="t-subhead">Followers{effectivePlat === "all" ? " across networks" : ""}</p>
+                    <p className="t-subhead">Followers{effectivePlat === "all" ? " · RivalIQ networks" : ""}</p>
                     <RankedBars rows={followersRows} emphasis legend={{ subject: clientName, others: "Competitors" }} />
                   </div>
                 )}
@@ -842,9 +845,12 @@ export default function CompetitiveReportView() {
                         <div className="grid grid-cols-2 gap-x-3 gap-y-3">
                           <MetricRow label="Followers" value={m.audience} signed={c.is_client} />
                           <MetricRow label="Engagement" value={m.engagement} signed={c.is_client} />
-                          <MetricRow label="Est. impressions" value={m.impressions} signed={c.is_client} />
+                          {m.actual_impressions && <MetricRow label="Client impressions" value={m.actual_impressions} signed={c.is_client} />}
+                          {m.impressions && <MetricRow label="Est. impressions (RivalIQ)" value={m.impressions} signed={c.is_client} />}
                           <MetricRow label="Posts" value={m.posts} format={(v) => String(Math.round(v))} signed={c.is_client} />
                         </div>
+                        {m.profiles?.length>0 && <p className="t-secondary">Connected profiles: {m.profiles.map(p=>p.name).join(", ")}</p>}
+                        {m.audience_as_of && <p className="t-secondary">Audience measured {m.audience_as_of}. Activity above covers the selected report dates.</p>}
                         {nets.length > 0 && (
                           <div className="space-y-1.5">
                             <p className="t-subhead">Followers by network</p>
@@ -1116,7 +1122,7 @@ export default function CompetitiveReportView() {
 
         {/* Top posts */}
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
-            <Section id="posts" index={num("posts")} style={{ order: orderOf("posts") }} action={scopeTag(true)} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Post-level figures come from RivalIQ and the reviewed public LinkedIn pages collected through Apify. Competitor impressions are estimates.</>}>
+            <Section id="posts" index={num("posts")} style={{ order: orderOf("posts") }} action={scopeTag(true)} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Client posts come from connected Sprout profiles. Other posts come from RivalIQ and reviewed public LinkedIn pages. Competitor impressions are estimates.</>}>
             <Card>
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
