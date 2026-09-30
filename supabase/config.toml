@@ -159,3 +159,12 @@ verify_jwt = false
 
 [functions.competitive-owned-source]
 verify_jwt = false
+
+# Creative runs. The worker is called by the schedule with the shared secret
+# and by the app with a staff session; both are checked in code, so the
+# gateway JWT check stays off like the rest of the project.
+[functions.advance-creative-plan]
+verify_jwt = false
+
+[functions.get-creative-plan]
+verify_jwt = false
