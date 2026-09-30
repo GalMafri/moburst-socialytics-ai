@@ -23,6 +23,7 @@ import { resolveContextImageUrls } from '../_shared/higgsfield/context.ts';
 import { startImageWithHiggsfield } from '../_shared/higgsfield/startImage.ts';
 import { checkVideoJob } from '../_shared/higgsfield/renderVideo.ts';
 import { storeRemoteImage } from '../_shared/media/storeRemote.ts';
+import { mediaBackendFor } from '../_shared/higgsfield/backend.ts';
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -73,7 +74,35 @@ async function reviewJob(db: any, creative: any, index: number, job: Job) {
   return { verdict, dirty };
 }
 
+const AGENT_ENGINE = 'creative-agent';
+const AGENT_TIMEOUT_MS = 90 * 60 * 1000;
+
+/** The Creative Production agent designs this plan: one queued brief, delivered back through agent-brief. */
+async function advanceAgentPlan(db: any, creative: any): Promise<{ frames: FrameState[]; done: boolean; failed: boolean; iterations: Array<{ id: string; media_urls: string[]; frames: number[]; finishing?: string }> }> {
+  const count = creative.plan.frames.length;
+  const all = creative.plan.frames.map((_: unknown, i: number) => i);
+  const { data: existing } = await db.from('media_jobs').select('id,status,error,input,post_iteration_id,created_at').eq('client_id', creative.client_id).eq('provider', AGENT_ENGINE).contains('input', { creative_plan_id: creative.id }).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  let job = existing;
+  if (!job) {
+    const { data, error } = await db.from('media_jobs').insert({ client_id: creative.client_id, kind: 'image', provider: AGENT_ENGINE, status: 'pending', input: { creative_plan_id: creative.id, engine: AGENT_ENGINE, frames: count } }).select('id,status,error,input,post_iteration_id,created_at').single();
+    if (error) throw new Error('The agent brief could not be queued.');
+    job = data;
+  }
+  if (job.post_iteration_id) {
+    const { data } = await db.from('post_iterations').select('id,media_urls,variant_angle,finishing').eq('client_id', creative.client_id).like('variant_angle', `Reference creative ${creative.id}%`).order('created_at');
+    return { frames: all.map((i: number) => ({ index: i, state: 'approved', attempt: 0, url: null, preview: null, error: null })), done: true, failed: false, iterations: (data || []).map((it: any, n: number) => ({ ...it, frames: creative.mode === 'carousel' ? all : [n] })) };
+  }
+  if (job.status !== 'failed' && Date.now() - Date.parse(job.created_at) > AGENT_TIMEOUT_MS) {
+    await db.from('media_jobs').update({ status: 'failed', error: 'The Creative Production agent did not deliver this brief within 90 minutes.', updated_at: new Date().toISOString() }).eq('id', job.id);
+    job = { ...job, status: 'failed', error: 'The Creative Production agent did not deliver this brief within 90 minutes.' };
+  }
+  const delivered = job.input?.delivered || {};
+  const frames: FrameState[] = all.map((i: number) => ({ index: i, state: job.status === 'failed' ? 'failed' : delivered[String(i)] ? 'approved' : job.status === 'submitted' ? 'reviewing' : 'rendering', attempt: 0, url: delivered[String(i)] || null, preview: delivered[String(i)] || null, error: job.status === 'failed' ? job.error : null }));
+  return { frames, done: false, failed: job.status === 'failed', iterations: [] };
+}
+
 async function advancePlan(db: any, creative: any, budget: { reviews: number }): Promise<{ frames: FrameState[]; done: boolean; failed: boolean; iterations: Array<{ id: string; media_urls: string[]; frames: number[]; finishing?: string }> }> {
+  if (await mediaBackendFor(db, creative.client_id) === AGENT_ENGINE) return advanceAgentPlan(db, creative);
   const count = creative.plan.frames.length;
   const jobs = await jobsFor(db, creative.client_id, creative.id);
   const attached = jobs.filter(j => j.post_iteration_id);

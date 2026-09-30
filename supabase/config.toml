@@ -168,3 +168,7 @@ verify_jwt = false
 
 [functions.get-creative-plan]
 verify_jwt = false
+
+# The Creative Production agent's door: authenticated by x-agent-key in code.
+[functions.agent-brief]
+verify_jwt = false

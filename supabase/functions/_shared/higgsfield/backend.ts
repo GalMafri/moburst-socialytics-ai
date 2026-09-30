@@ -8,13 +8,13 @@
 // letting the body pick the provider would still mean any caller could aim
 // any client at the paid account. The column is the only say.
 
-export type MediaBackend = "gemini" | "higgsfield";
+export type MediaBackend = "gemini" | "higgsfield" | "creative-agent";
 
 export const DEFAULT_BACKEND: MediaBackend = "gemini";
 
 /** Anything unrecognised is Gemini: an unknown value must not spend credits. */
 export function asMediaBackend(value: unknown): MediaBackend {
-  return value === "higgsfield" ? "higgsfield" : DEFAULT_BACKEND;
+  return value === "higgsfield" ? "higgsfield" : value === "creative-agent" ? "creative-agent" : DEFAULT_BACKEND;
 }
 
 /**
