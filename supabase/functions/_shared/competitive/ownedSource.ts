@@ -111,7 +111,7 @@ export async function collectOwnedCompetitive(db:any,client:any,period:Period) {
       const response=await fetch(`https://api.sproutsocial.com/v1/${encodeURIComponent(customer)}/analytics/${path}`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({...body,page}),signal:AbortSignal.timeout(20000)});
       if(!response.ok) {
         const detail=await response.text();
-        throw new Error(`Sprout ${path} collection failed [${response.status}]: ${detail.replaceAll(token,'[redacted]').slice(0,600)}`);
+        throw new Error(`Sprout ${path} collection failed [${response.status}]: ${detail.split(token).join('[redacted]').slice(0,600)}`);
       }
       const data=await response.json();
       if(!Array.isArray(data.data)||data.paging&&Number(data.paging.current_page)!==page) throw new Error('Sprout pagination response is incomplete');
@@ -122,7 +122,7 @@ export async function collectOwnedCompetitive(db:any,client:any,period:Period) {
   };
   const audience=async(range:Period)=>pages('profiles',{filters:[filter,`reporting_period.in(${range.start}...${range.end})`],metrics:['lifetime_snapshot.followers_count'],limit:1000});
   const [postRows,currentRows,previousRows,latestRows]=await Promise.all([
-    pages('posts',{timezone:'UTC',filters:[filter,`created_time.in(${previous.start}T00:00:00...${period.end}T23:59:59)`],fields:['guid','customer_profile_id','network','created_time','perma_link','text','post_type','content_category','visual_media','sent'],metrics:['lifetime.reactions','lifetime.likes','lifetime.comments_count','lifetime.shares_count','lifetime.impressions','lifetime.video_views'],limit:50}),
+    pages('posts',{timezone:'UTC',filters:[filter,`created_time.in(${previous.start}T00:00:00...${period.end}T23:59:59)`],fields:['guid','customer_profile_id','network','created_time','perma_link','text','post_type','content_category','visual_media'],metrics:['lifetime.reactions','lifetime.likes','lifetime.comments_count','lifetime.shares_count','lifetime.impressions','lifetime.video_views'],limit:50}),
     audience(period),audience(previous),audience({start:new Date(Date.parse(latest)-2*DAY).toISOString().slice(0,10),end:latest}),
   ]);
   return normalizeOwnedCompetitive(selected,period,postRows,[...currentRows,...previousRows,...latestRows],collectedAt);
