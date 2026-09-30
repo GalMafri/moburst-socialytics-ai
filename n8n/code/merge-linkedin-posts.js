@@ -17,7 +17,12 @@ for (const row of rows) {
   const headerMatches = profile(row.header?.imageLink) === source.profile_url;
   const collaboration = headerMatches && /collaborated on this/i.test(row.header?.text || '');
   if (headerMatches && /reposted this/i.test(row.header?.text || '')) continue;
-  if (profile(row.author?.linkedinUrl) !== source.profile_url && !collaboration) throw new Error('LinkedIn post author does not match the reviewed company page.');
+  // LinkedIn resolves numeric company URLs to a vanity slug. The immutable
+  // company ID must match exactly; similar names or slugs are not evidence.
+  const reviewedId = source.profile_url.match(/\/company\/(\d+)$/)?.[1];
+  const sameCompanyId = reviewedId && row.author?.type === 'company'
+    && String(row.author.companyId || '') === reviewedId && !!profile(row.author.linkedinUrl);
+  if (profile(row.author?.linkedinUrl) !== source.profile_url && !sameCompanyId && !collaboration) throw new Error('LinkedIn post author does not match the reviewed company page.');
   counts.set(source.profile_url,(counts.get(source.profile_url)||0)+1);
   const published = row.postedAt?.date;
   if (!published || !Number.isFinite(Date.parse(published)) || !/^https:\/\/www\.linkedin\.com\/(?:posts|feed\/update)\//.test(row.linkedinUrl || '')) throw new Error('LinkedIn post is missing its source URL or publication date.');

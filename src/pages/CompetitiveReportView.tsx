@@ -1034,7 +1034,7 @@ export default function CompetitiveReportView() {
                 {teardowns.map((w: any, i: number) => {
                   const examples: Array<{ url: string; post?: TopPost }> = w.examples;
                   return (
-                    <div key={i} className="glass-inner p-4 space-y-3">
+                    <div key={i} data-pdf-unit className="glass-inner p-4 space-y-3">
                       <p data-pdf-heading className="t-h3 pb-3 border-b border-[rgba(255,255,255,0.08)]" title={w.competitor}>{displayCompanyName(w.competitor)}</p>
                       {/* The pattern is the claim, and the only prose here. */}
                       <p className="t-body text-white leading-[1.55] pt-0.5">{w.pattern}</p>
@@ -1103,7 +1103,7 @@ export default function CompetitiveReportView() {
                   return (
                     <div key={c.company_id} data-pdf-company className="space-y-2">
                       <p className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
-                      <div className="grid gap-2 grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
+                      <div data-pdf-moodboard className="grid gap-2 grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
                         {posts.map((p, i) => <PostVisual key={i} url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} compact />)}
                       </div>
                     </div>

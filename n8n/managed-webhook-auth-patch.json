@@ -1,0 +1,108 @@
+{
+  "applied_at": "2026-09-30",
+  "workflows": [
+    {
+      "workflow_id": "SZbRTV7yOdXTNHHf",
+      "active_version": "af8e2076-633d-4528-86f9-f63e8383e15d",
+      "operations": [
+        {
+          "type": "updateNodeParameters",
+          "nodeName": "HTTP Request",
+          "parameters": {
+            "method": "POST",
+            "url": "=https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/update-report",
+            "sendHeaders": true,
+            "headerParameters": {
+              "parameters": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ]
+            },
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={{ JSON.stringify({\n  \"report_id\": $json.report_id,\n  \"status\": $json.status === \"success\" ? \"completed\" : \"failed\",\n  \"report_data\": $json,\n  \"gamma_url\": $json.gamma_url || \"\",\n  \"duration_minutes\": $json.duration_minutes || 0\n}) }}",
+            "options": {
+              "timeout": 60000
+            },
+            "authentication": "genericCredentialType",
+            "genericAuthType": "httpHeaderAuth"
+          },
+          "replace": true
+        },
+        {
+          "type": "setNodeCredential",
+          "nodeName": "HTTP Request",
+          "credentialKey": "httpHeaderAuth",
+          "credentialId": "eSV0BS2mZ6Jjofq5",
+          "credentialName": "Socialytics App Webhook"
+        },
+        {
+          "type": "updateNodeParameters",
+          "nodeName": "Mark Social Report Failed",
+          "parameters": {
+            "method": "POST",
+            "url": "=https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/update-report",
+            "sendHeaders": true,
+            "headerParameters": {
+              "parameters": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ]
+            },
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={{ JSON.stringify({report_id: $('Webhook').first().json.body?.report_id || $('Webhook').first().json.report_id, status: 'failed', report_data: {error: 'The analysis workflow stopped before completion. Review the failed n8n execution before retrying.'}}) }}",
+            "options": {
+              "timeout": 60000
+            },
+            "authentication": "genericCredentialType",
+            "genericAuthType": "httpHeaderAuth"
+          },
+          "replace": true
+        },
+        {
+          "type": "setNodeCredential",
+          "nodeName": "Mark Social Report Failed",
+          "credentialKey": "httpHeaderAuth",
+          "credentialId": "eSV0BS2mZ6Jjofq5",
+          "credentialName": "Socialytics App Webhook"
+        }
+      ]
+    },
+    {
+      "workflow_id": "m6hj4kWuT1tPSeJg",
+      "active_version": "f5ecbb30-8425-41fe-964e-7a286728375c",
+      "operations": [
+        {
+          "type": "updateNodeParameters",
+          "nodeName": "Run due report schedules",
+          "parameters": {
+            "method": "POST",
+            "url": "https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/trigger-scheduled-reports",
+            "sendHeaders": false,
+            "sendBody": true,
+            "specifyBody": "json",
+            "jsonBody": "={{ ({ source: \"n8n-daily-scheduler\", at: $now.toISO() }) }}",
+            "options": {
+              "timeout": 120000
+            },
+            "authentication": "genericCredentialType",
+            "genericAuthType": "httpHeaderAuth"
+          },
+          "replace": true
+        },
+        {
+          "type": "setNodeCredential",
+          "nodeName": "Run due report schedules",
+          "credentialKey": "httpHeaderAuth",
+          "credentialId": "eSV0BS2mZ6Jjofq5",
+          "credentialName": "Socialytics App Webhook"
+        }
+      ]
+    }
+  ]
+}

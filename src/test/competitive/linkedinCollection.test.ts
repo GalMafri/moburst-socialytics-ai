@@ -8,8 +8,8 @@ const fixture = JSON.parse(readFileSync('scripts/fixtures/linkedin-source-posts.
 const source = readFileSync('n8n/code/merge-linkedin-posts.js','utf8');
 const profile = 'https://www.linkedin.com/company/medisafe-project';
 const period = {start:'2026-08-30',end:'2026-09-28'};
-function merge(rows = fixture) {
-  const nodes: any = {'Run Config':{range_start:period.start,range_end:period.end},'Prepare LinkedIn Sources':{has_sources:true,sources:[{company_id:'42',name:'Medisafe',profile_url:profile}]},'Merge Post Pages':{socialPosts:[],expected_windows:5}};
+function merge(rows = fixture, reviewedProfile = profile) {
+  const nodes: any = {'Run Config':{range_start:period.start,range_end:period.end},'Prepare LinkedIn Sources':{has_sources:true,sources:[{company_id:'42',name:'Medisafe',profile_url:reviewedProfile}]},'Merge Post Pages':{socialPosts:[],expected_windows:5}};
   return runInNewContext('(function(){'+source+'})()', {$: (n:string)=>({first:()=>({json:nodes[n]})}),$input:{all:()=>rows.map((json:any)=>({json}))}})[0].json;
 }
 it('imports verified real posts with source identity, publication dates and engagement', () => {
@@ -19,6 +19,19 @@ it('imports verified real posts with source identity, publication dates and enga
 it('does not attribute a different company author to the requested competitor', () => {
   const rows=structuredClone(fixture);rows[0].author.linkedinUrl='https://www.linkedin.com/company/unrelated';
   expect(()=>merge(rows)).toThrow('author does not match');
+});
+it('accepts numeric LinkedIn URLs only when the author has the identical company ID', () => {
+  const numeric = 'https://www.linkedin.com/company/1761291';
+  const row = structuredClone(fixture[0]);
+  row.query.targetUrl = numeric;
+  row.author = {type:'company',companyId:'1761291',linkedinUrl:'https://www.linkedin.com/company/kiron-interactive/posts'};
+  expect(merge([row], numeric).linkedin_posts).toBe(1);
+  row.author.companyId = '17612910';
+  expect(()=>merge([row], numeric)).toThrow('author does not match');
+  row.author.companyId = '1761291'; row.author.type = 'person';
+  expect(()=>merge([row], numeric)).toThrow('author does not match');
+  row.author.type = 'company'; row.author.linkedinUrl = 'https://www.linkedin.com/in/person';
+  expect(()=>merge([row], numeric)).toThrow('author does not match');
 });
 it('filters by the requested date range and deduplicates posts', () => {
   const old=structuredClone(fixture[0]);old.id='older';old.postedAt.date='2026-07-01T00:00:00Z';

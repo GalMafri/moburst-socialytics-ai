@@ -114,8 +114,23 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
   content.querySelectorAll('[data-pdf-company]').forEach(company => {
     const heading = company.firstElementChild;
     const grid = heading?.nextElementSibling;
-    const first = grid?.firstElementChild;
+    let first = grid?.firstElementChild;
     if (!heading || !grid?.classList.contains('grid') || !first) return;
+    if (grid.hasAttribute('data-pdf-moodboard')) {
+      // Break a mood board between short rows, retaining every original tile.
+      // A single tall data grid otherwise moves to the next page as one block.
+      const tiles = Array.from(grid.children);
+      grid.replaceChildren();
+      grid.className = '';
+      for (let i = 0; i < tiles.length; i += 3) {
+        const row = document.createElement('div');
+        row.className = 'pdf-moodboard-row';
+        row.setAttribute('data-pdf-keep', '');
+        row.append(...tiles.slice(i, i + 3));
+        grid.appendChild(row);
+      }
+      first = grid.firstElementChild!;
+    }
     const fragment = document.createElement('div');
     fragment.setAttribute('data-pdf-keep', '');
     company.insertBefore(fragment, heading);
@@ -527,6 +542,9 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     /* Prose and media grids read across the whole page, never in KPI columns. */
     .pdf-root .grid[data-pdf-flow] { display: block !important; }
     .pdf-root .grid[data-pdf-flow] > * { margin-bottom: 12px; }
+    .pdf-root .pdf-moodboard-row { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+    .pdf-root .pdf-moodboard-row [data-pdf-media],
+    .pdf-root .pdf-moodboard-row img { max-height: 42mm !important; }
     /* A thumbnail next to its caption keeps the row, but the caption gets the
        rest of the width instead of the leftovers of a squeezed column. */
     .pdf-root [data-pdf-media-row] { display: flex !important; flex-wrap: nowrap !important; align-items: flex-start; gap: 12px; }
