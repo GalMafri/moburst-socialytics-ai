@@ -13,10 +13,10 @@ describe('reference-directed creative',()=>{
     expect(()=>parseCreativePlan({...plan,frames:frames.slice(0,2)},3,3)).toThrow();
     expect(()=>parseCreativePlan({...plan,frames:frames.map(f=>({...f,reference_indices:[0,7]}))},3,3)).toThrow();
     expect(()=>parseCreativePlan({...plan,frames:frames.map(f=>({...f,subject:'Same rocket'}))},3,3)).toThrow();
-    expect(parseCreativePlan({...plan,frames:frames.map(f=>({...f,composition:'Same glass card system'}))},3,3).frames).toHaveLength(3);
+    expect(()=>parseCreativePlan({...plan,frames:frames.map(f=>({...f,composition:'Same centered card'}))},3,3)).toThrow();
   });
-  it('keeps one template hierarchy across a set and still demands a measured template and logo',()=>{
-    expect(parseCreativePlan({...plan,frames:frames.map(f=>({...f,layout:{...f.layout,headline_position:'bottom',subject_position:'top'}}))},3,3).frames).toHaveLength(3);
+  it('rejects identical visual hierarchy even when composition wording differs',()=>{
+    expect(()=>parseCreativePlan({...plan,frames:frames.map(f=>({...f,layout:{...f.layout,headline_position:'bottom',subject_position:'top'}}))},3,3)).toThrow('same visual hierarchy');
     expect(()=>parseCreativePlan({...plan,frames:frames.map(f=>({...f,layout:{...f.layout,reference_index:7}}))},3,3)).toThrow('measured layout');
     expect(()=>parseCreativePlan({...plan,logo:undefined},3,3)).toThrow('authentic logo');
   });
@@ -38,8 +38,9 @@ describe('reference-directed creative',()=>{
     const prompt=creativeImagePrompt(plan as never,1);
     expect(prompt).toContain('Subject 1');expect(prompt).toContain('Message 1');
     expect(prompt).not.toContain('Subject 0');expect(prompt).not.toContain('Message 2');
-    expect(prompt).toContain('TEMPLATE: attached image 1');
-    expect(prompt).toContain('Change exactly two things');
+    expect(prompt).toContain('take the tokens from the pixels, not from words');
+    expect(prompt).toContain('Build a NEW composition');
+    expect(prompt).not.toContain('#');
   });
   it('requests three moving shots with no burned-in lettering',()=>{
     const prompt=creativeVideoPrompt(plan as never);
