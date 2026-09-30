@@ -777,14 +777,14 @@ export default function CompetitiveReportView() {
               <Card>
                 <CardContent className="pt-5">
                   <div className="overflow-x-auto">
-                    <table className="w-full border-collapse">
+                    <table data-pdf-unit className="w-full border-collapse">
                       <thead>
                         <tr>
                           <th className="t-subhead text-left align-bottom pb-3 pr-6 w-[92px]"><span className="sr-only">Dimension</span></th>
                           {ordered.map((c) => (
                             <th key={c.company_id} className="text-left align-bottom pb-3 pr-6 last:pr-0 min-w-[240px]">
                               <span className="t-body font-semibold text-white" title={c.name}>{displayCompanyName(c.name)}</span>
-                              {c.is_client && <span className="t-label !text-[#b9e045] ml-2">client</span>}
+                              {c.is_client && <span data-pdf-client-label className="t-label !text-[#b9e045] ml-2">client</span>}
                             </th>
                           ))}
                         </tr>
@@ -878,7 +878,7 @@ export default function CompetitiveReportView() {
                   const peakHour = peakOf(b.by_hour);
                   const peakDay = peakOf(b.by_weekday);
                   return (
-                  <div key={c.company_id} className="space-y-3 glass-inner p-4">
+                  <div key={c.company_id} data-pdf-unit className="space-y-3 glass-inner p-4">
                     <div className="t-h3 flex items-center gap-2 flex-wrap pb-3 border-b border-[rgba(255,255,255,0.08)]" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client · current rhythm</Badge>}</div>
                     {(peakHour || peakDay) && (
                       <div className="flex flex-wrap gap-x-8 gap-y-2">

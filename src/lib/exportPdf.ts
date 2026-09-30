@@ -511,6 +511,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
     .pdf-root thead { display: table-header-group; }
     .pdf-root tr { break-inside: avoid; }
     .pdf-root th, .pdf-root td { white-space: normal !important; overflow-wrap: anywhere; font-size: 10px; padding: 6px; }
+    .pdf-root [data-pdf-client-label] { display: block; margin-left: 0; white-space: nowrap !important; }
     .pdf-root img { max-width: 100% !important; max-height: 65mm !important; object-fit: contain !important; }
     .pdf-root [data-pdf-media] { aspect-ratio: auto !important; height: auto !important; min-height: 0 !important; max-height: 65mm !important; padding: 0 !important; break-inside: avoid; }
     .pdf-root [data-pdf-media] img, .pdf-root [data-pdf-media] video { position: static !important; display: block; width: auto !important; height: auto !important; max-width: 100% !important; max-height: 65mm !important; margin: 0 auto; object-fit: contain !important; }
@@ -570,7 +571,7 @@ export async function exportReportToPdf({ contentRef, filename, title }: ExportO
       // the previous page above an empty plot box. Keep chart cards whole up to
       // a full page of content.
       const fullPageHeight = 240 * 96 / 25.4;
-      document.querySelectorAll('.pdf-root article, .pdf-root .glass, .pdf-root .glass-inner, .pdf-root .glass-accent, .pdf-root blockquote, .pdf-root tr').forEach(el => {
+      document.querySelectorAll('.pdf-root article, .pdf-root .glass, .pdf-root .glass-inner, .pdf-root .glass-accent, .pdf-root blockquote, .pdf-root tr, .pdf-root [data-pdf-unit]').forEach(el => {
         const height = el.getBoundingClientRect().height;
         const limit = el.hasAttribute('data-pdf-unit') || el.querySelector('.recharts-surface') ? fullPageHeight : usablePageHeight;
         el.setAttribute(height > limit ? 'data-pdf-splittable' : 'data-pdf-keep', '');
