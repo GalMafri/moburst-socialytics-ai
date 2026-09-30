@@ -878,6 +878,8 @@ export type Database = {
           post_iteration_id: string | null
           provider: string
           request_id: string | null
+          review: Json | null
+          reviewed_at: string | null
           seed_image_url: string | null
           status: string
           updated_at: string
@@ -895,6 +897,8 @@ export type Database = {
           post_iteration_id?: string | null
           provider?: string
           request_id?: string | null
+          review?: Json | null
+          reviewed_at?: string | null
           seed_image_url?: string | null
           status?: string
           updated_at?: string
@@ -912,6 +916,8 @@ export type Database = {
           post_iteration_id?: string | null
           provider?: string
           request_id?: string | null
+          review?: Json | null
+          reviewed_at?: string | null
           seed_image_url?: string | null
           status?: string
           updated_at?: string
@@ -944,6 +950,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           cta: string | null
+          finishing: string
           format: string | null
           hashtags: string[] | null
           id: string
@@ -974,6 +981,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           cta?: string | null
+          finishing?: string
           format?: string | null
           hashtags?: string[] | null
           id?: string
@@ -1004,6 +1012,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           cta?: string | null
+          finishing?: string
           format?: string | null
           hashtags?: string[] | null
           id?: string
