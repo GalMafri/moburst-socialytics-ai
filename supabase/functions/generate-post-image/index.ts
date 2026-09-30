@@ -4,7 +4,7 @@ import { creativeImagePrompt, frameReferenceIndices} from '../_shared/design-pro
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
-import { imageAspectRatio } from "../_shared/design-prompts/aspect.ts";
+import { imageAspectRatio, platformDesignSpec} from '../_shared/design-prompts/aspect.ts';
 import { brandFootingAdvice, footingOf, resolveBrandContext } from "../_shared/design-prompts/resolveBrand.ts";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { mediaBackendFor } from "../_shared/higgsfield/backend.ts";
@@ -240,7 +240,7 @@ Deno.serve(async (req) => {
       try {
         const {referenceUrls}=await resolveContextImageUrls({design_references:resolvedRefs},brandDb);
         if(referenceUrls.length!==resolvedRefs.length) throw new Error('The selected client references could not be opened.');
-        const started=await startImageWithHiggsfield(brandDb,creativeImagePrompt(creative.plan,creative_frame_index,typeof creative_correction==='string'?creative_correction:''),imageAspectRatio(platform,format),referenceUrls);
+        const started=await startImageWithHiggsfield(brandDb,creativeImagePrompt(creative.plan,creative_frame_index,typeof creative_correction==='string'?creative_correction:'',platformDesignSpec(platform,format)),imageAspectRatio(platform,format),referenceUrls);
         const {error:recordError}=await brandDb.from('media_jobs').update({request_id:started.jobId,model_path:started.model,status:'submitted'}).eq('id',row.id);
         if(recordError) throw new Error(`Image submitted as ${started.jobId} but recording failed. Do not resubmit.`);
       } catch(error) {
@@ -280,7 +280,7 @@ Deno.serve(async (req) => {
     let aspectRatio = imageAspectRatio(platform, format);
     // Rules learned from this client's rejected designs, if any.
     const learnings = await loadDesignLearnings(brandDb, client_id || client_context?.client_id);
-    let designPrompt = creative ? creativeImagePrompt(creative.plan, creative_frame_index, typeof creative_correction === "string" ? creative_correction : "") : buildImagePrompt({
+    let designPrompt = creative ? creativeImagePrompt(creative.plan, creative_frame_index, typeof creative_correction === "string" ? creative_correction : "", platformDesignSpec(platform, format)) : buildImagePrompt({
       basePrompt: prompt,
       noText: render_text === false,
       learnings,

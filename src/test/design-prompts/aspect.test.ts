@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   imageAspectRatio,
+  platformDesignSpec,
   isVerticalFormat,
   videoAspectRatio,
 } from "../../../supabase/functions/_shared/design-prompts/aspect";
@@ -94,8 +95,8 @@ describe("imageAspectRatio", () => {
   });
 
   it("keeps the existing shapes for everything else", () => {
-    expect(imageAspectRatio("Instagram", "Single Image")).toBe("1:1");
-    expect(imageAspectRatio("Instagram", "Carousel")).toBe("1:1");
+    expect(imageAspectRatio("Instagram", "Single Image")).toBe("4:5");
+    expect(imageAspectRatio("Instagram", "Carousel")).toBe("4:5");
     // A cover still for an Instagram video is tall, like the clip it fronts.
     expect(imageAspectRatio("Instagram", "Video")).toBe("9:16");
     expect(imageAspectRatio("LinkedIn", "Single Image")).toBe("16:9");
@@ -117,5 +118,23 @@ describe("buildImagePrompt noText", () => {
     const out = buildImagePrompt({ basePrompt: "An attorney in an office" });
     expect(out).toContain("only use text that appears in the creative direction");
     expect(out).not.toContain("Render NO text of any kind");
+  });
+});
+
+describe("platformDesignSpec", () => {
+  it("reserves the platform interface and sizes type and logo per surface", () => {
+    const reel = platformDesignSpec("Instagram", "Reel/Video");
+    expect(reel.aspect).toBe("9:16");
+    expect(reel.safe.bottom).toBeGreaterThan(0.2);
+    expect(reel.safe.right).toBeGreaterThan(0.1);
+    expect(reel.note).toContain("Instagram Reels");
+    const feed = platformDesignSpec("Instagram", "Single Image");
+    expect(feed.aspect).toBe("4:5");
+    expect(feed.headlineScale).toBeGreaterThan(reel.headlineScale - 0.01);
+    const li = platformDesignSpec("LinkedIn", "Single Image");
+    expect(li.aspect).toBe("16:9");
+    expect(li.logoWidth).toBeLessThan(feed.logoWidth);
+    expect(platformDesignSpec("LinkedIn", "Carousel").aspect).toBe("1:1");
+    expect(platformDesignSpec(null, null).aspect).toBe("1:1");
   });
 });

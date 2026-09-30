@@ -27,6 +27,10 @@ describe('reference-directed creative',()=>{
     expect(prompt).toContain('do not draw any header band');
     expect(prompt).toContain('PRIMARY layout reference');
   });
+  it('keeps the emphasis inside the headline',()=>{
+    expect(()=>parseCreativePlan({...plan,frames:frames.map(f=>({...f,emphasis:'not in headline'}))},3,3)).toThrow('emphasised phrase');
+    expect(parseCreativePlan({...plan,frames:frames.map((f,i)=>({...f,emphasis:`Message ${i}`}))},3,3).frames[1].emphasis).toBe('Message 1');
+  });
   it('requires multiple distinct visual references for every frame',()=>{
     for(const reference_indices of [[0],[1,1],[-1,2]]) expect(()=>parseCreativePlan({...plan,frames:frames.map(f=>({...f,reference_indices}))},3,3)).toThrow();
   });
@@ -36,10 +40,11 @@ describe('reference-directed creative',()=>{
   });
   it('gives each render only its own scene and exact headline',()=>{
     const prompt=creativeImagePrompt(plan as never,1);
-    expect(prompt).toContain('Subject 1');expect(prompt).toContain('Message 1');
+    expect(prompt).toContain('Subject 1');expect(prompt).not.toContain('Message 1');
     expect(prompt).not.toContain('Subject 0');expect(prompt).not.toContain('Message 2');
     expect(prompt).toContain('take the tokens from the pixels, not from words');
     expect(prompt).toContain('Build a NEW composition');
+    expect(prompt).toContain('Render NO lettering');
     expect(prompt).not.toContain('#');
   });
   it('requests three moving shots with no burned-in lettering',()=>{
