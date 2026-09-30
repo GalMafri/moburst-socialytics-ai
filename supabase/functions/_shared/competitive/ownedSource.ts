@@ -109,7 +109,10 @@ export async function collectOwnedCompetitive(db:any,client:any,period:Period) {
     const rows:any[]=[];
     for(let page=1;page<=100;page++) {
       const response=await fetch(`https://api.sproutsocial.com/v1/${encodeURIComponent(customer)}/analytics/${path}`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({...body,page}),signal:AbortSignal.timeout(20000)});
-      if(!response.ok) throw new Error(`Sprout ${path} collection failed [${response.status}]`);
+      if(!response.ok) {
+        const detail=await response.text();
+        throw new Error(`Sprout ${path} collection failed [${response.status}]: ${detail.replaceAll(token,'[redacted]').slice(0,600)}`);
+      }
       const data=await response.json();
       if(!Array.isArray(data.data)||data.paging&&Number(data.paging.current_page)!==page) throw new Error('Sprout pagination response is incomplete');
       rows.push(...data.data);

@@ -16,7 +16,7 @@ export function metricCoveragePatch(workflow) {
   const source = find('Landscape Metrics Summary');
   const snapshot = {
     name:'Landscape Audience Snapshot', type:source.type, typeVersion:source.typeVersion,
-    position:[960,-300],credentials:structuredClone(source.credentials),
+    position:[960,-300],credentials:{httpHeaderAuth:structuredClone(source.credentials.httpHeaderAuth)},
     parameters:{...structuredClone(source.parameters),queryParameters:{parameters:['mainPeriodStart','mainPeriodEnd'].map(name=>({
       name,value:'={{ DateTime.fromISO($("Run Config").first().json.started_at).toUTC().minus({days:1}).toFormat("yyyy-MM-dd") }}',
     }))}},
