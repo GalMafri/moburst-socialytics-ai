@@ -32,7 +32,10 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Sprout audience date is missing');
     const rows=observations.get(id)||[]; rows.push({date,followers:metric(row,'lifetime_snapshot.followers_count')});observations.set(id,rows);
   }
-  for(const profile of profiles) if(!observations.get(String(profile.sprout_profile_id))?.some(r=>r.followers!==null)) throw new Error('Sprout returned no profile coverage for '+(profile.profile_name||profile.native_name||profile.sprout_profile_id));
+  // Sprout does not report a follower count every day for every network
+  // (LinkedIn and YouTube can go a week without one). A profile with no
+  // reading in the window still contributes its posts; its followers and
+  // rate stay null for the network rather than failing the client.
   const followers=(id:string,start:string,end:string)=>[...(observations.get(id)||[])].filter(r=>r.date>=start&&r.date<=end&&r.followers!==null).sort((a,b)=>b.date.localeCompare(a.date))[0];
   const seen=new Set<string>(); const all:any[]=[];
   for(const row of postRows) {
