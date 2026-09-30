@@ -65,8 +65,10 @@ async function recordDesign(db: any, job: any) {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   try {
-    if (!await secretEquals(req.headers.get('x-agent-key'), Deno.env.get('SOCIALYTICS_AGENT_KEY'))) return json({ error: 'unauthorized' }, 401);
     const body = await req.json().catch(() => ({}));
+    // Unauthenticated liveness: whether the door has its key at all (never the key itself).
+    if (body?.op === 'health') return json({ ok: true, configured: !!Deno.env.get('SOCIALYTICS_AGENT_KEY'), key_length: (Deno.env.get('SOCIALYTICS_AGENT_KEY') || '').length });
+    if (!await secretEquals(req.headers.get('x-agent-key'), Deno.env.get('SOCIALYTICS_AGENT_KEY'))) return json({ error: 'unauthorized' }, 401);
     const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const op = String(body.op || 'next');
     if (op === 'next') {
