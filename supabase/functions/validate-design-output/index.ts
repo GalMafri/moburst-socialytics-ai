@@ -1,3 +1,4 @@
+import {frameReferenceIndices} from '../_shared/design-prompts/creativePlan.ts';
 import {loadCreativePlan} from "../_shared/design-prompts/loadCreativePlan.ts";
 import { sourceImage } from "../_shared/design-prompts/sourceImage.ts";
 import { referencesFor } from "../_shared/design-prompts/designRefs.ts";
@@ -65,7 +66,7 @@ Deno.serve(async (req) => {
       const creative=await loadCreativePlan(db,creative_plan_id,client_id);
       const frame=creative.plan.frames[creative_frame_index];
       if(!Number.isInteger(creative_frame_index)||!frame) throw new Error('Unknown creative scene.');
-      referenceImages=await Promise.all(frame.reference_indices.map((i:number)=>sourceImage(db,creative.reference_paths[i])));
+      referenceImages=await Promise.all(frameReferenceIndices(frame).map((i:number)=>sourceImage(db,creative.reference_paths[i])));
       creativeText=frame.headline; video=creative.mode==='video';
       if(!video && frame.layout) creativeDirection=JSON.stringify({subject:frame.subject,headline_position:frame.layout.headline_position,subject_position:frame.layout.subject_position});
     }

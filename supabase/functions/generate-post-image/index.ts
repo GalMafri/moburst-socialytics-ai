@@ -1,6 +1,6 @@
 import {startImageWithHiggsfield} from "../_shared/higgsfield/startImage.ts";
 import { loadCreativePlan } from "../_shared/design-prompts/loadCreativePlan.ts";
-import { creativeImagePrompt } from "../_shared/design-prompts/creativePlan.ts";
+import { creativeImagePrompt, frameReferenceIndices} from '../_shared/design-prompts/creativePlan.ts';
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildImagePrompt } from "../_shared/design-prompts/buildImagePrompt.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
     const creative = creative_plan_id ? await loadCreativePlan(brandDb, creative_plan_id, resolvedClientId) : null;
     if (creative?.mode === 'video' || (creative && (!Number.isInteger(creative_frame_index) || !creative.plan.frames[creative_frame_index]))) throw new Error('Invalid image scene.');
     if (resolvedSynthesis?.reference_pipeline_version === 1 && !creative) throw new Error('Prepare a new creative direction from the client’s social references before rendering.');
-    if (creative) resolvedRefs = creative.plan.frames[creative_frame_index].reference_indices.map((i:number) => creative.reference_paths[i]);
+    if (creative) resolvedRefs = frameReferenceIndices(creative.plan.frames[creative_frame_index]).map((i:number) => creative.reference_paths[i]);
 
     const backend = await mediaBackendFor(brandDb, client_id || client_context?.client_id);
     console.log("[generate-post-image] backend:", backend);

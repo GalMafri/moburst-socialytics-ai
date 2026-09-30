@@ -41,8 +41,8 @@ export function parseCreativePlan(value: unknown, count: number, references: num
       layouts.add(`${l.headline_position}:${l.subject_position}`);
     }
   }
-  if (subjects.size !== count || (count > 1 && compositions.size < Math.min(count, 3))) throw new Error('The plan repeats the same subject or composition.');
-  if(!video && layouts.size<Math.min(count,3)) throw new Error('The plan repeats the same visual hierarchy. Use different layouts observed in the client references.');
+  if (subjects.size !== count) throw new Error('The plan repeats the same subject.');
+  void compositions; void layouts;
   {
     const l=v.logo;
     if(!l||!Number.isInteger(l.reference_index)||l.reference_index<0||l.reference_index>=references||!['x','y','width','height'].every(k=>Number.isFinite(l[k as keyof typeof l]))||l.x<0||l.y<0||l.width<=0||l.height<=0||l.x+l.width>1||l.y+l.height>1||l.width*l.height>0.08) throw new Error('The authentic logo could not be located in the client references.');
@@ -53,19 +53,24 @@ export function parseCreativePlan(value: unknown, count: number, references: num
   }
   return v;
 }
+/** The frame's references with its template first: the image model and the reviewer both read the first image as the template. */
+export function frameReferenceIndices(f: CreativeFrame): number[] {
+  if (!f.layout) return f.reference_indices;
+  return [f.layout.reference_index, ...f.reference_indices.filter(i => i !== f.layout!.reference_index)];
+}
 export function creativeImagePrompt(plan: CreativePlan, index: number, correction = ''): string {
   const f = plan.frames[index];
   if (!f) throw new Error('That scene is not in the creative plan.');
+  const templateOrdinal = 1;
   return [
-    'Create ONE new finished client social graphic. The attached images are real published client references. Study their actual visual treatment, typography, palette, spacing and authentic logo. They are visual evidence, not canvases to repaint.',
+    'Create ONE new finished client social graphic that belongs to the same design system as the attached images, which are real published posts by this client.',
+    `TEMPLATE: attached image ${templateOrdinal} is the template for this design. Reproduce its design system faithfully: the background treatment, the headline container (card, panel, frame or none) with the same shape, corner radius, transparency and placement, any outer frame or border, the typography family, weight contrast, size hierarchy, alignment and colour, the accent colours, light effects and materials, and the rendering style of the hero object. The other attached images confirm the same system; where they differ, the template wins.`,
     `Reference-backed brand system: ${plan.brand_system}`,
-    `New subject for this post: ${f.subject}`,
-    f.layout ? `AUTHORITATIVE COMPOSITION: place the headline in the ${f.layout.headline_position} region and the new subject in the ${f.layout.subject_position} region. These positions determine the hierarchy. Do not move the headline to another region to copy a reference layout.` : `Composition for this particular design: ${f.composition}`,
-    f.layout ? `The PRIMARY layout reference is attached image ${f.reference_indices.indexOf(f.layout.reference_index)+1}. Match its typography weight, hierarchy and spacing. Headline: ${f.layout.headline_position}; new subject: ${f.layout.subject_position}. Other references support color and image treatment, not a merged generic card layout.` : '',
-    `Exact headline: ${JSON.stringify(f.headline)}. These are the only visible words. Preserve spelling and sentence case. Match the actual reference's regular/bold contrast; never make every word heavy bold.`,
-    'Create new imagery appropriate to this message. Never reuse a reference photograph, face, campaign prop, product, quote or headline. Never just change the text on a reference. Retain the real brand identity and design treatment, while changing the subject, visual hierarchy and arrangement as directed. Do not invent people, endorsements, statistics or product claims.',
-    'One edge-to-edge composition, no contact sheet, mock social interface, slide counter, empty text card, blank placeholder or extra captions. Exclude incidental gems, crystals, leaves and other decorations unless they are the specified subject. The reference brand system describes evidence, not a checklist of props to add.',
-    plan.logo ? `Render NO logo, wordmark, brand name or substitute icon. Leave breathing room at ${f.layout?.logo_position || 'top-center'} for software to place the real client logo: its footprint is 22% of image width and 8% of image height, starting 4.5% from the top. Keep headline and subject clear of that footprint. Continue the scene backdrop naturally behind this space; do not draw any header band, strip, panel, border, rectangle or placeholder for the logo.` : 'Match the authentic logo in the supplied images precisely; never invent a replacement mark.',
+    `Change exactly two things and nothing else. (1) Headline: ${JSON.stringify(f.headline)}. These are the only visible words; preserve spelling and sentence case; set them in the template's type treatment with the same regular/bold contrast. (2) Hero subject: ${f.subject}. Render it in the template's rendering style, lighting and palette.`,
+    f.layout ? `PRIMARY layout reference is attached image ${templateOrdinal}. Keep the headline in its ${f.layout.headline_position} region and place the new subject in the ${f.layout.subject_position} region, exactly as the template arranges its own headline and hero.` : `Composition for this design: ${f.composition}`,
+    'Do not copy the template\'s hero object, photograph, person, product, campaign text or quote; the subject is new. Do not add decorative elements the template does not have. Recurring elements shared by the references (a gradient border, a glass card, glowing accents, brand props) are part of the system and stay. Do not invent people, endorsements, statistics or product claims.',
+    'One edge-to-edge composition, no contact sheet, mock social interface, slide counter, empty text card, blank placeholder or extra captions.',
+    plan.logo ? `Render NO logo, wordmark, brand name or substitute icon. Leave breathing room at ${f.layout?.logo_position || 'top-center'} for software to place the real client logo: its footprint is 22% of image width and 8% of image height, starting 4.5% from the top. Keep headline and subject clear of that footprint. Continue the template backdrop naturally behind this space; do not draw any header band, strip, panel, border, rectangle or placeholder for the logo.` : 'Match the authentic logo in the supplied images precisely; never invent a replacement mark.',
     correction ? `Correct the previous attempt: ${correction.slice(0, 1600)}` : '',
   ].filter(Boolean).join('\n\n');
 }
