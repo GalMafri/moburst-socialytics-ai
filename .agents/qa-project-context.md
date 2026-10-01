@@ -114,4 +114,5 @@ posts are client-facing agency work.
 - `run-report` refuses to start when the previous run is under 90 minutes old and still `running`; a stuck row needs that long before a retry.
 - RivalIQ landscape setup is a multi-phase state machine with a two-minute lease; a second caller gets "Setup is already being checked".
 - Firecrawl returns navigation and images as "main content"; the demo cleans it (`demo/site-text.ts`) before drafting a brief.
-- `generate-post-image` on a Higgsfield client answers 202 with a media job; the demo records `post_image_pending` for those.
+- `generate-post-image` on a Higgsfield client answers 202 with a media job; the demo records `post_image_pending` for those. On 2026-10-01 the Higgsfield account had 0 credits, so every Higgsfield client's image generation stopped with "The Higgsfield account is down to 0 credits"; the demo records it as `post_image_missing` with that reason.
+- RivalIQ refused to start tracking two brand-new landscapes on 2026-10-01 (calm.com answered its visit with 403; the other companies came back with a credits payload); a demo on a brand RivalIQ cannot track ends with `tracking_incomplete` and no competitive report. The landscapes RivalIQ created stay in the account; the app has no call to remove them.
