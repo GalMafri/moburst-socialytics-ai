@@ -31,3 +31,11 @@ export async function svgToPng(db: any, svg: string, width: number, fonts: Uint8
   const r = new Resvg(svg, { font: { fontBuffers: fonts, defaultFontFamily: defaultFamily, loadSystemFonts: false }, fitTo: { mode: 'width', value: width } });
   return r.render().asPng();
 }
+
+/** Draw one image at exactly width x height (cover fit) and return PNG bytes: the canvas-sized hero and its small copy. */
+export async function imageToPng(db: any, href: string, width: number, height: number): Promise<Uint8Array> {
+  await ensureResvg(db);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><image href="${href}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/></svg>`;
+  const r = new Resvg(svg, { fitTo: { mode: 'width', value: width } });
+  return r.render().asPng();
+}

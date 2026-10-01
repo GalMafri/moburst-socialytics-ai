@@ -24,8 +24,10 @@ import { startImageWithHiggsfield } from '../_shared/higgsfield/startImage.ts';
 import { checkVideoJob } from '../_shared/higgsfield/renderVideo.ts';
 import { storeRemoteImage } from '../_shared/media/storeRemote.ts';
 import { mediaBackendFor } from '../_shared/higgsfield/backend.ts';
-import { designedHeroPrompt, formatKeyForSpec, loadApprovedSystem, loadSystemById, pickTemplates, templateById, type LoadedSystem } from '../_shared/design-system/load.ts';
+import { artworkCorrection, artworkReviewQuestion, designedHeroPrompt, formatKeyForSpec, loadApprovedSystem, loadSystemById, pickTemplates, templateById, type LoadedSystem } from '../_shared/design-system/load.ts';
 import { renderRemote } from '../_shared/design-system/renderClient.ts';
+import { FORMAT_DIMENSIONS } from '../_shared/design-system/types.ts';
+import { urlToDataUrl } from '../_shared/render/hero.ts';
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -34,6 +36,22 @@ const REVIEWS_PER_TICK = 2;
 const STALE_PENDING_MS = 5 * 60 * 1000;
 
 type Job = { id: string; status: string; request_id: string | null; output_url: string | null; error: string | null; review: any; input: any; post_iteration_id: string | null; created_at: string };
+type Prepared = { hero_url: string; soft_url: string; width: number; height: number };
+
+/**
+ * The hero at canvas size with its soft copy, made once per job by
+ * render-design and kept on the job, so the review sends an image under the
+ * model's size limit and every render draws same-size images.
+ */
+async function preparedHero(db: any, creative: any, job: Job): Promise<Prepared> {
+  if (job.input?.prepared?.hero_url && job.input?.prepared?.soft_url) return job.input.prepared as Prepared;
+  const dims = FORMAT_DIMENSIONS[formatKeyForSpec(platformDesignSpec(creative.platform, creative.format))];
+  const prepared = await renderRemote({ kind: 'prepare', client_id: creative.client_id, hero_url: job.output_url, width: dims.width, height: dims.height }) as Prepared;
+  const { error } = await db.from('media_jobs').update({ input: { ...job.input, prepared }, updated_at: new Date().toISOString() }).eq('id', job.id);
+  if (error) throw new Error('The prepared hero could not be recorded.');
+  job.input = { ...job.input, prepared };
+  return prepared;
+}
 type FrameState = { index: number; state: 'rendering' | 'reviewing' | 'approved' | 'failed'; attempt: number; url: string | null; preview: string | null; error: string | null };
 
 async function jobsFor(db: any, clientId: string, planId: string): Promise<Job[]> {
@@ -96,7 +114,9 @@ async function reviewJob(db: any, creative: any, index: number, job: Job, design
   const template = designed ? templateById(designed.system, frame.template_id) : null;
   const direction = template ? JSON.stringify({ subject: frame.subject, hero_region: template.hero_region, calm_region: template.headline.region, never: designed!.system.imagery.never })
     : frame.layout ? JSON.stringify({ subject: frame.subject, headline_position: frame.layout.headline_position, subject_position: frame.layout.subject_position }) : undefined;
-  const verdict = await validateDesignImage(job.output_url!, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText: '' });
+  // The reviewer takes image bytes, not a URL, and the model caps an image at 5 MB; the prepared hero is both.
+  const candidate = await urlToDataUrl((await preparedHero(db, creative, job)).hero_url);
+  const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText: '', question: template ? artworkReviewQuestion(designed!.system, template, frame.subject) : undefined });
   const dirty = verdictIsDirty(verdict, { expectNoText: true });
   await db.from('media_jobs').update({ review: { ...verdict, dirty }, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
   return { verdict, dirty };
@@ -141,6 +161,7 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
     return { frames: creative.plan.frames.map((_: unknown, i: number) => ({ index: i, state: 'approved', attempt: 0, url: null, preview: null, error: null })), done: true, failed: false, iterations: (data || []).map((it: any) => ({ ...it, frames: creative.mode === 'carousel' ? creative.plan.frames.map((_: unknown, i: number) => i) : [creative.plan.frames.findIndex((f: any) => String(it.variant_angle || '').endsWith(f.subject.slice(0, 80)))].map(i => Math.max(0, i)) })) };
   }
   const frames: FrameState[] = [];
+  const jobByIndex = new Map<number, Job>();
   for (let index = 0; index < count; index++) {
     const mine = jobs.filter(j => j.input?.creative_frame_index === index).sort((a, b) => (a.input?.creative_attempt ?? 0) - (b.input?.creative_attempt ?? 0));
     let job = mine[mine.length - 1];
@@ -171,7 +192,7 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
       const { verdict, dirty } = await reviewJob(db, creative, index, job, designed);
       job = { ...job, review: { ...verdict, dirty } };
       if (dirty) {
-        const reason = correctionFor(verdict, { expectNoText: true });
+        const reason = designed ? artworkCorrection(verdict) : correctionFor(verdict, { expectNoText: true });
         if (attempt + 1 < MAX_ATTEMPTS) { job = await submitFrame(db, creative, index, attempt + 1, reason, designed); attempt += 1; }
         else { await db.from('media_jobs').update({ status: 'failed', error: `Brand review rejected the artwork: ${reason}`.slice(0, 1000), updated_at: new Date().toISOString() }).eq('id', job.id); job = { ...job, status: 'failed', error: `Brand review rejected the artwork: ${reason}` }; }
       }
@@ -179,6 +200,7 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
     const approved = job.status === 'completed' && job.review && !job.review.dirty;
     const state: FrameState['state'] = approved ? 'approved' : job.status === 'failed' ? 'failed' : job.status === 'completed' ? 'reviewing' : 'rendering';
     frames.push({ index, state, attempt, url: approved ? job.output_url : null, preview: job.output_url || null, error: job.status === 'failed' ? job.error : null });
+    jobByIndex.set(index, job);
   }
   const failed = frames.some(f => f.state === 'failed');
   const done = !failed && frames.every(f => f.state === 'approved');
@@ -189,7 +211,10 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
     // and the browser finishes it when the post is opened.
     const finalUrl = new Map<number, string>(frames.map(f => [f.index, f.url!]));
     if (designed) {
-      const rendered = await Promise.all(frames.map(f => renderRemote({ kind: 'frame', client_id: creative.client_id, plan_id: creative.id, frame_index: f.index, hero_url: f.url })));
+      const rendered = await Promise.all(frames.map(async f => {
+        const prepared = await preparedHero(db, creative, jobByIndex.get(f.index)!);
+        return renderRemote({ kind: 'frame', client_id: creative.client_id, plan_id: creative.id, frame_index: f.index, hero_url: prepared.hero_url, soft_url: prepared.soft_url });
+      }));
       for (const r of rendered) finalUrl.set(r.index, r.url);
     }
     const base = { client_id: creative.client_id, platform: creative.platform || null, post_copy: creative.post_copy || null, format: creative.format || null, source: 'calendar', finishing: designed ? 'done' : 'pending', variant_group_id: crypto.randomUUID() };
