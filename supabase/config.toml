@@ -185,3 +185,6 @@ verify_jwt = false
 # checks keys, scopes and rate limits itself.
 [functions.api]
 verify_jwt = false
+
+[functions.read-social-template]
+verify_jwt = false
