@@ -2,8 +2,9 @@
 // request keeps each call inside the edge runtime's CPU budget; the worker
 // and the design-system builder call this once per frame or per preview.
 //
+// kind 'prepare': a generated hero resized to the canvas, plus its small blurred copy.
 // kind 'preview': a template preview with a stand-in hero drawn from the tokens.
-// kind 'frame':   a planned frame of a creative run with its approved hero.
+// kind 'frame':   a planned frame of a creative run with its prepared hero.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
 import { secretEquals } from '../_shared/auth/secretEquals.ts';
@@ -12,8 +13,9 @@ import { loadCreativePlan } from '../_shared/design-prompts/loadCreativePlan.ts'
 import { FORMAT_DIMENSIONS, type DesignSystem, type FormatKey, type Template } from '../_shared/design-system/types.ts';
 import { loadSystemById, templateById, formatKeyForSpec } from '../_shared/design-system/load.ts';
 import { placeholderHero } from '../_shared/design-system/previewHero.ts';
-import { bytesToDataUrl, heroHrefs } from '../_shared/render/hero.ts';
+import { bytesToDataUrl, softCopy, urlToDataUrl } from '../_shared/render/hero.ts';
 import { renderStill } from '../_shared/render/render.ts';
+import { imageToPng } from '../_shared/render/resvg.ts';
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -44,8 +46,18 @@ async function renderPreview(db: any, clientId: string, system: DesignSystem, lo
   return { template_id: template.id, format, path, url: await store(db, 'brand-assets', path, out.png), font_size: out.fontSize, lines: out.lines };
 }
 
-/** A planned frame with its approved hero, stored in generated-media. */
-async function renderFrame(db: any, creative: any, index: number, heroUrl: string) {
+/** The hero at canvas size and its soft copy, both stored in generated-media. */
+async function prepareHero(db: any, clientId: string, heroUrl: string, width: number, height: number) {
+  const href = await urlToDataUrl(heroUrl);
+  const [full, small] = await Promise.all([imageToPng(db, href, width, height), imageToPng(db, href, Math.round(width / 4), Math.round(height / 4))]);
+  const soft = await softCopy(small);
+  const stamp = `${clientId}/${Date.now()}-hero-${width}x${height}`;
+  const [hero_url, soft_url] = await Promise.all([store(db, 'generated-media', `${stamp}.png`, full), store(db, 'generated-media', `${stamp}-soft.png`, soft)]);
+  return { hero_url, soft_url, width, height };
+}
+
+/** A planned frame with its prepared hero, stored in generated-media. */
+async function renderFrame(db: any, creative: any, index: number, heroUrl: string, softUrl: string) {
   const plan = creative.plan;
   const frame = plan.frames[index];
   if (!frame || !plan.design_system_id || !frame.template_id) throw new Error('This frame was not planned with a design system.');
@@ -53,10 +65,8 @@ async function renderFrame(db: any, creative: any, index: number, heroUrl: strin
   const template = templateById(loaded.system, frame.template_id);
   const spec = platformDesignSpec(creative.platform, creative.format);
   const dims = FORMAT_DIMENSIONS[formatKeyForSpec(spec)];
-  const res = await fetch(heroUrl, { signal: AbortSignal.timeout(30000) });
-  if (!res.ok) throw new Error(`The approved hero could not be fetched [${res.status}]`);
-  const hero = await heroHrefs(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type') || 'image/png');
-  const out = await renderStill(db, { ...dims, system: loaded.system, template, spec, headline: frame.headline, emphasis: frame.emphasis || null, heroHref: hero.heroHref, softHeroHref: hero.softHeroHref, logoHref: await logoHrefFor(db, loaded.system), logoAspect: loaded.logoAspect });
+  const [heroHref, softHeroHref, logoHref] = await Promise.all([urlToDataUrl(heroUrl), urlToDataUrl(softUrl), logoHrefFor(db, loaded.system)]);
+  const out = await renderStill(db, { ...dims, system: loaded.system, template, spec, headline: frame.headline, emphasis: frame.emphasis || null, heroHref, softHeroHref, logoHref, logoAspect: loaded.logoAspect });
   const path = `${creative.client_id}/${Date.now()}-design-${creative.id}-${index}.png`;
   return { index, template_id: template.id, url: await store(db, 'generated-media', path, out.png), font_size: out.fontSize, lines: out.lines };
 }
@@ -77,13 +87,18 @@ Deno.serve(async (req) => {
       if (!template) return json({ error: 'unknown template' }, 400);
       return json(await renderPreview(db, clientId, system, Number(logo_aspect) || 3, template, Number(version) || 0, String(headline || ''), String(emphasis || '')));
     }
+    if (body.kind === 'prepare') {
+      const width = Number(body.width), height = Number(body.height);
+      if (!body.hero_url || !(width >= 200 && width <= 2200) || !(height >= 200 && height <= 2200)) return json({ error: 'hero_url, width and height are required' }, 400);
+      return json(await prepareHero(db, clientId, String(body.hero_url), Math.round(width), Math.round(height)));
+    }
     if (body.kind === 'frame') {
       const creative = await loadCreativePlan(db, body.plan_id, clientId);
       const index = Number(body.frame_index);
-      if (!Number.isInteger(index) || !body.hero_url) return json({ error: 'frame_index and hero_url are required' }, 400);
-      return json(await renderFrame(db, creative, index, String(body.hero_url)));
+      if (!Number.isInteger(index) || !body.hero_url || !body.soft_url) return json({ error: 'frame_index, hero_url and soft_url are required' }, 400);
+      return json(await renderFrame(db, creative, index, String(body.hero_url), String(body.soft_url)));
     }
-    return json({ error: 'kind must be preview or frame' }, 400);
+    return json({ error: 'kind must be prepare, preview or frame' }, 400);
   } catch (err) {
     if (err instanceof AuthzError) return json({ error: err.message }, err.status);
     return json({ error: err instanceof Error ? err.message : 'The design could not be rendered.' }, 500);
