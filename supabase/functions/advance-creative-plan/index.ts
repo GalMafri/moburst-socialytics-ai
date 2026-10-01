@@ -24,7 +24,7 @@ import { startImageWithHiggsfield } from '../_shared/higgsfield/startImage.ts';
 import { checkVideoJob } from '../_shared/higgsfield/renderVideo.ts';
 import { storeRemoteImage } from '../_shared/media/storeRemote.ts';
 import { mediaBackendFor } from '../_shared/higgsfield/backend.ts';
-import { designedHeroPrompt, formatKeyForSpec, loadApprovedSystem, loadSystemById, pickTemplates, templateById, type LoadedSystem } from '../_shared/design-system/load.ts';
+import { artworkCorrection, artworkReviewQuestion, designedHeroPrompt, formatKeyForSpec, loadApprovedSystem, loadSystemById, pickTemplates, templateById, type LoadedSystem } from '../_shared/design-system/load.ts';
 import { renderRemote } from '../_shared/design-system/renderClient.ts';
 import { FORMAT_DIMENSIONS } from '../_shared/design-system/types.ts';
 import { urlToDataUrl } from '../_shared/render/hero.ts';
@@ -116,7 +116,7 @@ async function reviewJob(db: any, creative: any, index: number, job: Job, design
     : frame.layout ? JSON.stringify({ subject: frame.subject, headline_position: frame.layout.headline_position, subject_position: frame.layout.subject_position }) : undefined;
   // The reviewer takes image bytes, not a URL, and the model caps an image at 5 MB; the prepared hero is both.
   const candidate = await urlToDataUrl((await preparedHero(db, creative, job)).hero_url);
-  const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText: '' });
+  const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText: '', question: template ? artworkReviewQuestion(designed!.system, template, frame.subject) : undefined });
   const dirty = verdictIsDirty(verdict, { expectNoText: true });
   await db.from('media_jobs').update({ review: { ...verdict, dirty }, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
   return { verdict, dirty };
@@ -192,7 +192,7 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
       const { verdict, dirty } = await reviewJob(db, creative, index, job, designed);
       job = { ...job, review: { ...verdict, dirty } };
       if (dirty) {
-        const reason = correctionFor(verdict, { expectNoText: true });
+        const reason = designed ? artworkCorrection(verdict) : correctionFor(verdict, { expectNoText: true });
         if (attempt + 1 < MAX_ATTEMPTS) { job = await submitFrame(db, creative, index, attempt + 1, reason, designed); attempt += 1; }
         else { await db.from('media_jobs').update({ status: 'failed', error: `Brand review rejected the artwork: ${reason}`.slice(0, 1000), updated_at: new Date().toISOString() }).eq('id', job.id); job = { ...job, status: 'failed', error: `Brand review rejected the artwork: ${reason}` }; }
       }
