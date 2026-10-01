@@ -82,7 +82,7 @@ The job runs these steps, each recorded with its outcome and a plain reason:
 5. `design`: when the brand has a Sprout profile or at least three design references, its own posts are read and a design system is built and approved; otherwise a gap says designs use the brand colours and fonts only.
 6. `competitors`: the competitors named in the request, or 8 to 12 proposed from the brand; social handles are detected; the three closest with a website and a verified profile are selected and the set confirmed. Fewer than three: the set stays a draft and the competitive report is skipped.
 7. `tracking`: the confirmed set is connected to RivalIQ and verified (checked every two minutes, up to an hour).
-8. `run_social`, 9. `run_competitive`: the reports start (`run-report`) unless one completed in the last 7 days and `force_run` is false. The competitive report needs a confirmed, tracked set.
+8. `run_social`, 9. `run_competitive`: the reports start (`run-report`) unless one completed in the last 7 days and `force_run` is false. The social report needs an active Sprout profile (the monthly workflow analyses the brand's own performance first); the competitive report needs a confirmed, tracked set. Either is skipped with a gap otherwise.
 10. `wait_reports`: both rows are polled every two minutes; 100 minutes after start a report is recorded as timed out and folded in later when it lands.
 11. `post`: the first calendar post of the social report (or an ad-hoc post from the pillars) is written, rendered with Gemini and stored; a post without an image is still returned, with the reason.
 12. `analytics`: Sprout performance for the last 30 days when the brand has a profile.
@@ -94,7 +94,7 @@ The callback body is the job's `status`, `client_id`, `outputs`, `gaps`, `finish
 
 ## Known limits
 
-- A brand not managed in Moburst's Sprout account gets no performance analytics, no scheduled posting and no design references from its own posts; the demo says so in `gaps`.
+- A brand not managed in Moburst's Sprout account gets no social report, no performance analytics, no scheduled posting and no design references from its own posts; the demo says so in `gaps` and writes its post ad hoc from the pillars.
 - The competitive report depends on RivalIQ ingesting a newly created landscape; the first report may come back thin or `needs_review`, which the API returns as recorded.
 - Social and competitive reports take 20 to 60 minutes each in n8n.
 

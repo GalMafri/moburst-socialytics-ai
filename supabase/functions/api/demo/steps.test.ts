@@ -245,9 +245,16 @@ describe("competitors and tracking", () => {
 });
 
 describe("reports", () => {
+  it("does not start the social report for a brand without a Sprout profile, and says why", async () => {
+    const h = harness();
+    await upTo(h, "run_social");
+    expect(await runStep(h, "run_social")).toMatchObject({ status: "skipped", reason: "no_sprout_profiles", gaps: [{ code: "social_report_unavailable" }] });
+    expect(h.calls.some((c) => c.name === "run-report")).toBe(false);
+  });
   it("starts the social report, flags it with the job, and waits until it lands", async () => {
     const h = harness();
     await upTo(h, "run_social");
+    h.t.sproutProfiles.push({ ...SPROUT_PROFILE, client_id: h.job.client_id! });
     const r = await runStep(h, "run_social");
     expect(r).toMatchObject({ status: "done", outcome: "started", data: { report_id: "rep-new" }, patch: { run_ids: ["rep-new"] } });
     expect(h.calls.at(-1)!.body).toEqual({ client_id: h.job.client_id, kind: "social" });
@@ -259,10 +266,10 @@ describe("reports", () => {
   });
   it("does not run again when a report completed in the last week, unless force_run", async () => {
     const fresh = { ...REPORT, id: "rep-fresh", client_id: "c-bader", status: "completed", created_at: "2026-09-29T00:00:00.000Z" };
-    const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], reports: [fresh] } });
+    const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], reports: [fresh], sproutProfiles: [SPROUT_PROFILE] } });
     await runStep(h, "resolve_client");
     expect(await runStep(h, "run_social")).toMatchObject({ status: "skipped", reason: "fresh_report_exists", patch: { run_ids: ["rep-fresh"] } });
-    const forced = harness({ input: { force_run: true }, tables: { clients: [bader({ website_url: "https://brooklinen.com" })], reports: [fresh] } });
+    const forced = harness({ input: { force_run: true }, tables: { clients: [bader({ website_url: "https://brooklinen.com" })], reports: [fresh], sproutProfiles: [SPROUT_PROFILE] } });
     await runStep(forced, "resolve_client");
     expect((await runStep(forced, "run_social")).outcome).toBe("started");
   });
@@ -272,7 +279,7 @@ describe("reports", () => {
     const r = await runStep(h, "run_competitive");
     expect(r).toMatchObject({ status: "done", outcome: "started", data: { report_id: "crep-new" } });
     expect(h.calls.at(-1)!.body).toEqual({ client_id: "c-bader", kind: "competitive", date_range_start: "2026-09-01", date_range_end: "2026-09-30" });
-    const refused = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })] }, call: (name) => (name === "run-report" ? fail(503, { error: "Workflow authentication is not configured." }) : undefined) });
+    const refused = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], sproutProfiles: [SPROUT_PROFILE] }, call: (name) => (name === "run-report" ? fail(503, { error: "Workflow authentication is not configured." }) : undefined) });
     await runStep(refused, "resolve_client");
     expect(await runStep(refused, "run_social")).toMatchObject({ status: "failed", reason: "workflow_unavailable", gaps: [{ code: "report_not_started" }] });
   });
@@ -335,18 +342,18 @@ describe("the whole job", () => {
     expect(h.job.status).toBe("completed");
     expect(h.job.steps.map((s) => `${s.name}:${s.status}:${s.outcome ?? s.reason}`)).toEqual([
       "resolve_client:done:created", "brand_identity:done:researched", "site_brief:done:drafted", "pillars:done:derived", "design:skipped:no_references", "competitors:done:3_selected", "tracking:done:tracked",
-      "run_social:done:started", "run_competitive:done:started", "wait_reports:done:all_completed", "post:done:generated", "analytics:skipped:no_sprout_profiles", "collect:done:collected", "callback:done:delivered",
+      "run_social:skipped:no_sprout_profiles", "run_competitive:done:started", "wait_reports:done:all_completed", "post:done:generated", "analytics:skipped:no_sprout_profiles", "collect:done:collected", "callback:done:delivered",
     ]);
     const out = h.job.outputs as Record<string, Record<string, unknown>>;
     expect(out.client).toMatchObject({ name: "Brooklinen", pillars: [{ name: "Sleep better" }, { name: "Home comfort" }] });
     expect(out.competitors).toMatchObject({ set_status: "confirmed", tracked: true, selected: [{ name: "Parachute" }, { name: "Boll & Branch" }, { name: "Casper" }] });
-    expect((out.reports as unknown as unknown[]).length).toBe(2);
-    expect(out.social_report).toMatchObject({ id: "rep-new", status: "completed", highlights: ["Reels outperformed."] });
+    expect((out.reports as unknown as unknown[]).length).toBe(1);
+    expect(out.social_report).toBeNull();
     expect(out.competitive_report).toMatchObject({ id: "crep-new", executive_summary: "Competitors post daily." });
-    expect(out.post).toMatchObject({ copy: "Know your rights after a crash.", media_urls: [expect.stringContaining("demo.png")] });
+    expect(out.post).toMatchObject({ copy: "Sleep on it. Better sheets, better mornings.", source: "ad_hoc", media_urls: [expect.stringContaining("demo.png")] });
     expect(out.design).toEqual({ status: "none", version: null, previews: [] });
     expect(out.analytics).toBeNull();
-    expect(h.job.gaps.map((g) => g.code).sort()).toEqual(["analytics_unavailable", "competitor_unplaced", "design_system_missing"]);
+    expect(h.job.gaps.map((g) => g.code).sort()).toEqual(["analytics_unavailable", "competitor_unplaced", "design_system_missing", "social_report_unavailable"]);
     expect(h.callbacks).toHaveLength(1);
     expect((h.callbacks[0] as { payload: { status: string; job_id: string } }).payload).toMatchObject({ job_id: "job-1", status: "completed" });
     expect(JSON.stringify(out)).not.toMatch(/L9|123456/);

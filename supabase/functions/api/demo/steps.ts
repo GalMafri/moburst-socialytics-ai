@@ -309,7 +309,16 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       return { status: "waiting", check_in_s: CHECK_IN_S, data: { set_id: set.id, phase, started_at: startedAt } };
     },
   },
-  { name: "run_social", run: (job, ctx) => startReport(job, ctx, "social") },
+  {
+    name: "run_social",
+    async run(job, ctx) {
+      // The monthly workflow analyses the brand's own Sprout performance first; without a profile it stops before anything is written.
+      const client = await clientOf(job, ctx);
+      const profiles = (await ctx.db.sproutProfilesOf(client.id)).filter((p) => p.is_active !== false);
+      if (!profiles.length) return { status: "skipped", reason: "no_sprout_profiles", message: "No Sprout profile: the social report needs the brand's own performance data, so it does not run.", gaps: [gap("run_social", "social_report_unavailable", "No Sprout profile: the social report needs the brand's own performance data, so it does not run for this brand.")] };
+      return startReport(job, ctx, "social");
+    },
+  },
   {
     name: "run_competitive",
     async run(job, ctx) {
