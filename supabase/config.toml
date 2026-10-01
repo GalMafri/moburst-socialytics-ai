@@ -188,3 +188,6 @@ verify_jwt = false
 
 [functions.read-social-template]
 verify_jwt = false
+
+[functions.build-social-templates]
+verify_jwt = false
