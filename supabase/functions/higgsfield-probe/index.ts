@@ -47,8 +47,10 @@ Deno.serve(async (req) => {
     // bodies and MCP tool calls to Higgsfield under the team's shared
     // credentials with no allowlist, and its submit mode spends credits. That
     // is a developer's tool, not something every staff session should hold.
-    const { asCaller } = await requireStaff(req);
-    const { data: isAdmin } = await asCaller.rpc("is_admin");
+    const caller = await requireStaff(req);
+    const { asCaller } = caller;
+    // The project's own server calls (operations) count as admin, as in delete-client.
+    const { data: isAdmin } = caller.viaSecret ? { data: true } : await asCaller.rpc("is_admin");
     if (!isAdmin) return json({ error: "Higgsfield diagnostics are an admin action." }, 403);
 
     // MCP mode: prove the linked team account works, and what it can reach.

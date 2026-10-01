@@ -267,11 +267,12 @@ describe("trackingFailureSummary", () => {
 });
 
 describe("reports", () => {
-  it("does not start the social report for a brand without a Sprout profile, and says why", async () => {
+  it("starts the social report for a brand without a Sprout profile and records that it carries no performance section", async () => {
     const h = harness();
     await upTo(h, "run_social");
-    expect(await runStep(h, "run_social")).toMatchObject({ status: "skipped", reason: "no_sprout_profiles", gaps: [{ code: "social_report_unavailable" }] });
-    expect(h.calls.some((c) => c.name === "run-report")).toBe(false);
+    const r = await runStep(h, "run_social");
+    expect(r).toMatchObject({ status: "done", outcome: "started", gaps: [{ code: "performance_data_unavailable" }] });
+    expect(h.calls.at(-1)!.body).toEqual({ client_id: h.job.client_id, kind: "social" });
   });
   it("starts the social report, flags it with the job, and waits until it lands", async () => {
     const h = harness();
@@ -366,18 +367,18 @@ describe("the whole job", () => {
     expect(h.job.status).toBe("completed");
     expect(h.job.steps.map((s) => `${s.name}:${s.status}:${s.outcome ?? s.reason}`)).toEqual([
       "resolve_client:done:created", "brand_identity:done:researched", "site_brief:done:drafted", "pillars:done:derived", "design:skipped:no_references", "competitors:done:3_selected", "tracking:done:tracked",
-      "run_social:skipped:no_sprout_profiles", "run_competitive:done:started", "wait_reports:done:all_completed", "post:done:generated", "analytics:skipped:no_sprout_profiles", "collect:done:collected", "callback:done:delivered",
+      "run_social:done:started", "run_competitive:done:started", "wait_reports:done:all_completed", "post:done:generated", "analytics:skipped:no_sprout_profiles", "collect:done:collected", "callback:done:delivered",
     ]);
     const out = h.job.outputs as Record<string, Record<string, unknown>>;
     expect(out.client).toMatchObject({ name: "Brooklinen", pillars: [{ name: "Sleep better" }, { name: "Home comfort" }] });
     expect(out.competitors).toMatchObject({ set_status: "confirmed", tracked: true, selected: [{ name: "Parachute" }, { name: "Boll & Branch" }, { name: "Casper" }] });
-    expect((out.reports as unknown as unknown[]).length).toBe(1);
-    expect(out.social_report).toBeNull();
+    expect((out.reports as unknown as unknown[]).length).toBe(2);
+    expect(out.social_report).toMatchObject({ id: "rep-new", status: "completed" });
     expect(out.competitive_report).toMatchObject({ id: "crep-new", executive_summary: "Competitors post daily." });
-    expect(out.post).toMatchObject({ copy: "Sleep on it. Better sheets, better mornings.", source: "ad_hoc", media_urls: [expect.stringContaining("demo.png")] });
+    expect(out.post).toMatchObject({ copy: "Know your rights after a crash.", source: "calendar", media_urls: [expect.stringContaining("demo.png")] });
     expect(out.design).toEqual({ status: "none", version: null, previews: [] });
     expect(out.analytics).toBeNull();
-    expect(h.job.gaps.map((g) => g.code).sort()).toEqual(["analytics_unavailable", "competitor_unplaced", "design_system_missing", "social_report_unavailable"]);
+    expect(h.job.gaps.map((g) => g.code).sort()).toEqual(["analytics_unavailable", "competitor_unplaced", "design_system_missing", "performance_data_unavailable"]);
     expect(h.callbacks).toHaveLength(1);
     expect((h.callbacks[0] as { payload: { status: string; job_id: string } }).payload).toMatchObject({ job_id: "job-1", status: "completed" });
     expect(JSON.stringify(out)).not.toMatch(/L9|123456/);

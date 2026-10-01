@@ -332,11 +332,13 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
   {
     name: "run_social",
     async run(job, ctx) {
-      // The monthly workflow analyses the brand's own Sprout performance first; without a profile it stops before anything is written.
+      // The monthly workflow branches around Sprout when a brand has no profile (trends, calendar and deck still come out);
+      // the gap only says what the report will not contain.
       const client = await clientOf(job, ctx);
       const profiles = (await ctx.db.sproutProfilesOf(client.id)).filter((p) => p.is_active !== false);
-      if (!profiles.length) return { status: "skipped", reason: "no_sprout_profiles", message: "No Sprout profile: the social report needs the brand's own performance data, so it does not run.", gaps: [gap("run_social", "social_report_unavailable", "No Sprout profile: the social report needs the brand's own performance data, so it does not run for this brand.")] };
-      return startReport(job, ctx, "social");
+      const r = await startReport(job, ctx, "social");
+      if (!profiles.length && (r.status === "done")) r.gaps = [...(r.gaps ?? []), gap("run_social", "performance_data_unavailable", "No Sprout profile: the social report has no performance section for this brand; trends, recommendations, the calendar and the deck are still produced.")];
+      return r;
     },
   },
   {
