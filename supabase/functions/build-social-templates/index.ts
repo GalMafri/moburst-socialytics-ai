@@ -69,7 +69,21 @@ async function step(db: any, clientId: string, state: { id: string; build: Build
   if (b.done) return b;
   if (!b.current) {
     const path = b.queue.shift();
-    if (!path) { b.done = true; await saveBuild(db, state.id, b); return b; }
+    if (!path) {
+      // Finishing: templates kept before any face was matched get their headline face now, up to three per step.
+      const unfaced = b.templates.filter((t) => t.slots.length && !t.slots.some((s) => s.face)).slice(0, 3);
+      for (const t of unfaced) {
+        const head = t.slots.find((s) => s.role === 'headline') || t.slots[0];
+        try {
+          const f = await readRemote({ client_id: clientId, path: t.source_path, step: 'fonts', text_layers: [{ index: 0, x: head.x, y: head.y, w: head.w, h: head.h, size: head.size, lineHeight: head.lineHeight, align: head.align, weight: head.weight, lines: head.sample.split(' / ').map((line) => [{ text: line, weight: head.weight }]) }] });
+          const top = f.fonts?.[0]?.matches?.[0];
+          if (top && top.score >= 0.3) { head.face = top.family; b.faces[top.family] = (b.faces[top.family] || 0) + 1; }
+          else head.face = head.face || facesOf(b).primary; // recorded as resolved either way, so finishing cannot loop
+        } catch (e) { head.face = head.face || facesOf(b).primary; console.warn('face pass failed', e instanceof Error ? e.message : e); }
+      }
+      if (unfaced.length) { await saveBuild(db, state.id, b); return b; }
+      b.done = true; await saveBuild(db, state.id, b); return b;
+    }
     const r = await readRemote({ client_id: clientId, path, round: 0, family: facesOf(b).primary, family2: facesOf(b).secondary || null });
     b.current = { path, round: 0, layers: r.layers, render_url: r.render_url, heatmap_url: r.heatmap_url, score: r.score, assets: r.assets || {}, width: r.width, height: r.height, best: { round: 0, layers: r.layers, render_url: r.render_url, score: r.score, assets: r.assets || {} } };
     await saveBuild(db, state.id, b); return b;

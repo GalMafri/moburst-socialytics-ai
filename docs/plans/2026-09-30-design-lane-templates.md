@@ -37,3 +37,31 @@ Sequence: renderer spike -> schema + builder + previews -> pipeline -> UI -> vid
 - Client Setup: the Design system panel (tokens, logo, template previews, Build / Rebuild from posts, Approve).
 - Templates whose hero is a client photo (`hero: photo`) or no hero are stored but not used by automatic runs yet;
   they are for the self-serve editor where the user supplies the photo.
+
+## Version 2 (2026-10-01): templates read from the client's posts
+
+The version-1 lane (tokens described by a vision model, layouts rendered from
+percentages) produced slide-deck cards and was rejected. Version 2 keeps the
+architecture and replaces the designer:
+
+- `read-social-template`: one round per request. The model proposes the post as
+  layers (background, images, panels, text with the post's exact words and
+  pixel boxes, lines, frame); `layers.ts` renders them; `compare.ts` scores the
+  render against the post (SSIM on greyscale) and draws a difference heatmap;
+  the next round shows the model the post, the render and the heatmap and asks
+  for corrections. Faces are never named by the model: `fontMatch.ts` lays the
+  text block out in forty candidate Google families and compares ink.
+- `build-social-templates`: one unit of work per call (the panel or a cron job
+  drives it): read the next post, refine while the score is under 0.62 (three
+  rounds at most), keep the best read as a template (`template.ts`: fixed
+  layers, text slots by role, hero slot, lifted assets) or reject it under
+  0.45, then match faces. The reproduction render is the template's preview,
+  shown in Client Setup next to the post it came from. Approving the library
+  makes it the client's system (version 2).
+- Per post: `v2.ts` picks a template for the format, asks the image model for a
+  hero shaped for the hero slot, reviews the artwork alone, and `fillTemplate`
+  composes the slots with fitted copy and the hero shown through its slot.
+
+Measured on Moburst, 2026-10-01: quote post 0.68, title card 0.64 (first
+round), carousel slide 0.86; three templates kept in the first six minutes of
+the library build (0.60, 0.83, 0.80).
