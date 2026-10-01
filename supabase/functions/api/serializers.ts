@@ -91,7 +91,7 @@ export function omitDeep<T>(value: T, keys: string[]): T {
   }
   return value;
 }
-const INTERNAL_KEYS = ["post_id", "post_ids", "profile_id", "profile_ids", "sprout_profile_id", "sprout_customer_id", "company_id", "company_ids", "focus_company_id", "landscape_id", "landscape", "rivaliq_landscape_id", "rivaliq_company_id", "rivaliq_metrics", "request_id", "model_path"];
+const INTERNAL_KEYS = ["post_id", "post_ids", "profile_id", "profile_ids", "sprout_profile_id", "sprout_customer_id", "company_id", "company_ids", "focus_company_id", "landscape_id", "landscape", "rivaliq_landscape_id", "rivaliq_company_id", "rivaliq_metrics", "rivaliq_calls", "post_windows", "request_id", "model_path"];
 
 const BRAND_FIELDS = ["primary_color", "secondary_color", "accent_color", "font_family", "visual_style", "tone_of_voice", "logo_description", "design_elements", "background_style"];
 function brandOut(b: BrandIdentity | null): Record<string, string | null> | null {
@@ -193,7 +193,7 @@ export function competitiveReportOut(row: CompetitiveReportRow, opts: { detail?:
   const out: CompetitiveReportOut = {
     id: row.id, client_id: row.client_id, set_id: row.set_id, status: row.status,
     period: { start: row.date_range_start ?? str(period.start), end: row.date_range_end ?? str(period.end), days: num(period.days) }, created_at: row.created_at, completed_at: str(rd.generated_at), duration_minutes: row.duration_minutes,
-    deck: { url: row.gamma_url ?? str(rd.gamma_url) }, totals: rd.totals && typeof rd.totals === "object" ? (rd.totals as Record<string, unknown>) : null, quality_check: rd.quality_check ?? null, provider_status: str(rd.provider_status), demo_job_id: row.demo_job_id,
+    deck: { url: row.gamma_url ?? str(rd.gamma_url) }, totals: rd.totals && typeof rd.totals === "object" ? omitDeep(rd.totals as Record<string, unknown>, INTERNAL_KEYS) : null, quality_check: rd.quality_check ?? null, provider_status: str(rd.provider_status), demo_job_id: row.demo_job_id,
     links: { app: `${APP_URL}/clients/${row.client_id}/competitive/reports/${row.id}`, api: `/v1/competitive-reports/${row.id}` },
   };
   if (opts.detail) {

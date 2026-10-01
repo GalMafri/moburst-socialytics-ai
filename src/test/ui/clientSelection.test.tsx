@@ -9,6 +9,7 @@ const clients = [
  {id:'alpha',name:'Alpha',reports:[],platforms:[],archived_at:null},
  {id:'beta',name:'Beta',reports:[],platforms:[],archived_at:null},
  {id:'archived',name:'Archived',reports:[],platforms:[],archived_at:'2026-01-01'},
+ {id:'demo',name:'Demo Brand',reports:[],platforms:[],archived_at:null,demo_job_id:'job-1'},
 ];
 vi.mock('@/hooks/useAuth',()=>({useAuth:()=>({canManageClients:true,canRunAnalysis:state.canRun,canDelete:true})}));
 vi.mock('@/components/layout/AppLayout',()=>({AppLayout:({children}:any)=><main>{children}</main>}));
@@ -44,4 +45,12 @@ it('dashboard: archived directory cannot launch reports and permissions still ap
  expect(screen.queryByRole('button',{name:'Run competitive report'})).not.toBeInTheDocument();
  cleanup();state.canRun=false;mount(AdminDashboard);
  expect(screen.queryByRole('button',{name:'Run competitive report'})).not.toBeInTheDocument();
+});
+
+it('dashboard: a client an API demo created carries a Demo badge, the others do not',()=>{
+  mount(AdminDashboard);
+  expect(screen.queryByText('Demo')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Demo Brand',pressed:false}));
+  expect(screen.getByRole('button',{name:'Open Demo Brand setup'})).toBeInTheDocument();
+  expect(screen.getByText('Demo')).toHaveAttribute('title',expect.stringContaining('API demo'));
 });

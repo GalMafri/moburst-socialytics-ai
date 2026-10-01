@@ -65,6 +65,8 @@ describe("competitiveReportOut", () => {
   it("summarises and details without RivalIQ identifiers", () => {
     const s = competitiveReportOut(COMPETITIVE_REPORT);
     expect(s).toMatchObject({ id: "crep-1", set_id: "set-1", status: "complete", period: { start: "2026-08-25", end: "2026-09-24", days: 31 }, totals: { posts_analyzed: 412 }, deck: { url: "https://gamma.app/docs/bader-comp" }, quality_check: null, links: { api: "/v1/competitive-reports/crep-1" } });
+    // How many provider calls a report made is plumbing, not a finding.
+    expect(s.totals).toEqual({ posts_analyzed: 412 });
     const d = competitiveReportOut(COMPETITIVE_REPORT, { detail: true });
     expect(d.analysis?.executive_summary).toBe("Competitors post daily.");
     expect(d.aggregates?.companies[0]).toMatchObject({ name: "Morgan & Morgan", is_client: false, post_count: 120 });

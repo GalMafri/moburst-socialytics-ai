@@ -322,7 +322,7 @@ describe("post and analytics", () => {
     h.job.run_ids = ["rep-done"];
     const r = await runStep(h, "post");
     expect(r).toMatchObject({ status: "done", outcome: "generated", data: { source: "calendar", platform: "Instagram", media_url: expect.stringContaining("generated-media") } });
-    expect(h.t.posts[0]).toMatchObject({ report_id: "rep-done", post_copy: "Know your rights after a crash.", source: "ad_hoc", demo_job_id: "job-1", media_urls: [expect.stringContaining("demo.png")], created_by: "u1" });
+    expect(h.t.posts[0]).toMatchObject({ report_id: "rep-done", post_copy: "Know your rights after a crash.", source: "calendar", demo_job_id: "job-1", media_urls: [expect.stringContaining("demo.png")], created_by: "u1" });
     expect(h.calls.map((c) => c.name)).toEqual(["generate-post-image", "upload-generated-media"]);
     // The upload function adds the extension itself; a name with one came back as ".png.png" live.
     expect(h.calls[1].body).toMatchObject({ media_type: "image", file_name: "demo-job-1" });

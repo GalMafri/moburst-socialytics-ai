@@ -229,6 +229,9 @@ export function AdminDashboard() {
                       {(client as any).archived_at && (
                         <Badge variant="secondary" className="t-label">Archived</Badge>
                       )}
+                      {(client as any).demo_job_id && (
+                        <Badge variant="outline" className="t-label" title="Created by an API demo; it can be removed from the demo job">Demo</Badge>
+                      )}
                     </div>
                     <div className="flex items-center gap-1">
                       {client.logo_url && <img src={client.logo_url} alt="" className="h-8 w-8 rounded object-cover" />}
