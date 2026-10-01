@@ -32,6 +32,12 @@ The shared core changed too, in AdVisor first and synced here: a step marked `al
 | Idempotency and capacity | pass | the Brooklinen request replayed with its key returned the same job (200); an empty body 400 with `field: client_name`; capacity 3 refused a fourth job (unit) |
 | Rollback plan | written | below |
 
+## Close-out (13:05 Israel time)
+
+- Audit at close: 230 requests since 11:57, of which 76 worker ticks; 2 answers of 500 or above (the discard before its fix), 5 rate-limited, 9 refused; public routes averaged 351 ms, slowest 2.0 s (an analytics read).
+- The three session keys (`soc_7JRBMsfL`, `soc_aZ0ziKD1`, `soc_XDdPn9Oe`) were revoked at 13:04; a call with the revoked key answers 401. AdVisor's session key from 2026-09-30 (`adv_b8cIUTAd`) was revoked at 13:05. No key plaintext was kept.
+- Left in place on purpose: the demo clients Brooklinen and Calm (badged Demo, each with a confirmed set and one generated post; removable with `POST /v1/demo-jobs/{id}/discard`), MyRxProfile's new social and competitive reports, six demo job records, and two orphan media files from the first round in `generated-media` (the folders of clients deleted before the `delete-client` fix).
+
 ## Rollback plan
 
 - Frontend: `deploy_project` republishes the previous commit after a revert of `b4edb55` and `63d8a66`.
