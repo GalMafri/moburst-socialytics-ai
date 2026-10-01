@@ -3,7 +3,7 @@ import { advanceJob, initialSteps, type JobRecord } from "../../_shared/api/jobs
 import type { CallResult } from "../../_shared/invoke";
 import { CLIENT, COMPETITIVE_REPORT, DESIGN_SYSTEM, REPORT, SPROUT_PROFILE } from "../fixtures";
 import { emptyTables, makeFakeDemoDb, type FakeTables } from "./fake-db";
-import { DEMO_STEPS, refreshOutputs, slugify, type DemoCtx } from "./steps";
+import { DEMO_STEPS, refreshOutputs, slugify, trackingFailureSummary, type DemoCtx } from "./steps";
 
 const ok = (data: unknown, status = 200): CallResult => ({ ok: true, status, data, text: JSON.stringify(data) });
 const fail = (status: number, data: unknown): CallResult => ({ ok: false, status, data, text: JSON.stringify(data) });
@@ -167,8 +167,14 @@ describe("design", () => {
     expect(await runStep(h, "design")).toMatchObject({ status: "skipped", reason: "no_references", gaps: [{ code: "design_system_missing" }] });
     expect(h.calls.some((c) => c.name.includes("design"))).toBe(false);
   });
-  it("discovers references from the brand's profiles, builds and approves a system", async () => {
+  it("never builds or approves a design system for a client that existed before the demo", async () => {
     const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], sproutProfiles: [{ ...SPROUT_PROFILE, client_id: "c-bader" }] } });
+    await runStep(h, "resolve_client");
+    expect(await runStep(h, "design")).toMatchObject({ status: "skipped", reason: "existing_client", gaps: [{ code: "design_system_missing" }] });
+    expect(h.calls.some((c) => c.name.includes("design"))).toBe(false);
+  });
+  it("discovers references from the brand's profiles, builds and approves a system for a client it created", async () => {
+    const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com", demo_job_id: "job-1" })], sproutProfiles: [{ ...SPROUT_PROFILE, client_id: "c-bader" }] } });
     await runStep(h, "resolve_client");
     expect(await runStep(h, "design")).toMatchObject({ status: "done", outcome: "approved", data: { system_id: "ds-new", version: 1, references: 3 } });
     expect(h.calls.map((c) => [c.name, c.body.action ?? c.body.discover])).toEqual([["synthesize-design-language", true], ["build-design-system", "build"], ["build-design-system", "approve"]]);
@@ -178,7 +184,7 @@ describe("design", () => {
     const existing = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], designSystems: [{ ...DESIGN_SYSTEM, client_id: "c-bader" }] } });
     await runStep(existing, "resolve_client");
     expect((await runStep(existing, "design")).reason).toBe("design_exists");
-    const broken = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com", harvested_design_references: [{ path: "a" }, { path: "b" }, { path: "c" }] })] }, call: (name, body) => (name === "build-design-system" && body.action === "build" ? fail(422, { error: "The design service is unavailable." }) : undefined) });
+    const broken = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com", demo_job_id: "job-1", harvested_design_references: [{ path: "a" }, { path: "b" }, { path: "c" }] })] }, call: (name, body) => (name === "build-design-system" && body.action === "build" ? fail(422, { error: "The design service is unavailable." }) : undefined) });
     await runStep(broken, "resolve_client");
     expect(await runStep(broken, "design")).toMatchObject({ status: "failed", reason: "build_failed", gaps: [{ code: "design_system_missing" }] });
   });
@@ -241,6 +247,22 @@ describe("competitors and tracking", () => {
     h.job.steps.find((s) => s.name === "tracking")!.data = t.data;
     h.clock.setTime(h.clock.getTime() + 61 * 60_000);
     expect(await runStep(h, "tracking")).toMatchObject({ status: "failed", reason: "tracking_timeout", gaps: [{ code: "tracking_incomplete" }] });
+  });
+});
+
+describe("trackingFailureSummary", () => {
+  it("names the companies the provider could not track and keeps its payload out of the sentence", () => {
+    const raw = 'RivalIQ could not finish tracking every reviewed website. Quince: {"data":{"credits":{"plan":40,"used":0}}}; Brooklinen: {"data":{"credits":{"plan":40}}}';
+    expect(trackingFailureSummary(raw)).toBe("RivalIQ could not start tracking Quince and Brooklinen.");
+    expect(trackingFailureSummary('RivalIQ could not finish tracking every reviewed website. Calm: {"message":"ProblemFetchingUrlError: HTTPError: Response code 403 ()"}; Headspace: {"data":{"credits":{}}}')).toBe("RivalIQ could not start tracking Calm and Headspace. At least one website refused the provider's visit.");
+    expect(trackingFailureSummary("RivalIQ API key is not configured")).toBe("RivalIQ API key is not configured.");
+  });
+  it("is what the tracking step records, with the provider's words on the step", async () => {
+    const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], sets: [{ id: "set-c", client_id: "c-bader", status: "confirmed", notes: null, source: "ai", rivaliq_landscape_id: null, confirmed_at: "x", created_at: "2026-09-01T00:00:00.000Z", demo_job_id: null }] }, call: (name, body) => (name === "setup-rivaliq-landscape" && body.mode === "advance" ? fail(422, { error: 'RivalIQ could not finish tracking every reviewed website. Quince: {"data":{"credits":{"plan":40}}}' }) : undefined) });
+    await runStep(h, "resolve_client");
+    const r = await runStep(h, "tracking");
+    expect(r).toMatchObject({ status: "failed", reason: "tracking_failed", message: "RivalIQ could not start tracking Quince.", data: { provider_message: expect.stringContaining("credits") } });
+    expect(r.gaps?.[0].message).toBe("Competitor tracking was not verified: RivalIQ could not start tracking Quince. The competitive report is skipped.");
   });
 });
 

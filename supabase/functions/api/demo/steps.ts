@@ -72,6 +72,20 @@ const referenceCount = (c: ClientRow) => (Array.isArray(c.harvested_design_refer
 const newestSet = (sets: SetWithCompetitors[]) => [...sets].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0] ?? null;
 const trackedSet = (sets: SetWithCompetitors[]) => sets.find((s) => CONFIRMED_SET.includes(s.status) && s.rivaliq_landscape_id) ?? null;
 
+/**
+ * The provider's tracking failure, as a sentence for the gap: the companies it
+ * could not start tracking, without the raw payload it attaches to each (the
+ * payload stays on the step as provider_message for whoever debugs it).
+ */
+export function trackingFailureSummary(raw: string): string {
+  const m = raw.match(/^RivalIQ could not finish tracking every reviewed website\.\s*(.*)$/s);
+  if (!m) return raw.replace(/\s+/g, " ").trim().replace(/\.?$/, ".");
+  const names = [...m[1].matchAll(/(?:^|;\s*)([^;:{}]+?):\s*(?:\{|[A-Za-z])/g)].map((x) => x[1].trim()).filter(Boolean);
+  const blocked = /403/.test(m[1]) ? " At least one website refused the provider's visit." : "";
+  if (!names.length) return "RivalIQ could not start tracking the reviewed websites.";
+  return `RivalIQ could not start tracking ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}.${blocked}`;
+}
+
 /** Start a report through run-report, unless the job already did or a fresh one exists. */
 async function startReport(job: JobRecord, ctx: DemoCtx, kind: "social" | "competitive", range?: { start: string; end: string }): Promise<StepResult> {
   const client = await clientOf(job, ctx);
@@ -188,6 +202,8 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       const systems = await ctx.db.designSystemsOf(client.id);
       const approved = systems.find((s) => s.status === "approved");
       if (approved) return { status: "skipped", reason: "design_exists", data: { system_id: approved.id, version: approved.version } };
+      // Approving a design system is a team decision; the demo takes it only for a client it created.
+      if (client.demo_job_id !== job.id) return { status: "skipped", reason: "existing_client", message: "This client existed before the demo; its design system is approved in Client Setup by the team.", data: { drafts: systems.length }, gaps: [gap("design", "design_system_missing", "No approved design system yet; the team approves one in Client Setup. Generated posts use the brand colours and fonts only.")] };
       const profiles = (await ctx.db.sproutProfilesOf(client.id)).filter((p) => p.is_active !== false);
       const noRefs = (): StepResult => ({ status: "skipped", reason: "no_references", message: "No brand references: designs use the brand colours and fonts only.", data: { references: referenceCount(client), sprout_profiles: profiles.length }, gaps: [gap("design", "design_system_missing", "No brand references: designs use the brand colours and fonts only.")] });
       if (!profiles.length && referenceCount(client) < MIN_REFERENCES) return noRefs();
@@ -291,18 +307,22 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       if (!CONFIRMED_SET.includes(set.status)) return { status: "skipped", reason: "set_not_confirmed", message: "The competitor set is not confirmed, so there is nothing to track.", data: { set_id: set.id } };
       const prior = stepData(job, "tracking");
       const startedAt = str(prior.started_at) ?? ctx.now().toISOString();
-      const fail = (reason: string, message: string): StepResult => ({ status: "failed", reason, message, data: { set_id: set.id, started_at: startedAt }, gaps: [gap("tracking", "tracking_incomplete", `Competitor tracking was not verified: ${message} The competitive report is skipped.`)] });
+      const fail = (reason: string, message: string, provider?: string): StepResult => ({ status: "failed", reason, message, data: { set_id: set.id, started_at: startedAt, ...(provider ? { provider_message: provider.slice(0, 1200) } : {}) }, gaps: [gap("tracking", "tracking_incomplete", `Competitor tracking was not verified: ${message} The competitive report is skipped.`)] });
       if (minutesSince(startedAt, ctx.now()) > TRACKING_TIMEOUT_MIN) return fail("tracking_timeout", `the provider did not confirm tracking within ${TRACKING_TIMEOUT_MIN} minutes.`);
       const actor = actorOf(job, client);
       const p = await ctx.call("setup-rivaliq-landscape", { set_id: set.id, mode: "preview" }, actor);
       const pd = obj(p.data) as { fingerprint?: string; job?: { phase?: string } | null };
-      if (!p.ok || !pd.fingerprint) return fail("tracking_failed", errorOf(p, "the tracking plan could not be prepared") + ".");
+      if (!p.ok || !pd.fingerprint) {
+        const raw = errorOf(p, "the tracking plan could not be prepared");
+        return fail("tracking_failed", trackingFailureSummary(raw), raw);
+      }
       if (pd.job?.phase === "complete") return { status: "done", outcome: "tracked", data: { set_id: set.id, phase: "complete", started_at: startedAt } };
       const a = await ctx.call("setup-rivaliq-landscape", { set_id: set.id, mode: "advance", fingerprint: pd.fingerprint }, actor);
       const ad = obj(a.data) as { job?: { phase?: string } | null };
       if (!a.ok) {
         if (a.status === 409 && /already being checked/i.test(errorOf(a, ""))) return { status: "waiting", check_in_s: CHECK_IN_S, data: { set_id: set.id, phase: pd.job?.phase ?? "busy", started_at: startedAt } };
-        return fail("tracking_failed", errorOf(a, "the provider refused the tracking request") + ".");
+        const raw = errorOf(a, "the provider refused the tracking request");
+        return fail("tracking_failed", trackingFailureSummary(raw), raw);
       }
       const phase = ad.job?.phase ?? "unknown";
       if (phase === "complete") return { status: "done", outcome: "tracked", data: { set_id: set.id, phase, started_at: startedAt } };

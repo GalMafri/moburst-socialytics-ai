@@ -79,7 +79,7 @@ The job runs these steps, each recorded with its outcome and a plain reason:
 2. `brand_identity`: colours, font, tone and logo description from the website (`research-brand-identity`), written only where empty.
 3. `site_brief`: the homepage's main text (Firecrawl) becomes the brief when the client has none.
 4. `pillars`: content pillars and social keywords derived from the evidence on file.
-5. `design`: when the brand has a Sprout profile or at least three design references, its own posts are read and a design system is built and approved; otherwise a gap says designs use the brand colours and fonts only.
+5. `design`: only for a brand the demo created (approving a design system is a team decision, never taken on an existing client); when it has a Sprout profile or at least three design references, its own posts are read and a design system is built and approved; otherwise a gap says designs use the brand colours and fonts only.
 6. `competitors`: the competitors named in the request, or 8 to 12 proposed from the brand; social handles are detected; the three closest with a website and a verified profile are selected and the set confirmed. Fewer than three: the set stays a draft and the competitive report is skipped.
 7. `tracking`: the confirmed set is connected to RivalIQ and verified (checked every two minutes, up to an hour).
 8. `run_social`, 9. `run_competitive`: the reports start (`run-report`) unless one completed in the last 7 days and `force_run` is false. The social report needs an active Sprout profile (the monthly workflow analyses the brand's own performance first); the competitive report needs a confirmed, tracked set. Either is skipped with a gap otherwise.
