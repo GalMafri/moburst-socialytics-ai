@@ -12,6 +12,7 @@ import { Navigate, useSearchParams } from "react-router-dom";
 import { Save, Loader2 } from "lucide-react";
 import { HubCompanySync } from "@/components/HubCompanySync";
 import { HiggsfieldConnection } from "@/components/settings/HiggsfieldConnection";
+import { ApiAccessCard } from "@/components/settings/ApiAccessCard";
 
 /**
  * Why a sign-in did not take. Higgsfield's callback cannot render a page of
@@ -63,6 +64,17 @@ export default function Settings() {
       const { data, error } = await supabase.from("app_settings").select("*");
       if (error) throw error;
       return data;
+    },
+    enabled: isAdmin,
+  });
+
+  // The company slugs a key can be limited to (the same slugs the hub hands over).
+  const { data: clientSlugs = [] } = useQuery({
+    queryKey: ["client-slugs"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("clients").select("company_slug").is("archived_at", null);
+      if (error) throw error;
+      return Array.from(new Set((data ?? []).map((c) => c.company_slug).filter((x): x is string => !!x))).sort();
     },
     enabled: isAdmin,
   });
@@ -125,6 +137,8 @@ export default function Settings() {
         <HubCompanySync />
 
         <HiggsfieldConnection />
+
+        <ApiAccessCard clientSlugs={clientSlugs} />
 
         <Card>
           <CardHeader>
