@@ -22,10 +22,11 @@ export function inkMask(img: Image, threshold = 0.6): { mask: Uint8Array; w: num
 }
 
 /** Row runs that carry text ink, as [y0, y1) pairs; runs closer than `gap` rows are one line. */
-export function lineRuns(img: Image, gap: number, threshold = 0.55): Array<[number, number]> {
+export function lineRuns(img: Image, gap: number, threshold = 0.55, minShare = 0.03): Array<[number, number]> {
   const W = img.width, H = img.height; const rows = new Float32Array(H);
   for (let y = 0; y < H; y++) { let n = 0; for (let x = 0; x < W; x++) { const i = (y * W + x) * 4; const p = img.bitmap; if ((0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]) / 255 > threshold) n++; } rows[y] = n / W; }
-  const on = Array.from(rows, (v) => v > 0.012);
+  // Rows with less than a few percent of ink are descenders or dots between lines, not a line.
+  const on = Array.from(rows, (v) => v > minShare);
   const runs: Array<[number, number]> = []; let start = -1, lastOn = -1;
   for (let y = 0; y <= H; y++) {
     const v = y < H && on[y];
