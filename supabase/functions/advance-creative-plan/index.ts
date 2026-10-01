@@ -26,6 +26,7 @@ import { storeRemoteImage } from '../_shared/media/storeRemote.ts';
 import { mediaBackendFor } from '../_shared/higgsfield/backend.ts';
 import { artworkCorrection, artworkReviewQuestion, designedHeroPrompt, formatKeyForSpec, loadApprovedSystem, loadSystemById, pickTemplates, templateById, type LoadedSystem } from '../_shared/design-system/load.ts';
 import { renderRemote } from '../_shared/design-system/renderClient.ts';
+import { artworkQuestionV2, heroPromptV2, isLibraryV2, pickV2, templateV2 } from '../_shared/design-system/v2.ts';
 import { FORMAT_DIMENSIONS } from '../_shared/design-system/types.ts';
 import { urlToDataUrl } from '../_shared/render/hero.ts';
 
@@ -73,7 +74,7 @@ async function designSystemFor(db: any, creative: any): Promise<LoadedSystem | n
   const spec = platformDesignSpec(creative.platform, creative.format);
   const { data: recent } = await db.from('creative_directions').select('plan').eq('client_id', creative.client_id).neq('id', creative.id).not('plan->design_system_id', 'is', null).order('created_at', { ascending: false }).limit(2);
   const recentIds = (recent || []).flatMap((r: any) => (r.plan?.frames || []).map((f: any) => f.template_id).filter(Boolean));
-  const ids = pickTemplates(approved.system, formatKeyForSpec(spec), creative.plan, recentIds);
+  const ids = isLibraryV2(approved.system) ? pickV2(approved.system, formatKeyForSpec(spec), creative.plan, recentIds) : pickTemplates(approved.system, formatKeyForSpec(spec), creative.plan, recentIds);
   const plan = { ...creative.plan, design_system_id: approved.id, frames: creative.plan.frames.map((f: any, i: number) => ({ ...f, template_id: ids[i] })) };
   // Two ticks can reach this together; only the first assignment counts.
   const { data: saved, error } = await db.from('creative_directions').update({ plan }).eq('id', creative.id).is('plan->design_system_id', null).select('plan');
@@ -96,7 +97,9 @@ async function submitFrame(db: any, creative: any, index: number, attempt: numbe
     const { referenceUrls } = await resolveContextImageUrls({ design_references: refs }, db);
     if (referenceUrls.length !== refs.length) throw new Error('The selected client references could not be opened.');
     const spec = platformDesignSpec(creative.platform, creative.format);
-    const prompt = designed ? designedHeroPrompt(creative.plan, index, designed.system, templateById(designed.system, frame.template_id), spec, correction) : creativeImagePrompt(creative.plan, index, correction, spec);
+    const prompt = designed
+      ? (isLibraryV2(designed.system) ? heroPromptV2(creative.plan, index, templateV2(designed.system, frame.template_id), spec, creative.plan.brand_system || '', correction) : designedHeroPrompt(creative.plan, index, designed.system, templateById(designed.system, frame.template_id), spec, correction))
+      : creativeImagePrompt(creative.plan, index, correction, spec);
     const started = await startImageWithHiggsfield(db, prompt, imageAspectRatio(creative.platform, creative.format), referenceUrls);
     const { error: recordError } = await db.from('media_jobs').update({ request_id: started.jobId, model_path: started.model, status: 'submitted', updated_at: new Date().toISOString() }).eq('id', row.id);
     if (recordError) throw new Error(`Image submitted as ${started.jobId} but recording failed.`);
@@ -111,12 +114,13 @@ async function submitFrame(db: any, creative: any, index: number, attempt: numbe
 async function reviewJob(db: any, creative: any, index: number, job: Job, designed: LoadedSystem | null) {
   const frame = creative.plan.frames[index];
   const references = await Promise.all(frameReferenceIndices(frame).map((i: number) => sourceImage(db, creative.reference_paths[i])));
-  const template = designed ? templateById(designed.system, frame.template_id) : null;
-  const direction = template ? JSON.stringify({ subject: frame.subject, hero_region: template.hero_region, calm_region: template.headline.region, never: designed!.system.imagery.never })
+  const v2 = designed && isLibraryV2(designed.system) ? templateV2(designed.system, frame.template_id) : null;
+  const template = designed && !v2 ? templateById(designed.system, frame.template_id) : null;
+  const direction = v2 ? JSON.stringify({ subject: frame.subject, hero_slot: v2.hero }) : template ? JSON.stringify({ subject: frame.subject, hero_region: template.hero_region, calm_region: template.headline.region, never: designed!.system.imagery.never })
     : frame.layout ? JSON.stringify({ subject: frame.subject, headline_position: frame.layout.headline_position, subject_position: frame.layout.subject_position }) : undefined;
   // The reviewer takes image bytes, not a URL, and the model caps an image at 5 MB; the prepared hero is both.
   const candidate = await urlToDataUrl((await preparedHero(db, creative, job)).hero_url);
-  const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText: '', question: template ? artworkReviewQuestion(designed!.system, template, frame.subject) : undefined });
+  const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText: '', question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : undefined });
   const dirty = verdictIsDirty(verdict, { expectNoText: true });
   await db.from('media_jobs').update({ review: { ...verdict, dirty }, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
   return { verdict, dirty };

@@ -12,7 +12,7 @@ export type Span = { text: string; weight?: Weight; color?: string; face?: strin
 export type Gradient = { from: string; to: string; angle?: number };
 export type Layer =
   | { type: 'background'; color: string; gradient?: Gradient }
-  | { type: 'image'; href: string; x: number; y: number; w: number; h: number; fit?: 'cover' | 'contain'; opacity?: number; radius?: number }
+  | { type: 'image'; href: string; x: number; y: number; w: number; h: number; fit?: 'cover' | 'contain'; opacity?: number; radius?: number; clip?: { x: number; y: number; w: number; h: number; radius?: number } }
   | { type: 'panel'; x: number; y: number; w: number; h: number; radius: number; fill: string; fillOpacity?: number; gradient?: Gradient; stroke?: string; strokeOpacity?: number; strokeWidth?: number; backdrop?: string }
   | { type: 'text'; x: number; y: number; w: number; size: number; lineHeight?: number; align?: 'left' | 'center' | 'right'; weight?: Weight; face?: string; color: string; lines: Span[][]; letterSpacing?: number }
   | { type: 'line'; x1: number; y1: number; x2: number; y2: number; color: string; opacity?: number; width: number }
@@ -72,8 +72,9 @@ export function composeLayers(spec: Spec, faces: Faces): string {
       if (L.gradient) { defs.push(gradientDef(id, L.gradient)); body.push(`<rect width="${spec.width}" height="${spec.height}" fill="url(#${id})"/>`); }
       else body.push(`<rect width="${spec.width}" height="${spec.height}" fill="${L.color}"/>`);
     } else if (L.type === 'image') {
-      if (L.radius) defs.push(`<clipPath id="${id}c"><rect x="${L.x}" y="${L.y}" width="${L.w}" height="${L.h}" rx="${L.radius}"/></clipPath>`);
-      body.push(`<image href="${L.href}" x="${L.x}" y="${L.y}" width="${L.w}" height="${L.h}" preserveAspectRatio="xMidYMid ${L.fit === 'contain' ? 'meet' : 'slice'}" opacity="${L.opacity ?? 1}"${L.radius ? ` clip-path="url(#${id}c)"` : ''}/>`);
+      const clip = L.clip ? L.clip : L.radius ? { x: L.x, y: L.y, w: L.w, h: L.h, radius: L.radius } : null;
+      if (clip) defs.push(`<clipPath id="${id}c"><rect x="${clip.x}" y="${clip.y}" width="${clip.w}" height="${clip.h}" rx="${clip.radius ?? 0}"/></clipPath>`);
+      body.push(`<image href="${L.href}" x="${L.x}" y="${L.y}" width="${L.w}" height="${L.h}" preserveAspectRatio="xMidYMid ${L.fit === 'contain' ? 'meet' : 'slice'}" opacity="${L.opacity ?? 1}"${clip ? ` clip-path="url(#${id}c)"` : ''}/>`);
     } else if (L.type === 'panel') {
       let fill = L.fill;
       if (L.gradient) { defs.push(gradientDef(id, L.gradient)); fill = `url(#${id})`; }

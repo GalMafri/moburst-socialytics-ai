@@ -7,6 +7,8 @@ import type { Layer, Span, Spec, Weight } from '../render/layers.ts';
 import { wrapSpans, type Faces } from '../render/layers.ts';
 
 export type SlotRole = 'eyebrow' | 'headline' | 'sub' | 'attribution' | 'counter';
+/** Placeholder a glass panel carries until a post's soft hero copy is known. */
+export const SOFT_HERO = '__soft_hero__';
 export interface TextSlot { role: SlotRole; x: number; y: number; w: number; h: number; size: number; lineHeight: number; align: 'left' | 'center' | 'right'; weight: Weight; color: string; accent?: string; maxLines: number; face?: string; sample: string }
 export interface HeroSlot { role: 'hero' | 'photo'; x: number; y: number; w: number; h: number; radius?: number }
 export interface Template {
@@ -27,7 +29,7 @@ export function templateFromRead(args: { id: string; name: string; source_path: 
   const n = (v: unknown, d = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
   args.layers.forEach((L, i) => {
     if (L.type === 'background') fixed.push({ type: 'background', color: L.color || '#000000', gradient: L.gradient });
-    else if (L.type === 'panel') fixed.push({ type: 'panel', x: n(L.x), y: n(L.y), w: n(L.w, 10), h: n(L.h, 10), radius: n(L.radius), fill: L.color || '#222222', fillOpacity: n(L.fillOpacity, 1), gradient: L.gradient, stroke: L.stroke, strokeOpacity: n(L.strokeOpacity, 1), strokeWidth: n(L.strokeWidth, 1) });
+    else if (L.type === 'panel') fixed.push({ type: 'panel', x: n(L.x), y: n(L.y), w: n(L.w, 10), h: n(L.h, 10), radius: n(L.radius), fill: L.color || '#222222', fillOpacity: n(L.fillOpacity, 1), gradient: L.gradient, stroke: L.stroke, strokeOpacity: n(L.strokeOpacity, 1), strokeWidth: n(L.strokeWidth, 1), backdrop: L.glass ? SOFT_HERO : undefined });
     else if (L.type === 'line') fixed.push({ type: 'line', x1: n(L.x1), y1: n(L.y1), x2: n(L.x2, args.width), y2: n(L.y2), color: L.color || '#ffffff', opacity: n(L.opacity, 1), width: n(L.width, 1) });
     else if (L.type === 'frame') fixed.push({ type: 'frame', inset: n(L.inset), width: n(L.width, 3), radius: n(L.radius), colors: Array.isArray(L.colors) && L.colors.length ? L.colors : ['#ffffff'] });
     else if (L.type === 'image') {
@@ -48,11 +50,16 @@ export function templateFromRead(args: { id: string; name: string; source_path: 
 }
 
 /** Fill a template's slots with new copy and a hero image; the copy is wrapped and, only when it cannot fit, shrunk step by step. */
-export function fillTemplate(t: Template, faces: Faces, copy: Partial<Record<SlotRole, Span[]>>, heroHref: string | null): Spec {
+export function fillTemplate(t: Template, faces: Faces, copy: Partial<Record<SlotRole, Span[]>>, heroHref: string | null, softHeroHref?: string | null): Spec {
   const layers: Layer[] = [];
   const bg = t.fixed.find((l) => l.type === 'background'); if (bg) layers.push(bg);
-  if (t.hero && heroHref) layers.push({ type: 'image', href: heroHref, x: t.hero.x, y: t.hero.y, w: t.hero.w, h: t.hero.h, fit: 'cover', radius: t.hero.radius });
-  for (const l of t.fixed) if (l.type !== 'background') layers.push(l);
+  // The hero is generated at the canvas aspect; it shows only inside its slot, so a half-frame slot shows that half of the scene.
+  if (t.hero && heroHref) layers.push({ type: 'image', href: heroHref, x: 0, y: 0, w: t.width, h: t.height, fit: 'cover', clip: { x: t.hero.x, y: t.hero.y, w: t.hero.w, h: t.hero.h, radius: t.hero.radius } });
+  for (const l of t.fixed) {
+    if (l.type === 'background') continue;
+    if (l.type === 'panel' && l.backdrop === SOFT_HERO) { layers.push({ ...l, backdrop: softHeroHref || undefined }); continue; }
+    layers.push(l);
+  }
   for (const s of t.slots) {
     const spans = copy[s.role]; if (!spans || !spans.length) continue;
     const face = s.face || t.faces.primary;

@@ -9,6 +9,7 @@ export interface LoadedSystem { id: string; status: string; system: DesignSystem
 
 function rowToLoaded(row: any): LoadedSystem {
   const { logo_aspect, ...system } = row.system || {};
+  // A version-2 library (templates read from the client's posts) carries no tokens; callers branch on its version.
   return { id: row.id, status: row.status, system: system as DesignSystem, logoAspect: Number(logo_aspect) || 3 };
 }
 
