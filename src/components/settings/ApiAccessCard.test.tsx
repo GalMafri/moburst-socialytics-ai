@@ -64,6 +64,13 @@ describe("ApiAccessCard", () => {
     await waitFor(() => expect(calls.some((c) => c.init?.method === "DELETE" && c.url.endsWith("/admin/keys/k1"))).toBe(true));
   });
 
+  it("says why when the keys cannot be loaded, instead of pretending there are none", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ error: { code: "unauthorized", message: "A valid API key is required" } }), { status: 401 })) as unknown as typeof fetch;
+    renderCard();
+    expect(await screen.findByRole("alert")).toHaveTextContent("The keys could not be loaded: A valid API key is required");
+    expect(screen.queryByText(/no keys yet/i)).not.toBeInTheDocument();
+  });
+
   it("says so when there are no keys", async () => {
     mockFetch(() => ({ data: [], next_cursor: null }));
     renderCard();

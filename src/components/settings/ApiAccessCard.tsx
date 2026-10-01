@@ -174,7 +174,7 @@ function CreateKeyDialog({ open, onOpenChange, clientSlugs, onCreated }: { open:
 /** Keys for gOS and other Moburst tools: who holds one, what it may do, and a way to make or revoke one. Admins only. */
 export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
   const { isAdmin } = useAuth();
-  const { data: keys = [], isLoading } = useApiKeys(isAdmin);
+  const { data: keys = [], isLoading, error } = useApiKeys(isAdmin);
   const revoke = useRevokeApiKey();
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreatedKey | null>(null);
@@ -205,6 +205,8 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
         {created && <OneTimeKey created={created} onDone={() => setCreated(null)} />}
         {isLoading ? (
           <p className="text-[13px] text-[#9ca3af]">Loading keys…</p>
+        ) : error ? (
+          <p className="text-[13px] text-red-400" role="alert">The keys could not be loaded: {error instanceof Error ? error.message : "the API did not answer."}</p>
         ) : keys.length === 0 ? (
           <p className="text-[13px] text-[#9ca3af]">No keys yet. Create one for gOS or another Moburst tool.</p>
         ) : (
