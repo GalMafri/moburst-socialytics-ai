@@ -38,6 +38,9 @@ export function describeFollowFailure(failures: Array<{ name: string; result: Fo
       : `RivalIQ's company allowance is used up, so ${list(capped.map((f) => f.name))} could not be added. Unfollow a company from an old landscape in RivalIQ, or raise the plan.`);
   }
   if (blocked.length) parts.push(`${list(blocked.map((f) => f.name))}: the website refused RivalIQ's visit.`);
-  for (const f of other) parts.push(`${f.name}: ${(asMessage(f.result.error) ?? JSON.stringify(f.result.error ?? "tracking failed")).slice(0, 200)}`);
+  if (other.length) {
+    const reasons = other.map((f) => `${f.name}: ${(asMessage(f.result.error) ?? (f.result.error == null ? "no reason given" : JSON.stringify(f.result.error))).slice(0, 200)}`);
+    parts.push(`RivalIQ could not finish tracking every reviewed website. ${reasons.join("; ")}`);
+  }
   return parts.join(" ") || "RivalIQ could not start tracking the reviewed websites.";
 }

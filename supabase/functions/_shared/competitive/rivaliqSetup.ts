@@ -79,10 +79,10 @@ export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): 
           try { company ||= job.plan.companies.find(c => c.url === publicCompanyUrl(url)); } catch { /* unknown provider URL */ }
           return { name: company?.name || 'Reviewed company', result };
         });
-      const detail = failures.length
-        ? describeFollowFailure(failures)
-        : (typeof pending.error === 'string' ? pending.error : JSON.stringify(pending.error || 'Check account capacity and company URLs.')).slice(0, 300);
       await update({ phase: 'following_failed' });
+      // Per-company answers become one plain sentence (plan capacity, a website that refused the visit, the provider's own words).
+      if (failures.length) throw new Error(describeFollowFailure(failures));
+      const detail = (typeof pending.error === 'string' ? pending.error : JSON.stringify(pending.error || 'Check account capacity and company URLs.')).slice(0, 300);
       throw new Error(`RivalIQ could not finish tracking every reviewed website. ${detail}`);
     }
     await update({ phase: 'verify' });

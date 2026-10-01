@@ -256,6 +256,9 @@ describe("trackingFailureSummary", () => {
     expect(trackingFailureSummary(raw)).toBe("RivalIQ could not start tracking Quince and Brooklinen.");
     expect(trackingFailureSummary('RivalIQ could not finish tracking every reviewed website. Calm: {"message":"ProblemFetchingUrlError: HTTPError: Response code 403 ()"}; Headspace: {"data":{"credits":{}}}')).toBe("RivalIQ could not start tracking Calm and Headspace. At least one website refused the provider's visit.");
     expect(trackingFailureSummary("RivalIQ API key is not configured")).toBe("RivalIQ API key is not configured.");
+    // The setup function now answers with a finished sentence; it passes through untouched.
+    const plan = "RivalIQ's plan tracks 40 distinct companies and 40 are in use, so Headspace, Balance and Ten Percent Happier could not be added. Unfollow a company from an old landscape in RivalIQ, or raise the plan. Calm: the website refused RivalIQ's visit.";
+    expect(trackingFailureSummary(plan)).toBe(plan);
   });
   it("is what the tracking step records, with the provider's words on the step", async () => {
     const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], sets: [{ id: "set-c", client_id: "c-bader", status: "confirmed", notes: null, source: "ai", rivaliq_landscape_id: null, confirmed_at: "x", created_at: "2026-09-01T00:00:00.000Z", demo_job_id: null }] }, call: (name, body) => (name === "setup-rivaliq-landscape" && body.mode === "advance" ? fail(422, { error: 'RivalIQ could not finish tracking every reviewed website. Quince: {"data":{"credits":{"plan":40}}}' }) : undefined) });
