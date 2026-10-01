@@ -108,6 +108,9 @@ posts are client-facing agency work.
 
 ## Known fragile areas
 
+- The monthly social workflow (n8n `SZbRTV7yOdXTNHHf`) needs the brand's Sprout profiles; with none, its Sprout step returns no items and the run ends on the failure branch. Until 2026-10-01 that branch's "Mark Social Report Failed" node had an expression the engine rejects (`json.body?.report_id`), so failed runs left their report `running` for good; fixed and published (version `8a6c17dd`). Any run failing before the fix still needs its report row marked failed by hand.
+- `delete-client` removed brand books and design references but left `generated-media/<client>/` and `design-previews/previews/<client>/`; both folders are removed since 2026-10-01.
+
 - `run-report` refuses to start when the previous run is under 90 minutes old and still `running`; a stuck row needs that long before a retry.
 - RivalIQ landscape setup is a multi-phase state machine with a two-minute lease; a second caller gets "Setup is already being checked".
 - Firecrawl returns navigation and images as "main content"; the demo cleans it (`demo/site-text.ts`) before drafting a brief.

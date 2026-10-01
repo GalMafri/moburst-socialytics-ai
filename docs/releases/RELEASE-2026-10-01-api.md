@@ -25,9 +25,9 @@ The shared core changed too, in AdVisor first and synced here: a step marked `al
 | Schema drift check | pass | `GET /v1/status` tries 19 column lists live: 0 findings |
 | Health findings | pass | status reports `media_failed: Moburst` (5 failed generations in 24 hours), a real finding |
 | Settings card | pass | 5 component tests; seen on the dev server at 1440x900 (count tile, title, copy, create button); the published bundle carries the card and its error state |
-| Demo, direct-to-consumer store (Brooklinen) | [pending] | job `2327739d` |
-| Demo, app (Calm) | [pending] | job `e238bdd9` |
-| Callbacks | [pending] | n8n sink `pTKsA0TSX3aV6sxf` |
+| Demo, round one (Brooklinen `2327739d`, Calm `e238bdd9`, 12:00 to 12:20) | partial, then discarded | both created their client, researched the brand (navy palette and Inter; yellow and blue and Montserrat), drafted a brief, derived pillars and keywords, and wrote an Instagram post with a Gemini image carrying the brand's logo; both callbacks delivered (sink executions 489899, 489900). Found and fixed the same hour: the competitor functions refused the server caller (S4); the social workflow cannot run without a Sprout profile and its failure marker was broken (two report rows marked failed by hand); the brief was drafted from navigation text; the stored image name ended in `.png.png`; the first discard ran as the requester's id and answered 500. Both jobs then discarded through the API (clients and rows gone; two orphan media files led to the delete-client fix) |
+| Demo, round two (Brooklinen `7e92b632`, Calm `f7679522`, from 12:27) | [pending] | on the fixed code: cleaned briefs ("Shop bundles with built-in savings", "Calm your mind. Change your life."), 5 and 6 pillars, 3 competitors selected and confirmed each (Boll & Branch, Quince, Pottery Barn; Headspace, Balance, Ten Percent Happier), RivalIQ landscapes created; tracking and the competitive report in progress |
+| Fatal path and its callback, live | pass | the company-scoped key asked for a demo on Calm: job `56c69629` failed at `resolve_client` (`out_of_scope`), the twelve other steps skipped `job_failed`, the callback delivered with `status: failed` (sink execution 489888) |
 | Idempotency and capacity | pass | the Brooklinen request replayed with its key returned the same job (200); an empty body 400 with `field: client_name`; capacity 3 refused a fourth job (unit) |
 | Rollback plan | written | below |
 
