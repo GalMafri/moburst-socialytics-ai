@@ -15,6 +15,23 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+/** Remove every object under a folder of a bucket, page by page. Failures are logged, never fatal: the rows are already gone. */
+async function removeFolder(storage: ReturnType<typeof createClient>, bucket: string, folder: string): Promise<void> {
+  try {
+    for (let page = 0; page < 50; page++) {
+      const { data, error } = await storage.storage.from(bucket).list(folder, { limit: 100, offset: page * 100 });
+      if (error) { console.warn(`[delete-client] could not list ${bucket}/${folder}: ${error.message}`); return; }
+      const names = (data ?? []).filter((o) => o.name && o.id).map((o) => `${folder}/${o.name}`);
+      if (!names.length) return;
+      const { error: rmErr } = await storage.storage.from(bucket).remove(names);
+      if (rmErr) { console.warn(`[delete-client] could not remove ${names.length} objects from ${bucket}/${folder}: ${rmErr.message}`); return; }
+      if (names.length < 100) return;
+    }
+  } catch (e) {
+    console.warn(`[delete-client] storage cleanup of ${bucket}/${folder} failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -96,6 +113,11 @@ serve(async (req) => {
     if (refPaths.length > 0) {
       await supabase.storage.from("design-references").remove(refPaths);
     }
+    // Generated media and design previews live in folders named after the
+    // client; a deleted client's folders go too (found as orphans after the
+    // first API demo discard on 2026-10-01).
+    await removeFolder(supabase, "generated-media", client_id);
+    await removeFolder(supabase, "design-previews", `previews/${client_id}`);
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
