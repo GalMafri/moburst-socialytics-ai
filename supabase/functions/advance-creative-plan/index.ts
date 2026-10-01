@@ -24,6 +24,8 @@ import { startImageWithHiggsfield } from '../_shared/higgsfield/startImage.ts';
 import { checkVideoJob } from '../_shared/higgsfield/renderVideo.ts';
 import { storeRemoteImage } from '../_shared/media/storeRemote.ts';
 import { mediaBackendFor } from '../_shared/higgsfield/backend.ts';
+import { designedHeroPrompt, formatKeyForSpec, loadApprovedSystem, loadSystemById, pickTemplates, templateById, type LoadedSystem } from '../_shared/design-system/load.ts';
+import { renderRemote } from '../_shared/design-system/renderClient.ts';
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -40,7 +42,30 @@ async function jobsFor(db: any, clientId: string, planId: string): Promise<Job[]
   return data || [];
 }
 
-async function submitFrame(db: any, creative: any, index: number, attempt: number, correction: string): Promise<Job> {
+/**
+ * The design system this run renders with: the one it was planned with, else
+ * the client's approved one, assigned to the plan on the first tick together
+ * with a template per frame. A client without an approved system still runs
+ * the older path (raw artwork finished in the browser).
+ */
+async function designSystemFor(db: any, creative: any): Promise<LoadedSystem | null> {
+  if (creative.plan.design_system_id) return loadSystemById(db, creative.client_id, creative.plan.design_system_id);
+  const approved = await loadApprovedSystem(db, creative.client_id);
+  if (!approved) return null;
+  const spec = platformDesignSpec(creative.platform, creative.format);
+  const { data: recent } = await db.from('creative_directions').select('plan').eq('client_id', creative.client_id).neq('id', creative.id).not('plan->design_system_id', 'is', null).order('created_at', { ascending: false }).limit(2);
+  const recentIds = (recent || []).flatMap((r: any) => (r.plan?.frames || []).map((f: any) => f.template_id).filter(Boolean));
+  const ids = pickTemplates(approved.system, formatKeyForSpec(spec), creative.plan, recentIds);
+  const plan = { ...creative.plan, design_system_id: approved.id, frames: creative.plan.frames.map((f: any, i: number) => ({ ...f, template_id: ids[i] })) };
+  // Two ticks can reach this together; only the first assignment counts.
+  const { data: saved, error } = await db.from('creative_directions').update({ plan }).eq('id', creative.id).is('plan->design_system_id', null).select('plan');
+  if (error) throw new Error('The template choice could not be saved.');
+  if (saved?.length) creative.plan = plan;
+  else { const { data: again } = await db.from('creative_directions').select('plan').eq('id', creative.id).single(); creative.plan = again?.plan || plan; }
+  return loadSystemById(db, creative.client_id, creative.plan.design_system_id);
+}
+
+async function submitFrame(db: any, creative: any, index: number, attempt: number, correction: string, designed: LoadedSystem | null): Promise<Job> {
   const key = { creative_plan_id: creative.id, creative_frame_index: index, creative_attempt: attempt };
   const { data: row, error } = await db.from('media_jobs').insert({ client_id: creative.client_id, kind: 'image', provider: 'higgsfield', status: 'pending', input: key }).select('id,status,request_id,output_url,error,review,input,post_iteration_id,created_at').single();
   if (error) {
@@ -52,7 +77,8 @@ async function submitFrame(db: any, creative: any, index: number, attempt: numbe
     const refs = frameReferenceIndices(frame).map((i: number) => creative.reference_paths[i]);
     const { referenceUrls } = await resolveContextImageUrls({ design_references: refs }, db);
     if (referenceUrls.length !== refs.length) throw new Error('The selected client references could not be opened.');
-    const prompt = creativeImagePrompt(creative.plan, index, correction, platformDesignSpec(creative.platform, creative.format));
+    const spec = platformDesignSpec(creative.platform, creative.format);
+    const prompt = designed ? designedHeroPrompt(creative.plan, index, designed.system, templateById(designed.system, frame.template_id), spec, correction) : creativeImagePrompt(creative.plan, index, correction, spec);
     const started = await startImageWithHiggsfield(db, prompt, imageAspectRatio(creative.platform, creative.format), referenceUrls);
     const { error: recordError } = await db.from('media_jobs').update({ request_id: started.jobId, model_path: started.model, status: 'submitted', updated_at: new Date().toISOString() }).eq('id', row.id);
     if (recordError) throw new Error(`Image submitted as ${started.jobId} but recording failed.`);
@@ -64,10 +90,12 @@ async function submitFrame(db: any, creative: any, index: number, attempt: numbe
   }
 }
 
-async function reviewJob(db: any, creative: any, index: number, job: Job) {
+async function reviewJob(db: any, creative: any, index: number, job: Job, designed: LoadedSystem | null) {
   const frame = creative.plan.frames[index];
   const references = await Promise.all(frameReferenceIndices(frame).map((i: number) => sourceImage(db, creative.reference_paths[i])));
-  const direction = frame.layout ? JSON.stringify({ subject: frame.subject, headline_position: frame.layout.headline_position, subject_position: frame.layout.subject_position }) : undefined;
+  const template = designed ? templateById(designed.system, frame.template_id) : null;
+  const direction = template ? JSON.stringify({ subject: frame.subject, hero_region: template.hero_region, calm_region: template.headline.region, never: designed!.system.imagery.never })
+    : frame.layout ? JSON.stringify({ subject: frame.subject, headline_position: frame.layout.headline_position, subject_position: frame.layout.subject_position }) : undefined;
   const verdict = await validateDesignImage(job.output_url!, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText: '' });
   const dirty = verdictIsDirty(verdict, { expectNoText: true });
   await db.from('media_jobs').update({ review: { ...verdict, dirty }, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
@@ -103,6 +131,7 @@ async function advanceAgentPlan(db: any, creative: any): Promise<{ frames: Frame
 
 async function advancePlan(db: any, creative: any, budget: { reviews: number }): Promise<{ frames: FrameState[]; done: boolean; failed: boolean; iterations: Array<{ id: string; media_urls: string[]; frames: number[]; finishing?: string }> }> {
   if (await mediaBackendFor(db, creative.client_id) === AGENT_ENGINE) return advanceAgentPlan(db, creative);
+  const designed = await designSystemFor(db, creative);
   const count = creative.plan.frames.length;
   const jobs = await jobsFor(db, creative.client_id, creative.id);
   const attached = jobs.filter(j => j.post_iteration_id);
@@ -116,7 +145,7 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
     const mine = jobs.filter(j => j.input?.creative_frame_index === index).sort((a, b) => (a.input?.creative_attempt ?? 0) - (b.input?.creative_attempt ?? 0));
     let job = mine[mine.length - 1];
     let attempt = job ? Number(job.input?.creative_attempt ?? 0) : 0;
-    if (!job) { job = await submitFrame(db, creative, index, 0, ''); }
+    if (!job) { job = await submitFrame(db, creative, index, 0, '', designed); }
     if (job.status === 'pending' && Date.now() - Date.parse(job.created_at) > STALE_PENDING_MS) {
       await db.from('media_jobs').update({ status: 'failed', error: 'The submission did not complete.', updated_at: new Date().toISOString() }).eq('id', job.id);
       job = { ...job, status: 'failed', error: 'The submission did not complete.' };
@@ -139,11 +168,11 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
     }
     if (job.status === 'completed' && job.output_url && !job.review && budget.reviews > 0) {
       budget.reviews--;
-      const { verdict, dirty } = await reviewJob(db, creative, index, job);
+      const { verdict, dirty } = await reviewJob(db, creative, index, job, designed);
       job = { ...job, review: { ...verdict, dirty } };
       if (dirty) {
         const reason = correctionFor(verdict, { expectNoText: true });
-        if (attempt + 1 < MAX_ATTEMPTS) { job = await submitFrame(db, creative, index, attempt + 1, reason); attempt += 1; }
+        if (attempt + 1 < MAX_ATTEMPTS) { job = await submitFrame(db, creative, index, attempt + 1, reason, designed); attempt += 1; }
         else { await db.from('media_jobs').update({ status: 'failed', error: `Brand review rejected the artwork: ${reason}`.slice(0, 1000), updated_at: new Date().toISOString() }).eq('id', job.id); job = { ...job, status: 'failed', error: `Brand review rejected the artwork: ${reason}` }; }
       }
     }
@@ -155,10 +184,18 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
   const done = !failed && frames.every(f => f.state === 'approved');
   const iterations: Array<{ id: string; media_urls: string[]; frames: number[]; finishing?: string }> = [];
   if (done) {
-    const base = { client_id: creative.client_id, platform: creative.platform || null, post_copy: creative.post_copy || null, format: creative.format || null, source: 'calendar', finishing: 'pending', variant_group_id: crypto.randomUUID() };
+    // With a design system the still is rendered here, finished, from the
+    // template and the approved hero; without one the raw artwork is saved
+    // and the browser finishes it when the post is opened.
+    const finalUrl = new Map<number, string>(frames.map(f => [f.index, f.url!]));
+    if (designed) {
+      const rendered = await Promise.all(frames.map(f => renderRemote({ kind: 'frame', client_id: creative.client_id, plan_id: creative.id, frame_index: f.index, hero_url: f.url })));
+      for (const r of rendered) finalUrl.set(r.index, r.url);
+    }
+    const base = { client_id: creative.client_id, platform: creative.platform || null, post_copy: creative.post_copy || null, format: creative.format || null, source: 'calendar', finishing: designed ? 'done' : 'pending', variant_group_id: crypto.randomUUID() };
     const rows = creative.mode === 'carousel'
-      ? [{ ...base, media_urls: frames.map(f => f.url!), variant_angle: `Reference creative ${creative.id}`, is_selected: true, frames: frames.map(f => f.index) }]
-      : frames.map(f => ({ ...base, media_urls: [f.url!], variant_angle: `Reference creative ${creative.id}: ${creative.plan.frames[f.index].subject}`.slice(0, 500), is_selected: false, frames: [f.index] }));
+      ? [{ ...base, media_urls: frames.map(f => finalUrl.get(f.index)!), variant_angle: `Reference creative ${creative.id}`, is_selected: true, frames: frames.map(f => f.index) }]
+      : frames.map(f => ({ ...base, media_urls: [finalUrl.get(f.index)!], variant_angle: `Reference creative ${creative.id}: ${creative.plan.frames[f.index].subject}`.slice(0, 500), is_selected: false, frames: [f.index] }));
     for (const row of rows) {
       const { frames: owned, ...insert } = row;
       let { data, error } = await db.from('post_iterations').insert(insert).select('id,media_urls,finishing').single();

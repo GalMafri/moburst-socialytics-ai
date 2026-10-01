@@ -10,6 +10,7 @@ export interface ComposeInput {
   system: DesignSystem; template: Template; spec: PlatformDesignSpec;
   headline: string; emphasis?: string | null; sub?: string | null;
   heroHref: string;              // data URL or https URL of the hero (or photo)
+  softHeroHref?: string;         // a small blurred copy of the hero, for the glass card backdrop
   logoHref: string;              // data URL or https URL of the transparent logo asset
   logoAspect: number;            // width / height of the logo asset
 }
@@ -74,7 +75,7 @@ export function compose(face: Face, input: ComposeInput): ComposeResult {
   const hero = `<image href="${input.heroHref}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>`;
   const card = template.card && t.card.style !== 'none' ? `
   <g clip-path="url(#card)">
-    ${t.card.style === 'glass' ? `<image href="${input.heroHref}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#blur)"/>` : ''}
+    ${t.card.style === 'glass' ? `<image href="${input.softHeroHref || input.heroHref}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" image-rendering="optimizeQuality"/>` : ''}
     <rect x="${x}" y="${y}" width="${cardW}" height="${cardH}" fill="${t.colors.surface}" fill-opacity="${t.card.style === 'glass' ? t.card.alpha : 1}"/>
     <rect x="${x}" y="${y}" width="${cardW}" height="${cardH}" fill="url(#sheen)"/>
   </g>
@@ -85,7 +86,6 @@ export function compose(face: Face, input: ComposeInput): ComposeResult {
   <defs>
     <clipPath id="card"><rect x="${x}" y="${y}" width="${cardW}" height="${cardH}" rx="${radius}"/></clipPath>
     <clipPath id="outer"><rect x="0" y="0" width="${W}" height="${H}" rx="${template.frame ? outerRadius : 0}"/></clipPath>
-    <filter id="blur"><feGaussianBlur stdDeviation="${Math.round(Math.min(W, H) * 0.012)}"/></filter>
     <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.07"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
     <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">${frameStops}</linearGradient>
   </defs>

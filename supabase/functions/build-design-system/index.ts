@@ -9,17 +9,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
 import { referencesFor } from '../_shared/design-prompts/designRefs.ts';
 import { sourceImage } from '../_shared/design-prompts/sourceImage.ts';
-import { platformDesignSpec } from '../_shared/design-prompts/aspect.ts';
 import { BUILD_INSTRUCTIONS, designSystemSchema, normaliseDesignSystem, resolvedFamily } from '../_shared/design-system/build.ts';
 import { cutLogo } from '../_shared/design-system/logoAsset.ts';
-import { FORMAT_DIMENSIONS, type DesignSystem, type FormatKey, type Template } from '../_shared/design-system/types.ts';
-import { bytesToDataUrl, placeholderHero } from '../_shared/design-system/previewHero.ts';
-import { renderStill } from '../_shared/render/render.ts';
+import type { DesignSystem, FormatKey } from '../_shared/design-system/types.ts';
+import { renderRemote } from '../_shared/design-system/renderClient.ts';
 import { Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
 
 const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Content-Type': 'application/json' };
 const BUCKET = 'brand-assets';
-const PREVIEW_PLATFORM: Record<FormatKey, [string, string]> = { '4:5': ['Instagram', 'Single Image'], '1:1': ['LinkedIn', 'Carousel'], '9:16': ['Instagram', 'Reel'], '16:9': ['LinkedIn', 'Single Image'], '2:3': ['Pinterest', 'Pin'] };
 const SAMPLE = { headline: 'The one idea this post exists to say, in a single line or two', emphasis: 'one idea' };
 
 function publicUrl(db: any, path: string): string { return db.storage.from(BUCKET).getPublicUrl(path).data.publicUrl; }
@@ -67,24 +64,10 @@ async function logoAsset(db: any, clientId: string, version: number, paths: stri
   throw new Error('No usable logo was found in the posts and the client has no logo file.');
 }
 
+/** One preview per template, each rendered by its own render-design request. */
 async function renderPreviews(db: any, clientId: string, version: number, system: DesignSystem, logoAspect: number) {
-  const logoHref = bytesToDataUrl(new Uint8Array(await (await db.storage.from(BUCKET).download(system.tokens.logo.asset_path)).data.arrayBuffer()));
-  const heroes = new Map<FormatKey, string>();
-  const previews: Array<{ template_id: string; format: FormatKey; path: string; font_size: number; lines: number }> = [];
-  for (const template of system.templates) {
-    const format = template.formats[0];
-    const dims = FORMAT_DIMENSIONS[format];
-    if (!heroes.has(format)) {
-      const glow = template.hero_region === 'left' ? { x: 0.3, y: 0.45 } : template.hero_region === 'top' ? { x: 0.5, y: 0.3 } : template.hero_region === 'bottom' ? { x: 0.5, y: 0.7 } : { x: 0.68, y: 0.45 };
-      heroes.set(format, bytesToDataUrl(await placeholderHero(dims.width, dims.height, system.tokens.colors.background, system.tokens.colors.accent, glow)));
-    }
-    const [platform, fmt] = PREVIEW_PLATFORM[format];
-    const out = await renderStill(db, { ...dims, system, template, spec: platformDesignSpec(platform, fmt), headline: SAMPLE.headline, emphasis: SAMPLE.emphasis, heroHref: heroes.get(format)!, logoHref, logoAspect });
-    const path = `previews/${clientId}/v${version}-${template.id}.png`;
-    await upload(db, path, out.png, 'image/png');
-    previews.push({ template_id: template.id, format, path, font_size: out.fontSize, lines: out.lines });
-  }
-  return previews;
+  const results = await Promise.all(system.templates.map((template) => renderRemote({ kind: 'preview', client_id: clientId, system, logo_aspect: logoAspect, template_id: template.id, version, headline: SAMPLE.headline, emphasis: SAMPLE.emphasis })));
+  return results.map((r: any) => ({ template_id: r.template_id as string, format: r.format as FormatKey, path: r.path as string, font_size: r.font_size as number, lines: r.lines as number }));
 }
 
 function withUrls(db: any, row: any) {
