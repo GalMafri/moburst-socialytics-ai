@@ -180,3 +180,8 @@ verify_jwt = false
 # server to server with the shared secret; the app with a staff session.
 [functions.render-design]
 verify_jwt = false
+
+# The public API: machine callers hold API keys, not sessions; the core
+# checks keys, scopes and rate limits itself.
+[functions.api]
+verify_jwt = false
