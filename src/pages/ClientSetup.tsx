@@ -25,7 +25,6 @@ import { Switch } from "@/components/ui/switch";
 import { BrandBookUpload } from "@/components/onboarding/BrandBookUpload";
 import { DesignReferencesUpload } from "@/components/onboarding/DesignReferencesUpload";
 import { AutomaticBrandReferences } from "@/components/onboarding/AutomaticBrandReferences";
-import { DesignSystemPanel } from "@/components/onboarding/DesignSystemPanel";
 import { DesignSynthesisCard } from "@/components/onboarding/DesignSynthesisCard";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
@@ -134,7 +133,6 @@ export default function ClientSetup() {
   // auto-runs only after one of those, never on merely opening the tab.
   const [designInputsVersion, setDesignInputsVersion] = useState(0);
   const [savedVersion, setSavedVersion] = useState(0);
-  const [referenceCount, setReferenceCount] = useState(0);
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -413,9 +411,8 @@ export default function ClientSetup() {
         <AutomaticBrandReferences
           clientId={!isNew && client ? id : undefined}
           savedVersion={savedVersion}
-          onReady={(synthesis, count) => { setForm(f => ({ ...f, design_style_synthesis: synthesis })); setReferenceCount(count); }}
+          onReady={(synthesis) => setForm(f => ({ ...f, design_style_synthesis: synthesis }))}
         />
-        <DesignSystemPanel clientId={!isNew && client ? id : undefined} referenceCount={referenceCount} />
         <Tabs defaultValue="info">
           {/* On mobile (<sm), tabs scroll horizontally to keep labels readable.
               From sm and up, they fill the row in a 5-column grid. */}
