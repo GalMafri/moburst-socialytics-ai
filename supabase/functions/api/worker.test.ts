@@ -49,7 +49,7 @@ describe("discardJob", () => {
   }
   it("deletes a client the job created through delete-client", async () => {
     const { db, calls } = fakeDb("job-1");
-    const called: Array<{ name: string; body: unknown }> = [];
+    const called: Array<{ name: string; body: unknown; actAs?: string | null }> = [];
     const j = job("job-1", { client_id: "c-1", status: "completed" });
     j.steps = [{ name: "resolve_client", status: "done", data: { acted_as: "u-actor" } }];
     const r = await discardJob(j, { db: db as never, call: async (name, body, actAs) => { called.push({ name, body, actAs }); return { ok: true, status: 200, data: {}, text: "{}" }; } });
