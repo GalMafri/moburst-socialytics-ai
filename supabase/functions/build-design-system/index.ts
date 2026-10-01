@@ -7,6 +7,7 @@
 // generates imagery: previews use a stand-in hero drawn from the tokens.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
+import { secretEquals } from '../_shared/auth/secretEquals.ts';
 import { referencesFor } from '../_shared/design-prompts/designRefs.ts';
 import { sourceImage } from '../_shared/design-prompts/sourceImage.ts';
 import { BUILD_INSTRUCTIONS, designSystemSchema, normaliseDesignSystem, resolvedFamily } from '../_shared/design-system/build.ts';
@@ -15,7 +16,7 @@ import type { DesignSystem, FormatKey } from '../_shared/design-system/types.ts'
 import { renderRemote } from '../_shared/design-system/renderClient.ts';
 import { Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
 
-const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Content-Type': 'application/json' };
+const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret', 'Content-Type': 'application/json' };
 const BUCKET = 'brand-assets';
 const SAMPLE = { headline: 'The one idea this post exists to say, in a single line or two', emphasis: 'one idea' };
 
@@ -79,7 +80,10 @@ Deno.serve(async (req) => {
   try {
     const { client_id, action = 'get', id } = await req.json();
     if (!client_id) throw new Error('A client is required.');
-    const caller = await requireStaff(req, { writeClientId: client_id });
+    // Staff in the app, or the project's own server calls (schedules and
+    // operations) with the shared secret; those carry no user id.
+    const trusted = await secretEquals(req.headers.get('x-socialytics-secret'), Deno.env.get('SOCIALYTICS_N8N_SECRET'));
+    const caller = trusted ? { userId: null as string | null } : await requireStaff(req, { writeClientId: client_id });
     const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
     if (action === 'get') {
