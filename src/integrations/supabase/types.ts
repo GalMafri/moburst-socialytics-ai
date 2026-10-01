@@ -145,6 +145,59 @@ export type Database = {
           },
         ]
       }
+      client_design_systems: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          built_from: Json
+          client_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          previews: Json
+          status: string
+          system: Json
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          built_from?: Json
+          client_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          previews?: Json
+          status?: string
+          system: Json
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          built_from?: Json
+          client_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          previews?: Json
+          status?: string
+          system?: Json
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_design_systems_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_users: {
         Row: {
           client_id: string
