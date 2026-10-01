@@ -17,7 +17,6 @@ import { renderStill } from '../_shared/render/render.ts';
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-const WASM = new URL('./resvg.wasm', import.meta.url);
 const PREVIEW_PLATFORM: Record<FormatKey, [string, string]> = { '4:5': ['Instagram', 'Single Image'], '1:1': ['LinkedIn', 'Carousel'], '9:16': ['Instagram', 'Reel'], '16:9': ['LinkedIn', 'Single Image'], '2:3': ['Pinterest', 'Pin'] };
 
 async function logoHrefFor(db: any, system: DesignSystem): Promise<string> {
@@ -40,7 +39,7 @@ async function renderPreview(db: any, clientId: string, system: DesignSystem, lo
   const small = await placeholderHero(Math.round(dims.width / 8), Math.round(dims.height / 8), system.tokens.colors.background, system.tokens.colors.accent, glow);
   const heroHref = bytesToDataUrl(small);
   const [platform, fmt] = PREVIEW_PLATFORM[format];
-  const out = await renderStill(db, { ...dims, system, template, spec: platformDesignSpec(platform, fmt), headline, emphasis, heroHref, softHeroHref: heroHref, logoHref: await logoHrefFor(db, system), logoAspect }, WASM);
+  const out = await renderStill(db, { ...dims, system, template, spec: platformDesignSpec(platform, fmt), headline, emphasis, heroHref, softHeroHref: heroHref, logoHref: await logoHrefFor(db, system), logoAspect });
   const path = `previews/${clientId}/v${version}-${template.id}.png`;
   return { template_id: template.id, format, path, url: await store(db, 'brand-assets', path, out.png), font_size: out.fontSize, lines: out.lines };
 }
@@ -57,7 +56,7 @@ async function renderFrame(db: any, creative: any, index: number, heroUrl: strin
   const res = await fetch(heroUrl, { signal: AbortSignal.timeout(30000) });
   if (!res.ok) throw new Error(`The approved hero could not be fetched [${res.status}]`);
   const hero = await heroHrefs(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type') || 'image/png');
-  const out = await renderStill(db, { ...dims, system: loaded.system, template, spec, headline: frame.headline, emphasis: frame.emphasis || null, heroHref: hero.heroHref, softHeroHref: hero.softHeroHref, logoHref: await logoHrefFor(db, loaded.system), logoAspect: loaded.logoAspect }, WASM);
+  const out = await renderStill(db, { ...dims, system: loaded.system, template, spec, headline: frame.headline, emphasis: frame.emphasis || null, heroHref: hero.heroHref, softHeroHref: hero.softHeroHref, logoHref: await logoHrefFor(db, loaded.system), logoAspect: loaded.logoAspect });
   const path = `${creative.client_id}/${Date.now()}-design-${creative.id}-${index}.png`;
   return { index, template_id: template.id, url: await store(db, 'generated-media', path, out.png), font_size: out.fontSize, lines: out.lines };
 }

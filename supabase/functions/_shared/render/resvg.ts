@@ -1,26 +1,33 @@
 // resvg (WASM) for the edge runtime: one initialisation per isolate. The
-// binary ships with the function as a static file; the package CDN is only a
-// fallback for a build that did not bundle it.
+// binary is kept in the project's own storage after the first fetch, the
+// same way brand fonts are, so a render never depends on a package CDN.
 import { Resvg, initWasm } from 'https://esm.sh/@resvg/resvg-wasm@2.6.2';
 
 const WASM_URL = 'https://unpkg.com/@resvg/resvg-wasm@2.6.2/index_bg.wasm';
+const CACHE_BUCKET = 'brand-assets';
+const CACHE_PATH = 'runtime/resvg-2.6.2.wasm';
 let ready: Promise<void> | null = null;
 
-export async function ensureResvg(local?: URL): Promise<void> {
-  if (!ready) ready = (async () => {
-    if (local) {
-      try { await initWasm(await Deno.readFile(local)); return; } catch (e) { console.warn('[resvg] bundled wasm unavailable, fetching', e instanceof Error ? e.message : e); }
-    }
-    const res = await fetch(WASM_URL, { signal: AbortSignal.timeout(30000) });
-    if (!res.ok) throw new Error(`The renderer could not be loaded [${res.status}]`);
-    await initWasm(await res.arrayBuffer());
-  })().catch((e) => { ready = null; throw e; });
+async function wasmBytes(db: any): Promise<ArrayBuffer> {
+  try {
+    const { data } = await db.storage.from(CACHE_BUCKET).download(CACHE_PATH);
+    if (data) return await data.arrayBuffer();
+  } catch { /* not cached yet */ }
+  const res = await fetch(WASM_URL, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`The renderer could not be loaded [${res.status}]`);
+  const bytes = await res.arrayBuffer();
+  await db.storage.from(CACHE_BUCKET).upload(CACHE_PATH, new Blob([bytes], { type: 'application/wasm' }), { contentType: 'application/wasm', upsert: true }).catch(() => null);
+  return bytes;
+}
+
+export async function ensureResvg(db: any): Promise<void> {
+  if (!ready) ready = (async () => { await initWasm(await wasmBytes(db)); })().catch((e) => { ready = null; throw e; });
   await ready;
 }
 
 /** Rasterise an SVG document to PNG bytes with the given font files. */
-export async function svgToPng(svg: string, width: number, fonts: Uint8Array[], defaultFamily: string, local?: URL): Promise<Uint8Array> {
-  await ensureResvg(local);
+export async function svgToPng(db: any, svg: string, width: number, fonts: Uint8Array[], defaultFamily: string): Promise<Uint8Array> {
+  await ensureResvg(db);
   const r = new Resvg(svg, { font: { fontBuffers: fonts, defaultFontFamily: defaultFamily, loadSystemFonts: false }, fitTo: { mode: 'width', value: width } });
   return r.render().asPng();
 }

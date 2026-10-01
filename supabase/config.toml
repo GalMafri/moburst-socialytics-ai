@@ -180,4 +180,3 @@ verify_jwt = false
 # server to server with the shared secret; the app with a staff session.
 [functions.render-design]
 verify_jwt = false
-static_files = [ "./functions/render-design/resvg.wasm" ]
