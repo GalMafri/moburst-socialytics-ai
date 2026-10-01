@@ -8,7 +8,7 @@ import { describeInvokeError } from '@/lib/invokeError';
 // React remounts share the same request instead of spending twice.
 const pending = new Map<string, Promise<any>>();
 export function AutomaticBrandReferences({ clientId, savedVersion, onReady }: {
-  clientId?: string; savedVersion: number; onReady: (synthesis: any) => void;
+  clientId?: string; savedVersion: number; onReady: (synthesis: any, referenceCount: number) => void;
 }) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
@@ -37,7 +37,7 @@ export function AutomaticBrandReferences({ clientId, savedVersion, onReady }: {
       const data = await request;
       if (activeClient.current !== clientId) return;
       setRefs(data.harvested_design_references || []);
-      callback.current(data.design_style_synthesis);
+      callback.current(data.design_style_synthesis, (data.harvested_design_references || []).length);
       const paths = (data.harvested_design_references || []).map((r: any) => r.path);
       if (paths.length) {
         const { data: signed } = await supabase.storage.from('design-references').createSignedUrls(paths, 3600);

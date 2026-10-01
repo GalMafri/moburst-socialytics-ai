@@ -12,7 +12,7 @@ it('requires no upload and starts discovery automatically after a client is save
   expect(f.invoke).not.toHaveBeenCalled();
   expect(screen.getByText(/No uploads required/)).toBeInTheDocument();
   view.rerender(<AutomaticBrandReferences clientId="client-1" savedVersion={1} onReady={ready} />);
-  await waitFor(() => expect(ready).toHaveBeenCalledWith({ source_count: 3 }));
+  await waitFor(() => expect(ready).toHaveBeenCalledWith({ source_count: 3 }, 0));
   expect(f.invoke).toHaveBeenCalledWith('synthesize-design-language', { body: { client_id: 'client-1', discover: true, force: false } });
 });
 it('shows the actual no-reference reason and permits an explicit retry', async () => {
