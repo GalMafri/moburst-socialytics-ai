@@ -27,7 +27,7 @@ export async function similarity(aBytes: Uint8Array, bBytes: Uint8Array, size = 
     const s = ((2 * ma * mb + C1) * (2 * cov + C2)) / ((ma * ma + mb * mb + C1) * (va + vb + C2));
     total += s; count++;
     const bad = Math.max(0, Math.min(1, 1 - s));
-    for (let j = 0; j < win; j++) for (let i = 0; i < win; i++) { const px = x + i, py = y + j; const prev = heat.getPixelAt(px + 1, py + 1) & 255; const v = Math.max(prev, Math.round(bad * 255)); heat.setPixelAt(px + 1, py + 1, Image.rgbaToColor(v, 40, 255 - v, 255)); }
+    for (let j = 0; j < win; j++) for (let i = 0; i < win; i++) { const px = x + i, py = y + j; const prev = (heat.getPixelAt(px + 1, py + 1) >>> 24) & 255; const v = Math.max(prev, Math.round(bad * 255)); heat.setPixelAt(px + 1, py + 1, Image.rgbaToColor(v, 40, 255 - v, 255)); }
   }
   for (let i = 0; i < A.w * A.h; i++) absSum += Math.abs(A.data[i] - B.data[i]);
   return { ssim: count ? total / count : 0, meanAbsDiff: absSum / (A.w * A.h), heatmap: await heat.encode() };

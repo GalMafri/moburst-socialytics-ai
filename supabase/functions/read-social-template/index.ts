@@ -49,16 +49,27 @@ async function callModel(apiKey: string, content: any[]): Promise<any> {
 
 const imageBlock = (bytes: Uint8Array, mime = 'image/jpeg') => ({ type: 'image', source: { type: 'base64', media_type: mime, data: bytesToDataUrl(bytes, mime).split(',')[1] } });
 
+/** The client's known logo asset, when a design system already holds one; the reader never re-cuts a logo it has. */
+async function knownLogo(db: any, clientId: string): Promise<string | null> {
+  const { data } = await db.from('client_design_systems').select('system').eq('client_id', clientId).neq('status', 'retired').order('created_at', { ascending: false }).limit(1).maybeSingle();
+  const path = data?.system?.tokens?.logo?.asset_path; if (!path) return null;
+  const { data: file } = await db.storage.from(BUCKET).download(path); if (!file) return null;
+  return bytesToDataUrl(new Uint8Array(await file.arrayBuffer()));
+}
+
 /** Image layers: lifted assets are cut from the post itself; photos and heroes use the post's own pixels in that box so the render can be compared. */
 async function imageHrefs(post: Image, layers: any[], db: any, clientId: string, stamp: string): Promise<{ hrefs: Record<number, string>; assets: Record<number, string> }> {
   const hrefs: Record<number, string> = {}; const assets: Record<number, string> = {};
+  const logo = layers.some((L) => L.type === 'image' && L.role === 'logo') ? await knownLogo(db, clientId) : null;
+  const postPng = await post.encode();
   for (let i = 0; i < layers.length; i++) {
     const L = layers[i]; if (L.type !== 'image') continue;
     const x = Math.max(0, Math.round(L.x || 0)), y = Math.max(0, Math.round(L.y || 0));
     const w = Math.max(2, Math.min(post.width - x, Math.round(L.w || 10))), h = Math.max(2, Math.min(post.height - y, Math.round(L.h || 10)));
+    if (L.role === 'logo' && logo) { hrefs[i] = logo; continue; }
     if (L.lift) {
       try {
-        const cut = await cutLogo(await post.encode(), { x: x / post.width, y: y / post.height, width: w / post.width, height: h / post.height }, 0.01);
+        const cut = await cutLogo(postPng, { x: x / post.width, y: y / post.height, width: w / post.width, height: h / post.height }, 0.04);
         const path = `assets/${clientId}/${stamp}-${i}-${L.role || 'asset'}.png`; assets[i] = await store(db, path, cut.png); hrefs[i] = bytesToDataUrl(cut.png); continue;
       } catch { /* fall back to the raw crop */ }
     }
