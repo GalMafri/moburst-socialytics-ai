@@ -4,6 +4,7 @@ import { readRoutes } from "./routes-read";
 import { makeFakeStore, emptyData } from "./store.fake";
 import { handleRequest, type CoreDeps } from "../_shared/api/core";
 import { hashKey } from "../_shared/api/keys";
+import { decodeCursor } from "../_shared/api/cursor";
 
 const ALL = "soc_all_key";
 const SCOPED = "soc_scoped_key";
@@ -44,7 +45,7 @@ describe("read routes", () => {
     const p1 = await get("/v1/clients?limit=1");
     expect(p1.status).toBe(200);
     expect(ids(p1)).toEqual(["c-calm"]);
-    expect(p1.body.next_cursor).toBeTruthy();
+    expect(decodeCursor(p1.body.next_cursor)).toEqual({ c: OTHER.created_at, i: "c-calm" });
     const p2 = await get(`/v1/clients?limit=1&cursor=${p1.body.next_cursor}`);
     expect(ids(p2)).toEqual(["c-bader"]);
     expect(p2.body.data[0]).toMatchObject({ counts: { reports: 1, competitive_reports: 1, posts: 2, schedules: 1 }, competitors: { selected: ["Morgan & Morgan"], tracked: true }, sprout: { profiles: 1 }, last_report: { id: "rep-1" } });
