@@ -32,8 +32,9 @@ serve(async (req) => {
     // Authenticate before touching anything, including before looking the
     // client up: an unauthenticated caller learns nothing, not even whether
     // the id exists.
-    const { asCaller } = await requireStaff(req, { writeClientId: client_id });
-    const { data: isAdmin, error: adminErr } = await asCaller.rpc("is_admin");
+    const caller = await requireStaff(req, { writeClientId: client_id });
+    // The project's own server calls (the api's discard of a demo client) count as admin.
+    const { data: isAdmin, error: adminErr } = caller.viaSecret ? { data: true, error: null } : await caller.asCaller.rpc("is_admin");
     if (adminErr) throw new Error(`Access check failed: ${adminErr.message}`);
     if (!isAdmin) {
       return new Response(

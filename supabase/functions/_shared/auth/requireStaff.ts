@@ -15,15 +15,18 @@
 // company-scoped staff — apply exactly as they do to direct table access.
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { AuthzError, authzResponse, bearerToken } from "./authz.ts";
+import { AuthzError, authzResponse, bearerToken, SERVER_SECRET_HEADER, SERVER_USER_HEADER, serverActAsUser } from "./authz.ts";
+import { secretEquals } from "./secretEquals.ts";
 
 // Re-exported so all 31 importers of this path keep working unchanged.
 export { AuthzError } from "./authz.ts";
 
 export interface StaffCaller {
   userId: string;
-  /** Client bound to the caller's JWT — queries through it hit RLS as them. */
+  /** Client bound to the caller's JWT — queries through it hit RLS as them. For a server call, the service role. */
   asCaller: SupabaseClient;
+  /** True when the caller is the project itself (the api worker, a schedule) presenting the operational secret. */
+  viaSecret?: boolean;
 }
 
 /**
@@ -35,10 +38,22 @@ export async function requireStaff(
   req: Request,
   opts: { writeClientId?: string } = {},
 ): Promise<StaffCaller> {
+  const url = Deno.env.get("SUPABASE_URL")!;
+
+  // The project's own server calls: the operational secret plus the user they
+  // act for. Trusted for every client (the secret is the project's authority),
+  // so the write check below is skipped; the actor still owns what is written.
+  const presented = req.headers.get(SERVER_SECRET_HEADER);
+  if (presented && (await secretEquals(presented, Deno.env.get("SOCIALYTICS_N8N_SECRET")))) {
+    const actAs = serverActAsUser(req.headers.get(SERVER_USER_HEADER));
+    if (!actAs) throw new AuthzError(400, "Server calls must name the user they act for.");
+    const asService = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+    return { userId: actAs, asCaller: asService, viaSecret: true };
+  }
+
   const jwt = bearerToken(req.headers.get("Authorization"));
   if (!jwt) throw new AuthzError(401, "Sign-in required.");
 
-  const url = Deno.env.get("SUPABASE_URL")!;
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const asCaller = createClient(url, anonKey, {
     global: { headers: { Authorization: `Bearer ${jwt}` } },

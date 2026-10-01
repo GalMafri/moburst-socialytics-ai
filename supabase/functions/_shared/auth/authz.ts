@@ -47,3 +47,21 @@ export function authzResponse(err: unknown, corsHeaders: Record<string, string>)
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
+
+/**
+ * Server calls to staff-gated functions. The api worker (and any schedule
+ * that runs on behalf of a person) presents the project's operational secret
+ * and names the user it acts for; that user id becomes created_by on
+ * whatever the call writes. The secret alone is not enough: a server call
+ * without an actor is refused, so every row keeps a human owner.
+ */
+export const SERVER_SECRET_HEADER = "x-socialytics-secret";
+export const SERVER_USER_HEADER = "x-socialytics-user";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The user a server call acts for: a UUID, or "" when the header is missing or malformed. */
+export function serverActAsUser(header: string | null | undefined): string {
+  const raw = String(header ?? "").trim();
+  return UUID.test(raw) ? raw : "";
+}

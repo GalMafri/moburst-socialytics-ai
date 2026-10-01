@@ -8,6 +8,7 @@
 // Response: { range, previous_range, profiles, totals, previous_totals, changes,
 //             daily: [{ date, ...metrics }], by_profile: [...], top_posts: [...] }
 
+import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
 
@@ -140,7 +141,9 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     const auth = req.headers.get("Authorization") || "";
-    if (!auth.startsWith("Bearer ")) return json({ error: "Sign-in required." }, 401);
+    // The project's own server calls (the api) present the operational secret instead of a session.
+    const server = await secretEquals(req.headers.get("x-socialytics-secret"), Deno.env.get("SOCIALYTICS_N8N_SECRET"));
+    if (!server && !auth.startsWith("Bearer ")) return json({ error: "Sign-in required." }, 401);
     const body = await req.json();
     const clientId = String(body.client_id || "");
     const start = String(body.start || "");
@@ -151,14 +154,19 @@ Deno.serve(async (req) => {
     const days = Math.round((endD.getTime() - startD.getTime()) / DAY) + 1;
     if (days > 366) return json({ error: "Ranges longer than a year are not supported." }, 400);
 
-    // Access check runs as the caller: RLS decides whether they may see this client.
-    const asUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
-    const { data: who } = await asUser.auth.getUser(auth.slice(7));
-    if (!who?.user) return json({ error: "Invalid or expired session." }, 401);
-    const { data: visible } = await asUser.from("clients").select("id, name, sprout_customer_id").eq("id", clientId).maybeSingle();
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    // Access check runs as the caller: RLS decides whether they may see this client. A server call reads it directly.
+    let visible: { id: string; name: string; sprout_customer_id: string | null } | null = null;
+    if (server) {
+      visible = (await admin.from("clients").select("id, name, sprout_customer_id").eq("id", clientId).maybeSingle()).data;
+    } else {
+      const asUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
+      const { data: who } = await asUser.auth.getUser(auth.slice(7));
+      if (!who?.user) return json({ error: "Invalid or expired session." }, 401);
+      visible = (await asUser.from("clients").select("id, name, sprout_customer_id").eq("id", clientId).maybeSingle()).data;
+    }
     if (!visible) return json({ error: "Client not found or not accessible." }, 403);
 
-    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: profiles } = await admin
       .from("sprout_profiles")
       .select("sprout_profile_id, profile_name, native_name, network_type")
