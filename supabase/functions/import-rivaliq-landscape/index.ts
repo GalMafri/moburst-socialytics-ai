@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
     if (mode !== "list" && mode !== "import") return jsonResp({ error: "mode must be 'list' or 'import'" }, 400);
 
     const { userId, asCaller } = await requireStaff(req);
-    const { data: canWrite, error: writeErr } = await asCaller.rpc("can_write_client", { _client_id: client_id });
+    const { data: canWrite, error: writeErr } = caller.viaSecret ? { data: true, error: null } : await asCaller.rpc("can_write_client", { _client_id: client_id });
     if (writeErr) throw new Error(`Access check failed: ${writeErr.message}`);
     if (!canWrite) return jsonResp({ error: "You do not have access to this client." }, 403);
 

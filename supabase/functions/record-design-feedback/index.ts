@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
     if (itErr) throw new Error(itErr.message);
     if (!it) return jsonResp({ error: "Design not found" }, 404);
 
-    const { data: canWrite, error: writeErr } = await asCaller.rpc("can_write_client", { _client_id: it.client_id });
+    const { data: canWrite, error: writeErr } = caller.viaSecret ? { data: true, error: null } : await asCaller.rpc("can_write_client", { _client_id: it.client_id });
     if (writeErr) throw new Error(`Access check failed: ${writeErr.message}`);
     if (!canWrite) return jsonResp({ error: "You do not have access to this client." }, 403);
 

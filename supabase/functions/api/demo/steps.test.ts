@@ -8,7 +8,7 @@ import { DEMO_STEPS, refreshOutputs, slugify, type DemoCtx } from "./steps";
 const ok = (data: unknown, status = 200): CallResult => ({ ok: true, status, data, text: JSON.stringify(data) });
 const fail = (status: number, data: unknown): CallResult => ({ ok: false, status, data, text: JSON.stringify(data) });
 const BRAND = { primary_color: "#112233", secondary_color: "#ffffff", accent_color: "#ffcc00", font_family: "Inter", visual_style: "clean", tone_of_voice: "warm", logo_description: "wordmark" };
-const MARKDOWN = "# Brooklinen\n\nThe internet's favorite sheets. ".repeat(12);
+const MARKDOWN = "[My Wishlist](https://x.com/#w) 0\n\n# Brooklinen bedding made well\n\n" + "The internet's favorite sheets, made in family-owned mills and backed by a warranty.\n\n".repeat(3);
 
 interface Harness { t: FakeTables; ctx: DemoCtx; calls: Array<{ name: string; body: Record<string, unknown>; actAs: string | null }>; callbacks: unknown[]; job: JobRecord; clock: Date }
 
@@ -133,7 +133,8 @@ describe("brand, brief and pillars", () => {
     await upTo(h, "design");
     const c = h.t.clients[0];
     expect(c.brand_identity).toEqual(BRAND);
-    expect(c.brief_text).toMatch(/^Drafted from the website on 2026-10-01:\n\n# Brooklinen\n\nThe internet's favorite sheets/);
+    expect(c.brief_text).toMatch(/^Drafted from the website on 2026-10-01:\n\nBrooklinen bedding made well\nThe internet's favorite sheets/);
+    expect(c.brief_text).not.toContain("Wishlist");
     expect(c.content_pillars).toHaveLength(2);
     expect(c.social_keywords).toEqual(["bedding", "sheets"]);
     expect(c.pillars_source).toBe("brief");

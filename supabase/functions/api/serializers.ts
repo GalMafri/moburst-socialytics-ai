@@ -91,7 +91,7 @@ export function omitDeep<T>(value: T, keys: string[]): T {
   }
   return value;
 }
-const INTERNAL_KEYS = ["post_id", "profile_id", "sprout_profile_id", "sprout_customer_id", "company_id", "focus_company_id", "landscape_id", "landscape", "rivaliq_landscape_id", "rivaliq_company_id", "request_id", "model_path"];
+const INTERNAL_KEYS = ["post_id", "post_ids", "profile_id", "profile_ids", "sprout_profile_id", "sprout_customer_id", "company_id", "company_ids", "focus_company_id", "landscape_id", "landscape", "rivaliq_landscape_id", "rivaliq_company_id", "rivaliq_metrics", "request_id", "model_path"];
 
 const BRAND_FIELDS = ["primary_color", "secondary_color", "accent_color", "font_family", "visual_style", "tone_of_voice", "logo_description", "design_elements", "background_style"];
 function brandOut(b: BrandIdentity | null): Record<string, string | null> | null {
@@ -108,6 +108,8 @@ export function pillarsOut(v: unknown): Array<{ name: string; description: strin
 
 export const CONFIRMED_SET = ["confirmed", "analyzing", "complete"];
 const newestFirst = <T extends { created_at: string }>(rows: T[]) => [...rows].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+/** The set the reports run on: the newest confirmed one; a newer draft in progress does not hide it. */
+export const activeSet = (sets: SetWithCompetitors[]): SetWithCompetitors | null => newestFirst(sets).find((s) => CONFIRMED_SET.includes(s.status)) ?? newestFirst(sets)[0] ?? null;
 
 export function clientSetup(row: ClientRow, i: { sproutProfiles: SproutProfileRow[]; sets: SetWithCompetitors[]; designSystems: DesignSystemRow[]; schedules: number }): Setup {
   const issues: SetupIssue[] = [];
@@ -115,7 +117,7 @@ export function clientSetup(row: ClientRow, i: { sproutProfiles: SproutProfileRo
   if (!pillarsOut(row.content_pillars).length) issues.push({ kind: "pillars_missing", text: "No content pillars: derive them from the website or write them.", fix: "setup" });
   if (!strs(row.social_keywords).length) issues.push({ kind: "keywords_missing", text: "No social keywords: trend research has nothing to search for.", fix: "setup" });
   if (!i.sproutProfiles.some((p) => p.is_active !== false)) issues.push({ kind: "sprout_missing", text: "No Sprout Social profile: performance analytics and scheduled posting are not available.", fix: "setup" });
-  const set = newestFirst(i.sets)[0] ?? null;
+  const set = activeSet(i.sets);
   if (!set || !CONFIRMED_SET.includes(set.status)) issues.push({ kind: "competitors_missing", text: "No confirmed competitor set: competitive reports cannot run.", fix: "competitive" });
   if (!i.designSystems.some((d) => d.status === "approved")) issues.push({ kind: "design_system_missing", text: "No approved design system: generated posts use the brand colours and fonts only.", fix: "setup" });
   if (i.schedules <= 0) issues.push({ kind: "schedule_missing", text: "No report schedule: reports run only when started by hand.", fix: "setup" });
@@ -123,7 +125,7 @@ export function clientSetup(row: ClientRow, i: { sproutProfiles: SproutProfileRo
 }
 
 export function clientOut(row: ClientRow, extras: { sproutProfiles: SproutProfileRow[]; sets: SetWithCompetitors[]; designSystems: DesignSystemRow[]; counts: { reports: number; competitive_reports: number; posts: number; schedules: number }; lastReport: ReportRow | null; schedules?: ScheduleRow[]; detail?: boolean }): ClientOut {
-  const set = newestFirst(extras.sets)[0] ?? null;
+  const set = activeSet(extras.sets);
   const approved = extras.designSystems.filter((d) => d.status === "approved").sort((a, b) => b.version - a.version)[0] ?? newestFirst(extras.designSystems)[0] ?? null;
   const synthesis = obj(row.design_style_synthesis);
   const refs = (Array.isArray(row.harvested_design_references) ? row.harvested_design_references.length : 0) + (Array.isArray(row.design_references) ? row.design_references.length : 0);
@@ -142,7 +144,7 @@ export function clientOut(row: ClientRow, extras: { sproutProfiles: SproutProfil
     archived: !!row.archived_at, demo_job_id: row.demo_job_id, created_at: row.created_at, links: { app: `${APP_URL}/clients/${row.id}/setup`, api: `/v1/clients/${row.id}` },
   };
   if (extras.detail) {
-    out.sprout_profiles = active.map((p) => ({ name: p.profile_name ?? p.native_name, handle: p.native_name, network: p.network_type, url: p.native_link }));
+    out.sprout_profiles = active.map((p) => ({ name: p.profile_name ?? p.native_name, handle: p.native_name, network: p.network_type, url: str(p.native_link) }));
     out.competitor_sets = newestFirst(extras.sets).map(competitorSetOut);
     out.schedules = (extras.schedules ?? []).map(scheduleOut);
   }

@@ -16,13 +16,15 @@ Deno.serve(async req => {
  try {
   const body = await req.json();
   if (!body.set_id || !['preview', 'advance'].includes(body.mode)) return json({ error: 'set_id and mode are required' }, 400);
-  const { asCaller } = await requireStaff(req);
+  const caller = await requireStaff(req);
+  const { asCaller } = caller;
   db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   setId = body.set_id;
   const { data: set, error: se } = await db.from('competitor_sets').select('id,client_id,status').eq('id', setId).maybeSingle();
   if (se) throw se;
   if (!set) return json({ error: 'Competitor set not found' }, 404);
-  const { data: allowed, error: ae } = await asCaller.rpc('can_write_client', { _client_id: set.client_id });
+  // The project's own server calls (the api's demo) are trusted for every client.
+  const { data: allowed, error: ae } = caller.viaSecret ? { data: true, error: null } : await asCaller.rpc('can_write_client', { _client_id: set.client_id });
   if (ae) throw ae;
   if (!allowed) return json({ error: 'You do not have access to this client' }, 403);
   if (!['confirmed', 'complete', 'failed'].includes(set.status)) return json({ error: 'Confirm the competitor set first and wait for any active analysis to finish.' }, 409);

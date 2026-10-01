@@ -15,6 +15,7 @@ import { callEnvFromDeno, callFunction, type CallEnv, type CallResult } from "..
 import { clientHost } from "../../_shared/net/clientHost.ts";
 import { analyticsOut, CONFIRMED_SET, pillarsOut, type BrandIdentity, type ClientRow, type CompetitiveReportRow, type ReportRow, type SetWithCompetitors } from "../serializers.ts";
 import { buildOutputs, type Unplaced } from "./collect.ts";
+import { cleanSiteText } from "./site-text.ts";
 import { makeDemoDb, type DemoDb } from "./db.ts";
 
 export interface DemoCtx {
@@ -150,7 +151,7 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       const url = client.website_url ?? `https://${inputOf(job).website}`;
       const r = await ctx.call("firecrawl-scrape", { url, options: { formats: ["markdown"], onlyMainContent: true } }, actorOf(job, client));
       const d = obj(r.data) as { success?: boolean; data?: { markdown?: string; metadata?: { title?: string; description?: string } } };
-      const markdown = (d.data?.markdown ?? "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+      const markdown = cleanSiteText(d.data?.markdown ?? "");
       if (!r.ok || !d.success || markdown.length < 80) {
         const message = r.ok && d.success ? "The page carried almost no readable text." : errorOf(r, "The website could not be read");
         return { status: "failed", reason: r.ok ? "site_unreadable" : "scrape_failed", message, gaps: [gap("site_brief", "brief_missing", `No brief could be drafted for ${client.name}: ${message}`)] };

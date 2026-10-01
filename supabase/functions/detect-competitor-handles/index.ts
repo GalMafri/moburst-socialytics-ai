@@ -165,7 +165,8 @@ Deno.serve(async (req) => {
     // Staff gate FIRST — before any query, so unauthenticated callers learn
     // nothing (not even whether an id exists). The per-client write check
     // follows once the rows tell us which client this is.
-    const { asCaller } = await requireStaff(req);
+    const caller = await requireStaff(req);
+    const { asCaller } = caller;
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -182,7 +183,8 @@ Deno.serve(async (req) => {
 
     // All rows in a set share a client; company-scoped staff must be allowed
     // to write THIS client.
-    const { data: canWrite, error: writeErr } = await asCaller.rpc("can_write_client", {
+    // The project's own server calls (the api's demo) are trusted for every client.
+    const { data: canWrite, error: writeErr } = caller.viaSecret ? { data: true, error: null } : await asCaller.rpc("can_write_client", {
       _client_id: competitors[0].client_id,
     });
     if (writeErr) throw new Error(`Access check failed: ${writeErr.message}`);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE } from "./fixtures";
+import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, REPORT_DATA, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE } from "./fixtures";
 import { alertOut, APP_URL, clientOut, competitiveReportOut, competitorSetOut, designSystemOut, mediaJobOut, postOut, reportOut, scheduledPostOut, scheduleOut } from "./serializers";
 
 describe("clientOut", () => {
@@ -22,6 +22,14 @@ describe("clientOut", () => {
     expect(bare.setup.ready).toBe(false);
     expect(bare.setup.issues.map((i) => i.kind)).toEqual(["brand_identity_missing", "pillars_missing", "keywords_missing", "sprout_missing", "competitors_missing", "design_system_missing", "schedule_missing"]);
   });
+  it("reads the competitor summary from the newest confirmed set even when a newer draft is in progress", () => {
+    const draft = { ...COMPETITOR_SET, id: "set-2", status: "draft", rivaliq_landscape_id: null, confirmed_at: null, created_at: "2026-09-30T10:00:00.000Z", competitors: [] };
+    const out = clientOut(CLIENT, { sproutProfiles: [{ ...SPROUT_PROFILE, native_link: "" }], sets: [draft, { ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], designSystems: [DESIGN_SYSTEM], counts: { reports: 1, competitive_reports: 1, posts: 0, schedules: 1 }, lastReport: null, detail: true });
+    expect(out.competitors).toEqual({ set_status: "confirmed", selected: ["Morgan & Morgan"], tracked: true });
+    expect(out.setup.issues.map((i) => i.kind)).not.toContain("competitors_missing");
+    expect(out.competitor_sets?.map((s) => s.id)).toEqual(["set-2", "set-1"]);
+    expect(out.sprout_profiles?.[0].url).toBeNull();
+  });
   it("adds detail blocks on request without Sprout ids", () => {
     const d = clientOut(CLIENT, { sproutProfiles: [SPROUT_PROFILE], sets: [{ ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], designSystems: [DESIGN_SYSTEM], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null, schedules: [SCHEDULE], detail: true });
     expect(d.sprout_profiles).toEqual([{ name: "Bader Law", handle: "baderlaw", network: "instagram", url: "https://instagram.com/baderlaw" }]);
@@ -40,6 +48,9 @@ describe("reportOut", () => {
     expect(d.calendar?.[0].posts[0]).toMatchObject({ platform: "Instagram", copy: "Know your rights after a crash." });
     expect(d.performance?.overall_totals).toEqual({ impressions: 120000 });
     expect(JSON.stringify(d.performance)).not.toContain("sp-post-1");
+    const withIds = reportOut({ ...REPORT, report_data: { ...REPORT_DATA, sprout_performance: { platform_metrics: { TikTok: { profile_ids: [123456], impressions: 5 } }, platform_breakdown: [{ network: "tiktok", profile_ids: [123456] }] } } }, { detail: true });
+    expect(JSON.stringify(withIds.performance)).not.toMatch(/profile_ids|123456/);
+    expect(withIds.performance).toEqual({ platform_metrics: { TikTok: { impressions: 5 } }, platform_breakdown: [{ network: "tiktok" }] });
     expect(d.trends?.tiktok.posts).toBe(1);
   });
   it("tolerates a failed report whose data is only an error", () => {

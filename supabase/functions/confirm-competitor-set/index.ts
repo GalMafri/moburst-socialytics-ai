@@ -31,7 +31,8 @@ Deno.serve(async (req) => {
 
     // Staff gate FIRST — an unauthenticated caller must not learn whether a
     // set id exists. Per-client authorization follows once the row is loaded.
-    const { userId, asCaller } = await requireStaff(req);
+    const caller = await requireStaff(req);
+    const { userId, asCaller } = caller;
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -45,7 +46,8 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (setErr || !set) return jsonResp({ error: "Set not found" }, 404);
 
-    const { data: canWrite, error: writeErr } = await asCaller.rpc("can_write_client", {
+    // The project's own server calls (the api's demo) are trusted for every client.
+    const { data: canWrite, error: writeErr } = caller.viaSecret ? { data: true, error: null } : await asCaller.rpc("can_write_client", {
       _client_id: set.client_id,
     });
     if (writeErr) throw new Error(`Access check failed: ${writeErr.message}`);
