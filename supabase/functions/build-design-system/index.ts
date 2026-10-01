@@ -11,7 +11,7 @@ import { secretEquals } from '../_shared/auth/secretEquals.ts';
 import { referencesFor } from '../_shared/design-prompts/designRefs.ts';
 import { sourceImage } from '../_shared/design-prompts/sourceImage.ts';
 import { BUILD_INSTRUCTIONS, designSystemSchema, normaliseDesignSystem, resolvedFamily } from '../_shared/design-system/build.ts';
-import { cutLogo } from '../_shared/design-system/logoAsset.ts';
+import { bestLogoCut } from '../_shared/design-system/logoAsset.ts';
 import type { DesignSystem, FormatKey } from '../_shared/design-system/types.ts';
 import { renderRemote } from '../_shared/design-system/renderClient.ts';
 import { Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
@@ -41,16 +41,22 @@ async function readSystem(apiKey: string, images: any[], clientName: string) {
   return draft;
 }
 
-/** The logo as a transparent asset: cut from the reference the read named, else the client's stored logo file. */
+/** The logo as a transparent asset: the cleanest cut among the candidate posts the read named, else the client's stored logo file. */
 async function logoAsset(db: any, clientId: string, version: number, paths: string[], draft: any, logoUrl: string | null): Promise<{ path: string; aspect: number; source: string }> {
   const stamp = `logos/${clientId}/v${version}.png`;
-  const box = draft?.logo?.box, index = draft?.logo?.reference_index;
-  if (box && Number.isInteger(index) && paths[index] && box.width > 0.02 && box.height > 0.01) {
+  const candidates: Array<{ bytes: Uint8Array; box: any; label: string }> = [];
+  for (const c of (draft?.logo?.candidates || []).slice(0, 3)) {
+    const box = c?.box, index = c?.reference_index;
+    if (!box || !Number.isInteger(index) || !paths[index] || !(box.width > 0.02) || !(box.height > 0.01)) continue;
+    const { data, error } = await db.storage.from('design-references').download(paths[index]);
+    if (error || !data) continue;
+    candidates.push({ bytes: new Uint8Array(await data.arrayBuffer()), box, label: `reference ${index}` });
+  }
+  if (candidates.length) {
     try {
-      const { data, error } = await db.storage.from('design-references').download(paths[index]);
-      if (error || !data) throw new Error('reference missing');
-      const cut = await cutLogo(new Uint8Array(await data.arrayBuffer()), box);
-      if (cut.width >= 60 && cut.width / cut.height >= 1.2) { await upload(db, stamp, cut.png, 'image/png'); return { path: stamp, aspect: cut.width / cut.height, source: `reference ${index}` }; }
+      const cut = await bestLogoCut(candidates);
+      await upload(db, stamp, cut.png, 'image/png');
+      return { path: stamp, aspect: cut.width / cut.height, source: `${cut.label} (noise ${cut.noise.toFixed(2)})` };
     } catch (e) { console.warn('logo cut failed, falling back', e instanceof Error ? e.message : e); }
   }
   if (logoUrl) {

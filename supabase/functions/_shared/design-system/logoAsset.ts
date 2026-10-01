@@ -5,9 +5,17 @@ import { Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
 
 export interface LogoBox { x: number; y: number; width: number; height: number }
 
-export async function cutLogo(sourceBytes: Uint8Array, box: LogoBox): Promise<{ png: Uint8Array; width: number; height: number }> {
+export interface LogoCut {
+  png: Uint8Array; width: number; height: number;
+  /** Share of kept ink that lies outside the measured box: light rays, props or text the margin caught. */
+  noise: number;
+  /** Ink touching the crop edge: the box plus margin cut through the lockup. */
+  clipped: boolean;
+}
+
+/** Cut once with the given margin around the measured box (fraction of the source image). */
+export async function cutLogo(sourceBytes: Uint8Array, box: LogoBox, m = 0.08): Promise<LogoCut> {
   const src = await Image.decode(sourceBytes);
-  const m = 0.06;
   const x0 = Math.max(0, Math.round((box.x - m) * src.width)), y0 = Math.max(0, Math.round((box.y - m) * src.height));
   const x1 = Math.min(src.width, Math.round((box.x + box.width + m) * src.width)), y1 = Math.min(src.height, Math.round((box.y + box.height + m) * src.height));
   const crop = src.clone().crop(x0, y0, Math.max(2, x1 - x0), Math.max(2, y1 - y0));
@@ -53,7 +61,34 @@ export async function cutLogo(sourceBytes: Uint8Array, box: LogoBox): Promise<{ 
     if (alpha[at] > 16) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
   }
   if (maxX < 0) throw new Error('No logo ink was found inside the measured box.');
+  let ink = 0, outside = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (alpha[y * W + x] <= 16) continue;
+    ink++;
+    if (x < core.left || x > core.right || y < core.top || y > core.bottom) outside++;
+  }
+  const clipped = minX === 0 || minY === 0 || maxX === W - 1 || maxY === H - 1;
   const out = new Image(maxX - minX + 1, maxY - minY + 1);
   for (let y = minY; y <= maxY; y++) for (let x = minX; x <= maxX; x++) { const c = px(x, y); out.setPixelAt(x - minX + 1, y - minY + 1, (((c >>> 8) << 8) | alpha[y * W + x]) >>> 0); }
-  return { png: await out.encode(), width: out.width, height: out.height };
+  return { png: await out.encode(), width: out.width, height: out.height, noise: ink ? outside / ink : 1, clipped };
+}
+
+/**
+ * The cleanest cut among several candidate boxes: each is cut, a cut that
+ * touches its crop edge is retried with a wider margin, and the one with
+ * the least ink outside its measured box wins. A streak of light or a prop
+ * crossing one post's logo then loses to a calmer post.
+ */
+export async function bestLogoCut(candidates: Array<{ bytes: Uint8Array; box: LogoBox; label: string }>): Promise<LogoCut & { label: string }> {
+  const cuts: Array<LogoCut & { label: string }> = [];
+  for (const c of candidates) {
+    try {
+      let cut = await cutLogo(c.bytes, c.box, 0.08);
+      if (cut.clipped) cut = await cutLogo(c.bytes, c.box, 0.14);
+      if (cut.width >= 60 && cut.width / cut.height >= 1.2) cuts.push({ ...cut, label: c.label });
+    } catch (e) { console.warn('[logo] candidate failed', c.label, e instanceof Error ? e.message : e); }
+  }
+  if (!cuts.length) throw new Error('No candidate produced a usable logo cut.');
+  cuts.sort((a, b) => (a.noise + (a.clipped ? 0.5 : 0)) - (b.noise + (b.clipped ? 0.5 : 0)));
+  return cuts[0];
 }
