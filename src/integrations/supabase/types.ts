@@ -14,6 +14,133 @@ export type Database = {
   }
   public: {
     Tables: {
+      api_keys: {
+        Row: {
+          client_ids: string[] | null
+          company_slugs: string[] | null
+          created_at: string
+          created_by: string | null
+          expires_at: string | null
+          id: string
+          key_hash: string
+          key_prefix: string
+          last_used_at: string | null
+          name: string
+          note: string | null
+          rate_limit_per_minute: number
+          revoked_at: string | null
+          scopes: string[]
+        }
+        Insert: {
+          client_ids?: string[] | null
+          company_slugs?: string[] | null
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          key_hash: string
+          key_prefix: string
+          last_used_at?: string | null
+          name: string
+          note?: string | null
+          rate_limit_per_minute?: number
+          revoked_at?: string | null
+          scopes?: string[]
+        }
+        Update: {
+          client_ids?: string[] | null
+          company_slugs?: string[] | null
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          key_hash?: string
+          key_prefix?: string
+          last_used_at?: string | null
+          name?: string
+          note?: string | null
+          rate_limit_per_minute?: number
+          revoked_at?: string | null
+          scopes?: string[]
+        }
+        Relationships: []
+      }
+      api_rate_buckets: {
+        Row: {
+          count: number
+          key_id: string
+          minute: string
+        }
+        Insert: {
+          count?: number
+          key_id: string
+          minute: string
+        }
+        Update: {
+          count?: number
+          key_id?: string
+          minute?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "api_rate_buckets_key_id_fkey"
+            columns: ["key_id"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      api_requests: {
+        Row: {
+          client_id: string | null
+          created_at: string
+          duration_ms: number | null
+          error_code: string | null
+          id: number
+          ip: string | null
+          job_id: string | null
+          key_id: string | null
+          method: string
+          path: string
+          status: number
+        }
+        Insert: {
+          client_id?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          error_code?: string | null
+          id?: number
+          ip?: string | null
+          job_id?: string | null
+          key_id?: string | null
+          method: string
+          path: string
+          status: number
+        }
+        Update: {
+          client_id?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          error_code?: string | null
+          id?: number
+          ip?: string | null
+          job_id?: string | null
+          key_id?: string | null
+          method?: string
+          path?: string
+          status?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "api_requests_key_id_fkey"
+            columns: ["key_id"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       app_events: {
         Row: {
           client_id: string | null
@@ -245,6 +372,7 @@ export type Database = {
           content_pillars: Json | null
           created_at: string | null
           created_by: string | null
+          demo_job_id: string | null
           design_references: Json | null
           design_refs_harvested_at: string | null
           design_style_synthesis: Json | null
@@ -282,6 +410,7 @@ export type Database = {
           content_pillars?: Json | null
           created_at?: string | null
           created_by?: string | null
+          demo_job_id?: string | null
           design_references?: Json | null
           design_refs_harvested_at?: string | null
           design_style_synthesis?: Json | null
@@ -319,6 +448,7 @@ export type Database = {
           content_pillars?: Json | null
           created_at?: string | null
           created_by?: string | null
+          demo_job_id?: string | null
           design_references?: Json | null
           design_refs_harvested_at?: string | null
           design_style_synthesis?: Json | null
@@ -461,6 +591,7 @@ export type Database = {
           created_by: string | null
           date_range_end: string | null
           date_range_start: string | null
+          demo_job_id: string | null
           duration_minutes: number | null
           gamma_url: string | null
           id: string
@@ -474,6 +605,7 @@ export type Database = {
           created_by?: string | null
           date_range_end?: string | null
           date_range_start?: string | null
+          demo_job_id?: string | null
           duration_minutes?: number | null
           gamma_url?: string | null
           id?: string
@@ -487,6 +619,7 @@ export type Database = {
           created_by?: string | null
           date_range_end?: string | null
           date_range_start?: string | null
+          demo_job_id?: string | null
           duration_minutes?: number | null
           gamma_url?: string | null
           id?: string
@@ -574,6 +707,7 @@ export type Database = {
           confirmed_at: string | null
           confirmed_by: string | null
           created_at: string
+          demo_job_id: string | null
           generated_by: string | null
           id: string
           notes: string | null
@@ -587,6 +721,7 @@ export type Database = {
           confirmed_at?: string | null
           confirmed_by?: string | null
           created_at?: string
+          demo_job_id?: string | null
           generated_by?: string | null
           id?: string
           notes?: string | null
@@ -600,6 +735,7 @@ export type Database = {
           confirmed_at?: string | null
           confirmed_by?: string | null
           created_at?: string
+          demo_job_id?: string | null
           generated_by?: string | null
           id?: string
           notes?: string | null
@@ -724,6 +860,86 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      demo_jobs: {
+        Row: {
+          callback_status: Json | null
+          callback_url: string | null
+          client_id: string | null
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          gaps: Json
+          id: string
+          idempotency_key: string | null
+          input: Json
+          key_id: string | null
+          lease_until: string | null
+          next_check_at: string | null
+          outputs: Json | null
+          requester: Json | null
+          run_ids: string[]
+          started_at: string | null
+          status: string
+          steps: Json
+          tool: string
+          updated_at: string
+        }
+        Insert: {
+          callback_status?: Json | null
+          callback_url?: string | null
+          client_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          gaps?: Json
+          id?: string
+          idempotency_key?: string | null
+          input?: Json
+          key_id?: string | null
+          lease_until?: string | null
+          next_check_at?: string | null
+          outputs?: Json | null
+          requester?: Json | null
+          run_ids?: string[]
+          started_at?: string | null
+          status?: string
+          steps?: Json
+          tool?: string
+          updated_at?: string
+        }
+        Update: {
+          callback_status?: Json | null
+          callback_url?: string | null
+          client_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          gaps?: Json
+          id?: string
+          idempotency_key?: string | null
+          input?: Json
+          key_id?: string | null
+          lease_until?: string | null
+          next_check_at?: string | null
+          outputs?: Json | null
+          requester?: Json | null
+          run_ids?: string[]
+          started_at?: string | null
+          status?: string
+          steps?: Json
+          tool?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "demo_jobs_key_id_fkey"
+            columns: ["key_id"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
             referencedColumns: ["id"]
           },
         ]
@@ -922,6 +1138,7 @@ export type Database = {
           client_id: string
           created_at: string
           created_by: string | null
+          demo_job_id: string | null
           error: string | null
           id: string
           input: Json
@@ -941,6 +1158,7 @@ export type Database = {
           client_id: string
           created_at?: string
           created_by?: string | null
+          demo_job_id?: string | null
           error?: string | null
           id?: string
           input?: Json
@@ -960,6 +1178,7 @@ export type Database = {
           client_id?: string
           created_at?: string
           created_by?: string | null
+          demo_job_id?: string | null
           error?: string | null
           id?: string
           input?: Json
@@ -1003,6 +1222,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           cta: string | null
+          demo_job_id: string | null
           finishing: string
           format: string | null
           hashtags: string[] | null
@@ -1034,6 +1254,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           cta?: string | null
+          demo_job_id?: string | null
           finishing?: string
           format?: string | null
           hashtags?: string[] | null
@@ -1065,6 +1286,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           cta?: string | null
+          demo_job_id?: string | null
           finishing?: string
           format?: string | null
           hashtags?: string[] | null
@@ -1254,6 +1476,7 @@ export type Database = {
           created_by: string | null
           date_range_end: string | null
           date_range_start: string | null
+          demo_job_id: string | null
           duration_minutes: number | null
           gamma_url: string | null
           id: string
@@ -1267,6 +1490,7 @@ export type Database = {
           created_by?: string | null
           date_range_end?: string | null
           date_range_start?: string | null
+          demo_job_id?: string | null
           duration_minutes?: number | null
           gamma_url?: string | null
           id?: string
@@ -1280,6 +1504,7 @@ export type Database = {
           created_by?: string | null
           date_range_end?: string | null
           date_range_start?: string | null
+          demo_job_id?: string | null
           duration_minutes?: number | null
           gamma_url?: string | null
           id?: string
@@ -1621,6 +1846,22 @@ export type Database = {
       }
     }
     Functions: {
+      api_key_touch: {
+        Args: { p_key_hash: string }
+        Returns: {
+          client_ids: string[]
+          company_slugs: string[]
+          expires_at: string
+          id: string
+          key_prefix: string
+          minute_count: number
+          name: string
+          rate_limit_per_minute: number
+          revoked_at: string
+          scopes: string[]
+        }[]
+      }
+      api_purge_audit: { Args: { p_days?: number }; Returns: number }
       attribution_health: {
         Args: never
         Returns: {
@@ -1637,6 +1878,38 @@ export type Database = {
         Returns: boolean
       }
       claim_rivaliq_request: { Args: { request_token: string }; Returns: Json }
+      demo_jobs_lease: {
+        Args: { p_lease_seconds?: number; p_limit?: number }
+        Returns: {
+          callback_status: Json | null
+          callback_url: string | null
+          client_id: string | null
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          gaps: Json
+          id: string
+          idempotency_key: string | null
+          input: Json
+          key_id: string | null
+          lease_until: string | null
+          next_check_at: string | null
+          outputs: Json | null
+          requester: Json | null
+          run_ids: string[]
+          started_at: string | null
+          status: string
+          steps: Json
+          tool: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "demo_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       freeze_quarter: {
         Args: { p_quarter: string }
         Returns: {
