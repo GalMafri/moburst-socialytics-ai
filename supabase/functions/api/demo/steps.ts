@@ -391,7 +391,7 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       const id = obj(img.data) as { image_url?: string; job_id?: string };
       if (img.status === 202 && id.job_id) return { status: "done", outcome: "image_pending", data: { post_id: post.id, platform: brief.platform, source: brief.source, media_job_id: id.job_id }, gaps: [gap("post", "post_image_pending", "The post's image is still rendering; it appears on the post when done.")] };
       if (!img.ok || !str(id.image_url)) return copyOnly(errorOf(img, "the image service did not answer") + ".");
-      const up = await ctx.call("upload-generated-media", { client_id: client.id, media_data: id.image_url, media_type: "image", file_name: `demo-${job.id}.png` }, actor);
+      const up = await ctx.call("upload-generated-media", { client_id: client.id, media_data: id.image_url, media_type: "image", file_name: `demo-${job.id}` }, actor);
       const url = str(obj(up.data).url);
       if (!up.ok || !url) return copyOnly(errorOf(up, "the image could not be stored") + ".");
       await ctx.db.updatePost(post.id, { media_urls: [url] });
