@@ -15,7 +15,7 @@ import { Faces, renderLayers, type Spec } from '../_shared/render/layers.ts';
 import { fontBytes } from '../_shared/render/fonts.ts';
 import { bytesToDataUrl } from '../_shared/render/hero.ts';
 import { similarity } from '../_shared/design-system/compare.ts';
-import { matchFont } from '../_shared/design-system/fontMatch.ts';
+import { matchFontBlock } from '../_shared/design-system/fontMatch.ts';
 import { cutLogo } from '../_shared/design-system/logoAsset.ts';
 import { SPEC_TOOL, proposeInstructions, refineInstructions, toSpec } from '../_shared/design-system/reader.ts';
 
@@ -93,10 +93,13 @@ Deno.serve(async (req) => {
 
     if (body.step === 'fonts') {
       // body.text_layers: [{index, text, weight, x,y,w,h}] from the kept spec
+      // body.text_layers: the read's text layers (x, y, w, h, size, lineHeight, align, weight, lines) with their index
       const out: any[] = [];
-      for (const t of (body.text_layers || []).slice(0, 4)) {
-        const crop = post.clone().crop(Math.max(0, Math.round(t.x)), Math.max(0, Math.round(t.y)), Math.max(2, Math.round(t.w)), Math.max(2, Math.round(t.h)));
-        const matches = await matchFont(db, crop, String(t.text || '').slice(0, 40), t.weight >= 600 ? 700 : 400, body.families);
+      for (const t of (body.text_layers || []).slice(0, 3)) {
+        const x = Math.max(0, Math.round(t.x || 0)), y = Math.max(0, Math.round(t.y || 0));
+        const w = Math.max(2, Math.min(post.width - x, Math.round(t.w || 10))), h = Math.max(2, Math.min(post.height - y, Math.round(t.h || 10)));
+        const crop = post.clone().crop(x, y, w, h);
+        const matches = await matchFontBlock(db, crop, { lines: Array.isArray(t.lines) ? t.lines : [], size: Number(t.size) || 40, lineHeight: Number(t.lineHeight) || 1.2, align: t.align, weight: t.weight }, body.families);
         out.push({ index: t.index, matches: matches.slice(0, 5) });
       }
       return json({ fonts: out });

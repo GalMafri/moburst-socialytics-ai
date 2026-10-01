@@ -85,10 +85,10 @@ async function step(db: any, clientId: string, state: { id: string; build: Build
   const best = c.best;
   if (best.score < 0.45) { b.rejected.push({ path: c.path, score: best.score }); b.current = null; await saveBuild(db, state.id, b); return b; }
   const texts = best.layers.map((L: any, i: number) => ({ L, i })).filter(({ L }: any) => L.type === 'text' && Array.isArray(L.lines) && L.lines.length).sort((a: any, b2: any) => (b2.L.size || 0) - (a.L.size || 0)).slice(0, 2);
-  const fontQuery = texts.map(({ L, i }: any) => { const first = (Array.isArray(L.lines[0]) ? L.lines[0] : [L.lines[0]]).map((s: any) => s?.text || '').join(''); const lineH = (L.size || 40) * 1.1; return { index: i, text: first.slice(0, 32), weight: (L.lines[0]?.[0]?.weight || L.weight || 400), x: L.x, y: L.y, w: Math.min(L.w || c.width, c.width - (L.x || 0)), h: lineH }; });
+  const fontQuery = texts.map(({ L, i }: any) => ({ index: i, x: L.x, y: L.y, w: Math.min(L.w || c.width, c.width - (L.x || 0)), h: L.h || (L.size || 40) * 1.3 * L.lines.length, size: L.size, lineHeight: L.lineHeight, align: L.align, weight: L.weight, lines: L.lines }));
   let faceByLayer: Record<number, string> = {};
   if (fontQuery.length) {
-    try { const f = await readRemote({ client_id: clientId, path: c.path, step: 'fonts', text_layers: fontQuery }); for (const r of f.fonts || []) { const top = r.matches?.[0]; if (top && top.score >= 0.4) { faceByLayer[r.index] = top.family; b.faces[top.family] = (b.faces[top.family] || 0) + 1; } } } catch (e) { console.warn('font match failed', e instanceof Error ? e.message : e); }
+    try { const f = await readRemote({ client_id: clientId, path: c.path, step: 'fonts', text_layers: fontQuery }); for (const r of f.fonts || []) { const top = r.matches?.[0]; if (top && top.score >= 0.3) { faceByLayer[r.index] = top.family; b.faces[top.family] = (b.faces[top.family] || 0) + 1; } } } catch (e) { console.warn('font match failed', e instanceof Error ? e.message : e); }
   }
   const id = `t${b.templates.length + 1}-${c.path.split('/').pop()!.replace(/[^a-z0-9]/gi, '').slice(7, 15)}`;
   const t = templateFromRead({ id, name: `Layout ${b.templates.length + 1}`, source_path: c.path, score: best.score, width: c.width, height: c.height, layers: best.layers, assetUrls: best.assets, logoUrl: b.logo_url, faces: facesOf(b) });
