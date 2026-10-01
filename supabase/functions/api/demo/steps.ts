@@ -226,7 +226,7 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       const client = await clientOf(job, ctx);
       const actor = actorOf(job, client);
       const requested = inputOf(job).competitors;
-      let sets = await ctx.db.setsOf(client.id);
+      const sets = await ctx.db.setsOf(client.id);
       const mine = sets.find((s) => s.demo_job_id === job.id);
       const other = sets.find((s) => CONFIRMED_SET.includes(s.status) && s.demo_job_id !== job.id);
       const selectedNames = (s: SetWithCompetitors) => s.competitors.filter((c) => c.is_selected).sort((a, b) => (a.selected_rank ?? 99) - (b.selected_rank ?? 99)).map((c) => c.name);

@@ -81,14 +81,14 @@ export default function Settings() {
 
   useEffect(() => {
     if (settings) {
-      const webhook = settings.find((s: any) => s.key === "n8n_webhook_url");
+      const webhook = settings.find((s: { key: string; value: string }) => s.key === "n8n_webhook_url");
       if (webhook) setWebhookUrl(webhook.value);
     }
   }, [settings]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const existing = settings?.find((s: any) => s.key === "n8n_webhook_url");
+      const existing = settings?.find((s: { key: string; value: string }) => s.key === "n8n_webhook_url");
       if (existing) {
         const { error } = await supabase.from("app_settings").update({ value: webhookUrl }).eq("key", "n8n_webhook_url");
         if (error) throw error;
@@ -101,7 +101,7 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ["app-settings"] });
       toast({ title: "Settings saved" });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
