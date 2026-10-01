@@ -47,7 +47,7 @@ const routes = socialyticsRoutes({
     const r = await callFunction("sprout-analytics", { client_id: clientId, start, end }, env);
     return { ok: r.ok, status: r.status, data: r.data };
   },
-  jobs, kickWorker: async () => { await callFunction("api/internal/worker", { kick: true }, env); }, discard: (job) => discardJob(job, { db, call: (name, body) => callFunction(name, body, { ...env, actAs: (job.requester as { id?: string } | null)?.id ?? null }) }),
+  jobs, kickWorker: async () => { await callFunction("api/internal/worker", { kick: true }, env); }, discard: (job) => discardJob(job, { db, call: (name, body, actAs) => callFunction(name, body, { ...env, actAs }) }),
   capacity: 3, stepNames: DEMO_STEPS.map((s) => s.name), keys, serverUrl, refresh: (job) => refreshOutputs(job, ctx),
   extraRoutes: [workerRoute({ jobs, ctx, steps: DEMO_STEPS })],
 });

@@ -42,7 +42,7 @@ describe("discardJob", () => {
     const del = (table: string) => ({ delete: () => ({ eq: (col: string, val: unknown) => ({ select: async () => { calls.push({ table, op: "delete", filter: { [col]: val } }); return { data: [{ id: 1 }, { id: 2 }].slice(0, table === "reports" || table === "competitive_reports" ? 1 : 2), error: null }; } }) }) });
     const db = {
       from: (table: string) => table === "clients"
-        ? { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: "c-1", name: "Brooklinen", demo_job_id: clientDemoJob }, error: null }) }) }) }
+        ? { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: "c-1", name: "Brooklinen", demo_job_id: clientDemoJob, created_by: "u-creator" }, error: null }) }) }) }
         : { ...del(table) },
     };
     return { db, calls };
@@ -50,8 +50,14 @@ describe("discardJob", () => {
   it("deletes a client the job created through delete-client", async () => {
     const { db, calls } = fakeDb("job-1");
     const called: Array<{ name: string; body: unknown }> = [];
-    const r = await discardJob(job("job-1", { client_id: "c-1", status: "completed" }), { db: db as never, call: async (name, body) => { called.push({ name, body }); return { ok: true, status: 200, data: {}, text: "{}" }; } });
-    expect(called).toEqual([{ name: "delete-client", body: { client_id: "c-1" } }]);
+    const j = job("job-1", { client_id: "c-1", status: "completed" });
+    j.steps = [{ name: "resolve_client", status: "done", data: { acted_as: "u-actor" } }];
+    const r = await discardJob(j, { db: db as never, call: async (name, body, actAs) => { called.push({ name, body, actAs }); return { ok: true, status: 200, data: {}, text: "{}" }; } });
+    expect(called).toEqual([{ name: "delete-client", body: { client_id: "c-1" }, actAs: "u-actor" }]);
+    // Without the resolve step's record, the client's creator is the actor.
+    const again: unknown[] = [];
+    await discardJob(job("job-1", { client_id: "c-1", status: "completed" }), { db: db as never, call: async (_n, _b, actAs) => { again.push(actAs); return { ok: true, status: 200, data: {}, text: "{}" }; } });
+    expect(again).toEqual(["u-creator"]);
     expect(r.removed.client).toBe(true);
     expect(calls).toEqual([]);
   });

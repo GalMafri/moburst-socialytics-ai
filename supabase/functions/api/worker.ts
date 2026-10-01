@@ -70,13 +70,15 @@ export function workerRoute<C>(deps: { jobs: { lease(limit: number, seconds: num
  * a client that existed before keeps its place and only the rows flagged
  * with the job go, children before parents.
  */
-export async function discardJob(job: JobRecord, deps: { db: SupabaseClient; call(name: string, body: unknown): Promise<CallResult> }): Promise<DiscardResult> {
+export async function discardJob(job: JobRecord, deps: { db: SupabaseClient; call(name: string, body: unknown, actAs: string | null): Promise<CallResult> }): Promise<DiscardResult> {
   const removed = { client: false, competitor_sets: 0, reports: 0, competitive_reports: 0, posts: 0, media_jobs: 0 };
   if (job.client_id) {
-    const { data: client } = await deps.db.from("clients").select("id, name, demo_job_id").eq("id", job.client_id).maybeSingle();
-    const c = client as { id: string; name: string; demo_job_id: string | null } | null;
+    const { data: client } = await deps.db.from("clients").select("id, name, demo_job_id, created_by").eq("id", job.client_id).maybeSingle();
+    const c = client as { id: string; name: string; demo_job_id: string | null; created_by: string | null } | null;
     if (c && c.demo_job_id === job.id) {
-      const r = await deps.call("delete-client", { client_id: c.id });
+      // The delete runs as the user the demo acted for (a Socialytics user), never as the requester's own id.
+      const resolved = job.steps.find((s) => s.name === "resolve_client")?.data as { acted_as?: string } | undefined;
+      const r = await deps.call("delete-client", { client_id: c.id }, resolved?.acted_as ?? c.created_by ?? null);
       if (!r.ok) throw new Error(`delete-client answered ${r.status}: ${r.text.slice(0, 200)}`);
       removed.client = true;
       return { removed };
