@@ -37,6 +37,13 @@ posts are client-facing agency work.
   (the public API's worker cron sends the same value as `X-Cron-Secret`).
 - Crons: `advance-creative-plans` every two minutes; the public API adds
   `api-demo-worker` (every minute) and `api-audit-purge` (03:15 UTC).
+  Scheduled reports and competitor feeds (since 2026-10-06):
+  `scheduled-reports-enqueue` (07:15 UTC, pure SQL
+  `enqueue_scheduled_report_jobs()`) and `scheduled-jobs-worker` (every
+  minute, `run-scheduled-jobs`). n8n "Socialytics - Scheduled Jobs Check"
+  reads `run-scheduled-jobs {"mode":"status"}` at 08:30 UTC and emails through
+  the error workflow when anything needs a person. Design:
+  `docs/superpowers/specs/2026-10-06-scheduled-report-queue-design.md`.
 
 ## Test frameworks and commands
 
@@ -66,6 +73,8 @@ posts are client-facing agency work.
 
 - No client-facing surface shows an internal operational note.
 - A report run never leaves a schedule or a creative plan stuck.
+- A schedule occurrence is dispatched at most once (scheduled_jobs dedupe key
+  plus the posting phase), and every job that cannot finish is alerted daily.
 - Generated media carries the client's brand tokens, never another client's.
 - A client-scoped key or user never sees another company's rows.
 
