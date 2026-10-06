@@ -170,7 +170,7 @@ async function reviewJob(db: any, creative: any, index: number, job: Job, design
   const candidate = designed ? await urlToDataUrl((await preparedHero(db, creative, job)).hero_url) : await reviewCandidate(db, creative, job);
   // A whole post is judged with its approved words: exact text, one authentic logo, legible, on brand.
   const expectedText = designed ? '' : wholePostExpectedText(creative.plan, index, creative.mode);
-  const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : wholePostQuestion(expectedText, Boolean(logoUrl), frame.subject) });
+  const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : wholePostQuestion(expectedText, Boolean(logoUrl), JSON.stringify({ hero: frame.subject, composition: frame.composition, hierarchy: frame.layout ? { headline: frame.layout.headline_position, hero: frame.layout.subject_position, logo: frame.layout.logo_position } : undefined })) });
   const dirty = verdictIsDirty(verdict, { expectNoText: Boolean(designed) });
   if (verdict.skipped && !designed) {
     // A whole post is never approved unreviewed: leave the job awaiting review so the next tick tries again,

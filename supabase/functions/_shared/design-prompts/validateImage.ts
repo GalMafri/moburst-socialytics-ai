@@ -112,11 +112,13 @@ export async function validateDesignImage(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-5-5",
-        max_tokens: 1000,
+        model: opts.creative ? "claude-opus-5-5" : "claude-sonnet-4-6",
+        ...(opts.creative ? { output_config: { effort: "medium" } } : {}),
+        max_tokens: opts.creative ? 6000 : 1000,
         ...(opts.creative ? {
-          tools:[{name:'record_review',description:'Record the observed creative defects.',input_schema:{type:'object',properties:{has_hex_codes:{type:'boolean'},has_logo:{type:'boolean'},has_garbled_text:{type:'boolean'},has_text:{type:'boolean'},off_brand:{type:'boolean'},has_unapproved_text:{type:'boolean'},reason:{type:'string'}},required:['has_hex_codes','has_logo','has_garbled_text','has_text','off_brand','has_unapproved_text','reason'],additionalProperties:false}}],
-          tool_choice:{type:'tool',name:'record_review'},
+          // Current models reject a forced tool choice; the brief asks for the call and strict mode keeps the arguments valid.
+          tools:[{name:'record_review',description:'Record the review verdict. Call it exactly once with every field.',strict:true,input_schema:{type:'object',properties:{has_hex_codes:{type:'boolean'},has_logo:{type:'boolean'},has_garbled_text:{type:'boolean'},has_text:{type:'boolean'},off_brand:{type:'boolean'},has_unapproved_text:{type:'boolean'},reason:{type:'string'}},required:['has_hex_codes','has_logo','has_garbled_text','has_text','off_brand','has_unapproved_text','reason'],additionalProperties:false}}],
+          tool_choice:{type:'auto'},
         } : {}),
         messages: [
           {
@@ -126,7 +128,7 @@ export async function validateDesignImage(
               ...(opts.referenceImage ? [{type: "text", text: "SOURCE: the client's published brand reference, compare design system only."}, opts.referenceImage, {type:"text",text:"CANDIDATE: the generated design to review."}] : []),
               {type:"text",text:"CANDIDATE: review this new design."},
               { type: "image", source: { type: "base64", media_type: parts.mimeType, data: parts.base64 } },
-              { type: "text", text: opts.question ?? (opts.creative ? creativeReferenceQuestion(opts.expectedText, opts.video, opts.creativeDirection) : opts.referenceImage ? referenceQuestion(opts.expectedText) : questionFor(opts.avoid, opts.expectedText)) },
+              { type: "text", text: (opts.question ?? (opts.creative ? creativeReferenceQuestion(opts.expectedText, opts.video, opts.creativeDirection) : opts.referenceImage ? referenceQuestion(opts.expectedText) : questionFor(opts.avoid, opts.expectedText))) + (opts.creative ? "\n\nRecord your verdict by calling record_review exactly once, with every field." : "") },
             ],
           },
         ],
@@ -142,7 +144,8 @@ export async function validateDesignImage(
 
     const result = await response.json();
     const structured=result.content?.find((c:any)=>c.type==='tool_use'&&c.name==='record_review');
-    const verdict=parseDesignVerdict(structured ? JSON.stringify(structured.input) : String(result.content?.[0]?.text || ''));
+    const textBlock=result.content?.find((c:any)=>c.type==='text'&&typeof c.text==='string'&&c.text.includes('{'));
+    const verdict=parseDesignVerdict(structured ? JSON.stringify(structured.input) : String(textBlock?.text || result.content?.[0]?.text || ''));
     return verdict.skipped ? {...verdict,reason:`Reference review returned an incomplete verdict (${result.stop_reason || 'unknown'}).`} : verdict;
 
   } catch (err) {
