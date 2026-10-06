@@ -52,3 +52,17 @@ export function wholePostCorrection(v: DesignVerdict, expectedText: string): str
   if (!notes.length && v.reason) notes.push(v.reason.slice(0, 400));
   return notes.join(' ');
 }
+
+/** The reviewer's brief for a finished post. It is told what is a defect and what is not, so good designs are not sent back. */
+export function wholePostQuestion(expectedText: string, hasLogoFile: boolean, direction?: string): string {
+  return `You are reviewing a FINISHED social post designed for a brand. The REAL CLIENT REFERENCES are the brand's own published posts${hasLogoFile ? ', and the last reference is the brand\'s logo file' : ''}. The CANDIDATE is the new design.
+Look carefully before judging; describe only what is actually visible. A translucent, frosted or dark rounded panel behind the headline counts as a headline card. Text that ends inside the frame with its last letter whole is not clipped.
+Return JSON booleans has_hex_codes, has_logo, has_garbled_text, has_text, off_brand, has_unapproved_text and a reason string.
+- has_unapproved_text: the visible words differ from the approved text ${JSON.stringify(expectedText)}: a word missing, added or misspelled. Ignore case, punctuation, line breaks and whitespace. The brand's logo wordmark is allowed. Decorative lettering on objects, labels, captions or interface text is unapproved.
+- has_garbled_text: letters visibly malformed, overlapping, or cut by the frame or by another object.
+- has_logo: the logo is missing, appears more than once, or differs from the brand's logo in its letterforms, case, colours or mark (compare with ${hasLogoFile ? 'the logo file' : 'the logo in the references'}). A correct logo sets has_logo FALSE.
+- off_brand: only for a clear departure from the references' language: a different palette, a typeface family that does not resemble theirs, a layout the brand never uses (such as the hero and the text in separate flat bands with nothing overlapping), a blank placeholder rectangle, a mock interface, or a stock-photo look that none of the references have. A composition that follows the references with a new scene and new copy is ON brand even if details differ.
+- has_text: true when any text is visible (it is not a defect here). has_hex_codes: colour notation rendered in the picture.
+${direction ? `The planned direction was: ${direction}. Treat it as context for what the hero should be, not as a checklist of positions.` : ''}
+In reason, cite only defects you can point to in the picture; otherwise return an empty string.`;
+}

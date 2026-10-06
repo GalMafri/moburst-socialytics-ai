@@ -112,7 +112,7 @@ export async function validateDesignImage(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5-5",
         max_tokens: 1000,
         ...(opts.creative ? {
           tools:[{name:'record_review',description:'Record the observed creative defects.',input_schema:{type:'object',properties:{has_hex_codes:{type:'boolean'},has_logo:{type:'boolean'},has_garbled_text:{type:'boolean'},has_text:{type:'boolean'},off_brand:{type:'boolean'},has_unapproved_text:{type:'boolean'},reason:{type:'string'}},required:['has_hex_codes','has_logo','has_garbled_text','has_text','off_brand','has_unapproved_text','reason'],additionalProperties:false}}],

@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 const assert = (v: unknown, msg?: string) => expect(v, msg).toBeTruthy();
 const assertEquals = (a: unknown, b: unknown) => expect(a).toEqual(b);
 const assertStringIncludes = (s: string, part: string) => expect(s).toContain(part);
-import { counterText, wholePostCorrection, wholePostExpectedText, wholePostPrompt } from './wholePost.ts';
+import { counterText, wholePostCorrection, wholePostExpectedText, wholePostPrompt, wholePostQuestion } from './wholePost.ts';
 
 const plan: any = {
   brand_system: 'Dark navy depth, cyan light, glass headline cards, rainbow frame on carousels.',
@@ -37,4 +37,13 @@ it('a failed review becomes a concrete correction', () => {
   assertStringIncludes(c, 'Render exactly this text and nothing else: "Retention is won before day one."');
   assertStringIncludes(c, 'Place the brand\'s logo once');
   assertEquals(wholePostCorrection({ has_unapproved_text: false, has_logo: false, off_brand: false, has_garbled_text: false, has_hex_codes: false, has_text: true, reason: 'a faint caption on the device' } as any, 'x'), 'a faint caption on the device');
+});
+
+it('the reviewer is told what counts as a defect and what does not', () => {
+  const q = wholePostQuestion('App Store Myths. Busted.', true, 'gems around the card');
+  assertStringIncludes(q, '"App Store Myths. Busted."');
+  assertStringIncludes(q, 'counts as a headline card');
+  assertStringIncludes(q, 'A correct logo sets has_logo FALSE');
+  assertStringIncludes(q, 'logo file');
+  assertStringIncludes(q, 'gems around the card');
 });
