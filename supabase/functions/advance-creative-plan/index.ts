@@ -1,11 +1,16 @@
 // The creative run, owned by the server.
 //
 // A plan (creative_directions) has N frames. For each frame this worker
-// submits the artwork job, collects the provider's result into storage,
-// reviews it against the client's references, submits one corrected attempt
-// when the review fails, and when every frame is approved it creates the
-// design record (post_iterations) with the raw artwork. The app then sets the
-// headline card, type and logo ("finishing") whenever the post is opened.
+// submits the design job, collects the provider's result into storage,
+// reviews it against the client's references and the approved headline,
+// submits one corrected attempt when the review fails, and when every frame
+// is approved it creates the design record (post_iterations).
+//
+// The image model designs the whole post in one picture from the client's own
+// published posts (and logo file), with the headline rendered as part of the
+// design; nothing is rebuilt in code afterwards. The older paths (a design
+// system rendered by render-design; raw artwork finished in the browser) stay
+// only for plans that already carry a design_system_id.
 //
 // It is idempotent and re-entrant: the browser polls it while a dialog is
 // open, and a schedule calls it without a browser, so a closed tab never
@@ -14,11 +19,10 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { AuthzError, requireStaff } from '../_shared/auth/requireStaff.ts';
 import { secretEquals } from '../_shared/auth/secretEquals.ts';
 import { loadCreativePlan } from '../_shared/design-prompts/loadCreativePlan.ts';
-import { creativeImagePrompt, frameReferenceIndices } from '../_shared/design-prompts/creativePlan.ts';
+import { frameReferenceIndices } from '../_shared/design-prompts/creativePlan.ts';
 import { imageAspectRatio, platformDesignSpec } from '../_shared/design-prompts/aspect.ts';
 import { sourceImage } from '../_shared/design-prompts/sourceImage.ts';
 import { validateDesignImage, verdictIsDirty } from '../_shared/design-prompts/validateImage.ts';
-import { correctionFor } from '../_shared/design-prompts/correction.ts';
 import { resolveContextImageUrls } from '../_shared/higgsfield/context.ts';
 import { startImageWithHiggsfield } from '../_shared/higgsfield/startImage.ts';
 import { checkVideoJob } from '../_shared/higgsfield/renderVideo.ts';
@@ -29,10 +33,12 @@ import { renderRemote } from '../_shared/design-system/renderClient.ts';
 import { artworkQuestionV2, heroPromptV2, isLibraryV2, pickV2, templateV2 } from '../_shared/design-system/v2.ts';
 import { FORMAT_DIMENSIONS } from '../_shared/design-system/types.ts';
 import { urlToDataUrl } from '../_shared/render/hero.ts';
+import { wholePostCorrection, wholePostExpectedText, wholePostPrompt } from '../_shared/design-prompts/wholePost.ts';
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-const MAX_ATTEMPTS = 2;
+const MAX_ATTEMPTS = 2; // legacy design-system path
+const WHOLE_POST_ATTEMPTS = 3; // a whole post is cheap to redo and a wrong logo or word must never reach a client
 const REVIEWS_PER_TICK = 2;
 const STALE_PENDING_MS = 5 * 60 * 1000;
 
@@ -84,6 +90,13 @@ async function designSystemFor(db: any, creative: any): Promise<LoadedSystem | n
   return loadSystemById(db, creative.client_id, creative.plan.design_system_id);
 }
 
+/** The client's logo file as a public image URL, when Client Setup has one; otherwise the posts carry the logo. */
+async function clientLogoUrl(db: any, clientId: string): Promise<string | null> {
+  const { data } = await db.from('clients').select('logo_url').eq('id', clientId).maybeSingle();
+  const url = typeof data?.logo_url === 'string' ? data.logo_url.trim() : '';
+  return /^https:\/\/.+\.(png|jpe?g|webp)(\?.*)?$/i.test(url) ? url : null;
+}
+
 async function submitFrame(db: any, creative: any, index: number, attempt: number, correction: string, designed: LoadedSystem | null): Promise<Job> {
   const key = { creative_plan_id: creative.id, creative_frame_index: index, creative_attempt: attempt };
   const { data: row, error } = await db.from('media_jobs').insert({ client_id: creative.client_id, kind: 'image', provider: 'higgsfield', status: 'pending', input: key }).select('id,status,request_id,output_url,error,review,input,post_iteration_id,created_at').single();
@@ -97,10 +110,11 @@ async function submitFrame(db: any, creative: any, index: number, attempt: numbe
     const { referenceUrls } = await resolveContextImageUrls({ design_references: refs }, db);
     if (referenceUrls.length !== refs.length) throw new Error('The selected client references could not be opened.');
     const spec = platformDesignSpec(creative.platform, creative.format);
+    const logoUrl = designed ? null : await clientLogoUrl(db, creative.client_id);
     const prompt = designed
       ? (isLibraryV2(designed.system) ? heroPromptV2(creative.plan, index, templateV2(designed.system, frame.template_id), spec, creative.plan.brand_system || '', correction) : designedHeroPrompt(creative.plan, index, designed.system, templateById(designed.system, frame.template_id), spec, correction))
-      : creativeImagePrompt(creative.plan, index, correction, spec);
-    const started = await startImageWithHiggsfield(db, prompt, imageAspectRatio(creative.platform, creative.format), referenceUrls);
+      : wholePostPrompt(creative.plan, index, spec, creative.mode, Boolean(logoUrl), correction);
+    const started = await startImageWithHiggsfield(db, prompt, imageAspectRatio(creative.platform, creative.format), logoUrl ? [...referenceUrls, logoUrl] : referenceUrls);
     const { error: recordError } = await db.from('media_jobs').update({ request_id: started.jobId, model_path: started.model, status: 'submitted', updated_at: new Date().toISOString() }).eq('id', row.id);
     if (recordError) throw new Error(`Image submitted as ${started.jobId} but recording failed.`);
     return { ...row, status: 'submitted', request_id: started.jobId };
@@ -114,14 +128,19 @@ async function submitFrame(db: any, creative: any, index: number, attempt: numbe
 async function reviewJob(db: any, creative: any, index: number, job: Job, designed: LoadedSystem | null) {
   const frame = creative.plan.frames[index];
   const references = await Promise.all(frameReferenceIndices(frame).map((i: number) => sourceImage(db, creative.reference_paths[i])));
+  // The reviewer judges the logo against the client's logo file when there is one.
+  const logoUrl = designed ? null : await clientLogoUrl(db, creative.client_id);
+  if (logoUrl) { try { references.push(await urlToDataUrl(logoUrl)); } catch { /* the posts still carry the logo */ } }
   const v2 = designed && isLibraryV2(designed.system) ? templateV2(designed.system, frame.template_id) : null;
   const template = designed && !v2 ? templateById(designed.system, frame.template_id) : null;
   const direction = v2 ? JSON.stringify({ subject: frame.subject, hero_slot: v2.hero }) : template ? JSON.stringify({ subject: frame.subject, hero_region: template.hero_region, calm_region: template.headline.region, never: designed!.system.imagery.never })
     : frame.layout ? JSON.stringify({ subject: frame.subject, headline_position: frame.layout.headline_position, subject_position: frame.layout.subject_position }) : undefined;
-  // The reviewer takes image bytes, not a URL, and the model caps an image at 5 MB; the prepared hero is both.
+  // The reviewer takes image bytes, not a URL, and the model caps an image at 5 MB; the prepared (canvas-size) copy is both.
   const candidate = await urlToDataUrl((await preparedHero(db, creative, job)).hero_url);
-  const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText: '', question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : undefined });
-  const dirty = verdictIsDirty(verdict, { expectNoText: true });
+  // A whole post is judged with its approved words: exact text, one authentic logo, legible, on brand.
+  const expectedText = designed ? '' : wholePostExpectedText(creative.plan, index, creative.mode);
+  const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : undefined });
+  const dirty = verdictIsDirty(verdict, { expectNoText: Boolean(designed) });
   await db.from('media_jobs').update({ review: { ...verdict, dirty }, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
   return { verdict, dirty };
 }
@@ -196,8 +215,8 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
       const { verdict, dirty } = await reviewJob(db, creative, index, job, designed);
       job = { ...job, review: { ...verdict, dirty } };
       if (dirty) {
-        const reason = designed ? artworkCorrection(verdict) : correctionFor(verdict, { expectNoText: true });
-        if (attempt + 1 < MAX_ATTEMPTS) { job = await submitFrame(db, creative, index, attempt + 1, reason, designed); attempt += 1; }
+        const reason = designed ? artworkCorrection(verdict) : wholePostCorrection(verdict, wholePostExpectedText(creative.plan, index, creative.mode));
+        if (attempt + 1 < (designed ? MAX_ATTEMPTS : WHOLE_POST_ATTEMPTS)) { job = await submitFrame(db, creative, index, attempt + 1, reason, designed); attempt += 1; }
         else { await db.from('media_jobs').update({ status: 'failed', error: `Brand review rejected the artwork: ${reason}`.slice(0, 1000), updated_at: new Date().toISOString() }).eq('id', job.id); job = { ...job, status: 'failed', error: `Brand review rejected the artwork: ${reason}` }; }
       }
     }
@@ -210,9 +229,8 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
   const done = !failed && frames.every(f => f.state === 'approved');
   const iterations: Array<{ id: string; media_urls: string[]; frames: number[]; finishing?: string }> = [];
   if (done) {
-    // With a design system the still is rendered here, finished, from the
-    // template and the approved hero; without one the raw artwork is saved
-    // and the browser finishes it when the post is opened.
+    // A whole-post design is finished as delivered. With a legacy design
+    // system the still is rendered here from the template and the approved hero.
     const finalUrl = new Map<number, string>(frames.map(f => [f.index, f.url!]));
     if (designed) {
       const rendered = await Promise.all(frames.map(async f => {
@@ -221,7 +239,7 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
       }));
       for (const r of rendered) finalUrl.set(r.index, r.url);
     }
-    const base = { client_id: creative.client_id, platform: creative.platform || null, post_copy: creative.post_copy || null, format: creative.format || null, source: 'calendar', finishing: designed ? 'done' : 'pending', variant_group_id: crypto.randomUUID() };
+    const base = { client_id: creative.client_id, platform: creative.platform || null, post_copy: creative.post_copy || null, format: creative.format || null, source: 'calendar', finishing: 'done', variant_group_id: crypto.randomUUID() };
     const rows = creative.mode === 'carousel'
       ? [{ ...base, media_urls: frames.map(f => finalUrl.get(f.index)!), variant_angle: `Reference creative ${creative.id}`, is_selected: true, frames: frames.map(f => f.index) }]
       : frames.map(f => ({ ...base, media_urls: [finalUrl.get(f.index)!], variant_angle: `Reference creative ${creative.id}: ${creative.plan.frames[f.index].subject}`.slice(0, 500), is_selected: false, frames: [f.index] }));
