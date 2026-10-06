@@ -19,10 +19,13 @@ export interface WorkerDeps {
   run(job: ScheduledJob): Promise<JobOutcome>;
   finish(job: ScheduledJob, outcome: JobOutcome): Promise<void>;
   closeAbandoned(): Promise<Array<{ table: string; id: string }>>;
+  /** release_ready_dispatches: held social jobs whose competitive report finished. */
+  releaseReady(): Promise<number>;
 }
 
 export interface TickResult {
   abandoned: number;
+  released: number;
   results: Array<{ id: string; kind: string; status: string; reason: string | null }>;
 }
 
@@ -33,6 +36,12 @@ export async function workerTick(d: WorkerDeps): Promise<TickResult> {
     abandoned = (await d.closeAbandoned()).length;
   } catch (e) {
     console.warn("[scheduled-jobs] abandoned-run sweep failed:", e instanceof Error ? e.message : String(e));
+  }
+  let released = 0;
+  try {
+    released = await d.releaseReady();
+  } catch (e) {
+    console.warn("[scheduled-jobs] release sweep failed:", e instanceof Error ? e.message : String(e));
   }
   const results: TickResult["results"] = [];
   for (;;) {
@@ -45,14 +54,17 @@ export async function workerTick(d: WorkerDeps): Promise<TickResult> {
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
       console.error(`[scheduled-jobs] ${job.kind} ${job.id} threw:`, reason);
-      outcome = job.attempts >= job.max_attempts
-        ? { status: "failed", reason }
-        : { status: "queued", reason, available_at: new Date(d.now().getTime() + RETRY_MINUTES * 60000).toISOString() };
+      // Out of attempts: a dispatch is blocked rather than failed. Its schedule
+      // has not moved on, and a failed job for the same occurrence would never be
+      // queued again; blocked is rechecked and alerted every day.
+      outcome = job.attempts < job.max_attempts
+        ? { status: "queued", reason, available_at: new Date(d.now().getTime() + RETRY_MINUTES * 60000).toISOString() }
+        : { status: job.kind === "dispatch" ? "blocked" : "failed", reason };
     }
     await d.finish(job, outcome);
     results.push({ id: job.id, kind: job.kind, status: outcome.status, reason: outcome.reason ?? null });
   }
-  return { abandoned, results };
+  return { abandoned, released, results };
 }
 
 /** Grace before a dead lease or an undrained queue counts as a problem. */

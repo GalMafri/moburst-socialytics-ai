@@ -57,6 +57,8 @@ export interface DispatchStore {
   /** The client's latest competitor set in confirmed, analyzing, complete or failed. */
   competitorSet(clientId: string): Promise<CompetitorSetRow | null>;
   competitiveReport(id: string, clientId: string): Promise<{ status: string; date_range_start: string | null; date_range_end: string | null } | null>;
+  /** A report row's status, to tell whether a prepared report is still open. */
+  reportStatus(table: "reports" | "competitive_reports", id: string): Promise<string | null>;
   pairedCompetitiveDue(clientId: string, now: Date): Promise<boolean>;
   webhooks(): Promise<{ social: string | null; competitive: string | null }>;
   insertCompetitiveReport(row: NewReportRow & { created_at: string; set_id: string }): Promise<string>;
@@ -91,9 +93,17 @@ const UNCONFIRMED = "the worker stopped while sending the request, so n8n may or
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** Both n8n webhooks answer on receipt; a request still open after this long is treated as failed. */
+export const POST_TIMEOUT_MS = 30_000;
+
 export function makePoster(secret: string, fetchImpl: (url: string, init: RequestInit) => Promise<Response> = (u, i) => fetch(u, i)) {
   return async (url: string, body: unknown) => {
-    const r = await fetchImpl(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret }, body: JSON.stringify(body) });
+    const r = await fetchImpl(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(POST_TIMEOUT_MS),
+    });
     await r.body?.cancel().catch(() => {});
     return { ok: r.ok, status: r.status };
   };
@@ -138,6 +148,14 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
 
   let reportId: string | null = job.report_id;
   let setId: string | null = prior.set_id ?? null;
+  let resumed = prior;
+  // A prepared report that was closed meanwhile (the abandoned-run sweep, or a
+  // person) is not reused: this run starts over with a new one.
+  if (reportId && !d.dryRun && (await d.store.reportStatus(table, reportId)) !== "running") {
+    reportId = null;
+    setId = null;
+    resumed = {};
+  }
   try {
     const hooks = await d.store.webhooks();
 
@@ -149,8 +167,8 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         if (!d.dryRun) await d.store.note(schedule.id, reason);
         return { status: "waiting", reason };
       }
-      const range = prior.range ?? rangeForSchedule(schedule.range_mode, now);
-      const attemptStartedAt = prior.attempt_started_at ?? now.toISOString();
+      const range = resumed.range ?? rangeForSchedule(schedule.range_mode, now);
+      const attemptStartedAt = resumed.attempt_started_at ?? now.toISOString();
       const result = { set_id: set.id, attempt_started_at: attemptStartedAt, range };
       if (!reportId) {
         if (d.dryRun) {
@@ -159,9 +177,12 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
           reportId = await d.store.insertCompetitiveReport({ created_at: attemptStartedAt, client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: schedule.created_by });
           setId = set.id;
           await d.saveJob({ phase: "prepared", report_id: reportId, result });
-          await d.store.holdSocial(client.id, reportId, now);
-          await d.store.setAnalyzing(set.id);
         }
+      }
+      if (!d.dryRun) {
+        // Both guarded, so a resumed job repeats them safely.
+        await d.store.holdSocial(client.id, reportId, now);
+        await d.store.setAnalyzing(set.id);
       }
       const payload = await d.buildCompetitivePayload({ client, reportId, set, range, attemptStartedAt, scheduled: true, staggerSeconds: job.stagger_seconds });
       if (d.dryRun) return { status: "done", reason: "dry run: would post", result: { ...result, payload_keys: Object.keys(payload) } };
@@ -174,7 +195,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
 
     // Social.
     if (!hooks.social) throw new Error("n8n webhook URL not configured");
-    let range = prior.range ?? rangeForSchedule(schedule.range_mode, now);
+    let range = resumed.range ?? rangeForSchedule(schedule.range_mode, now);
     let wait: { reason: string; blocked: boolean } | null = null;
     const dependencyId = schedule.pending_competitive_report_id || undefined;
     if (dependencyId) {
@@ -226,7 +247,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       await d.store.failReport(table, reportId, `Dispatch could not be confirmed: ${msg}. Check the n8n execution before retrying.`);
       if (setId) await d.store.failSet(setId);
       await d.store.advance(schedule, now, `error: ${msg}`);
-      return { status: "failed", reason: msg, result: { ...prior, report_id: reportId } };
+      return { status: "failed", reason: msg, result: { ...resumed, report_id: reportId } };
     }
     await d.store.note(schedule.id, `error: ${msg}`);
     return { status: "blocked", reason: msg };

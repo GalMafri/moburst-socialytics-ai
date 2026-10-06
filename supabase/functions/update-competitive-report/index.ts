@@ -200,19 +200,9 @@ Deno.serve(async (req) => {
             .in("status", from);
         }
       }
-      let schedulingWarning: string | undefined;
-      if (effectiveStatus === "complete") {
-        // Release the social dispatch this report was holding. A database call:
-        // the scheduled-jobs worker picks the job up within a minute.
-        try {
-          const { error: requeueError } = await supabase.rpc("requeue_dispatch_after_competitive", { p_competitive_report_id: report_id });
-          if (requeueError) throw new Error(requeueError.message);
-        } catch (error) {
-          schedulingWarning = "The competitive report is saved. Its waiting social schedule will be checked again by the daily scheduler.";
-          console.warn("[competitive schedule resume]", error);
-        }
-      }
-      return jsonResp({ ok: true, report: data[0], ...(schedulingWarning ? { warning: schedulingWarning } : {}) });
+      // A social report held for this one is released by the scheduled-jobs
+      // worker, which looks for finished competitive reports every minute.
+      return jsonResp({ ok: true, report: data[0] });
     }
 
     return jsonResp({ error: "op must be 'snapshot' or 'report'" }, 400);

@@ -97,6 +97,7 @@ Deno.serve(async (req) => {
         : runFeedJob(job, { now: () => new Date(), refreshFeed })),
       finish: (job, outcome) => jobs.finish(job, outcome),
       closeAbandoned: () => closeAbandonedRuns(db, new Date(), false),
+      releaseReady: () => jobs.releaseReady(),
     });
     return json(result);
   } catch (err) {

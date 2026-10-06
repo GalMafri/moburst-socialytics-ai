@@ -56,9 +56,11 @@ describe("workerTick", () => {
       run: async (j) => ({ status: j.id === "b" ? "skipped" : "done" }),
       finish: async (j, o) => { finished.push([j.id, o.status]); },
       closeAbandoned: async () => [{ table: "reports", id: "old" }],
+      releaseReady: async () => 2,
     });
     expect(finished).toEqual([["a", "done"], ["b", "skipped"], ["c", "done"]]);
     expect(r.abandoned).toBe(1);
+    expect(r.released).toBe(2);
     expect(r.results.map((x) => x.id)).toEqual(["a", "b", "c"]);
   });
 
@@ -70,27 +72,29 @@ describe("workerTick", () => {
       run: async () => ({ status: "done" }),
       finish: async () => {},
       closeAbandoned: async () => [],
+      releaseReady: async () => 0,
     });
     expect(r.results.map((x) => x.id)).toEqual(["a"]);
     expect(queue.map((j) => j.id)).toEqual(["b"]);
   });
 
-  it("turns an unexpected error into a retry, then a failure on the last attempt", async () => {
+  it("turns an unexpected error into a retry, then a failure on the last attempt; a dispatch is blocked instead", async () => {
     const outcomes: JobOutcome[] = [];
-    const queue = [job("a", { attempts: 1 }), job("b", { attempts: 3 })];
+    const queue = [job("a", { attempts: 1 }), job("b", { attempts: 3 }), job("c", { attempts: 3, kind: "dispatch", schedule_id: "s", occurrence: T0.toISOString() })];
     await workerTick({
       now: clock(10),
       lease: async () => queue.shift() ?? null,
       run: async () => { throw new Error("db down"); },
       finish: async (_j, o) => { outcomes.push(o); },
       closeAbandoned: async () => [],
+      releaseReady: async () => 0,
     });
-    expect(outcomes.map((o) => o.status)).toEqual(["queued", "failed"]);
+    expect(outcomes.map((o) => o.status)).toEqual(["queued", "failed", "blocked"]);
     expect(outcomes[0].reason).toBe("db down");
     expect(outcomes[0].available_at).toBeDefined();
   });
 
-  it("still works the queue when the abandoned-run sweep fails", async () => {
+  it("still works the queue when the sweeps fail", async () => {
     const queue = [job("a")];
     const r = await workerTick({
       now: clock(10),
@@ -98,6 +102,7 @@ describe("workerTick", () => {
       run: async () => ({ status: "done" }),
       finish: async () => {},
       closeAbandoned: async () => { throw new Error("sweep failed"); },
+      releaseReady: async () => { throw new Error("release failed"); },
     });
     expect(r.results).toHaveLength(1);
   });

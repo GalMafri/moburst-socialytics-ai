@@ -87,7 +87,10 @@ Each invocation:
 
 1. Closes abandoned runs (moved unchanged from the old scheduler; it now runs
    every minute, so a dead run is closed within a minute of the 90-minute mark).
-2. Leases one job (`scheduled_jobs_lease`, 300 s lease, `for update skip
+2. Releases held social dispatches whose pinned competitive report finished
+   (`release_ready_dispatches`): complete, so they can go out; failed, so they
+   record `blocked`.
+3. Leases one job (`scheduled_jobs_lease`, 300 s lease, `for update skip
    locked`), runs it, records the outcome, and leases another only while less
    than 20 s have passed. Every job is bounded, so no invocation approaches
    the wall clock, and overlapping invocations never share a job.
@@ -109,7 +112,8 @@ and for its pending competitive report; the range comes from the completed
 competitive report; archived clients never dispatch), with explicit phases:
 
 - `prepared`: the report row exists and its id is on the job. A job resumed
-  in this phase reuses that report.
+  in this phase reuses that report while it is still running (and repeats the
+  guarded pin and set update); if it was closed meanwhile, it starts over.
 - `posting`: written immediately before the webhook call. A job found in this
   phase after an interruption never posts again: its report is closed as
   "Dispatch could not be confirmed" (the Retry control's existing path), the
@@ -117,6 +121,10 @@ competitive report; archived clients never dispatch), with explicit phases:
   n8n run per occurrence, which is what the old claim protected.
 - Webhook refused or payload error: report failed, schedule advanced with the
   error, job `failed` (unchanged behaviour).
+- An unexpected error (a database call failing) retries after 10 minutes; on
+  the last attempt a dispatch ends `blocked`, never `failed`, because its
+  schedule has not moved on and only `blocked` is released daily.
+- The webhook request times out after 30 s (both webhooks answer on receipt).
 - Success: schedule advanced (`last_run_at`, `next_run_at`, `last_result`,
   pending cleared), job `done`.
 
@@ -125,15 +133,17 @@ reads the same thing.
 
 ### Releasing held social reports
 
-`update-competitive-report`, on a completed report, calls the SQL function
-`requeue_dispatch_after_competitive(report_id)` through the database client.
-No HTTP call to another function.
+The worker's per-minute sweep (`release_ready_dispatches`) releases them, so
+`update-competitive-report` no longer knows about scheduling at all: it stops
+calling the scheduler over HTTP and makes no scheduling call of any kind.
 
 ### Alerting
 
 `run-scheduled-jobs` with `{"mode":"status"}` returns today's jobs. It
 answers 500 when any job is `failed` or `blocked`, or `running` past its
-lease, and lists them. The n8n workflow runs that check at 08:30 UTC; its
+lease, or `queued` and not picked up for 30 minutes, or when an active
+schedule is an hour past due with no job (`scheduled_report_gaps`: the daily
+enqueue did not run), and lists them by client and report kind. The n8n workflow runs that check at 08:30 UTC; its
 existing error workflow emails the failure, as alerts reach Lital today.
 
 ### What is removed

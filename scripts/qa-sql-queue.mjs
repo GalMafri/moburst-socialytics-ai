@@ -10,7 +10,8 @@ CREATE TABLE public.clients(id uuid PRIMARY KEY, name text, archived_at timestam
 CREATE TABLE public.report_schedules(id uuid PRIMARY KEY, client_id uuid REFERENCES public.clients(id), report_kind text, is_active boolean, next_run_at timestamptz,
   pending_competitive_report_id uuid, created_at timestamptz DEFAULT now());
 CREATE TABLE public.competitor_sets(id uuid PRIMARY KEY, client_id uuid, status text);
-CREATE TABLE public.rivaliq_snapshots(id serial PRIMARY KEY, client_id uuid, endpoint text, fetched_at timestamptz);`);
+CREATE TABLE public.rivaliq_snapshots(id serial PRIMARY KEY, client_id uuid, endpoint text, fetched_at timestamptz);
+CREATE TABLE public.competitive_reports(id uuid PRIMARY KEY, status text);`);
 
 const migration = readFileSync(new URL('../supabase/migrations/20261006150000_scheduled_report_queue.sql', import.meta.url), 'utf8');
 await db.exec(migration);
@@ -41,6 +42,7 @@ for (const role of ['anon', 'authenticated']) {
   await db.exec(`RESET ROLE; SET ROLE ${role}`);
   await assert.rejects(() => db.query(`SELECT public.enqueue_scheduled_report_jobs('${NOW}', true)`), /permission denied/);
   await assert.rejects(() => db.query(`SELECT * FROM public.scheduled_jobs_lease(300)`), /permission denied/);
+  await assert.rejects(() => db.query(`SELECT public.release_ready_dispatches()`), /permission denied/);
   await assert.rejects(() => db.query(`SELECT * FROM public.scheduled_jobs`), /permission denied/);
   await db.exec('RESET ROLE');
 }
@@ -101,18 +103,30 @@ assert.equal(again.attempts, 2);
 await db.exec(`UPDATE public.scheduled_jobs SET status='queued', lease_until=null, available_at = now() + interval '10 minutes' WHERE id = '${a.id}'`);
 assert.equal(await leaseOne(), null);
 
-// Waiting and blocked dispatches: the competitive completion releases only the matching social job.
+// The sweep releases a held social job once its pinned competitive report finishes, and only that one.
 await db.exec(`UPDATE public.scheduled_jobs SET status='waiting', lease_until=null WHERE kind='dispatch' AND schedule_id IN ('${id(12)}','${id(22)}');
+INSERT INTO public.competitive_reports VALUES ('${id(900)}','running'),('${id(901)}','running');
 UPDATE public.report_schedules SET pending_competitive_report_id='${id(900)}' WHERE id='${id(12)}';
 UPDATE public.report_schedules SET pending_competitive_report_id='${id(901)}' WHERE id='${id(22)}';`);
-const released = await asService(`SELECT public.requeue_dispatch_after_competitive('${id(900)}') AS n`);
-assert.equal(released[0].n, 1);
-const states = Object.fromEntries((await db.query(`SELECT schedule_id, status FROM public.scheduled_jobs WHERE kind='dispatch'`)).rows.map((r) => [r.schedule_id.slice(-2), r.status]));
-assert.equal(states['12'], 'queued');
-assert.equal(states['22'], 'waiting');
+const sweep = () => asService(`SELECT public.release_ready_dispatches() AS n`).then((r) => r[0].n);
+const dispatchStates = async () => Object.fromEntries((await db.query(`SELECT schedule_id, status FROM public.scheduled_jobs WHERE kind='dispatch'`)).rows.map((r) => [r.schedule_id.slice(-2), r.status]));
+assert.equal(await sweep(), 0, 'released while the competitive report was still running');
+await db.exec(`UPDATE public.competitive_reports SET status='complete' WHERE id='${id(900)}'`);
+assert.equal(await sweep(), 1);
+assert.equal((await dispatchStates())['12'], 'queued');
+assert.equal((await dispatchStates())['22'], 'waiting');
+// A failed competitive report releases a waiting job once (so it can record blocked), never a blocked one.
+await db.exec(`UPDATE public.competitive_reports SET status='failed' WHERE id='${id(901)}'`);
+assert.equal(await sweep(), 1);
+await db.exec(`UPDATE public.scheduled_jobs SET status='blocked' WHERE schedule_id='${id(22)}'`);
+assert.equal(await sweep(), 0);
+// Retried and complete: the blocked job is released.
+await db.exec(`UPDATE public.competitive_reports SET status='complete' WHERE id='${id(901)}'`);
+assert.equal(await sweep(), 1);
 
 // The daily tick releases every waiting or blocked dispatch for its recheck.
 await db.exec(`UPDATE public.scheduled_jobs SET status='blocked' WHERE schedule_id='${id(22)}'`);
+await db.exec(`UPDATE public.competitive_reports SET status='failed' WHERE id='${id(901)}'`);
 const third = await enqueue(false);
 assert.equal(third.released, 1);
 assert.equal((await db.query(`SELECT status FROM public.scheduled_jobs WHERE schedule_id='${id(22)}'`)).rows[0].status, 'queued');
@@ -126,4 +140,4 @@ assert(days.every((d) => d >= 0 && d <= 6));
 assert.equal((await db.query(`SELECT public.feed_refresh_weekday('${id(1)}') = public.feed_refresh_weekday('${id(1)}') AS same`)).rows[0].same, true);
 
 await db.close();
-console.log('PASS: queue migration applies twice; only service_role reaches it; dry run writes nothing; enqueue is idempotent and ordered with the old stagger; lease is exclusive and counts attempts; completion releases only its social job; the daily tick rechecks waiting and blocked jobs; overdue schedules with no job are reported.');
+console.log('PASS: queue migration applies twice; only service_role reaches it; dry run writes nothing; enqueue is idempotent and ordered with the old stagger; lease is exclusive and counts attempts; the sweep releases only social jobs whose competitive report finished; the daily tick rechecks waiting and blocked jobs; overdue schedules with no job are reported.');

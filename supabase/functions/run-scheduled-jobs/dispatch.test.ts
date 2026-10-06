@@ -1,3 +1,5 @@
+// @vitest-environment node
+// Node, like the Deno runtime, has AbortSignal.timeout; jsdom does not.
 import { describe, it, expect } from "vitest";
 import { makePoster, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
 import type { ScheduledJob } from "./types";
@@ -31,6 +33,7 @@ function world(opts: { kinds?: Array<"competitive" | "social">; set?: boolean } 
     async client(id) { return tables.clients.find((c) => c.id === id) ?? null; },
     async competitorSet(clientId) { return tables.sets.find((s) => s.client_id === clientId) ?? null; },
     async competitiveReport(id, clientId) { return tables.competitive.find((r) => r.id === id && r.client_id === clientId) ?? null; },
+    async reportStatus(table, id) { return (table === "reports" ? tables.reports : tables.competitive).find((r) => r.id === id)?.status ?? null; },
     async pairedCompetitiveDue(clientId, now) {
       return tables.schedules.some((s) => s.client_id === clientId && s.report_kind === "competitive" && s.is_active && new Date(s.next_run_at) <= now);
     },
@@ -245,6 +248,27 @@ describe("runDispatch", () => {
     expect(r.status).toBe("done");
     expect(w.tables.reports).toHaveLength(1);
     expect(h.posts[0].body.report_id).toBe("social-0");
+  });
+
+  it("starts over with a new report when the prepared one was closed meanwhile", async () => {
+    const w = world({ kinds: ["social"] });
+    w.tables.reports.push({ id: "social-0", client_id: "client-1", status: "failed", date_range_start: "2026-09-01", date_range_end: "2026-09-30" });
+    const h = harness(w);
+    const r = await h.run(jobFor("social", { phase: "prepared", report_id: "social-0", attempts: 2 }));
+    expect(r.status).toBe("done");
+    expect(w.tables.reports.map((x) => x.id)).toEqual(["social-0", "social-1"]);
+    expect(h.posts[0].body.report_id).toBe("social-1");
+  });
+
+  it("pins the social report again when a prepared competitive dispatch resumes", async () => {
+    const w = world();
+    w.tables.competitive.push({ id: "comp-1", client_id: "client-1", status: "running", date_range_start: "2026-09-01", date_range_end: "2026-09-30", set_id: "set-1" });
+    const h = harness(w);
+    const r = await h.run(jobFor("competitive", { phase: "prepared", report_id: "comp-1", attempts: 2, result: { set_id: "set-1", attempt_started_at: "2026-10-07T07:16:00.000Z", range: { start: "2026-09-01", end: "2026-09-30" } } }));
+    expect(r.status).toBe("done");
+    expect(w.tables.competitive).toHaveLength(2);
+    expect(w.tables.schedules.find((s) => s.report_kind === "social")!.pending_competitive_report_id).toBe("comp-1");
+    expect(h.posts[0].body.attempt_started_at).toBe("2026-10-07T07:16:00.000Z");
   });
 
   it("blocks without creating a report when it keeps stopping before the request", async () => {

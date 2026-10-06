@@ -151,19 +151,23 @@ begin
 end;
 $$;
 
--- A competitive report completed: release the social dispatch it was holding.
-create or replace function public.requeue_dispatch_after_competitive(p_competitive_report_id uuid)
+-- Release held social dispatches whose pinned competitive report has finished:
+-- complete, so the social report can go out; or failed, so the job records
+-- that it is blocked and the daily check alerts. The worker runs this every
+-- minute, so the competitive callback needs no knowledge of scheduling.
+create or replace function public.release_ready_dispatches()
 returns integer
 language plpgsql security definer set search_path = public as $$
 declare
   v_count integer;
 begin
   update public.scheduled_jobs j
-     set status = 'queued', available_at = now(), lease_until = null, reason = null, updated_at = now()
-   where j.kind = 'dispatch' and j.status in ('waiting', 'blocked')
-     and j.schedule_id in (
-       select s.id from public.report_schedules s
-        where s.pending_competitive_report_id = p_competitive_report_id and s.report_kind = 'social');
+     set status = 'queued', available_at = now(), lease_until = null, updated_at = now()
+    from public.report_schedules s
+    join public.competitive_reports c on c.id = s.pending_competitive_report_id
+   where j.schedule_id = s.id and j.kind = 'dispatch' and s.report_kind = 'social'
+     and ((j.status in ('waiting', 'blocked') and c.status = 'complete')
+       or (j.status = 'waiting' and c.status = 'failed'));
   get diagnostics v_count = row_count;
   return v_count;
 end;
@@ -186,8 +190,8 @@ $$;
 revoke all on function public.feed_refresh_weekday(uuid) from public, anon, authenticated;
 revoke all on function public.scheduled_jobs_lease(integer) from public, anon, authenticated;
 revoke all on function public.enqueue_scheduled_report_jobs(timestamptz, boolean) from public, anon, authenticated;
-revoke all on function public.requeue_dispatch_after_competitive(uuid) from public, anon, authenticated;
+revoke all on function public.release_ready_dispatches() from public, anon, authenticated;
 revoke all on function public.scheduled_report_gaps(timestamptz) from public, anon, authenticated;
 grant execute on function public.feed_refresh_weekday(uuid), public.scheduled_jobs_lease(integer),
-  public.enqueue_scheduled_report_jobs(timestamptz, boolean), public.requeue_dispatch_after_competitive(uuid),
+  public.enqueue_scheduled_report_jobs(timestamptz, boolean), public.release_ready_dispatches(),
   public.scheduled_report_gaps(timestamptz) to service_role;

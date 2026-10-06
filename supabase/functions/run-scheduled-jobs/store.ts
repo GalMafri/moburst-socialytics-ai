@@ -23,6 +23,8 @@ export interface JobStore {
   finish(job: ScheduledJob, outcome: JobOutcome): Promise<void>;
   /** Jobs the daily check looks at: everything open, and everything finished in the last day and a half. */
   statusRows(now: Date): Promise<ScheduledJob[]>;
+  /** Held social jobs whose competitive report finished, back in the queue. */
+  releaseReady(): Promise<number>;
   /** Due schedule occurrences with no job (scheduled_report_gaps). */
   gaps(now: Date): Promise<ScheduleGap[]>;
   enqueue(dryRun: boolean): Promise<{ dry_run: boolean; released: number; enqueued: Array<{ kind: string; client_id: string; schedule_id: string | null; detail: string; priority: number; stagger_seconds: number }> }>;
@@ -61,6 +63,9 @@ export function makeJobStore(db: SupabaseClient): JobStore {
     async gaps(now) {
       return ((await must(db.rpc("scheduled_report_gaps", { p_now: now.toISOString() }) as unknown as PromiseLike<Result<ScheduleGap[] | null>>)) ?? []);
     },
+    async releaseReady() {
+      return (await must(db.rpc("release_ready_dispatches") as unknown as PromiseLike<Result<number | null>>)) ?? 0;
+    },
     async enqueue(dryRun) {
       return await must(db.rpc("enqueue_scheduled_report_jobs", { p_dry_run: dryRun }) as unknown as PromiseLike<Result<Awaited<ReturnType<JobStore["enqueue"]>>>>);
     },
@@ -85,6 +90,10 @@ export function makeDispatchStore(db: SupabaseClient): DispatchStore {
     async competitiveReport(id, clientId) {
       return (await must(db.from("competitive_reports").select("status, date_range_start, date_range_end").eq("id", id).eq("client_id", clientId).maybeSingle())) as
         { status: string; date_range_start: string | null; date_range_end: string | null } | null;
+    },
+    async reportStatus(table, id) {
+      const r = (await must(db.from(table).select("status").eq("id", id).maybeSingle())) as { status: string } | null;
+      return r?.status ?? null;
     },
     async pairedCompetitiveDue(clientId, now) {
       const rows = await must(db.from("report_schedules").select("id").eq("client_id", clientId).eq("report_kind", "competitive").eq("is_active", true).lte("next_run_at", now.toISOString()).limit(1));
