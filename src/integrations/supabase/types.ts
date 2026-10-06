@@ -1960,10 +1960,6 @@ export type Database = {
       can_access_client: { Args: { _client_id: string }; Returns: boolean }
       can_manage_roster: { Args: never; Returns: boolean }
       can_write_client: { Args: { _client_id: string }; Returns: boolean }
-      claim_report_schedule: {
-        Args: { expected_next_run_at: string; schedule_id: string }
-        Returns: boolean
-      }
       claim_rivaliq_request: { Args: { request_token: string }; Returns: Json }
       demo_jobs_lease: {
         Args: { p_lease_seconds?: number; p_limit?: number }
