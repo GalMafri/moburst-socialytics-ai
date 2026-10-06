@@ -27,7 +27,7 @@ export interface JobStore {
   releaseReady(): Promise<number>;
   /** Due schedule occurrences with no job (scheduled_report_gaps). */
   gaps(now: Date): Promise<ScheduleGap[]>;
-  enqueue(dryRun: boolean): Promise<{ dry_run: boolean; released: number; enqueued: Array<{ kind: string; client_id: string; schedule_id: string | null; detail: string; priority: number; stagger_seconds: number }> }>;
+  enqueue(dryRun: boolean, at?: Date): Promise<{ dry_run: boolean; released: number; enqueued: Array<{ kind: string; client_id: string; schedule_id: string | null; detail: string; priority: number; stagger_seconds: number }> }>;
 }
 
 export function makeJobStore(db: SupabaseClient): JobStore {
@@ -66,8 +66,8 @@ export function makeJobStore(db: SupabaseClient): JobStore {
     async releaseReady() {
       return (await must(db.rpc("release_ready_dispatches") as unknown as PromiseLike<Result<number | null>>)) ?? 0;
     },
-    async enqueue(dryRun) {
-      return await must(db.rpc("enqueue_scheduled_report_jobs", { p_dry_run: dryRun }) as unknown as PromiseLike<Result<Awaited<ReturnType<JobStore["enqueue"]>>>>);
+    async enqueue(dryRun, at) {
+      return await must(db.rpc("enqueue_scheduled_report_jobs", { p_dry_run: dryRun, ...(at ? { p_now: at.toISOString() } : {}) }) as unknown as PromiseLike<Result<Awaited<ReturnType<JobStore["enqueue"]>>>>);
     },
   };
 }

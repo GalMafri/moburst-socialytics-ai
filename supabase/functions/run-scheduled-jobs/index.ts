@@ -6,6 +6,7 @@
 //                              500 listing failed, blocked, stuck and overdue jobs.
 // POST {"mode":"dry_run"}      what the next enqueue would add, and every due dispatch
 //                              built against live data with no writes and no requests.
+//                              "at" (ISO) previews a later tick, such as tomorrow's.
 //
 // Authenticated with the operational secret (X-Socialytics-Secret or X-Cron-Secret).
 
@@ -39,9 +40,11 @@ Deno.serve(async (req) => {
     const jobs = makeJobStore(db);
     const store = makeDispatchStore(db);
     const post = makePoster(secret);
+    // A dry run may preview a later tick; nothing else ever moves the clock.
+    const at = mode === "dry_run" && typeof body.at === "string" && !Number.isNaN(Date.parse(body.at)) ? new Date(body.at) : null;
     const dispatchDeps = (job: ScheduledJob, dryRun: boolean): DispatchDeps => ({
       store,
-      now: () => new Date(),
+      now: () => (dryRun && at ? at : new Date()),
       post,
       // deno-lint-ignore no-explicit-any
       buildSocialPayload: (a) => buildSocialPayload({ supabase: db, ...a } as any),
@@ -73,7 +76,7 @@ Deno.serve(async (req) => {
     }
 
     if (mode === "dry_run") {
-      const plan = await jobs.enqueue(true);
+      const plan = await jobs.enqueue(true, at ?? undefined);
       const now = new Date().toISOString();
       const dispatch = [];
       for (const c of plan.enqueued.filter((j) => j.kind === "dispatch")) {
