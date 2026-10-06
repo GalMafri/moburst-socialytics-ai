@@ -17,9 +17,13 @@ export async function validateCompetitorWebsites<T extends { name: string; websi
         if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Invalid company website.');
         if (host(url.href) === clientHost) throw new Error('This is the client website, not a separate competitor.');
         const response = await fetcher(url.href, { redirect: 'follow', signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'text/html' } });
-        if (!response.ok) throw new Error(`Website returned HTTP ${response.status}.`);
-        const html = await response.text();
-        if (html.trim().length < 100 || !/<(?:html|head|body|title|a)\b/i.test(html)) throw new Error('Website did not return a readable company page.');
+        // A site that refuses automated visitors (Shopify storefronts answer 429 or 403 from cloud
+        // addresses) exists all the same; the check is for domains that do not. Only a missing page,
+        // a server failure or no answer rejects a company.
+        const refusesBots = [401, 403, 405, 429].includes(response.status);
+        if (!response.ok && !refusesBots) throw new Error(`Website returned HTTP ${response.status}.`);
+        const html = refusesBots ? '' : await response.text();
+        if (!refusesBots && (html.trim().length < 100 || !/<(?:html|head|body|title|a)\b/i.test(html))) throw new Error('Website did not return a readable company page.');
         const finalUrl = response.url || url.href;
         if (host(finalUrl) === clientHost) throw new Error('Website redirects to the client.');
         results[index] = { candidate: { ...candidate, website_url: finalUrl } };

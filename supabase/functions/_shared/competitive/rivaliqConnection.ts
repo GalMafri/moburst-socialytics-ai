@@ -31,5 +31,6 @@ export async function coordinatedRivalIqFetch(url: string, init: RequestInit = {
   const cooldown = response.status === 429 && /HourRateLimitExceeded/i.test(body)
     ? Math.max(1, Number(response.headers.get('Retry-After')) || 3600) : 0;
   await rpc('release_rivaliq_request', { request_token: token, cooldown_seconds: cooldown });
-  return new Response(body, { status: response.status, headers: response.headers });
+  // A 204 (a DELETE's answer) may not carry a body, even an empty one.
+  return new Response([204, 205, 304].includes(response.status) ? null : body, { status: response.status, headers: response.headers });
 }

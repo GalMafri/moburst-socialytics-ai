@@ -82,8 +82,12 @@ Deno.serve(async req => {
     ? value.replaceAll(key, '[redacted]').replaceAll(encodeURIComponent(key), '[redacted]') : value));
   };
   if (body.mode === 'cleanup') {
-   const cleanup = await cleanupRivalIqLandscape(job, api);
-   if (cleanup.deleted) {
+   // A landscape already removed on the provider's side leaves only our stale record to clear.
+   const cleanup = await cleanupRivalIqLandscape(job, api).catch((e: unknown) => {
+    if (e instanceof Error && /HTTP 404/.test(e.message)) return { deleted: false, reason: 'not_found' as const };
+    throw e;
+   });
+   if (cleanup.deleted || cleanup.reason === 'not_found') {
     const { error: ue } = await db.from('competitor_sets').update({ rivaliq_landscape_id: null }).eq('id', setId).eq('rivaliq_landscape_id', job.landscape_id);
     if (ue) throw ue;
     const { error: de } = await db.from('rivaliq_setup_jobs').delete().eq('set_id', setId).eq('lease_id', leaseId);
