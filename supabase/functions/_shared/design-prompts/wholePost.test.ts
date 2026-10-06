@@ -1,4 +1,7 @@
-import { assert, assertEquals, assertStringIncludes } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { expect, it } from 'vitest';
+const assert = (v: unknown, msg?: string) => expect(v, msg).toBeTruthy();
+const assertEquals = (a: unknown, b: unknown) => expect(a).toEqual(b);
+const assertStringIncludes = (s: string, part: string) => expect(s).toContain(part);
 import { counterText, wholePostCorrection, wholePostExpectedText, wholePostPrompt } from './wholePost.ts';
 
 const plan: any = {
@@ -9,13 +12,13 @@ const plan: any = {
   ],
 };
 
-Deno.test('the approved headline is the only text, with a counter on carousel slides', () => {
+it('the approved headline is the only text, with a counter on carousel slides', () => {
   assertEquals(wholePostExpectedText(plan, 0, 'single'), 'AEO is not SEO with new initials.');
   assertEquals(wholePostExpectedText(plan, 1, 'carousel'), 'Retention is won before day one. 02 / 02');
   assertEquals(counterText('single', 0, 1), '');
 });
 
-Deno.test('the prompt asks for one finished picture with the exact words, the brand language and the logo', () => {
+it('the prompt asks for one finished picture with the exact words, the brand language and the logo', () => {
   const p = wholePostPrompt(plan, 0, undefined, 'single', true);
   assertStringIncludes(p, '"AEO is not SEO with new initials."');
   assertStringIncludes(p, '"new initials"');
@@ -29,7 +32,7 @@ Deno.test('the prompt asks for one finished picture with the exact words, the br
   assertStringIncludes(noFile, 'Correct the previous attempt: the hourglass hid the words');
 });
 
-Deno.test('a failed review becomes a concrete correction', () => {
+it('a failed review becomes a concrete correction', () => {
   const c = wholePostCorrection({ has_unapproved_text: true, has_logo: true, off_brand: false, has_garbled_text: false, has_hex_codes: false, has_text: true, reason: '' } as any, 'Retention is won before day one.');
   assertStringIncludes(c, 'Render exactly this text and nothing else: "Retention is won before day one."');
   assertStringIncludes(c, 'Place the brand\'s logo once');
