@@ -63,7 +63,7 @@ function database({order=['competitive','social'],due=true,feedError=false}={}){
  const competitor_handles=competitors.map((c,i)=>({id:'fixture-handle-'+i,competitor_id:c.id,client_id:client.id,platform:'instagram',handle:'fixture'+i,source:'auto',detection_confidence:.9,is_active:true}));
  const tables={reports:[],competitive_reports:[old],app_settings:[{key:'n8n_webhook_url',value:'https://fixture.invalid/social'},{key:'competitive_n8n_webhook_url',value:'https://fixture.invalid/competitive'}],report_schedules:due?order.map((kind,i)=>({id:'schedule-'+i,client_id:client.id,clients:client,report_kind:kind,is_active:true,next_run_at:'2020-01-01T00:00:00Z',frequency:'monthly',range_mode:'previous_month',run_day_of_month:7})):[],clients:[client],competitor_sets:[{id:'fixture-set',client_id:client.id,status:'confirmed',confirmed_at:'2026-01-01',clients:client}],rivaliq_snapshots:feedError?[]:[{client_id:client.id,endpoint:'feed',fetched_at:new Date().toISOString()}],sprout_profiles:[],competitive_insight_feedback:[],competitors,competitor_handles};
  const operations=[];
- const db={async rpc(name,args){if(name!=='claim_report_schedule')throw Error('Unmocked RPC');const row=tables.report_schedules.find(r=>r.id===args.schedule_id && r.next_run_at===args.expected_next_run_at && r.is_active && !r.dispatch_claimed_at);if(row)row.dispatch_claimed_at=new Date().toISOString();return{data:!!row,error:null}},from(table){const filters=[];let mode='select',payload,one=false,limit=Infinity,sort;const q={
+ const db={async rpc(name,args){if(name!=='requeue_dispatch_after_competitive')throw Error('Unmocked RPC');operations.push({rpc:name,args});return tables.__rpcError?{data:null,error:{message:tables.__rpcError}}:{data:1,error:null}},from(table){const filters=[];let mode='select',payload,one=false,limit=Infinity,sort;const q={
   select(){return q},throwOnError(){return q},is(k,v){filters.push(r=>v===null?r[k]==null:r[k]===v);return q},eq(k,v){filters.push(r=>r[k]===v);return q},neq(k,v){filters.push(r=>r[k]!==v);return q},in(k,vs){filters.push(r=>vs.includes(r[k]));return q},lt(k,v){filters.push(r=>r[k]<v);return q},lte(k,v){filters.push(r=>r[k]<=v);return q},gte(k,v){filters.push(r=>r[k]>=v);return q},order(k,opt){sort={k,desc:opt?.ascending===false};return q},limit(v){limit=v;return q},insert(v){mode='insert';payload=v;return q},update(v){mode='update';payload=v;return q},single(){one=true;return q},maybeSingle(){one=true;return q},
   then(resolve,reject){try{
    const data=tables[table]||[];let rows=data.filter(r=>filters.every(fn=>fn(r)));
@@ -80,38 +80,35 @@ function actualStaffGuard({staff=true,valid=true,canWrite=true,roleError=false}=
  const caller={auth:{getUser:async()=>({data:{user:valid?{id:'fixture-user'}:null},error:null})},rpc:async(name)=>({data:name==='is_moburst_staff'?staff:canWrite,error:roleError?{message:'Fixture role lookup failed'}:null})};
  return moduleFrom('supabase/functions/_shared/auth/requireStaff.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>caller},'./authz.ts':authz},{Deno:{env:{get:()=> 'fixture'}}});
 }
-async function runScheduler(options={}){
- const state=options.state || database(options);let handler;const requests=[];
- moduleFrom('supabase/functions/trigger-scheduled-reports/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/reports/payloads.ts':payloadModule(),'../_shared/auth/secretEquals.ts':{secretEquals:async()=>options.authorized!==false}},{Deno:{env:{get:()=> 'https://fixture.invalid'},serve:f=>handler=f},fetch:async(url,opts)=>{
-  requests.push({url,headers:opts.headers,payload:JSON.parse(opts.body),newCompetitiveStatus:state.tables.competitive_reports.at(-1).status});
-  if(url.includes('refresh-competitor-feed'))return new Response(JSON.stringify(options.feedResponse || {error:'Fixture landscape missing'}),{status:options.feedStatus || 422});
-  if(options.transport==='throw')throw Error('Fixture network failure');
-  if(options.transport==='reject')return new Response('{}',{status:503});
-  if(options.immediate && url.endsWith('/competitive'))Object.assign(state.tables.competitive_reports.at(-1),{status:'complete',report_data:{ai_analysis:{executive_summary:'Fresh analysis'}}});
-  return new Response(JSON.stringify({accepted:true}),{status:200});
- }});
- const response=await handler(new Request('https://fixture.invalid/scheduler'+(options.dryRun?'?dry_run=1':''),{method:'POST',body:JSON.stringify(options.body||{})}));return{...state,requests,status:response.status,body:await response.json()};
-}
+// runScheduler drove the single-request scheduler, replaced by the scheduled-jobs
+// queue on 2026-10-06; its QA-10, QA-11 and QA-04 behaviours are Vitest tests in
+// supabase/functions/run-scheduled-jobs and the SQL ones are in scripts/qa-sql-queue.mjs.
 async function runFeed({landscapes,explicit,posts=[],providerStatus=200}) {
  const state=database({due:false});Object.assign(state.tables.clients[0],{name:'Subliy',website_url:'https://subliy.com'});
  if(explicit)state.tables.competitor_sets[0].rivaliq_landscape_id=explicit;
  state.tables.competitors=[{set_id:'fixture-set',name:'Jobber',website_url:'https://getjobber.com',is_selected:true}];
  let handler;const requests=[];
- moduleFrom('supabase/functions/refresh-competitor-feed/index.ts',{
- 'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},
- '../_shared/competitive/ownedSource.ts':{collectOwnedCompetitive:async()=>({coverage:'not_connected',profiles:[],posts:[],metrics:null}),...moduleFrom('supabase/functions/_shared/competitive/ownedMerge.ts')},
- '../_shared/competitive/rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts'),
- '../_shared/competitive/linkedinSource.ts':moduleFrom('supabase/functions/_shared/competitive/linkedinSource.ts',{'./rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts')}),
- '../_shared/auth/requireStaff.ts':{requireStaff:async()=>({})},
- '../_shared/auth/secretEquals.ts':{secretEquals:async()=>true},
- '../_shared/design-prompts/designRefs.ts':{harvestedPaths:()=>[]}
- },{AbortSignal,Deno:{env:{get:n=>n==='ANTHROPIC_API_KEY'?undefined:'fixture'},serve:f=>handler=f},fetch:async url=>{
+ const globals={AbortSignal,Deno:{env:{get:n=>n==='ANTHROPIC_API_KEY'?undefined:'fixture'},serve:f=>handler=f},fetch:async url=>{
  requests.push(url);
  if(url.includes('/landscapes?'))return new Response(JSON.stringify({landscapes}),{status:providerStatus});
  if(url.includes('/socialposts?'))return new Response(JSON.stringify({socialPosts:posts}));
  if(url.startsWith('https://fixture.invalid/'))return new Response('',{status:404});
  throw Error('Unexpected outbound call');
- }});
+ }};
+ // The refresh moved to _shared/competitive/refreshFeed.ts (2026-10-06); the endpoint is auth plus a call.
+ const refreshFeed=moduleFrom('supabase/functions/_shared/competitive/refreshFeed.ts',{
+ './ownedSource.ts':{collectOwnedCompetitive:async()=>({coverage:'not_connected',profiles:[],posts:[],metrics:null}),...moduleFrom('supabase/functions/_shared/competitive/ownedMerge.ts')},
+ './rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts'),
+ './linkedinSource.ts':moduleFrom('supabase/functions/_shared/competitive/linkedinSource.ts',{'./rivaliqLandscape.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqLandscape.ts')}),
+ './rivaliqFetch.ts':moduleFrom('supabase/functions/_shared/competitive/rivaliqFetch.ts',{},globals),
+ '../design-prompts/designRefs.ts':{harvestedPaths:()=>[]}
+ },globals);
+ moduleFrom('supabase/functions/refresh-competitor-feed/index.ts',{
+ 'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},
+ '../_shared/competitive/refreshFeed.ts':refreshFeed,
+ '../_shared/auth/requireStaff.ts':{requireStaff:async()=>({})},
+ '../_shared/auth/secretEquals.ts':{secretEquals:async()=>true}
+ },globals);
  const response=await handler(new Request('https://fixture.invalid/feed',{method:'POST',body:JSON.stringify({client_id:'fixture-client'})}));
  return {...state,requests,status:response.status,body:await response.json()};
 }
@@ -150,10 +147,10 @@ async function runManual(transport, options={}){
 }
 
 async function runCallback(state,kind,status,reportId,{authorized=true,resume=true}={}){
- let handler;const requests=[];
+ let handler;if(!resume)state.tables.__rpcError='Fixture database unavailable';const requests=[];
  const attempt = state.tables.competitive_reports.find(r=>r.id===reportId)?.created_at;
  if(kind==='competitive') state.tables.rivaliq_snapshots.push({report_id:reportId,attempt_started_at:attempt,endpoint:'socialposts',fetched_at:new Date().toISOString(),payload:{expected_windows:5,failed_windows:0}});
- moduleFrom('supabase/functions/update-'+(kind==='competitive'?'competitive-':'')+'report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/secretEquals.ts':{secretEquals:async()=>authorized}},{Deno:{env:{get:()=> 'https://fixture.invalid'},serve:f=>handler=f},fetch:async(url,opts)=>{requests.push({url,body:JSON.parse(opts.body)});if(!resume)throw Error('Scheduler unavailable');const r=await runScheduler({state,body:JSON.parse(opts.body)});return new Response(JSON.stringify(r.body),{status:r.status});}});
+ moduleFrom('supabase/functions/update-'+(kind==='competitive'?'competitive-':'')+'report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/secretEquals.ts':{secretEquals:async()=>authorized}},{Deno:{env:{get:()=> 'https://fixture.invalid'},serve:f=>handler=f},fetch:async(url,opts)=>{requests.push({url,body:JSON.parse(opts.body)});throw Error('Unexpected outbound call');}});
  const response=await handler(new Request('https://fixture.invalid/callback',{method:'POST',body:JSON.stringify({op:'report',report_id:reportId,attempt_started_at:attempt,status,report_data:{ai_analysis:{executive_summary:'Completed fixture'}}})}));
  return{status:response.status,body:await response.json(),requests};
 }
@@ -214,18 +211,7 @@ async function confirmCompetitorsQa({handlesById={},handlesError=false}={}) {
  await check('QA-07','control','missing analysis is a report failure',()=>assert.equal(gamma({status:'failed'},{}).status,'failed'));
  await check('QA-07','regression','timeout retains usable analysis with warning',()=>{const r=gamma({status:'pending',_gamma_timeout:true});assert.equal(r.status,'success');assert.equal(r.gamma_status,'timed_out');assert.match(r.warnings[0],/timed out/);});
  for(const [start,end,count,days,cadence] of [['2026-09-09','2026-09-15',16,7,16],['2024-02-01','2024-02-29',29,29,7],['2026-09-09','2026-09-09',7,1,49],['2026-09-09','2026-09-15',0,7,0]])await check('QA-08','regression','inclusive cadence '+start+' '+end,()=>{const r=aggregate(start,end,count);assert.equal(r.period.days,days);assert.equal(r.companies[0].cadence_per_week,cadence);});
- for(const order of [['competitive','social'],['social','competitive']])await check('QA-10','regression','hold social until fresh competitive completes '+order,async()=>{const r=await runScheduler({order});assert.equal(r.status,200);assert.equal(r.requests.filter(x=>x.url.endsWith('/social')).length,0);assert.equal(r.body.triggered,1);const comp=r.tables.competitive_reports.at(-1);assert.equal(comp.status,'running');const schedule=r.tables.report_schedules.find(x=>x.report_kind==='social');assert.equal(schedule.pending_competitive_report_id,comp.id);assert.equal(schedule.next_run_at,'2020-01-01T00:00:00Z');comp.status='complete';comp.report_data={ai_analysis:{executive_summary:'Fresh cycle'}};const resumed=await runScheduler({state:r,body:{resume_competitive_report_id:comp.id}});assert.equal(resumed.body.triggered,1);const social=resumed.requests.find(x=>x.url.endsWith('/social'));assert.equal(social.payload.competitive_report_id,comp.id);assert.equal(social.payload.competitive_context.executive_summary,'Fresh cycle');assert.equal(schedule.pending_competitive_report_id,null);const duplicate=await runScheduler({state:r,body:{resume_competitive_report_id:comp.id}});assert.equal(duplicate.requests.length,0);});
- await check('QA-10','control','social-only schedule still runs',async()=>{const r=await runScheduler({order:['social']});assert.equal(r.body.triggered,1);assert.equal(r.requests[0].payload.competitive_report_id,'old-complete');});
- await check('QA-10','control','immediate competitive completion uses fresh result',async()=>{const r=await runScheduler({immediate:true});assert.equal(r.body.triggered,2);assert.equal(r.requests[1].payload.competitive_context.executive_summary,'Fresh analysis');});
- await check('QA-10','control','missing competitor set holds both due schedules',async()=>{const state=database();state.tables.competitor_sets=[];const r=await runScheduler({state});assert.equal(r.requests.length,0);assert(r.tables.report_schedules.every(x=>x.next_run_at==='2020-01-01T00:00:00Z'));});
- await check('QA-10','control','already claimed schedule is not dispatched',async()=>{const state=database({order:['social']});state.tables.report_schedules[0].dispatch_claimed_at='2026-09-01';const r=await runScheduler({state});assert.equal(r.requests.length,0);assert.equal(r.body.triggered,0);});
- await check('QA-10','control','dry run makes no writes or outbound calls',async()=>{const r=await runScheduler({dryRun:true,feedError:true});assert.equal(r.operations.length,0);assert.equal(r.requests.length,0);assert.equal(r.body.triggered,0);});
- await check('QA-10','control','wrong secret is rejected before writes',async()=>{const r=await runScheduler({authorized:false});assert.equal(r.status,401);assert.equal(r.operations.length,0);assert.equal(r.requests.length,0);});
  await check('QA-10','control','explicit dependency cannot use another client report',async()=>{const state=database();state.tables.competitive_reports[0].client_id='other';await assert.rejects(()=>payloadModule().buildSocialPayload({supabase:state.db,client:state.tables.clients[0],reportId:'fixture',range:{},competitiveReportId:'old-complete'}),/required competitive/);});
- await check('QA-11','regression','failed feed returns a failing scheduler response',async()=>{const r=await runScheduler({due:false,feedError:true});assert.equal(r.status,502);assert.equal(r.body.failed,1);assert.equal(r.body.triggered,0);});
- for(const feedStatus of [401,403,429,500,502]) await check('QA-11','regression','real feed failure stays visible '+feedStatus,async()=>{const r=await runScheduler({due:false,feedError:true,feedStatus,feedResponse:{error:'Provider failed',code:'RIVALIQ_CLIENT_NOT_TRACKED'}});assert.equal(r.status,502);assert.equal(r.body.failed,1);});
- await check('QA-11','regression','missing tracking is explicit configuration status without gateway failure',async()=>{const r=await runScheduler({due:false,feedError:true,feedResponse:{code:'RIVALIQ_CLIENT_NOT_TRACKED',error:'Client missing'}});assert.equal(r.status,200);assert.equal(r.body.status,'configuration_required');assert.equal(r.body.configuration_required,1);assert.equal(r.body.failed,0);assert.equal(r.body.feeds[0].error,'Client missing');assert.equal(r.operations.length,0);});
- await check('QA-11','regression','missing feed tracking does not prevent a due social dispatch',async()=>{const r=await runScheduler({order:['social'],feedError:true,feedResponse:{code:'RIVALIQ_CLIENT_NOT_TRACKED',error:'Client missing'}});assert.equal(r.status,200);assert.equal(r.body.triggered,1);assert.equal(r.body.configuration_required,1);});
  for(const explicit of [null,'612909']) await check('QA-FEED','regression','unrelated Subliy landscape rejected before all writes '+explicit,async()=>{const r=await runFeed({explicit,landscapes:[{id:612909,name:'Subliy',focusCompanyId:1,companies:[{id:1,name:'Jobber',url:'https://getjobber.com'}]}]});assert.equal(r.status,422);assert.equal(r.body.code,'RIVALIQ_CLIENT_NOT_TRACKED');assert.equal(r.requests.length,1);assert.equal(r.operations.length,0);});
  await check('QA-FEED','regression','ambiguous identity is rejected before writes',async()=>{const r=await runFeed({explicit:'1',landscapes:[{id:1,focusCompanyId:1,companies:[{id:1,name:'Subliy',url:'https://subliy.com'},{id:2,name:'Subliy LLC',url:'http://www.subliy.com/'}]}]});assert.equal(r.status,422);assert.equal(r.operations.length,0);});
  await check('QA-FEED','regression','provider failure remains an error with no writes',async()=>{const r=await runFeed({landscapes:[],providerStatus:429});assert.equal(r.status,500);assert.equal(r.body.code,undefined);assert.equal(r.operations.length,0);});
@@ -236,17 +222,13 @@ async function confirmCompetitorsQa({handlesById={},handlesError=false}={}) {
  await check('QA-IMPORT','regression','non-focus client is excluded and focus competitor retained',async()=>{const r=await runImport();assert.equal(r.status,200);assert.equal(r.state.tables.competitors.length,1);assert.equal(r.state.tables.competitors[0].name,'Jobber');});
  await check('QA-04','regression','manual dispatch includes workflow authentication',async()=>{const r=await runManual('accept');assert.equal(r.status,200);assert.equal(r.sentHeaders[0]['X-Socialytics-Secret'],'fixture');});
  await check('QA-04','regression','missing workflow secret cannot create or dispatch reports',async()=>{const r=await runManual('accept',{missingDispatchSecret:true});assert.equal(r.status,503);assert.equal(r.dispatches,0);assert.equal(r.state.operations.length,0);});
- await check('QA-04','regression','both scheduled dispatch types carry workflow authentication',async()=>{const r=await runScheduler({immediate:true});assert.equal(r.body.triggered,2);assert(r.requests.every(q=>q.headers['X-Socialytics-Secret']==='https://fixture.invalid'));});
- for(const transport of ['throw','reject'])await check('QA-11','regression','failed scheduler dispatch '+transport,async()=>{const r=await runScheduler({order:['social'],transport});assert.equal(r.status,502);assert.equal(r.tables.reports[0].status,'failed');assert.equal(r.body.triggered,0);});
  for(const transport of ['throw','reject','accept','late-completed'])await check('QA-11','regression','manual dispatch '+transport,async()=>{const r=await runManual(transport);assert.equal(r.status,transport==='reject'?502:transport==='accept'?200:500);assert.equal(r.reportStatus,transport==='accept'?'running':transport==='late-completed'?'completed':'failed');});
 
- await check('QA-10','regression','actual completion callback resumes the pinned social schedule',async()=>{const r=await runScheduler();const id=r.tables.competitive_reports.at(-1).id;const callback=await runCallback(r,'competitive','complete',id);assert.equal(callback.status,200);assert.equal(callback.requests[0].body.resume_competitive_report_id,id);assert.equal(r.tables.reports.length,1);await runCallback(r,'competitive','complete',id);assert.equal(r.tables.reports.length,1);});
- await check('QA-10','regression','failed competitive dependency blocks social with visible failure',async()=>{const r=await runScheduler();r.tables.competitive_reports.at(-1).status='failed';const blocked=await runScheduler({state:r});assert.equal(blocked.status,502);assert.equal(blocked.requests.length,0);assert.equal(r.tables.reports.length,0);assert.equal(r.tables.report_schedules.find(s=>s.report_kind==='social').next_run_at,'2020-01-01T00:00:00Z');});
- await check('QA-10','control','callback scheduler failure preserves completed competitive report',async()=>{const r=await runScheduler();const id=r.tables.competitive_reports.at(-1).id;const callback=await runCallback(r,'competitive','complete',id,{resume:false});assert.equal(callback.status,200);assert(callback.body.warning);assert.equal(r.tables.competitive_reports.at(-1).status,'complete');assert.equal(r.tables.reports.length,0);});
+ await check('QA-10','regression','completed competitive callback releases the held social job through the database',async()=>{const state=database();state.tables.competitive_reports.push({id:'comp-new',client_id:'fixture-client',status:'running',set_id:'fixture-set',created_at:new Date().toISOString()});const callback=await runCallback(state,'competitive','complete','comp-new');assert.equal(callback.status,200);assert.equal(callback.body.warning,undefined);assert.equal(callback.requests.length,0);const call=state.operations.find(o=>o.rpc==='requeue_dispatch_after_competitive');assert.equal(call.args.p_competitive_report_id,'comp-new');});
+ await check('QA-10','control','release failure preserves the completed competitive report',async()=>{const state=database();state.tables.competitive_reports.push({id:'comp-new',client_id:'fixture-client',status:'running',set_id:'fixture-set',created_at:new Date().toISOString()});const callback=await runCallback(state,'competitive','complete','comp-new',{resume:false});assert.equal(callback.status,200);assert(callback.body.warning);assert.equal(state.tables.competitive_reports.at(-1).status,'complete');});
  await check('QA-11','regression','social failure callback closes running row',async()=>{const state=database();state.tables.reports.push({id:'fixture',status:'running'});const callback=await runCallback(state,'social','failed','fixture');assert.equal(callback.status,200);assert.equal(state.tables.reports[0].status,'failed');});
  await check('QA-11','regression','late social failure cannot erase a completed report',async()=>{const state=database();state.tables.reports.push({id:'fixture',status:'completed',report_data:{keep:'original'}});const callback=await runCallback(state,'social','failed','fixture');assert.equal(callback.status,200);assert.equal(state.tables.reports[0].status,'completed');assert.equal(state.tables.reports[0].report_data.keep,'original');});
  await check('QA-11','control','unauthorized callback cannot change report',async()=>{const state=database();state.tables.reports.push({id:'fixture',status:'running'});const callback=await runCallback(state,'social','failed','fixture',{authorized:false});assert.equal(callback.status,401);assert.equal(state.tables.reports[0].status,'running');});
- await check('QA-10','regression','delayed completion retains the competitive report period',async()=>{const r=await runScheduler();const comp=r.tables.competitive_reports.at(-1);comp.status='complete';comp.date_range_start='2026-07-01';comp.date_range_end='2026-07-31';const resumed=await runScheduler({state:r,body:{resume_competitive_report_id:comp.id}});assert.equal(resumed.requests[0].payload.date_range_start,'2026-07-01');assert.equal(resumed.requests[0].payload.date_range_end,'2026-07-31');});
  for (const kind of ['social','competitive']) {
   const table=kind==='social'?'reports':'competitive_reports';
   for (const status of (kind==='competitive'?['running']:['running','failed'])) for (const age of [10,15,45,89]) await check('QA-90','regression',kind+' '+status+' retry locked at '+age+' minutes',async()=>{

@@ -20,6 +20,10 @@ verify_jwt = false
 [functions.trigger-scheduled-reports]
 verify_jwt = false
 
+# The scheduled-jobs worker: called by pg_cron every minute with the operational secret.
+[functions.run-scheduled-jobs]
+verify_jwt = false
+
 [functions.firecrawl-scrape]
 verify_jwt = false
 

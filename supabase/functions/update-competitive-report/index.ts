@@ -202,13 +202,11 @@ Deno.serve(async (req) => {
       }
       let schedulingWarning: string | undefined;
       if (effectiveStatus === "complete") {
+        // Release the social dispatch this report was holding. A database call:
+        // the scheduled-jobs worker picks the job up within a minute.
         try {
-          const response = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/trigger-scheduled-reports`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET")! },
-            body: JSON.stringify({ resume_competitive_report_id: report_id }),
-          });
-          if (!response.ok) throw new Error(`Scheduler returned ${response.status}`);
+          const { error: requeueError } = await supabase.rpc("requeue_dispatch_after_competitive", { p_competitive_report_id: report_id });
+          if (requeueError) throw new Error(requeueError.message);
         } catch (error) {
           schedulingWarning = "The competitive report is saved. Its waiting social schedule will be checked again by the daily scheduler.";
           console.warn("[competitive schedule resume]", error);

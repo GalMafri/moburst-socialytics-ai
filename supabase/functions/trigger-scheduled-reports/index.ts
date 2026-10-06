@@ -1,141 +1,22 @@
-// Scheduled report runner (feedback item 10).
+// Enqueue the due scheduled work now.
 //
-// Called daily by the n8n "Socialytics - Daily Scheduler" workflow with the
-// shared secret header. Finds every active schedule whose next_run_at has
-// passed and fires its kind:
-//   social       → monthly performance report (existing n8n webhook), with the
-//                  client's latest complete competitive report attached as
-//                  competitive_context so the calendar is competitor-informed.
-//   competitive  → RivalIQ competitive analysis (competitive webhook), only
-//                  when the client has a confirmed competitor set; otherwise
-//                  the run is skipped and the reason recorded in last_result.
-// Range: range_mode 'previous_month' covers the first to the last day of the
-// previous calendar month, so a run on the 7th reports on the whole prior
-// month. next_run_at advances to run_day_of_month of the following month, 07:15 UTC.
+// Scheduled reports and competitor feeds run as a queue since 2026-10-06
+// (docs/superpowers/specs/2026-10-06-scheduled-report-queue-design.md). The
+// daily pg_cron job scheduled-reports-enqueue calls the same SQL function
+// directly; this endpoint is the manual and QA way in. ?dry_run=1 returns the
+// plan without writing. The scheduled-jobs worker does the work.
 //
-// FINDING (2026-09-02): nothing had been calling this function — schedules sat
-// with stale next_run_at values — so the daily n8n trigger is what makes any
-// of this real.
+// Until 2026-10-06 this function did all of it inside one request (abandoned
+// runs, every stale feed, every due dispatch), and on that day the feed
+// refreshes alone outlasted the caller's timeout.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { buildCompetitivePayload, buildSocialPayload, STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-socialytics-secret",
 };
-
-function previousMonthRange(now: Date): { start: string; end: string } {
-  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-  const last = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
-  return { start: first.toISOString().slice(0, 10), end: last.toISOString().slice(0, 10) };
-}
-
-function currentMonthRange(now: Date): { start: string; end: string } {
-  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  return { start: first.toISOString().slice(0, 10), end: now.toISOString().slice(0, 10) };
-}
-
-function nextRun(now: Date, runDay: number, frequency: string): string {
-  if (frequency === "weekly") return new Date(now.getTime() + 7 * 86400000).toISOString();
-  if (frequency === "biweekly") return new Date(now.getTime() + 14 * 86400000).toISOString();
-  const day = Math.min(Math.max(runDay || 7, 1), 28);
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, day, 7, 15, 0)).toISOString();
-}
-
-/** Compact digest of the latest complete competitive report (mirrors RunAnalysis). */
-/**
- * Close out runs that died without saying so.
- *
- * A workflow that fails at an HTTP node never reaches its writeback, so the
- * report row sits on "running" for ever — Wendover's August report sat that
- * way for two days, LegaBot's July one for a month, and nothing in the app
- * or the database said anything was wrong. n8n's error trigger does not
- * carry the report id, so the only reliable place to notice is here, from
- * the clock.
- *
- * They become ordinary failures with a reason, which is what the Retry
- * control is for.
- */
-async function closeAbandonedRuns(supabase: any, now: Date, dryRun: boolean) {
-  const cutoff = new Date(now.getTime() - STUCK_AFTER_MINUTES * 60000).toISOString();
-  const out: Array<{ table: string; id: string }> = [];
-  for (const table of ["reports", "competitive_reports"]) {
-    try {
-      const { data: stale } = await supabase
-        .from(table)
-        .select("id")
-        .eq("status", "running")
-        .lt("created_at", cutoff);
-      for (const row of stale || []) {
-        out.push({ table, id: row.id });
-        if (dryRun) continue;
-        await supabase
-          .from(table)
-          .update({
-            status: "failed",
-            report_data: {
-              error:
-                "The workflow stopped without reporting back, so this run was closed automatically. " +
-                "Run it again, and if it stops again check the n8n execution for that client.",
-            },
-          })
-          .eq("id", row.id)
-          .eq("status", "running");
-      }
-    } catch (e) {
-      console.warn(`[abandoned] ${table}:`, e);
-    }
-  }
-  if (out.length > 0) console.log(`[abandoned] closed ${out.length} run(s) that never reported back`);
-  return out;
-}
-
-// Milestone 4: keep each client's competitor feed under a week old. One
-// RivalIQ call per client, at most ten clients per daily run, so the weekly
-// refresh never competes with the monthly pulls for the hourly budget.
-async function refreshStaleFeeds(supabase: any, now: Date, dryRun: boolean, secret: string) {
-  const out: unknown[] = [];
-  try {
-    const { data: sets } = await supabase
-      .from("competitor_sets")
-      .select("client_id, status, clients!inner(id, name, archived_at)")
-      .in("status", ["confirmed", "analyzing", "complete", "failed"]);
-    const clientIds = [...new Set<string>((sets || []).filter((s: any) => !s.clients?.archived_at).map((s: any) => s.client_id as string))].slice(0, 25);
-    if (clientIds.length === 0) return out;
-    const { data: snaps } = await supabase
-      .from("rivaliq_snapshots")
-      .select("client_id, fetched_at")
-      .eq("endpoint", "feed")
-      .in("client_id", clientIds)
-      .order("fetched_at", { ascending: false });
-    const latest = new Map<string, string>();
-    for (const s of snaps || []) if (!latest.has(s.client_id)) latest.set(s.client_id, s.fetched_at);
-    const stale = clientIds.filter((id) => { const f = latest.get(id); return !f || now.getTime() - new Date(f).getTime() > 6 * 86400000; }).slice(0, 10);
-    for (const clientId of stale) {
-      if (dryRun) { out.push({ client_id: clientId, status: "would refresh feed" }); continue; }
-      try {
-        const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/refresh-competitor-feed`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret },
-          body: JSON.stringify({ client_id: clientId }),
-        });
-        const j = await r.json().catch(() => ({}));
-        // An unconfigured client needs setup, not a daily gateway-failure
-        // notification. Only this explicit contract is downgraded; provider,
-        // authentication, database and unknown 422 failures still fail the run.
-        const needsSetup = r.status === 422 && j.code === "RIVALIQ_CLIENT_NOT_TRACKED";
-        out.push({ client_id: clientId, status: r.ok ? "refreshed" : needsSetup ? "configuration_required" : "error", code: j.code, posts: j.posts, alerts: j.alerts, error: j.error });
-      } catch (e) {
-        out.push({ client_id: clientId, status: "error", error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-  } catch (e) {
-    out.push({ status: "error", error: e instanceof Error ? e.message : String(e) });
-  }
-  return out;
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -145,159 +26,10 @@ Deno.serve(async (req) => {
 
   try {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const now = new Date();
     const dryRun = new URL(req.url).searchParams.get("dry_run") === "1";
-
-    const body = await req.json().catch(() => ({}));
-    const resumeId = typeof body.resume_competitive_report_id === "string" ? body.resume_competitive_report_id : null;
-    let dueQuery = supabase
-      .from("report_schedules")
-      .select("*, clients(*)")
-      .eq("is_active", true)
-      .lte("next_run_at", now.toISOString());
-    if (resumeId) dueQuery = dueQuery.eq("report_kind", "social").eq("pending_competitive_report_id", resumeId);
-    const { data: due, error: dueErr } = await dueQuery;
-    if (dueErr) throw dueErr;
-    const abandoned = resumeId ? [] : await closeAbandonedRuns(supabase, now, dryRun);
-    const feeds = resumeId ? [] : await refreshStaleFeeds(supabase, now, dryRun, secret);
-    const finish = (results: Array<Record<string, unknown>>) => {
-      const failed = [...results, ...feeds].filter((r: any) => r.status === "error").length;
-      const configurationRequired = feeds.filter((r: any) => r.status === "configuration_required").length;
-      return json({ status: failed ? "partial_failure" : configurationRequired ? "configuration_required" : "ok", failed, configuration_required: configurationRequired, triggered: results.filter(r => r.status === "triggered").length, dry_run: dryRun, results, feeds, abandoned }, failed ? 502 : 200);
-    };
-    if (!due || due.length === 0) return finish([]);
-
-    const { data: settings } = await supabase.from("app_settings").select("key, value").in("key", ["n8n_webhook_url", "competitive_n8n_webhook_url"]);
-    const socialUrl = settings?.find((s) => s.key === "n8n_webhook_url")?.value;
-    const competitiveUrl = settings?.find((s) => s.key === "competitive_n8n_webhook_url")?.value;
-
-    const results: Array<Record<string, unknown>> = [];
-    // Runs fired in the same minute are spaced out: each n8n workflow waits
-    // stagger_seconds before its first external call. RivalIQ allows one concurrent
-    // call per account (competitive, 150 s apart); the social pipeline shares Sprout,
-    // Apify and Gamma quotas across clients (180 s apart).
-    let competitiveIndex = 0;
-    let socialIndex = 0;
-    for (const schedule of [...due].sort((a, b) => Number(b.report_kind === "competitive") - Number(a.report_kind === "competitive"))) {
-      const client = schedule.clients;
-      if (!client || client.archived_at) { results.push({ schedule: schedule.id, status: "skipped", reason: "client archived or missing" }); continue; }
-      let range = schedule.range_mode === "previous_month" ? previousMonthRange(now) : currentMonthRange(now);
-      const advance = async (result: string) => {
-        if (dryRun) return;
-        await supabase.from("report_schedules").update({ last_run_at: now.toISOString(), next_run_at: nextRun(now, schedule.run_day_of_month, schedule.frequency), last_result: result.slice(0, 500), dispatch_claimed_at: null, pending_competitive_report_id: null }).eq("id", schedule.id).throwOnError();
-      };
-
-      const waitForDependency = async (reason: string, failed = false) => {
-        if (!dryRun) await supabase.from("report_schedules").update({ last_result: reason, dispatch_claimed_at: null }).eq("id", schedule.id).throwOnError();
-        results.push({ client: client.name, kind: schedule.report_kind, status: failed ? "error" : "waiting", reason });
-      };
-      if (!dryRun) {
-        const { data: claimed, error: claimError } = await supabase.rpc("claim_report_schedule", { schedule_id: schedule.id, expected_next_run_at: schedule.next_run_at });
-        if (claimError) throw claimError;
-        if (!claimed) {
-          results.push({ client: client.name, kind: schedule.report_kind, status: "claimed_elsewhere", reason: "Already dispatched or claimed. An interrupted claim needs execution review before retrying." });
-          continue;
-        }
-      }
-      // The report row is created BEFORE the webhook call, so a webhook that
-      // refuses used to leave it sitting on "running" (and a competitor set on
-      // "analyzing") until closeAbandonedRuns noticed hours later. Remember
-      // what this iteration created so the catch can close it straight away.
-      let openReport: { table: string; id: string } | null = null;
-      let openSetId: string | null = null;
-
-      try {
-        if (schedule.report_kind === "competitive") {
-          if (!competitiveUrl) throw new Error("competitive webhook URL not configured");
-          const { data: set } = await supabase.from("competitor_sets").select("*").eq("client_id", client.id)// Same statuses every other consumer accepts. Restricting the scheduler to
-          // confirmed|complete meant a client whose last run failed, or whose set
-          // was left mid-analysis, silently stopped being scheduled altogether and
-          // nothing said so.
-          .in("status", ["confirmed", "analyzing", "complete", "failed"]).order("confirmed_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
-          if (!set) { await waitForDependency("Waiting for a confirmed competitor set; paired social report is held."); continue; }
-          if (dryRun) { results.push({ client: client.name, kind: "competitive", status: "would run", range }); continue; }
-          const attemptStartedAt = new Date().toISOString();
-          const { data: report, error: repErr } = await supabase.from("competitive_reports").insert({ created_at: attemptStartedAt, client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: schedule.created_by }).select("id").single();
-          if (repErr) throw repErr;
-          openReport = { table: "competitive_reports", id: report.id };
-          openSetId = set.id;
-          await supabase.from("report_schedules")
-            .update({ pending_competitive_report_id: report.id, last_result: `Waiting for competitive report ${report.id}` })
-            .eq("client_id", client.id).eq("report_kind", "social").eq("is_active", true)
-            .lte("next_run_at", now.toISOString()).is("pending_competitive_report_id", null).throwOnError();
-          await supabase.from("competitor_sets").update({ status: "analyzing" }).eq("id", set.id).in("status", ["confirmed", "complete", "failed"]);
-          const payload = await buildCompetitivePayload({
-            supabase, client, reportId: report.id, set, range, attemptStartedAt,
-            scheduled: true, staggerSeconds: competitiveIndex++ * 150,
-          });
-          const r = await fetch(competitiveUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret }, body: JSON.stringify(payload) });
-          if (!r.ok) throw new Error(`competitive webhook ${r.status}`);
-          await advance(`triggered competitive report ${report.id}`);
-          results.push({ client: client.name, kind: "competitive", status: "triggered", report_id: report.id, range });
-          continue;
-        }
-
-        // Re-read after claiming: the competitive dispatch or its callback may
-        // have attached a dependency since this invocation loaded its due list.
-        let dependencyId: string | undefined;
-        if (!dryRun) {
-          const { data: fresh, error: freshError } = await supabase.from("report_schedules").select("pending_competitive_report_id").eq("id", schedule.id).single();
-          if (freshError) throw freshError;
-          dependencyId = fresh.pending_competitive_report_id || undefined;
-          if (dependencyId) {
-            const { data: dependency, error: dependencyError } = await supabase.from("competitive_reports").select("status, client_id, date_range_start, date_range_end").eq("id", dependencyId).eq("client_id", client.id).maybeSingle();
-            if (dependencyError) throw dependencyError;
-            if (dependency?.status !== "complete") {
-              await waitForDependency(`Waiting for competitive report ${dependencyId} (${dependency?.status || "unavailable"}). Retry that report if it failed.`, dependency?.status === "failed" || !dependency);
-              continue;
-            }
-            if (!dependency.date_range_start || !dependency.date_range_end) throw new Error("The required competitive report has no reporting period.");
-            range = { start: dependency.date_range_start, end: dependency.date_range_end };
-          } else {
-            const { data: paired, error: pairedError } = await supabase.from("report_schedules").select("id").eq("client_id", client.id).eq("report_kind", "competitive").eq("is_active", true).lte("next_run_at", now.toISOString()).maybeSingle();
-            if (pairedError) throw pairedError;
-            if (paired) { await waitForDependency("Waiting for the due competitive analysis to start."); continue; }
-          }
-        }
-
-        // social (default)
-        if (!socialUrl) throw new Error("n8n webhook URL not configured");
-        if (dryRun) { results.push({ client: client.name, kind: "social", status: "would run", range }); continue; }
-
-        const { data: report, error: reportErr } = await supabase.from("reports").insert({ client_id: client.id, status: "running", report_data: {}, created_by: schedule.created_by, date_range_start: range.start, date_range_end: range.end }).select("id").single();
-        if (reportErr) throw reportErr;
-        openReport = { table: "reports", id: report.id };
-
-        const payload = await buildSocialPayload({
-          supabase, client, reportId: report.id, range,
-          scheduled: true, staggerSeconds: socialIndex++ * 180, competitiveReportId: dependencyId,
-        });
-        const r = await fetch(socialUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret }, body: JSON.stringify(payload) });
-        if (!r.ok) throw new Error(`social webhook ${r.status}`);
-        await advance(`triggered social report ${report.id}`);
-        results.push({ client: client.name, kind: "social", status: "triggered", report_id: report.id, range, competitive_context: !!payload.competitive_context });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        // Close what this iteration opened, rather than leaving a run that
-        // nobody started showing as in progress. Both updates are guarded on
-        // the status we set, so a webhook that actually landed and reported
-        // back first is never overwritten.
-        if (openReport) {
-          await supabase
-            .from(openReport.table)
-            .update({ status: "failed", report_data: { error: `Dispatch could not be confirmed: ${msg}. Check the n8n execution before retrying.` } })
-            .eq("id", openReport.id)
-            .eq("status", "running");
-        }
-        if (openSetId) {
-          await supabase.from("competitor_sets").update({ status: "failed" }).eq("id", openSetId).eq("status", "analyzing");
-        }
-        if (openReport) await advance(`error: ${msg}`);
-        else if (!dryRun) await supabase.from("report_schedules").update({ last_result: `error: ${msg}`.slice(0, 500), dispatch_claimed_at: null }).eq("id", schedule.id).throwOnError();
-        results.push({ client: client?.name || schedule.client_id, kind: schedule.report_kind, status: "error", error: msg });
-      }
-    }
-    return finish(results);
+    const { data, error } = await supabase.rpc("enqueue_scheduled_report_jobs", { p_dry_run: dryRun });
+    if (error) throw new Error(error.message);
+    return json(data);
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
