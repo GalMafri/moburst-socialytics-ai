@@ -1,5 +1,6 @@
 // @ts-nocheck
 // Isolated bundle of the locally tested planner and reviewer.
+
 // supabase/functions/preview-brand-design/index.ts
 import { createClient as createClient2 } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -175,7 +176,8 @@ Choose the KIND of visual from the feed. Typography-led brands can have NO physi
 Each result must have a specific NEW visual idea tied to the message, beyond replacing words: a new subject in a demonstrated rendering style, or a new message-specific treatment of the brand's graphic/background vocabulary when typography leads. Do NOT keep an existing post's structure or merely swap its words and hero. subject describes the message-specific visual idea without telling the model where to put it; composition describes the intended visual relationship without placement instructions. new_content names the new subject or graphic idea, and new_composition explains how its treatment is genuinely distinct from each reference's arrangement. message_fit explains why this treatment suits the message and copy density. Cite only observations visible in the chosen images.
 
 Exact copy: if approved_headlines is supplied, frame i must use that exact string, preserving spelling, case and punctuation. Otherwise take a concise, contiguous, VERBATIM excerpt of approved_post_copy for each headline; never rewrite, manufacture a claim, improve wording or silently change a number. Alternative singles communicate the same message. A carousel must cover the supplied argument and enumerated points without inventing additional material. If the requested count or copy cannot work, return frames=[] with an actionable blocked_reason. emphasis is empty or one to three complete consecutive words occurring exactly in the headline.
-Return brand_system describing only the demonstrated visual system, under 1800 characters. Per frame: headline <= 240 characters, subject <= 700, composition <= 900, action <= 200, message_fit/new_content/new_composition <= 700. reference_indices contains the two to four token references; none is a layout template. Each token rule <= 900 characters. No layout, logo crop, caption_style, hex values or reconstruction instructions. If there is no suitable treatment with independent supporting evidence, return frames=[] and explain the specific missing evidence. Call record_feed_plan once.`;
+Before submitting, verify that EVERY selected reference has identity=client, suitable=true, requires_asset=false, and EXACTLY the same treatment value as its frame. Use object for rendered physical-object-led work even when it contains typography and graphic elements; graphic for abstract/flat-graphic-led work, typography when type leads, photo for photographs, testimonial for attributed testimonials. Classify the dominant treatment consistently. Do not select a reference you just marked unsuitable. At least two selected family identifiers must differ.
+Keep the record concise: brand_system <= 700 characters; observation visible_evidence <= 360 and reason <= 200 characters; per frame subject/composition <= 400, action <= 120, message_fit/new_content/new_composition <= 400; each token rule <= 400. Preserve specific visible evidence, not generic praise. Headline <= 240 characters. Aim for under 2500 output tokens for one frame. reference_indices contains two to four token references; none is a layout template. No layout, logo crop, caption_style, hex values or reconstruction instructions. If there is no suitable treatment with independent supporting evidence, return frames=[] and explain the specific missing evidence. Call record_feed_plan once.`;
 }
 var text = (value, max) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
 var integerIndex = (value, references) => Number.isInteger(value) && value >= 0 && value < references;
@@ -235,11 +237,11 @@ async function requestFeedPlan(input, apiKey) {
   content.push({ type: "text", text: feedPlanQuestion(input.brief) });
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    signal: AbortSignal.timeout(9e4),
+    signal: AbortSignal.timeout(12e4),
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 12e3,
+      max_tokens: 6e3,
       tools: [{ name: "record_feed_plan", strict: true, description: "Record observed brand tokens and original design decisions, or explain missing evidence.", input_schema: feedPlanSchema(input.brief.count, input.images.length) }],
       tool_choice: { type: "auto" },
       messages: [{ role: "user", content }]
@@ -250,7 +252,11 @@ async function requestFeedPlan(input, apiKey) {
   if (result.stop_reason === "max_tokens") throw new Error("The brand-token assessment was incomplete. No design was started.");
   const calls = result.content?.filter((part) => part.type === "tool_use" && part.name === "record_feed_plan") || [];
   if (calls.length !== 1) throw new Error("The planner did not return one complete evidence record. No design was started.");
-  return parseFeedPlan(calls[0].input, input.brief, input.images.length);
+  try {
+    return parseFeedPlan(calls[0].input, input.brief, input.images.length);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "The planner returned invalid evidence.", { cause: { rejected_plan: calls[0].input } });
+  }
 }
 async function logoImageFor(url) {
   const parsed = new URL(url);
@@ -462,7 +468,7 @@ async function validateDesignImage(imageData, opts = {}) {
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      signal: AbortSignal.timeout(45e3),
+      signal: AbortSignal.timeout(opts.feedAuditReferences ? 9e4 : 45e3),
       headers: {
         "Content-Type": "application/json",
         "x-api-key": apiKey,
@@ -531,12 +537,16 @@ var json = (body, status = 200) => new Response(JSON.stringify(body), { status, 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers });
   if (req.method !== "POST") return json({ error: "POST required" }, 405);
+  let phase = "authorization";
+  let authenticated = false;
   try {
     const body = await req.json();
     if (typeof body.client_id !== "string" || !body.client_id) throw new Error("client_id is required.");
     const internal = await secretEquals(req.headers.get("x-socialytics-secret"), Deno.env.get("SOCIALYTICS_N8N_SECRET"));
     if (!internal) await requireStaff(req, { writeClientId: body.client_id });
-    if (!["plan", "review"].includes(body.op)) throw new Error("op must be plan or review.");
+    authenticated = true;
+    phase = "request validation";
+    if (!["evidence", "plan", "review"].includes(body.op)) throw new Error("op must be evidence, plan or review.");
     if (typeof body.copy !== "string" || !body.copy.trim() || body.copy.length > 12e3) throw new Error("Approved post copy is required.");
     const mode = body.mode ?? "single", count = body.count ?? 1;
     if (!["single", "carousel"].includes(mode) || !Number.isInteger(count) || count < 1 || count > 6) throw new Error("Use 1\u20136 still frames for a proof.");
@@ -546,19 +556,23 @@ Deno.serve(async (req) => {
     if (error || !client) throw new Error("The client evidence could not be read.");
     const paths = referencesFor(client.design_references, client.harvested_design_references, 8);
     if (paths.length < 3) throw new Error("At least three real client references are required.");
+    const previewsFor = () => Promise.all(paths.map(async (path) => {
+      const { data, error: error2 } = await db.storage.from("design-references").createSignedUrl(path, 3600);
+      if (error2) throw error2;
+      return data.signedUrl;
+    }));
+    if (body.op === "evidence") return json({ production_writes: 0, client_id: client.id, reference_paths: paths, reference_previews: await previewsFor(), logo_url: client.logo_url, evidence: referenceEvidence(paths, client.harvested_design_references) });
     const key = Deno.env.get("ANTHROPIC_API_KEY");
     if (!key) throw new Error("The existing planning credential is unavailable.");
+    phase = "loading reference images";
     const [images, logoImage] = await Promise.all([Promise.all(paths.map((p) => sourceImage(db, p))), client.logo_url ? logoImageFor(client.logo_url) : void 0]);
     if (body.op === "plan") {
       const { data: recent, error: recentError } = await db.from("creative_directions").select("plan").eq("client_id", client.id).order("created_at", { ascending: false }).limit(8);
       if (recentError) throw new Error("Recent design history could not be read.");
       const brief = { clientName: client.name, copy: body.copy, count, mode, platform: body.platform, format: body.format, approvedHeadlines: body.approved_headlines, recent: (recent || []).flatMap((r) => r.plan?.frames || []).slice(0, 18).map((f) => ({ subject: f.subject, composition: f.composition })) };
+      phase = "brand-token planning";
       const plan = { ...await requestFeedPlan({ brief, images, logoImage, evidence: referenceEvidence(paths, client.harvested_design_references) }, key), approved_headlines: body.approved_headlines || null };
-      const previews = await Promise.all(paths.map(async (path) => {
-        const { data, error: error2 } = await db.storage.from("design-references").createSignedUrl(path, 3600);
-        if (error2) throw error2;
-        return data.signedUrl;
-      }));
+      const previews = await previewsFor();
       return json({
         production_writes: 0,
         human_approved: false,
@@ -573,10 +587,24 @@ Deno.serve(async (req) => {
     if (JSON.stringify(body.reference_paths) !== JSON.stringify(paths)) throw new Error("The reference snapshot changed. Prepare the proof again.");
     validateStoredFeedPlan(body.plan, body.copy, mode, paths.length);
     const index = body.frame_index;
+    if (body.image_url !== void 0) {
+      const url = new URL(body.image_url);
+      if (url.protocol !== "https:" || url.username || url.password || url.port || !url.hostname.endsWith(".cloudfront.net")) throw new Error("Remote proof candidates must use the generation provider HTTPS CDN.");
+      phase = "loading candidate";
+      const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(2e4) });
+      const mime = (response.headers.get("content-type") || "").split(";")[0];
+      if (!response.ok || !["image/png", "image/jpeg", "image/webp"].includes(mime) || Number(response.headers.get("content-length")) > 5 * 1024 * 1024) throw new Error("The candidate could not be loaded as a supported image.");
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (!bytes.length || bytes.length > 5 * 1024 * 1024) throw new Error("The candidate exceeds the proof image limit.");
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+      body.image_data = `data:${mime};base64,${btoa(binary)}`;
+    }
     if (!Number.isInteger(index) || !body.plan.frames[index] || typeof body.image_data !== "string" || !body.image_data.startsWith("data:image/") || body.image_data.length > 7 * 1024 * 1024) throw new Error("Supply one candidate image and its frame index.");
+    phase = "brand-token review";
     const verdict = await validateDesignImage(body.image_data, { apiKey: key, creative: true, referenceImages: images, logoImage, feedAuditReferences: paths.length, expectedText: wholePostExpectedText(body.plan, index, mode), question: feedDesignQuestion(body.plan, index, mode, !!logoImage) });
     return json({ production_writes: 0, human_approved: false, status: verdict.skipped ? "unreviewed" : verdictIsDirty(verdict) ? "rejected" : "model-passed", verdict });
   } catch (error) {
-    return json({ error: error instanceof Error ? error.message : "Proof could not be completed.", production_writes: 0 }, error instanceof AuthzError ? error.status : 422);
+    return json({ error: error instanceof Error ? error.message : "Proof could not be completed.", production_writes: 0, ...authenticated ? { phase, diagnostic: error instanceof Error ? error.cause : void 0 } : {} }, error instanceof AuthzError ? error.status : 422);
   }
 });
