@@ -32,7 +32,7 @@ import { artworkCorrection, artworkReviewQuestion, designedHeroPrompt, formatKey
 import { renderRemote } from '../_shared/design-system/renderClient.ts';
 import { artworkQuestionV2, heroPromptV2, isLibraryV2, pickV2, templateV2 } from '../_shared/design-system/v2.ts';
 import { FORMAT_DIMENSIONS } from '../_shared/design-system/types.ts';
-import { urlToDataUrl } from '../_shared/render/hero.ts';
+import { bytesToDataUrl, urlToDataUrl } from '../_shared/render/hero.ts';
 import { wholePostCorrection, wholePostExpectedText, wholePostPrompt } from '../_shared/design-prompts/wholePost.ts';
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
@@ -40,6 +40,16 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const MAX_ATTEMPTS = 2; // legacy design-system path
 const WHOLE_POST_ATTEMPTS = 3; // a whole post is cheap to redo and a wrong logo or word must never reach a client
 const REVIEW_OUTAGES = 3; // review attempts that may fail (service error) before the job itself fails
+
+const REVIEW_IMAGE_LIMIT = 4.5 * 1024 * 1024;
+/** The delivered design as review bytes; a file over the reviewer's limit is downsized to the canvas first. */
+async function reviewCandidate(db: any, creative: any, job: Job): Promise<string> {
+  const res = await fetch(job.output_url!, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`The delivered design could not be fetched for review [${res.status}]`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.length <= REVIEW_IMAGE_LIMIT) return bytesToDataUrl(bytes, res.headers.get('content-type') || 'image/png');
+  return urlToDataUrl((await preparedHero(db, creative, job)).hero_url);
+}
 
 /** An image at a public URL as a reviewer message part, the same shape sourceImage() returns. */
 async function imagePartFromUrl(url: string) {
@@ -147,8 +157,10 @@ async function reviewJob(db: any, creative: any, index: number, job: Job, design
   const template = designed && !v2 ? templateById(designed.system, frame.template_id) : null;
   const direction = v2 ? JSON.stringify({ subject: frame.subject, hero_slot: v2.hero }) : template ? JSON.stringify({ subject: frame.subject, hero_region: template.hero_region, calm_region: template.headline.region, never: designed!.system.imagery.never })
     : frame.layout ? JSON.stringify({ subject: frame.subject, headline_position: frame.layout.headline_position, subject_position: frame.layout.subject_position }) : undefined;
-  // The reviewer takes image bytes, not a URL, and the model caps an image at 5 MB; the prepared (canvas-size) copy is both.
-  const candidate = await urlToDataUrl((await preparedHero(db, creative, job)).hero_url);
+  // The reviewer takes image bytes, not a URL, and the model caps an image at 5 MB. A whole post is reviewed as delivered
+  // (the provider's 2k PNG is about 2 MB); only an oversized file goes through the canvas-size copy. The legacy path keeps
+  // using the prepared hero it renders with.
+  const candidate = designed ? await urlToDataUrl((await preparedHero(db, creative, job)).hero_url) : await reviewCandidate(db, creative, job);
   // A whole post is judged with its approved words: exact text, one authentic logo, legible, on brand.
   const expectedText = designed ? '' : wholePostExpectedText(creative.plan, index, creative.mode);
   const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : undefined });
