@@ -94,7 +94,7 @@ The job runs these steps, each recorded with its outcome and a plain reason:
 
 ### Showing a demo to a prospect
 
-A sales demo has two halves. The prospect half is this job, run on the prospect's own brand from public data. The connected half is Moburst's own workspace (Sprout profiles, monthly social and competitive reports, posts), where performance analytics, publishing and the competitive report are shown with real, current data that belongs to Moburst. Sales users see both inside the app through what the app already has: the client role with the profile's allowed company slugs (gOS owns that field) set to `moburst` plus the brands they demoed.
+A sales demo has two halves. The prospect half is this job, run on the prospect's own brand from public data. The connected half is Moburst's own workspace (Sprout profiles, monthly social and competitive reports, posts), where performance analytics, publishing and the competitive report are shown with real, current data that belongs to Moburst. Inside the app, demo clients and everything they created are visible to admins only: the `moburst_user` and `client` roles never see a demo client, its competitor set, reports, posts or media (database policies, migration `20261006120000_demo_rows_admin_only.sql`). Moburst's own workspace is an ordinary client and stays visible as before. Sales shows the prospect half from the outputs this API returns (deck, calendar, post, brand identity) or with an admin at the keyboard.
 
 The callback body is the job's `status`, `client_id`, `outputs`, `gaps`, `finished_at` and `links.self`, signed with HMAC-SHA256 over the raw body using the SHA-256 of the API key as the secret (`X-Demo-Signature: sha256=<hex>`).
 

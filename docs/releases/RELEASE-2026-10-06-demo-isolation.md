@@ -1,0 +1,33 @@
+# Release 2026-10-06: demos on a demo copy of the brand, connected features on the showcase workspace
+
+Commits `41151cb` and `90a52c2` on main (rebased onto the design-lane v2 work pushed over the weekend). Edge functions deployed: `api` and `setup-rivaliq-landscape` from `41151cb`; `identify-competitors`, `setup-rivaliq-landscape`, `import-rivaliq-landscape`, `rivaliq-request`, `refresh-competitor-feed` and `run-report` from `90a52c2` (they bundle the changed `_shared/competitive` files). No frontend change published by this release; commit `876023f` (Client Setup without the design system panel) is Lital's and stays unpublished until she publishes it.
+
+## Why
+
+Lital settled the sales-demo question on 2026-10-06 after five designs: a demo has two halves. The prospect half is the existing demo job on the prospect's own brand from public data (brand identity, brief, pillars, trends, recommendations, calendar, deck, a generated post). The connected half is Moburst's own workspace (3 Sprout profiles, 26 social and 13 competitive reports, 128 posts, refreshed by the monthly workflow), where performance analytics, publishing and the competitive report are shown with real, current data that belongs to Moburst. Demos must never touch a production client and must never take a RivalIQ seat.
+
+## What changed
+
+- **Demo isolation.** `resolve_client` reuses only a client an earlier demo created (`demo_job_id` set) for the same website host or exact name, else creates one whose `company_slug` is `demo-<brand>`. A production client with the same website or name is never read, reused or written. The shared API core (synced from AdVisor) lets a company-scoped key reach its company's demo copy. The reused branch reports the slug and the creator it acts for.
+- **Connected-only steps.** `tracking` and `run_competitive` are skipped with reason `connected_only`; the gap, recorded once by `tracking`, names the connected showcase workspace. The competitor set is still identified, handles detected and the set confirmed, so it is ready the day the brand connects. `analytics` keeps its `analytics_unavailable` gap with the same wording. The dead tracking code and its helper were removed rather than parked behind a return.
+- **Companies behind bot protection.** `validateCompetitorWebsites` keeps a company whose website answers 401, 403, 405 or 429 (Shopify storefronts refuse cloud visitors) and still rejects 404, server failures, no answer and the client's own domain. Glossier's identification had rejected nine of ten proposed competitors for HTTP 429 and one for 403, and the demo ended with no competitors.
+- **RivalIQ cleanup.** `setup-rivaliq-landscape` has a `cleanup` mode: it deletes a landscape only when it carries this setup's own name and tracks no company, treats a 404 from RivalIQ as already removed, and clears the stale setup record either way. `coordinatedRivalIqFetch` no longer rebuilds a 204 answer with a body (the first cleanup deleted its landscape, then failed on exactly that).
+- **Demo rows hidden from non-admins** (Lital, 13:23: "make sure demos don't show up for Moburst User role or Client roles in both apps ... and all related traces of demos, since those can confuse our users"). Migration `20261006120000_demo_rows_admin_only.sql`, applied live at 13:30: a `is_demo_client(uuid)` helper and restrictive select policies on `clients` and on every table that hangs off a client (competitor sets, competitors, handles, reports, competitive reports, posts, media jobs, design systems and states, alerts, schedules, scheduled posts, Sprout profiles, RivalIQ setup jobs and snapshots, learnings, feedback, app events, client users) plus `demo_jobs`. Rows a demo flagged are hidden whoever the client is, which also covers the two reports the 2026-10-01 demo produced on MyRxProfile before isolation. The API and the functions use the service role and are unaffected.
+- **Housekeeping.** The two demo clients from 2026-10-01 were renamed to `demo-brooklinen` and `demo-calm`. The two empty demo landscapes 654991 and 654992 are gone; 12 landscapes remain, all with companies.
+
+## Evidence
+
+| Check | Result |
+|---|---|
+| Unit and component tests | 845 passed after the rebase (`npx vitest run`), typecheck clean, lint clean on the lines this release added |
+| Demo steps | 32 tests: production client ignored, demo client reused and acted for by its creator, slug suffix, scoped key, `connected_only` skips with no RivalIQ or `run-report` calls, end to end with the connected-only gap |
+| Competitive helpers | 6 tests: cleanup deletes only an empty landscape of its own name; 204 answers pass through; bot-refusing sites stay verifiable while 404 and 502 are rejected |
+| Production smoke | 16 passed (`scripts/smoke-prod.sh` with a temporary key) |
+| Demo rows hidden, live | impersonated through SQL (`set local role authenticated` with each user's JWT claims): a `moburst_user` sees 9 clients and 72 reports, and 0 demo clients, sets, competitors, handles, reports, competitive reports, posts or media; a `client` user sees its 1 client and 0 demo rows; an admin sees the 3 demo clients, 4 demo reports, 1 demo competitive report and 6 demo posts |
+| Landscape cleanup, live | both calls answered 422 on the first run (the 204 wrapper defect) after RivalIQ had already deleted the landscapes; the landscape list read through `rivaliq-request` confirms 654991 and 654992 are gone |
+| Live demo, first run | Glossier (job `72b60732`, 12:45 to 13:00 Israel time), partial: `demo-glossier` created, brand identity (pink and charcoal, Helvetica Neue), brief, 3 pillars; design skipped (no references); competitors failed (every proposed site answered 429 or 403, the defect fixed in `90a52c2`); tracking and the competitive report skipped `connected_only`; the social report completed in 15 minutes with a Gamma deck, 15 TikTok and 15 Instagram trends, 13 recommendations and a 7-day calendar; an Instagram post written from the calendar and rendered with one image; callback delivered (HTTP 200, one attempt) |
+| Live demo, second run | Glossier again (job `350e0daa`, 13:01 to 13:04 Israel time), completed in 3 minutes: the demo client reused (`matched_by: website_or_name`, slug `demo-glossier`); brand, brief, pillars and design skipped as existing; competitors `3_selected` from 10 candidates (Rare Beauty, Kosas, Ilia Beauty) with the validator fix, set confirmed, not tracked; the fresh social report reused; a second calendar post rendered; callback delivered. No RivalIQ call was made in either run |
+
+## Leftovers
+
+- Pre-existing `any` lint errors in `rivaliqSetup.ts` and `setup-rivaliq-landscape/index.ts` remain (none on the lines this release added).
