@@ -33,7 +33,7 @@ import { renderRemote } from '../_shared/design-system/renderClient.ts';
 import { artworkQuestionV2, heroPromptV2, isLibraryV2, pickV2, templateV2 } from '../_shared/design-system/v2.ts';
 import { FORMAT_DIMENSIONS } from '../_shared/design-system/types.ts';
 import { bytesToDataUrl, urlToDataUrl } from '../_shared/render/hero.ts';
-import { wholePostCorrection, wholePostExpectedText, wholePostPrompt, wholePostQuestion } from '../_shared/design-prompts/wholePost.ts';
+import { counterText, wholePostCorrection, wholePostExpectedText, wholePostPrompt, wholePostQuestion } from '../_shared/design-prompts/wholePost.ts';
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-socialytics-secret' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -174,7 +174,7 @@ async function reviewJob(db: any, creative: any, index: number, job: Job, design
   const candidate = designed ? await urlToDataUrl((await preparedHero(db, creative, job)).hero_url) : await reviewCandidate(db, creative, job);
   // A whole post is judged with its approved words: exact text, one authentic logo, legible, on brand.
   const expectedText = designed ? '' : wholePostExpectedText(creative.plan, index, creative.mode);
-  const verdict = await validateDesignImage(candidate, { referenceImages: references, logoImage, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : wholePostQuestion(expectedText, Boolean(logoImage), JSON.stringify({ hero: frame.subject, composition: frame.composition, hierarchy: frame.layout ? { headline: frame.layout.headline_position, hero: frame.layout.subject_position, logo: frame.layout.logo_position } : undefined })) });
+  const verdict = await validateDesignImage(candidate, { referenceImages: references, logoImage, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : wholePostQuestion(expectedText, Boolean(logoImage), JSON.stringify({ hero: frame.subject, composition: frame.composition, hierarchy: frame.layout ? { headline: frame.layout.headline_position, hero: frame.layout.subject_position, logo: frame.layout.logo_position } : undefined }), counterText(creative.mode, index, creative.plan.frames.length)) });
   const dirty = verdictIsDirty(verdict, { expectNoText: Boolean(designed) });
   if (verdict.skipped && !designed) {
     // A whole post is never approved unreviewed: leave the job awaiting review so the next tick tries again,

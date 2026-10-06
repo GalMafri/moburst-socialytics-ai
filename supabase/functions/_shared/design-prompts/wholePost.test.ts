@@ -22,6 +22,7 @@ it('the prompt edits the source post: structure kept, hero and words new, logo u
   const p = wholePostPrompt(plan, 0, undefined, 'single', true);
   assertStringIncludes(p, 'keep its STRUCTURE exactly');
   assertStringIncludes(p, 'The logo stays in its place and size, untouched');
+  assertStringIncludes(p, 'carries no letters, numerals, dial markings or labels');
   assertStringIncludes(p, 'The hero object or scene becomes: a chrome compass whose needle is a beam of light');
   assertStringIncludes(p, '"AEO is not SEO with new initials."');
   assertStringIncludes(p, '"new initials"');
@@ -49,4 +50,6 @@ it('the reviewer is told what counts as a defect and what does not', () => {
   assertStringIncludes(q, 'sub-brand wordmark');
   assertStringIncludes(q, 'gems around the card');
   assertStringIncludes(q, 'structure differs from the SOURCE POST');
+  assertStringIncludes(q, 'its absence is correct');
+  assertStringIncludes(wholePostQuestion('x', false, undefined, '02 / 06'), 'The slide counter must read "02 / 06"');
 });
