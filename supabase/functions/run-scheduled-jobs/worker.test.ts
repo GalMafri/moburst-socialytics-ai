@@ -128,4 +128,11 @@ describe("summarize", () => {
     expect(s.stuck.map((j) => j.id)).toEqual(["dead-lease"]);
     expect(s.overdue.map((j) => j.id)).toEqual(["undrained"]);
   });
+  it("is not ok when a due schedule has no job at all, even with an empty queue", () => {
+    const gap = { schedule_id: "s-1", client_id: "c-1", client_name: "Bader Law", report_kind: "social", next_run_at: "2026-10-07T07:00:00Z" };
+    const s = summarize([], now, [gap]);
+    expect(s.ok).toBe(false);
+    expect(s.unscheduled).toEqual([gap]);
+    expect(summarize([], now).ok).toBe(true);
+  });
 });

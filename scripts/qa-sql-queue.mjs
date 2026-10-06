@@ -70,6 +70,17 @@ const second = await enqueue(false);
 assert.equal(second.enqueued.length, 0);
 assert.equal((await jobs()).length, rows.length);
 
+// Gaps: nothing is missing right after the tick; a due occurrence with no job, an hour on, is reported.
+const gaps = (at) => asService(`SELECT schedule_id, report_kind FROM public.scheduled_report_gaps('${at}')`);
+assert.equal((await gaps('2026-09-09T09:00:00Z')).length, 0);
+await db.exec(`INSERT INTO public.report_schedules(id,client_id,report_kind,is_active,next_run_at) VALUES ('${id(13)}','${id(1)}','social',true,'2026-09-09T07:30:00Z')`);
+assert.deepEqual((await gaps('2026-09-09T09:00:00Z')).map((g) => g.schedule_id.slice(-2)), ['13']);
+assert.equal((await gaps('2026-09-09T08:00:00Z')).length, 0, 'reported before the hour of grace');
+await db.exec(`DELETE FROM public.report_schedules WHERE id='${id(13)}'`);
+await db.exec('RESET ROLE; SET ROLE authenticated');
+await assert.rejects(() => db.query(`SELECT * FROM public.scheduled_report_gaps(now())`), /permission denied/);
+await db.exec('RESET ROLE');
+
 // Lease hands out one job at a time, best priority first, and never the same job twice while leased.
 const leaseOne = () => asService(`SELECT id, kind, priority, attempts, status FROM public.scheduled_jobs_lease(300)`).then((r) => r[0] || null);
 const a = await leaseOne();
@@ -115,4 +126,4 @@ assert(days.every((d) => d >= 0 && d <= 6));
 assert.equal((await db.query(`SELECT public.feed_refresh_weekday('${id(1)}') = public.feed_refresh_weekday('${id(1)}') AS same`)).rows[0].same, true);
 
 await db.close();
-console.log('PASS: queue migration applies twice; only service_role reaches it; dry run writes nothing; enqueue is idempotent and ordered with the old stagger; lease is exclusive and counts attempts; completion releases only its social job; the daily tick rechecks waiting and blocked jobs.');
+console.log('PASS: queue migration applies twice; only service_role reaches it; dry run writes nothing; enqueue is idempotent and ordered with the old stagger; lease is exclusive and counts attempts; completion releases only its social job; the daily tick rechecks waiting and blocked jobs; overdue schedules with no job are reported.');

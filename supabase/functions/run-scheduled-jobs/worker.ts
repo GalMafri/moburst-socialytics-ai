@@ -60,6 +60,15 @@ const LEASE_GRACE_MS = 5 * 60000;
 const DRAIN_GRACE_MS = 30 * 60000;
 const DAY_MS = 86_400_000;
 
+/** A due schedule occurrence with no job (scheduled_report_gaps). */
+export interface ScheduleGap {
+  schedule_id: string;
+  client_id: string;
+  client_name: string | null;
+  report_kind: string;
+  next_run_at: string;
+}
+
 export interface JobsSummary {
   ok: boolean;
   counts: Record<string, number>;
@@ -67,14 +76,16 @@ export interface JobsSummary {
   blocked: ScheduledJob[];
   stuck: ScheduledJob[];
   overdue: ScheduledJob[];
+  unscheduled: ScheduleGap[];
 }
 
 /**
  * What the daily check alerts on: a job that failed in the last day, a job
  * blocked on something a person has to fix, a lease that ran out without the
- * job finishing, and due work nobody picked up (the worker is not running).
+ * job finishing, due work nobody picked up (the worker is not running), and a
+ * due schedule with no job at all (the daily enqueue did not run).
  */
-export function summarize(rows: ScheduledJob[], now: Date): JobsSummary {
+export function summarize(rows: ScheduledJob[], now: Date, gaps: ScheduleGap[] = []): JobsSummary {
   const t = now.getTime();
   const counts: Record<string, number> = {};
   for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
@@ -82,5 +93,6 @@ export function summarize(rows: ScheduledJob[], now: Date): JobsSummary {
   const blocked = rows.filter((r) => r.status === "blocked");
   const stuck = rows.filter((r) => r.status === "running" && r.lease_until && new Date(r.lease_until).getTime() < t - LEASE_GRACE_MS);
   const overdue = rows.filter((r) => r.status === "queued" && t - new Date(r.available_at).getTime() > DRAIN_GRACE_MS);
-  return { ok: !failed.length && !blocked.length && !stuck.length && !overdue.length, counts, failed, blocked, stuck, overdue };
+  const ok = !failed.length && !blocked.length && !stuck.length && !overdue.length && !gaps.length;
+  return { ok, counts, failed, blocked, stuck, overdue, unscheduled: gaps };
 }

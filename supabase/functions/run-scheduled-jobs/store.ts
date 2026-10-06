@@ -5,6 +5,7 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { followingRun, type ClientRow, type CompetitorSetRow, type DispatchStore, type ScheduleRow } from "./dispatch.ts";
 import { TERMINAL, type JobOutcome, type ScheduledJob } from "./types.ts";
+import type { ScheduleGap } from "./worker.ts";
 
 const SCHEDULE_COLUMNS = "id, client_id, report_kind, is_active, next_run_at, run_day_of_month, frequency, range_mode, created_by, pending_competitive_report_id";
 const SET_STATUSES = ["confirmed", "analyzing", "complete", "failed"];
@@ -22,6 +23,8 @@ export interface JobStore {
   finish(job: ScheduledJob, outcome: JobOutcome): Promise<void>;
   /** Jobs the daily check looks at: everything open, and everything finished in the last day and a half. */
   statusRows(now: Date): Promise<ScheduledJob[]>;
+  /** Due schedule occurrences with no job (scheduled_report_gaps). */
+  gaps(now: Date): Promise<ScheduleGap[]>;
   enqueue(dryRun: boolean): Promise<{ dry_run: boolean; released: number; enqueued: Array<{ kind: string; client_id: string; schedule_id: string | null; detail: string; priority: number; stagger_seconds: number }> }>;
 }
 
@@ -52,8 +55,11 @@ export function makeJobStore(db: SupabaseClient): JobStore {
     },
     async statusRows(now) {
       const since = new Date(now.getTime() - 36 * 3_600_000).toISOString();
-      const rows = await must(db.from("scheduled_jobs").select("*").or(`status.in.(queued,running,waiting,blocked),finished_at.gte."${since}"`).order("created_at", { ascending: false }).limit(1000));
+      const rows = await must(db.from("scheduled_jobs").select("*, clients(name), report_schedules(report_kind)").or(`status.in.(queued,running,waiting,blocked),finished_at.gte."${since}"`).order("created_at", { ascending: false }).limit(1000));
       return (rows ?? []) as ScheduledJob[];
+    },
+    async gaps(now) {
+      return ((await must(db.rpc("scheduled_report_gaps", { p_now: now.toISOString() }) as unknown as PromiseLike<Result<ScheduleGap[] | null>>)) ?? []);
     },
     async enqueue(dryRun) {
       return await must(db.rpc("enqueue_scheduled_report_jobs", { p_dry_run: dryRun }) as unknown as PromiseLike<Result<Awaited<ReturnType<JobStore["enqueue"]>>>>);

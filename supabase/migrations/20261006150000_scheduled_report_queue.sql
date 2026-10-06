@@ -169,9 +169,25 @@ begin
 end;
 $$;
 
+-- Due schedule occurrences with no job, an hour past due: the daily enqueue did
+-- not run, or something kept a schedule out of the queue. The daily check
+-- alerts on these, so an empty queue can never pass for a healthy one.
+create or replace function public.scheduled_report_gaps(p_now timestamptz default now())
+returns table (schedule_id uuid, client_id uuid, client_name text, report_kind text, next_run_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select s.id, s.client_id, c.name, s.report_kind, s.next_run_at
+    from public.report_schedules s
+    join public.clients c on c.id = s.client_id
+   where s.is_active and c.archived_at is null
+     and s.next_run_at < p_now - interval '1 hour'
+     and not exists (select 1 from public.scheduled_jobs j where j.schedule_id = s.id and j.occurrence = s.next_run_at)
+$$;
+
 revoke all on function public.feed_refresh_weekday(uuid) from public, anon, authenticated;
 revoke all on function public.scheduled_jobs_lease(integer) from public, anon, authenticated;
 revoke all on function public.enqueue_scheduled_report_jobs(timestamptz, boolean) from public, anon, authenticated;
 revoke all on function public.requeue_dispatch_after_competitive(uuid) from public, anon, authenticated;
+revoke all on function public.scheduled_report_gaps(timestamptz) from public, anon, authenticated;
 grant execute on function public.feed_refresh_weekday(uuid), public.scheduled_jobs_lease(integer),
-  public.enqueue_scheduled_report_jobs(timestamptz, boolean), public.requeue_dispatch_after_competitive(uuid) to service_role;
+  public.enqueue_scheduled_report_jobs(timestamptz, boolean), public.requeue_dispatch_after_competitive(uuid),
+  public.scheduled_report_gaps(timestamptz) to service_role;

@@ -58,11 +58,17 @@ Deno.serve(async (req) => {
 
     if (mode === "status") {
       const now = new Date();
-      const summary = summarize(await jobs.statusRows(now), now);
-      const brief = (rows: ScheduledJob[]) => rows.map((r) => ({ id: r.id, kind: r.kind, client_id: r.client_id, schedule_id: r.schedule_id, status: r.status, reason: r.reason, attempts: r.attempts }));
+      const summary = summarize(await jobs.statusRows(now), now, await jobs.gaps(now));
+      // The rows carry the client's name and the schedule's kind (embedded by statusRows) for a readable alert.
+      type Named = ScheduledJob & { clients?: { name?: string } | null; report_schedules?: { report_kind?: string } | null };
+      const brief = (rows: ScheduledJob[]) => (rows as Named[]).map((r) => ({
+        id: r.id, client: r.clients?.name ?? r.client_id, job: r.kind === "dispatch" ? `${r.report_schedules?.report_kind ?? "report"} dispatch` : "feed refresh",
+        status: r.status, reason: r.reason, attempts: r.attempts,
+      }));
       return json({
         ok: summary.ok, at: now.toISOString(), counts: summary.counts,
         failed: brief(summary.failed), blocked: brief(summary.blocked), stuck: brief(summary.stuck), overdue: brief(summary.overdue),
+        unscheduled: summary.unscheduled.map((g) => ({ client: g.client_name ?? g.client_id, job: `${g.report_kind} dispatch`, reason: `due ${g.next_run_at} and never queued` })),
       }, summary.ok ? 200 : 500);
     }
 
