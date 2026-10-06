@@ -39,6 +39,18 @@ const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 const MAX_ATTEMPTS = 2; // legacy design-system path
 const WHOLE_POST_ATTEMPTS = 3; // a whole post is cheap to redo and a wrong logo or word must never reach a client
+const REVIEW_OUTAGES = 3; // review attempts that may fail (service error) before the job itself fails
+
+/** An image at a public URL as a reviewer message part, the same shape sourceImage() returns. */
+async function imagePartFromUrl(url: string) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`The logo file could not be fetched [${res.status}]`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.length > 4 * 1024 * 1024) throw new Error('The logo file is too large to review against.');
+  let binary = ''; for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 0x8000)) as unknown as number[]);
+  const mime = (res.headers.get('content-type') || '').split(';')[0] || (/\.png(\?|$)/i.test(url) ? 'image/png' : 'image/jpeg');
+  return { type: 'image', source: { type: 'base64', media_type: mime, data: btoa(binary) } };
+}
 const REVIEWS_PER_TICK = 2;
 const STALE_PENDING_MS = 5 * 60 * 1000;
 
@@ -128,9 +140,9 @@ async function submitFrame(db: any, creative: any, index: number, attempt: numbe
 async function reviewJob(db: any, creative: any, index: number, job: Job, designed: LoadedSystem | null) {
   const frame = creative.plan.frames[index];
   const references = await Promise.all(frameReferenceIndices(frame).map((i: number) => sourceImage(db, creative.reference_paths[i])));
-  // The reviewer judges the logo against the client's logo file when there is one.
+  // The reviewer judges the logo against the client's logo file when there is one (same message part shape as a reference).
   const logoUrl = designed ? null : await clientLogoUrl(db, creative.client_id);
-  if (logoUrl) { try { references.push(await urlToDataUrl(logoUrl)); } catch { /* the posts still carry the logo */ } }
+  if (logoUrl) { try { references.push(await imagePartFromUrl(logoUrl)); } catch { /* the posts still carry the logo */ } }
   const v2 = designed && isLibraryV2(designed.system) ? templateV2(designed.system, frame.template_id) : null;
   const template = designed && !v2 ? templateById(designed.system, frame.template_id) : null;
   const direction = v2 ? JSON.stringify({ subject: frame.subject, hero_slot: v2.hero }) : template ? JSON.stringify({ subject: frame.subject, hero_region: template.hero_region, calm_region: template.headline.region, never: designed!.system.imagery.never })
@@ -141,8 +153,19 @@ async function reviewJob(db: any, creative: any, index: number, job: Job, design
   const expectedText = designed ? '' : wholePostExpectedText(creative.plan, index, creative.mode);
   const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : undefined });
   const dirty = verdictIsDirty(verdict, { expectNoText: Boolean(designed) });
+  if (verdict.skipped && !designed) {
+    // A whole post is never approved unreviewed: leave the job awaiting review so the next tick tries again,
+    // and give up on the job after three review outages.
+    const failures = Number(job.input?.review_failures ?? 0) + 1;
+    if (failures >= REVIEW_OUTAGES) {
+      await db.from('media_jobs').update({ status: 'failed', error: `The design could not be reviewed: ${verdict.reason || 'review unavailable'}`.slice(0, 1000), input: { ...job.input, review_failures: failures }, updated_at: new Date().toISOString() }).eq('id', job.id);
+      return { verdict, dirty: false, skipped: true, failed: true };
+    }
+    await db.from('media_jobs').update({ input: { ...job.input, review_failures: failures }, updated_at: new Date().toISOString() }).eq('id', job.id);
+    return { verdict, dirty: false, skipped: true, failed: false };
+  }
   await db.from('media_jobs').update({ review: { ...verdict, dirty }, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', job.id);
-  return { verdict, dirty };
+  return { verdict, dirty, skipped: false, failed: false };
 }
 
 const AGENT_ENGINE = 'creative-agent';
@@ -212,8 +235,10 @@ async function advancePlan(db: any, creative: any, budget: { reviews: number }):
     }
     if (job.status === 'completed' && job.output_url && !job.review && budget.reviews > 0) {
       budget.reviews--;
-      const { verdict, dirty } = await reviewJob(db, creative, index, job, designed);
-      job = { ...job, review: { ...verdict, dirty } };
+      const reviewed = await reviewJob(db, creative, index, job, designed);
+      const { verdict, dirty } = reviewed;
+      if (reviewed.failed) job = { ...job, status: 'failed', error: `The design could not be reviewed: ${verdict.reason || 'review unavailable'}` };
+      else if (!reviewed.skipped) job = { ...job, review: { ...verdict, dirty } };
       if (dirty) {
         const reason = designed ? artworkCorrection(verdict) : wholePostCorrection(verdict, wholePostExpectedText(creative.plan, index, creative.mode));
         if (attempt + 1 < (designed ? MAX_ATTEMPTS : WHOLE_POST_ATTEMPTS)) { job = await submitFrame(db, creative, index, attempt + 1, reason, designed); attempt += 1; }
