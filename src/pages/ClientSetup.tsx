@@ -25,6 +25,7 @@ import { Switch } from "@/components/ui/switch";
 import { BrandBookUpload } from "@/components/onboarding/BrandBookUpload";
 import { DesignReferencesUpload } from "@/components/onboarding/DesignReferencesUpload";
 import { AutomaticBrandReferences } from "@/components/onboarding/AutomaticBrandReferences";
+import { LogoFileField } from "@/components/onboarding/LogoFileField";
 import { DesignSynthesisCard } from "@/components/onboarding/DesignSynthesisCard";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
@@ -106,6 +107,7 @@ export default function ClientSetup() {
     brand_book_text: "",
     brand_book_url: "",
     brand_book_file_path: "",
+    logo_url: "",
     timezone: "UTC",
     // Every client runs on Higgsfield. Defaulting a new one to gemini put it
     // on a path nobody exercises, which is where the leaked-key and
@@ -210,6 +212,7 @@ export default function ClientSetup() {
         brand_book_text: client.brand_book_text || "",
         brand_book_url: (client as any).brand_book_url || "",
         brand_book_file_path: (client as any).brand_book_file_path || "",
+        logo_url: (client as any).logo_url || "",
         timezone: (client as any).timezone || "UTC",
         media_backend: (client as any).media_backend || "gemini",
         design_references: ((client as any).design_references as string[]) || [],
@@ -262,6 +265,7 @@ export default function ClientSetup() {
           : {}),
         brand_book_url: form.brand_book_url || null,
         brand_book_file_path: form.brand_book_file_path || null,
+        logo_url: form.logo_url || null,
         timezone: form.timezone || "UTC",
         media_backend: form.media_backend || "gemini",
         design_references: design_references.length > 0 ? design_references : null,
@@ -1003,6 +1007,7 @@ export default function ClientSetup() {
                     rows={3}
                   />
                 </div>
+                <LogoFileField clientId={isNew ? undefined : id} clientName={form.name} logoUrl={form.logo_url} onChange={(url) => setForm((f) => ({ ...f, logo_url: url }))} />
                 <details className="space-y-3"><summary className="cursor-pointer t-secondary">Optional brand documents and additional references</summary>
                 <BrandBookUpload
                   clientId={isNew ? undefined : id}
