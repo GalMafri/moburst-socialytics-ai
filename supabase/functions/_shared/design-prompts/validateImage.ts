@@ -145,7 +145,9 @@ export async function validateDesignImage(
     const result = await response.json();
     const structured=result.content?.find((c:any)=>c.type==='tool_use'&&c.name==='record_review');
     const textBlock=result.content?.find((c:any)=>c.type==='text'&&typeof c.text==='string'&&c.text.includes('{'));
-    const verdict=parseDesignVerdict(structured ? JSON.stringify(structured.input) : String(textBlock?.text || result.content?.[0]?.text || ''));
+    const text=String(textBlock?.text || result.content?.[0]?.text || '');
+    const json=text.includes('{') ? text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1) : text; // a verdict written around prose
+    const verdict=parseDesignVerdict(structured ? JSON.stringify(structured.input) : json);
     return verdict.skipped ? {...verdict,reason:`Reference review returned an incomplete verdict (${result.stop_reason || 'unknown'}).`} : verdict;
 
   } catch (err) {

@@ -64,10 +64,17 @@ describe('reference review protocol',()=>{
     try {
       globalThis.fetch=async(_url,init)=>{
         const body=JSON.parse(String(init?.body));
-        expect(body.tool_choice.name).toBe('record_review');
+        // current models reject a forced tool choice: the brief asks for the call, strict mode keeps the arguments valid
+        expect(body.model).toBe('claude-opus-5-5');
+        expect(body.tool_choice).toEqual({type:'auto'});
+        expect(body.tools[0]).toMatchObject({name:'record_review',strict:true});
+        expect(body.messages[0].content.at(-1).text).toContain('calling record_review exactly once');
         return new Response(JSON.stringify({content:[{type:'tool_use',name:'record_review',input:verdict}],stop_reason:'tool_use'}));
       };
       expect(await validateDesignImage('data:image/jpeg;base64,ZmFrZQ==',{apiKey:'fixture',creative:true})).toEqual(verdict);
+      // a verdict written as JSON text instead of a tool call is read too
+      globalThis.fetch=async()=>new Response(JSON.stringify({content:[{type:'text',text:'Here is my review:\n'+JSON.stringify({...verdict,off_brand:true,reason:'flat bands'})}],stop_reason:'end_turn'}));
+      expect(await validateDesignImage('data:image/jpeg;base64,ZmFrZQ==',{apiKey:'fixture',creative:true})).toEqual({...verdict,off_brand:true,reason:'flat bands'});
       globalThis.fetch=async()=>new Response(JSON.stringify({error:{message:'Image exceeds size limit'}}),{status:400});
       const failed=await validateDesignImage('data:image/jpeg;base64,ZmFrZQ==',{apiKey:'fixture',creative:true});
       expect(failed.skipped).toBe(true);expect(failed.reason).toContain('size limit');
