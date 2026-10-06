@@ -42,12 +42,19 @@ const WHOLE_POST_ATTEMPTS = 3; // a whole post is cheap to redo and a wrong logo
 const REVIEW_OUTAGES = 3; // review attempts that may fail (service error) before the job itself fails
 
 const REVIEW_IMAGE_LIMIT = 4.5 * 1024 * 1024;
-/** The delivered design as review bytes; a file over the reviewer's limit is downsized to the canvas first. */
+/** The delivered design as review bytes: storage's own 1080-wide rendition (about 3 MB for a 2k PNG), the original when
+ *  the rendition is unavailable and small enough, and the canvas-size copy only as a last resort. */
 async function reviewCandidate(db: any, creative: any, job: Job): Promise<string> {
-  const res = await fetch(job.output_url!, { signal: AbortSignal.timeout(30000) });
-  if (!res.ok) throw new Error(`The delivered design could not be fetched for review [${res.status}]`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.length <= REVIEW_IMAGE_LIMIT) return bytesToDataUrl(bytes, res.headers.get('content-type') || 'image/png');
+  const original = job.output_url!;
+  const rendition = original.includes('/storage/v1/object/public/') ? `${original.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/')}?width=1080` : null;
+  for (const url of [rendition, original].filter(Boolean) as string[]) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (!res.ok) continue;
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.length <= REVIEW_IMAGE_LIMIT) return bytesToDataUrl(bytes, (res.headers.get('content-type') || 'image/png').split(';')[0]);
+    } catch { /* try the next source */ }
+  }
   return urlToDataUrl((await preparedHero(db, creative, job)).hero_url);
 }
 
