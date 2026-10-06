@@ -46,7 +46,7 @@ const REVIEW_IMAGE_LIMIT = 4.5 * 1024 * 1024;
  *  the rendition is unavailable and small enough, and the canvas-size copy only as a last resort. */
 async function reviewCandidate(db: any, creative: any, job: Job): Promise<string> {
   const original = job.output_url!;
-  const rendition = original.includes('/storage/v1/object/public/') ? `${original.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/')}?width=1080` : null;
+  const rendition = original.includes('/storage/v1/object/public/') ? `${original.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/')}?width=1080&height=1350&resize=contain` : null; // contain: the whole picture, never a crop
   for (const url of [rendition, original].filter(Boolean) as string[]) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(30000) });

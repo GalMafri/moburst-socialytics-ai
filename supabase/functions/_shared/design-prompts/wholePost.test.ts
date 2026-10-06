@@ -25,6 +25,9 @@ it('the prompt asks for one finished picture with the exact words, the brand lan
   assertStringIncludes(p, 'logo file');
   assertStringIncludes(p, 'ONE finished picture');
   assertStringIncludes(p, 'headline center, hero bottom, logo top-center');
+  assertStringIncludes(p, 'Arrangement for this post: card centred, compass low');
+  assertStringIncludes(p, 'FIRST attached post is the layout reference');
+  assertStringIncludes(p, 'no slide counter');
   assert(!p.includes('Render NO lettering'), 'the whole-post prompt never forbids lettering');
   const noFile = wholePostPrompt(plan, 1, undefined, 'carousel', false, 'the hourglass hid the words');
   assertStringIncludes(noFile, 'exactly as it appears in the attached posts');
