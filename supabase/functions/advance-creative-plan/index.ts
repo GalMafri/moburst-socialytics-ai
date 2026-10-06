@@ -157,9 +157,10 @@ async function submitFrame(db: any, creative: any, index: number, attempt: numbe
 async function reviewJob(db: any, creative: any, index: number, job: Job, designed: LoadedSystem | null) {
   const frame = creative.plan.frames[index];
   const references = await Promise.all(frameReferenceIndices(frame).map((i: number) => sourceImage(db, creative.reference_paths[i])));
-  // The reviewer judges the logo against the client's logo file when there is one (same message part shape as a reference).
+  // The reviewer judges the logo against the client's logo file when there is one, shown to it as the only correct logo.
   const logoUrl = designed ? null : await clientLogoUrl(db, creative.client_id);
-  if (logoUrl) { try { references.push(await imagePartFromUrl(logoUrl)); } catch { /* the posts still carry the logo */ } }
+  let logoImage: any = undefined;
+  if (logoUrl) { try { logoImage = await imagePartFromUrl(logoUrl); } catch { /* the posts still carry the logo */ } }
   const v2 = designed && isLibraryV2(designed.system) ? templateV2(designed.system, frame.template_id) : null;
   const template = designed && !v2 ? templateById(designed.system, frame.template_id) : null;
   const direction = v2 ? JSON.stringify({ subject: frame.subject, hero_slot: v2.hero }) : template ? JSON.stringify({ subject: frame.subject, hero_region: template.hero_region, calm_region: template.headline.region, never: designed!.system.imagery.never })
@@ -170,7 +171,7 @@ async function reviewJob(db: any, creative: any, index: number, job: Job, design
   const candidate = designed ? await urlToDataUrl((await preparedHero(db, creative, job)).hero_url) : await reviewCandidate(db, creative, job);
   // A whole post is judged with its approved words: exact text, one authentic logo, legible, on brand.
   const expectedText = designed ? '' : wholePostExpectedText(creative.plan, index, creative.mode);
-  const verdict = await validateDesignImage(candidate, { referenceImages: references, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : wholePostQuestion(expectedText, Boolean(logoUrl), JSON.stringify({ hero: frame.subject, composition: frame.composition, hierarchy: frame.layout ? { headline: frame.layout.headline_position, hero: frame.layout.subject_position, logo: frame.layout.logo_position } : undefined })) });
+  const verdict = await validateDesignImage(candidate, { referenceImages: references, logoImage, creative: true, video: false, creativeDirection: direction, expectedText, question: v2 ? artworkQuestionV2(v2, frame.subject) : template ? artworkReviewQuestion(designed!.system, template, frame.subject) : wholePostQuestion(expectedText, Boolean(logoImage), JSON.stringify({ hero: frame.subject, composition: frame.composition, hierarchy: frame.layout ? { headline: frame.layout.headline_position, hero: frame.layout.subject_position, logo: frame.layout.logo_position } : undefined })) });
   const dirty = verdictIsDirty(verdict, { expectNoText: Boolean(designed) });
   if (verdict.skipped && !designed) {
     // A whole post is never approved unreviewed: leave the job awaiting review so the next tick tries again,

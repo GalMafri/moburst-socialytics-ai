@@ -94,7 +94,7 @@ export function splitImageData(imageData: string, fallbackMime = "image/png"): {
  */
 export async function validateDesignImage(
   imageData: string,
-  opts: { apiKey?: string | null; mediaType?: string; avoid?: string | null; expectedText?: string | null; referenceImage?: any; referenceImages?: any[]; creative?: boolean; video?: boolean; creativeDirection?: string; /** A complete question of the caller's own, used instead of the built-in ones (the design-system artwork review). */ question?: string } = {},
+  opts: { apiKey?: string | null; mediaType?: string; avoid?: string | null; expectedText?: string | null; referenceImage?: any; referenceImages?: any[]; /** The brand's logo file as an image part: shown to the reviewer as the only correct logo. */ logoImage?: any; creative?: boolean; video?: boolean; creativeDirection?: string; /** A complete question of the caller's own, used instead of the built-in ones (the design-system artwork review). */ question?: string } = {},
 ): Promise<DesignVerdict> {
   const apiKey = opts.apiKey ?? anthropicKeyFromEnv();
   if (!apiKey) return { ...CLEAN_VERDICT, skipped: true };
@@ -125,6 +125,7 @@ export async function validateDesignImage(
             role: "user",
             content: [
               ...(opts.referenceImages?.length ? opts.referenceImages.flatMap((im:any,i:number)=>[{type:"text",text:`REAL CLIENT REFERENCE ${i}`},im]) : []),
+              ...(opts.logoImage ? [{type:"text",text:"THE BRAND'S LOGO FILE: the only correct logo. Any other wordmark, sub-brand or name in the candidate is a wrong logo and unapproved text."}, opts.logoImage] : []),
               ...(opts.referenceImage ? [{type: "text", text: "SOURCE: the client's published brand reference, compare design system only."}, opts.referenceImage, {type:"text",text:"CANDIDATE: the generated design to review."}] : []),
               {type:"text",text:"CANDIDATE: review this new design."},
               { type: "image", source: { type: "base64", media_type: parts.mimeType, data: parts.base64 } },

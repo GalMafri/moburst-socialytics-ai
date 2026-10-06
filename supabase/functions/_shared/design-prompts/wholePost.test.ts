@@ -22,7 +22,8 @@ it('the prompt asks for one finished picture with the exact words, the brand lan
   const p = wholePostPrompt(plan, 0, undefined, 'single', true);
   assertStringIncludes(p, '"AEO is not SEO with new initials."');
   assertStringIncludes(p, '"new initials"');
-  assertStringIncludes(p, 'logo file');
+  assertStringIncludes(p, 'ONLY logo for this post');
+  assertStringIncludes(p, 'never use those');
   assertStringIncludes(p, 'ONE finished picture');
   assertStringIncludes(p, 'headline center, hero bottom, logo top-center');
   assertStringIncludes(p, 'Arrangement for this post: card centred, compass low');
@@ -47,6 +48,7 @@ it('the reviewer is told what counts as a defect and what does not', () => {
   assertStringIncludes(q, '"App Store Myths. Busted."');
   assertStringIncludes(q, 'counts as a headline card');
   assertStringIncludes(q, 'A correct logo sets has_logo FALSE');
-  assertStringIncludes(q, 'logo file');
+  assertStringIncludes(q, "THE BRAND'S LOGO FILE");
+  assertStringIncludes(q, 'sub-brand wordmark');
   assertStringIncludes(q, 'gems around the card');
 });
