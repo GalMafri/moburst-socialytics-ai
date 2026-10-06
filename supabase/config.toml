@@ -195,3 +195,6 @@ verify_jwt = false
 
 [functions.build-social-templates]
 verify_jwt = false
+
+[functions.preview-brand-design]
+verify_jwt = false
