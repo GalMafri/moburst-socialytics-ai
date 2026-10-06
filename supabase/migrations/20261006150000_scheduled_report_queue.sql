@@ -20,7 +20,8 @@ create table if not exists public.scheduled_jobs (
   -- Sent to n8n, which waits this long before its first external call.
   stagger_seconds integer not null default 0,
   -- waiting: a dependency is in progress. blocked: a dependency or a step failed
-  -- and needs a person. Both are rechecked daily and on competitive completion.
+  -- and needs a person. Both are rechecked daily; held social jobs are also
+  -- released by the worker's sweep as soon as their competitive report finishes.
   status text not null default 'queued'
     check (status in ('queued', 'running', 'waiting', 'blocked', 'done', 'skipped', 'failed')),
   -- Dispatch progress: prepared = the report row exists (report_id); posting =
