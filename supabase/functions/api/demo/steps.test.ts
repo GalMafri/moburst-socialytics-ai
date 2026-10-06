@@ -3,7 +3,7 @@ import { advanceJob, initialSteps, type JobRecord } from "../../_shared/api/jobs
 import type { CallResult } from "../../_shared/invoke";
 import { CLIENT, COMPETITIVE_REPORT, DESIGN_SYSTEM, REPORT, SPROUT_PROFILE } from "../fixtures";
 import { emptyTables, makeFakeDemoDb, type FakeTables } from "./fake-db";
-import { DEMO_STEPS, refreshOutputs, slugify, trackingFailureSummary, type DemoCtx } from "./steps";
+import { DEMO_STEPS, refreshOutputs, slugify, type DemoCtx } from "./steps";
 
 const ok = (data: unknown, status = 200): CallResult => ({ ok: true, status, data, text: JSON.stringify(data) });
 const fail = (status: number, data: unknown): CallResult => ({ ok: false, status, data, text: JSON.stringify(data) });
@@ -87,7 +87,8 @@ async function upTo(h: Harness, name: string) {
     if (r.status !== "waiting" && r.gaps) h.job.gaps = [...h.job.gaps, ...r.gaps];
   }
 }
-const bader = (over: Partial<typeof CLIENT> = {}) => ({ ...CLIENT, brand_identity: null, content_pillars: null, social_keywords: null, brief_text: null, harvested_design_references: null, design_references: null, ...over });
+/** A client an earlier demo job created: the only kind of existing client a demo may reuse. */
+const bader = (over: Partial<typeof CLIENT> = {}) => ({ ...CLIENT, company_slug: "demo-bader-law", demo_job_id: "job-0", brand_identity: null, content_pillars: null, social_keywords: null, brief_text: null, harvested_design_references: null, design_references: null, ...over });
 
 describe("step order", () => {
   it("is the documented one", () => {
@@ -103,27 +104,39 @@ describe("resolve_client", () => {
   it("creates the client with a slug, the owner from the requester email, the defaults and the job flag", async () => {
     const h = harness({ tables: { profiles: [{ user_id: "u-lital", email: "lital@moburst.com" }] } });
     const r = await runStep(h, "resolve_client");
-    expect(r).toMatchObject({ status: "done", outcome: "created", data: { company_slug: "brooklinen", acted_as: "u-lital" } });
+    expect(r).toMatchObject({ status: "done", outcome: "created", data: { company_slug: "demo-brooklinen", acted_as: "u-lital" } });
+    expect(h.t.clients[0].company_slug).toBe("demo-brooklinen");
     expect(h.t.clients[0]).toMatchObject({ name: "Brooklinen", website_url: "https://brooklinen.com", created_by: "u-lital", primary_platforms: ["Instagram", "TikTok", "Facebook", "LinkedIn"], geo: "US", media_backend: "gemini", demo_job_id: "job-1" });
   });
-  it("reuses a client matched by website host and acts for its creator", async () => {
-    const h = harness({ tables: { clients: [bader({ id: "c-x", name: "Brooklinen Inc", website_url: "https://www.brooklinen.com/", created_by: "u-creator" })] } });
-    expect(await runStep(h, "resolve_client")).toMatchObject({ status: "done", outcome: "reused", data: { client_id: "c-x", matched_by: "website_or_name", acted_as: "u-creator" } });
+  it("never reuses a production client, even one with the same website and name", async () => {
+    const prod = bader({ id: "c-prod", name: "Brooklinen", website_url: "https://www.brooklinen.com/", company_slug: "brooklinen", created_by: "u-creator", brief_text: "Production brief.", demo_job_id: null });
+    const h = harness({ tables: { clients: [prod], profiles: [{ user_id: "u-lital", email: "lital@moburst.com" }] } });
+    expect(await runStep(h, "resolve_client")).toMatchObject({ status: "done", outcome: "created", data: { company_slug: "demo-brooklinen", acted_as: "u-lital" } });
+    expect(h.t.clients).toHaveLength(2);
+    expect(h.t.clients[0]).toEqual(prod);
+    expect(h.t.clients[1]).toMatchObject({ company_slug: "demo-brooklinen", demo_job_id: "job-1", brief_text: null });
+  });
+  it("reuses a demo client from an earlier job, matched by website host, and acts for its creator", async () => {
+    const h = harness({ tables: { clients: [bader({ id: "c-x", name: "Brooklinen Inc", website_url: "https://www.brooklinen.com/", company_slug: "demo-brooklinen", created_by: "u-creator", demo_job_id: "job-0" })] } });
+    expect(await runStep(h, "resolve_client")).toMatchObject({ status: "done", outcome: "reused", data: { client_id: "c-x", company_slug: "demo-brooklinen", matched_by: "website_or_name", acted_as: "u-creator" } });
     expect(h.t.clients).toHaveLength(1);
   });
-  it("adds a suffix when the slug is taken", async () => {
-    const h = harness({ tables: { clients: [bader({ id: "c-x", name: "Other", website_url: "https://other.com", company_slug: "brooklinen" })] } });
-    expect((await runStep(h, "resolve_client")).data?.company_slug).toBe("brooklinen-2");
+  it("adds a suffix when the demo slug is taken", async () => {
+    const h = harness({ tables: { clients: [bader({ id: "c-x", name: "Other", website_url: "https://other.com", company_slug: "demo-brooklinen" })] } });
+    expect((await runStep(h, "resolve_client")).data?.company_slug).toBe("demo-brooklinen-2");
   });
   it("refuses, before writing, a client outside a scoped key's companies", async () => {
     const scoped = { id: "k-1", company_slugs: ["bader-law"], client_ids: null };
     const h = harness({ tables: { keys: [scoped] } });
     expect(await runStep(h, "resolve_client")).toMatchObject({ status: "failed", fatal: true, reason: "out_of_scope" });
     expect(h.t.clients).toHaveLength(0);
-    const reuse = harness({ input: { client_name: "Calm", website: "calm.com" }, tables: { keys: [scoped], clients: [bader({ id: "c-calm", name: "Calm", website_url: "https://calm.com", company_slug: "calm" })] } });
+    const reuse = harness({ input: { client_name: "Calm", website: "calm.com" }, tables: { keys: [scoped], clients: [bader({ id: "c-calm", name: "Calm", website_url: "https://calm.com", company_slug: "demo-calm", demo_job_id: "job-0" })] } });
     expect(await runStep(reuse, "resolve_client")).toMatchObject({ status: "failed", fatal: true, reason: "out_of_scope" });
     const allowed = harness({ input: { client_name: "Bader Law", website: "baderlaw.com" }, tables: { keys: [scoped] } });
-    expect(await runStep(allowed, "resolve_client")).toMatchObject({ status: "done", outcome: "created" });
+    expect(await runStep(allowed, "resolve_client")).toMatchObject({ status: "done", outcome: "created", data: { company_slug: "demo-bader-law" } });
+    const again = harness({ input: { client_name: "Bader Law", website: "baderlaw.com" }, tables: { keys: [scoped], clients: allowed.t.clients } });
+    again.job.id = "job-2";
+    expect(await runStep(again, "resolve_client")).toMatchObject({ status: "done", outcome: "reused", data: { company_slug: "demo-bader-law" } });
   });
 });
 
@@ -202,10 +215,10 @@ describe("competitors and tracking", () => {
     expect(h.t.sets[0].demo_job_id).toBe("job-1");
     expect(h.calls.filter((c) => c.name === "confirm-competitor-set")).toHaveLength(0);
     h.job.steps.find((s) => s.name === "competitors")!.data = r.data;
-    expect(await runStep(h, "tracking")).toMatchObject({ status: "skipped", reason: "set_not_confirmed" });
-    expect(await runStep(h, "run_competitive")).toMatchObject({ status: "skipped", reason: "no_tracked_set" });
+    expect(await runStep(h, "tracking")).toMatchObject({ status: "skipped", reason: "connected_only" });
+    expect(await runStep(h, "run_competitive")).toMatchObject({ status: "skipped", reason: "connected_only" });
   });
-  it("selects the three closest verified competitors, confirms the set and verifies tracking", async () => {
+  it("selects the three closest verified competitors, confirms the set, and leaves tracking to the connected product", async () => {
     const h = harness({ call: (name, body, hh) => {
       if (name !== "detect-competitor-handles") return undefined;
       for (const c of hh.t.competitors.filter((c) => c.set_id === body.set_id)) hh.t.handles.push({ id: `h-${c.id}`, competitor_id: c.id, client_id: c.client_id, platform: "instagram", handle: c.name.toLowerCase(), profile_url: null, is_active: true, followers: null, detection_confidence: 0.95, source: "auto", detected_at: hh.clock.toISOString() });
@@ -218,10 +231,14 @@ describe("competitors and tracking", () => {
     expect(h.t.competitors.filter((c) => c.is_selected).map((c) => [c.name, c.selected_rank])).toEqual([["Parachute", 1], ["Boll & Branch", 2], ["Casper", 3]]);
     expect(h.t.sets[0].status).toBe("confirmed");
     h.job.steps.find((s) => s.name === "competitors")!.data = r.data;
+    // Tracking and the competitive report need a RivalIQ seat; a demo shows them on the connected showcase workspace instead.
     const t = await runStep(h, "tracking");
-    expect(t).toMatchObject({ status: "done", outcome: "tracked", data: { phase: "complete" } });
-    expect(h.calls.filter((c) => c.name === "setup-rivaliq-landscape").map((c) => c.body.mode)).toEqual(["preview", "advance"]);
-    expect(h.t.sets[0].rivaliq_landscape_id).toBe("L9");
+    expect(t).toMatchObject({ status: "skipped", reason: "connected_only", gaps: [{ step: "tracking", code: "connected_only" }] });
+    expect((t.gaps as Array<{ message: string }>)[0].message).toMatch(/connected showcase workspace/);
+    expect(h.calls.filter((c) => c.name === "setup-rivaliq-landscape")).toHaveLength(0);
+    expect(h.t.sets[0].rivaliq_landscape_id).toBeNull();
+    expect(await runStep(h, "run_competitive")).toMatchObject({ status: "skipped", reason: "connected_only" });
+    expect(h.calls.filter((c) => c.name === "run-report")).toHaveLength(0);
   });
   it("uses the competitors named in the request and re-runs safely", async () => {
     const h = harness({ input: { competitors: [{ name: "Parachute", website: "parachutehome.com" }, { name: "Buffy", website: "buffy.co" }, { name: "Quince", website: "quince.com" }] }, call: (name, body, hh) => {
@@ -236,38 +253,18 @@ describe("competitors and tracking", () => {
     expect(h.t.sets[0]).toMatchObject({ source: "manual", demo_job_id: "job-1", status: "confirmed" });
     expect(await runStep(h, "competitors")).toMatchObject({ status: "done", outcome: "already_confirmed" });
   });
-  it("skips when the client already has a confirmed set and waits while tracking is in progress", async () => {
-    const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], sets: [{ id: "set-old", client_id: "c-bader", status: "confirmed", notes: null, source: "ai", rivaliq_landscape_id: null, confirmed_at: "2026-09-01T00:00:00.000Z", created_at: "2026-09-01T00:00:00.000Z", demo_job_id: null }] }, call: (name, body) => (name === "setup-rivaliq-landscape" && body.mode === "advance" ? ok({ job: { phase: "following" } }) : undefined) });
-    await runStep(h, "resolve_client");
+  it("skips the competitor step when the demo client already has a confirmed set, and still never tracks", async () => {
+    const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com", company_slug: "demo-brooklinen", demo_job_id: "job-0" })], sets: [{ id: "set-old", client_id: "c-bader", status: "confirmed", notes: null, source: "ai", rivaliq_landscape_id: null, confirmed_at: "2026-09-01T00:00:00.000Z", created_at: "2026-09-01T00:00:00.000Z", demo_job_id: "job-0" }] } });
+    expect(await runStep(h, "resolve_client")).toMatchObject({ outcome: "reused" });
     const r = await runStep(h, "competitors");
     expect(r).toMatchObject({ status: "skipped", reason: "set_exists", data: { set_id: "set-old" } });
     h.job.steps.find((s) => s.name === "competitors")!.data = r.data;
-    const t = await runStep(h, "tracking");
-    expect(t).toMatchObject({ status: "waiting", check_in_s: 120, data: { phase: "following", started_at: "2026-10-01T12:00:00.000Z" } });
-    h.job.steps.find((s) => s.name === "tracking")!.data = t.data;
-    h.clock.setTime(h.clock.getTime() + 61 * 60_000);
-    expect(await runStep(h, "tracking")).toMatchObject({ status: "failed", reason: "tracking_timeout", gaps: [{ code: "tracking_incomplete" }] });
+    expect(await runStep(h, "tracking")).toMatchObject({ status: "skipped", reason: "connected_only" });
+    expect(h.calls.filter((c) => c.name === "setup-rivaliq-landscape")).toHaveLength(0);
   });
 });
 
-describe("trackingFailureSummary", () => {
-  it("names the companies the provider could not track and keeps its payload out of the sentence", () => {
-    const raw = 'RivalIQ could not finish tracking every reviewed website. Quince: {"data":{"credits":{"plan":40,"used":0}}}; Brooklinen: {"data":{"credits":{"plan":40}}}';
-    expect(trackingFailureSummary(raw)).toBe("RivalIQ could not start tracking Quince and Brooklinen.");
-    expect(trackingFailureSummary('RivalIQ could not finish tracking every reviewed website. Calm: {"message":"ProblemFetchingUrlError: HTTPError: Response code 403 ()"}; Headspace: {"data":{"credits":{}}}')).toBe("RivalIQ could not start tracking Calm and Headspace. At least one website refused the provider's visit.");
-    expect(trackingFailureSummary("RivalIQ API key is not configured")).toBe("RivalIQ API key is not configured.");
-    // The setup function now answers with a finished sentence; it passes through untouched.
-    const plan = "RivalIQ's plan tracks 40 distinct companies and 40 are in use, so Headspace, Balance and Ten Percent Happier could not be added. Unfollow a company from an old landscape in RivalIQ, or raise the plan. Calm: the website refused RivalIQ's visit.";
-    expect(trackingFailureSummary(plan)).toBe(plan);
-  });
-  it("is what the tracking step records, with the provider's words on the step", async () => {
-    const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], sets: [{ id: "set-c", client_id: "c-bader", status: "confirmed", notes: null, source: "ai", rivaliq_landscape_id: null, confirmed_at: "x", created_at: "2026-09-01T00:00:00.000Z", demo_job_id: null }] }, call: (name, body) => (name === "setup-rivaliq-landscape" && body.mode === "advance" ? fail(422, { error: 'RivalIQ could not finish tracking every reviewed website. Quince: {"data":{"credits":{"plan":40}}}' }) : undefined) });
-    await runStep(h, "resolve_client");
-    const r = await runStep(h, "tracking");
-    expect(r).toMatchObject({ status: "failed", reason: "tracking_failed", message: "RivalIQ could not start tracking Quince.", data: { provider_message: expect.stringContaining("credits") } });
-    expect(r.gaps?.[0].message).toBe("Competitor tracking was not verified: RivalIQ could not start tracking Quince. The competitive report is skipped.");
-  });
-});
+
 
 describe("reports", () => {
   it("starts the social report for a brand without a Sprout profile and records that it carries no performance section", async () => {
@@ -298,16 +295,6 @@ describe("reports", () => {
     const forced = harness({ input: { force_run: true }, tables: { clients: [bader({ website_url: "https://brooklinen.com" })], reports: [fresh], sproutProfiles: [SPROUT_PROFILE] } });
     await runStep(forced, "resolve_client");
     expect((await runStep(forced, "run_social")).outcome).toBe("started");
-  });
-  it("runs the competitive report over the 30 days ending yesterday when the set is tracked, and records refusals", async () => {
-    const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], sets: [{ id: "set-t", client_id: "c-bader", status: "confirmed", notes: null, source: "ai", rivaliq_landscape_id: "L1", confirmed_at: "x", created_at: "2026-09-01T00:00:00.000Z", demo_job_id: null }] } });
-    await runStep(h, "resolve_client");
-    const r = await runStep(h, "run_competitive");
-    expect(r).toMatchObject({ status: "done", outcome: "started", data: { report_id: "crep-new" } });
-    expect(h.calls.at(-1)!.body).toEqual({ client_id: "c-bader", kind: "competitive", date_range_start: "2026-09-01", date_range_end: "2026-09-30" });
-    const refused = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], sproutProfiles: [SPROUT_PROFILE] }, call: (name) => (name === "run-report" ? fail(503, { error: "Workflow authentication is not configured." }) : undefined) });
-    await runStep(refused, "resolve_client");
-    expect(await runStep(refused, "run_social")).toMatchObject({ status: "failed", reason: "workflow_unavailable", gaps: [{ code: "report_not_started" }] });
   });
   it("times out a report after 100 minutes and records a failed one", async () => {
     const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com" })], reports: [{ ...REPORT, id: "r-slow", client_id: "c-bader", status: "running", created_at: "2026-10-01T10:00:00.000Z" }, { ...REPORT, id: "r-bad", client_id: "c-bader", status: "failed", report_data: { error: "n8n stopped" }, created_at: "2026-10-01T11:00:00.000Z" }] } });
@@ -369,19 +356,19 @@ describe("the whole job", () => {
     expect(r.stopped).toBe("finished");
     expect(h.job.status).toBe("completed");
     expect(h.job.steps.map((s) => `${s.name}:${s.status}:${s.outcome ?? s.reason}`)).toEqual([
-      "resolve_client:done:created", "brand_identity:done:researched", "site_brief:done:drafted", "pillars:done:derived", "design:skipped:no_references", "competitors:done:3_selected", "tracking:done:tracked",
-      "run_social:done:started", "run_competitive:done:started", "wait_reports:done:all_completed", "post:done:generated", "analytics:skipped:no_sprout_profiles", "collect:done:collected", "callback:done:delivered",
+      "resolve_client:done:created", "brand_identity:done:researched", "site_brief:done:drafted", "pillars:done:derived", "design:skipped:no_references", "competitors:done:3_selected", "tracking:skipped:connected_only",
+      "run_social:done:started", "run_competitive:skipped:connected_only", "wait_reports:done:all_completed", "post:done:generated", "analytics:skipped:no_sprout_profiles", "collect:done:collected", "callback:done:delivered",
     ]);
     const out = h.job.outputs as Record<string, Record<string, unknown>>;
     expect(out.client).toMatchObject({ name: "Brooklinen", pillars: [{ name: "Sleep better" }, { name: "Home comfort" }] });
-    expect(out.competitors).toMatchObject({ set_status: "confirmed", tracked: true, selected: [{ name: "Parachute" }, { name: "Boll & Branch" }, { name: "Casper" }] });
-    expect((out.reports as unknown as unknown[]).length).toBe(2);
+    expect(out.competitors).toMatchObject({ set_status: "confirmed", tracked: false, selected: [{ name: "Parachute" }, { name: "Boll & Branch" }, { name: "Casper" }] });
+    expect((out.reports as unknown as unknown[]).length).toBe(1);
     expect(out.social_report).toMatchObject({ id: "rep-new", status: "completed" });
-    expect(out.competitive_report).toMatchObject({ id: "crep-new", executive_summary: "Competitors post daily." });
+    expect(out.competitive_report).toBeNull();
     expect(out.post).toMatchObject({ copy: "Know your rights after a crash.", source: "calendar", media_urls: [expect.stringContaining("demo.png")] });
     expect(out.design).toEqual({ status: "none", version: null, previews: [] });
     expect(out.analytics).toBeNull();
-    expect(h.job.gaps.map((g) => g.code).sort()).toEqual(["analytics_unavailable", "competitor_unplaced", "design_system_missing", "performance_data_unavailable"]);
+    expect(h.job.gaps.map((g) => g.code).sort()).toEqual(["analytics_unavailable", "competitor_unplaced", "connected_only", "design_system_missing", "performance_data_unavailable"]);
     expect(h.callbacks).toHaveLength(1);
     expect((h.callbacks[0] as { payload: { status: string; job_id: string } }).payload).toMatchObject({ job_id: "job-1", status: "completed" });
     expect(JSON.stringify(out)).not.toMatch(/L9|123456/);

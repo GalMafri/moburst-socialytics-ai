@@ -8,7 +8,7 @@
  */
 import { CALLBACK_DELAYS_S, CALLBACK_MAX_ATTEMPTS, deliverOnce } from "../../_shared/api/callback.ts";
 import { finalStatus, type Gap, type JobRecord, type StepDef, type StepResult } from "../../_shared/api/jobs.ts";
-import { resolveScope } from "../../_shared/api/keys.ts";
+import { demoSlug, resolveScope } from "../../_shared/api/keys.ts";
 import type { ClientScope } from "../../_shared/api/router.ts";
 import { isReviewReadyHandle } from "../../_shared/competitive/extractSocialHandles.ts";
 import { callEnvFromDeno, callFunction, type CallEnv, type CallResult } from "../../_shared/invoke.ts";
@@ -30,10 +30,15 @@ export interface DemoCtx {
 
 const FRESH_REPORT_DAYS = 7;
 const REPORT_TIMEOUT_MIN = 100;
-const TRACKING_TIMEOUT_MIN = 60;
 const CHECK_IN_S = 120;
 const MIN_REFERENCES = 3;
 const DEFAULT_PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn"];
+/** What a demo cannot show for a prospect: the parts of the product that need the brand's own connections. */
+const CONNECTED_ONLY = {
+  tracking: "Competitor tracking and the competitive report start when the brand connects; the demo shows them on the connected showcase workspace.",
+  competitive: "The competitive report needs tracked competitors; the demo shows it on the connected showcase workspace.",
+  analytics: "Performance analytics need the brand's Sprout connection; the demo shows them on the connected showcase workspace.",
+};
 
 type Input = { client_name: string; website: string; competitors?: Array<{ name: string; website?: string }>; force_run?: boolean };
 const inputOf = (job: JobRecord) => job.input as unknown as Input;
@@ -70,21 +75,7 @@ async function clientOf(job: JobRecord, ctx: DemoCtx): Promise<ClientRow> {
 const actorOf = (job: JobRecord, client: ClientRow): string | null => str(stepData(job, "resolve_client").acted_as) ?? client.created_by ?? null;
 const referenceCount = (c: ClientRow) => (Array.isArray(c.harvested_design_references) ? c.harvested_design_references.length : 0) + (Array.isArray(c.design_references) ? c.design_references.length : 0);
 const newestSet = (sets: SetWithCompetitors[]) => [...sets].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0] ?? null;
-const trackedSet = (sets: SetWithCompetitors[]) => sets.find((s) => CONFIRMED_SET.includes(s.status) && s.rivaliq_landscape_id) ?? null;
 
-/**
- * The provider's tracking failure, as a sentence for the gap: the companies it
- * could not start tracking, without the raw payload it attaches to each (the
- * payload stays on the step as provider_message for whoever debugs it).
- */
-export function trackingFailureSummary(raw: string): string {
-  const m = raw.match(/^RivalIQ could not finish tracking every reviewed website\.\s*(.*)$/s);
-  if (!m) return raw.replace(/\s+/g, " ").trim().replace(/\.?$/, ".");
-  const names = [...m[1].matchAll(/(?:^|;\s*)([^;:{}]+?):\s*(?:\{|[A-Za-z])/g)].map((x) => x[1].trim()).filter(Boolean);
-  const blocked = /403/.test(m[1]) ? " At least one website refused the provider's visit." : "";
-  if (!names.length) return "RivalIQ could not start tracking the reviewed websites.";
-  return `RivalIQ could not start tracking ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}.${blocked}`;
-}
 
 /** Start a report through run-report, unless the job already did or a fresh one exists. */
 async function startReport(job: JobRecord, ctx: DemoCtx, kind: "social" | "competitive", range?: { start: string; end: string }): Promise<StepResult> {
@@ -118,21 +109,24 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       const host = input.website;
       const scope = await jobScope(job, ctx);
       const outOfScope = (what: string): StepResult => ({ status: "failed", fatal: true, reason: "out_of_scope", message: `This key may not work on ${what}.` });
-      const existing = (await ctx.db.findClientByHost(host)) ?? (await ctx.db.findClientByName(input.client_name));
+      // A demo works on its own copy of the brand. A production client with the same website or name is never read, reused or written.
+      const existing = (await ctx.db.findDemoClientByHost(host)) ?? (await ctx.db.findDemoClientByName(input.client_name));
       if (existing) {
         if (!scope.allows(existing.id)) return outOfScope("this client");
         const mine = existing.demo_job_id === job.id;
         const actedAs = existing.created_by ?? (await ctx.db.ownerFor(requesterEmail(job)));
-        return { status: "done", outcome: mine ? "created" : "reused", data: { client_id: existing.id, name: existing.name, matched_by: mine ? "job" : "website_or_name", acted_as: actedAs }, patch: { client_id: existing.id } };
+        return { status: "done", outcome: mine ? "created" : "reused", data: { client_id: existing.id, name: existing.name, company_slug: existing.company_slug, matched_by: mine ? "job" : "website_or_name", acted_as: actedAs }, patch: { client_id: existing.id } };
       }
       const owner = await ctx.db.ownerFor(requesterEmail(job));
       if (!owner) return { status: "failed", fatal: true, reason: "no_owner", message: "No Socialytics user is available to own the new client." };
-      const base = slugify(input.client_name);
+      const company = slugify(input.client_name);
+      const base = demoSlug(company);
       let slug = base;
       for (let n = 2; (await ctx.db.slugExists(slug)) && n < 20; n++) slug = `${base}-${n}`;
+      // A company-scoped key may only create the demo copy of one of its companies.
       if (!scope.all) {
         const reach = await ctx.db.keyReach((job.key_id as string | null) ?? "");
-        if (!reach?.company_slugs?.includes(slug)) return outOfScope(`a client outside its companies (${slug})`);
+        if (!reach?.company_slugs?.some((s) => s === slug || s === company)) return outOfScope(`a client outside its companies (${company})`);
       }
       const c = await ctx.db.insertClient({ name: input.client_name, website_url: `https://${host}`, company_slug: slug, created_by: owner, primary_platforms: DEFAULT_PLATFORMS, geo: "US", language: "en", timezone: "UTC", media_backend: "gemini", demo_job_id: job.id });
       return { status: "done", outcome: "created", data: { client_id: c.id, name: c.name, company_slug: slug, acted_as: owner }, patch: { client_id: c.id } };
@@ -297,36 +291,10 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
   },
   {
     name: "tracking",
-    async run(job, ctx) {
-      const client = await clientOf(job, ctx);
-      const comp = stepData(job, "competitors");
-      const sets = await ctx.db.setsOf(client.id);
-      const set = sets.find((s) => s.id === comp.set_id) ?? newestSet(sets.filter((s) => CONFIRMED_SET.includes(s.status)));
-      if (!set) return { status: "skipped", reason: "no_set", message: "There is no competitor set to track." };
-      if (set.rivaliq_landscape_id) return { status: "done", outcome: "already_tracked", data: { set_id: set.id } };
-      if (!CONFIRMED_SET.includes(set.status)) return { status: "skipped", reason: "set_not_confirmed", message: "The competitor set is not confirmed, so there is nothing to track.", data: { set_id: set.id } };
-      const prior = stepData(job, "tracking");
-      const startedAt = str(prior.started_at) ?? ctx.now().toISOString();
-      const fail = (reason: string, message: string, provider?: string): StepResult => ({ status: "failed", reason, message, data: { set_id: set.id, started_at: startedAt, ...(provider ? { provider_message: provider.slice(0, 1200) } : {}) }, gaps: [gap("tracking", "tracking_incomplete", `Competitor tracking was not verified: ${message} The competitive report is skipped.`)] });
-      if (minutesSince(startedAt, ctx.now()) > TRACKING_TIMEOUT_MIN) return fail("tracking_timeout", `the provider did not confirm tracking within ${TRACKING_TIMEOUT_MIN} minutes.`);
-      const actor = actorOf(job, client);
-      const p = await ctx.call("setup-rivaliq-landscape", { set_id: set.id, mode: "preview" }, actor);
-      const pd = obj(p.data) as { fingerprint?: string; job?: { phase?: string } | null };
-      if (!p.ok || !pd.fingerprint) {
-        const raw = errorOf(p, "the tracking plan could not be prepared");
-        return fail("tracking_failed", trackingFailureSummary(raw), raw);
-      }
-      if (pd.job?.phase === "complete") return { status: "done", outcome: "tracked", data: { set_id: set.id, phase: "complete", started_at: startedAt } };
-      const a = await ctx.call("setup-rivaliq-landscape", { set_id: set.id, mode: "advance", fingerprint: pd.fingerprint }, actor);
-      const ad = obj(a.data) as { job?: { phase?: string } | null };
-      if (!a.ok) {
-        if (a.status === 409 && /already being checked/i.test(errorOf(a, ""))) return { status: "waiting", check_in_s: CHECK_IN_S, data: { set_id: set.id, phase: pd.job?.phase ?? "busy", started_at: startedAt } };
-        const raw = errorOf(a, "the provider refused the tracking request");
-        return fail("tracking_failed", trackingFailureSummary(raw), raw);
-      }
-      const phase = ad.job?.phase ?? "unknown";
-      if (phase === "complete") return { status: "done", outcome: "tracked", data: { set_id: set.id, phase, started_at: startedAt } };
-      return { status: "waiting", check_in_s: CHECK_IN_S, data: { set_id: set.id, phase, started_at: startedAt } };
+    // Competitor tracking takes a RivalIQ seat and the competitive report is built on it; both belong to the connected
+    // product. A demo keeps the competitor set and shows tracking and the report on the connected showcase workspace.
+    async run() {
+      return { status: "skipped", reason: "connected_only", message: CONNECTED_ONLY.tracking, gaps: [gap("tracking", "connected_only", CONNECTED_ONLY.tracking)] };
     },
   },
   {
@@ -343,13 +311,9 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
   },
   {
     name: "run_competitive",
-    async run(job, ctx) {
-      const client = await clientOf(job, ctx);
-      const set = trackedSet(await ctx.db.setsOf(client.id));
-      if (!set) return { status: "skipped", reason: "no_tracked_set", message: "No confirmed and tracked competitor set, so the competitive report does not run." };
-      const end = new Date(ctx.now().getTime() - 86_400_000);
-      const start = new Date(end.getTime() - 29 * 86_400_000);
-      return startReport(job, ctx, "competitive", { start: day(start), end: day(end) });
+    // The gap is recorded once, by the tracking step.
+    async run() {
+      return { status: "skipped", reason: "connected_only", message: CONNECTED_ONLY.competitive };
     },
   },
   {
@@ -425,7 +389,7 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
     async run(job, ctx) {
       const client = await clientOf(job, ctx);
       const profiles = (await ctx.db.sproutProfilesOf(client.id)).filter((p) => p.is_active !== false);
-      if (!profiles.length) return { status: "skipped", reason: "no_sprout_profiles", message: "No Sprout profile: performance analytics are not available for this brand.", gaps: [gap("analytics", "analytics_unavailable", "No Sprout profile: performance analytics are not available for this brand.")] };
+      if (!profiles.length) return { status: "skipped", reason: "no_sprout_profiles", message: CONNECTED_ONLY.analytics, gaps: [gap("analytics", "analytics_unavailable", CONNECTED_ONLY.analytics)] };
       const end = ctx.now();
       const start = new Date(end.getTime() - 29 * 86_400_000);
       const r = await ctx.call("sprout-analytics", { client_id: client.id, start: day(start), end: day(end) }, actorOf(job, client));

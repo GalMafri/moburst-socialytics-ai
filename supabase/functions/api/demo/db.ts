@@ -15,8 +15,9 @@ export function escapeLike(s: string): string {
 }
 
 export interface DemoDb {
-  findClientByHost(host: string): Promise<ClientRow | null>;
-  findClientByName(name: string): Promise<ClientRow | null>;
+  /** Demo clients only (rows carrying a demo_job_id): a demo never reads, reuses or writes a production client. */
+  findDemoClientByHost(host: string): Promise<ClientRow | null>;
+  findDemoClientByName(name: string): Promise<ClientRow | null>;
   /** The user the job acts for: the requester when their email matches a profile, else the creator of the most clients. */
   ownerFor(email: string | null | undefined): Promise<string | null>;
   slugExists(slug: string): Promise<boolean>;
@@ -66,12 +67,12 @@ async function run(p: PromiseLike<{ error: { message: string } | null }>): Promi
 
 export function makeDemoDb(db: SupabaseClient): DemoDb {
   return {
-    async findClientByHost(host) {
-      const candidates = await rows<ClientRow>(db.from("clients").select(CLIENT_COLUMNS).is("archived_at", null).ilike("website_url", `%${escapeLike(host)}%`).limit(20));
+    async findDemoClientByHost(host) {
+      const candidates = await rows<ClientRow>(db.from("clients").select(CLIENT_COLUMNS).is("archived_at", null).not("demo_job_id", "is", null).ilike("website_url", `%${escapeLike(host)}%`).limit(20));
       return candidates.find((c) => clientHost(c.website_url) === host) ?? null;
     },
-    async findClientByName(name) {
-      return one<ClientRow>(db.from("clients").select(CLIENT_COLUMNS).is("archived_at", null).ilike("name", escapeLike(name)).limit(1).maybeSingle());
+    async findDemoClientByName(name) {
+      return one<ClientRow>(db.from("clients").select(CLIENT_COLUMNS).is("archived_at", null).not("demo_job_id", "is", null).ilike("name", escapeLike(name)).limit(1).maybeSingle());
     },
     async ownerFor(email) {
       if (email) {

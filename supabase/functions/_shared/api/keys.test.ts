@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bearerFrom, generateKey, hashKey, hasScope, keyIsLive, resolveScope, scopeAll, scopeOf, type KeyRow } from "./keys";
+import { bearerFrom, demoSlug, generateKey, hashKey, hasScope, isDemoSlug, keyIsLive, resolveScope, scopeAll, scopeOf, type KeyRow } from "./keys";
 
 const row = (over: Partial<KeyRow> = {}): KeyRow => ({
   id: "k1", name: "gOS", key_prefix: "adv_abcdefgh", scopes: ["read"], company_slugs: null, client_ids: null,
@@ -58,6 +58,16 @@ describe("resolveScope", () => {
     expect(s.allows("c-nano")).toBe(false);
     expect(s.allows("c-tilt")).toBe(false);
     expect(s.allows(undefined)).toBe(false);
+  });
+  it("lets a company-scoped key reach the demo copy of its companies and nothing else", () => {
+    const withDemos = [...clients, { id: "c-demo-bader", company_slug: "demo-bader-law" }, { id: "c-demo-tilt", company_slug: "demo-tilt-app" }];
+    const s = resolveScope(row({ company_slugs: ["bader-law"] }), withDemos);
+    expect(s.allows("c-bader")).toBe(true);
+    expect(s.allows("c-demo-bader")).toBe(true);
+    expect(s.allows("c-demo-tilt")).toBe(false);
+    expect(demoSlug("bader-law")).toBe("demo-bader-law");
+    expect(isDemoSlug("demo-bader-law")).toBe(true);
+    expect(isDemoSlug("bader-law")).toBe(false);
   });
   it("prefers explicit client ids over slugs", () => {
     const s = resolveScope(row({ company_slugs: ["bader-law"], client_ids: ["c-nano"] }), clients);

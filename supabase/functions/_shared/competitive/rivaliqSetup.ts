@@ -107,3 +107,21 @@ export async function advanceRivalIqSetup(job: SetupJob, api: Api, save: Save): 
   }
   return job;
 }
+
+/**
+ * Removing a landscape a setup created but never filled (the follow step
+ * failed, so the companies were never added). Only a landscape carrying this
+ * setup's own name, and only while it tracks no company: a shared or imported
+ * landscape, or one that holds companies, is never touched.
+ */
+export async function cleanupRivalIqLandscape(job: SetupJob, api: Api): Promise<{ deleted: boolean; reason: 'empty' | 'no_landscape' | 'not_found' | 'not_ours' | 'has_companies' }> {
+  if (!job.landscape_id) return { deleted: false, reason: 'no_landscape' };
+  const path = `/landscapes/${encodeURIComponent(job.landscape_id)}`;
+  const { landscape } = await api(path);
+  if (!landscape) return { deleted: false, reason: 'not_found' };
+  if (landscape.name !== job.plan.name) return { deleted: false, reason: 'not_ours' };
+  const response = await api(`${path}/companies`);
+  if ((response.companies || []).length) return { deleted: false, reason: 'has_companies' };
+  await api(path, 'DELETE');
+  return { deleted: true, reason: 'empty' };
+}

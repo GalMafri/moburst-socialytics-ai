@@ -63,12 +63,22 @@ export function scopeOf(ids: Iterable<string>): ClientScope {
   return { all: false, ids: set, allows: (id) => !!id && set.has(id) };
 }
 
-/** Explicit client ids win; otherwise company slugs; a null slug never matches; no scope at all means every client. */
+/**
+ * Demo jobs never touch a production client: they create their own copy of a
+ * brand, whose company slug carries this prefix. A key scoped to a company
+ * therefore reaches that company's demo copy as well.
+ */
+export const DEMO_SLUG_PREFIX = "demo-";
+export const demoSlug = (slug: string): string => `${DEMO_SLUG_PREFIX}${slug}`;
+export const isDemoSlug = (slug: string | null | undefined): boolean => !!slug && slug.startsWith(DEMO_SLUG_PREFIX);
+const baseSlug = (slug: string): string => (isDemoSlug(slug) ? slug.slice(DEMO_SLUG_PREFIX.length) : slug);
+
+/** Explicit client ids win; otherwise company slugs (a company covers its demo copy); a null slug never matches; no scope at all means every client. */
 export function resolveScope(row: Pick<KeyRow, "company_slugs" | "client_ids">, clients: Array<{ id: string; company_slug: string | null }>): ClientScope {
   if (row.client_ids && row.client_ids.length) return scopeOf(row.client_ids);
   if (row.company_slugs && row.company_slugs.length) {
     const slugs = new Set(row.company_slugs);
-    return scopeOf(clients.filter((c) => c.company_slug && slugs.has(c.company_slug)).map((c) => c.id));
+    return scopeOf(clients.filter((c) => c.company_slug && (slugs.has(c.company_slug) || slugs.has(baseSlug(c.company_slug)))).map((c) => c.id));
   }
   return scopeAll();
 }

@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { requireStaff, AuthzError } from '../_shared/auth/requireStaff.ts';
-import { advanceRivalIqSetup, publicCompanyUrl, type SetupPlan } from '../_shared/competitive/rivaliqSetup.ts';
+import { advanceRivalIqSetup, cleanupRivalIqLandscape, publicCompanyUrl, type SetupPlan } from '../_shared/competitive/rivaliqSetup.ts';
 import { rivalIqFetch } from '../_shared/competitive/rivaliqFetch.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version' };
@@ -15,7 +15,7 @@ Deno.serve(async req => {
  let db: any, leaseId: string | undefined, setId: string | undefined;
  try {
   const body = await req.json();
-  if (!body.set_id || !['preview', 'advance'].includes(body.mode)) return json({ error: 'set_id and mode are required' }, 400);
+  if (!body.set_id || !['preview', 'advance', 'cleanup'].includes(body.mode)) return json({ error: 'set_id and mode are required' }, 400);
   const caller = await requireStaff(req);
   const { asCaller } = caller;
   db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -46,7 +46,10 @@ Deno.serve(async req => {
   const publicJob = (job: any) => job ? { phase: job.phase, landscape_id: job.landscape_id } : null;
   if (prior && prior.fingerprint !== hash) return json({ error: 'This setup belongs to an earlier selection. Create and confirm a new competitor draft before connecting different companies.' }, 409);
   if (body.mode === 'preview') return json({ plan, fingerprint: hash, job: publicJob(prior) });
-  if (body.fingerprint !== hash || (prior && prior.fingerprint !== hash)) return json({ error: 'The reviewed company list changed. Review setup again before continuing.' }, 409);
+  if (body.mode === 'cleanup') {
+   // Removing an empty landscape left by a failed follow. Nothing to clean without a setup record.
+   if (!prior) return json({ error: 'No tracking setup exists for this set.' }, 404);
+  } else if (body.fingerprint !== hash || (prior && prior.fingerprint !== hash)) return json({ error: 'The reviewed company list changed. Review setup again before continuing.' }, 409);
   const key = Deno.env.get('RIVALIQ_API_KEY');
   if (!key) return json({ error: 'RivalIQ API key is not configured.' }, 503);
   if (!prior) {
@@ -71,11 +74,23 @@ Deno.serve(async req => {
     ...(payload ? { body: JSON.stringify(payload) } : {}), signal: AbortSignal.timeout(25000),
    });
    if (!response.ok) throw new Error(`RivalIQ returned HTTP ${response.status}. Check API permissions or account capacity, then check setup status. No automatic POST retry was sent.`);
+   const text = await response.text();
+   if (!text.trim()) return {}; // a DELETE answers with an empty body
    // Provider validation messages can contain request URLs. Remove the key
    // before any message can reach a caller or logs; operation tokens stay server-side.
-   return JSON.parse(JSON.stringify(await response.json(), (_name, value) => typeof value === 'string'
+   return JSON.parse(JSON.stringify(JSON.parse(text), (_name, value) => typeof value === 'string'
     ? value.replaceAll(key, '[redacted]').replaceAll(encodeURIComponent(key), '[redacted]') : value));
   };
+  if (body.mode === 'cleanup') {
+   const cleanup = await cleanupRivalIqLandscape(job, api);
+   if (cleanup.deleted) {
+    const { error: ue } = await db.from('competitor_sets').update({ rivaliq_landscape_id: null }).eq('id', setId).eq('rivaliq_landscape_id', job.landscape_id);
+    if (ue) throw ue;
+    const { error: de } = await db.from('rivaliq_setup_jobs').delete().eq('set_id', setId).eq('lease_id', leaseId);
+    if (de) throw de;
+   }
+   return json({ cleanup, job: cleanup.deleted ? null : publicJob(job) });
+  }
   const next = await advanceRivalIqSetup(job, api, save);
   if (next.phase === 'verified') {
    // Do not link a plan that was edited while the provider request was running.

@@ -19,8 +19,8 @@ const newest = <T extends { created_at: string }>(r: T[]) => [...r].sort((a, b) 
 export function makeFakeDemoDb(t: FakeTables): DemoDb {
   const full = (sets: CompetitorSetRow[]) => sets.map((s) => ({ ...s, competitors: t.competitors.filter((c) => c.set_id === s.id).map((c) => ({ ...c, handles: t.handles.filter((h) => h.competitor_id === c.id) })) }));
   return {
-    async findClientByHost(h) { return t.clients.find((c) => !c.archived_at && host(c.website_url) === h) ?? null; },
-    async findClientByName(name) { return t.clients.find((c) => !c.archived_at && c.name.toLowerCase() === name.toLowerCase()) ?? null; },
+    async findDemoClientByHost(h) { return t.clients.find((c) => !c.archived_at && c.demo_job_id && host(c.website_url) === h) ?? null; },
+    async findDemoClientByName(name) { return t.clients.find((c) => !c.archived_at && c.demo_job_id && c.name.toLowerCase() === name.toLowerCase()) ?? null; },
     async ownerFor(email) { const p = email ? t.profiles.find((x) => x.email === email) : null; return p?.user_id ?? t.owners[0] ?? null; },
     async slugExists(slug) { return t.clients.some((c) => c.company_slug === slug); },
     async insertClient(row) {
