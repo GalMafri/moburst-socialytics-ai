@@ -24,7 +24,7 @@ import { imageAspectRatio, platformDesignSpec } from '../_shared/design-prompts/
 import { sourceImage } from '../_shared/design-prompts/sourceImage.ts';
 import { validateDesignImage, verdictIsDirty } from '../_shared/design-prompts/validateImage.ts';
 import { resolveContextImageUrls } from '../_shared/higgsfield/context.ts';
-import { startImageWithHiggsfield } from '../_shared/higgsfield/startImage.ts';
+import { startDesignEdit, startImageWithHiggsfield } from '../_shared/higgsfield/startImage.ts';
 import { checkVideoJob } from '../_shared/higgsfield/renderVideo.ts';
 import { storeRemoteImage } from '../_shared/media/storeRemote.ts';
 import { mediaBackendFor } from '../_shared/higgsfield/backend.ts';
@@ -143,7 +143,10 @@ async function submitFrame(db: any, creative: any, index: number, attempt: numbe
     const prompt = designed
       ? (isLibraryV2(designed.system) ? heroPromptV2(creative.plan, index, templateV2(designed.system, frame.template_id), spec, creative.plan.brand_system || '', correction) : designedHeroPrompt(creative.plan, index, designed.system, templateById(designed.system, frame.template_id), spec, correction))
       : wholePostPrompt(creative.plan, index, spec, creative.mode, Boolean(logoUrl), correction);
-    const started = await startImageWithHiggsfield(db, prompt, imageAspectRatio(creative.platform, creative.format), logoUrl ? [...referenceUrls, logoUrl] : referenceUrls);
+    // The design edit works on ONE source post (the frame's layout reference comes first); the legacy path keeps its reference set.
+    const started = designed
+      ? await startImageWithHiggsfield(db, prompt, imageAspectRatio(creative.platform, creative.format), referenceUrls)
+      : await startDesignEdit(db, prompt, imageAspectRatio(creative.platform, creative.format), referenceUrls[0]);
     const { error: recordError } = await db.from('media_jobs').update({ request_id: started.jobId, model_path: started.model, status: 'submitted', updated_at: new Date().toISOString() }).eq('id', row.id);
     if (recordError) throw new Error(`Image submitted as ${started.jobId} but recording failed.`);
     return { ...row, status: 'submitted', request_id: started.jobId };

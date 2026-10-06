@@ -237,6 +237,8 @@ export interface ImageRequest {
   referenceIds?: string[];
   resolution?: "1k" | "2k" | "4k";
   model?: string;
+  /** Model-specific parameters passed through as they are (for example GPT Image 2.5's quality). */
+  extra?: Record<string, unknown>;
 }
 
 export async function submitImage(mcp: ToolCaller, req: ImageRequest): Promise<JobRef[]> {
@@ -246,6 +248,7 @@ export async function submitImage(mcp: ToolCaller, req: ImageRequest): Promise<J
     aspect_ratio: imageAspect(req.aspect),
     resolution: req.resolution || "2k",
     use_unlim: false,
+    ...(req.extra || {}),
   };
   if (req.referenceIds?.length) {
     params.medias = req.referenceIds.map((value) => ({ value, role: "image_references" }));

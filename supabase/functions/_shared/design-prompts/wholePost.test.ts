@@ -18,22 +18,18 @@ it('the approved headline is the only text, with a counter on carousel slides', 
   assertEquals(counterText('single', 0, 1), '');
 });
 
-it('the prompt asks for one finished picture with the exact words, the brand language and the logo', () => {
+it('the prompt edits the source post: structure kept, hero and words new, logo untouched', () => {
   const p = wholePostPrompt(plan, 0, undefined, 'single', true);
+  assertStringIncludes(p, 'keep its STRUCTURE exactly');
+  assertStringIncludes(p, 'The logo stays in its place and size, untouched');
+  assertStringIncludes(p, 'The hero object or scene becomes: a chrome compass whose needle is a beam of light');
   assertStringIncludes(p, '"AEO is not SEO with new initials."');
   assertStringIncludes(p, '"new initials"');
-  assertStringIncludes(p, 'ONLY logo for this post');
-  assertStringIncludes(p, 'never use those');
-  assertStringIncludes(p, 'ONE finished picture');
-  assertStringIncludes(p, 'headline center, hero bottom, logo top-center');
-  assertStringIncludes(p, 'Arrangement for this post: card centred, compass low');
-  assertStringIncludes(p, 'FIRST attached post is the layout reference');
-  assertStringIncludes(p, 'no slide counter');
-  assert(!p.includes('Render NO lettering'), 'the whole-post prompt never forbids lettering');
-  const noFile = wholePostPrompt(plan, 1, undefined, 'carousel', false, 'the hourglass hid the words');
-  assertStringIncludes(noFile, 'exactly as it appears in the attached posts');
-  assertStringIncludes(noFile, '"02 / 02"');
-  assertStringIncludes(noFile, 'Correct the previous attempt: the hourglass hid the words');
+  assertStringIncludes(p, 'Remove any slide counter');
+  assert(!p.includes('lower third') && !p.includes('upper third') && !p.includes('headline center'), 'positions never come from the prompt');
+  const slide = wholePostPrompt(plan, 1, undefined, 'carousel', false, 'the hourglass hid the words');
+  assertStringIncludes(slide, 'The counter now reads "02 / 02"');
+  assertStringIncludes(slide, 'Correct the previous attempt: the hourglass hid the words');
 });
 
 it('a failed review becomes a concrete correction', () => {
@@ -52,4 +48,5 @@ it('the reviewer is told what counts as a defect and what does not', () => {
   assertStringIncludes(q, "THE BRAND'S LOGO FILE");
   assertStringIncludes(q, 'sub-brand wordmark');
   assertStringIncludes(q, 'gems around the card');
+  assertStringIncludes(q, 'structure differs from the SOURCE POST');
 });
