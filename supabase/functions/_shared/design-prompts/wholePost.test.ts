@@ -47,6 +47,7 @@ it('the reviewer is told what counts as a defect and what does not', () => {
   const q = wholePostQuestion('App Store Myths. Busted.', true, 'gems around the card');
   assertStringIncludes(q, '"App Store Myths. Busted."');
   assertStringIncludes(q, 'counts as a headline card');
+  assertStringIncludes(q, 'one word rendered in more than one colour');
   assertStringIncludes(q, 'A correct logo sets has_logo FALSE');
   assertStringIncludes(q, "THE BRAND'S LOGO FILE");
   assertStringIncludes(q, 'sub-brand wordmark');
