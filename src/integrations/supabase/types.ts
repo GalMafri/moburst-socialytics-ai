@@ -2022,6 +2022,7 @@ export type Database = {
       is_admin: { Args: never; Returns: boolean }
       is_client_member: { Args: { _client_id: string }; Returns: boolean }
       is_company_restricted: { Args: never; Returns: boolean }
+      is_demo_client: { Args: { _client_id: string }; Returns: boolean }
       is_moburst_staff: { Args: never; Returns: boolean }
       purge_raw_events: {
         Args: { p_keep_months?: number }
