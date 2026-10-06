@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, REPORT_DATA, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE } from "./fixtures";
-import { alertOut, APP_URL, clientOut, competitiveReportOut, competitorSetOut, designSystemOut, mediaJobOut, postOut, reportOut, scheduledPostOut, scheduleOut } from "./serializers";
+import { alertOut, APP_URL, appUrl, clientOut, competitiveReportOut, competitorSetOut, designSystemOut, mediaJobOut, postOut, reportOut, scheduledPostOut, scheduleOut } from "./serializers";
 
 describe("clientOut", () => {
   const out = clientOut(CLIENT, { sproutProfiles: [SPROUT_PROFILE], sets: [{ ...COMPETITOR_SET, competitors: [{ ...COMPETITOR, handles: [HANDLE] }] }], designSystems: [DESIGN_SYSTEM], counts: { reports: 4, competitive_reports: 2, posts: 9, schedules: 1 }, lastReport: REPORT });
@@ -97,5 +97,13 @@ describe("scheduleOut, scheduledPostOut, alertOut, designSystemOut", () => {
     expect(JSON.stringify(scheduledPostOut(SCHEDULED_POST))).not.toContain("9988");
     expect(alertOut(ALERT)).toMatchObject({ id: "al-1", topic: "Back to school safety", companies: ["Morgan & Morgan", "Cellino"], window: { start: "2026-09-15", end: "2026-09-21" }, status: "new" });
     expect(designSystemOut(DESIGN_SYSTEM)).toMatchObject({ id: "ds-1", version: 2, status: "approved", templates: [{ id: "t-quote", name: "Quote card", formats: ["square", "portrait"] }], tokens: { font_family: "Montserrat", colors: { accent: "#C8A951" } }, previews: [{ template_id: "t-quote", format: "square", url: "https://x/previews/v2-t-quote.png" }] });
+  });
+});
+
+describe("appUrl", () => {
+  it("uses the branded gOS host when PUBLIC_APP_URL is set, else the Lovable origin, and never keeps a trailing slash", () => {
+    expect(appUrl(() => undefined)).toBe("https://moburst-socialytics-ai.lovable.app");
+    expect(appUrl((k) => (k === "PUBLIC_APP_URL" ? "https://socialytics.moburst.ai/" : undefined))).toBe("https://socialytics.moburst.ai");
+    expect(appUrl(() => "   ")).toBe("https://moburst-socialytics-ai.lovable.app");
   });
 });

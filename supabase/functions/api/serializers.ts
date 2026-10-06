@@ -4,8 +4,17 @@
  * and customer ids, RivalIQ landscape and company ids, media provider
  * request ids) never appear in any output.
  */
-export const APP_URL = "https://moburst-socialytics-ai.lovable.app";
 declare const Deno: { env: { get(k: string): string | undefined } } | undefined;
+/**
+ * The host the API puts in `links.app`. gOS users reach the tool through its branded
+ * URL (<tool_id>.moburst.ai), so links must not escape to the Lovable origin: set
+ * PUBLIC_APP_URL in the project to the branded host. The Lovable origin is the default.
+ */
+export function appUrl(get: (key: string) => string | undefined): string {
+  const v = (get("PUBLIC_APP_URL") ?? "").trim().replace(/\/+$/, "");
+  return v || "https://moburst-socialytics-ai.lovable.app";
+}
+export const APP_URL = appUrl((k) => (typeof Deno !== "undefined" ? Deno.env.get(k) : undefined));
 const SUPABASE_URL = (typeof Deno !== "undefined" ? Deno.env.get("SUPABASE_URL") : undefined) ?? "https://rwouwxqggjjacbpbhqsn.supabase.co";
 export const STORAGE_URL = `${SUPABASE_URL}/storage/v1/object/public`;
 
