@@ -76,7 +76,8 @@ daily check that alerts by email (see Alerting).
    client is not archived.
 3. One `feed_refresh` job per non-archived client with a competitor set in
    `confirmed`, `analyzing`, `complete` or `failed`, when its latest feed is
-   missing, older than seven days, or older than a day and today is the
+   missing, older than six days (the old guarantee: every feed under a week
+   old), or older than a day and today is the
    client's refresh weekday (a stable hash of the client id). Feeds spread
    across the week instead of falling due together.
 4. Returns what it enqueued. `p_dry_run` returns the same list without writing.

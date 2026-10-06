@@ -129,7 +129,7 @@ begin
       from feed_clients f
       left join latest_feed l on l.client_id = f.client_id
      where l.fetched_at is null
-        or l.fetched_at < p_now - interval '7 days'
+        or l.fetched_at < p_now - interval '6 days'
         or (l.fetched_at < p_now - interval '1 day'
             and extract(dow from p_now at time zone 'UTC')::int = public.feed_refresh_weekday(f.client_id))
   ), fresh as (
