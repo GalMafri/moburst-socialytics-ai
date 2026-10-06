@@ -1663,6 +1663,93 @@ export type Database = {
           },
         ]
       }
+      scheduled_jobs: {
+        Row: {
+          attempts: number
+          available_at: string
+          client_id: string
+          created_at: string
+          dedupe_key: string
+          finished_at: string | null
+          id: string
+          kind: string
+          lease_until: string | null
+          max_attempts: number
+          occurrence: string | null
+          phase: string | null
+          priority: number
+          reason: string | null
+          report_id: string | null
+          result: Json | null
+          schedule_id: string | null
+          stagger_seconds: number
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          available_at?: string
+          client_id: string
+          created_at?: string
+          dedupe_key: string
+          finished_at?: string | null
+          id?: string
+          kind: string
+          lease_until?: string | null
+          max_attempts?: number
+          occurrence?: string | null
+          phase?: string | null
+          priority?: number
+          reason?: string | null
+          report_id?: string | null
+          result?: Json | null
+          schedule_id?: string | null
+          stagger_seconds?: number
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          available_at?: string
+          client_id?: string
+          created_at?: string
+          dedupe_key?: string
+          finished_at?: string | null
+          id?: string
+          kind?: string
+          lease_until?: string | null
+          max_attempts?: number
+          occurrence?: string | null
+          phase?: string | null
+          priority?: number
+          reason?: string | null
+          report_id?: string | null
+          result?: Json | null
+          schedule_id?: string | null
+          stagger_seconds?: number
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_jobs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_jobs_schedule_id_fkey"
+            columns: ["schedule_id"]
+            isOneToOne: false
+            referencedRelation: "report_schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scheduled_posts: {
         Row: {
           client_id: string | null
@@ -1910,6 +1997,11 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      enqueue_scheduled_report_jobs: {
+        Args: { p_dry_run?: boolean; p_now?: string }
+        Returns: Json
+      }
+      feed_refresh_weekday: { Args: { p_client_id: string }; Returns: number }
       freeze_quarter: {
         Args: { p_quarter: string }
         Returns: {
@@ -2032,9 +2124,52 @@ export type Database = {
           status: string
         }[]
       }
+      release_ready_dispatches: { Args: never; Returns: number }
       release_rivaliq_request: {
         Args: { cooldown_seconds?: number; request_token: string }
         Returns: undefined
+      }
+      scheduled_jobs_lease: {
+        Args: { p_lease_seconds?: number }
+        Returns: {
+          attempts: number
+          available_at: string
+          client_id: string
+          created_at: string
+          dedupe_key: string
+          finished_at: string | null
+          id: string
+          kind: string
+          lease_until: string | null
+          max_attempts: number
+          occurrence: string | null
+          phase: string | null
+          priority: number
+          reason: string | null
+          report_id: string | null
+          result: Json | null
+          schedule_id: string | null
+          stagger_seconds: number
+          started_at: string | null
+          status: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "scheduled_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      scheduled_report_gaps: {
+        Args: { p_now?: string }
+        Returns: {
+          client_id: string
+          client_name: string
+          next_run_at: string
+          report_kind: string
+          schedule_id: string
+        }[]
       }
       verify_quarter: {
         Args: { p_quarter: string }
