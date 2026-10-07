@@ -593,7 +593,7 @@ Deno.serve(async (req) => {
     if (!["single", "carousel"].includes(mode) || !Number.isInteger(count) || count < 1 || count > 6) throw new Error("Use 1\u20136 still frames for a proof.");
     if (body.approved_headlines !== void 0 && (!Array.isArray(body.approved_headlines) || body.approved_headlines.length !== count || body.approved_headlines.some((s) => typeof s !== "string" || !s.trim() || s.length > 240))) throw new Error("Supply one exact approved headline per frame.");
     const db = createClient2(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
-    const { data: client, error } = await db.from("clients").select("id,name,design_references,harvested_design_references,logo_url").eq("id", body.client_id).single();
+    const { data: client, error } = await db.from("clients").select("id,name,design_references,harvested_design_references,logo_url,website_url,brand_identity,brand_book_file_path").eq("id", body.client_id).single();
     if (error || !client) throw new Error("The client evidence could not be read.");
     const paths = referencesFor(client.design_references, client.harvested_design_references, 8);
     if (paths.length < 3) throw new Error("At least three real client references are required.");
@@ -602,7 +602,25 @@ Deno.serve(async (req) => {
       if (error2) throw error2;
       return data.signedUrl;
     }));
-    if (body.op === "evidence") return json({ production_writes: 0, client_id: client.id, reference_paths: paths, reference_previews: await previewsFor(), logo_url: client.logo_url, evidence: referenceEvidence(paths, client.harvested_design_references) });
+    if (body.op === "evidence") {
+      let brandBookUrl = null;
+      if (client.brand_book_file_path) {
+        const signed = await db.storage.from("brand-books").createSignedUrl(client.brand_book_file_path, 3600);
+        if (signed.error) throw new Error("The client brand document could not be opened.");
+        brandBookUrl = signed.data.signedUrl;
+      }
+      return json({
+        production_writes: 0,
+        client_id: client.id,
+        reference_paths: paths,
+        reference_previews: await previewsFor(),
+        logo_url: client.logo_url,
+        website_url: client.website_url,
+        brand_identity: client.brand_identity,
+        brand_book_url: brandBookUrl,
+        evidence: referenceEvidence(paths, client.harvested_design_references)
+      });
+    }
     const key = Deno.env.get("ANTHROPIC_API_KEY");
     if (!key) throw new Error("The existing planning credential is unavailable.");
     phase = "loading reference images";
