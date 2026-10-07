@@ -1,6 +1,3 @@
-// @ts-nocheck
-// Isolated bundle of tested planner, reviewer, and source readers.
-
 // supabase/functions/preview-brand-design/index.ts
 import { createClient as createClient2 } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -450,7 +447,7 @@ function platformDesignSpec(platform, format) {
     if (/carousel|document|slide/.test(fmt)) return spec("a LinkedIn document carousel", "1:1", { top: 0.07, bottom: 0.09, left: 0.07, right: 0.07 }, 0.058, 0.22, "Slides are viewed at feed width, so type runs large and the frame is not crowded.");
     return spec("a LinkedIn feed image", "16:9", { top: 0.07, bottom: 0.07, left: 0.06, right: 0.06 }, 0.048, 0.16, "It is viewed at feed width in a wide frame, so the hero sits in one half and the other half stays open.");
   }
-  if (/(x|twitter)/.test(plat)) return spec("an X post image", "16:9", { top: 0.06, bottom: 0.06, left: 0.06, right: 0.06 }, 0.048, 0.16);
+  if (/\b(x|twitter)\b/.test(plat)) return spec("an X post image", "16:9", { top: 0.06, bottom: 0.06, left: 0.06, right: 0.06 }, 0.048, 0.16);
   if (/article|landscape|widescreen|banner|cover/.test(fmt)) return spec("a wide banner", "16:9", { top: 0.06, bottom: 0.06, left: 0.06, right: 0.06 }, 0.048, 0.16);
   if (/instagram|facebook/.test(plat)) {
     const name = /facebook/.test(plat) ? "the Facebook feed" : /carousel/.test(fmt) ? "an Instagram carousel" : "the Instagram feed";
@@ -664,10 +661,11 @@ function consumeHistoryPage(cursor, response) {
   return { posts: [...unique.values()], next, page: current, total_pages: total, profile_id: owner };
 }
 async function getSproutHistoryToken() {
+  const env = globalThis.Deno.env;
   const response = await fetch("https://identity.sproutsocial.com/oauth2/84e39c75-d770-45d9-90a9-7b79e3037d2c/v1/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: Deno.env.get("SPROUT_CLIENT_ID") || "", client_secret: Deno.env.get("SPROUT_CLIENT_SECRET") || "", grant_type: "client_credentials", scope: "organization_id" }),
+    body: new URLSearchParams({ client_id: env.get("SPROUT_CLIENT_ID") || "", client_secret: env.get("SPROUT_CLIENT_SECRET") || "", grant_type: "client_credentials", scope: "organization_id" }),
     signal: AbortSignal.timeout(15e3)
   });
   if (!response.ok) throw new Error("The social connection could not be opened. Please retry.");
@@ -809,7 +807,8 @@ async function fetchBrandDocument(rawUrl, maxBytes = 2 * 1024 * 1024) {
     if (!isPubliclyFetchable(url.href) || url.username || url.password || url.port && !["80", "443"].includes(url.port)) throw new Error("Use a public brand website.");
     const host = url.hostname.replace(/^\[|\]$/g, "");
     if (!host.includes(":") && !/^\d+(?:\.\d+){3}$/.test(host)) {
-      const lookups = await Promise.allSettled([Deno.resolveDns(host, "A"), Deno.resolveDns(host, "AAAA")]);
+      const runtime = globalThis.Deno;
+      const lookups = await Promise.allSettled([runtime.resolveDns(host, "A"), runtime.resolveDns(host, "AAAA")]);
       const ips = lookups.flatMap((r) => r.status === "fulfilled" ? r.value : []);
       if (!ips.length || ips.some((ip) => !isPubliclyFetchable(`https://${ip.includes(":") ? `[${ip}]` : ip}/`))) throw new Error("This website could not be reached safely.");
     }
@@ -872,6 +871,88 @@ function defaultSproutCustomerId() {
   return fromEnv || FALLBACK_SPROUT_CUSTOMER_ID;
 }
 
+// supabase/functions/_shared/design-prompts/nativeScene.ts
+var string = { type: "string" };
+var number = { type: "number" };
+function object3(properties) {
+  return { type: "object", additionalProperties: false, properties, required: Object.keys(properties) };
+}
+var paint = { anyOf: [string, object3({ from: string, to: string, angle: number })] };
+var box = { id: string, x: number, y: number, w: number, h: number, opacity: number, rotation: number };
+var layer = { anyOf: [
+  object3({ ...box, type: { type: "string", enum: ["text"] }, text: string, font_id: string, size: number, min_size: number, line_height: number, tracking: number, align: { type: "string", enum: ["left", "center", "right"] }, color: string, decorative: { type: "boolean" } }),
+  object3({ ...box, type: { type: "string", enum: ["rect", "ellipse"] }, paint, radius: number }),
+  object3({ ...box, type: { type: "string", enum: ["asset"] }, asset_id: string, fit: { type: "string", enum: ["contain", "cover"] } })
+] };
+var sceneSchema = object3({ version: { type: "integer", const: 1 }, width: number, height: number, background: paint, layers: { type: "array", minItems: 1, maxItems: 40, items: layer } });
+var compositionSchema = object3({ scene: sceneSchema, tokens: { type: "array", minItems: 6, maxItems: 12, items: object3({ kind: { type: "string", enum: ["logo", "typography", "palette", "surfaces", "graphic_vocabulary", "imagery"] }, rule: string, reference_indices: { type: "array", minItems: 1, items: { type: "integer" } } }) }, new_composition: string });
+function validateNativeManifest(manifest) {
+  if (manifest?.version !== 1 || !Array.isArray(manifest.fonts) || !manifest.fonts.length || !Array.isArray(manifest.assets) || !Array.isArray(manifest.palette) || !manifest.palette.length || !Array.isArray(manifest.decorative_glyphs)) throw new Error("Verified brand files are required.");
+  const ids = /* @__PURE__ */ new Set();
+  for (const file of [...manifest.fonts, ...manifest.assets]) {
+    if (!/^[\w-]{1,80}$/.test(file.id) || ids.has(file.id) || !/^[a-f0-9]{64}$/.test(file.sha256) || !/^https:\/\//.test(file.source_url)) throw new Error("Invalid original brand file.");
+    ids.add(file.id);
+  }
+  if (manifest.fonts.some((font) => !font.family?.trim() || !Number.isInteger(font.weight) || font.weight < 100 || font.weight > 900 || !["normal", "italic"].includes(font.style))) throw new Error("A verified font face and weight are required.");
+  if (manifest.assets.some((asset) => !["logo", "photo", "graphic"].includes(asset.role) || !["image/png", "image/jpeg", "image/webp", "image/svg+xml"].includes(asset.mime) || !Number.isFinite(asset.width) || asset.width <= 0 || !Number.isFinite(asset.height) || asset.height <= 0)) throw new Error("A verified original asset is required.");
+  if (manifest.palette.some((value) => !/^#[a-f0-9]{6}$/i.test(value))) throw new Error("Observed brand colors are required.");
+}
+function validateNativeComposition(composition, manifest, text2, width, height, referenceCount) {
+  validateNativeManifest(manifest);
+  const scene = composition?.scene;
+  if (scene?.version !== 1 || scene.width !== width || scene.height !== height || !Array.isArray(scene.layers) || scene.layers.length < 1 || scene.layers.length > 40) throw new Error("The proposed composition has invalid dimensions.");
+  const norm = (value) => value.replace(/\s+/gu, " ").trim();
+  const layers = scene.layers;
+  if (norm(layers.filter((l) => l.type === "text" && !l.decorative).map((l) => l.text).join(" ")) !== norm(text2)) throw new Error("The proposed composition changed the approved copy.");
+  const colors = new Set(manifest.palette.map((value) => value.toLowerCase()));
+  const color = (value) => typeof value === "string" && colors.has(value.toLowerCase());
+  const validPaint = (value) => color(value) || value && color(value.from) && color(value.to) && Number.isFinite(value.angle) && value.angle >= 0 && value.angle <= 360;
+  if (!validPaint(scene.background)) throw new Error("The proposed background is outside the observed palette.");
+  const ids = /* @__PURE__ */ new Set(), logos = [];
+  for (const item of layers) {
+    if (typeof item.id !== "string" || ids.has(item.id) || !["text", "asset", "rect", "ellipse"].includes(item.type) || !["x", "y", "w", "h"].every((key) => Number.isFinite(item[key])) || item.w <= 0 || item.h <= 0) throw new Error("Invalid composition geometry.");
+    ids.add(item.id);
+    if (item.type === "text") {
+      if (!manifest.fonts.some((font) => font.id === item.font_id) || !color(item.color)) throw new Error("The composition must use original brand typography.");
+      if (item.decorative && !manifest.decorative_glyphs.includes(item.text)) throw new Error("Invented brand decoration is not permitted.");
+    }
+    if (item.type === "asset") {
+      const asset = manifest.assets.find((asset2) => asset2.id === item.asset_id);
+      if (!asset) throw new Error("The composition contains an unknown asset.");
+      if (asset.role === "logo") logos.push(item);
+    }
+    if (["rect", "ellipse"].includes(item.type) && !validPaint(item.paint)) throw new Error("The composition changed the brand palette.");
+  }
+  if (manifest.assets.some((asset) => asset.role === "logo") && (logos.length !== 1 || logos[0].fit !== "contain" || logos[0].rotation !== 0 || logos[0].opacity !== 1)) throw new Error("Place one unaltered original logo.");
+  const kinds = ["logo", "typography", "palette", "surfaces", "graphic_vocabulary", "imagery"];
+  if (!Array.isArray(composition.tokens) || kinds.some((kind) => !composition.tokens.some((token) => token.kind === kind)) || composition.tokens.some((token) => !token.rule?.trim() || !token.reference_indices?.length || token.reference_indices.some((index) => !Number.isInteger(index) || index < 0 || index >= referenceCount)) || !composition.new_composition?.trim()) throw new Error("A composition needs complete source-grounded design decisions.");
+  return composition;
+}
+async function requestNativeComposition(input, apiKey) {
+  validateNativeManifest(input.manifest);
+  if (input.images.length < 2 || input.images.length !== input.evidence.length) throw new Error("Independent brand evidence is required.");
+  const content = input.images.flatMap((image, index) => [{ type: "text", text: `SOURCE ${index}: ${JSON.stringify(input.evidence[index])}` }, image]);
+  if (input.revision) {
+    content.push({ type: "text", text: `FAILED COMPOSITION, diagnostic only. Replace the defective layout; do not imitate it. ${JSON.stringify(input.revision)}` });
+    if (input.revision.image) content.push(input.revision.image);
+  }
+  content.push({ type: "text", text: `Create a professionally composed NEW ${input.format} for ${input.platform} using this brand's actual design language. Reinspect the sources, distinguish repeated copies from independent artworks, and record six evidenced token roles. A new composition must materially reorganize hierarchy, grouping or spatial rhythm; a source with substituted text is not a new composition. Preserve the brand's font weights, relative visual scale, spacing character, palette roles, surface treatments and restraint. Do not magnify quiet source decoration into a hero, invent symbols or add generic shapes just to appear creative.
+
+The complete approved reading copy, in order, is: ${JSON.stringify(input.copy)}. Preserve every character, with only whitespace/line breaks changing. Split it into natural headline/supporting blocks when the source system does. Native type uses exact fonts from the manifest. Do not draw logos from text, shapes or prompts: use the original asset ID once, with contain fit, no rotation/opacity changes. Any other graphic asset must also come from the manifest. There is no image generation in this step. Shapes may express an evidenced simple surface/accent, never reconstruct a complex branded mark. When an essential photo or graphic is unavailable, do not invent a substitute.
+
+Output a scene at ${input.width} by ${input.height} pixels. Positions are your new compositional decisions, not a template. The renderer wraps and measures the actual font outlines, top-aligns their visible ink, and may shrink from size to min_size. Supply generous real boxes, sensible line heights, and nearly equal size/min_size to preserve hierarchy; allow for line wrapping. Reading type and logo must be on-canvas and must not overlap. Keep text layers in reading order in the layer array; decoration can precede reading layers. Font size is in pixels, tracking is in pixels. Avoid unsupported glyphs. Use only exact manifest colors, including gradient stops. Decorative glyphs are allowed only when present in the manifest; keep their opacity faithful to the references. No added labels, explanations, frame counters or AI notes.
+
+Manifest of verified files and observed colors: ${JSON.stringify(input.manifest)}
+Recent compositions to avoid repeating: ${JSON.stringify(input.recent || [])}
+Describe what is new and why it serves this message. Return one record_native_composition tool call.` });
+  const response = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", signal: AbortSignal.timeout(12e4), headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model: "claude-opus-5-5", output_config: { effort: "medium" }, max_tokens: 8e3, tools: [{ name: "record_native_composition", strict: true, description: "Record a new source-grounded native brand composition.", input_schema: compositionSchema }], tool_choice: { type: "auto" }, messages: [{ role: "user", content }] }) });
+  if (!response.ok) throw new Error(`The composition service is unavailable (${response.status}).`);
+  const result = await response.json();
+  const calls = result.content?.filter((part) => part.type === "tool_use" && part.name === "record_native_composition") || [];
+  if (result.stop_reason === "max_tokens" || calls.length !== 1) throw new Error("The composition was incomplete.");
+  return validateNativeComposition(calls[0].input, input.manifest, input.copy, input.width, input.height, input.images.length);
+}
+
 // supabase/functions/preview-brand-design/index.ts
 var headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-socialytics-secret", "Content-Type": "application/json" };
 var json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers });
@@ -887,7 +968,7 @@ Deno.serve(async (req) => {
     if (!internal) await requireStaff(req, { writeClientId: body.client_id });
     authenticated = true;
     phase = "request validation";
-    if (!["evidence", "history", "website", "plan", "review", "revise"].includes(body.op)) throw new Error("Unknown proof operation.");
+    if (!["evidence", "history", "website", "plan", "review", "revise", "native-plan"].includes(body.op)) throw new Error("Unknown proof operation.");
     if (!["evidence", "history", "website"].includes(body.op) && (typeof body.copy !== "string" || !body.copy.trim() || body.copy.length > 12e3)) throw new Error("Approved post copy is required.");
     const mode = body.mode ?? "single", count = body.count ?? 1;
     if (!["single", "carousel"].includes(mode) || !Number.isInteger(count) || count < 1 || count > 6) throw new Error("Use 1\u20136 still frames for a proof.");
@@ -941,6 +1022,12 @@ Deno.serve(async (req) => {
     if (!key) throw new Error("The existing planning credential is unavailable.");
     phase = "loading reference images";
     const [images, logoImage] = await Promise.all([Promise.all(paths.map((p) => sourceImage(db, p))), client.logo_url ? logoImageFor(client.logo_url) : void 0]);
+    if (body.op === "native-plan") {
+      if (!Number.isInteger(body.width) || !Number.isInteger(body.height) || body.width < 320 || body.width > 2160 || body.height < 320 || body.height > 3840) throw new Error("Valid canvas dimensions are required.");
+      phase = "planning native brand composition";
+      const composition = await requestNativeComposition({ copy: body.copy, width: body.width, height: body.height, manifest: body.manifest, images, evidence: referenceEvidence(paths, client.harvested_design_references), platform: body.platform || "", format: body.format || "", revision: body.revision }, key);
+      return json({ production_writes: 0, human_approved: false, client_id: client.id, composition, reference_paths: paths });
+    }
     if (body.op === "plan") {
       const { data: recent, error: recentError } = await db.from("creative_directions").select("plan").eq("client_id", client.id).order("created_at", { ascending: false }).limit(8);
       if (recentError) throw new Error("Recent design history could not be read.");
