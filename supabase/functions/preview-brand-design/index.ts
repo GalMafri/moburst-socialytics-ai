@@ -884,8 +884,8 @@ var layer = { anyOf: [
   object3({ ...box, type: { type: "string", enum: ["rect", "ellipse"] }, paint, radius: number }),
   object3({ ...box, type: { type: "string", enum: ["asset"] }, asset_id: string, fit: { type: "string", enum: ["contain", "cover"] } })
 ] };
-var sceneSchema = object3({ version: { type: "integer", const: 1 }, width: number, height: number, background: paint, layers: { type: "array", minItems: 1, maxItems: 40, items: layer } });
-var compositionSchema = object3({ scene: sceneSchema, tokens: { type: "array", minItems: 6, maxItems: 12, items: object3({ kind: { type: "string", enum: ["logo", "typography", "palette", "surfaces", "graphic_vocabulary", "imagery"] }, rule: string, reference_indices: { type: "array", minItems: 1, items: { type: "integer" } } }) }, new_composition: string });
+var sceneSchema = object3({ version: { type: "integer", const: 1 }, width: number, height: number, background: paint, layers: { type: "array", minItems: 1, items: layer } });
+var compositionSchema = object3({ scene: sceneSchema, tokens: { type: "array", minItems: 1, items: object3({ kind: { type: "string", enum: ["logo", "typography", "palette", "surfaces", "graphic_vocabulary", "imagery"] }, rule: string, reference_indices: { type: "array", minItems: 1, items: { type: "integer" } } }) }, new_composition: string });
 function validateNativeManifest(manifest) {
   if (manifest?.version !== 1 || !Array.isArray(manifest.fonts) || !manifest.fonts.length || !Array.isArray(manifest.assets) || !Array.isArray(manifest.palette) || !manifest.palette.length || !Array.isArray(manifest.decorative_glyphs)) throw new Error("Verified brand files are required.");
   const ids = /* @__PURE__ */ new Set();
@@ -946,7 +946,10 @@ Manifest of verified files and observed colors: ${JSON.stringify(input.manifest)
 Recent compositions to avoid repeating: ${JSON.stringify(input.recent || [])}
 Describe what is new and why it serves this message. Return one record_native_composition tool call.` });
   const response = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", signal: AbortSignal.timeout(12e4), headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model: "claude-opus-5-5", output_config: { effort: "medium" }, max_tokens: 8e3, tools: [{ name: "record_native_composition", strict: true, description: "Record a new source-grounded native brand composition.", input_schema: compositionSchema }], tool_choice: { type: "auto" }, messages: [{ role: "user", content }] }) });
-  if (!response.ok) throw new Error(`The composition service is unavailable (${response.status}).`);
+  if (!response.ok) {
+    const diagnostic = await response.json().catch(() => ({}));
+    throw new Error(`The composition service is unavailable (${response.status}).`, { cause: { provider_message: String(diagnostic.error?.message || "").slice(0, 1500) } });
+  }
   const result = await response.json();
   const calls = result.content?.filter((part) => part.type === "tool_use" && part.name === "record_native_composition") || [];
   if (result.stop_reason === "max_tokens" || calls.length !== 1) throw new Error("The composition was incomplete.");
