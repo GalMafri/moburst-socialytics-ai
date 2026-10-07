@@ -1,5 +1,5 @@
 // @ts-nocheck
-// Isolated bundle of the locally tested planner, revision flow and reviewer.
+// Isolated bundle of tested planner, reviewer, and source readers.
 
 // supabase/functions/preview-brand-design/index.ts
 import { createClient as createClient2 } from "https://esm.sh/@supabase/supabase-js@2";
@@ -572,6 +572,306 @@ function parseDesignVerdict(answer) {
   }
 }
 
+// supabase/functions/_shared/brand-references/history.ts
+var HISTORY_VERSION = 1;
+var HISTORY_START = "2000-01-01T00:00:00";
+var profileIds = (ids) => [...new Set(ids.map(String))].sort();
+function newHistoryCursor(ids, now = /* @__PURE__ */ new Date()) {
+  if (ids.some((id) => !/^\d+$/.test(String(id)))) throw new Error("Invalid assigned social account.");
+  return {
+    version: HISTORY_VERSION,
+    profile_ids: profileIds(ids),
+    profile_index: 0,
+    page: 1,
+    as_of: now.toISOString(),
+    complete: ids.length === 0
+  };
+}
+function validateHistoryCursor(cursor, assigned) {
+  if (cursor?.version !== HISTORY_VERSION || JSON.stringify(cursor.profile_ids) !== JSON.stringify(profileIds(assigned)) || !Number.isInteger(cursor.profile_index) || cursor.profile_index < 0 || cursor.profile_index > assigned.length || !Number.isInteger(cursor.page) || cursor.page < 1 || !Number.isFinite(Date.parse(cursor.as_of)) || cursor.complete !== (cursor.profile_index === cursor.profile_ids.length)) {
+    throw new Error("The social account selection changed. Start a fresh brand update.");
+  }
+}
+function historyRequest(cursor) {
+  validateHistoryCursor(cursor, cursor.profile_ids);
+  if (cursor.complete) throw new Error("History import has finished.");
+  return {
+    filters: [
+      `customer_profile_id.eq(${cursor.profile_ids[cursor.profile_index]})`,
+      `created_time.in(${HISTORY_START}...${cursor.as_of.replace(/\.\d{3}Z$/, "")})`
+    ],
+    fields: ["guid", "customer_profile_id", "network", "created_time", "perma_link", "text", "content_category", "visual_media"],
+    metrics: [],
+    sort: ["created_time:asc"],
+    timezone: "UTC",
+    limit: 50,
+    page: cursor.page
+  };
+}
+function publicLink(value) {
+  if (typeof value !== "string") return "";
+  try {
+    const u = new URL(value);
+    return ["https:", "http:"].includes(u.protocol) && !u.username && !u.password ? u.href : "";
+  } catch {
+    return "";
+  }
+}
+function normalizeHistoryPost(row, expectedProfile) {
+  const owner = String(row?.customer_profile_id ?? row?.dimensions?.customer_profile_id ?? "");
+  if (owner !== expectedProfile || row?.sent === false || !row?.guid || !publicLink(row?.perma_link) || !Number.isFinite(Date.parse(row?.created_time))) return null;
+  return {
+    source_id: String(row.guid),
+    profile_id: owner,
+    platform: String(row.network || ""),
+    source_url: publicLink(row.perma_link),
+    published_at: new Date(row.created_time).toISOString(),
+    copy: typeof row.text === "string" ? row.text : "",
+    content_type: String(row.content_category || "UNKNOWN"),
+    media: (Array.isArray(row.visual_media) ? row.visual_media : []).flatMap((m) => {
+      const url = publicLink(m?.media_url);
+      if (!url) return [];
+      const thumbnail = publicLink(m.thumbnail_url);
+      return [{
+        type: String(m.media_type || "UNKNOWN"),
+        url,
+        ...thumbnail ? { thumbnail_url: thumbnail } : {},
+        ...typeof m.alt_text === "string" ? { alt_text: m.alt_text } : {}
+      }];
+    })
+  };
+}
+function consumeHistoryPage(cursor, response) {
+  validateHistoryCursor(cursor, cursor.profile_ids);
+  if (cursor.complete || !Array.isArray(response?.data)) throw new Error("The social history response is incomplete.");
+  const current = response.paging?.current_page;
+  const total = response.paging?.total_pages;
+  if (!Number.isInteger(current) || current !== cursor.page || !Number.isInteger(total) || total < 0 || total === 0 && (current !== 1 || response.data.length !== 0) || total > 0 && current > total) {
+    throw new Error("The social history page could not be verified. Retry this update.");
+  }
+  const owner = cursor.profile_ids[cursor.profile_index];
+  const normalized = response.data.map((row) => normalizeHistoryPost(row, owner));
+  if (normalized.some((post) => !post)) throw new Error("Some published posts could not be attributed to this account.");
+  const unique = /* @__PURE__ */ new Map();
+  for (const post of normalized) unique.set(post.source_id, post);
+  const next = { ...cursor };
+  if (current < total) next.page++;
+  else {
+    next.profile_index++;
+    next.page = 1;
+    next.complete = next.profile_index === next.profile_ids.length;
+  }
+  return { posts: [...unique.values()], next, page: current, total_pages: total, profile_id: owner };
+}
+async function getSproutHistoryToken() {
+  const response = await fetch("https://identity.sproutsocial.com/oauth2/84e39c75-d770-45d9-90a9-7b79e3037d2c/v1/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: Deno.env.get("SPROUT_CLIENT_ID") || "", client_secret: Deno.env.get("SPROUT_CLIENT_SECRET") || "", grant_type: "client_credentials", scope: "organization_id" }),
+    signal: AbortSignal.timeout(15e3)
+  });
+  if (!response.ok) throw new Error("The social connection could not be opened. Please retry.");
+  const token = await response.json();
+  if (!token.access_token) throw new Error("The social connection could not be opened. Please retry.");
+  return token.access_token;
+}
+async function fetchHistoryPage(cursor, customer, token) {
+  const response = await fetch(`https://api.sproutsocial.com/v1/${encodeURIComponent(customer)}/analytics/posts`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(historyRequest(cursor)),
+    signal: AbortSignal.timeout(2e4)
+  });
+  if (!response.ok) throw new Error(response.status === 429 ? "The social connection is busy. Please retry shortly." : "Published posts could not be loaded. Please retry.");
+  return consumeHistoryPage(cursor, await response.json());
+}
+
+// supabase/functions/_shared/net/safeUrl.ts
+var BLOCKED_HOSTNAMES = /* @__PURE__ */ new Set([
+  "localhost",
+  "localhost.localdomain",
+  "metadata.google.internal",
+  "metadata"
+]);
+function isPrivateIPv4(host) {
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  if ([a, Number(m[2]), Number(m[3]), Number(m[4])].some((n) => n > 255)) return true;
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 0) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  return false;
+}
+function isPrivateIPv6(host) {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+  if (h === "::1" || h === "::") return true;
+  if (h.startsWith("fe80")) return true;
+  if (/^f[cd]/.test(h)) return true;
+  const mapped = h.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mapped) {
+    const hi = parseInt(mapped[1], 16);
+    const lo = parseInt(mapped[2], 16);
+    return isPrivateIPv4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  }
+  if (h.startsWith("::ffff:")) return isPrivateIPv4(h.slice(7));
+  return false;
+}
+function isPubliclyFetchable(raw) {
+  let u;
+  try {
+    u = new URL(String(raw ?? ""));
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase();
+  if (!host) return false;
+  if (BLOCKED_HOSTNAMES.has(host)) return false;
+  if (host.endsWith(".localhost") || host.endsWith(".internal") || host.endsWith(".local")) return false;
+  if (isPrivateIPv4(host)) return false;
+  if (isPrivateIPv6(host)) return false;
+  return true;
+}
+
+// supabase/functions/_shared/brand-references/webEvidence.ts
+function decode(value) {
+  return value.replace(/&(?:amp|quot|apos|lt|gt|#39|#x27);/gi, (entity) => ({ "&amp;": "&", "&quot;": '"', "&apos;": "'", "&lt;": "<", "&gt;": ">", "&#39;": "'", "&#x27;": "'" })[entity.toLowerCase()] || entity);
+}
+function attrs(tag) {
+  return Object.fromEntries([...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)].map((m) => [m[1].toLowerCase(), decode(m[2] ?? m[3] ?? m[4])]));
+}
+function resolve(raw, base) {
+  if (!raw) return "";
+  try {
+    const u = new URL(raw, base);
+    return isPubliclyFetchable(u.href) && !u.username && !u.password ? u.href : "";
+  } catch {
+    return "";
+  }
+}
+function inspectBrandHtml(html, sourceUrl, at = (/* @__PURE__ */ new Date()).toISOString()) {
+  const assets = [];
+  const styles = /* @__PURE__ */ new Set();
+  for (const match of html.matchAll(/<(?:link|meta|img)\b[^>]*>/gi)) {
+    const a = attrs(match[0]);
+    if (a.rel?.toLowerCase().split(/\s+/).includes("stylesheet")) {
+      const url2 = resolve(a.href, sourceUrl);
+      if (url2) styles.add(url2);
+    }
+    const url = resolve(a.src || a.content || a.href, sourceUrl);
+    if (!url) continue;
+    if (/^<img/i.test(match[0]) && /logo|wordmark|brand[-_ ]?mark/i.test(`${a.alt || ""} ${a.class || ""} ${a.id || ""} ${a.src || ""}`)) assets.push({ url, role: "logo_candidate", source_url: sourceUrl });
+    else if (["og:image", "twitter:image"].includes(a.property || a.name)) assets.push({ url, role: "social_image", source_url: sourceUrl });
+    else if (/^(?:icon|shortcut icon|apple-touch-icon)$/i.test(a.rel || "")) assets.push({ url, role: "icon", source_url: sourceUrl });
+  }
+  const inlineCss = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join("\n");
+  const css = inspectBrandCss(inlineCss, sourceUrl);
+  return {
+    version: 1,
+    source_url: sourceUrl,
+    fetched_at: at,
+    title: decode(html.match(/<title\b[^>]*>([^<]*)<\/title>/i)?.[1] || "").trim(),
+    copy: decode(html.replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim(),
+    ...css,
+    assets: assets.filter((a, i) => assets.findIndex((b) => b.url === a.url && b.role === a.role) === i),
+    stylesheet_urls: [...styles],
+    inspected_stylesheets: [],
+    unavailable_stylesheets: []
+  };
+}
+function inspectBrandCss(css, sourceUrl) {
+  const fonts = [];
+  const colors = [];
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const face of clean.matchAll(/@font-face\s*\{([^}]+)\}/gi)) {
+    const property = (name) => face[1].match(new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`, "i"))?.[1]?.trim() || "";
+    const family = property("font-family").replace(/^['"]|['"]$/g, "");
+    const urls = [...property("src").matchAll(/url\(\s*['"]?([^'"\s)]+)['"]?\s*\)/gi)].map((m) => resolve(m[1], sourceUrl)).filter(Boolean);
+    if (family && urls.length) fonts.push({ family, weight: property("font-weight") || "normal", style: property("font-style") || "normal", file_urls: [...new Set(urls)], source_url: sourceUrl });
+  }
+  for (const match of clean.matchAll(/([\w-]+)\s*:\s*([^;{}]+)/g)) {
+    if (!/^(?:--|color$|background|border|fill$|stroke$)/i.test(match[1])) continue;
+    for (const color of match[2].matchAll(/#[\da-f]{8}\b|#[\da-f]{6}\b|#[\da-f]{4}\b|#[\da-f]{3}\b|rgba?\([^)]+\)|hsla?\([^)]+\)/gi)) {
+      colors.push({ value: color[0], property: match[1], source_url: sourceUrl });
+    }
+  }
+  return { fonts, colors: colors.filter((c, i) => colors.findIndex((o) => o.value === c.value && o.property === c.property) === i) };
+}
+async function fetchBrandDocument(rawUrl, maxBytes = 2 * 1024 * 1024) {
+  let url = new URL(rawUrl);
+  const signal = AbortSignal.timeout(15e3);
+  for (let redirects = 0; redirects <= 4; redirects++) {
+    if (!isPubliclyFetchable(url.href) || url.username || url.password || url.port && !["80", "443"].includes(url.port)) throw new Error("Use a public brand website.");
+    const host = url.hostname.replace(/^\[|\]$/g, "");
+    if (!host.includes(":") && !/^\d+(?:\.\d+){3}$/.test(host)) {
+      const lookups = await Promise.allSettled([Deno.resolveDns(host, "A"), Deno.resolveDns(host, "AAAA")]);
+      const ips = lookups.flatMap((r) => r.status === "fulfilled" ? r.value : []);
+      if (!ips.length || ips.some((ip) => !isPubliclyFetchable(`https://${ip.includes(":") ? `[${ip}]` : ip}/`))) throw new Error("This website could not be reached safely.");
+    }
+    const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; SocialyticsBrandReader/1.0)", Accept: "text/html,text/css;q=0.9" }, redirect: "manual", signal });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+      const location = response.headers.get("location");
+      if (!location) throw new Error("This website could not be opened.");
+      url = new URL(location, url);
+      continue;
+    }
+    const mime = (response.headers.get("content-type") || "").split(";")[0].trim();
+    if (!response.ok || !["text/html", "text/css", "application/xhtml+xml", "text/plain"].includes(mime)) {
+      await response.body?.cancel();
+      throw new Error("This website could not be read. Check its address or add another brand source.");
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("This website returned no content.");
+    const decoder = new TextDecoder();
+    let text2 = "", bytes = 0;
+    for (; ; ) {
+      const part = await reader.read();
+      if (part.done) break;
+      bytes += part.value.length;
+      if (bytes > maxBytes) {
+        await reader.cancel();
+        throw new Error("This brand source is too large to read.");
+      }
+      text2 += decoder.decode(part.value, { stream: true });
+    }
+    return { text: text2 + decoder.decode(), url: url.href };
+  }
+  throw new Error("This website redirects too many times. Add its current address.");
+}
+async function collectBrandWebsite(url) {
+  const document = await fetchBrandDocument(/^https?:\/\//i.test(url) ? url : `https://${url}`);
+  const evidence = inspectBrandHtml(document.text, document.url);
+  const batch = evidence.stylesheet_urls.slice(0, 12);
+  for (let at = 0; at < batch.length; at += 4) {
+    const results = await Promise.allSettled(batch.slice(at, at + 4).map(async (cssUrl) => {
+      const css = await fetchBrandDocument(cssUrl);
+      return { requested: cssUrl, ...inspectBrandCss(css.text, css.url) };
+    }));
+    results.forEach((result, i) => {
+      if (result.status === "fulfilled") {
+        evidence.fonts.push(...result.value.fonts);
+        evidence.colors.push(...result.value.colors);
+        evidence.inspected_stylesheets.push(result.value.requested);
+      } else evidence.unavailable_stylesheets.push(batch[at + i]);
+    });
+  }
+  return evidence;
+}
+
+// supabase/functions/_shared/sprout/customer.ts
+var FALLBACK_SPROUT_CUSTOMER_ID = "1676448";
+function defaultSproutCustomerId() {
+  const env = globalThis.Deno?.env;
+  const fromEnv = typeof env?.get === "function" ? env.get("SPROUT_CUSTOMER_ID") : void 0;
+  return fromEnv || FALLBACK_SPROUT_CUSTOMER_ID;
+}
+
 // supabase/functions/preview-brand-design/index.ts
 var headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-socialytics-secret", "Content-Type": "application/json" };
 var json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers });
@@ -587,14 +887,30 @@ Deno.serve(async (req) => {
     if (!internal) await requireStaff(req, { writeClientId: body.client_id });
     authenticated = true;
     phase = "request validation";
-    if (!["evidence", "plan", "review", "revise"].includes(body.op)) throw new Error("op must be evidence, plan, review or revise.");
-    if (typeof body.copy !== "string" || !body.copy.trim() || body.copy.length > 12e3) throw new Error("Approved post copy is required.");
+    if (!["evidence", "history", "website", "plan", "review", "revise"].includes(body.op)) throw new Error("Unknown proof operation.");
+    if (!["evidence", "history", "website"].includes(body.op) && (typeof body.copy !== "string" || !body.copy.trim() || body.copy.length > 12e3)) throw new Error("Approved post copy is required.");
     const mode = body.mode ?? "single", count = body.count ?? 1;
     if (!["single", "carousel"].includes(mode) || !Number.isInteger(count) || count < 1 || count > 6) throw new Error("Use 1\u20136 still frames for a proof.");
     if (body.approved_headlines !== void 0 && (!Array.isArray(body.approved_headlines) || body.approved_headlines.length !== count || body.approved_headlines.some((s) => typeof s !== "string" || !s.trim() || s.length > 240))) throw new Error("Supply one exact approved headline per frame.");
     const db = createClient2(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
-    const { data: client, error } = await db.from("clients").select("id,name,design_references,harvested_design_references,logo_url,website_url,brand_identity,brand_book_file_path").eq("id", body.client_id).single();
+    const { data: client, error } = await db.from("clients").select("id,name,sprout_customer_id,design_references,harvested_design_references,logo_url,website_url,brand_identity,brand_book_file_path").eq("id", body.client_id).single();
     if (error || !client) throw new Error("The client evidence could not be read.");
+    if (body.op === "history") {
+      const { data: profiles, error: profileError } = await db.from("sprout_profiles").select("sprout_profile_id").eq("client_id", client.id).eq("is_active", true);
+      if (profileError) throw new Error("The assigned social accounts could not be read.");
+      const ids = (profiles || []).map((p) => String(p.sprout_profile_id));
+      const cursor = body.cursor || newHistoryCursor(ids);
+      validateHistoryCursor(cursor, ids);
+      if (cursor.complete) return json({ production_writes: 0, client_id: client.id, posts: [], next: cursor });
+      phase = "reading published history";
+      const page = await fetchHistoryPage(cursor, String(client.sprout_customer_id || defaultSproutCustomerId()), await getSproutHistoryToken());
+      return json({ production_writes: 0, client_id: client.id, ...page, coverage: "provider-accessible history; native platform retention may apply" });
+    }
+    if (body.op === "website") {
+      phase = "reading brand website";
+      if (!client.website_url) throw new Error("Add the client website first.");
+      return json({ production_writes: 0, client_id: client.id, evidence: await collectBrandWebsite(client.website_url) });
+    }
     const paths = referencesFor(client.design_references, client.harvested_design_references, 8);
     if (paths.length < 3) throw new Error("At least three real client references are required.");
     const previewsFor = () => Promise.all(paths.map(async (path) => {
