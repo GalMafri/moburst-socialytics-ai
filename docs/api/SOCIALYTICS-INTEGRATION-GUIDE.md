@@ -20,7 +20,7 @@ The API never accepts a gOS user session. The credential is an API key held by g
 
 **Five facts that shape the gOS screen**
 
-- A demo is **asynchronous**: about 15 minutes for a new brand, about 3 minutes for a repeat of the same brand within 7 days. Your screen needs a progress state (poll every minute, or receive the callback) and should show the finished steps while the rest run.
+- A demo is **asynchronous**: 10 to 35 minutes for a new brand (the monthly report workflow sets the pace), about 3 minutes for a repeat of the same brand within 7 days. Your screen needs a progress state (poll every minute, or receive the callback) and should show the finished steps while the rest run.
 - **Render the outputs yourself.** The job's `outputs` carry everything a rep shows: the brand identity, the brief and pillars, the deck URL, the calendar, the generated post with its image, the competitor set and the gaps in plain words.
 - **A demo has two halves.** The prospect half is this job, on the prospect's own brand from public data. The parts of Socialytics that need the brand's own connections, which are competitor tracking and the competitive report (RivalIQ) and performance analytics and publishing (Sprout), are deliberately **not run for a prospect**: the job records them as `connected_only` gaps. They are shown on the connected half, Moburst's own Socialytics workspace (`company_slug` `moburst`, 3 Sprout profiles, monthly social and competitive reports), through the read routes or in the app.
 - **Only tool admins can open a demo inside Socialytics.** Through the gOS auth bridge, `super_admin`, `admin` and `account_manager` become tool admins; every other gOS role never sees a demo client or anything it created. Links into the app are for admins; everyone else sees what your screen renders.
@@ -182,7 +182,7 @@ The answer is `202` with the job object. At most three demo jobs run at once; a 
 | `analytics` | **Skipped for a prospect** (no Sprout profile, `analytics_unavailable`). Shown on Moburst's workspace. |
 | `collect`, `callback` | The outputs below; the signed POST to `callback_url`. |
 
-**Duration.** About 15 minutes for a new brand (the report takes 11 to 15 of them). About 3 minutes for a repeat demo of the same brand within 7 days: brand, brief, pillars and the report are reused, competitors and a fresh post still run.
+**Duration.** 10 to 35 minutes for a new brand; the social report is almost all of it (recent reports took 10 to 32 minutes). About 3 minutes for a repeat demo of the same brand within 7 days: brand, brief, pillars and the report are reused, competitors and a fresh post still run.
 
 ### Outputs
 
@@ -202,7 +202,7 @@ The answer is `202` with the job object. At most three demo jobs run at once; a 
 
 ### What to render for a rep
 
-Show the brand identity (colours, font, tone), the pillars, the deck link, the calendar days and highlights, the generated post with its image, the competitor set, and the gaps as plain sentences; then switch to Moburst's workspace for performance analytics, the competitive report and publishing. Links in `app_link` and `links.app` open Socialytics itself and work only for gOS admins and account managers (section 8); do not rely on them for other users.
+Show the brand identity (colours, font, tone), the pillars, the deck link, the calendar days and highlights, the generated post with its image, the competitor set, and the gaps as plain sentences; then switch to Moburst's workspace for performance analytics, the competitive report and publishing. Links in `app_link` and `links.app` open Socialytics itself and work only for gOS admins and account managers (section 8); do not rely on them for other users. `outputs.client.app_link` opens the brand's Reports page, where the demo's report and deck are; `social_report.app_link` opens the report itself. The brand's Setup page (`/clients/{id}/setup`) is the team's configuration screen: for every demo brand it shows a notice that no social accounts are assigned, which is the expected state, not a failure.
 
 ## 7. Receiving the callback
 
@@ -268,7 +268,7 @@ End-to-end checklist:
 
 - A key with `read` and `demo` is stored as a secret in gOS.
 - `GET /health` answers `200`; `GET /clients` without a key answers `401`.
-- A demo on a brand you choose reaches `completed` or `partial` in about 15 minutes, and your screen shows the progress while it runs and the outputs with their gaps at the end.
+- A demo on a brand you choose reaches `completed` or `partial` in 10 to 35 minutes, and your screen shows the progress while it runs and the outputs with their gaps at the end.
 - Your screen shows the connected half from Moburst's workspace.
 - Your callback endpoint answers `2xx` and verifies `X-Demo-Signature`.
 - The same `idempotency_key` sent twice returns the same job.
@@ -287,7 +287,8 @@ End-to-end checklist:
 | `partial` with `connected_only` gaps | Expected for a prospect | Show tracking, the competitive report and analytics from Moburst's workspace. |
 | `competitors_unconfirmed` or `no_competitors` | Fewer than three proposed competitors had a website and a verified social profile | Pass `competitors[]` with the names you want; the demo detects their handles. |
 | `post_image_missing` | The image provider refused or ran out of credits; the reason is in the gap | Show the copy; the admin checks the provider. |
-| Job stays `running` past 20 minutes | The monthly workflow is slow or has stalled; the API records `report_timeout` at 100 minutes and folds the report in when it lands | Keep polling or wait for the callback. |
+| Job stays `running` past 35 minutes | The monthly workflow is slow or has stalled; the API records `report_timeout` at 100 minutes and folds the report in when it lands | Keep polling or wait for the callback. |
+| The client link opens a Setup page with a red notice about social accounts | That is the configuration screen; the notice is the normal state of a brand without Sprout | Open `social_report.app_link` or the deck URL instead; `client.app_link` now opens the Reports page. |
 | Callback never arrives | Endpoint unreachable or not `2xx` | Check `callback_status` on the job; the API tried three times. |
 | Links open the Lovable address | `PUBLIC_APP_URL` not set | Ask the admin to set it to the branded host. |
 

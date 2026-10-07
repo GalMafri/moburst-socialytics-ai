@@ -39,7 +39,7 @@ export function buildOutputs(i: { client: ClientRow; set: SetWithCompetitors | n
   const analysis = obj(socialOut?.analysis);
   const highlights = strs(obj(analysis.sprout_performance_analysis).key_insights);
   return {
-    client: { id: c.id, name: c.name, website: c.website_url, company_slug: c.company_slug, brand_identity: c.brand_identity, pillars: pillarsOut(c.content_pillars), keywords: strs(c.social_keywords), app_link: `${APP_URL}/clients/${c.id}/setup`, api_link: `/v1/clients/${c.id}` },
+    client: { id: c.id, name: c.name, website: c.website_url, company_slug: c.company_slug, brand_identity: c.brand_identity, pillars: pillarsOut(c.content_pillars), keywords: strs(c.social_keywords), app_link: `${APP_URL}/clients/${c.id}/reports`, api_link: `/v1/clients/${c.id}` },
     competitors: {
       set_id: i.set?.id ?? null, set_status: i.set?.status ?? null,
       selected: (i.set?.competitors ?? []).filter((k) => k.is_selected).sort((a, b) => (a.selected_rank ?? 99) - (b.selected_rank ?? 99)).map((k) => ({ name: k.name, website: k.website_url, handles: k.handles.filter((h) => h.is_active !== false).map((h) => `${h.platform}:${h.handle}`) })),
