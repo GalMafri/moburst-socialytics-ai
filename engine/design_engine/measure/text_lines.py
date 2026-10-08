@@ -35,8 +35,12 @@ def classify(lines: list[Line], W: int, H: int, exclude_boxes=()) -> TextRead:
     if not kept:
         return TextRead()
     kept.sort(key=lambda line: line.box[1])
-    tallest = max(line.box[3] for line in kept)
-    head = [line for line in kept if line.box[3] >= 0.8 * tallest]
+    # a headline is set in words: a line of fewer than three letters (a "VS" bolt, a monogram read as letters) is furniture
+    worded = [line for line in kept if sum(c.isalpha() for c in line.text) >= 3]
+    if not worded:
+        return TextRead(other=kept)
+    tallest = max(line.box[3] for line in worded)
+    head = [line for line in worded if line.box[3] >= 0.8 * tallest]
     rest = [line for line in kept if line not in head]
     # the subline is the block of lines just below the headline with a consistent smaller height
     sub: list[Line] = []

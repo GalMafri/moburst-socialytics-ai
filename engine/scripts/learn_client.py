@@ -242,6 +242,8 @@ def main():
             ground = "dark" if grounds.get("on_dark", 0) >= grounds.get("on_light", 0) else "light"
             kept_files.append({**lf, "matches_in_probe": hits, "ground": ground, "ground_source": f"measured:{grounds}"})
             templates += [(f"{lf['path']}:{name}", g) for name, g in cand]
+    seen_logo_paths: set[str] = set()
+    kept_files = [f for f in kept_files if not (f["path"] in seen_logo_paths or seen_logo_paths.add(f["path"]))]
     if not kept_files and logo_files:
         kept_files = [logo_files[0]]
         templates = logo_templates_from_file(ws.root / logo_files[0]["path"])
