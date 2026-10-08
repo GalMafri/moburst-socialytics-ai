@@ -1,0 +1,83 @@
+{
+  "_comment": "Seeded by hand on 2026-10-08 from the reference catalog's organic social and platform entries (registry/platform_formats.json, read only) and the platforms' own help pages. Plan 4's weekly job refetches source_url and replaces this table; nothing here is edited by a run. Insets are pixels the platform UI covers on that export; min_text_px is the smallest body copy that reads there; max_file_kb is the platform's cap for statics.",
+  "platforms": {
+    "Instagram": {
+      "aliases": ["IG", "Instagram organic"],
+      "source_url": "https://help.instagram.com/1631821640426723",
+      "fetched_at": "2026-10-08",
+      "min_text_px": 24,
+      "max_file_kb": 30000,
+      "sizes": [
+        {"name": "ig-feed-4x5", "w": 1080, "h": 1350, "aspect": "4:5", "placement": "feed"},
+        {"name": "ig-feed-1x1", "w": 1080, "h": 1080, "aspect": "1:1", "placement": "feed"},
+        {"name": "ig-story-9x16", "w": 1080, "h": 1920, "aspect": "9:16", "placement": "story", "safe": {"top": 250, "bottom": 340}}
+      ],
+      "formats": {
+        "Single Image": ["ig-feed-4x5", "ig-feed-1x1"],
+        "Carousel": ["ig-feed-4x5", "ig-feed-1x1"],
+        "Story": ["ig-story-9x16"]
+      }
+    },
+    "Facebook": {
+      "aliases": ["FB"],
+      "source_url": "https://www.facebook.com/business/help/103816146375741",
+      "fetched_at": "2026-10-08",
+      "min_text_px": 24,
+      "max_file_kb": 30000,
+      "sizes": [
+        {"name": "fb-feed-4x5", "w": 1080, "h": 1350, "aspect": "4:5", "placement": "feed"},
+        {"name": "fb-link-191x100", "w": 1200, "h": 630, "aspect": "1.91:1", "placement": "feed"},
+        {"name": "fb-story-9x16", "w": 1080, "h": 1920, "aspect": "9:16", "placement": "story", "safe": {"top": 250, "bottom": 340}}
+      ],
+      "formats": {
+        "Single Image": ["fb-feed-4x5", "fb-link-191x100"],
+        "Carousel": ["fb-feed-4x5"],
+        "Story": ["fb-story-9x16"]
+      }
+    },
+    "LinkedIn": {
+      "aliases": ["LI"],
+      "source_url": "https://www.linkedin.com/help/linkedin/answer/a564129",
+      "fetched_at": "2026-10-08",
+      "min_text_px": 24,
+      "max_file_kb": 5120,
+      "sizes": [
+        {"name": "li-feed-4x5", "w": 1080, "h": 1350, "aspect": "4:5", "placement": "feed"},
+        {"name": "li-feed-191x100", "w": 1200, "h": 627, "aspect": "1.91:1", "placement": "feed"}
+      ],
+      "formats": {
+        "Single Image": ["li-feed-4x5", "li-feed-191x100"],
+        "Carousel": ["li-feed-4x5"]
+      }
+    },
+    "X": {
+      "aliases": ["Twitter"],
+      "source_url": "https://help.x.com/en/using-x/how-to-post-a-photo",
+      "fetched_at": "2026-10-08",
+      "min_text_px": 24,
+      "max_file_kb": 5120,
+      "sizes": [
+        {"name": "x-feed-16x9", "w": 1600, "h": 900, "aspect": "16:9", "placement": "feed"},
+        {"name": "x-feed-1x1", "w": 1080, "h": 1080, "aspect": "1:1", "placement": "feed"}
+      ],
+      "formats": {
+        "Single Image": ["x-feed-16x9", "x-feed-1x1"]
+      }
+    },
+    "TikTok": {
+      "aliases": ["TT"],
+      "source_url": "https://support.tiktok.com/en/using-tiktok/creating-videos/photo-mode",
+      "fetched_at": "2026-10-08",
+      "min_text_px": 28,
+      "max_file_kb": 500,
+      "sizes": [
+        {"name": "tt-feed-9x16", "w": 1080, "h": 1920, "aspect": "9:16", "placement": "feed", "safe": {"top": 150, "bottom": 480, "right": 120}},
+        {"name": "tt-feed-1x1", "w": 1080, "h": 1080, "aspect": "1:1", "placement": "feed"}
+      ],
+      "formats": {
+        "Single Image": ["tt-feed-9x16"],
+        "Carousel": ["tt-feed-9x16", "tt-feed-1x1"]
+      }
+    }
+  }
+}
