@@ -281,7 +281,24 @@ def main():
                 designed.append(r)
             if (i + 1) % 25 == 0:
                 print(f"  read {i + 1}/{len(posts) + len(upload_posts)} ({len(designed)} designed) {time.time() - t0:.0f}s")
-    print(f"posts read: {len(reads)}, designed: {len(designed)}, with logo: {sum(1 for r in designed if r.logo)}")
+    # the same design re-posted at another platform's size is one design: collapse reads whose luminance structure matches
+    from PIL import Image as _Image
+
+    from design_engine.measure.hashes import dhash, hamming
+
+    hashed = []
+    kept: list = []
+    for r in sorted(reads, key=lambda r: -(r.W * r.H)):
+        h = dhash(_Image.open(r.path))
+        if any(hamming(h, k) <= 6 for k in hashed):
+            r.extras["duplicate_of_larger"] = True
+            continue
+        hashed.append(h)
+        kept.append(r)
+    dupes = len(reads) - len(kept)
+    reads = kept
+    designed = [r for r in reads if is_designed(r)]
+    print(f"posts read: {len(reads)} (+{dupes} re-posts of the same design collapsed), designed: {len(designed)}, with logo: {sum(1 for r in designed if r.logo)}")
     (out / "reads.json").parent.mkdir(parents=True, exist_ok=True)
     out.mkdir(parents=True, exist_ok=True)
     (out / "reads.json").write_text(json.dumps([dump_read(r) for r in reads], indent=1))
@@ -311,7 +328,25 @@ def main():
             if region.size:
                 device_cols.append(np.median(region, axis=0))
     site_accents = [c["hex"] for c in (site.colours if site else []) if c.get("where") in ("theme-color", "background")][:3]
-    if device_cols:
+    # The accent, in evidence order: a colour the brand declares on its own site (theme-color, CTA background) that also appears in
+    # its posts wins; the dominant device colour measured on the posts is the fallback when the site declares nothing that the posts use.
+    chosen_accent = None
+    if site_accents and arrays:
+        sample = np.concatenate([a.reshape(-1, 3)[:: max(1, a.shape[0] * a.shape[1] // 20000)] for a in arrays]).astype(np.float64)
+        best_share = 0.0
+        for h in site_accents:
+            col = np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], dtype=np.float64)
+            share = float((np.linalg.norm(sample - col, axis=1) < 40).mean())
+            print(f"site accent {h}: {share:.3%} of designed-post pixels")
+            if share >= 0.003 and share > best_share:
+                best_share, chosen_accent = share, h
+    if chosen_accent:
+        from design_engine.learn.palette import Swatch
+
+        pal = [Swatch(sw.hex, sw.share, "other" if sw.role == "accent" else sw.role) for sw in pal]
+        pal.append(Swatch(chosen_accent, round(best_share, 4), "accent"))
+        print(f"accent {chosen_accent} from the site, present in the posts")
+    elif device_cols:
         # the dominant device colour: quantise and take the largest cluster, never a median across unlike devices
         q = (np.asarray(device_cols) // 24).astype(int)
         keys, counts = np.unique(q, axis=0, return_counts=True)
