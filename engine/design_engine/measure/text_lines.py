@@ -1,0 +1,51 @@
+"""Sort OCR lines into headline, subline and the rest by their measured heights and vertical order."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from .image import Box
+from .ocr import Line
+
+
+def _overlap(a: Box, b: Box) -> float:
+    ix = max(0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0]))
+    iy = max(0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
+    return (ix * iy) / max(1.0, a[2] * a[3])
+
+
+def union(boxes: list[Box]) -> Box | None:
+    if not boxes:
+        return None
+    x0 = min(b[0] for b in boxes)
+    y0 = min(b[1] for b in boxes)
+    return [x0, y0, max(b[0] + b[2] for b in boxes) - x0, max(b[1] + b[3] for b in boxes) - y0]
+
+
+@dataclass
+class TextRead:
+    headline: list[Line] = field(default_factory=list)
+    subline: list[Line] = field(default_factory=list)
+    other: list[Line] = field(default_factory=list)
+    headline_box: Box | None = None
+    subline_box: Box | None = None
+
+
+def classify(lines: list[Line], W: int, H: int, exclude_boxes=()) -> TextRead:
+    kept = [line for line in lines if line.confidence >= 0.5 and not any(_overlap(line.box, e) > 0.5 for e in exclude_boxes)]
+    if not kept:
+        return TextRead()
+    kept.sort(key=lambda line: line.box[1])
+    tallest = max(line.box[3] for line in kept)
+    head = [line for line in kept if line.box[3] >= 0.8 * tallest]
+    rest = [line for line in kept if line not in head]
+    # the subline is the block of lines just below the headline with a consistent smaller height
+    sub: list[Line] = []
+    if rest:
+        h0 = rest[0].box[3]
+        for line in rest:
+            if abs(line.box[3] - h0) <= 0.25 * h0 and (not sub or line.box[1] - (sub[-1].box[1] + sub[-1].box[3]) < 1.5 * h0):
+                sub.append(line)
+            else:
+                break
+    other = [line for line in rest if line not in sub]
+    return TextRead(head, sub, other, union([line.box for line in head]), union([line.box for line in sub]))
