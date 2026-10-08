@@ -1,0 +1,10 @@
+{
+  "items": [
+    {"kind": "device", "description": "A phone held in hand showing the app's home screen", "evidence_post_ids": [0, 1]},
+    {"kind": "illustration", "description": "Flat line illustration of a house", "evidence_post_ids": []}
+  ],
+  "people": "real_only",
+  "devices": ["phone"],
+  "grounds": ["flat navy ground"],
+  "never": ["stock photography"]
+}
