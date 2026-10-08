@@ -89,11 +89,25 @@ def _instance(font_path: str, weight: int) -> str:
     return str(out)
 
 
+STYLE_WORDS = ("thin", "extralight", "ultralight", "light", "regular", "book", "medium", "semibold", "demibold", "bold", "extrabold",
+               "ultrabold", "black", "heavy", "italic", "oblique", "condensed", "narrow", "wide", "extended")
+
+
 def family_name(font_path: Path) -> str:
+    """The typographic family. Static Google font files often carry the weight in the legacy family name ("Poppins Medium") and no
+    name id 16, which would make one family look like several; the trailing style words are stripped in that case."""
     try:
-        return TTFont(str(font_path), lazy=True)["name"].getBestFamilyName() or Path(font_path).stem
+        name = TTFont(str(font_path), lazy=True)["name"]
+        typographic = name.getDebugName(16)
+        if typographic:
+            return typographic.strip()
+        legacy = (name.getDebugName(1) or Path(font_path).stem).strip()
     except (TTLibError, OSError, KeyError):
-        return Path(font_path).stem
+        legacy = Path(font_path).stem
+    words = legacy.split()
+    while len(words) > 1 and words[-1].lower().replace("-", "") in STYLE_WORDS:
+        words.pop()
+    return " ".join(words)
 
 
 def render_line(font_path: Path, text: str, size: int = RENDER_SIZE) -> Image.Image:

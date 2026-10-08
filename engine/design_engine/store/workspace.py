@@ -39,7 +39,12 @@ class Workspace:
             return []
         index = json.loads(index_path.read_text())
         out = []
-        for entry in index.values():
+        seen_paths: set[str] = set()
+        # the same image posted to several platforms is one design: keep the first entry per file (the index keeps every source)
+        for entry in sorted(index.values(), key=lambda e: (e.get("posted_at") or ""), reverse=True):
+            if entry["path"] in seen_paths:
+                continue
+            seen_paths.add(entry["path"])
             out.append(PostFile(self.root / entry["path"], entry["source_post_id"], entry.get("source_url"), entry.get("platform") or "",
                                 entry.get("posted_at") or "", int(entry.get("slide_index") or 0), entry.get("kind") or "post",
                                 entry.get("impressions"), entry.get("text")))

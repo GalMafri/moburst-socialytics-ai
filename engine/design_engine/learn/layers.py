@@ -93,7 +93,8 @@ def _accent_boxes(arr: np.ndarray, exclude: list[Box]) -> list[Box]:
             blk_s = sat[i * cell:(i + 1) * cell, j * cell:(j + 1) * cell]
             blk_l = lum[i * cell:(i + 1) * cell, j * cell:(j + 1) * cell]
             far_from_ground = np.linalg.norm(blk.mean(axis=0) - ground) > 60
-            flat_sat[i, j] = far_from_ground and blk_s.mean() > 0.45 and blk_l.std() < 0.03
+            solid = float(blk.std(axis=0).max()) < 10.0
+            flat_sat[i, j] = far_from_ground and solid and blk_s.mean() > 0.45 and blk_l.std() < 0.03
     boxes = _components(flat_sat, 0.004, gx, gy)
     out: list[Box] = []
     for b in boxes:
@@ -147,7 +148,7 @@ def _ground(arr: np.ndarray, exclude: list[Box]) -> dict:
     return {"kind": "photo", "hex": _hex(med_rgb), "coverage": float(mask.mean())}
 
 
-def _texture_mask(arr: np.ndarray, cell: int = 16, thresh: float = 0.06) -> np.ndarray:
+def _texture_mask(arr: np.ndarray, cell: int = 16, thresh: float = 0.10) -> np.ndarray:
     """Cells whose luminance varies more than flat type or colour fields do: photographs, renders, textured grounds."""
     H, W = arr.shape[:2]
     lum = rel_lum(arr)

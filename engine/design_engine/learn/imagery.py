@@ -65,7 +65,7 @@ def describe_imagery(post_paths: list[Path], client_name: str, model: str = "cla
     """Ask the vision model once about all posts; keep only items whose evidence names real post indexes."""
     paths = [Path(p) for p in post_paths]
     if not paths:
-        return Imagery(model=model)
+    return Imagery(model=model)
     if client is None:
         import anthropic
 
@@ -136,6 +136,9 @@ def _strings(value) -> list[str]:
     return [str(v).strip() for v in value if isinstance(v, (str, int, float)) and str(v).strip()]
 
 
+GENERATED_NEVER = True  # faces are never generated (spec section 4): a reply saying generated_ok is read as real_only
+
+
 def build_imagery(data: dict, post_count: int, model: str = "", raw: str = "") -> Imagery:
     """Validate the model's JSON: drop items without in-range evidence; derive `people` from the items when omitted."""
     items: list[dict] = []
@@ -157,8 +160,10 @@ def build_imagery(data: dict, post_count: int, model: str = "", raw: str = "") -
             continue
         items.append({"kind": kind, "description": desc, "evidence_post_ids": sorted(set(ids))})
     people = data.get("people")
-    if people not in PEOPLE_VALUES:
-        people = "real_only" if any(any(k in it["kind"] for k in PEOPLE_KINDS) for it in items) else "none"
+    has_people = any(any(k in it["kind"] for k in PEOPLE_KINDS) for it in items)
+    if people not in PEOPLE_VALUES or people == "generated_ok":
+        # faces are never generated (spec section 4): a reply saying generated_ok still means the brand shows people, so real_only
+        people = "real_only" if has_people else "none"
     return Imagery(
         items=items,
         people=people,

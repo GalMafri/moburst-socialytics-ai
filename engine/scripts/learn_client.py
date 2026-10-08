@@ -124,15 +124,25 @@ def load_reads(cache: Path) -> list:
 
 
 def type_samples(designed, n=4):
-    """Headline lines fit to measure a typeface on: horizontal, mostly letters, readable size, high OCR confidence, from different posts."""
+    """Headline lines fit to measure a typeface on: horizontal, mostly letters, readable size, high OCR confidence, on a flat or
+    gradient ground (letterforms cannot be isolated on a photograph), from different posts and different wordings."""
+    from design_engine.measure.contrast import busy_ground
+
     cands = []
+    seen_text = set()
     for r in designed:
         short = min(r.W, r.H)
         for l in r.text.headline[:1]:
             x, y, w, h = l.box
             letters = sum(c.isalpha() for c in l.text)
+            key = l.text.strip().lower()
+            if key in seen_text:
+                continue
             if w / max(1.0, h) >= 3 and letters >= 6 and letters >= 0.7 * len(l.text.replace(" ", "")) and 0.03 * short <= h <= 0.15 * short and l.confidence >= 0.9:
-                cands.append((letters, r.path, l.box, l.text))
+                region = load_rgb(r.path)[max(0, int(y - h * 0.3)):int(y + h * 1.3), max(0, int(x - w * 0.05)):int(x + w * 1.05)]
+                if region.size and busy_ground(region) <= 0.11:
+                    cands.append((letters, r.path, l.box, l.text))
+                    seen_text.add(key)
     cands.sort(key=lambda c: -c[0])
     return [(p, b, t) for _, p, b, t in cands[:n]]
 
@@ -216,16 +226,21 @@ def main():
             print(f"logo template failed for {lf['path']}: {e}")
             continue
         hits = 0
+        grounds: dict[str, int] = {}
         for pp in probe:
             try:
                 arr = load_rgb(pp.path)
             except Exception:
                 continue
             m = find_logo_any(arr, cand, min(arr.shape[0], arr.shape[1]), min_score=0.8)
-            hits += 1 if (m and m.height_share >= 0.03) else 0
-        print(f"logo candidate {lf['path']}: {hits} matches in {len(probe)} posts")
+            if m and m.height_share >= 0.03:
+                hits += 1
+                grounds[m.variant] = grounds.get(m.variant, 0) + 1
+        print(f"logo candidate {lf['path']}: {hits} matches in {len(probe)} posts {grounds}")
         if hits >= 2:
-            kept_files.append({**lf, "matches_in_probe": hits})
+            # the ground this file reads on, measured: which composite matched the posts
+            ground = "dark" if grounds.get("on_dark", 0) >= grounds.get("on_light", 0) else "light"
+            kept_files.append({**lf, "matches_in_probe": hits, "ground": ground, "ground_source": f"measured:{grounds}"})
             templates += [(f"{lf['path']}:{name}", g) for name, g in cand]
     if not kept_files and logo_files:
         kept_files = [logo_files[0]]
@@ -295,8 +310,14 @@ def main():
             region = arr[max(0, y):y + h, max(0, x):x + w].reshape(-1, 3)
             if region.size:
                 device_cols.append(np.median(region, axis=0))
+    site_accents = [c["hex"] for c in (site.colours if site else []) if c.get("where") in ("theme-color", "background")][:3]
     if device_cols:
-        dev = np.median(np.asarray(device_cols), axis=0)
+        # the dominant device colour: quantise and take the largest cluster, never a median across unlike devices
+        q = (np.asarray(device_cols) // 24).astype(int)
+        keys, counts = np.unique(q, axis=0, return_counts=True)
+        dom = keys[int(np.argmax(counts))]
+        members = np.asarray(device_cols)[(q == dom).all(axis=1)]
+        dev = np.median(members, axis=0)
         dev_hex = "#%02x%02x%02x" % tuple(int(v) for v in dev)
         from design_engine.learn.palette import Swatch
 
@@ -310,7 +331,7 @@ def main():
             pal[nearest] = Swatch(pal[nearest].hex, pal[nearest].share, "accent")
         else:
             pal.append(Swatch(dev_hex, 0.0, "accent"))
-        print(f"device colour {dev_hex} from {len(device_cols)} device boxes")
+        print(f"device colour {dev_hex} from the largest cluster of {len(device_cols)} device boxes ({int(counts.max())} boxes); site accents {site_accents}")
     print(f"palette: {[(s.hex, s.role) for s in pal[:6]]}; pairs: {len(pair_rows)}")
 
     # 4. type: the brand's own files first, the library only to name candidates
@@ -381,6 +402,7 @@ def main():
     client = {"id": None, "name": args.client}
     profile = build(client, site, [{"source": u.get("source")} for u in uploads], designed, pal, pair_rows, type_match, grammar, fams, imagery, cal,
                     logo_files=logo_files, measured_on=[r.source for r in designed])
+    profile["site_accents"] = [{"hex": h, "source": f"site:{args.site} theme-color or CTA background"} for h in site_accents]
     profile["classification"] = {"designed_rule": "logo found by template match, or at least one set line of readable size (OCR confidence >= 0.8, height >= 2% of the short edge)",
                                  "read": len(reads), "designed": len(designed), "source": "measured:is_designed"}
     (out / "profile.json").write_text(json.dumps(profile, indent=1, default=str))
