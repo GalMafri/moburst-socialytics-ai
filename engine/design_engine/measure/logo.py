@@ -9,6 +9,7 @@ from PIL import Image
 
 from .image import Box, rel_lum
 
+NEAR_EQUAL_SCORE = 0.05  # two templates within this score both match; the one covering more of the post is the evidence
 SCALES = (0.03, 0.04, 0.05, 0.06, 0.075, 0.09, 0.11, 0.13, 0.16)
 
 
@@ -195,19 +196,25 @@ def find_logo_any(arr: np.ndarray, templates: list, short_edge: int, min_score: 
     """Best match across the light-ground and dark-ground templates; `variant` names the ground the lockup was found on.
     `box` is the full lockup's footprint at the matched scale (a mark-only template is extended to its file's lockup extent, clipped
     to the frame); `match_box` is the region the template itself matched. Templates are LogoTemplates or (name, gray) pairs."""
-    best: LogoMatch | None = None
+    found: list[LogoMatch] = []
     H, W = arr.shape[:2]
     for t in (_as_template(x) for x in templates):
         if t.gray.std() < 1.0:
             continue
         m = find_logo(arr, t.gray, short_edge, min_score)
-        if m and (best is None or m.score > best.score):
-            box = list(m.box)
-            if t.full_w and t.full_h and t.gray.shape[1]:
-                s = m.box[2] / t.gray.shape[1]
-                x0, y0 = m.box[0] - t.dx * s, m.box[1] - t.dy * s
-                x1, y1 = x0 + t.full_w * s, y0 + t.full_h * s
-                x0, y0, x1, y1 = max(0.0, x0), max(0.0, y0), min(float(W), x1), min(float(H), y1)
-                box = [x0, y0, x1 - x0, y1 - y0]
-            best = LogoMatch(m.score, box, m.height_share, t.name, list(m.box))
-    return best
+        if not m:
+            continue
+        box = list(m.box)
+        if t.full_w and t.full_h and t.gray.shape[1]:
+            s = m.box[2] / t.gray.shape[1]
+            x0, y0 = m.box[0] - t.dx * s, m.box[1] - t.dy * s
+            x1, y1 = x0 + t.full_w * s, y0 + t.full_h * s
+            x0, y0, x1, y1 = max(0.0, x0), max(0.0, y0), min(float(W), x1), min(float(H), y1)
+            box = [x0, y0, x1 - x0, y1 - y0]
+        found.append(LogoMatch(m.score, box, m.height_share, t.name, list(m.box)))
+    if not found:
+        return None
+    # a lockup template that matches explains more of the post than its mark alone: among near-equal scores the larger match wins
+    top = max(f.score for f in found)
+    close = [f for f in found if f.score >= top - NEAR_EQUAL_SCORE]
+    return max(close, key=lambda f: ((f.match_box or f.box)[2] * (f.match_box or f.box)[3], f.score))

@@ -58,7 +58,7 @@ def option_record(run_id: str, opt: Any, run_dir: Path, copy_files: bool = True)
         pictures.append(entry)
     (opt_dir / "measurements.json").write_text(json.dumps(_jsonable(measurements), indent=1))
     return {"id": opt.id, "run_id": run_id, "status": opt.status, "rank": opt.rank, "family_key": opt.family_key or opt.family.get("key"),
-            "arrangement": opt.arrangement, "parts": opt.parts, "bands": opt.bands, "headline": opt.headline, "subline": opt.subline,
+            "arrangement": opt.arrangement, "parts": opt.parts, "bands": opt.bands, "headline": opt.headline, "subline": opt.subline, "footer": getattr(opt, "footer", None),
             "picture_concept": opt.picture_brief, "picture_job_ids": opt.job_ids, "credits": opt.credits, "fix_rounds": opt.fix_rounds,
             "dropped_reason": opt.dropped_reason, "signature": sig, "files": files, "pictures": pictures, "unrendered": opt.failures}
 

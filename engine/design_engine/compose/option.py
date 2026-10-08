@@ -19,11 +19,11 @@ from . import place
 from .place import Arrangement, hex_lum
 from .render import render_html
 from .template import ComposeSpec, build_html
-from .typeset import Fit, fit_block
+from .typeset import LINE_HEIGHT, Fit, fit_block
 
 LOGO_FLOOR_MARGIN = 1.04  # the logo is drawn a little above the client's floor so a one-pixel rounding never fails the gate
-TEXT_ROLES = ("headline", "subline")
-DEFAULT_MAX_LINES = {"headline": 3, "subline": 2}
+TEXT_ROLES = ("headline", "subline", "footer")
+DEFAULT_MAX_LINES = {"headline": 3, "subline": 2, "footer": 1}
 GROUND_TAGS = ("dark", "light")
 
 
@@ -75,6 +75,9 @@ def _typeset(profile: dict, family: dict, size: Size, copy: Mapping, boxes: dict
             continue
         band = grammar.get(f"{role}_h_share") or {}
         p50 = band.get("p50")
+        if role == "footer" and p50 is None:  # the footer's size is its slot: a single line at the family's measured height
+            _fx, _fy, _fw, fh = boxes[role]
+            p50, band = fh / LINE_HEIGHT / size.short_edge, {"p25": 0.8 * fh / LINE_HEIGHT / size.short_edge}
         if p50 is None:
             raise ValueError(f"profile.grammar.{role}_h_share has no p50: the brand size of the {role} is unmeasured")
         size_px = float(p50) * size.short_edge
@@ -205,6 +208,7 @@ def assemble(profile: dict, family: dict, size: Size, picture_path: Path | str |
     params = fam.get("parameters") or {}
     device = bool(tpl.get("devices")) and bool(params.get("device_on", True))
     spec = ComposeSpec(headline=str(headline), subline=str(copy["subline"]) if copy.get("subline") else None, logo_variant=variant,
+                       footer=str(copy["footer"]) if copy.get("footer") else None,
                        pair=chosen, device=device, arrangement=tname, accent_hex=accent_hex or params.get("accent_hex"),
                        extra={"arrangement_name": arr.name, "overrides": arr.overrides, "shares": arr.shares})
     logo_min_h = logo_floor_for(profile, size.w, size.h) * size.short_edge * LOGO_FLOOR_MARGIN

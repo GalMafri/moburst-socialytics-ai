@@ -65,7 +65,7 @@ _SCHEMAS: dict[str, dict] = {
             "id": {"type": "string"}, "family_key": {"type": ["string", "null"]}, "arrangement": {"type": "string", "enum": ["family", "new"]},
             "parts": {"type": "array", "items": {"type": "string"}},
             "bands": {"type": "object", "additionalProperties": {"type": "object", "properties": {k: {"type": "number"} for k in ("x", "y", "w", "h")}}},
-            "headline": {"type": "string"}, "subline": {"type": ["string", "null"]}, "picture_brief": {"type": "string"},
+            "headline": {"type": "string"}, "subline": {"type": ["string", "null"]}, "footer": {"type": ["string", "null"]}, "picture_brief": {"type": "string"},
             "alignment": {"type": "string", "enum": ["left", "center"]}},
         "required": ["headline", "picture_brief"]}}}, "required": ["options"], "additionalProperties": False},
     "picture": {"type": "object", "properties": {"option_id": {"type": "string"}}, "required": ["option_id"], "additionalProperties": False},

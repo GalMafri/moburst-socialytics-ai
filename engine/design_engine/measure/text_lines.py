@@ -28,6 +28,11 @@ class TextRead:
     other: list[Line] = field(default_factory=list)
     headline_box: Box | None = None
     subline_box: Box | None = None
+    footer: list[Line] = field(default_factory=list)  # lines along the bottom edge: dates, rounds, handles, closing lines
+    footer_box: Box | None = None
+
+
+FOOTER_BAND = 0.15  # the bottom share of the frame a footer line sits in
 
 
 def classify(lines: list[Line], W: int, H: int, exclude_boxes=()) -> TextRead:
@@ -53,4 +58,6 @@ def classify(lines: list[Line], W: int, H: int, exclude_boxes=()) -> TextRead:
             else:
                 break
     other = [line for line in rest if line not in sub] + furniture
-    return TextRead(head, sub, other, union([line.box for line in head]), union([line.box for line in sub]))
+    footer = [line for line in other if line.box[1] >= (1 - FOOTER_BAND) * H and line.box[3] < 0.6 * tallest]
+    other = [line for line in other if line not in footer]
+    return TextRead(head, sub, other, union([line.box for line in head]), union([line.box for line in sub]), footer, union([line.box for line in footer]))

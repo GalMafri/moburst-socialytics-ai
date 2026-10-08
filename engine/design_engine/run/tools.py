@@ -51,7 +51,7 @@ PICTURES_PER_OPTION = 2
 FIX_ROUNDS = 1
 ROTATION_WINDOW = 3
 HEADLINE_LENGTH_FACTOR = 1.3
-TEXT_ROLES = ("headline", "subline")
+TEXT_ROLES = ("headline", "subline", "footer")
 NEW_ARRANGEMENT_PARTS = ("headline", "subline", "logo", "picture", "accent")
 _QUOTES = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
 
@@ -82,6 +82,7 @@ class OptionState:
     picture_brief: str
     parts: list[str] = field(default_factory=list)
     bands: dict = field(default_factory=dict)
+    footer: str | None = None  # the family's bottom-edge line, when it carries one
     status: str = "planned"  # planned | pictured | composed | needs_fix | passed | offered | dropped
     pictures: list[PictureResult] = field(default_factory=list)
     renders: dict[str, dict] = field(default_factory=dict)  # size name -> {rendered, gate, picture, picture_sha, margin, arrangement}
@@ -94,7 +95,7 @@ class OptionState:
 
     @property
     def copy(self) -> dict:
-        return {"headline": self.headline, "subline": self.subline}
+        return {"headline": self.headline, "subline": self.subline, "footer": self.footer}
 
     @property
     def ok_pictures(self) -> list[PictureResult]:
@@ -197,6 +198,20 @@ class RunContext:
 
 def _norm(text: str | None) -> str:
     return " ".join((text or "").translate(_QUOTES).split())
+
+
+def reading_order(family: dict) -> str:
+    """subline_first when the family's subline slot sits wholly above its headline slot (a kicker line), headline_first when wholly
+    below, unknown otherwise (side by side, or no subline slot)."""
+    slots = (family.get("template") or {}).get("slots") or {}
+    h, s_ = slots.get("headline"), slots.get("subline")
+    if not h or not s_:
+        return "unknown"
+    if float(s_["y"]) + float(s_["h"]) <= float(h["y"]) + 0.01:
+        return "subline_first"
+    if float(s_["y"]) >= float(h["y"]) + float(h["h"]) - 0.01:
+        return "headline_first"
+    return "unknown"
 
 
 def _band(b: Mapping | None) -> dict | None:
@@ -425,18 +440,32 @@ def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str]
         parts, bands = [], {}
     headline = o.get("headline")
     subline = o.get("subline") or None
-    copy = _norm(ctx.copy_text)
+    footer = o.get("footer") or None
+    copy = _norm(ctx.copy_text).lower()  # capitalising a line's first word is not rewriting
     if not isinstance(headline, str) or not headline.strip():
         problems.append(f"{oid}: a headline is required")
     else:
-        if _norm(headline) not in copy:
+        if _norm(headline).lower() not in copy:
             problems.append(f"{oid}: the headline must be the post copy's own words (a substring or line-join of the post copy): {headline!r}")
         p75 = ((family or {}).get("parameters") or {}).get("headline_chars", {}).get("p75") if family else None
         if isinstance(p75, (int, float)) and len(_norm(headline)) > p75 * HEADLINE_LENGTH_FACTOR:
             problems.append(f"{oid}: headline of {len(_norm(headline))} characters is longer than the family's {p75:.0f} x {HEADLINE_LENGTH_FACTOR} = "
                             f"{p75 * HEADLINE_LENGTH_FACTOR:.0f}; shorten it")
-    if subline is not None and _norm(str(subline)) not in copy:
+    if subline is not None and _norm(str(subline)).lower() not in copy:
         problems.append(f"{oid}: the subline must be the post copy's own words: {subline!r}")
+    if footer is not None and _norm(str(footer)).lower() not in copy:
+        problems.append(f"{oid}: the footer must be the post copy's own words: {footer!r}")
+    if family is not None and isinstance(headline, str) and subline:
+        order = reading_order(family)
+        hi, si = copy.find(_norm(headline).lower()), copy.find(_norm(str(subline)).lower())
+        if order == "subline_first" and hi >= 0 and si > hi:
+            problems.append(f"{oid}: in family {family.get('key')!r} the subline sits above the headline (a kicker), so it must come before the "
+                            "headline in the post copy; swap them or choose a line that precedes the headline")
+        if order == "headline_first" and hi >= 0 and 0 <= si < hi:
+            problems.append(f"{oid}: in family {family.get('key')!r} the subline sits below the headline, so it must follow the headline in the post copy")
+    if family is not None and "footer" in ((family.get("template") or {}).get("slots") or {}) and not footer:
+        problems.append(f"{oid}: family {family.get('key')!r} carries a footer line at the bottom edge in the client's posts; give a `footer` from the "
+                        "post copy (a short closing line) or choose another family")
     concept = o.get("picture_brief") or o.get("picture_concept") or ""
     if not isinstance(concept, str) or not concept.strip():
         problems.append(f"{oid}: a picture_brief concept is required")
@@ -450,7 +479,8 @@ def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str]
     if problems or family is None:
         return None, problems
     return OptionState(oid, fkey, family, arrangement if arrangement == "new" else "family", str(headline).strip(),
-                       str(subline).strip() if subline else None, concept.strip(), parts, dict(bands) if bands else {}), []
+                       str(subline).strip() if subline else None, concept.strip(), parts, dict(bands) if bands else {},
+                       footer=str(footer).strip() if footer else None), []
 
 
 def plan(ctx: RunContext, options: list[dict]) -> dict:
@@ -491,7 +521,7 @@ def plan(ctx: RunContext, options: list[dict]) -> dict:
                 opt.pictures = old.pictures
         ctx.options[opt.id] = opt
     return {"accepted": [o.id for o in built],
-            "options": [{"id": o.id, "family_key": o.family_key, "arrangement": o.arrangement, "headline": o.headline, "subline": o.subline,
+            "options": [{"id": o.id, "family_key": o.family_key, "arrangement": o.arrangement, "headline": o.headline, "subline": o.subline, "footer": o.footer,
                          "picture_brief": o.picture_brief, "fix_rounds_used": o.fix_rounds} for o in built],
             "next": "call picture(option_id) for each option, then compose, measure and submit"}
 
@@ -499,7 +529,7 @@ def plan(ctx: RunContext, options: list[dict]) -> dict:
 # ---- picture ----
 
 
-def quiet_zone(family: dict, slots: tuple[str, ...] = ("headline", "subline", "logo")) -> dict | None:
+def quiet_zone(family: dict, slots: tuple[str, ...] = ("headline", "subline", "footer", "logo")) -> dict | None:
     """The part of the picture the text and logo cover, as fractions of the PICTURE (the brief names "the lower 40%" of the picture
     it asks for, and the dry run flattens that region of the picture it hands back): the union of the slots that overlap the
     family's picture area at their median position, mapped into the picture box. None when the family carries no picture or no

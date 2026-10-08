@@ -13,7 +13,7 @@ from ..platform.specs import Size
 from .typeset import Fit
 
 BASE_CSS = Path(__file__).with_name("base.css").read_text()
-TEXT_ROLES = ("headline", "subline")
+TEXT_ROLES = ("headline", "subline", "footer")
 
 
 @dataclass
@@ -25,6 +25,7 @@ class ComposeSpec:
     device: bool
     arrangement: str  # p50 (the slot medians) | p25 | p75 (positions from the slot bands) | new
     accent_hex: str | None = None  # the device colour; falls back to the family's recorded accent, then the ink
+    footer: str | None = None  # the family's bottom-edge line
     extra: dict = field(default_factory=dict)
 
 
@@ -237,7 +238,7 @@ def build_html(family: dict, size: Size, spec: ComposeSpec, fonts: dict[str, Pat
             parts.append(f'<div class="slot" data-slot="accent" data-side="{dev.get("side", "")}" style="{_pos(x, y, w, h)}background:{accent};"></div>')
 
     for role in TEXT_ROLES:
-        text = spec.headline if role == "headline" else spec.subline
+        text = spec.headline if role == "headline" else spec.subline if role == "subline" else spec.footer
         if not text or role not in slots or role not in fit:
             continue
         f = fit[role]

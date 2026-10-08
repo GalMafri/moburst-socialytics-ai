@@ -333,3 +333,25 @@ def test_rank_is_an_order_not_a_verdict(tmp_path):
     def broken(a, b, refs):
         raise RuntimeError("no vision today")
     assert len(rank.pairwise(opts, [], client=None, ask=broken, png_of=lambda o: o.png)) == 3
+
+
+def test_plan_reading_order_and_case(tmp_path, family, fonts, logo_files):
+    """A kicker family (subline above the headline) refuses copy in the wrong order; capitalising a first word is not rewriting."""
+    from copy import deepcopy
+
+    below = deepcopy(family)
+    hs, ss = below["template"]["slots"]["headline"], below["template"]["slots"]["subline"]
+    hs["y"], hs["h"], ss["y"], ss["h"] = 0.30, 0.15, 0.50, 0.05
+    assert tools.reading_order(below) == "headline_first"
+    ctx = make_ctx(tmp_path, below, fonts, logo_files)
+    key = below["key"]
+    out = tools.plan(ctx, [option(key, headline="ruin summers some sense", subline=None)])  # lower-case start: still the copy's words
+    assert out["accepted"] == ["o1"]
+    kicker = deepcopy(family)
+    kicker["key"] = key + "|kicker"
+    hs, ss = kicker["template"]["slots"]["headline"], kicker["template"]["slots"]["subline"]
+    ss["y"], ss["h"], hs["y"] = 0.05, 0.04, 0.30
+    assert tools.reading_order(kicker) == "subline_first"
+    ctx2 = make_ctx(tmp_path / "k", kicker, fonts, logo_files)
+    with pytest.raises(tools.ToolRefused, match="kicker"):
+        tools.plan(ctx2, [option(kicker["key"], headline="Some injuries", subline="ruin summers")])

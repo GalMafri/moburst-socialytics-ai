@@ -116,7 +116,7 @@ def cluster(reads: list[PostRead]) -> list[Family]:
         post_ids = sorted({m.source_post_id or m.path.stem for m in members})
         seen = len(post_ids)
         fam = Family(key, sig, post_ids, seen, "family" if seen >= 2 else "seen_once", sources=[m.source for m in members])
-        slots: dict[str, list[dict]] = {"logo": [], "headline": [], "subline": [], "picture": [], "accent": []}
+        slots: dict[str, list[dict]] = {"logo": [], "headline": [], "subline": [], "footer": [], "picture": [], "accent": []}
         src: dict[str, list[str]] = {k: [] for k in slots}
         for m in members:
             if m.logo:
@@ -128,6 +128,9 @@ def cluster(reads: list[PostRead]) -> list[Family]:
             if m.text.subline_box:
                 slots["subline"].append(_frac(m.text.subline_box, m.W, m.H))
                 src["subline"].append(m.source)
+            if getattr(m.text, "footer_box", None):
+                slots["footer"].append(_frac(m.text.footer_box, m.W, m.H))
+                src["footer"].append(m.source)
             if m.picture_boxes and sig.picture_role != "none":  # a sliver under 4% of the frame is not a picture slot
                 slots["picture"].append(_frac(m.picture_boxes[0], m.W, m.H))
                 src["picture"].append(m.source)
@@ -135,6 +138,8 @@ def cluster(reads: list[PostRead]) -> list[Family]:
             if dev is not None:
                 slots["accent"].append(_frac(dev, m.W, m.H))
                 src["accent"].append(m.source)
+        if len(slots["footer"]) < max(1, len(members) / 2):  # a footer is a family trait only when most members carry one
+            slots["footer"], src["footer"] = [], []
         fam.slots = {k: _slot_band(v, src[k]) for k, v in slots.items() if v}
         heads = [" ".join(l.text for l in m.text.headline) for m in members if m.text.headline]
         head_lines = [len(m.text.headline) for m in members if m.text.headline]
@@ -147,6 +152,8 @@ def cluster(reads: list[PostRead]) -> list[Family]:
             "alignment": sig.text_align,
             "headline_chars": band([len(h) for h in heads], [m.source for m in members if m.text.headline]),
             "headline_lines": band([float(n) for n in head_lines], [m.source for m in members if m.text.headline]),
+            "footer_chars": band([float(len(" ".join(l.text for l in m.text.footer))) for m in members if getattr(m.text, "footer", None)],
+                                 [m.source for m in members if getattr(m.text, "footer", None)]),
             "picture_text_ratio": band(pic_ratio, [m.source for m in members if m.picture_boxes and m.text.headline_box]),
             "device_on": bool(slots["accent"]),
             "logo_variant": max(set(variants), key=variants.count) if variants else "none",
