@@ -23,7 +23,7 @@ def contrast(l1: float, l2: float) -> float:
 
 
 def crop(arr: np.ndarray, box: Box):
-    x, y, w, h = [int(round(v)) for v in box]
+    x, y, w, h = [round(v) for v in box]
     H, W = arr.shape[:2]
     x0, y0, x1, y1 = max(0, x), max(0, y), min(W, x + w), min(H, y + h)
     if x1 <= x0 or y1 <= y0:
