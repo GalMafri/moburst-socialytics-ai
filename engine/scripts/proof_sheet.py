@@ -247,11 +247,20 @@ def build(run_dirs: list[Path]) -> tuple[Image.Image, list[str]]:
     return sheet, lines
 
 
-def run_dirs_for(runs_root: Path) -> list[Path]:
+def run_dirs_for(runs_root: Path, latest_per_post: bool = False) -> list[Path]:
+    """Every finished run dir in time order; with `latest_per_post`, only the newest run of each post index (the run dir name ends
+    in -post<N>[-dry]), so a sheet shows where each post stands now and not every attempt on the way."""
     runs_root = Path(runs_root)
     if not runs_root.exists():
         return []
-    return sorted(p for p in runs_root.iterdir() if p.is_dir() and (p / "options.json").exists())
+    runs = sorted(p for p in runs_root.iterdir() if p.is_dir() and (p / "options.json").exists())
+    if not latest_per_post:
+        return runs
+    latest: dict[str, Path] = {}
+    for r in runs:
+        key = r.name.split("-", 2)[-1] if r.name.count("-") >= 2 else r.name  # post2-dry
+        latest[key] = r
+    return sorted(latest.values())
 
 
 def write(run_dirs: list[Path], out: Path) -> Path:
@@ -266,9 +275,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--client", required=True)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--latest", action="store_true", help="only the newest run of each post")
     args = ap.parse_args()
     ws = settings().work_dir / slugify(args.client)
-    runs = run_dirs_for(ws / "runs")
+    runs = run_dirs_for(ws / "runs", latest_per_post=args.latest)
     if not runs:
         print(f"no runs under {ws / 'runs'}; run scripts/run_post.py first")
         sys.exit(1)
