@@ -123,15 +123,19 @@ def test_drawn_shape_in_place_of_logo_fails_as_not_the_file(tmp_path):
     assert r.measurements["logo_match"] < 0.9
 
 
-def test_copy_of_client_post_with_new_text_fails_near_copy(tmp_path):
+def test_same_skeleton_warns_and_pixel_copy_fails(tmp_path):
     ref = render(tmp_path, "ref")
     fx = render(tmp_path, "cand", headline=("Your child was", "hurt at school"))
     r = run(fx, references=[ref["path"]])
-    assert not r.passed
-    hits = [f for f in r.failures if f.startswith("near copy of reference ref.png: ")]
-    assert hits and re.fullmatch(r"near copy of reference ref\.png: (whole-frame distance \d+ is within 40|half-frame distance \d+ is within 20)", hits[0])
-    # the same render against an unrelated post is not a near copy
-    assert run(fx, references=[unrelated_reference(tmp_path)]).measurements["near_copy"]["is_copy"] is False
+    # a same-family render with new words shares the skeleton: a warning, never a failure on its own
+    assert r.measurements["near_copy"]["same_skeleton"] is True
+    assert any(w.startswith("same skeleton as reference ref.png") for w in r.warnings), r.warnings
+    assert not any(f.startswith("pixel copy") for f in r.failures)
+    # the identical file is a pixel copy and fails
+    r2 = run(fx, references=[fx["path"]])
+    assert any(f.startswith("pixel copy of reference cand.png") for f in r2.failures), r2.failures
+    # an unrelated post is neither
+    assert run(fx, references=[unrelated_reference(tmp_path)]).measurements["near_copy"]["same_skeleton"] is False
 
 
 def test_ocr_copy_check_is_whitespace_and_line_order_tolerant(tmp_path):

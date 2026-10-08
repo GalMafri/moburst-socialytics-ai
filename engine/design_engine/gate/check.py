@@ -29,8 +29,10 @@ HEADLINE_SHORT_EDGE_SHARE_MIN = 0.08
 CONTENT_SPAN_MIN = 0.55
 TALL_FRAME_ASPECT = 0.7
 TALL_FRAME_LOGO_FACTOR = 1.15
-NEAR_COPY_WHOLE = 40
+NEAR_COPY_WHOLE = 40  # the reference's thresholds: same skeleton, used as a warning here (a family shares its skeleton by design)
 NEAR_COPY_HALF = 20
+PIXEL_COPY_WHOLE = 12  # near-identical pixels: a copy, whatever the words say
+PIXEL_COPY_HALF = 8
 SUBJECT_OVERLAP_MAX = 0.01
 TEXT_SLOTS = ("headline", "subline")
 
@@ -139,7 +141,7 @@ def _copy_matches(lines: list[Line], expected: str) -> tuple[bool, str]:
 
 
 def check(png: Path, boxes: dict, profile: dict, size: SizeLike | Mapping, references: list[Path], prior: list[Path], copy: dict,
-          ocr: Callable[[Path], list[Line]] = read_lines, logo_path: Path | None = None) -> GateResult:
+          ocr: Callable[[Path], list[Line]] = read_lines, logo_path: Path | None = None, picture_references: list | None = None) -> GateResult:
     """Run every check in the plan's order on one render. `boxes` maps slots (logo, headline, subline, picture, accent, subject) to
     [x, y, w, h] in export pixels; `copy` has `headline` and `subline`; `references` are the client's stored posts and `prior` the
     earlier deliveries; `ocr` reads the final file (injectable; tests pass a FakeOCR). The logo file is `logo_path` or the files on
@@ -253,16 +255,28 @@ def check(png: Path, boxes: dict, profile: dict, size: SizeLike | Mapping, refer
         fails.append(f"content span {_fmt(span)} of the safe height is below {_fmt(CONTENT_SPAN_MIN)}")
 
     # ---- near-copy against the client's posts and the earlier deliveries ----
+    # A family reuses the client's skeleton on purpose, and a 16x16 luminance hash sees the skeleton as the picture (a same-family render
+    # with new copy sits at distance ~22 from the post it was learned from). So the whole frame is a copy only at pixel-copy distances;
+    # the reference's 40/20 is a warning; and what must differ is measured where it lives: the picture region (picture_references) and
+    # the words (the OCR check below).
     cand = Image.open(png)
     pool = [(Path(p), "reference") for p in references] + [(Path(p), "prior delivery") for p in prior]
     nc = near_copy(cand, [Image.open(p) for p, _ in pool], NEAR_COPY_WHOLE, NEAR_COPY_HALF) if pool else None
-    m["near_copy"] = {"min_whole": nc.min_whole, "min_half": nc.min_half, "is_copy": nc.is_copy, "index": nc.index} if nc else {"is_copy": False}
-    if nc and nc.is_copy and nc.index is not None:
+    m["near_copy"] = {"min_whole": nc.min_whole, "min_half": nc.min_half, "same_skeleton": nc.is_copy, "index": nc.index} if nc else {"same_skeleton": False}
+    if nc and nc.index is not None:
         path, kind = pool[nc.index]
-        if nc.min_whole <= NEAR_COPY_WHOLE:
-            fails.append(f"near copy of {kind} {path.name}: whole-frame distance {nc.min_whole} is within {NEAR_COPY_WHOLE}")
-        else:
-            fails.append(f"near copy of {kind} {path.name}: half-frame distance {nc.min_half} is within {NEAR_COPY_HALF}")
+        if nc.min_whole <= PIXEL_COPY_WHOLE or nc.min_half <= PIXEL_COPY_HALF:
+            fails.append(f"pixel copy of {kind} {path.name}: whole-frame distance {nc.min_whole}, half-frame {nc.min_half}")
+        elif nc.is_copy:
+            warns.append(f"same skeleton as {kind} {path.name} (whole-frame distance {nc.min_whole}); the picture and the words must carry the difference")
+    pic_box = boxes.get("picture")
+    if pic_box and picture_references:
+        pc = crop(np.asarray(cand.convert("RGB")), pic_box)
+        if pc is not None and pc.size:
+            pnc = near_copy(Image.fromarray(pc), [Image.open(p) for p in picture_references], NEAR_COPY_WHOLE, NEAR_COPY_HALF)
+            m["picture_near_copy"] = {"min_whole": pnc.min_whole, "min_half": pnc.min_half, "is_copy": pnc.is_copy, "index": pnc.index}
+            if pnc.is_copy and pnc.index is not None:
+                fails.append(f"picture is a near copy of {Path(picture_references[pnc.index]).name}: distance {pnc.min_whole} is within {NEAR_COPY_WHOLE}")
 
     # ---- copy exactness, verified once by OCR on the final render ----
     m["ocr"] = {}
