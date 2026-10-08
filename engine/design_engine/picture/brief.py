@@ -44,8 +44,9 @@ class Brief:
     aspect: str = "4:5"
     brand_name: str | None = None
     zone_instruction: str = ""
-    zone_side: tuple[str, str] = ("upper part", "lower part")
+    zone_side: tuple[str, str] | None = ("upper part", "lower part")  # None: no text sits on the picture, nothing to keep calm
     reference_urls: list[str] = field(default_factory=list)  # hosted copies of reference_paths, filled by the caller before the real call
+    reference_media_ids: list[str] = field(default_factory=list)  # references already in Higgsfield storage (client.upload)
 
 
 def forbidden_pattern(brand_name: str | None = None) -> re.Pattern:
@@ -103,6 +104,8 @@ def zone_instruction(slot_zone: dict) -> str:
 
 
 def stronger(brief: Brief) -> str:
+    if not brief.zone_side:
+        return brief.text
     side, other = brief.zone_side
     return f"{brief.text} {STRONGER_ZONE_INSTRUCTION.format(side=side, other=other)}."
 
@@ -143,7 +146,7 @@ def reference_crops(reads: list, ref_dir: Path, limit: int = MAX_REFERENCES) -> 
     return out
 
 
-def build(profile: dict, family: dict, slot_zone: dict, concept: str, platform: str, reads: list | None = None,
+def build(profile: dict, family: dict, slot_zone: dict | None, concept: str, platform: str, reads: list | None = None,
           ref_dir: Path | None = None, legible_objects: bool = False) -> Brief:
     """The brief for one picture: the concept in the brand's imagery language, the palette as words, the quiet zone named, the aspect
     from the family; refused before anything else when the concept names a logo, text or the brand."""
@@ -164,12 +167,16 @@ def build(profile: dict, family: dict, slot_zone: dict, concept: str, platform: 
     never = [n for n in imagery.get("never") or [] if is_clean(n, brand)]
     if never:
         lines.append("Never: " + "; ".join(never) + ".")
-    instruction = zone_instruction(slot_zone)
-    lines.append(instruction[0].upper() + instruction[1:] + ".")
+    instruction = zone_instruction(slot_zone) if slot_zone else ""
+    if instruction:
+        lines.append(instruction[0].upper() + instruction[1:] + ".")
     lines.append(f"A single still picture for {platform}, photographic realism unless the brand's own pictures are illustrated.")
     text = " ".join(lines)
     check(text, brand)
-    side, other, _pct = zone_sides(slot_zone)
+    zone_side = None
+    if slot_zone:
+        side, other, _pct = zone_sides(slot_zone)
+        zone_side = (f"{side} part", f"{other} part")
     ratio = (family.get("parameters") or {}).get("aspect")
     aspect = nearest_aspect(float(ratio)) if isinstance(ratio, (int, float)) and ratio > 0 else "4:5"
     if legible_objects and imagery.get("people") == "none":
@@ -179,4 +186,4 @@ def build(profile: dict, family: dict, slot_zone: dict, concept: str, platform: 
         model, params = DEFAULT_MODEL, {"model": DEFAULT_MODEL, "aspect_ratio": aspect, "resolution": DEFAULT_RESOLUTION, "use_unlim": False}
     refs = reference_crops(reads, ref_dir, MAX_REFERENCES) if reads and ref_dir else []
     return Brief(text=text, reference_paths=refs, model=model, params=params, aspect=aspect, brand_name=brand, zone_instruction=instruction,
-                 zone_side=(f"{side} part", f"{other} part"))
+                 zone_side=zone_side)

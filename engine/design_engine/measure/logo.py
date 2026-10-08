@@ -11,8 +11,8 @@ from .image import Box, rel_lum
 SCALES = (0.03, 0.04, 0.05, 0.06, 0.075, 0.09, 0.11, 0.13, 0.16)
 
 
-def logo_gray_from_file(path, ground: int = 255) -> np.ndarray:
-    """Alpha composited on a flat ground (white by default, as the reference does), trimmed to ink."""
+def _ink_bbox(path, ground: int) -> tuple[np.ndarray, tuple[int, int, int, int] | None]:
+    """The file's luminance composited on a flat ground, and the bbox (x, y, w, h) of what reads as ink on that ground."""
     lg = Image.open(path).convert("RGBA")
     bg = Image.new("RGBA", lg.size, (ground, ground, ground, 255))
     bg.alpha_composite(lg)
@@ -22,14 +22,65 @@ def logo_gray_from_file(path, ground: int = 255) -> np.ndarray:
     ink = np.abs(g.astype(np.int16) - ground_l) > 8
     ys, xs = np.where(ink)
     if ys.size == 0:
+        return g, None
+    return g, (int(xs.min()), int(ys.min()), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1))
+
+
+def logo_gray_from_file(path, ground: int = 255) -> np.ndarray:
+    """Alpha composited on a flat ground (white by default, as the reference does), trimmed to ink."""
+    g, bb = _ink_bbox(path, ground)
+    if bb is None:
         return g
-    return g[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
+    x, y, w, h = bb
+    return g[y : y + h, x : x + w]
 
 
-def logo_templates_from_file(path) -> list[tuple[str, np.ndarray]]:
+@dataclass(frozen=True)
+class LogoTemplate:
+    """One polarity of a logo file: the ink that survives on that ground, and where that ink sits inside the file's whole lockup.
+    A wordmark in white vanishes on a white ground and leaves the mark alone; a match of the mark alone still names the whole
+    lockup's footprint, because that is what the composer draws and what the posts carry around the mark."""
+
+    name: str  # on_light | on_dark
+    gray: np.ndarray
+    dx: int = 0  # offset of this template's ink inside the full lockup extent, file pixels
+    dy: int = 0
+    full_w: int = 0  # the full lockup extent (union of both polarities' ink), file pixels; 0 = this template is the whole lockup
+    full_h: int = 0
+
+
+def file_ground(path) -> str | None:
+    """The ground a logo file is drawn for, from its own ink: the polarity on which more of its ink survives. A file whose wordmark is
+    white loses it on white, so it reads on dark. None when both polarities keep the same ink (a single-colour mark)."""
+    _, on_light = _ink_bbox(path, 255)
+    _, on_dark = _ink_bbox(path, 0)
+    if on_light is None or on_dark is None:
+        return "dark" if on_light is None and on_dark else "light" if on_dark is None and on_light else None
+    a_light, a_dark = on_light[2] * on_light[3], on_dark[2] * on_dark[3]
+    if abs(a_light - a_dark) <= 0.05 * max(a_light, a_dark):
+        return None
+    return "light" if a_light > a_dark else "dark"
+
+
+def logo_templates_from_file(path) -> list[LogoTemplate]:
     """The lockup composited on a light and on a dark ground. Normalised correlation is polarity-sensitive: a white wordmark
-    vanishes on white and a red mark reads darker than white but lighter than navy, so one template cannot serve both grounds."""
-    return [("on_light", logo_gray_from_file(path, 255)), ("on_dark", logo_gray_from_file(path, 0))]
+    vanishes on white and a red mark reads darker than white but lighter than navy, so one template cannot serve both grounds.
+    Each template records where its ink sits inside the full lockup extent, so a mark-only match reports the lockup's footprint."""
+    g_l, bb_l = _ink_bbox(path, 255)
+    g_d, bb_d = _ink_bbox(path, 0)
+    boxes = [b for b in (bb_l, bb_d) if b is not None]
+    if not boxes:
+        return [LogoTemplate("on_light", g_l), LogoTemplate("on_dark", g_d)]
+    fx0, fy0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    fx1, fy1 = max(b[0] + b[2] for b in boxes), max(b[1] + b[3] for b in boxes)
+    out = []
+    for name, g, bb in (("on_light", g_l, bb_l), ("on_dark", g_d, bb_d)):
+        if bb is None:
+            out.append(LogoTemplate(name, g))
+            continue
+        x, y, w, h = bb
+        out.append(LogoTemplate(name, g[y : y + h, x : x + w], x - fx0, y - fy0, fx1 - fx0, fy1 - fy0))
+    return out
 
 
 @dataclass(frozen=True)
@@ -38,6 +89,7 @@ class LogoMatch:
     box: Box  # full-resolution pixels [x, y, w, h]
     height_share: float
     variant: str = "unknown"
+    match_box: Box | None = None  # the region the template itself matched when `box` was extended to the lockup's footprint
 
 
 def find_logo(arr: np.ndarray, logo_gray: np.ndarray, short_edge: int, min_score: float = 0.62) -> LogoMatch | None:
@@ -99,13 +151,27 @@ def find_logo(arr: np.ndarray, logo_gray: np.ndarray, short_edge: int, min_score
     return LogoMatch(best, [x / scale_img, y / scale_img, tw_ / scale_img, th_ / scale_img], (th_ / scale_img) / short_edge)
 
 
-def find_logo_any(arr: np.ndarray, templates: list[tuple[str, np.ndarray]], short_edge: int, min_score: float = 0.62) -> LogoMatch | None:
-    """Best match across the light-ground and dark-ground templates; `variant` names the ground the lockup was found on."""
+def _as_template(t) -> LogoTemplate:
+    return t if isinstance(t, LogoTemplate) else LogoTemplate(str(t[0]), t[1])
+
+
+def find_logo_any(arr: np.ndarray, templates: list, short_edge: int, min_score: float = 0.62) -> LogoMatch | None:
+    """Best match across the light-ground and dark-ground templates; `variant` names the ground the lockup was found on.
+    `box` is the full lockup's footprint at the matched scale (a mark-only template is extended to its file's lockup extent, clipped
+    to the frame); `match_box` is the region the template itself matched. Templates are LogoTemplates or (name, gray) pairs."""
     best: LogoMatch | None = None
-    for name, gray in templates:
-        if gray.std() < 1.0:
+    H, W = arr.shape[:2]
+    for t in (_as_template(x) for x in templates):
+        if t.gray.std() < 1.0:
             continue
-        m = find_logo(arr, gray, short_edge, min_score)
+        m = find_logo(arr, t.gray, short_edge, min_score)
         if m and (best is None or m.score > best.score):
-            best = LogoMatch(m.score, m.box, m.height_share, name)
+            box = list(m.box)
+            if t.full_w and t.full_h and t.gray.shape[1]:
+                s = m.box[2] / t.gray.shape[1]
+                x0, y0 = m.box[0] - t.dx * s, m.box[1] - t.dy * s
+                x1, y1 = x0 + t.full_w * s, y0 + t.full_h * s
+                x0, y0, x1, y1 = max(0.0, x0), max(0.0, y0), min(float(W), x1), min(float(H), y1)
+                box = [x0, y0, x1 - x0, y1 - y0]
+            best = LogoMatch(m.score, box, m.height_share, t.name, list(m.box))
     return best

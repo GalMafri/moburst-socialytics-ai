@@ -158,12 +158,21 @@ def _block_record(block: Any) -> dict:
     return {"type": t}
 
 
-def result_from(ctx: RunContext, turns: int, transcript_path: Path | None) -> RunResult:
-    """The result of a run from its context: offered options in rank order, every other live option dropped with a reason."""
+ENDED = {"submitted": "not submitted", "turns": "the turn budget ended before submit accepted this option",
+         "usd": "the dollar budget ended before submit accepted this option",
+         "end_turn": "the model ended its turn without submitting this option"}
+
+
+def result_from(ctx: RunContext, turns: int, transcript_path: Path | None, ended: str = "submitted") -> RunResult:
+    """The result of a run from its context: offered options in rank order, every other live option dropped with the reason the run
+    ended (`ended`: submitted | turns | usd | end_turn)."""
     offered = list(ctx.submitted or [])
+    reason = ENDED.get(ended, ENDED["end_turn"]) if not ctx.done else ENDED["submitted"]
+    if ended not in ENDED:
+        reason = f"the run ended ({ended}) before submit accepted this option"
     for opt in ctx.options.values():
         if opt.status != "dropped" and opt not in offered:
-            ctx.drop(opt, "the budget ended before submit accepted this option" if not ctx.done else "not submitted")
+            ctx.drop(opt, reason)
     ctx.spent["turns"] = turns
     return RunResult(offered, ctx.spent, turns, list(ctx.dropped), transcript_path, list(ctx.options.values()))
 
@@ -182,6 +191,7 @@ def run_post(ctx: RunContext, model: str | None = None, model_client: Any = None
         messages=[{"role": "user", "content": _first_message(ctx)}], max_iterations=ctx.budget.max_turns,
     )
     turns = 0
+    ended = "end_turn"
     started = time.time()
     with transcript_path.open("w", encoding="utf-8") as log:
         for message in runner:
@@ -196,14 +206,23 @@ def run_post(ctx: RunContext, model: str | None = None, model_client: Any = None
                                   "content": [_block_record(b) for b in message.content], "tool_events_before": tool_events}, default=str) + "\n")
             log.flush()
             if ctx.done:
+                ended = "submitted"
                 break
             if ctx.spent["usd"] >= ctx.budget.max_usd:
                 ctx.spent["warnings"].append(f"dollar budget of {ctx.budget.max_usd} reached after turn {turns}")
+                ended = "usd"
                 break
+            if message.stop_reason == "end_turn":
+                ended = "end_turn"
+            elif turns >= ctx.budget.max_turns:
+                ended = "turns"
         if ctx.transcript:
             log.write(json.dumps({"turn": turns, "tool_events_after": ctx.transcript}, default=str) + "\n")
             ctx.transcript = []
-    result = result_from(ctx, turns, transcript_path)
+    if ended == "end_turn" and turns >= ctx.budget.max_turns:
+        ended = "turns"
+    ctx.spent["ended"] = ended
+    result = result_from(ctx, turns, transcript_path, ended)
     record.write(ctx.run_dir, result)
     return result
 

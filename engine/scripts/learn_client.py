@@ -12,7 +12,7 @@ import json
 import re
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import httpx
@@ -32,7 +32,7 @@ from design_engine.learn.profile import build, validate
 from design_engine.learn.typeface import match_headlines, render_line
 from design_engine.measure.calibrate import calibrate
 from design_engine.measure.image import load_rgb
-from design_engine.measure.logo import logo_templates_from_file
+from design_engine.measure.logo import file_ground, logo_templates_from_file
 from design_engine.measure.ocr import read_lines
 from design_engine.report.board import render
 from design_engine.store.workspace import Workspace
@@ -238,10 +238,12 @@ def main():
                 grounds[m.variant] = grounds.get(m.variant, 0) + 1
         print(f"logo candidate {lf['path']}: {hits} matches in {len(probe)} posts {grounds}")
         if hits >= 2:
-            # the ground this file reads on, measured: which composite matched the posts
-            ground = "dark" if grounds.get("on_dark", 0) >= grounds.get("on_light", 0) else "light"
-            kept_files.append({**lf, "matches_in_probe": hits, "ground": ground, "ground_source": f"measured:{grounds}"})
-            templates += [(f"{lf['path']}:{name}", g) for name, g in cand]
+            # the ground this file reads on: from its own ink (a white wordmark vanishes on white, so the file is for dark grounds);
+            # a single-colour mark that reads on both is tagged by which composite matched the posts
+            own = file_ground(ws.root / lf["path"])
+            ground = own or ("dark" if grounds.get("on_dark", 0) >= grounds.get("on_light", 0) else "light")
+            kept_files.append({**lf, "matches_in_probe": hits, "ground": ground, "ground_source": f"file ink:{own}" if own else f"measured:{grounds}"})
+            templates += [replace(t, name=f"{lf['path']}:{t.name}") for t in cand]
     seen_logo_paths: set[str] = set()
     kept_files = [f for f in kept_files if not (f["path"] in seen_logo_paths or seen_logo_paths.add(f["path"]))]
     if not kept_files and logo_files:
@@ -256,8 +258,21 @@ def main():
     cache = out / "reads.json"
     if args.from_cache and cache.exists():
         reads = load_reads(cache)
+        if templates:
+            # the cache keeps the OCR (the slow part); the logo is matched again so its box follows the current templates
+            from design_engine.measure.text_lines import classify
+
+            for r in reads:
+                try:
+                    arr = load_rgb(r.path)
+                except Exception:  # noqa: BLE001  a missing file keeps its cached read
+                    continue
+                r.logo = find_logo_any(arr, templates, min(r.W, r.H))
+                if r.logo:
+                    r.logo = type(r.logo)(r.logo.score, r.logo.box, r.logo.height_share, r.logo.variant.split(":")[-1], r.logo.match_box)
+                r.text = classify(r.lines, r.W, r.H, exclude_boxes=[r.logo.box] if r.logo else ())
         designed = [r for r in reads if is_designed(r)]
-        print(f"loaded {len(reads)} reads from cache")
+        print(f"loaded {len(reads)} reads from cache; logo re-matched on {sum(1 for r in reads if r.logo)}")
     else:
         for i, p in enumerate(posts + [None] * len(upload_posts)):
             if p is None:
@@ -271,7 +286,7 @@ def main():
                     arr = load_rgb(path)
                     r.logo = find_logo_any(arr, templates, min(r.W, r.H))
                     if r.logo:
-                        r.logo = type(r.logo)(r.logo.score, r.logo.box, r.logo.height_share, r.logo.variant.split(":")[-1])
+                        r.logo = type(r.logo)(r.logo.score, r.logo.box, r.logo.height_share, r.logo.variant.split(":")[-1], r.logo.match_box)
                         from design_engine.measure.text_lines import classify
 
                         r.text = classify(r.lines, r.W, r.H, exclude_boxes=[r.logo.box])

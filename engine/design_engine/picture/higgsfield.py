@@ -162,6 +162,36 @@ class Client:
         media_id = data.get("media_id") if isinstance(data, dict) else None
         return media_id if isinstance(media_id, str) and media_id else None
 
+    def upload(self, path: Path) -> str | None:
+        """Push one local reference into Higgsfield's storage through media_upload's presigned URL and confirm it; the media id,
+        or None when any step fails (a reference is help, never a reason to stop)."""
+        path = Path(path)
+        suffix = path.suffix.lower().lstrip(".") or "png"
+        content_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(suffix, "image/png")
+        try:
+            data = self._call("media_upload", {"filename": path.name, "content_type": content_type, "method": "upload_url"})
+            entry = data
+            if isinstance(data, dict):
+                for key in ("files", "uploads", "results"):
+                    if isinstance(data.get(key), list) and data[key]:
+                        entry = data[key][0]
+                        break
+            if not isinstance(entry, dict):
+                return None
+            upload_url = entry.get("upload_url") or entry.get("url")
+            media_id = entry.get("media_id") or entry.get("id")
+            if not (isinstance(upload_url, str) and isinstance(media_id, str)):
+                return None
+            import httpx
+
+            resp = httpx.put(upload_url, content=path.read_bytes(), headers={"Content-Type": content_type}, timeout=self.timeout)
+            if resp.status_code >= 300:
+                return None
+            self._call("media_confirm", {"media_id": media_id, "type": "image"})
+            return media_id
+        except (HiggsfieldError, OSError):
+            return None
+
     def cost(self, model: str, params: dict) -> float | None:
         """What this exact generation would cost, without submitting it (generate_image with get_cost)."""
         try:
@@ -233,6 +263,10 @@ class FakeClient:
 
     def import_url(self, url: str, type: str = "image") -> str | None:
         self.calls.append(("media_import_url", {"url": url, "type": type}))
+        return self.media_ids.pop(0) if self.media_ids else f"media-{len(self.calls)}"
+
+    def upload(self, path: Path) -> str | None:
+        self.calls.append(("media_upload", {"filename": Path(path).name}))
         return self.media_ids.pop(0) if self.media_ids else f"media-{len(self.calls)}"
 
     def cost(self, model: str, params: dict) -> float | None:

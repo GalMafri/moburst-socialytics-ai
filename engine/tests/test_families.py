@@ -43,3 +43,19 @@ def test_template_slots_are_fractions(tmp_path):
     assert 0 <= head["x"] <= 1 and 0 < head["w"] <= 1 and "band" in head
     assert fam.template["devices"] == [{"kind": "accent", "side": "left"}] and fam.template["logo_corner"] == "tl"
     assert fam.parameters["headline_lines"]["p50"] == 2.0 and fam.parameters["device_on"] is True
+
+
+def test_only_edge_bands_are_devices_and_role_none_has_no_picture_slot(tmp_path):
+    from design_engine.learn.families import device_box
+
+    a = read(tmp_path, "a")
+    assert device_box(a) is not None  # the fixture's left bar: full height, narrow
+    a.accent_boxes = [[0.0, 0.0, 90.0, 140.0]]  # a corner badge instead
+    assert device_box(a) is None and signature(a).accent_side == "none"
+    b = read(tmp_path, "b")
+    b.accent_boxes = [[0.0, 0.0, 90.0, 140.0]]
+    b.picture_boxes = [[200.0, 700.0, 600.0, 40.0]]  # a sliver: picture role none
+    a.picture_boxes = [[200.0, 700.0, 600.0, 40.0]]
+    fam = cluster([a, b])[0]
+    assert fam.template["devices"] == [] and "accent" not in fam.slots
+    assert fam.template["picture_role"] == "none" and "picture" not in fam.slots

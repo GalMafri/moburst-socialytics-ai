@@ -6,6 +6,7 @@ zone drops the picture: the result lists both job ids and both salient shares, a
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,10 +41,16 @@ def _first_result(outcomes: list[JobOutcome]) -> JobOutcome:
     raise HiggsfieldError("Higgsfield finished without returning a picture")
 
 
-def make_picture(client: Client | FakeClient, brief: Brief, out_dir: Path, zone_box: Box, floor: float) -> PictureResult:
+Reader = Callable[[Path], ZoneRead]
+
+
+def make_picture(client: Client | FakeClient, brief: Brief, out_dir: Path, zone: Box | Reader, floor: float = zone_mod.DEFAULT_FLOOR) -> PictureResult:
+    """`zone` is the quiet zone in the picture's pixels, read with the floor, or a reader `(path) -> ZoneRead` that judges the
+    picture the way the composer will place text on it (the busiest text slot over every arrangement)."""
+    read_zone: Reader = zone if callable(zone) else (lambda path: zone_mod.read(path, zone, floor))
     brief_mod.check(brief.text, brief.brand_name)
     out_dir = Path(out_dir)
-    medias = []
+    medias = [{"value": mid, "role": REFERENCE_ROLE} for mid in brief.reference_media_ids if mid]
     for url in brief.reference_urls:
         media_id = client.import_url(url)
         if media_id:
@@ -66,7 +73,7 @@ def make_picture(client: Client | FakeClient, brief: Brief, out_dir: Path, zone_
         spent.append({"job_id": job.job_id, "credits": credits, "model": brief.model, "attempt": attempt})
         done = _first_result(client.wait(jobs))
         path = client.download(done.result_url, out_dir / f"picture-{job.job_id}.png")
-        read = zone_mod.read(path, zone_box, floor)
+        read = read_zone(path)
         reads.append(read)
         total = sum(s["credits"] or 0.0 for s in spent)
         if read.ok:

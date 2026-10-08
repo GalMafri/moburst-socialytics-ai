@@ -16,7 +16,7 @@ from ..measure.image import Box, crop, load_rgb, rel_lum
 from ..measure.saliency import saliency_map, salient_share
 from ..picture.zone import CELL, DEFAULT_FLOOR, ZoneRead, zone_to_cells
 from ..platform.specs import Size
-from .template import slot_px
+from .template import frame_boxes
 
 NAMED = ("p50", "p25", "p75")  # the median first: on a tie the brand's most observed position keeps the place
 PLACED = ("headline", "subline", "logo")  # the slots an arrangement moves and the saliency is read under
@@ -73,17 +73,21 @@ def boxes_for(family: dict, size: Size, arrangement: str | Mapping | Arrangement
     """The placed slots in pixels for one arrangement."""
     fam = family_for(family, arrangement)
     name = arrangement.template_name if isinstance(arrangement, Arrangement) else arrangement if isinstance(arrangement, str) else "p50"
-    tpl_slots = fam["template"]["slots"]
-    return {s: list(slot_px(tpl_slots[s], size, name)) for s in slots if s in tpl_slots}
+    boxes = frame_boxes(fam, size, name)
+    return {s: list(boxes[s]) for s in slots if s in boxes}
 
 
-def picture_box(family: dict, size: Size, arrangement_name: str = "p50") -> Box:
-    """Where the template draws the picture: the whole frame for a full-bleed family, else the picture slot."""
+def picture_box(family: dict, size: Size, arrangement_name: str = "p50") -> Box | None:
+    """Where the template draws the picture: the whole frame for a full-bleed family, the picture slot otherwise, None for a
+    family that carries no picture (picture_role none)."""
     tpl = family["template"]
     slots = tpl["slots"]
-    if tpl.get("picture_role", "none") == "full" or "picture" not in slots:
+    role = tpl.get("picture_role", "none")
+    if role == "none":
+        return None
+    if role == "full" or "picture" not in slots:
         return [0.0, 0.0, float(size.w), float(size.h)]
-    return list(slot_px(slots["picture"], size, arrangement_name))
+    return list(frame_boxes(family, size, arrangement_name)["picture"])
 
 
 def frame_to_picture(box: Box, pic_box: Box, pw: int, ph: int) -> Box | None:
@@ -111,7 +115,7 @@ def picture_reader(picture: Path | str, family: dict, size: Size, cell: int = CE
         pic = picture_box(family, size, name if name in NAMED else "p50")
         shares: dict[str, float] = {}
         for slot, box in boxes.items():
-            mapped = frame_to_picture(box, pic, pw, ph)
+            mapped = frame_to_picture(box, pic, pw, ph) if pic is not None else None
             shares[slot] = 0.0 if mapped is None else float(salient_share(sal, zone_to_cells(mapped, cell, sal.shape)))
         return shares
 
@@ -185,10 +189,11 @@ def hex_lum(hex_colour: str) -> float:
 def ground_under(picture: Path | str | None, family: dict, size: Size, arrangement_name: str, box: Box) -> float | None:
     """Median relative luminance of what lies under a slot: the picture crop when the slot is on the picture, else the
     family's recorded ground colour. None when neither is known (the caller falls back to the first observed pair)."""
-    if picture is not None:
+    pic = picture_box(family, size, arrangement_name) if picture is not None else None
+    if picture is not None and pic is not None:
         with Image.open(picture) as im:
             pw, ph = im.size
-        mapped = frame_to_picture(box, picture_box(family, size, arrangement_name), pw, ph)
+        mapped = frame_to_picture(box, pic, pw, ph)
         if mapped is not None:
             region = crop(load_rgb(picture), mapped)
             if region is not None and region.size:

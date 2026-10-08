@@ -46,26 +46,33 @@ def _third(y_centre: float) -> str:
     return "top" if y_centre < 1 / 3 else "middle" if y_centre < 2 / 3 else "bottom"
 
 
+def device_box(read: PostRead) -> Box | None:
+    """The post's layout device, if it carries one: a band along an edge (at least 60% of one frame edge, under 30% of the other).
+    A small saturated block in a corner is a badge or a pictorial element, not a device, and shapes no family."""
+    for box in read.accent_boxes:
+        w, h = box[2], box[3]
+        if (h >= 0.6 * read.H and w < 0.3 * read.W) or (w >= 0.6 * read.W and h < 0.3 * read.H):
+            return list(box)
+    return None
+
+
 def _accent_side(read: PostRead) -> str:
-    if not read.accent_boxes:
+    box = device_box(read)
+    if box is None:
         return "none"
-    x, y, w, h = read.accent_boxes[0]
-    if h >= 0.6 * read.H and w < 0.3 * read.W:
-        return "left" if x < read.W / 2 else "right"
-    if w >= 0.6 * read.W and h < 0.3 * read.H:
-        return "top" if y < read.H / 2 else "bottom"
-    return "left" if x + w / 2 < read.W / 2 else "right"
+    if box[3] >= 0.6 * read.H:
+        return "left" if box[0] < read.W / 2 else "right"
+    return "top" if box[1] < read.H / 2 else "bottom"
 
 
 def _picture_role(read: PostRead) -> str:
     if not read.picture_boxes:
         return "none"
-    x, y, w, h = read.picture_boxes[0]
+    _x, y, w, h = read.picture_boxes[0]
     cover = (w * h) / (read.W * read.H)
     if cover > 0.8:
         return "full"
     cy = (y + h / 2) / read.H
-    cx = (x + w / 2) / read.W
     if w > 0.7 * read.W:
         return "top" if cy < 0.5 else "bottom"
     if h > 0.5 * read.H:
@@ -121,11 +128,12 @@ def cluster(reads: list[PostRead]) -> list[Family]:
             if m.text.subline_box:
                 slots["subline"].append(_frac(m.text.subline_box, m.W, m.H))
                 src["subline"].append(m.source)
-            if m.picture_boxes:
+            if m.picture_boxes and sig.picture_role != "none":  # a sliver under 4% of the frame is not a picture slot
                 slots["picture"].append(_frac(m.picture_boxes[0], m.W, m.H))
                 src["picture"].append(m.source)
-            if m.accent_boxes:
-                slots["accent"].append(_frac(m.accent_boxes[0], m.W, m.H))
+            dev = device_box(m)
+            if dev is not None:
+                slots["accent"].append(_frac(dev, m.W, m.H))
                 src["accent"].append(m.source)
         fam.slots = {k: _slot_band(v, src[k]) for k, v in slots.items() if v}
         heads = [" ".join(l.text for l in m.text.headline) for m in members if m.text.headline]

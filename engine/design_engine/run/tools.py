@@ -43,7 +43,7 @@ from ..measure.ocr import read_lines
 from ..picture import PictureResult, make_picture
 from ..picture import brief as brief_mod
 from ..picture.brief import BriefRefused
-from ..picture.zone import floor_from_calibration
+from ..picture.zone import ZoneRead, floor_from_calibration
 from ..platform.specs import Size
 
 MAX_OPTIONS = 3
@@ -499,14 +499,54 @@ def plan(ctx: RunContext, options: list[dict]) -> dict:
 # ---- picture ----
 
 
-def quiet_zone(family: dict, slots: tuple[str, ...] = ("headline", "subline", "logo")) -> dict:
-    """The union of the text and logo slots at their median position, as fractions of the frame: what the picture must keep calm."""
-    boxes = [(float(s["x"]), float(s["y"]), float(s["w"]), float(s["h"])) for k, s in (family.get("template") or {}).get("slots", {}).items() if k in slots]
+def quiet_zone(family: dict, slots: tuple[str, ...] = ("headline", "subline", "logo")) -> dict | None:
+    """The part of the picture the text and logo cover, as fractions of the frame: the union of the slots that overlap the family's
+    picture area at their median position. None when the family carries no picture or no text sits on it (a picture above a text
+    panel, say): then nothing in the picture needs to stay calm, and the picture is never judged against a zone."""
+    tpl = family.get("template") or {}
+    role = tpl.get("picture_role", "none")
+    if role == "none":
+        return None
+    tpl_slots = tpl.get("slots", {})
+    if role == "full" or "picture" not in tpl_slots:
+        pic = (0.0, 0.0, 1.0, 1.0)
+    else:
+        ps = tpl_slots["picture"]
+        pic = (float(ps["x"]), float(ps["y"]), float(ps["w"]), float(ps["h"]))
+    boxes = []
+    for k, s_ in tpl_slots.items():
+        if k not in slots:
+            continue
+        b = (float(s_["x"]), float(s_["y"]), float(s_["w"]), float(s_["h"]))
+        ix0, iy0 = max(b[0], pic[0]), max(b[1], pic[1])
+        ix1, iy1 = min(b[0] + b[2], pic[0] + pic[2]), min(b[1] + b[3], pic[1] + pic[3])
+        if ix1 - ix0 > 0.01 and iy1 - iy0 > 0.01:
+            boxes.append((ix0, iy0, ix1 - ix0, iy1 - iy0))
     if not boxes:
-        return {"x": 0.0, "y": 0.0, "w": 1.0, "h": 0.45}
+        return None
     x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
     x1, y1 = max(b[0] + b[2] for b in boxes), max(b[1] + b[3] for b in boxes)
     return {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
+
+
+def arrangements_for(opt: OptionState) -> list:
+    """The arrangements compose tries for an option: every named one for a family arrangement, the median alone otherwise."""
+    return list(place.NAMED) if opt.arrangement == "family" else ["p50"]
+
+
+def picture_reader(ctx: RunContext, opt: OptionState) -> Callable[[Path], ZoneRead]:
+    """Judges a picture exactly as compose will place text on it: the busiest text or logo slot over the option's arrangements,
+    the quietest arrangement deciding. A family whose text never sits on the picture reads 0 and always passes."""
+    cands = arrangements_for(opt)
+
+    def read(path: Path) -> ZoneRead:
+        ranked = place.rank(opt.family, ctx.primary, path, ctx.floor, cands)
+        if not ranked:
+            return ZoneRead(salient_share=0.0, ok=True, floor=float(ctx.floor))
+        best = ranked[0]
+        return ZoneRead(salient_share=best.share, ok=best.ok, floor=float(ctx.floor))
+
+    return read
 
 
 class _FramedClient:
@@ -533,41 +573,47 @@ class _FramedClient:
 
 def picture(ctx: RunContext, option_id: str) -> dict:
     """Two measured pictures for an option through Task 4's make_picture. Every generation is preceded by the budget check and
-    recorded on the option and on spent["credits"]; a picture whose quiet zone stays busy after one regeneration is dropped."""
+    recorded on the option and on spent["credits"]; a picture whose text slots stay busy after one regeneration is dropped. The
+    picture is judged the way compose will place the text on it, so the two never disagree."""
     opt = _option(ctx, option_id)
     client = ctx.clients.get("higgsfield")
     if client is None:
         raise ToolRefused("no Higgsfield client on this run; pictures cannot be made")
     fam = opt.family
     primary = ctx.primary
+    pic_box = place.picture_box(fam, primary, "p50")
+    if pic_box is None:
+        raise ToolRefused(f"family {opt.family_key!r} carries no picture (picture_role none): call compose({opt.id!r}) directly, it renders the "
+                          "ground, the device, the copy and the logo")
     zone = quiet_zone(fam)
     out_dir = ctx.option_dir(opt.id)
     brief = brief_mod.build(ctx.profile, fam, zone, opt.picture_brief, ctx.platform, reads=ctx.reads or None, ref_dir=out_dir / "refs")
     if ctx.host_reference:
         brief.reference_urls = [u for u in (ctx.host_reference(p) for p in brief.reference_paths) if u]
-    pic_box = place.picture_box(fam, primary, "p50")
+    elif hasattr(client, "upload"):  # no public host: the crops go straight into Higgsfield's storage
+        brief.reference_media_ids = [m for m in (client.upload(p) for p in brief.reference_paths) if m]
     pw, ph = round(pic_box[2]), round(pic_box[3])
-    zone_px = [zone["x"] * primary.w, zone["y"] * primary.h, zone["w"] * primary.w, zone["h"] * primary.h]
-    zone_box = place.frame_to_picture(zone_px, pic_box, pw, ph) or [0.0, 0.0, float(pw), float(ph)]
     framed = _FramedClient(client, pw, ph)
+    read = picture_reader(ctx, opt)
     made = []
     while len(opt.ok_pictures) < PICTURES_PER_OPTION and len(made) < PICTURES_PER_OPTION:
         if ctx.spent["credits"] >= ctx.budget.max_credits:
             raise BudgetExceeded(f"credit budget of {ctx.budget.max_credits:g} is spent ({ctx.spent['credits']:g}); compose and submit what exists")
-        result = make_picture(framed, brief, out_dir / "pictures", zone_box, float(ctx.floor))
+        result = make_picture(framed, brief, out_dir / "pictures", read)
         opt.pictures.append(result)
         made.append(result)
         opt.credits += result.credits
         ctx.spent["credits"] += result.credits
     opt.status = "pictured" if opt.ok_pictures else opt.status
-    summary = {"option_id": opt.id, "brief": brief.text, "model": brief.model, "quiet_zone": {k: round(v, 3) for k, v in zone.items()},
+    summary = {"option_id": opt.id, "brief": brief.text, "model": brief.model,
+               "quiet_zone": {k: round(v, 3) for k, v in zone.items()} if zone else None,
                "pictures": [{"status": p.status, "path": str(p.path) if p.path else None, "job_ids": p.job_ids, "credits": p.credits,
                              "zone_reads": [{"salient_share": z.salient_share, "ok": z.ok, "floor": z.floor} for z in p.zone_reads]} for p in made],
                "credits_spent_total": ctx.spent["credits"]}
     if not opt.ok_pictures:
         opt.fix_rounds += 1
         if opt.fix_rounds > FIX_ROUNDS:
-            ctx.drop(opt, "no picture kept a quiet zone after the fix round: " + "; ".join(f"{p.job_ids}: shares {[z.salient_share for z in p.zone_reads]}" for p in opt.pictures))
+            ctx.drop(opt, "no picture kept the text slots quiet after the fix round: " + "; ".join(f"{p.job_ids}: shares {[z.salient_share for z in p.zone_reads]}" for p in opt.pictures))
             summary["status"] = "dropped"
         else:
             summary["status"] = "no_picture"
@@ -629,21 +675,22 @@ def _gate(ctx: RunContext, r: Rendered, size: Size, copy: Mapping, full: bool) -
                                 picture_references=list(ctx.picture_references) if full else None)
 
 
-def _register(ctx: RunContext, opt: OptionState, size: Size, r: Rendered, pic: PictureResult, sha: str) -> None:
-    ctx.files[str(r.png)] = {"option_id": opt.id, "size": size.name, "boxes": r.boxes, "copy": opt.copy, "picture": str(pic.path), "picture_sha": sha}
+def _register(ctx: RunContext, opt: OptionState, size: Size, r: Rendered, pic: PictureResult | None, sha: str) -> None:
+    ctx.files[str(r.png)] = {"option_id": opt.id, "size": size.name, "boxes": r.boxes, "copy": opt.copy, "picture": str(pic.path) if pic else None,
+                             "picture_sha": sha}
 
 
 def compose(ctx: RunContext, option_id: str, arrangement: str | dict | None = None) -> dict:
     """Every size x every kept picture x the family's arrangements (or the one the model names), each rendered and screened by the gate;
     per size the candidate with the best margins is kept. Overflow at the client's floor is reported as the size's failure."""
     opt = _option(ctx, option_id)
-    pics = opt.ok_pictures
-    if not pics:
+    pics: list = opt.ok_pictures
+    no_picture = place.picture_box(opt.family, ctx.primary, "p50") is None
+    if no_picture:
+        pics = [None]  # the family carries no picture: ground, device, copy and logo
+    elif not pics:
         raise ToolRefused(f"option {opt.id} has no picture yet; call picture({opt.id!r}) first")
-    if arrangement:
-        cands: list = [arrangement]
-    else:
-        cands = list(place.NAMED) if opt.arrangement == "family" else ["p50"]
+    cands: list = [arrangement] if arrangement else arrangements_for(opt)
     report: dict[str, dict] = {}
     opt.renders.clear()
     opt.failures.clear()
@@ -651,8 +698,11 @@ def compose(ctx: RunContext, option_id: str, arrangement: str | dict | None = No
         best: dict | None = None
         notes: list[str] = []
         for pi, pic in enumerate(pics):
-            sha = _sha(pic.path)
-            ranked = place.rank(opt.family, size, pic.path, ctx.floor, cands)
+            sha = _sha(pic.path) if pic is not None else "none"
+            if pic is None:
+                ranked = place.rank(opt.family, size, {str(c if isinstance(c, str) else c.get("name", "custom")): ZoneRead(0.0, ok=True, floor=float(ctx.floor)) for c in cands}, ctx.floor, cands)
+            else:
+                ranked = place.rank(opt.family, size, pic.path, ctx.floor, cands)
             if not any(a.ok for a in ranked):
                 notes.append(f"picture {pi + 1}: every arrangement is busy under the text (shares {[a.share for a in ranked]} above {ctx.floor})")
             for arr in ranked:
@@ -660,7 +710,7 @@ def compose(ctx: RunContext, option_id: str, arrangement: str | dict | None = No
                     continue
                 out_dir = ctx.option_dir(opt.id) / "candidates" / f"{size.name}-p{pi + 1}-{arr.name}"
                 try:
-                    r = assemble(ctx.profile, opt.family, size, pic.path, opt.copy, arr, None, None, ctx.fonts, ctx.logo_files, out_dir,
+                    r = assemble(ctx.profile, opt.family, size, pic.path if pic is not None else None, opt.copy, arr, None, None, ctx.fonts, ctx.logo_files, out_dir,
                                  floors={}, accent_hex=(opt.family.get("parameters") or {}).get("accent_hex"), browser=ctx.browser)
                 except OverflowError as e:
                     notes.append(str(e))
@@ -668,7 +718,7 @@ def compose(ctx: RunContext, option_id: str, arrangement: str | dict | None = No
                 _register(ctx, opt, size, r, pic, sha)
                 g = _gate(ctx, r, size, opt.copy, full=False)
                 score = margin_sum(g.measurements, ctx.profile, size)
-                cand = {"rendered": r, "gate": g, "picture": pic, "picture_index": pi + 1, "picture_sha": sha, "margin": score, "arrangement": arr.name,
+                cand = {"rendered": r, "gate": g, "picture": pic, "picture_index": pi + 1 if pic is not None else None, "picture_sha": sha, "margin": score, "arrangement": arr.name,
                         "shares": arr.shares}
                 if best is None or (g.passed, score) > (best["gate"].passed, best["margin"]):
                     best = cand
@@ -791,5 +841,23 @@ def submit(ctx: RunContext, option_ids: list[str]) -> dict:
             "credits": ctx.spent["credits"], "message": "the run is complete; reply with one line and stop"}
 
 
-__all__ = ["Budget", "BudgetExceeded", "OptionState", "RunContext", "ToolRefused", "compose", "margin_sum", "margins", "measure",
-           "nearest_posts", "new_family", "picture", "plan", "quiet_zone", "read_brand", "submit"]
+__all__ = [
+    "Budget",
+    "BudgetExceeded",
+    "OptionState",
+    "RunContext",
+    "ToolRefused",
+    "arrangements_for",
+    "compose",
+    "margin_sum",
+    "margins",
+    "measure",
+    "nearest_posts",
+    "new_family",
+    "picture",
+    "picture_reader",
+    "plan",
+    "quiet_zone",
+    "read_brand",
+    "submit",
+]

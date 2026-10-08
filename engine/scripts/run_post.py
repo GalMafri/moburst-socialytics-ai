@@ -181,6 +181,8 @@ def text_zones(families: list[dict], size: specs.Size) -> list[list[float]]:
     zones = []
     for fam in top:
         z = quiet_zone(fam)
+        if z is None:  # the family's text never sits on its picture
+            continue
         zones.append([z["x"] * size.w, z["y"] * size.h, z["w"] * size.w, z["h"] * size.h])
     return zones or [[0.0, 0.0, float(size.w), size.h * 0.45]]
 
