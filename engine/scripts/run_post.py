@@ -264,11 +264,14 @@ class DryRunClient(FakeClient):
         if zone is not None:
             share_before = zone_mod.read(_tmp_png(im), zone, self.floor).salient_share
             if share_before > self.floor:
+                # calm the zone the way a generated picture would be calm there: the same photo, out of focus and darker, not a flat fill
+                from PIL import ImageEnhance, ImageFilter
+
                 x, y, w, h = (round(v) for v in zone)
-                arr = np.asarray(im).copy()
-                region = arr[y:y + h, x:x + w]
-                arr[y:y + h, x:x + w] = np.median(region.reshape(-1, 3), axis=0).astype(np.uint8)
-                im = Image.fromarray(arr)
+                region = im.crop((x, y, x + w, y + h)).filter(ImageFilter.GaussianBlur(radius=max(6, round(0.04 * min(self.w, self.h)))))
+                region = ImageEnhance.Brightness(region).enhance(0.45)
+                im = im.copy()
+                im.paste(region, (x, y))
                 flattened = True
         out = Path(out)
         out.parent.mkdir(parents=True, exist_ok=True)

@@ -95,6 +95,7 @@ def _frac(box, W, H) -> dict:
 
 
 def _slot_band(fracs: list[dict], sources: list[str]) -> dict:
+    """The slot's band across the family: the medians, the p25/p75 of each coordinate, the count and the sources."""
     out = {}
     for k in ("x", "y", "w", "h"):
         vals = [f[k] for f in fracs]
@@ -103,6 +104,46 @@ def _slot_band(fracs: list[dict], sources: list[str]) -> dict:
         out.setdefault("band", {})[k] = {"p25": b["p25"], "p75": b["p75"]}
     out["n"] = len(fracs)
     out["sources"] = list(sources)
+    return out
+
+
+def exemplar_order(per_member: list[dict[str, dict]], medians: dict[str, dict]) -> list[int]:
+    """Members ordered by how close their whole geometry sits to the family's slot medians (the medoid first): the exemplar whose
+    slots the template takes, then the next nearest, whose geometries are the family's other arrangements. A slot median composed
+    from different posts is a layout nobody published; an exemplar's slots were published together."""
+    def distance(slots: dict[str, dict]) -> float:
+        d, n = 0.0, 0
+        for k, med in medians.items():
+            b = slots.get(k)
+            if b is None:
+                d += 1.0  # a member without the slot is far from the family on it
+                continue
+            d += sum(abs(b[c] - med[c]) for c in ("x", "y", "w", "h"))
+            n += 1
+        return d / max(1, len(medians))
+
+    return sorted(range(len(per_member)), key=lambda i: distance(per_member[i]))
+
+
+def _exemplar_slots(per_member: list[dict[str, dict]], order: list[int], bands: dict[str, dict]) -> dict[str, dict]:
+    """Slots as the exemplar published them, the next two exemplars' boxes as the p25/p75 arrangements, the family band kept for
+    the record. A slot the exemplar lacks takes the nearest member that has it."""
+    out: dict[str, dict] = {}
+    for k, b in bands.items():
+        havers = [i for i in order if k in per_member[i]]
+        if not havers:
+            continue
+        first = per_member[havers[0]][k]
+        alts = [per_member[i][k] for i in havers[1:3]]
+        slot = {c: float(first[c]) for c in ("x", "y", "w", "h")}
+        slot["band"] = {c: {"p25": float(alts[0][c]) if alts else float(first[c]), "p75": float(alts[1][c]) if len(alts) > 1 else (float(alts[0][c]) if alts else float(first[c]))}
+                        for c in ("x", "y", "w", "h")}
+        slot["family_band"] = b["band"]
+        slot["median"] = {c: b[c] for c in ("x", "y", "w", "h")}
+        slot["n"] = b["n"]
+        slot["sources"] = b["sources"]
+        slot["exemplar"] = havers[0]
+        out[k] = slot
     return out
 
 
@@ -118,29 +159,33 @@ def cluster(reads: list[PostRead]) -> list[Family]:
         fam = Family(key, sig, post_ids, seen, "family" if seen >= 2 else "seen_once", sources=[m.source for m in members])
         slots: dict[str, list[dict]] = {"logo": [], "headline": [], "subline": [], "footer": [], "picture": [], "accent": []}
         src: dict[str, list[str]] = {k: [] for k in slots}
+        per_member: list[dict[str, dict]] = []
         for m in members:
+            per_member.append({})
             if m.logo:
-                slots["logo"].append(_frac(m.logo.box, m.W, m.H))
-                src["logo"].append(m.source)
+                per_member[-1]["logo"] = _frac(m.logo.box, m.W, m.H)
             if m.text.headline_box:
-                slots["headline"].append(_frac(m.text.headline_box, m.W, m.H))
-                src["headline"].append(m.source)
+                per_member[-1]["headline"] = _frac(m.text.headline_box, m.W, m.H)
             if m.text.subline_box:
-                slots["subline"].append(_frac(m.text.subline_box, m.W, m.H))
-                src["subline"].append(m.source)
+                per_member[-1]["subline"] = _frac(m.text.subline_box, m.W, m.H)
             if getattr(m.text, "footer_box", None):
-                slots["footer"].append(_frac(m.text.footer_box, m.W, m.H))
-                src["footer"].append(m.source)
+                per_member[-1]["footer"] = _frac(m.text.footer_box, m.W, m.H)
             if m.picture_boxes and sig.picture_role != "none":  # a sliver under 4% of the frame is not a picture slot
-                slots["picture"].append(_frac(m.picture_boxes[0], m.W, m.H))
-                src["picture"].append(m.source)
+                per_member[-1]["picture"] = _frac(m.picture_boxes[0], m.W, m.H)
             dev = device_box(m)
             if dev is not None:
-                slots["accent"].append(_frac(dev, m.W, m.H))
-                src["accent"].append(m.source)
+                per_member[-1]["accent"] = _frac(dev, m.W, m.H)
+            for k, v in per_member[-1].items():
+                slots[k].append(v)
+                src[k].append(m.source)
         if len(slots["footer"]) < max(1, len(members) / 2):  # a footer is a family trait only when most members carry one
             slots["footer"], src["footer"] = [], []
-        fam.slots = {k: _slot_band(v, src[k]) for k, v in slots.items() if v}
+            for pm in per_member:
+                pm.pop("footer", None)
+        bands_ = {k: _slot_band(v, src[k]) for k, v in slots.items() if v}
+        order = exemplar_order(per_member, {k: {c: b[c] for c in ("x", "y", "w", "h")} for k, b in bands_.items()})
+        fam.slots = _exemplar_slots(per_member, order, bands_)
+        fam.parameters["exemplars"] = [members[i].source for i in order[:3]]
         heads = [" ".join(l.text for l in m.text.headline) for m in members if m.text.headline]
         head_lines = [len(m.text.headline) for m in members if m.text.headline]
         pic_ratio = []
@@ -148,7 +193,9 @@ def cluster(reads: list[PostRead]) -> list[Family]:
             if m.picture_boxes and m.text.headline_box:
                 pic_ratio.append((m.picture_boxes[0][2] * m.picture_boxes[0][3]) / max(1.0, m.text.headline_box[2] * m.text.headline_box[3]))
         variants = [m.logo.variant for m in members if m.logo]
+        exemplars = fam.parameters.get("exemplars", [])
         fam.parameters = {
+            "exemplars": exemplars,
             "alignment": sig.text_align,
             "headline_chars": band([len(h) for h in heads], [m.source for m in members if m.text.headline]),
             "headline_lines": band([float(n) for n in head_lines], [m.source for m in members if m.text.headline]),
