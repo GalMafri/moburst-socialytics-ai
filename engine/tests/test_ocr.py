@@ -63,3 +63,11 @@ def test_vision_reads_fixture(tmp_path):
     drawn = boxes["headline_0"]
     assert abs(hits[0].box[1] - drawn[1]) < 0.5 * drawn[3]
     assert abs(hits[0].box[0] - drawn[0]) < 0.5 * drawn[3]
+
+
+def test_two_letter_lines_are_furniture_not_headline():
+    from design_engine.measure.text_lines import classify
+
+    lines = [Line("VS", [500, 600, 120, 160], 1.0), Line("TOKYO NEON", [100, 900, 300, 60], 1.0), Line("MUMBAI MONSOON", [600, 900, 380, 60], 1.0)]
+    r = classify(lines, 1080, 1350)
+    assert [l.text for l in r.headline] == ["TOKYO NEON", "MUMBAI MONSOON"] and r.other[0].text == "VS"

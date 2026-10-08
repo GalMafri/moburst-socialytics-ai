@@ -334,12 +334,18 @@ def main():
     if site_accents and arrays:
         sample = np.concatenate([a.reshape(-1, 3)[:: max(1, a.shape[0] * a.shape[1] // 20000)] for a in arrays]).astype(np.float64)
         best_share = 0.0
+        best_key = -1.0
+        ground_cols = [np.array([int(sw.hex[i:i + 2], 16) for i in (1, 3, 5)], dtype=np.float64) for sw in pal if sw.role == "ground"]
         for h in site_accents:
             col = np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], dtype=np.float64)
             share = float((np.linalg.norm(sample - col, axis=1) < 40).mean())
-            print(f"site accent {h}: {share:.3%} of designed-post pixels")
-            if share >= 0.003 and share > best_share:
-                best_share, chosen_accent = share, h
+            is_ground = any(np.linalg.norm(col - g) < 60 for g in ground_cols)
+            sat = (col.max() - col.min()) / max(col.max(), 1.0)
+            print(f"site accent {h}: {share:.3%} of designed-post pixels, saturation {sat:.2f}{', reads as the ground' if is_ground else ''}")
+            # an accent is a minority, saturated colour: the ground itself never qualifies, and among the rest the most saturated
+            # colour the posts actually use wins
+            if share >= 0.003 and not is_ground and sat > best_key:
+                best_key, best_share, chosen_accent = sat, share, h
     if chosen_accent:
         from design_engine.learn.palette import Swatch
 
