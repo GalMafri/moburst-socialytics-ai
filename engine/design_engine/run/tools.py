@@ -651,7 +651,8 @@ def picture(ctx: RunContext, option_id: str) -> dict:
                           "ground, the device, the copy and the logo")
     zone = quiet_zone(fam)
     out_dir = ctx.option_dir(opt.id)
-    brief = brief_mod.build(ctx.profile, fam, zone, opt.picture_brief, ctx.platform, reads=ctx.reads or None, ref_dir=out_dir / "refs")
+    brief = brief_mod.build(ctx.profile, fam, zone, opt.picture_brief, ctx.platform, reads=ctx.reads or None, ref_dir=out_dir / "refs",
+                            picture_aspect=(pic_box[2] / pic_box[3]) if pic_box[3] > 0 else None)
     if ctx.host_reference:
         brief.reference_urls = [u for u in (ctx.host_reference(p) for p in brief.reference_paths) if u]
     elif hasattr(client, "upload"):  # no public host: the crops go straight into Higgsfield's storage

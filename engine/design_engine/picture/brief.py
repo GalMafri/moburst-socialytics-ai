@@ -160,7 +160,8 @@ USE_REFERENCES = False  # the client's own crops fed as image references were pa
 
 
 def build(profile: dict, family: dict, slot_zone: dict | None, concept: str, platform: str, reads: list | None = None,
-          ref_dir: Path | None = None, legible_objects: bool = False, use_references: bool = USE_REFERENCES) -> Brief:
+          ref_dir: Path | None = None, legible_objects: bool = False, use_references: bool = USE_REFERENCES,
+          picture_aspect: float | None = None) -> Brief:
     """The brief for one picture: the concept in the brand's imagery language, the palette as words, the quiet zone named, the aspect
     from the family; refused before anything else when the concept names a logo, text or the brand."""
     brand = profile.get("client_name") or None
@@ -192,7 +193,9 @@ def build(profile: dict, family: dict, slot_zone: dict | None, concept: str, pla
     if slot_zone:
         side, other, _pct = zone_sides(slot_zone)
         zone_side = (f"{side} part", f"{other} part")
-    ratio = (family.get("parameters") or {}).get("aspect")
+    # the picture is asked for at the shape it will fill (the family's picture slot at this size), so object-fit cover crops nothing
+    # that matters; the family's frame aspect only when no slot shape is known
+    ratio = picture_aspect if isinstance(picture_aspect, (int, float)) and picture_aspect > 0 else (family.get("parameters") or {}).get("aspect")
     aspect = nearest_aspect(float(ratio)) if isinstance(ratio, (int, float)) and ratio > 0 else "4:5"
     if legible_objects and imagery.get("people") == "none":
         model, params = OBJECT_MODEL, {"model": OBJECT_MODEL, "aspect_ratio": aspect, "resolution": DEFAULT_RESOLUTION, "quality": OBJECT_QUALITY,
