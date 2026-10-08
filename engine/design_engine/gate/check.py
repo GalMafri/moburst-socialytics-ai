@@ -31,8 +31,8 @@ TALL_FRAME_ASPECT = 0.7
 TALL_FRAME_LOGO_FACTOR = 1.15
 NEAR_COPY_WHOLE = 40  # the reference's thresholds: same skeleton, used as a warning here (a family shares its skeleton by design)
 NEAR_COPY_HALF = 20
-PIXEL_COPY_WHOLE = 12  # near-identical pixels: a copy, whatever the words say
-PIXEL_COPY_HALF = 8
+PIXEL_COPY_WHOLE = 12  # near-identical pixels over the whole frame: a copy, whatever the words say. A half can be identical by design
+# (the skeleton half with the logo and the bar), so halves only feed the warning.
 SUBJECT_OVERLAP_MAX = 0.01
 TEXT_SLOTS = ("headline", "subline")
 
@@ -265,8 +265,8 @@ def check(png: Path, boxes: dict, profile: dict, size: SizeLike | Mapping, refer
     m["near_copy"] = {"min_whole": nc.min_whole, "min_half": nc.min_half, "same_skeleton": nc.is_copy, "index": nc.index} if nc else {"same_skeleton": False}
     if nc and nc.index is not None:
         path, kind = pool[nc.index]
-        if nc.min_whole <= PIXEL_COPY_WHOLE or nc.min_half <= PIXEL_COPY_HALF:
-            fails.append(f"pixel copy of {kind} {path.name}: whole-frame distance {nc.min_whole}, half-frame {nc.min_half}")
+        if nc.min_whole <= PIXEL_COPY_WHOLE:
+            fails.append(f"pixel copy of {kind} {path.name}: whole-frame distance {nc.min_whole} is within {PIXEL_COPY_WHOLE}")
         elif nc.is_copy:
             warns.append(f"same skeleton as {kind} {path.name} (whole-frame distance {nc.min_whole}); the picture and the words must carry the difference")
     pic_box = boxes.get("picture")
