@@ -147,7 +147,7 @@ def _ground(arr: np.ndarray, exclude: list[Box]) -> dict:
     return {"kind": "photo", "hex": _hex(med_rgb), "coverage": float(mask.mean())}
 
 
-def _texture_mask(arr: np.ndarray, cell: int = 16, thresh: float = 0.035) -> np.ndarray:
+def _texture_mask(arr: np.ndarray, cell: int = 16, thresh: float = 0.06) -> np.ndarray:
     """Cells whose luminance varies more than flat type or colour fields do: photographs, renders, textured grounds."""
     H, W = arr.shape[:2]
     lum = rel_lum(arr)

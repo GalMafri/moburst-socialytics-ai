@@ -104,7 +104,8 @@ def render(profile: dict, reads: list[PostRead], out_path: Path, type_sheet: Pat
 
     # families with posts
     by_source = {r.source: r for r in reads}
-    for fam in profile["families"]:
+    shown = [f for f in profile["families"] if f["status"] == "family"][:12]
+    for fam in shown:
         members = [by_source[s] for s in fam["source"] if s in by_source][:6]
         thumbs = []
         for r in members:

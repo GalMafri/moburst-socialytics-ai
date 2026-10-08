@@ -99,6 +99,43 @@ def font_library(work_root: Path) -> list[Path]:
     return [lib / n for n in names]
 
 
+def dump_read(r) -> dict:
+    return {"path": str(r.path), "source_post_id": r.source_post_id, "platform": r.platform, "posted_at": r.posted_at, "slide_index": r.slide_index,
+            "kind": r.kind, "W": r.W, "H": r.H, "lines": [asdict(l) for l in r.lines], "logo": asdict(r.logo) if r.logo else None,
+            "picture_boxes": r.picture_boxes, "ground": r.ground, "accent_boxes": r.accent_boxes, "designed": is_designed(r)}
+
+
+def load_reads(cache: Path) -> list:
+    from design_engine.learn.layers import PostRead
+    from design_engine.measure.logo import LogoMatch
+    from design_engine.measure.ocr import Line
+    from design_engine.measure.text_lines import classify
+
+    reads = []
+    for d in json.loads(cache.read_text()):
+        lines = [Line(**l) for l in d.get("lines", [])] or [Line(**l) for l in d.get("headline", []) + d.get("subline", [])]
+        logo = LogoMatch(**d["logo"]) if d.get("logo") else None
+        text = classify(lines, d["W"], d["H"], exclude_boxes=[logo.box] if logo else ())
+        reads.append(PostRead(Path(d["path"]), d["W"], d["H"], lines, text, logo, d.get("picture_boxes", []), d.get("ground", {}),
+                              d.get("accent_boxes", []), d.get("source_post_id", ""), d.get("platform", ""), d.get("posted_at", ""),
+                              int(d.get("slide_index", 0)), d.get("kind", "post")))
+    return reads
+
+
+def type_samples(designed, n=4):
+    """Headline lines fit to measure a typeface on: horizontal, mostly letters, readable size, high OCR confidence, from different posts."""
+    cands = []
+    for r in designed:
+        short = min(r.W, r.H)
+        for l in r.text.headline[:1]:
+            x, y, w, h = l.box
+            letters = sum(c.isalpha() for c in l.text)
+            if w / max(1.0, h) >= 3 and letters >= 6 and letters >= 0.7 * len(l.text.replace(" ", "")) and 0.03 * short <= h <= 0.15 * short and l.confidence >= 0.9:
+                cands.append((letters, r.path, l.box, l.text))
+    cands.sort(key=lambda c: -c[0])
+    return [(p, b, t) for _, p, b, t in cands[:n]]
+
+
 def is_designed(read) -> bool:
     """Measured criterion for a designed still: the brand's logo is on it, or it carries set type of readable size."""
     short = min(read.W, read.H)
@@ -114,6 +151,7 @@ def main():
     ap.add_argument("--skip-matting", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--ocr", default=None)
+    ap.add_argument("--from-cache", action="store_true", help="reuse out/reads.json instead of reading the posts again")
     args = ap.parse_args()
     cfg = settings()
     slug = slugify(args.client)
@@ -197,36 +235,40 @@ def main():
 
     reads = []
     designed = []
-    for i, p in enumerate(posts + [None] * len(upload_posts)):
-        if p is None:
-            u = upload_posts[i - len(posts)]
-            path, meta = ws.root / u["path"], {"source_post_id": u["source"], "kind": "upload"}
-        else:
-            path, meta = p.path, {"source_post_id": p.source_post_id, "platform": p.platform, "posted_at": p.posted_at, "slide_index": p.slide_index, "kind": p.kind}
-        try:
-            r = read_post(path, None, ocr=ocr, matting=not args.skip_matting, meta=meta)
-            if templates:
-                arr = load_rgb(path)
-                r.logo = find_logo_any(arr, templates, min(r.W, r.H))
-                if r.logo:
-                    r.logo = type(r.logo)(r.logo.score, r.logo.box, r.logo.height_share, r.logo.variant.split(":")[-1])
-                if r.logo:  # re-classify text with the logo excluded, as read_post does when the template is given up front
-                    from design_engine.measure.text_lines import classify
+    cache = out / "reads.json"
+    if args.from_cache and cache.exists():
+        reads = load_reads(cache)
+        designed = [r for r in reads if is_designed(r)]
+        print(f"loaded {len(reads)} reads from cache")
+    else:
+        for i, p in enumerate(posts + [None] * len(upload_posts)):
+            if p is None:
+                u = upload_posts[i - len(posts)]
+                path, meta = ws.root / u["path"], {"source_post_id": u["source"], "kind": "upload"}
+            else:
+                path, meta = p.path, {"source_post_id": p.source_post_id, "platform": p.platform, "posted_at": p.posted_at, "slide_index": p.slide_index, "kind": p.kind}
+            try:
+                r = read_post(path, None, ocr=ocr, matting=not args.skip_matting, meta=meta)
+                if templates:
+                    arr = load_rgb(path)
+                    r.logo = find_logo_any(arr, templates, min(r.W, r.H))
+                    if r.logo:
+                        r.logo = type(r.logo)(r.logo.score, r.logo.box, r.logo.height_share, r.logo.variant.split(":")[-1])
+                        from design_engine.measure.text_lines import classify
 
-                    r.text = classify(r.lines, r.W, r.H, exclude_boxes=[r.logo.box])
-        except Exception as e:
-            print(f"read failed {path.name}: {e}")
-            continue
-        reads.append(r)
-        if is_designed(r):
-            designed.append(r)
-        if (i + 1) % 25 == 0:
-            print(f"  read {i + 1}/{len(posts) + len(upload_posts)} ({len(designed)} designed) {time.time() - t0:.0f}s")
+                        r.text = classify(r.lines, r.W, r.H, exclude_boxes=[r.logo.box])
+            except Exception as e:  # noqa: BLE001  one unreadable file must not stop the learner; it is reported
+                print(f"read failed {path.name}: {e}")
+                continue
+            reads.append(r)
+            if is_designed(r):
+                designed.append(r)
+            if (i + 1) % 25 == 0:
+                print(f"  read {i + 1}/{len(posts) + len(upload_posts)} ({len(designed)} designed) {time.time() - t0:.0f}s")
     print(f"posts read: {len(reads)}, designed: {len(designed)}, with logo: {sum(1 for r in designed if r.logo)}")
     (out / "reads.json").parent.mkdir(parents=True, exist_ok=True)
-    (out / "reads.json").write_text(json.dumps([{"path": str(r.path), "source": r.source, "W": r.W, "H": r.H, "logo": asdict(r.logo) if r.logo else None,
-        "headline": [asdict(l) for l in r.text.headline], "subline": [asdict(l) for l in r.text.subline], "picture_boxes": r.picture_boxes,
-        "ground": r.ground, "accent_boxes": r.accent_boxes, "designed": is_designed(r)} for r in reads], indent=1))
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "reads.json").write_text(json.dumps([dump_read(r) for r in reads], indent=1))
 
     # 3. palette and pairs
     arrays = [load_rgb(r.path) for r in designed]
@@ -236,22 +278,43 @@ def main():
     pair_rows = []
     seen = set()
     for r, arr, tb in zip(designed, arrays, text_boxes):
+        if r.ground.get("kind") not in ("flat", "gradient"):
+            continue
         for pr in observed_pairs(arr, tb):
             k = (pr.ink_hex, pr.ground_hex)
             if k in seen:
                 continue
             seen.add(k)
             pair_rows.append(type("P", (), {"ink_hex": pr.ink_hex, "ground_hex": pr.ground_hex, "contrast": pr.contrast, "source": r.source})())
+    # the accent is what the brand's devices are painted with, measured on the device boxes, never the most saturated pixel of a photo
+    device_cols = []
+    for r, arr in zip(designed, arrays):
+        for b in r.accent_boxes[:2]:
+            x, y, w, h = [int(round(v)) for v in b]
+            region = arr[max(0, y):y + h, max(0, x):x + w].reshape(-1, 3)
+            if region.size:
+                device_cols.append(np.median(region, axis=0))
+    if device_cols:
+        dev = np.median(np.asarray(device_cols), axis=0)
+        dev_hex = "#%02x%02x%02x" % tuple(int(v) for v in dev)
+        from design_engine.learn.palette import Swatch
+
+        def dist(h):
+            a = np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)])
+            return float(np.linalg.norm(a - dev))
+
+        nearest = min(range(len(pal)), key=lambda i: dist(pal[i].hex)) if pal else None
+        pal = [Swatch(sw.hex, sw.share, "other" if sw.role == "accent" else sw.role) for sw in pal]
+        if nearest is not None and dist(pal[nearest].hex) < 60:
+            pal[nearest] = Swatch(pal[nearest].hex, pal[nearest].share, "accent")
+        else:
+            pal.append(Swatch(dev_hex, 0.0, "accent"))
+        print(f"device colour {dev_hex} from {len(device_cols)} device boxes")
     print(f"palette: {[(s.hex, s.role) for s in pal[:6]]}; pairs: {len(pair_rows)}")
 
     # 4. type: the brand's own files first, the library only to name candidates
-    samples = []
-    for r in sorted(designed, key=lambda r: -(r.text.headline[0].box[3] if r.text.headline else 0)):
-        if r.text.headline and len(r.text.headline[0].text.strip()) >= 6:
-            l = r.text.headline[0]
-            samples.append((r.path, l.box, l.text))
-        if len(samples) >= 4:
-            break
+    samples = type_samples(designed)
+    print(f"type samples: {[t for _, _, t in samples]}")
     type_match = None
     if samples:
         if own_fonts:

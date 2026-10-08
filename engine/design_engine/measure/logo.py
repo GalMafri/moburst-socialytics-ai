@@ -51,24 +51,27 @@ def find_logo(arr: np.ndarray, logo_gray: np.ndarray, short_edge: int, min_score
         scale_img = 1.0
     lh0, lw0 = logo_gray.shape
     best, best_box = 0.0, None
+    from skimage.feature import match_template
+
+    lum64 = lum.astype(np.float64)  # match_template must run in float64: float32 returns scores above 1
     for share in SCALES:
         th_ = max(6, int(short_edge * scale_img * share))
         tw_ = max(6, int(lw0 * th_ / lh0))
         if th_ >= H or tw_ >= W:
             continue
-        t = np.asarray(Image.fromarray(logo_gray.astype(np.uint8)).resize((tw_, th_))).astype(np.float32)
-        t = t - t.mean()
-        tn = np.linalg.norm(t) or 1.0
-        stride = max(2, th_ // 4)
-        for y in range(0, H - th_, stride):
-            for x in range(0, W - tw_, stride):
-                w = lum[y : y + th_, x : x + tw_]
-                w = w - w.mean()
-                wn = np.linalg.norm(w) or 1.0
-                c = float((w * t).sum() / (wn * tn))
-                if c > best:
-                    best, best_box = c, (x, y, tw_, th_)
-    if best_box is None:
+        t = np.asarray(Image.fromarray(logo_gray.astype(np.uint8)).resize((tw_, th_))).astype(np.float64)
+        if t.std() < 1e-6:
+            continue
+        # the same normalised cross-correlation as the reference's window loop, over every position instead of a stride
+        corr = match_template(lum64, t)
+        if corr.size == 0:
+            continue
+        idx = int(np.argmax(corr))
+        c = float(corr.flat[idx])
+        if c > best:
+            y, x = np.unravel_index(idx, corr.shape)
+            best, best_box = c, (int(x), int(y), tw_, th_)
+    if best_box is None or not np.isfinite(best):
         return None
     # Coarse-to-fine: the nine rungs are up to 12% apart in height, which alone costs a tenth of the score on an exact lockup.
     # Refine around the best rung over local scales and a one-stride neighbourhood before judging against the floor.

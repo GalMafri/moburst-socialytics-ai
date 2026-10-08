@@ -16,7 +16,7 @@ from PIL import Image
 
 LONG_EDGE = 768
 JPEG_QUALITY = 85
-MAX_TOKENS = 2000
+MAX_TOKENS = 6000
 PEOPLE_VALUES = ("real_only", "none", "generated_ok")
 PEOPLE_KINDS = ("people", "person", "headshot", "portrait", "team", "founder", "staff", "face")
 
@@ -76,6 +76,8 @@ def describe_imagery(post_paths: list[Path], client_name: str, model: str = "cla
         content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": encode_for_vision(p)}})
     content.append({"type": "text", "text": INSTRUCTIONS.format(n=len(paths), client=client_name, last=len(paths) - 1)})
     resp = client.messages.create(model=model, max_tokens=MAX_TOKENS, system=SYSTEM, messages=[{"role": "user", "content": content}])
+    if getattr(resp, "stop_reason", None) == "max_tokens":
+        raise ValueError(f"imagery reply was cut at {MAX_TOKENS} tokens; the model must answer in fewer items")
     text = "".join(getattr(b, "text", "") for b in resp.content)
     data = parse_json_block(text)
     return build_imagery(data, len(paths), model=model, raw=text)

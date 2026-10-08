@@ -66,7 +66,8 @@ def build(client: dict, site: SiteRead | None, uploads: list[dict], reads: list[
                      "never": imagery.never, "source": f"measured:vision read of {imagery.post_count} posts, items kept only with post evidence"}
                     if imagery else {"items": [], "people": "unknown", "source": "measured:not run"}),
         "voice": {"pillars": client.get("content_pillars") or [], "notes": client.get("brand_notes") or "", "source": "client:clients row"},
-        "calibration": {**calibration, "source": f"measured:calibrate over {calibration.get('measured_on', 0)} posts"},
+        "calibration": {**{k: ({**v, "source": "measured:calibrate"} if isinstance(v, dict) else v) for k, v in calibration.items()},
+                        "source": f"measured:calibrate over {calibration.get('measured_on', 0)} posts"},
     }
     return profile
 

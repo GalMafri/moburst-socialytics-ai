@@ -25,7 +25,8 @@ class Signature:
 
     @property
     def key(self) -> str:
-        return "|".join([self.text_third, self.text_align, self.logo_corner, self.accent_side, self.picture_role, self.ground_kind])
+        # the skeleton only: where text, logo, device and picture sit. The ground kind is a family parameter, not a different layout.
+        return "|".join([self.text_third, self.text_align, self.logo_corner, self.accent_side, self.picture_role])
 
 
 @dataclass
@@ -94,6 +95,7 @@ def _slot_band(fracs: list[dict], sources: list[str]) -> dict:
         out[k] = b["p50"]
         out.setdefault("band", {})[k] = {"p25": b["p25"], "p75": b["p75"]}
     out["n"] = len(fracs)
+    out["sources"] = list(sources)
     return out
 
 
@@ -145,7 +147,8 @@ def cluster(reads: list[PostRead]) -> list[Family]:
         }
         fam.template = {
             "slots": fam.slots,
-            "ground": {"kind": sig.ground_kind, "hex": fam.parameters["ground_hex"][0] if fam.parameters["ground_hex"] else None},
+            "ground": {"kinds": sorted({m.ground.get("kind", "photo") for m in members}),
+                       "hex": fam.parameters["ground_hex"][0] if fam.parameters["ground_hex"] else None, "sources": [m.source for m in members]},
             "devices": [{"kind": "accent", "side": sig.accent_side}] if slots["accent"] else [],
             "alignment": sig.text_align,
             "picture_role": sig.picture_role,
