@@ -31,3 +31,21 @@ def test_finds_logo_at_known_place(tmp_path):
 def test_no_logo_returns_zero(tmp_path):
     frame = np.full((1350, 1080, 3), 30, dtype=np.uint8)
     assert find_logo(frame, logo_gray_from_file(lockup(tmp_path)), 1080) is None
+
+
+def test_white_wordmark_on_navy_is_found_with_dark_template(tmp_path):
+    from design_engine.measure.logo import find_logo_any, logo_templates_from_file
+
+    im = Image.new("RGBA", (400, 100), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rectangle([0, 0, 90, 90], fill=(220, 40, 40, 255))
+    for i in range(6):  # a wordmark of six white "letters" with gaps, not one slab
+        d.rectangle([110 + i * 46, 20, 110 + i * 46 + 34, 70], fill=(255, 255, 255, 255))
+    p = tmp_path / "logo-white.png"
+    im.save(p)
+    frame = Image.new("RGB", (1080, 1350), (14, 27, 46))
+    lg = im.resize((324, 81))
+    frame.paste(lg, (100, 120), lg)
+    m = find_logo_any(np.asarray(frame), logo_templates_from_file(p), 1080)
+    assert m is not None and m.variant == "on_dark"
+    assert abs(m.box[0] - 100) < 30 and abs(m.box[1] - 120) < 30
