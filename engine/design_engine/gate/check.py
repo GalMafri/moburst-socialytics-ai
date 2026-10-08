@@ -213,6 +213,8 @@ def check(png: Path, boxes: dict, profile: dict, size: SizeLike | Mapping, refer
         if not box:
             if slot == "headline":
                 fails.append("headline is missing: no headline box on the render")
+            elif (copy or {}).get(slot):
+                fails.append(f"{slot} is missing: the copy carries a {slot} but the render has no {slot} box")
             continue
         region = crop(arr, box)
         if region is None:

@@ -20,8 +20,8 @@ from ..platform.specs import Size
 from .template import frame_boxes
 
 NAMED = ("p50", "p25", "p75")  # the median first: on a tie the brand's most observed position keeps the place
-PLACED = ("headline", "subline", "logo")  # the slots an arrangement moves and the saliency is read under
-TEXT_SLOTS = ("headline", "subline")
+PLACED = ("headline", "subline", "footer", "logo")  # the slots an arrangement moves and the saliency is read under
+TEXT_SLOTS = ("headline", "subline", "footer")
 BUSY_MAX = 0.11  # the gate's busy-ground ceiling under copy (gate.check.BUSY_MAX reads this value)
 Reader = Callable[[str, dict[str, Box]], "ZoneRead | float | Mapping[str, float]"]
 

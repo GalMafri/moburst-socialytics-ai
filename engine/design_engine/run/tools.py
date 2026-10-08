@@ -52,7 +52,7 @@ FIX_ROUNDS = 1
 ROTATION_WINDOW = 3
 HEADLINE_LENGTH_FACTOR = 1.3
 TEXT_ROLES = ("headline", "subline", "footer")
-NEW_ARRANGEMENT_PARTS = ("headline", "subline", "logo", "picture", "accent")
+NEW_ARRANGEMENT_PARTS = ("headline", "subline", "footer", "logo", "picture", "accent")
 _QUOTES = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
 
 
