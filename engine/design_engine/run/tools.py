@@ -1,0 +1,795 @@
+"""The seven tools of the per-post run and the context they close over. Each tool is a plain function `tool(ctx, ...)` that the loop
+wraps for the model; every rule the spec gives the worker is enforced here, whatever the system prompt says:
+
+- `plan`: at most three options; each names a family or a new arrangement with parts and bands; headline and subline are the post's
+  own words; a family or picture concept used in the client's last three runs is refused; a brief naming a logo, text or the brand is
+  refused; a headline longer than the family's headline_chars p75 x 1.3 is refused. A refused plan records nothing and spends nothing.
+- `picture`: two pictures per option through Task 4's `make_picture` (quiet zone read, one regeneration, then dropped), credits recorded,
+  the credit budget checked before every generation. Pictures are stored at the frame's pixel size for the primary platform size
+  (object-fit cover), which is exactly what the composer draws, so the quiet zone can be read in frame pixels.
+- `compose`: every size x every picture x the family's arrangements, keeping per size the candidate with the best gate margins.
+- `measure`: the full gate over every size; one fix round, a second failure drops the option.
+- `submit`: re-measures every file, accepts only when all pass, orders the set (margins, then the vision pass) and applies the
+  set-level distinctness filter.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import re
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from PIL import Image
+
+from ..compose import place
+from ..compose.option import Rendered, assemble
+from ..gate.check import (
+    BUSY_MAX,
+    CONTENT_SPAN_MIN,
+    HEADLINE_SHORT_EDGE_SHARE_MIN,
+    LOGO_CONTRAST_MIN,
+    LOGO_MATCH_MIN,
+    TEXT_CONTRAST_MIN,
+    GateResult,
+)
+from ..gate.check import check as gate_check
+from ..gate.distinct import Option, filter_set, signature
+from ..measure.ocr import read_lines
+from ..picture import PictureResult, make_picture
+from ..picture import brief as brief_mod
+from ..picture.brief import BriefRefused
+from ..picture.zone import floor_from_calibration
+from ..platform.specs import Size
+
+MAX_OPTIONS = 3
+PICTURES_PER_OPTION = 2
+FIX_ROUNDS = 1
+ROTATION_WINDOW = 3
+HEADLINE_LENGTH_FACTOR = 1.3
+TEXT_ROLES = ("headline", "subline")
+NEW_ARRANGEMENT_PARTS = ("headline", "subline", "logo", "picture", "accent")
+_QUOTES = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
+
+
+class ToolRefused(ValueError):
+    """A tool refused the model's request; the message names the rule and the number."""
+
+
+class BudgetExceeded(ToolRefused):
+    pass
+
+
+@dataclass
+class Budget:
+    max_turns: int = 12
+    max_usd: float = 5.0
+    max_credits: float = 60.0
+
+
+@dataclass
+class OptionState:
+    id: str
+    family_key: str | None
+    family: dict
+    arrangement: str  # "family" | "new"
+    headline: str
+    subline: str | None
+    picture_brief: str
+    parts: list[str] = field(default_factory=list)
+    bands: dict = field(default_factory=dict)
+    status: str = "planned"  # planned | pictured | composed | needs_fix | passed | offered | dropped
+    pictures: list[PictureResult] = field(default_factory=list)
+    renders: dict[str, dict] = field(default_factory=dict)  # size name -> {rendered, gate, picture, picture_sha, margin, arrangement}
+    failures: dict[str, list[str]] = field(default_factory=dict)  # size name -> why nothing could be kept
+    fix_rounds: int = 0
+    credits: float = 0.0
+    dropped_reason: str | None = None
+    rank: int | None = None
+    distinct_signature: str | None = None
+
+    @property
+    def copy(self) -> dict:
+        return {"headline": self.headline, "subline": self.subline}
+
+    @property
+    def ok_pictures(self) -> list[PictureResult]:
+        return [p for p in self.pictures if p.status == "ok" and p.path]
+
+    @property
+    def png(self) -> Path | None:
+        """The primary size's kept render, for the vision pass and the record."""
+        first = next(iter(self.renders.values()), None)
+        return first["rendered"].png if first else None
+
+    @property
+    def job_ids(self) -> list[str]:
+        return [j for p in self.pictures for j in p.job_ids]
+
+
+@dataclass
+class RunContext:
+    profile: dict
+    families: list[dict]
+    reads: list
+    workspace: Path
+    size_list: list[Size]
+    platform: str
+    post: dict  # copy, format, pillar, post_key, ...
+    prior_runs: list[dict] = field(default_factory=list)  # {run_id, family_key, picture_concept, signature, files}
+    budget: Budget = field(default_factory=Budget)
+    clients: dict = field(default_factory=dict)  # "anthropic", "higgsfield"
+    fonts: dict[str, Path] = field(default_factory=dict)
+    logo_files: list[dict] = field(default_factory=list)
+    run_dir: Path | None = None
+    ocr: Callable = read_lines
+    references: list[Path] = field(default_factory=list)  # the client's stored posts, for near-copy in measure and submit
+    picture_references: list[Path] = field(default_factory=list)
+    prior_files: list[Path] = field(default_factory=list)  # earlier deliveries
+    browser: Any = None  # one Chromium for every render; assemble launches its own when None
+    floor: float | None = None  # occlusion floor; from the calibration when None
+    rank_with_vision: bool = True
+    host_reference: Callable[[Path], str | None] | None = None  # a local crop -> a URL Higgsfield can import; None sends no references
+    model: str = "claude-opus-5-5"
+    # run state
+    options: dict[str, OptionState] = field(default_factory=dict)
+    spent: dict = field(default_factory=lambda: {"usd": 0.0, "credits": 0.0, "turns": 0, "warnings": [], "model_calls": []})
+    dropped: list[dict] = field(default_factory=list)
+    submitted: list[OptionState] | None = None
+    done: bool = False
+    files: dict[str, dict] = field(default_factory=dict)  # png path -> {option_id, size, boxes, copy, picture_sha}
+    nearest: list[dict] = field(default_factory=list)
+    transcript: list[dict] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.workspace = Path(self.workspace)
+        self.logo_files = [{**f, "path": str(self._abs(f["path"]))} for f in self.logo_files if f.get("path")]
+        self.fonts = {k: Path(v) for k, v in self.fonts.items()}
+        if self.run_dir is None:
+            self.run_dir = self.workspace / "runs" / time.strftime("%Y%m%d-%H%M%S")
+        self.run_dir = Path(self.run_dir)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        if self.floor is None:
+            self.floor = floor_from_calibration(self.profile.get("calibration"))
+        if not self.size_list:
+            raise ValueError("a run needs at least one platform size")
+
+    def _abs(self, p: str | Path) -> Path:
+        p = Path(p)
+        return p if p.is_absolute() else self.workspace / p
+
+    @property
+    def primary(self) -> Size:
+        return self.size_list[0]
+
+    @property
+    def copy_text(self) -> str:
+        return str(self.post.get("copy") or "")
+
+    @property
+    def brand_name(self) -> str | None:
+        return self.profile.get("client_name") or None
+
+    def recent_runs(self) -> list[dict]:
+        return list(self.prior_runs)[-ROTATION_WINDOW:]
+
+    def recent_signatures(self) -> list[str]:
+        return [r["signature"] for r in self.recent_runs() if isinstance(r, dict) and r.get("signature")]
+
+    def option_dir(self, option_id: str) -> Path:
+        d = self.run_dir / option_id
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def drop(self, opt: OptionState, reason: str) -> None:
+        opt.status = "dropped"
+        opt.dropped_reason = reason
+        if not any(d["id"] == opt.id for d in self.dropped):
+            self.dropped.append({"id": opt.id, "reason": reason, "family_key": opt.family_key, "credits": opt.credits})
+
+
+# ---- helpers ----
+
+
+def _norm(text: str | None) -> str:
+    return " ".join((text or "").translate(_QUOTES).split())
+
+
+def _band(b: Mapping | None) -> dict | None:
+    if not isinstance(b, Mapping):
+        return None
+    return {k: (round(b[k], 4) if isinstance(b.get(k), (int, float)) else b.get(k)) for k in ("p25", "p50", "p75", "n") if k in b}
+
+
+def _sha(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:12]
+
+
+def _option(ctx: RunContext, option_id: str) -> OptionState:
+    opt = ctx.options.get(str(option_id))
+    if opt is None:
+        raise ToolRefused(f"unknown option {option_id!r}; planned options are {', '.join(ctx.options) or 'none'}")
+    if opt.status == "dropped":
+        raise ToolRefused(f"option {opt.id} was dropped: {opt.dropped_reason}")
+    return opt
+
+
+def _family_summary(fam: dict) -> dict:
+    params = fam.get("parameters") or {}
+    tpl = fam.get("template") or {}
+    chars = _band(params.get("headline_chars"))
+    return {
+        "key": fam.get("key"), "status": fam.get("status"), "seen_count": fam.get("seen_count"),
+        "alignment": tpl.get("alignment"), "picture_role": tpl.get("picture_role"), "logo_corner": tpl.get("logo_corner"),
+        "devices": tpl.get("devices") or [], "ground": {"kinds": (tpl.get("ground") or {}).get("kinds"), "hex": (tpl.get("ground") or {}).get("hex")},
+        "slots": {s: {k: round(float(v[k]), 3) for k in ("x", "y", "w", "h") if isinstance(v.get(k), (int, float))}
+                  for s, v in (tpl.get("slots") or {}).items()},
+        "headline_chars": chars, "headline_lines": _band(params.get("headline_lines")),
+        "headline_max_chars": math.floor(chars["p75"] * HEADLINE_LENGTH_FACTOR) if chars and isinstance(chars.get("p75"), (int, float)) else None,
+    }
+
+
+def _widest_headline_band(families: list[dict]) -> dict | None:
+    bands = [f.get("parameters", {}).get("headline_chars") for f in families]
+    bands = [b for b in bands if isinstance(b, Mapping) and isinstance(b.get("p75"), (int, float))]
+    return max(bands, key=lambda b: b["p75"]) if bands else None
+
+
+def _palette_hex(profile: dict, role: str) -> str | None:
+    for s in profile.get("palette") or []:
+        if s.get("role") == role and s.get("hex"):
+            return s["hex"]
+    return None
+
+
+def _corner(band: Mapping) -> str:
+    cx, cy = band["x"] + band["w"] / 2, band["y"] + band["h"] / 2
+    return ("t" if cy < 0.4 else "b" if cy > 0.6 else "m") + ("l" if cx < 0.4 else "r" if cx > 0.6 else "c")
+
+
+def new_family(ctx: RunContext, option_id: str, parts: list[str], bands: Mapping[str, Mapping], alignment: str | None = None) -> dict:
+    """A one-off family for `arrangement: new`: slots from the model's bands, the brand's ground and accent, the widest observed
+    headline band as its length cap. It renders through the same template as a learned family."""
+    slots = {p: {k: float(bands[p][k]) for k in ("x", "y", "w", "h")} for p in parts}
+    pic = slots.get("picture")
+    if pic is None:
+        role = "none"
+    elif pic["w"] * pic["h"] > 0.8:
+        role = "full"
+    elif pic["w"] > 0.7:
+        role = "top" if pic["y"] + pic["h"] / 2 < 0.5 else "bottom"
+    else:
+        role = "side" if pic["h"] > 0.5 else "inset"
+    acc = slots.get("accent")
+    side = ("left" if acc["x"] < 0.5 else "right") if acc and acc["h"] >= acc["w"] else ("top" if acc and acc["y"] < 0.5 else "bottom")
+    ground = _palette_hex(ctx.profile, "ground") or "#000000"
+    counts = (ctx.profile.get("grammar") or {}).get("alignment_counts") or {}
+    align = alignment or (max(counts, key=counts.get) if counts else "left")
+    key = f"new:{option_id}"
+    return {
+        "key": key, "status": "new", "seen_count": 0, "post_ids": [],
+        "slots": slots,
+        "parameters": {"alignment": align, "headline_chars": _widest_headline_band(ctx.families) or {}, "headline_lines": {},
+                       "device_on": acc is not None, "ground_hex": [ground], "accent_hex": _palette_hex(ctx.profile, "accent"),
+                       "aspect": ctx.primary.w / ctx.primary.h},
+        "template": {"slots": slots, "ground": {"kinds": ["photo"] if pic else ["flat"], "hex": ground, "sources": []},
+                     "devices": [{"kind": "accent", "side": side}] if acc else [], "alignment": align, "picture_role": role,
+                     "logo_corner": _corner(slots["logo"]) if "logo" in slots else "none"},
+    }
+
+
+# ---- read_brand ----
+
+
+def read_brand(ctx: RunContext) -> dict:
+    """The confirmed profile in brief, the families, the floors, the standing rules, the post, the sizes and the last three runs."""
+    p = ctx.profile
+    grammar = p.get("grammar") or {}
+    imagery = p.get("imagery") or {}
+    cal = p.get("calibration") or {}
+    return {
+        "client": p.get("client_name"),
+        "profile_status": p.get("status"),
+        "type": {k: (p.get("type") or {}).get(k) for k in ("status", "family", "file", "accepted_stand_in")},
+        "palette": [{"hex": s.get("hex"), "role": s.get("role")} for s in p.get("palette") or []],
+        "observed_pairs": [{"ink_hex": q.get("ink_hex"), "ground_hex": q.get("ground_hex"), "contrast": q.get("contrast")} for q in (p.get("observed_pairs") or [])[:8]],
+        "grammar": {k: _band(grammar.get(k)) for k in ("headline_h_share", "subline_h_share", "side_margin", "logo_width_share") if grammar.get(k)}
+        | {"alignment_counts": grammar.get("alignment_counts"), "logo_corner_counts": grammar.get("logo_corner_counts")},
+        "imagery": {"items": [{"kind": it.get("kind"), "description": it.get("description")} for it in imagery.get("items") or []],
+                    "people": imagery.get("people"), "grounds": imagery.get("grounds"), "never": imagery.get("never")},
+        "voice": p.get("voice"),
+        "floors": cal.get("floors"),
+        "occlusion_floor": ctx.floor,
+        "families": [_family_summary(f) for f in ctx.families],
+        "rules": list(p.get("rules") or p.get("design_rules") or []),
+        "last_three_runs": [{"run_id": r.get("run_id"), "family_key": r.get("family_key") or r.get("family_id"),
+                             "picture_concept": r.get("picture_concept") or r.get("picture_brief")} for r in ctx.recent_runs()],
+        "post": {"copy": ctx.copy_text, "pillar": ctx.post.get("pillar"), "format": ctx.post.get("format"), "platform": ctx.platform,
+                 "visual_direction": ctx.post.get("visual_direction")},
+        "sizes": [{"name": s.name, "w": s.w, "h": s.h, "placement": s.placement, "min_text_px": s.min_text_px} for s in ctx.size_list],
+        "limits": {"max_options": MAX_OPTIONS, "pictures_per_option": PICTURES_PER_OPTION, "fix_rounds": FIX_ROUNDS,
+                   "credits_left": max(0.0, ctx.budget.max_credits - ctx.spent["credits"])},
+    }
+
+
+# ---- nearest_posts ----
+
+
+def _tokens(text: str) -> list[str]:
+    return [t for t in re.findall(r"[a-z0-9']+", (text or "").lower()) if len(t) > 1]
+
+
+def _read_dict(r: Any) -> dict:
+    if isinstance(r, Mapping):
+        return dict(r)
+    logo = getattr(r, "logo", None)
+    return {"path": str(getattr(r, "path", "")), "source_post_id": getattr(r, "source_post_id", ""), "W": getattr(r, "W", None),
+            "H": getattr(r, "H", None), "lines": [{"text": line.text, "box": line.box} for line in getattr(r, "lines", [])],
+            "logo": {"box": logo.box, "height_share": logo.height_share, "variant": logo.variant} if logo else None,
+            "ground": getattr(r, "ground", {}), "picture_boxes": getattr(r, "picture_boxes", [])}
+
+
+def _measurements_for(ctx: RunContext, post_id: str) -> dict | None:
+    for r in ctx.reads:
+        d = _read_dict(r)
+        if d.get("source_post_id") == post_id:
+            logo = d.get("logo") or {}
+            return {"W": d.get("W"), "H": d.get("H"), "logo_height_share": logo.get("height_share"), "logo_variant": logo.get("variant"),
+                    "ground": d.get("ground"), "lines": len(d.get("lines") or []), "pictures": len(d.get("picture_boxes") or []),
+                    "path": d.get("path")}
+    return None
+
+
+def nearest_posts(ctx: RunContext, copy: str, k: int = 4) -> list[dict]:
+    """The client's own posts closest to this copy: cosine over TF-IDF of the text in posts_index.json, with each post's family
+    (by membership) and measurements (from the reads) as exemplars."""
+    index_path = ctx.workspace / "posts_index.json"
+    if not index_path.exists():
+        return []
+    entries: dict[str, dict] = {}
+    for e in json.loads(index_path.read_text()).values():
+        pid = e.get("source_post_id")
+        if pid and pid not in entries and e.get("text"):
+            entries[pid] = e
+    if not entries:
+        return []
+    docs = {pid: _tokens(e["text"]) for pid, e in entries.items()}
+    df: dict[str, int] = {}
+    for toks in docs.values():
+        for t in set(toks):
+            df[t] = df.get(t, 0) + 1
+    n = len(docs)
+
+    def vec(toks: list[str]) -> dict[str, float]:
+        tf: dict[str, float] = {}
+        for t in toks:
+            tf[t] = tf.get(t, 0.0) + 1.0
+        return {t: c * math.log((1 + n) / (1 + df.get(t, 0))) + 1e-9 for t, c in tf.items()}
+
+    def cos(a: dict[str, float], b: dict[str, float]) -> float:
+        dot = sum(v * b[t] for t, v in a.items() if t in b)
+        na, nb = math.sqrt(sum(v * v for v in a.values())), math.sqrt(sum(v * v for v in b.values()))
+        return dot / (na * nb) if na and nb else 0.0
+
+    q = vec(_tokens(copy))
+    scored = sorted(((cos(q, vec(toks)), pid) for pid, toks in docs.items()), key=lambda s: (-s[0], s[1]))
+    by_post = {pid: f.get("key") for f in ctx.families for pid in f.get("post_ids") or []}
+    out = []
+    for score, pid in scored[: max(1, int(k))]:
+        e = entries[pid]
+        out.append({"source_post_id": pid, "path": str(ctx._abs(e["path"])), "similarity": round(score, 4), "platform": e.get("platform"),
+                    "text": (e.get("text") or "")[:240], "family_key": by_post.get(pid), "measurements": _measurements_for(ctx, pid)})
+    ctx.nearest = out
+    return out
+
+
+# ---- plan ----
+
+
+def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str], recent_concepts: set[str]) -> tuple[OptionState | None, list[str]]:
+    problems: list[str] = []
+    oid = str(o.get("id") or f"o{i + 1}")
+    arrangement = str(o.get("arrangement") or ("new" if not o.get("family_key") else "family")).lower()
+    family: dict | None = None
+    fkey = o.get("family_key")
+    if arrangement == "new":
+        parts = [str(p) for p in (o.get("parts") or [])]
+        bands = o.get("bands") or {}
+        bad = [p for p in parts if p not in NEW_ARRANGEMENT_PARTS]
+        if bad:
+            problems.append(f"{oid}: unknown parts {bad}; parts are {', '.join(NEW_ARRANGEMENT_PARTS)}")
+        if "headline" not in parts or "logo" not in parts:
+            problems.append(f"{oid}: a new arrangement needs at least the headline and the logo among its parts")
+        for p in parts:
+            b = bands.get(p) if isinstance(bands, Mapping) else None
+            if not isinstance(b, Mapping) or any(not isinstance(b.get(k), (int, float)) or not 0 <= float(b[k]) <= 1 for k in ("x", "y", "w", "h")):
+                problems.append(f"{oid}: part {p!r} needs a band with x, y, w, h as fractions of the frame")
+        if not problems:
+            family = new_family(ctx, oid, parts, bands, o.get("alignment"))
+            fkey = None
+    else:
+        if not fkey:
+            problems.append(f"{oid}: name a family_key or set arrangement to \"new\" with parts and bands")
+        else:
+            family = next((f for f in ctx.families if f.get("key") == fkey), None)
+            if family is None:
+                problems.append(f"{oid}: unknown family {fkey!r}")
+            elif "headline" not in (family.get("template") or {}).get("slots", {}):
+                problems.append(f"{oid}: family {fkey!r} has no headline slot to typeset into")
+            elif fkey in recent_families:
+                problems.append(f"{oid}: family {fkey!r} was used in one of the client's last three runs; rotate to another")
+        parts, bands = [], {}
+    headline = o.get("headline")
+    subline = o.get("subline") or None
+    copy = _norm(ctx.copy_text)
+    if not isinstance(headline, str) or not headline.strip():
+        problems.append(f"{oid}: a headline is required")
+    else:
+        if _norm(headline) not in copy:
+            problems.append(f"{oid}: the headline must be the post copy's own words (a substring or line-join of the post copy): {headline!r}")
+        p75 = ((family or {}).get("parameters") or {}).get("headline_chars", {}).get("p75") if family else None
+        if isinstance(p75, (int, float)) and len(_norm(headline)) > p75 * HEADLINE_LENGTH_FACTOR:
+            problems.append(f"{oid}: headline of {len(_norm(headline))} characters is longer than the family's {p75:.0f} x {HEADLINE_LENGTH_FACTOR} = "
+                            f"{p75 * HEADLINE_LENGTH_FACTOR:.0f}; shorten it")
+    if subline is not None and _norm(str(subline)) not in copy:
+        problems.append(f"{oid}: the subline must be the post copy's own words: {subline!r}")
+    concept = o.get("picture_brief") or o.get("picture_concept") or ""
+    if not isinstance(concept, str) or not concept.strip():
+        problems.append(f"{oid}: a picture_brief concept is required")
+    else:
+        try:
+            brief_mod.check(concept, ctx.brand_name)
+        except BriefRefused as e:
+            problems.append(f"{oid}: {e}")
+        if _norm(concept).lower() in recent_concepts:
+            problems.append(f"{oid}: the picture concept was used in one of the client's last three runs; choose another")
+    if problems or family is None:
+        return None, problems
+    return OptionState(oid, fkey, family, arrangement if arrangement == "new" else "family", str(headline).strip(),
+                       str(subline).strip() if subline else None, concept.strip(), parts, dict(bands) if bands else {}), []
+
+
+def plan(ctx: RunContext, options: list[dict]) -> dict:
+    """Record the model's plan after every rule passes; refuse the whole plan otherwise, with nothing recorded and nothing spent.
+    Re-planning an existing option id is the fix round: it keeps the option's credits and pictures when the brief is unchanged."""
+    if not isinstance(options, list) or not options:
+        raise ToolRefused("plan refused: options must be a non-empty list")
+    if len(options) > MAX_OPTIONS:
+        raise ToolRefused(f"plan refused: at most {MAX_OPTIONS} options per run, got {len(options)}")
+    recent = ctx.recent_runs()
+    recent_families = {str(r.get("family_key") or r.get("family_id")) for r in recent if r.get("family_key") or r.get("family_id")}
+    recent_concepts = {_norm(r.get("picture_concept") or r.get("picture_brief")).lower() for r in recent if r.get("picture_concept") or r.get("picture_brief")}
+    built: list[OptionState] = []
+    problems: list[str] = []
+    for i, o in enumerate(options):
+        if not isinstance(o, Mapping):
+            problems.append(f"option {i + 1} is not an object")
+            continue
+        opt, probs = _check_option(ctx, i, o, recent_families, recent_concepts)
+        problems.extend(probs)
+        if opt:
+            built.append(opt)
+    ids = [o.id for o in built]
+    if len(set(ids)) != len(ids):
+        problems.append(f"option ids repeat: {ids}")
+    live = {k for k, v in ctx.options.items() if v.status != "dropped"}
+    if len(live | set(ids)) > MAX_OPTIONS:
+        problems.append(f"at most {MAX_OPTIONS} options per run; {sorted(live)} already exist, reuse their ids to re-plan them")
+    if problems:
+        raise ToolRefused("plan refused: " + "; ".join(problems))
+    for opt in built:
+        old = ctx.options.get(opt.id)
+        if old is not None:
+            opt.fix_rounds, opt.credits = old.fix_rounds, old.credits
+            if old.status == "dropped":
+                raise ToolRefused(f"plan refused: option {opt.id} was dropped ({old.dropped_reason}); use a new id")
+            if _norm(old.picture_brief) == _norm(opt.picture_brief) and old.family_key == opt.family_key and old.arrangement == opt.arrangement:
+                opt.pictures = old.pictures
+        ctx.options[opt.id] = opt
+    return {"accepted": [o.id for o in built],
+            "options": [{"id": o.id, "family_key": o.family_key, "arrangement": o.arrangement, "headline": o.headline, "subline": o.subline,
+                         "picture_brief": o.picture_brief, "fix_rounds_used": o.fix_rounds} for o in built],
+            "next": "call picture(option_id) for each option, then compose, measure and submit"}
+
+
+# ---- picture ----
+
+
+def quiet_zone(family: dict, slots: tuple[str, ...] = ("headline", "subline", "logo")) -> dict:
+    """The union of the text and logo slots at their median position, as fractions of the frame: what the picture must keep calm."""
+    boxes = [(float(s["x"]), float(s["y"]), float(s["w"]), float(s["h"])) for k, s in (family.get("template") or {}).get("slots", {}).items() if k in slots]
+    if not boxes:
+        return {"x": 0.0, "y": 0.0, "w": 1.0, "h": 0.45}
+    x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    x1, y1 = max(b[0] + b[2] for b in boxes), max(b[1] + b[3] for b in boxes)
+    return {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
+
+
+class _FramedClient:
+    """Delegates to the Higgsfield client and stores every downloaded picture at the frame's pixel size (object-fit cover, centred), so
+    the quiet zone can be read in the same pixels the composer draws."""
+
+    def __init__(self, inner: Any, w: int, h: int):
+        self.inner, self.w, self.h = inner, int(w), int(h)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
+    def download(self, url: str, out: Path) -> Path:
+        path = Path(self.inner.download(url, out))
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            scale = max(self.w / im.width, self.h / im.height)
+            rw, rh = max(self.w, round(im.width * scale)), max(self.h, round(im.height * scale))
+            im = im.resize((rw, rh), Image.Resampling.LANCZOS)
+            left, top = (rw - self.w) // 2, (rh - self.h) // 2
+            im.crop((left, top, left + self.w, top + self.h)).save(path)
+        return path
+
+
+def picture(ctx: RunContext, option_id: str) -> dict:
+    """Two measured pictures for an option through Task 4's make_picture. Every generation is preceded by the budget check and
+    recorded on the option and on spent["credits"]; a picture whose quiet zone stays busy after one regeneration is dropped."""
+    opt = _option(ctx, option_id)
+    client = ctx.clients.get("higgsfield")
+    if client is None:
+        raise ToolRefused("no Higgsfield client on this run; pictures cannot be made")
+    fam = opt.family
+    primary = ctx.primary
+    zone = quiet_zone(fam)
+    out_dir = ctx.option_dir(opt.id)
+    brief = brief_mod.build(ctx.profile, fam, zone, opt.picture_brief, ctx.platform, reads=ctx.reads or None, ref_dir=out_dir / "refs")
+    if ctx.host_reference:
+        brief.reference_urls = [u for u in (ctx.host_reference(p) for p in brief.reference_paths) if u]
+    pic_box = place.picture_box(fam, primary, "p50")
+    pw, ph = round(pic_box[2]), round(pic_box[3])
+    zone_px = [zone["x"] * primary.w, zone["y"] * primary.h, zone["w"] * primary.w, zone["h"] * primary.h]
+    zone_box = place.frame_to_picture(zone_px, pic_box, pw, ph) or [0.0, 0.0, float(pw), float(ph)]
+    framed = _FramedClient(client, pw, ph)
+    made = []
+    while len(opt.ok_pictures) < PICTURES_PER_OPTION and len(made) < PICTURES_PER_OPTION:
+        if ctx.spent["credits"] >= ctx.budget.max_credits:
+            raise BudgetExceeded(f"credit budget of {ctx.budget.max_credits:g} is spent ({ctx.spent['credits']:g}); compose and submit what exists")
+        result = make_picture(framed, brief, out_dir / "pictures", zone_box, float(ctx.floor))
+        opt.pictures.append(result)
+        made.append(result)
+        opt.credits += result.credits
+        ctx.spent["credits"] += result.credits
+    opt.status = "pictured" if opt.ok_pictures else opt.status
+    summary = {"option_id": opt.id, "brief": brief.text, "model": brief.model, "quiet_zone": {k: round(v, 3) for k, v in zone.items()},
+               "pictures": [{"status": p.status, "path": str(p.path) if p.path else None, "job_ids": p.job_ids, "credits": p.credits,
+                             "zone_reads": [{"salient_share": z.salient_share, "ok": z.ok, "floor": z.floor} for z in p.zone_reads]} for p in made],
+               "credits_spent_total": ctx.spent["credits"]}
+    if not opt.ok_pictures:
+        opt.fix_rounds += 1
+        if opt.fix_rounds > FIX_ROUNDS:
+            ctx.drop(opt, "no picture kept a quiet zone after the fix round: " + "; ".join(f"{p.job_ids}: shares {[z.salient_share for z in p.zone_reads]}" for p in opt.pictures))
+            summary["status"] = "dropped"
+        else:
+            summary["status"] = "no_picture"
+            summary["advice"] = "every picture was busy under the text; re-plan this option id with a calmer picture brief (one fix round)"
+    else:
+        summary["status"] = "ok"
+    return summary
+
+
+# ---- compose ----
+
+_MARGIN_FLOORS = {"logo_match": LOGO_MATCH_MIN, "logo_contrast": LOGO_CONTRAST_MIN, "headline_contrast": TEXT_CONTRAST_MIN,
+                  "subline_contrast": TEXT_CONTRAST_MIN, "headline_h_share": HEADLINE_SHORT_EDGE_SHARE_MIN, "content_span": CONTENT_SPAN_MIN}
+_MARGIN_CEILINGS = {"headline_busy": BUSY_MAX, "subline_busy": BUSY_MAX}
+
+
+def margins(m: Mapping, profile: dict, size: Size) -> dict[str, float]:
+    """How far each measurement sits from its floor, as a share of the floor and clipped to [-1, 1]: positive is room, negative a failure."""
+    out: dict[str, float] = {}
+
+    def rel(v: float | None, floor: float, above: bool) -> float | None:
+        if v is None or floor <= 0:
+            return None
+        return max(-1.0, min(1.0, (v - floor) / floor if above else (floor - v) / floor))
+
+    for k, floor in _MARGIN_FLOORS.items():
+        r = rel(m.get(k), floor, True)
+        if r is not None:
+            out[k] = r
+    for k, ceil in _MARGIN_CEILINGS.items():
+        r = rel(m.get(k), ceil, False)
+        if r is not None:
+            out[k] = r
+    if m.get("logo_height_share") is not None and m.get("logo_height_min"):
+        out["logo_height"] = rel(m["logo_height_share"], m["logo_height_min"], True)
+    if m.get("min_text_px") is not None and size.min_text_px:
+        out["min_text"] = rel(m["min_text_px"], float(size.min_text_px), True)
+    floors = (profile.get("calibration") or {}).get("floors") or {}
+    bands = m.get("empty_bands") or {}
+    band_max = float(floors.get("edge_band_max", 0.16))
+    for side in ("top", "bottom"):
+        r = rel(bands.get(side), band_max, False)
+        if r is not None:
+            out[f"band_{side}"] = r
+    r = rel(m.get("dead_space"), float(floors.get("dead_space_max", 0.38)), False)
+    if r is not None:
+        out["dead_space"] = r
+    return {k: round(v, 4) for k, v in out.items() if v is not None}
+
+
+def margin_sum(m: Mapping, profile: dict, size: Size) -> float:
+    return round(sum(margins(m, profile, size).values()), 4)
+
+
+def _gate(ctx: RunContext, r: Rendered, size: Size, copy: Mapping, full: bool) -> GateResult:
+    refs = list(ctx.references) if full else []
+    prior = list(ctx.prior_files) if full else []
+    return gate_check(r.png, r.boxes, ctx.profile, size, refs, prior, dict(copy), ocr=ctx.ocr, logo_path=r.logo_path,
+                                picture_references=list(ctx.picture_references) if full else None)
+
+
+def _register(ctx: RunContext, opt: OptionState, size: Size, r: Rendered, pic: PictureResult, sha: str) -> None:
+    ctx.files[str(r.png)] = {"option_id": opt.id, "size": size.name, "boxes": r.boxes, "copy": opt.copy, "picture": str(pic.path), "picture_sha": sha}
+
+
+def compose(ctx: RunContext, option_id: str, arrangement: str | dict | None = None) -> dict:
+    """Every size x every kept picture x the family's arrangements (or the one the model names), each rendered and screened by the gate;
+    per size the candidate with the best margins is kept. Overflow at the client's floor is reported as the size's failure."""
+    opt = _option(ctx, option_id)
+    pics = opt.ok_pictures
+    if not pics:
+        raise ToolRefused(f"option {opt.id} has no picture yet; call picture({opt.id!r}) first")
+    if arrangement:
+        cands: list = [arrangement]
+    else:
+        cands = list(place.NAMED) if opt.arrangement == "family" else ["p50"]
+    report: dict[str, dict] = {}
+    opt.renders.clear()
+    opt.failures.clear()
+    for size in ctx.size_list:
+        best: dict | None = None
+        notes: list[str] = []
+        for pi, pic in enumerate(pics):
+            sha = _sha(pic.path)
+            ranked = place.rank(opt.family, size, pic.path, ctx.floor, cands)
+            if not any(a.ok for a in ranked):
+                notes.append(f"picture {pi + 1}: every arrangement is busy under the text (shares {[a.share for a in ranked]} above {ctx.floor})")
+            for arr in ranked:
+                if not arr.ok:
+                    continue
+                out_dir = ctx.option_dir(opt.id) / "candidates" / f"{size.name}-p{pi + 1}-{arr.name}"
+                try:
+                    r = assemble(ctx.profile, opt.family, size, pic.path, opt.copy, arr, None, None, ctx.fonts, ctx.logo_files, out_dir,
+                                 floors={}, accent_hex=(opt.family.get("parameters") or {}).get("accent_hex"), browser=ctx.browser)
+                except OverflowError as e:
+                    notes.append(str(e))
+                    continue
+                _register(ctx, opt, size, r, pic, sha)
+                g = _gate(ctx, r, size, opt.copy, full=False)
+                score = margin_sum(g.measurements, ctx.profile, size)
+                cand = {"rendered": r, "gate": g, "picture": pic, "picture_index": pi + 1, "picture_sha": sha, "margin": score, "arrangement": arr.name,
+                        "shares": arr.shares}
+                if best is None or (g.passed, score) > (best["gate"].passed, best["margin"]):
+                    best = cand
+        if best is None:
+            opt.failures[size.name] = notes or ["nothing could be rendered"]
+            report[size.name] = {"passed": False, "failures": opt.failures[size.name]}
+            continue
+        opt.renders[size.name] = best
+        g = best["gate"]
+        report[size.name] = {"passed": g.passed, "failures": g.failures, "warnings": g.warnings, "margin": best["margin"],
+                             "margins": margins(g.measurements, ctx.profile, size), "picture": best["picture_index"], "arrangement": best["arrangement"],
+                             "png": str(best["rendered"].png), "text_px": best["rendered"].text_px, "notes": notes}
+    opt.status = "composed"
+    return {"option_id": opt.id, "sizes": report, "next": f"call measure({opt.id!r})"}
+
+
+# ---- measure ----
+
+
+def _fail_round(ctx: RunContext, opt: OptionState, first_failure: str) -> str:
+    opt.fix_rounds += 1
+    if opt.fix_rounds > FIX_ROUNDS:
+        ctx.drop(opt, f"failed the gate after its fix round: {first_failure}")
+        return "dropped"
+    opt.status = "needs_fix"
+    return "needs_fix"
+
+
+def measure(ctx: RunContext, option_id: str) -> dict:
+    """The full gate over every size of an option's kept renders; failures are named with their numbers. One fix round is allowed:
+    the model may re-plan the copy length, the picture brief or compose with another arrangement; a second failure drops the option."""
+    opt = _option(ctx, option_id)
+    if not opt.renders and not opt.failures:
+        raise ToolRefused(f"option {opt.id} has nothing composed; call compose({opt.id!r}) first")
+    sizes: dict[str, dict] = {}
+    first_failure: str | None = None
+    for size in ctx.size_list:
+        rec = opt.renders.get(size.name)
+        if rec is None:
+            fails = opt.failures.get(size.name) or [f"{size.name} was not composed"]
+            sizes[size.name] = {"passed": False, "failures": fails}
+        else:
+            g = _gate(ctx, rec["rendered"], size, opt.copy, full=True)
+            rec["gate"] = g
+            rec["margin"] = margin_sum(g.measurements, ctx.profile, size)
+            sizes[size.name] = {"passed": g.passed, "failures": g.failures, "warnings": g.warnings, "measurements": g.measurements,
+                                "margins": margins(g.measurements, ctx.profile, size)}
+            fails = g.failures
+        if fails and first_failure is None:
+            first_failure = f"{size.name}: {fails[0]}"
+    out: dict[str, Any] = {"option_id": opt.id, "sizes": sizes}
+    if first_failure is None:
+        opt.status = "passed"
+        out["status"] = "passed"
+        out["next"] = "submit when every option you want to offer has passed"
+    else:
+        out["status"] = _fail_round(ctx, opt, first_failure)
+        if out["status"] == "needs_fix":
+            out["advice"] = ("one fix round: shorten the copy (re-plan this option id), change the picture brief (re-plan, then picture), "
+                             "or compose with another arrangement; a second failure drops the option")
+        else:
+            out["reason"] = opt.dropped_reason
+    return out
+
+
+# ---- submit ----
+
+
+def submit(ctx: RunContext, option_ids: list[str]) -> dict:
+    """Re-measure every file of every named option and accept only when all pass; then order the set and apply the distinctness filter.
+    What the model reported earlier is not consulted."""
+    from . import rank as rank_mod
+
+    if not isinstance(option_ids, list) or not option_ids:
+        raise ToolRefused("submit refused: name at least one option id")
+    opts = [_option(ctx, oid) for oid in option_ids]
+    refused: dict[str, list[str]] = {}
+    for opt in opts:
+        fails: list[str] = []
+        for size in ctx.size_list:
+            rec = opt.renders.get(size.name)
+            if rec is None:
+                fails.append(f"{size.name}: " + "; ".join(opt.failures.get(size.name) or ["not composed"]))
+                continue
+            g = _gate(ctx, rec["rendered"], size, opt.copy, full=True)
+            rec["gate"] = g
+            rec["margin"] = margin_sum(g.measurements, ctx.profile, size)
+            fails.extend(f"{size.name}: {f}" for f in g.failures)
+        if fails:
+            refused[opt.id] = fails
+    if refused:
+        notes = []
+        for oid, fails in refused.items():
+            status = _fail_round(ctx, ctx.options[oid], fails[0])
+            notes.append(f"{oid} ({status}): " + "; ".join(fails))
+        raise ToolRefused("submit refused, the gate failed on re-measure: " + " | ".join(notes))
+    opts.sort(key=lambda o: -sum(r["margin"] for r in o.renders.values()))
+    vision = ctx.clients.get("anthropic") if ctx.rank_with_vision else None
+    ordered = rank_mod.pairwise(opts, ctx.nearest, vision, png_of=lambda o: o.png)
+    for i, opt in enumerate(ordered):
+        opt.rank = i + 1
+        first = opt.renders[ctx.primary.name]
+        opt.distinct_signature = signature(first["rendered"].boxes, ctx.primary)
+    gate_opts = [Option(o.id, o.rank, o.family_key or o.family.get("key"), o.renders[ctx.primary.name]["picture_sha"],
+                        o.renders[ctx.primary.name]["rendered"].boxes, ctx.primary) for o in ordered]
+    dropped_msgs: list[str] = []
+    kept_ids = {o.id for o in filter_set(gate_opts, recent_signatures=ctx.recent_signatures(), dropped=dropped_msgs)}
+    kept: list[OptionState] = []
+    for opt in ordered:
+        if opt.id in kept_ids:
+            opt.status = "offered"
+            kept.append(opt)
+        else:
+            ctx.drop(opt, next((m for m in dropped_msgs if m.startswith(f"{opt.id}:")), "dropped by the set-level distinctness check"))
+    for i, opt in enumerate(kept):
+        opt.rank = i + 1
+    ctx.submitted = kept
+    ctx.done = True
+    return {"accepted": [o.id for o in kept], "order": [{"id": o.id, "rank": o.rank} for o in kept], "dropped": dropped_msgs,
+            "credits": ctx.spent["credits"], "message": "the run is complete; reply with one line and stop"}
+
+
+__all__ = ["Budget", "BudgetExceeded", "OptionState", "RunContext", "ToolRefused", "compose", "margin_sum", "margins", "measure",
+           "nearest_posts", "new_family", "picture", "plan", "quiet_zone", "read_brand", "submit"]
