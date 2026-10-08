@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from ..measure.contrast import busy_ground
 from ..measure.image import Box, crop, load_rgb, rel_lum
 from ..measure.saliency import saliency_map, salient_share
 from ..picture.zone import CELL, DEFAULT_FLOOR, ZoneRead, zone_to_cells
@@ -20,6 +21,8 @@ from .template import frame_boxes
 
 NAMED = ("p50", "p25", "p75")  # the median first: on a tie the brand's most observed position keeps the place
 PLACED = ("headline", "subline", "logo")  # the slots an arrangement moves and the saliency is read under
+TEXT_SLOTS = ("headline", "subline")
+BUSY_MAX = 0.11  # the gate's busy-ground ceiling under copy (gate.check.BUSY_MAX reads this value)
 Reader = Callable[[str, dict[str, Box]], "ZoneRead | float | Mapping[str, float]"]
 
 
@@ -31,10 +34,12 @@ class Arrangement:
     shares: dict[str, float] = field(default_factory=dict)  # salient share under each placed slot (frame mean = 1)
     share: float = 0.0  # the busiest placed slot's share: what the floor is judged on
     floor: float = DEFAULT_FLOOR
+    busy: dict[str, float] = field(default_factory=dict)  # busy ground under each text slot, the gate's own measure
+    busy_max: float = BUSY_MAX
 
     @property
     def ok(self) -> bool:
-        return self.share <= self.floor
+        return self.share <= self.floor and all(v <= self.busy_max for v in self.busy.values())
 
     @property
     def template_name(self) -> str:
@@ -106,7 +111,8 @@ def frame_to_picture(box: Box, pic_box: Box, pw: int, ph: int) -> Box | None:
 
 
 def picture_reader(picture: Path | str, family: dict, size: Size, cell: int = CELL) -> Reader:
-    """One saliency map of the picture, read under each arrangement's placed slots. A slot off the picture reads 0."""
+    """One saliency map of the picture, read under each arrangement's placed slots, and the gate's busy-ground measure under each
+    text slot (what the gate will read beneath the copy). A slot off the picture reads 0."""
     arr = load_rgb(picture)
     ph, pw = arr.shape[:2]
     sal = saliency_map(arr, cell)
@@ -117,6 +123,9 @@ def picture_reader(picture: Path | str, family: dict, size: Size, cell: int = CE
         for slot, box in boxes.items():
             mapped = frame_to_picture(box, pic, pw, ph) if pic is not None else None
             shares[slot] = 0.0 if mapped is None else float(salient_share(sal, zone_to_cells(mapped, cell, sal.shape)))
+            if mapped is not None and slot in TEXT_SLOTS:
+                region = crop(arr, mapped)
+                shares[f"busy:{slot}"] = float(busy_ground(region)) if region is not None and region.size else 0.0
         return shares
 
     return read
@@ -163,8 +172,10 @@ def rank(family: dict, size: Size, zone_reads: Mapping[str, ZoneRead] | Reader |
         else:
             assert reader is not None
             shares = _shares(reader(name, boxes), boxes)
+        busy = {k.split(":", 1)[1]: round(v, 4) for k, v in shares.items() if k.startswith("busy:")}
+        shares = {k: v for k, v in shares.items() if not k.startswith("busy:")}
         share = max(shares.values()) if shares else 0.0
-        out.append(Arrangement(name, boxes, overrides, {k: round(v, 4) for k, v in shares.items()}, round(share, 4), arr_floor))
+        out.append(Arrangement(name, boxes, overrides, {k: round(v, 4) for k, v in shares.items()}, round(share, 4), arr_floor, busy))
     out.sort(key=lambda a: (a.share, a.mean_share))
     return out
 

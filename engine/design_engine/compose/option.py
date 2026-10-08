@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 
 from ..measure.image import Box, contrast, rel_lum
+from ..gate.check import TEXT_CONTRAST_MIN, logo_floor_for
 from ..measure.logo import ink_aspect
 from ..platform.specs import Size
 from . import place
@@ -20,6 +21,7 @@ from .render import render_html
 from .template import ComposeSpec, build_html
 from .typeset import Fit, fit_block
 
+LOGO_FLOOR_MARGIN = 1.04  # the logo is drawn a little above the client's floor so a one-pixel rounding never fails the gate
 TEXT_ROLES = ("headline", "subline")
 DEFAULT_MAX_LINES = {"headline": 3, "subline": 2}
 GROUND_TAGS = ("dark", "light")
@@ -91,13 +93,17 @@ def _typeset(profile: dict, family: dict, size: Size, copy: Mapping, boxes: dict
     return fits, text_px
 
 
-def pick_pair(pairs: Sequence[Mapping], ground_lum: float | None) -> dict:
-    """The observed pair whose ground is closest in luminance to the measured ground; the first pair when nothing was measured."""
+def pick_pair(pairs: Sequence[Mapping], ground_lum: float | None, contrast_min: float = TEXT_CONTRAST_MIN) -> dict:
+    """The observed pair whose ground is closest in luminance to the measured ground, among the pairs whose ink clears the contrast
+    floor against that measured ground; when none clears it, the pair whose ink contrasts most. The first pair when nothing was measured."""
     if not pairs:
         raise ValueError("no observed pair to compose with: the profile carries no observed_pairs")
     if ground_lum is None:
         return dict(pairs[0])
-    return dict(min(pairs, key=lambda p: abs(hex_lum(p["ground_hex"]) - ground_lum)))
+    legible = [p for p in pairs if contrast(hex_lum(p["ink_hex"]), ground_lum) >= contrast_min]
+    if legible:
+        return dict(min(legible, key=lambda p: abs(hex_lum(p["ground_hex"]) - ground_lum)))
+    return dict(max(pairs, key=lambda p: contrast(hex_lum(p["ink_hex"]), ground_lum)))
 
 
 def _ground_tag(entry: Mapping) -> str | None:
@@ -201,7 +207,8 @@ def assemble(profile: dict, family: dict, size: Size, picture_path: Path | str |
     spec = ComposeSpec(headline=str(headline), subline=str(copy["subline"]) if copy.get("subline") else None, logo_variant=variant,
                        pair=chosen, device=device, arrangement=tname, accent_hex=accent_hex or params.get("accent_hex"),
                        extra={"arrangement_name": arr.name, "overrides": arr.overrides, "shares": arr.shares})
-    html = build_html(fam, size, spec, dict(fonts), logo_path, Path(picture_path) if picture_path is not None else None, fits)
+    logo_min_h = logo_floor_for(profile, size.w, size.h) * size.short_edge * LOGO_FLOOR_MARGIN
+    html = build_html(fam, size, spec, dict(fonts), logo_path, Path(picture_path) if picture_path is not None else None, fits, logo_min_h=logo_min_h)
     png = Path(out_dir) / f"{size.name}.png"
     rendered = render_html(html, size.w, size.h, png, browser)
     return Rendered(png, rendered, spec, html, fits, arr.name, logo_path, ground_lum, logo_ground_lum, text_px)

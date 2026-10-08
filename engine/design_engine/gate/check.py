@@ -24,7 +24,7 @@ from ..measure.ocr import Line, read_lines
 LOGO_MATCH_MIN = 0.90
 LOGO_CONTRAST_MIN = 3.0
 TEXT_CONTRAST_MIN = 4.5
-BUSY_MAX = 0.11
+from ..compose.place import BUSY_MAX  # noqa: E402  one ceiling for the picture judge and the gate
 HEADLINE_SHORT_EDGE_SHARE_MIN = 0.08
 CONTENT_SPAN_MIN = 0.55
 TALL_FRAME_ASPECT = 0.7
@@ -90,6 +90,25 @@ def _ground_under(arr: np.ndarray, box: Box, ring: int = 4) -> np.ndarray:
     if px.size == 0:
         px = arr[max(0, y):min(H, y + h), max(0, x):min(W, x + w)].reshape(-1, 3)
     return np.median(px, axis=0)
+
+
+def logo_floor_for(profile: Mapping, w: int, h: int) -> float:
+    """The logo height floor as a share of the short edge: the client's calibrated floor, raised for a tall frame."""
+    floors = (profile.get("calibration") or {}).get("floors") or {}
+    logo_floor = float(floors.get("logo_height_min", 0.06))
+    if w / h < TALL_FRAME_ASPECT:
+        logo_floor *= TALL_FRAME_LOGO_FACTOR
+    return logo_floor
+
+
+def headline_floor_for(profile: Mapping) -> float:
+    """The headline height floor as a share of the short edge: the client's own p25 (the smallest headline a quarter of its posts
+    carry), never below the legibility constant's half; the constant alone when the client's headline size is unmeasured."""
+    band = (profile.get("grammar") or {}).get("headline_h_share") or {}
+    p25 = band.get("p25")
+    if isinstance(p25, (int, float)) and p25 > 0:
+        return max(float(p25), HEADLINE_SHORT_EDGE_SHARE_MIN / 2)
+    return HEADLINE_SHORT_EDGE_SHARE_MIN
 
 
 def _logo_match(region: np.ndarray, logo_path: Path, ground_rgb: np.ndarray) -> tuple[float, float]:
@@ -173,9 +192,7 @@ def check(png: Path, boxes: dict, profile: dict, size: SizeLike | Mapping, refer
                 fails.append(f"logo is not the file: match {_fmt(best)} is below {_fmt(LOGO_MATCH_MIN)}")
             lc = ink_vs_ground(region)
             m["logo_contrast"] = round(lc, 2) if lc is not None else None
-        logo_floor = float(floors.get("logo_height_min", 0.06))
-        if W / H < TALL_FRAME_ASPECT:
-            logo_floor *= TALL_FRAME_LOGO_FACTOR
+        logo_floor = logo_floor_for(profile, W, H)
         share = (logo_box[3] * ink_share) / short
         m["logo_height_share"] = round(share, 4)
         m["logo_height_min"] = round(logo_floor, 4)
@@ -219,9 +236,11 @@ def check(png: Path, boxes: dict, profile: dict, size: SizeLike | Mapping, refer
         smallest = min(heights) if smallest is None else min(smallest, min(heights))
         if slot == "headline":
             hs = max(heights) / short
+            h_floor = headline_floor_for(profile)
             m["headline_h_share"] = round(hs, 4)
-            if hs < HEADLINE_SHORT_EDGE_SHARE_MIN:
-                fails.append(f"headline height {_fmt(hs, 3)} of the short edge is below {_fmt(HEADLINE_SHORT_EDGE_SHARE_MIN, 2)}")
+            m["headline_h_min"] = round(h_floor, 4)
+            if hs < h_floor:
+                fails.append(f"headline height {_fmt(hs, 3)} of the short edge is below {_fmt(h_floor, 3)}")
         spill = _outside_safe(box, W, H, safe)
         if spill:
             fails.append(f"{slot} leaves the safe box by {_fmt(spill[1], 0)} px at the {spill[0]}")

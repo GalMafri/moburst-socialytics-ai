@@ -125,16 +125,40 @@ def reflow(slots: dict[str, dict], size: Size, ref_aspect: float, arrangement: s
     return {n: tuple(b) for n, b in out.items()}
 
 
+def clear_of_logo(boxes: dict[str, tuple[float, float, float, float]], size: Size) -> dict[str, tuple[float, float, float, float]]:
+    """Text slots pushed off the logo box. A family's slot medians come from different posts, so a subline that sits beside the logo
+    in every post can still land on the logo's median box; the push is along the axis that costs least and stays inside the frame."""
+    logo = boxes.get("logo")
+    if not logo:
+        return boxes
+    lx, ly, lw, lh = logo
+    out = dict(boxes)
+    for role in TEXT_ROLES:
+        b = out.get(role)
+        if not b or not _overlap(b, logo):
+            continue
+        x, y, w, h = b
+        moves = [("x", lx + lw - x), ("x", lx - w - x), ("y", ly + lh - y), ("y", ly - h - y)]  # right, left, down, up
+        for axis, d in sorted(moves, key=lambda m: abs(m[1])):
+            nx, ny = (x + d, y) if axis == "x" else (x, y + d)
+            if 0 <= nx and nx + w <= size.w and 0 <= ny and ny + h <= size.h:
+                out[role] = (nx, ny, w, h)
+                break
+    return out
+
+
 def frame_boxes(family: dict, size: Size, arrangement: str = "p50") -> dict[str, tuple[float, float, float, float]]:
     """Every slot of the family in pixels at this size: plain fraction scaling when the size has the family's aspect, the reflow
-    otherwise. The family's aspect is `parameters.aspect` (W/H of the posts it was measured on); without it, fractions."""
+    otherwise; text slots never on the logo. The family's aspect is `parameters.aspect` (W/H of the posts it was measured on)."""
     slots = (family.get("template") or {}).get("slots") or {}
     arrangement = arrangement if arrangement in ("p25", "p50", "p75") else "p50"
     ref = (family.get("parameters") or {}).get("aspect")
     target = size.w / size.h
     if isinstance(ref, (int, float)) and ref > 0 and abs(float(ref) - target) / target > ASPECT_TOLERANCE:
-        return reflow(slots, size, float(ref), arrangement)
-    return {name: slot_px(slot, size, arrangement) for name, slot in slots.items()}
+        boxes = reflow(slots, size, float(ref), arrangement)
+    else:
+        boxes = {name: slot_px(slot, size, arrangement) for name, slot in slots.items()}
+    return clear_of_logo(boxes, size)
 
 
 def _darken(hex_colour: str, share: float = 0.25) -> str:
@@ -151,12 +175,15 @@ def _pos(x: float, y: float, w: float, h: float) -> str:
     return f"left:{x:.2f}px;top:{y:.2f}px;width:{w:.2f}px;height:{h:.2f}px;"
 
 
-def _logo_box(logo_path: Path, slot_box: tuple[float, float, float, float], corner: str) -> tuple[float, float, float, float]:
-    """The logo drawn at the file's own aspect inside the slot, anchored to the family's logo corner."""
+def _logo_box(logo_path: Path, slot_box: tuple[float, float, float, float], corner: str, min_h: float | None = None) -> tuple[float, float, float, float]:
+    """The logo drawn at the file's own aspect inside the slot, anchored to the family's logo corner, and never below `min_h` px
+    (the client's own floor): a family whose posts carry a smaller mark than the client's floor still gets a legible one."""
     with Image.open(logo_path) as im:
         lw, lh = im.size
     sx, sy, sw, sh = slot_box
     scale = min(sw / lw, sh / lh)
+    if min_h is not None and lh * scale < min_h:
+        scale = min_h / lh
     w, h = lw * scale, lh * scale
     col = corner[1] if len(corner) == 2 else "l"
     row = corner[0] if len(corner) == 2 else "t"
@@ -175,7 +202,7 @@ def _device_box(device: dict, boxes: dict, size: Size) -> tuple[float, float, fl
 
 
 def build_html(family: dict, size: Size, spec: ComposeSpec, fonts: dict[str, Path], logo_path: Path, picture_path: Path | None,
-               fit: dict[str, Fit]) -> str:
+               fit: dict[str, Fit], logo_min_h: float | None = None) -> str:
     tpl = family["template"]
     slots = tpl["slots"]
     arrangement = spec.arrangement if spec.arrangement in ("p25", "p50", "p75") else "p50"
@@ -226,7 +253,7 @@ def build_html(family: dict, size: Size, spec: ComposeSpec, fonts: dict[str, Pat
         )
 
     if "logo" in slots:
-        x, y, w, h = _logo_box(logo_path, boxes["logo"], tpl.get("logo_corner", "tl"))
+        x, y, w, h = _logo_box(logo_path, boxes["logo"], tpl.get("logo_corner", "tl"), logo_min_h)
         parts.append(f'<img class="slot" data-slot="logo" data-variant="{html_mod.escape(spec.logo_variant)}" src="{_uri(logo_path)}" '
                      f'style="{_pos(x, y, w, h)}">')
 

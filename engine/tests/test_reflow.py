@@ -56,3 +56,15 @@ def test_right_anchored_logo_keeps_its_right_margin():
     boxes = reflow(fam["template"]["slots"], LANDSCAPE, 0.8)
     x, w = boxes["logo"][0], boxes["logo"][2]
     assert abs((1200 - (x + w)) - 0.05 * 627) < 0.5
+
+
+def test_text_slots_are_pushed_off_the_logo():
+    fam = {"parameters": {"aspect": 0.8}, "template": {"slots": {
+        "logo": {"x": 0.03, "y": 0.03, "w": 0.08, "h": 0.06},
+        "subline": {"x": 0.06, "y": 0.04, "w": 0.22, "h": 0.045},  # the median subline lands on the median logo
+        "headline": {"x": 0.19, "y": 0.31, "w": 0.43, "h": 0.17}}}}
+    b = frame_boxes(fam, PORTRAIT)
+    lx, ly, lw, lh = b["logo"]
+    sx, sy, sw, sh = b["subline"]
+    assert sx >= lx + lw - 0.5 or sy >= ly + lh - 0.5 or sx + sw <= lx + 0.5 or sy + sh <= ly + 0.5
+    assert abs(sx - (lx + lw)) < 0.5  # pushed right, the shortest move

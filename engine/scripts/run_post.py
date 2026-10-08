@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from learn_client import is_designed, load_reads, slugify
 
+from design_engine.compose import place
 from design_engine.compose.render import chromium
 from design_engine.config import settings
 from design_engine.picture import zone as zone_mod
@@ -176,14 +177,16 @@ def framed(path: Path, w: int, h: int) -> Image.Image:
 
 
 def text_zones(families: list[dict], size: specs.Size) -> list[list[float]]:
-    """The quiet zones (headline, subline, logo union) of the most observed families, in frame pixels."""
+    """The quiet zones (headline, subline, logo union) of the most observed families, in frame pixels: the zone is in picture
+    fractions, mapped back through each family's picture box at this size."""
     top = sorted(families, key=lambda f: -(f.get("seen_count") or 0))[:TOP_FAMILIES_FOR_ZONE]
     zones = []
     for fam in top:
         z = quiet_zone(fam)
-        if z is None:  # the family's text never sits on its picture
+        pic = place.picture_box(fam, size, "p50")
+        if z is None or pic is None:  # the family's text never sits on its picture
             continue
-        zones.append([z["x"] * size.w, z["y"] * size.h, z["w"] * size.w, z["h"] * size.h])
+        zones.append([pic[0] + z["x"] * pic[2], pic[1] + z["y"] * pic[3], z["w"] * pic[2], z["h"] * pic[3]])
     return zones or [[0.0, 0.0, float(size.w), size.h * 0.45]]
 
 
@@ -231,6 +234,10 @@ class DryRunClient(FakeClient):
         self.zones: dict[str, list[float] | None] = {}
         self.made: list[dict] = []
         self._next = 0
+
+    def frame_to(self, w: int, h: int) -> None:
+        """The size the next pictures are painted at: the picture box the composer will fill (set by the worker's framing wrapper)."""
+        self.w, self.h = int(w), int(h)
 
     def _zone(self, side: str, pct: int) -> list[float]:
         f = min(max(pct, 1), 100) / 100.0

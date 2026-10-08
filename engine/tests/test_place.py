@@ -280,3 +280,14 @@ def test_trim_to_ink_crops_padding_and_keeps_tight_files(tmp_path):
     tight = Image.new("RGBA", (100, 100), (220, 40, 40, 255))
     tight.save(tmp_path / "tight.png")
     assert trim_to_ink(tmp_path / "tight.png", tmp_path / "tight-trim.png") is None
+
+
+def test_pick_pair_clears_the_contrast_floor():
+    from design_engine.compose.option import pick_pair
+
+    pairs = [{"ink_hex": "#ffffff", "ground_hex": "#0e1b2e"}, {"ink_hex": "#444444", "ground_hex": "#555555"},
+             {"ink_hex": "#111111", "ground_hex": "#f3f3f3"}]
+    mid = 0.18  # a mid-brown ground: nearest pair by luminance is the grey-on-grey one, which cannot be read
+    chosen = pick_pair(pairs, mid)
+    assert chosen["ink_hex"] in ("#ffffff", "#111111")
+    assert pick_pair(pairs, 0.02)["ink_hex"] == "#ffffff" and pick_pair(pairs, 0.9)["ink_hex"] == "#111111"

@@ -500,9 +500,10 @@ def plan(ctx: RunContext, options: list[dict]) -> dict:
 
 
 def quiet_zone(family: dict, slots: tuple[str, ...] = ("headline", "subline", "logo")) -> dict | None:
-    """The part of the picture the text and logo cover, as fractions of the frame: the union of the slots that overlap the family's
-    picture area at their median position. None when the family carries no picture or no text sits on it (a picture above a text
-    panel, say): then nothing in the picture needs to stay calm, and the picture is never judged against a zone."""
+    """The part of the picture the text and logo cover, as fractions of the PICTURE (the brief names "the lower 40%" of the picture
+    it asks for, and the dry run flattens that region of the picture it hands back): the union of the slots that overlap the
+    family's picture area at their median position, mapped into the picture box. None when the family carries no picture or no
+    text sits on it (a picture above a text panel, say): then nothing in the picture needs to stay calm."""
     tpl = family.get("template") or {}
     role = tpl.get("picture_role", "none")
     if role == "none":
@@ -526,7 +527,7 @@ def quiet_zone(family: dict, slots: tuple[str, ...] = ("headline", "subline", "l
         return None
     x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
     x1, y1 = max(b[0] + b[2] for b in boxes), max(b[1] + b[3] for b in boxes)
-    return {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0}
+    return {"x": (x0 - pic[0]) / pic[2], "y": (y0 - pic[1]) / pic[3], "w": (x1 - x0) / pic[2], "h": (y1 - y0) / pic[3]}
 
 
 def arrangements_for(opt: OptionState) -> list:
@@ -555,6 +556,8 @@ class _FramedClient:
 
     def __init__(self, inner: Any, w: int, h: int):
         self.inner, self.w, self.h = inner, int(w), int(h)
+        if hasattr(inner, "frame_to"):  # a stand-in that paints its own pictures draws them at the picture's size
+            inner.frame_to(self.w, self.h)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)
