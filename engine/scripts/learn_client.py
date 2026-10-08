@@ -32,7 +32,7 @@ from design_engine.learn.profile import build, validate
 from design_engine.learn.typeface import match_headlines, render_line
 from design_engine.measure.calibrate import calibrate
 from design_engine.measure.image import load_rgb
-from design_engine.measure.logo import file_ground, logo_templates_from_file
+from design_engine.measure.logo import file_ground, logo_templates_from_file, trim_to_ink
 from design_engine.measure.ocr import read_lines
 from design_engine.report.board import render
 from design_engine.store.workspace import Workspace
@@ -208,6 +208,15 @@ def main():
     for u in uploads:
         if u.get("kind") == "logo":
             logo_files.insert(0, {"path": u["path"], "variant": "upload", "source": u["source"]})
+    # the asset is the file's ink: a site export padded with transparent space is cropped to its lockup (the client's own pixels)
+    for lf in logo_files:
+        src = ws.root / lf["path"]
+        if src.suffix.lower() not in (".png", ".webp"):
+            continue
+        trimmed = trim_to_ink(src, src.with_name(src.stem + "-trim.png"))
+        if trimmed is not None:
+            lf["original"] = lf["path"]
+            lf["path"] = str(trimmed.relative_to(ws.root))
 
     # 2. posts
     posts = [p for p in ws.posts() if p.kind == "post"]

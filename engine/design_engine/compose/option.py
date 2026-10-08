@@ -3,6 +3,7 @@ from an observed pair whose ground matches what is measured under the text, the 
 A line that cannot fit at the floor raises OverflowError naming the slot: the run loop turns that into "shorten the copy"."""
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +12,7 @@ import numpy as np
 from PIL import Image
 
 from ..measure.image import Box, contrast, rel_lum
+from ..measure.logo import ink_aspect
 from ..platform.specs import Size
 from . import place
 from .place import Arrangement, hex_lum
@@ -121,11 +123,26 @@ def _ink_lum(path: Path) -> float | None:
     return float(rel_lum(rgba[..., :3][mask]).mean())
 
 
-def pick_logo(logo_files: Sequence[Mapping], ground_lum: float | None, pair: Mapping, logo_variant: str | None = None) -> tuple[Path, str]:
+def _by_slot_aspect(files: list[dict], slot_aspect: float | None) -> list[dict]:
+    """The files ordered by how close their ink aspect sits to the slot's: a square slot the posts carry takes the mark file, a wide
+    one the lockup. Order unchanged when no slot aspect is known."""
+    if slot_aspect is None or len(files) < 2:
+        return files
+
+    def distance(f: Mapping) -> float:
+        a = ink_aspect(Path(str(f["path"])))
+        return abs(math.log(a / slot_aspect)) if a else 9.0
+
+    return sorted(files, key=distance)
+
+
+def pick_logo(logo_files: Sequence[Mapping], ground_lum: float | None, pair: Mapping, logo_variant: str | None = None,
+              slot_aspect: float | None = None) -> tuple[Path, str]:
     """The logo file for this ground and the variant name recorded on the spec. An explicit `logo_variant` naming a file's
     `variant`, `ground` tag or stem is honoured. Otherwise the ground the pair reads on (dark when its ink is lighter than its
-    ground) selects a file tagged for that ground; untagged files are measured: the one whose ink contrasts most with the ground."""
-    files = [f for f in logo_files if f.get("path")]
+    ground) selects a file tagged for that ground; among those, the file whose ink aspect fits the slot the posts carry (the mark
+    for a square slot, the lockup for a wide one); untagged files are measured: the one whose ink contrasts most with the ground."""
+    files = _by_slot_aspect([dict(f) for f in logo_files if f.get("path")], slot_aspect)
     if not files:
         raise ValueError("no logo file to place: the profile carries no logo files")
     if logo_variant:
@@ -174,7 +191,9 @@ def assemble(profile: dict, family: dict, size: Size, picture_path: Path | str |
         chosen = dict(pair)
     else:
         chosen = pick_pair(list(pair) if pair is not None else list(profile.get("observed_pairs") or []), ground_lum)
-    logo_path, variant = pick_logo(logo_files, ground_lum, chosen, logo_variant)
+    logo_slot = boxes.get("logo")
+    slot_aspect = (logo_slot[2] / logo_slot[3]) if logo_slot and logo_slot[3] > 0 else None
+    logo_path, variant = pick_logo(logo_files, ground_lum, chosen, logo_variant, slot_aspect)
 
     tpl = fam.get("template") or {}
     params = fam.get("parameters") or {}

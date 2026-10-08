@@ -243,3 +243,40 @@ def test_flat_ground_lum_is_the_template_ground(family, size):
     c = hexes[0].lstrip("#")
     expected = float(rel_lum(np.array([int(c[i:i + 2], 16) for i in (0, 2, 4)])))
     assert lum == pytest.approx(expected, abs=1e-6)
+
+
+def test_pick_logo_prefers_the_file_whose_ink_fits_the_slot(tmp_path):
+    from PIL import Image, ImageDraw
+
+    from design_engine.compose.option import pick_logo
+
+    mark = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+    ImageDraw.Draw(mark).rectangle([5, 5, 95, 95], fill=(220, 40, 40, 255))
+    mark.save(tmp_path / "mark.png")
+    lockup = Image.new("RGBA", (400, 100), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lockup)
+    d.rectangle([5, 5, 95, 95], fill=(220, 40, 40, 255))
+    d.rectangle([120, 30, 390, 70], fill=(255, 255, 255, 255))
+    lockup.save(tmp_path / "lockup.png")
+    files = [{"path": str(tmp_path / "lockup.png"), "ground": "dark"}, {"path": str(tmp_path / "mark.png"), "ground": "dark"}]
+    pair = {"ink_hex": "#ffffff", "ground_hex": "#0e1b2e"}
+    assert pick_logo(files, 0.02, pair, slot_aspect=1.1)[0].name == "mark.png"
+    assert pick_logo(files, 0.02, pair, slot_aspect=4.0)[0].name == "lockup.png"
+    assert pick_logo(files, 0.02, pair)[0].name == "lockup.png"  # no slot known: the first tagged file
+
+
+def test_trim_to_ink_crops_padding_and_keeps_tight_files(tmp_path):
+    from PIL import Image, ImageDraw
+
+    from design_engine.measure.logo import trim_to_ink
+
+    padded = Image.new("RGBA", (1600, 46), (0, 0, 0, 0))
+    d = ImageDraw.Draw(padded)
+    d.rectangle([0, 0, 45, 45], fill=(220, 40, 40, 255))
+    d.rectangle([60, 10, 266, 36], fill=(255, 255, 255, 255))  # a white wordmark: ink on black only
+    padded.save(tmp_path / "padded.png")
+    out = trim_to_ink(tmp_path / "padded.png", tmp_path / "padded-trim.png")
+    assert out is not None and Image.open(out).size == (267, 46)
+    tight = Image.new("RGBA", (100, 100), (220, 40, 40, 255))
+    tight.save(tmp_path / "tight.png")
+    assert trim_to_ink(tmp_path / "tight.png", tmp_path / "tight-trim.png") is None

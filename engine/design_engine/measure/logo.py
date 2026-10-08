@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -60,6 +61,41 @@ def file_ground(path) -> str | None:
     if abs(a_light - a_dark) <= 0.05 * max(a_light, a_dark):
         return None
     return "light" if a_light > a_dark else "dark"
+
+
+def ink_extent(path) -> tuple[int, int, int, int] | None:
+    """The file's full ink extent (x, y, w, h): the union of what reads on white and on black, so a white wordmark counts."""
+    _, on_light = _ink_bbox(path, 255)
+    _, on_dark = _ink_bbox(path, 0)
+    boxes = [b for b in (on_light, on_dark) if b is not None]
+    if not boxes:
+        return None
+    x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    x1, y1 = max(b[0] + b[2] for b in boxes), max(b[1] + b[3] for b in boxes)
+    return x0, y0, x1 - x0, y1 - y0
+
+
+def ink_aspect(path) -> float | None:
+    ext = ink_extent(path)
+    return (ext[2] / ext[3]) if ext and ext[3] > 0 else None
+
+
+def trim_to_ink(path, out, pad: int = 0, min_change: float = 0.05) -> Path | None:
+    """The file cropped to its ink extent, written to `out`: the client's own pixels without the transparent padding a site export
+    carries (one lockup arrived 1600 px wide with 267 px of ink, and drawn as-is it fills a slot with nothing). None when the file is
+    already within `min_change` of its ink extent; then the original is the asset."""
+    ext = ink_extent(path)
+    if ext is None:
+        return None
+    lg = Image.open(path).convert("RGBA")
+    x, y, w, h = ext
+    if w * h >= (1 - min_change) * lg.width * lg.height:
+        return None
+    box = (max(0, x - pad), max(0, y - pad), min(lg.width, x + w + pad), min(lg.height, y + h + pad))
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    lg.crop(box).save(out)
+    return out
 
 
 def logo_templates_from_file(path) -> list[LogoTemplate]:
