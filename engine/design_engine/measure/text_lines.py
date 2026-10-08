@@ -41,7 +41,8 @@ def classify(lines: list[Line], W: int, H: int, exclude_boxes=()) -> TextRead:
         return TextRead(other=kept)
     tallest = max(line.box[3] for line in worded)
     head = [line for line in worded if line.box[3] >= 0.8 * tallest]
-    rest = [line for line in kept if line not in head]
+    furniture = [line for line in kept if line not in worded]
+    rest = [line for line in worded if line not in head]
     # the subline is the block of lines just below the headline with a consistent smaller height
     sub: list[Line] = []
     if rest:
@@ -51,5 +52,5 @@ def classify(lines: list[Line], W: int, H: int, exclude_boxes=()) -> TextRead:
                 sub.append(line)
             else:
                 break
-    other = [line for line in rest if line not in sub]
+    other = [line for line in rest if line not in sub] + furniture
     return TextRead(head, sub, other, union([line.box for line in head]), union([line.box for line in sub]))
