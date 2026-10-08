@@ -5,9 +5,9 @@ Nothing here guesses positions from a description; every box is measured on the 
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 from PIL import Image

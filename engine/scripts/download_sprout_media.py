@@ -1,7 +1,12 @@
 """Download the stills of a client's Sprout posts into work/<slug>/posts/ with provenance. Idempotent by sha256."""
 from __future__ import annotations
-import hashlib, json, sys, time
+
+import hashlib
+import json
+import sys
+import time
 from pathlib import Path
+
 import httpx
 
 slug = sys.argv[1]
@@ -33,7 +38,7 @@ for p in posts:
                           "profile_id": p.get("profile_id"), "platform": p.get("network"), "posted_at": p.get("created_time"),
                           "content_category": cat, "slide_index": i, "impressions": p.get("impressions"), "text": p.get("text"), "kind": "video_thumb" if cat == "VIDEO" else "post"}
             done += 1
-        except Exception as e:
+        except Exception:
             fail += 1
         time.sleep(0.05)
 json.dump(index, open(index_path, "w"), indent=1)
