@@ -44,15 +44,21 @@ def slugify(name: str) -> str:
 
 
 def svg_to_png(svg_path: Path, out: Path, width: int = 1600) -> Path:
-    """Rasterise an SVG with Chromium on a transparent page; the file stays the brand's own vector."""
+    """Rasterise an SVG with Chromium by inlining it (a file:// image inside a generated page is refused); the vector file stays
+    the brand's own asset, this PNG is only the measuring template."""
+    import re as _re
+
     from playwright.sync_api import sync_playwright
 
+    svg = svg_path.read_text(errors="ignore")
+    # width-only sizing keeps the aspect ratio: strip fixed width/height attrs on the root so CSS width applies
+    svg = _re.sub(r"<svg([^>]*?)\s(width|height)=\"[^\"]*\"", r"<svg\1", svg, count=2)
+    html = f"<html><body style='margin:0;background:transparent'><div id='l' style='display:inline-block;width:{width}px'>{svg}</div></body></html>"
     with sync_playwright() as p:
         b = p.chromium.launch()
-        page = b.new_page(viewport={"width": width, "height": 600})
-        html = f"<html><body style='margin:0;background:transparent'><img id='l' src='{svg_path.resolve().as_uri()}' style='width:{width}px'></body></html>"
+        page = b.new_page(viewport={"width": width + 20, "height": 800})
         page.set_content(html)
-        page.wait_for_load_state("networkidle")
+        page.evaluate("document.querySelector('#l svg') && (document.querySelector('#l svg').style.width='100%')")
         el = page.query_selector("#l")
         el.screenshot(path=str(out), omit_background=True)
         b.close()
@@ -126,7 +132,16 @@ def main():
             for f in site.font_files:
                 if f.get("path"):
                     own_fonts.append(Path(f["path"]) if Path(f["path"]).is_absolute() else ws.root / "website" / f["path"])
-            for i, lc in enumerate(site.logo_candidates[:3]):
+            # every candidate the page offered, lockups first: icons under 24 px and square inline glyphs are social buttons, not marks
+            ranked = []
+            for lc in site.logo_candidates:
+                w, h = lc.get("width") or 0, lc.get("height") or 0
+                if lc.get("kind") == "inline-svg" and max(w, h) <= 24:
+                    continue
+                aspect = (w / h) if (w and h) else 1.0
+                ranked.append((0 if aspect >= 1.3 else 1 if lc.get("kind") in ("img", "inline-svg") else 2, lc))
+            ranked.sort(key=lambda t: t[0])
+            for i, (_, lc) in enumerate(ranked):
                 p = lc.get("path")
                 if not p:
                     continue
@@ -150,14 +165,35 @@ def main():
     if args.limit:
         posts = posts[: args.limit]
     upload_posts = [u for u in uploads if u.get("kind") == "upload"]
-    templates = []
+    # Which candidate file is the brand's lockup is decided by the posts: a candidate must match on at least two of them.
+    from design_engine.measure.logo import find_logo_any
+
+    probe = posts[:40]
+    kept_files, templates = [], []
     for lf in logo_files:
         try:
-            templates += logo_templates_from_file(ws.root / lf["path"])
+            cand = logo_templates_from_file(ws.root / lf["path"])
         except Exception as e:
             print(f"logo template failed for {lf['path']}: {e}")
+            continue
+        hits = 0
+        for pp in probe:
+            try:
+                arr = load_rgb(pp.path)
+            except Exception:
+                continue
+            m = find_logo_any(arr, cand, min(arr.shape[0], arr.shape[1]), min_score=0.8)
+            hits += 1 if (m and m.height_share >= 0.03) else 0
+        print(f"logo candidate {lf['path']}: {hits} matches in {len(probe)} posts")
+        if hits >= 2:
+            kept_files.append({**lf, "matches_in_probe": hits})
+            templates += [(f"{lf['path']}:{name}", g) for name, g in cand]
+    if not kept_files and logo_files:
+        kept_files = [logo_files[0]]
+        templates = logo_templates_from_file(ws.root / logo_files[0]["path"])
+        print("no candidate matched two posts; keeping the first site candidate as the file")
+    logo_files = kept_files
     ocr = (lambda p: read_lines(p, backend=args.ocr)) if args.ocr else read_lines
-    from design_engine.measure.logo import find_logo_any
 
     reads = []
     designed = []
@@ -172,6 +208,8 @@ def main():
             if templates:
                 arr = load_rgb(path)
                 r.logo = find_logo_any(arr, templates, min(r.W, r.H))
+                if r.logo:
+                    r.logo = type(r.logo)(r.logo.score, r.logo.box, r.logo.height_share, r.logo.variant.split(":")[-1])
                 if r.logo:  # re-classify text with the logo excluded, as read_post does when the template is given up front
                     from design_engine.measure.text_lines import classify
 
