@@ -49,6 +49,9 @@ class Brief:
     reference_media_ids: list[str] = field(default_factory=list)  # references already in Higgsfield storage (client.upload)
 
 
+PICTURELESS_KINDS = {"text_only", "typography", "type_only", "ghost_mark", "logo", "wordmark"}  # imagery items that describe type or marks, never a picture
+
+
 def forbidden_pattern(brand_name: str | None = None) -> re.Pattern:
     words = list(FORBIDDEN_WORDS)
     if brand_name and brand_name.strip():
@@ -155,7 +158,8 @@ def build(profile: dict, family: dict, slot_zone: dict | None, concept: str, pla
     imagery = profile.get("imagery") or {}
     items = [it for it in imagery.get("items") or [] if isinstance(it, dict) and it.get("description")]
     lines = [concept.strip().rstrip(".") + "."]
-    looks = [f"{it['kind'].replace('_', ' ')}: {it['description'].rstrip('.')}" for it in items if is_clean(it["description"], brand)]
+    looks = [f"{it['kind'].replace('_', ' ')}: {it['description'].rstrip('.')}" for it in items
+             if str(it.get("kind", "")).lower() not in PICTURELESS_KINDS and is_clean(it["kind"].replace("_", " "), brand) and is_clean(it["description"], brand)]
     if looks:
         lines.append("In this brand's own picture language, " + "; ".join(looks) + ".")
     grounds = [g for g in imagery.get("grounds") or [] if is_clean(g, brand)]

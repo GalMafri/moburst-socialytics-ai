@@ -44,7 +44,10 @@ def slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
-def svg_to_png(svg_path: Path, out: Path, width: int = 1600) -> Path:
+MIN_LOGO_PX = 1200  # the ink of a placed logo is never upscaled from a smaller raster
+
+
+def svg_to_png(svg_path: Path, out: Path, width: int = 1600, scale: float = 1.0) -> Path:
     """Rasterise an SVG with Chromium by inlining it (a file:// image inside a generated page is refused); the vector file stays
     the brand's own asset, this PNG is only the measuring template."""
     import re as _re
@@ -57,7 +60,7 @@ def svg_to_png(svg_path: Path, out: Path, width: int = 1600) -> Path:
     html = f"<html><body style='margin:0;background:transparent'><div id='l' style='display:inline-block;width:{width}px'>{svg}</div></body></html>"
     with sync_playwright() as p:
         b = p.chromium.launch()
-        page = b.new_page(viewport={"width": width + 20, "height": 800})
+        page = b.new_page(viewport={"width": width + 20, "height": 800}, device_scale_factor=scale)  # scale: a vector whose ink is small on the page
         page.set_content(html)
         page.evaluate("document.querySelector('#l svg') && (document.querySelector('#l svg').style.width='100%')")
         el = page.query_selector("#l")
@@ -214,6 +217,13 @@ def main():
         if src.suffix.lower() not in (".png", ".webp"):
             continue
         trimmed = trim_to_ink(src, src.with_name(src.stem + "-trim.png"))
+        if trimmed is not None and lf.get("svg"):
+            # a vector rasterised wide but with little ink: rasterise again so the ink itself is at least MIN_LOGO_PX wide
+            with Image.open(trimmed) as im:
+                ink_w = im.width
+            if ink_w < MIN_LOGO_PX:
+                svg_to_png(ws.root / lf["svg"], src, scale=MIN_LOGO_PX / max(ink_w, 1))
+                trimmed = trim_to_ink(src, src.with_name(src.stem + "-trim.png")) or src
         if trimmed is not None:
             lf["original"] = lf["path"]
             lf["path"] = str(trimmed.relative_to(ws.root))

@@ -16,6 +16,8 @@ from typing import Any
 from dotenv import load_dotenv
 
 from ..config import ENGINE_ROOT
+from ..picture.brief import BriefRefused
+from ..picture.higgsfield import HiggsfieldError
 from . import record, tools
 from .tools import OptionState, RunContext
 
@@ -134,6 +136,10 @@ def build_tools(ctx: RunContext) -> list:
             except tools.ToolRefused as e:
                 ctx.transcript.append({"tool": name, "args": kwargs, "refused": str(e)})
                 raise
+            except (BriefRefused, tools.BudgetExceeded, HiggsfieldError) as e:
+                # a worker rule or the picture service said no: the model reads it as a refusal with the reason, not as a crash
+                ctx.transcript.append({"tool": name, "args": kwargs, "refused": f"{type(e).__name__}: {e}"})
+                raise tools.ToolRefused(f"{name} refused: {e}") from e
             ctx.transcript.append({"tool": name, "args": kwargs, "ok": True})
             return json.dumps(out, default=str)
 

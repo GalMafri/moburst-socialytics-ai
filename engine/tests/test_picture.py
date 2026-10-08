@@ -260,3 +260,13 @@ def test_fake_client_download_writes_scripted_png(tmp_path):
     client = FakeClient(pictures=[quiet_top_png()])
     out = client.download("fake://job-1", tmp_path / "p.png")
     assert out.exists() and Image.open(out).size == (W, H)
+
+
+def test_profile_fragments_never_put_forbidden_words_in_the_brief():
+    """An imagery item whose kind or description names type is not a picture description; the brief is built from the rest."""
+    profile = {**PROFILE, "imagery": {**PROFILE["imagery"], "items": PROFILE["imagery"]["items"] + [
+        {"kind": "text_only", "description": "A result card with large type.", "evidence_post_ids": [2]},
+        {"kind": "photography", "description": "A hand holding a card with text on it.", "evidence_post_ids": [3]}]}}
+    b = brief_mod.build(profile, FAMILY, SLOT_ZONE, "a quiet stadium at night", "instagram")
+    assert brief_mod.is_clean(b.text, "Bader Law") and "result card" not in b.text and "holding a card" not in b.text
+    assert "Office interiors" in b.text
