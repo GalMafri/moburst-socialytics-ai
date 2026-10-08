@@ -65,7 +65,7 @@ def describe_imagery(post_paths: list[Path], client_name: str, model: str = "cla
     """Ask the vision model once about all posts; keep only items whose evidence names real post indexes."""
     paths = [Path(p) for p in post_paths]
     if not paths:
-    return Imagery(model=model)
+        return Imagery(model=model)
     if client is None:
         import anthropic
 
