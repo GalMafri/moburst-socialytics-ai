@@ -103,6 +103,14 @@ def font_library(work_root: Path) -> list[Path]:
     return [lib / n for n in names]
 
 
+def device_colour(arr, box) -> str:
+    """The median colour inside a device box, as hex: the band's own colour, never the ink's."""
+    x, y, w, h = [int(round(v)) for v in box]
+    region = arr[max(0, y):y + max(1, h), max(0, x):x + max(1, w)].reshape(-1, 3)
+    r, g, b = (int(v) for v in np.median(region, axis=0))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 def dump_read(r) -> dict:
     return {"path": str(r.path), "source_post_id": r.source_post_id, "platform": r.platform, "posted_at": r.posted_at, "slide_index": r.slide_index,
             "kind": r.kind, "W": r.W, "H": r.H, "lines": [asdict(l) for l in r.lines], "logo": asdict(r.logo) if r.logo else None,
@@ -290,6 +298,7 @@ def main():
                 if r.logo:
                     r.logo = type(r.logo)(r.logo.score, r.logo.box, r.logo.height_share, r.logo.variant.split(":")[-1], r.logo.match_box)
                 r.text = classify(r.lines, r.W, r.H, exclude_boxes=[r.logo.box] if r.logo else ())
+                r.extras["accent_hex"] = [device_colour(arr, b) for b in r.accent_boxes]
         designed = [r for r in reads if is_designed(r)]
         print(f"loaded {len(reads)} reads from cache; logo re-matched on {sum(1 for r in reads if r.logo)}")
     else:
@@ -309,6 +318,7 @@ def main():
                         from design_engine.measure.text_lines import classify
 
                         r.text = classify(r.lines, r.W, r.H, exclude_boxes=[r.logo.box])
+                r.extras["accent_hex"] = [device_colour(load_rgb(path), b) for b in r.accent_boxes]
             except Exception as e:  # noqa: BLE001  one unreadable file must not stop the learner; it is reported
                 print(f"read failed {path.name}: {e}")
                 continue

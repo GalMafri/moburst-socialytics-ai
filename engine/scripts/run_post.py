@@ -320,9 +320,10 @@ def build_context(args: argparse.Namespace, browser) -> tuple[RunContext, dict]:
         notes.append(f"DryRunClient cycles {len(feed)} client crops as pictures (flattened in the brief's zone when busy there); "
                      f"{len(picture_references)} other crops stay as picture references")
     else:
-        from design_engine.picture.higgsfield import Client
+        from design_engine.picture.higgsfield import PROBE_URL_ENV, Client, ProbeClient
 
-        higgsfield = Client.from_env()
+        # the product's own door: Socialytics's linked Higgsfield session through the n8n bridge; a personal MCP token otherwise
+        higgsfield = ProbeClient.from_env() if os.environ.get(PROBE_URL_ENV) else Client.from_env()
         picture_references = list(crops)
     if not cfg.anthropic_api_key:
         raise SystemExit("ANTHROPIC_API_KEY is not set in engine/.env; the model cannot run")

@@ -173,7 +173,7 @@ def test_brief_references_skip_text_and_logo(tmp_path):
         {"path": str(post), "W": W, "H": H, "logo": None, "lines": [], "picture_boxes": [[0.0, 100.0, 480.0, 200.0]]},
         {"path": str(post), "W": W, "H": H, "logo": None, "lines": [], "picture_boxes": [[0.0, 100.0, 480.0, 200.0]]},
     ]
-    b = brief_mod.build(PROFILE, FAMILY, SLOT_ZONE, "a quiet office", "instagram", reads=reads, ref_dir=tmp_path / "refs")
+    b = brief_mod.build(PROFILE, FAMILY, SLOT_ZONE, "a quiet office", "instagram", reads=reads, ref_dir=tmp_path / "refs", use_references=True)
     assert len(b.reference_paths) == 3
     assert all(p.exists() for p in b.reference_paths)
     assert Image.open(b.reference_paths[0]).size == (480, 150)
@@ -268,5 +268,5 @@ def test_profile_fragments_never_put_forbidden_words_in_the_brief():
         {"kind": "text_only", "description": "A result card with large type.", "evidence_post_ids": [2]},
         {"kind": "photography", "description": "A hand holding a card with text on it.", "evidence_post_ids": [3]}]}}
     b = brief_mod.build(profile, FAMILY, SLOT_ZONE, "a quiet stadium at night", "instagram")
-    assert brief_mod.is_clean(b.text, "Bader Law") and "result card" not in b.text and "holding a card" not in b.text
+    assert brief_mod.is_clean(brief_mod.without_clause(b.text), "Bader Law") and "result card" not in b.text and "holding a card" not in b.text
     assert "Office interiors" in b.text

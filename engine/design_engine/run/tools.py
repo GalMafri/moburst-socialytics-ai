@@ -47,6 +47,8 @@ from ..picture.zone import ZoneRead, floor_from_calibration
 from ..platform.specs import Size
 
 MAX_OPTIONS = 3
+LETTERING_CONFIDENCE = 0.6
+LETTERING_MIN_CHARS = 3
 PICTURES_PER_OPTION = 2
 FIX_ROUNDS = 1
 ROTATION_WINDOW = 3
@@ -207,9 +209,10 @@ def reading_order(family: dict) -> str:
     h, s_ = slots.get("headline"), slots.get("subline")
     if not h or not s_:
         return "unknown"
-    if float(s_["y"]) + float(s_["h"]) <= float(h["y"]) + 0.01:
+    sc, hc = float(s_["y"]) + float(s_["h"]) / 2, float(h["y"]) + float(h["h"]) / 2
+    if sc < float(h["y"]):  # the subline's centre is above the headline block: a kicker
         return "subline_first"
-    if float(s_["y"]) >= float(h["y"]) + float(h["h"]) - 0.01:
+    if sc > float(h["y"]) + float(h["h"]):
         return "headline_first"
     return "unknown"
 
@@ -561,8 +564,32 @@ def quiet_zone(family: dict, slots: tuple[str, ...] = ("headline", "subline", "f
 
 
 def arrangements_for(opt: OptionState) -> list:
-    """The arrangements compose tries for an option: every named one for a family arrangement, the median alone otherwise."""
-    return list(place.NAMED) if opt.arrangement == "family" else ["p50"]
+    """The arrangements compose tries for an option: every named one for a family arrangement, the exemplar alone otherwise. An
+    alternative exemplar whose reading order differs from the family's (a kicker where the family reads headline first) is left
+    out: the copy was planned for the family's order."""
+    if opt.arrangement != "family":
+        return ["p50"]
+    base = reading_order(opt.family)
+    out = []
+    for name in place.NAMED:
+        fam = opt.family if name == "p50" else _family_at(opt.family, name)
+        if name == "p50" or reading_order(fam) == base or base == "unknown":
+            out.append(name)
+    return out
+
+
+def _family_at(family: dict, arrangement: str) -> dict:
+    """The family with its slots at a named alternative arrangement (the next exemplar's boxes), for rules that read slot geometry."""
+    import copy as copy_mod
+
+    fam = copy_mod.deepcopy(family)
+    for slot in (fam.get("template") or {}).get("slots", {}).values():
+        band = slot.get("band") or {}
+        for c in ("x", "y", "w", "h"):
+            v = band.get(c, {}).get(arrangement)
+            if isinstance(v, (int, float)) and ("exemplar" in slot or c in ("x", "y")):
+                slot[c] = float(v)
+    return fam
 
 
 def picture_reader(ctx: RunContext, opt: OptionState) -> Callable[[Path], ZoneRead]:
@@ -571,11 +598,15 @@ def picture_reader(ctx: RunContext, opt: OptionState) -> Callable[[Path], ZoneRe
     cands = arrangements_for(opt)
 
     def read(path: Path) -> ZoneRead:
+        lettered = [ln for ln in ctx.ocr(path) if ln.confidence >= LETTERING_CONFIDENCE and sum(c.isalnum() for c in ln.text) >= LETTERING_MIN_CHARS]
+        if lettered:  # a picture never carries lettering: the copy and the mark are the layout's, and the gate reads copy by OCR
+            return ZoneRead(salient_share=1.0, ok=False, floor=float(ctx.floor),
+                            reason="lettering in the picture: " + "; ".join(repr(ln.text) for ln in lettered[:3]))
         ranked = place.rank(opt.family, ctx.primary, path, ctx.floor, cands)
         if not ranked:
             return ZoneRead(salient_share=0.0, ok=True, floor=float(ctx.floor))
         best = ranked[0]
-        return ZoneRead(salient_share=best.share, ok=best.ok, floor=float(ctx.floor))
+        return ZoneRead(salient_share=best.share, ok=best.ok, floor=float(ctx.floor), reason="" if best.ok else "busy under the text")
 
     return read
 
@@ -641,16 +672,16 @@ def picture(ctx: RunContext, option_id: str) -> dict:
     summary = {"option_id": opt.id, "brief": brief.text, "model": brief.model,
                "quiet_zone": {k: round(v, 3) for k, v in zone.items()} if zone else None,
                "pictures": [{"status": p.status, "path": str(p.path) if p.path else None, "job_ids": p.job_ids, "credits": p.credits,
-                             "zone_reads": [{"salient_share": z.salient_share, "ok": z.ok, "floor": z.floor} for z in p.zone_reads]} for p in made],
+                             "zone_reads": [{"salient_share": z.salient_share, "ok": z.ok, "floor": z.floor, "reason": z.reason} for z in p.zone_reads]} for p in made],
                "credits_spent_total": ctx.spent["credits"]}
     if not opt.ok_pictures:
         opt.fix_rounds += 1
         if opt.fix_rounds > FIX_ROUNDS:
-            ctx.drop(opt, "no picture kept the text slots quiet after the fix round: " + "; ".join(f"{p.job_ids}: shares {[z.salient_share for z in p.zone_reads]}" for p in opt.pictures))
+            ctx.drop(opt, "no usable picture after the fix round: " + "; ".join(f"{p.job_ids}: {[z.reason or 'ok' for z in p.zone_reads]}" for p in opt.pictures))
             summary["status"] = "dropped"
         else:
             summary["status"] = "no_picture"
-            summary["advice"] = "every picture was busy under the text; re-plan this option id with a calmer picture brief (one fix round)"
+            summary["advice"] = "no picture was usable (busy under the text, or lettering in the picture); re-plan this option id with a calmer, object-free brief (one fix round)"
     else:
         summary["status"] = "ok"
     return summary

@@ -247,6 +247,84 @@ class Client:
             return None
 
 
+PROBE_SECRET_ENV = "SOCIALYTICS_SERVER_SECRET"
+PROBE_USER_ENV = "SOCIALYTICS_ACT_AS_USER"
+PROBE_JWT_ENV = "SOCIALYTICS_STAFF_JWT"
+PROBE_URL_ENV = "SOCIALYTICS_PROBE_URL"
+DEFAULT_PROBE_URL = "https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/higgsfield-probe"
+SUPABASE_ANON_KEY = ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3b3V3eHFnZ2pqYWNicGJocXNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA3MjI5MjUsImV4cCI6MjA4NjI5ODkyNX0."
+                     "MVh6NOBLeBFvgYlxa9Ye9y6fTX3fQrMuo-YcwwJL5hU")  # public by design (the app bundle inlines it)
+
+
+class _ProbeResult:
+    """The shape `payload` reads, built from the probe function's answer (`{mcp: "call", isError, data, text}`)."""
+
+    def __init__(self, body: dict):
+        self.is_error = bool(body.get("isError"))
+        self.structured_content = body.get("data")
+        text = body.get("text")
+        self.content = [type("T", (), {"type": "text", "text": text})()] if isinstance(text, str) else []
+
+
+class ProbeClient(Client):
+    """The same surface as Client, but every MCP tool call goes through Socialytics's own `higgsfield-probe` edge function, which
+    holds the team's linked Higgsfield session (the server-side OAuth refresh token in integration_tokens). This is the product's
+    own access path: the worker on the Socialytics box will call the MCP with that session directly; from a laptop the function
+    is the door. Auth is the project's server secret plus the user acted for, or a signed-in admin's JWT."""
+
+    def __init__(self, url: str = DEFAULT_PROBE_URL, secret: str = "", act_as: str = "", jwt: str = "", timeout: float = 300.0):
+        bridged = "n8n" in url  # the n8n bridge holds the secret itself; the laptop sends only the user acted for
+        if not act_as and not jwt:
+            raise HiggsfieldError(f"no Socialytics credential; set {PROBE_USER_ENV} (+ {PROBE_SECRET_ENV} unless bridged) or {PROBE_JWT_ENV} in engine/.env")
+        if not bridged and not jwt and not secret:
+            raise HiggsfieldError(f"calling the edge function directly needs {PROBE_SECRET_ENV} in engine/.env")
+        self.url, self.secret, self.act_as, self.jwt, self.timeout, self.bridged = url, secret, act_as, jwt, timeout, bridged
+        self.token = "probe"
+
+    @classmethod
+    def from_env(cls) -> ProbeClient:  # type: ignore[override]
+        load_dotenv(ENGINE_ROOT / ".env")
+        return cls(os.environ.get(PROBE_URL_ENV, DEFAULT_PROBE_URL), os.environ.get(PROBE_SECRET_ENV, ""), os.environ.get(PROBE_USER_ENV, ""),
+                   os.environ.get(PROBE_JWT_ENV, ""))
+
+    def _headers(self) -> dict:
+        h = {"Content-Type": "application/json"}
+        if self.bridged:
+            return h
+        h["apikey"] = SUPABASE_ANON_KEY
+        if self.jwt:
+            h["Authorization"] = f"Bearer {self.jwt}"
+        else:
+            h["Authorization"] = f"Bearer {SUPABASE_ANON_KEY}"
+            h["x-socialytics-secret"] = self.secret
+            h["x-socialytics-user"] = self.act_as
+        return h
+
+    def _call(self, name: str, args: dict) -> Any:
+        import httpx
+
+        resp = httpx.post(self.url, json={"mcp": "call", "tool": name, "args": args, "act_as": self.act_as}, headers=self._headers(), timeout=self.timeout)
+        if resp.status_code >= 300:
+            raise HiggsfieldError(f"higgsfield-probe {resp.status_code} on {name}: {resp.text[:300]}")
+        body = resp.json()
+        if isinstance(body, dict) and isinstance(body.get("status"), int) and body["status"] >= 300:
+            raise HiggsfieldError(f"higgsfield-probe {body['status']} on {name}: {str(body.get('error') or body)[:300]}")
+        if not isinstance(body, dict) or body.get("mcp") != "call":
+            raise HiggsfieldError(f"higgsfield-probe answered without a tool result on {name}: {resp.text[:300]}")
+        return payload(_ProbeResult(body), name)
+
+    def list_tools(self) -> list[str]:
+        import httpx
+
+        resp = httpx.post(self.url, json={"mcp": "tools", "act_as": self.act_as}, headers=self._headers(), timeout=self.timeout)
+        if resp.status_code >= 300:
+            raise HiggsfieldError(f"higgsfield-probe {resp.status_code}: {resp.text[:300]}")
+        body = resp.json()
+        if isinstance(body, dict) and body.get("error"):
+            raise HiggsfieldError(f"higgsfield-probe: {body['error']}")
+        return list(body.get("tools") or [])
+
+
 class FakeClient:
     """Scripted stand-in with the Client surface. `pictures` are the PNG bytes successive downloads write; `costs` the preflight answers;
     `media_ids` the import answers (None = would not load). Every call is recorded on `calls` as (tool, args)."""

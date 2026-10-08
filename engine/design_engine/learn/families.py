@@ -160,6 +160,7 @@ def cluster(reads: list[PostRead]) -> list[Family]:
         slots: dict[str, list[dict]] = {"logo": [], "headline": [], "subline": [], "footer": [], "picture": [], "accent": []}
         src: dict[str, list[str]] = {k: [] for k in slots}
         per_member: list[dict[str, dict]] = []
+        accent_hexes: list[str] = []
         for m in members:
             per_member.append({})
             if m.logo:
@@ -175,6 +176,10 @@ def cluster(reads: list[PostRead]) -> list[Family]:
             dev = device_box(m)
             if dev is not None:
                 per_member[-1]["accent"] = _frac(dev, m.W, m.H)
+                hexes = (getattr(m, "extras", {}) or {}).get("accent_hex") or []
+                idx = next((i for i, b in enumerate(m.accent_boxes) if list(b) == list(dev)), None)
+                if idx is not None and idx < len(hexes):
+                    accent_hexes.append(hexes[idx])
             for k, v in per_member[-1].items():
                 slots[k].append(v)
                 src[k].append(m.source)
@@ -203,6 +208,7 @@ def cluster(reads: list[PostRead]) -> list[Family]:
                                  [m.source for m in members if getattr(m.text, "footer", None)]),
             "picture_text_ratio": band(pic_ratio, [m.source for m in members if m.picture_boxes and m.text.headline_box]),
             "device_on": bool(slots["accent"]),
+            "accent_hex": max(set(accent_hexes), key=accent_hexes.count) if accent_hexes else None,  # the band's measured colour
             "logo_variant": max(set(variants), key=variants.count) if variants else "none",
             "ground_hex": [m.ground.get("hex") for m in members if m.ground.get("hex")],
             "aspect": float(np.median([m.W / m.H for m in members])),

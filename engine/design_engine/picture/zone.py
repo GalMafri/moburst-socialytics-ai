@@ -23,6 +23,7 @@ class ZoneRead:
     zone_cells: CellBox = (0, 0, 0, 0)
     cell: int = CELL
     thresh: float = 0.0
+    reason: str = ""  # why the picture is not ok, when it is not: "busy under the text" or "lettering in the picture"
 
 
 def zone_to_cells(zone_box: Box, cell: int, grid: tuple[int, int]) -> CellBox:

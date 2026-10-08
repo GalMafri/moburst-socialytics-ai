@@ -106,6 +106,11 @@ def zone_instruction(slot_zone: dict) -> str:
     return f"keep the {side} {pct}% calm and uncluttered: no objects, no texture, a plain or softly graded field"
 
 
+def without_clause(text: str) -> str:
+    """The brief without the worker's own no-lettering clause, for the screen that forbids the model those words."""
+    return (text or "").replace(NO_LETTERING, "")
+
+
 def stronger(brief: Brief) -> str:
     if not brief.zone_side:
         return brief.text
@@ -149,8 +154,13 @@ def reference_crops(reads: list, ref_dir: Path, limit: int = MAX_REFERENCES) -> 
     return out
 
 
+NO_LETTERING = ("No lettering, numbers, signage, logos, badges, crests, interface elements, buttons or captions anywhere in the picture; "
+                "the copy and the mark are added afterwards by the layout.")
+USE_REFERENCES = False  # the client's own crops fed as image references were pasted into the pictures (icons, headshots, footers)
+
+
 def build(profile: dict, family: dict, slot_zone: dict | None, concept: str, platform: str, reads: list | None = None,
-          ref_dir: Path | None = None, legible_objects: bool = False) -> Brief:
+          ref_dir: Path | None = None, legible_objects: bool = False, use_references: bool = USE_REFERENCES) -> Brief:
     """The brief for one picture: the concept in the brand's imagery language, the palette as words, the quiet zone named, the aspect
     from the family; refused before anything else when the concept names a logo, text or the brand."""
     brand = profile.get("client_name") or None
@@ -176,7 +186,8 @@ def build(profile: dict, family: dict, slot_zone: dict | None, concept: str, pla
         lines.append(instruction[0].upper() + instruction[1:] + ".")
     lines.append(f"A single still picture for {platform}, photographic realism unless the brand's own pictures are illustrated.")
     text = " ".join(lines)
-    check(text, brand)
+    check(text, brand)  # the model's concept and the profile's words are screened; the worker's own clause follows the screen
+    text = text + " " + NO_LETTERING
     zone_side = None
     if slot_zone:
         side, other, _pct = zone_sides(slot_zone)
@@ -188,6 +199,6 @@ def build(profile: dict, family: dict, slot_zone: dict | None, concept: str, pla
                                        "use_unlim": False}
     else:
         model, params = DEFAULT_MODEL, {"model": DEFAULT_MODEL, "aspect_ratio": aspect, "resolution": DEFAULT_RESOLUTION, "use_unlim": False}
-    refs = reference_crops(reads, ref_dir, MAX_REFERENCES) if reads and ref_dir else []
+    refs = reference_crops(reads, ref_dir, MAX_REFERENCES) if use_references and reads and ref_dir else []
     return Brief(text=text, reference_paths=refs, model=model, params=params, aspect=aspect, brand_name=brand, zone_instruction=instruction,
                  zone_side=zone_side)

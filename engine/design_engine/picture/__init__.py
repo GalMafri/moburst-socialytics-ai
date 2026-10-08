@@ -48,7 +48,7 @@ def make_picture(client: Client | FakeClient, brief: Brief, out_dir: Path, zone:
     """`zone` is the quiet zone in the picture's pixels, read with the floor, or a reader `(path) -> ZoneRead` that judges the
     picture the way the composer will place text on it (the busiest text slot over every arrangement)."""
     read_zone: Reader = zone if callable(zone) else (lambda path: zone_mod.read(path, zone, floor))
-    brief_mod.check(brief.text, brief.brand_name)
+    brief_mod.check(brief_mod.without_clause(brief.text), brief.brand_name)
     out_dir = Path(out_dir)
     medias = [{"value": mid, "role": REFERENCE_ROLE} for mid in brief.reference_media_ids if mid]
     for url in brief.reference_urls:
@@ -61,7 +61,7 @@ def make_picture(client: Client | FakeClient, brief: Brief, out_dir: Path, zone:
     prompts: list[str] = []
     for attempt in range(1, ATTEMPTS + 1):
         prompt = brief.text if attempt == 1 else brief_mod.stronger(brief)
-        brief_mod.check(prompt, brief.brand_name)
+        brief_mod.check(brief_mod.without_clause(prompt), brief.brand_name)
         params = {**brief.params, "model": brief.model, "prompt": prompt, "use_unlim": False}
         if medias:
             params["medias"] = medias
