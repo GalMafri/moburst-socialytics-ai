@@ -85,4 +85,52 @@ def make_video(profile: dict, copy: str, size: Size, fonts: dict, logo_files: li
                        None if status == "ok" else "; ".join(result["failures"][:4]), frames)
 
 
-__all__ = ["MAX_CARDS", "VideoResult", "cards_from_copy", "choose_family", "make_video"]
+@dataclass
+class CardStill:
+    index: int  # 0-based card index
+    headline: str
+    png: Path | None
+    passed: bool
+    failures: list[str]
+    seconds: float  # the second of the composition the still was taken at
+
+
+def make_card_stills(profile: dict, copy: str, size: Size, fonts: dict, logo_files: list[dict], out_dir: Path, cards: int = MAX_CARDS,
+                     only_first: bool = False) -> tuple[list[CardStill], str | None]:
+    """The brand text cards as stills: the same composition the video renders, one PNG per card at the middle of its time on screen,
+    each judged by the video gate's frame check (logo from the file, contrast, busy ground, safe zone). The guaranteed deliverable
+    when no composed option passes: the brand's ground, type and logo, with the post's own lines. Returns (stills, failure)."""
+    fam = choose_family(profile)
+    if fam is None:
+        return [], "no family with a headline and a logo slot"
+    pairs = profile.get("observed_pairs") or []
+    pair = pick_pair(pairs, 0.02) if pairs else {"ink_hex": "#ffffff", "ground_hex": "#0e1b2e"}
+    logo_path, _ = pick_logo(logo_files, 0.02, pair)
+    card_list = cards_from_copy(copy, cards)
+    if not card_list:
+        return [], "the post copy has no lines to set"
+    if only_first:
+        card_list = card_list[:1]
+    spec = vspec.build_spec(profile, fam, size, card_list, fonts, logo_path, pair)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    vspec.write_spec(spec, out_dir / "spec.json")
+    fps = float(spec.get("fps") or 30)
+    stills: list[CardStill] = []
+    t = 0.0
+    for i, card in enumerate(spec["cards"]):
+        mid = t + float(card["seconds"]) / 2
+        png = out_dir / f"card-{i + 1}.png"
+        try:
+            vrender.render_still(spec, png, int(round(mid * fps)))
+        except vrender.RenderError as e:
+            stills.append(CardStill(i, str(card.get("headline") or ""), None, False, [f"render failed: {str(e)[:200]}"], mid))
+        else:
+            fails = vgate.check_frame(png, spec, size, mid, Path(logo_path))
+            stills.append(CardStill(i, str(card.get("headline") or ""), png, not fails, fails, mid))
+        t += float(card["seconds"])
+    (out_dir / "gate.json").write_text(json.dumps([{"card": s.index + 1, "passed": s.passed, "failures": s.failures} for s in stills], indent=1))
+    return stills, None
+
+
+__all__ = ["MAX_CARDS", "CardStill", "VideoResult", "cards_from_copy", "choose_family", "make_card_stills", "make_video"]

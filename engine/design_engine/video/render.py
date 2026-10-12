@@ -54,6 +54,22 @@ def render(spec: dict, out_mp4: Path, props_path: Path | None = None, timeout: f
     return Path(out_mp4)
 
 
+def render_still(spec: dict, out_png: Path, frame: int, props_path: Path | None = None, timeout: float = 300.0) -> Path:
+    """`npx remotion still src/index.ts BrandCards <out> --frame N --props <json>`: one frame of the composition as a PNG."""
+    if not (VIDEO_DIR / "node_modules" / "remotion").exists():
+        raise RenderError(f"Remotion is not installed in {VIDEO_DIR}: run `npm install` there")
+    staged = stage_assets(spec)
+    props = Path(props_path or out_png.with_suffix(".props.json"))
+    props.parent.mkdir(parents=True, exist_ok=True)
+    props.write_text(json.dumps({"spec": staged}))
+    cmd = ["npx", "remotion", "still", "src/index.ts", "BrandCards", str(Path(out_png).resolve()), "--frame", str(int(frame)),
+           "--props", str(props.resolve()), "--log", "error"]
+    proc = subprocess.run(cmd, cwd=VIDEO_DIR, capture_output=True, text=True, timeout=timeout)
+    if proc.returncode != 0:
+        raise RenderError(f"remotion still failed ({proc.returncode}): {(proc.stderr or proc.stdout)[-1200:]}")
+    return Path(out_png)
+
+
 def ffmpeg_exe() -> str:
     """ffmpeg on the PATH, else the binary the imageio-ffmpeg package carries (the box installs ffmpeg; a laptop may not)."""
     found = shutil.which("ffmpeg")
