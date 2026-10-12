@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import os
 import sys
 import time
@@ -123,6 +124,48 @@ def ctx_size(ctx: RunContext, name: str) -> specs.Size:
     return next(s for s in ctx.size_list if s.name == name)
 
 
+VIDEO_FORMATS = re.compile(r"\b(video|reel|reels|short|shorts|clip)\b", re.IGNORECASE)
+
+
+def is_video_format(fmt: str | None) -> bool:
+    return bool(VIDEO_FORMATS.search(str(fmt or "")))
+
+
+def process_video(store: Any, run: Run, profile: dict, ws: Path) -> dict:
+    """A video run: text cards from the post copy in the brand, rendered and gated; one option row with the mp4 and a poster."""
+    from ..video.make import make_video
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    from run_post import choose_fonts  # noqa: E402
+
+    platform, size_list = sizes_for(run.platform, run.format)
+    size = size_list[0]
+    typ = profile.get("type") or {}
+    stand_in = typ.get("accepted_stand_in") or os.environ.get("DESIGN_STAND_IN_FONT")
+    if typ.get("status") != "resolved" and not stand_in:
+        cands = [c for c in (typ.get("candidates") or []) if c.get("file") and Path(str(c["file"])).exists()]
+        stand_in = str(cands[0]["file"]) if cands else None
+    headline_font, subline_font, _ = choose_fonts(profile, stand_in, ws / "website" / "fonts")
+    logo_files = [{**f, "path": str(ws / f["path"]) if not Path(str(f["path"])).is_absolute() else f["path"]} for f in (profile.get("logo") or {}).get("files") or []]
+    out_dir = ws / "video" / f"{time.strftime('%Y%m%d-%H%M%S')}-{run.id[:8]}"
+    store.heartbeat(run.id, LEASE_SECONDS, plan={"stage": "pictures", "turn": 1, "options": 1, "pictures": 0, "composed": 0, "passed": 0, "sizes": [size.name]})
+    res = make_video(profile, run.copy, size, {"headline": headline_font, "subline": subline_font}, logo_files, out_dir)
+    sizes = [{"name": size.name, "w": size.w, "h": size.h}]
+    if res.status != "ok" or not res.mp4:
+        return {"status": "dropped", "spent": {"usd": 0.0, "credits": 0.0}, "sizes": sizes, "failure": res.failure or "the video did not pass the checks",
+                "plan": {"stage": "finished", "offered": [], "dropped": [{"id": "V", "reason": res.failure}], "run_dir": str(out_dir)}}
+    store.heartbeat(run.id, LEASE_SECONDS, plan={"stage": "checking", "turn": 2, "options": 1, "pictures": 1, "composed": 1, "passed": 1, "sizes": [size.name]})
+    mp4_url = store.upload(run.client_id, run.id, res.mp4, f"V-{size.name}.mp4")
+    poster_url = store.upload(run.client_id, run.id, res.poster, f"V-{size.name}-poster.jpg") if res.poster else None
+    files = {size.name: {"url": mp4_url, "path": f"designs/{run.client_id}/{run.id}/V-{size.name}.mp4", "w": size.w, "h": size.h, "passed": True,
+                         "video": True, "seconds": res.seconds, "poster": poster_url}}
+    store.write_options([{"run_id": run.id, "client_id": run.client_id, "option_key": "V", "rank": 1, "kind": "video", "family_key": res.family_key,
+                          "arrangement": "cards", "files": files, "picture_jobs": [], "measurements": {"video": res.gate, "seconds": res.seconds},
+                          "status": "offered"}])
+    return {"status": "offered", "spent": {"usd": 0.0, "credits": 0.0}, "sizes": sizes, "failure": None,
+            "plan": {"stage": "finished", "offered": ["V"], "dropped": [], "run_dir": str(out_dir)}}
+
+
 def process(store: Any, run: Run, browser: Any, clients: dict) -> dict:
     """One run end to end; returns the finish payload. Never raises past a run: a failure finishes the run as failed with the reason."""
     try:
@@ -130,6 +173,10 @@ def process(store: Any, run: Run, browser: Any, clients: dict) -> dict:
         if profile is None:
             raise StoreError("no confirmed brand profile for this client; confirm the brand on the Setup screen first")
         ws = workspace_for(run, profile)
+        if is_video_format(run.format):
+            payload = process_video(store, run, profile, ws)
+            store.finish(run.id, payload["status"], payload["spent"], payload["sizes"], payload["failure"], payload["plan"])
+            return payload
         ctx = build_context(run, profile, store.rules(run.client_id), store.prior_runs(run.client_id), ws, browser, clients)
         store.heartbeat(run.id, LEASE_SECONDS, plan={"stage": "reading", "sizes": [s.name for s in ctx.size_list]})
         ctx.on_progress = lambda p: store.heartbeat(run.id, LEASE_SECONDS, plan=p)

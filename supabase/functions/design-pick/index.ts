@@ -69,6 +69,7 @@ Deno.serve(async (req) => {
         if (u) urls.push(u);
       }
     } else {
+      // a static attaches every size; a video attaches its one mp4
       for (const f of Object.values((option.files || {}) as Record<string, { url?: string }>)) if (f?.url) urls.push(f.url);
     }
     if (!urls.length) return json({ error: "This option has no files to attach." }, 409);
