@@ -17,6 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 const db = supabase as unknown as SupabaseClient<any>;
 import { Check, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { STAGES, stageIndex, stageLabel, useDesignRuns } from "./DesignRunsContext";
 
 export interface DesignTabPost {
   _calendarPostKey?: string;
@@ -64,6 +65,8 @@ export function DesignTab({ post, clientId, reportId, onPicked }: Props) {
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const shared = useDesignRuns();
+  const sharedRun = postKey ? shared.runs[postKey] : null;
 
   const load = async () => {
     if (!clientId || !postKey) return;
@@ -86,6 +89,10 @@ export function DesignTab({ post, clientId, reportId, onPicked }: Props) {
     const t = setInterval(() => { void load(); }, POLL_MS);
     return () => clearInterval(t);
   }, [run?.id, run?.status]);
+  // the shared state (polled for the whole calendar) finishing a run reloads this tab's options at once
+  useEffect(() => {
+    if (sharedRun && run && sharedRun.id === run.id && sharedRun.status !== run.status) void load();
+  }, [sharedRun?.status]);
 
   const create = async () => {
     if (!clientId || !postKey) return;
@@ -101,6 +108,7 @@ export function DesignTab({ post, clientId, reportId, onPicked }: Props) {
       if (error) throw error;
       toast.success("Designs are on their way. This takes a few minutes; you can close this panel.");
       await load();
+      await shared.refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not start the designs.");
     } finally {
@@ -115,6 +123,7 @@ export function DesignTab({ post, clientId, reportId, onPicked }: Props) {
       if (error || data?.error) throw new Error(data?.error || error?.message || "Could not use this design.");
       toast.success("Added to this post. Schedule it from the Schedule tab.");
       await load();
+      await shared.refresh();
       onPicked?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not use this design.");
@@ -167,6 +176,30 @@ export function DesignTab({ post, clientId, reportId, onPicked }: Props) {
           <span className="ml-1.5">{tops.length ? "Create more" : "Create designs"}</span>
         </Button>
       </div>
+
+      {inProgress && (
+        <div className="glass-inner p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin text-[#b9e045]" />
+            <p className="text-sm font-semibold">{sharedRun ? stageLabel(sharedRun) : "Waiting to start"}</p>
+          </div>
+          <ol className="grid grid-cols-5 gap-2">
+            {STAGES.map((st, i) => {
+              const at = sharedRun ? stageIndex(sharedRun.stage) : 0;
+              const done = i < at, now = i === at;
+              return (
+                <li key={st.key} className="space-y-1">
+                  <div className={`h-1.5 rounded-full ${done ? "bg-[#b9e045]" : now ? "bg-[#b9e045]/60 animate-pulse" : "bg-white/10"}`} />
+                  <p className={`t-label ${done || now ? "text-white" : "text-muted-foreground"}`}>{st.label}</p>
+                </li>
+              );
+            })}
+          </ol>
+          {sharedRun && sharedRun.options > 0 && (
+            <p className="t-secondary">{sharedRun.options} option{sharedRun.options === 1 ? "" : "s"} in the making · {sharedRun.pictures} picture{sharedRun.pictures === 1 ? "" : "s"} made · {sharedRun.passed} passed every check</p>
+          )}
+        </div>
+      )}
 
       {run?.status === "failed" || run?.status === "dropped" ? (
         <div className="glass-inner p-4">

@@ -148,6 +148,7 @@ class RunContext:
     rank_with_vision: bool = True
     host_reference: Callable[[Path], str | None] | None = None  # a local crop -> a URL Higgsfield can import; None sends no references
     model: str = "claude-opus-5-5"
+    on_progress: Callable[[dict], None] | None = None  # called after every turn with what the client can be told
     # run state
     options: dict[str, OptionState] = field(default_factory=dict)
     spent: dict = field(default_factory=lambda: {"usd": 0.0, "credits": 0.0, "turns": 0, "warnings": [], "model_calls": []})
@@ -204,6 +205,19 @@ class RunContext:
         d = self.run_dir / option_id
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+    def progress(self, turn: int) -> dict:
+        """What a person may be told about the run so far: counts, never model wording."""
+        opts = [o for o in self.options.values() if o.parent is None]
+        live = [o for o in opts if o.status != "dropped"]
+        pictures = sum(len(o.ok_pictures) for o in self.options.values())
+        composed = sum(1 for o in live if o.renders)
+        passed = sum(1 for o in live if o.status in ("passed", "offered"))
+        stage = "reading" if not opts else "planned" if pictures == 0 and composed == 0 else "pictures" if composed == 0 else "checking" if passed < len(live) else "checked"
+        if self.done:
+            stage = "finished"
+        return {"stage": stage, "turn": turn, "options": len(live), "pictures": pictures, "composed": composed, "passed": passed,
+                "credits": self.spent.get("credits", 0.0), "sizes": [s.name for s in self.size_list]}
 
     def drop(self, opt: OptionState, reason: str) -> None:
         opt.status = "dropped"
