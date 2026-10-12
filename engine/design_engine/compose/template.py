@@ -159,12 +159,19 @@ def clear_text_of_text(boxes: dict[str, tuple[float, float, float, float]], size
     out = dict(boxes)
     present = [r for r in TEXT_ORDER if r in out]
     present.sort(key=lambda r: out[r][1])
+    safe = size.safe or {}
+    bottom = float(size.h) - float(safe.get("bottom", 0))
     for i, later in enumerate(present):
         for earlier in present[:i]:
             a, b = out[earlier], out[later]
             if _overlap(a, b):
-                ny = min(a[1] + a[3] + 0.01 * size.h, size.h - b[3])
+                ny = min(a[1] + a[3] + 0.01 * size.h, bottom - b[3])
                 out[later] = (b[0], ny, b[2], b[3])
+    # a grown block never runs past the platform's safe area: it moves up as far as the frame allows
+    for role in present:
+        x, y, w, h = out[role]
+        if y + h > bottom:
+            out[role] = (x, max(float(safe.get("top", 0)), bottom - h), w, h)
     return out
 
 

@@ -521,6 +521,7 @@ def main():
               f"{[(k, v[0]) for k, v in st.items() if v][:4]}")
     except Exception as e:  # noqa: BLE001  the self-test is a guard; a broken guard is reported, not fatal
         print(f"self-test failed: {e}")
+    (out / "profile.json").write_text(json.dumps(profile, indent=1, default=str))  # with the self-test marks
     problems = validate(profile)
     print("validate:", "ok" if not problems else problems)
     board = render(profile, designed, out / "board.jpg", type_sheet=out / "type-sheet.jpg")
