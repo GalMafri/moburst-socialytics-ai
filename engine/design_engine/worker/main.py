@@ -56,7 +56,7 @@ def build_context(run: Run, profile: dict, rules: list[str], prior: list[dict], 
     from learn_client import is_designed, load_reads  # noqa: E402
     from run_post import choose_fonts, picture_crops  # noqa: E402
 
-    families = [f for f in profile.get("families") or [] if "headline" in ((f.get("template") or {}).get("slots") or {})]
+    families = [f for f in profile.get("families") or [] if f.get("status", "family") == "family" and "headline" in ((f.get("template") or {}).get("slots") or {})]
     if not families:
         raise StoreError("the confirmed profile has no family with a headline slot")
     reads_path = ws / "out" / "reads.json"

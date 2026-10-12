@@ -20,6 +20,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from design_engine.config import settings
 from design_engine.ingest.website import read_site
@@ -501,6 +502,25 @@ def main():
     profile["classification"] = {"designed_rule": "logo found by template match, or at least one set line of readable size (OCR confidence >= 0.8, height >= 2% of the short edge)",
                                  "read": len(reads), "designed": len(designed), "source": "measured:is_designed"}
     (out / "profile.json").write_text(json.dumps(profile, indent=1, default=str))
+    # 7b. a family must reproduce its own exemplar; one that cannot carries something unmodelled and is never offered
+    try:
+        from design_engine.compose.render import chromium
+        from design_engine.learn import selftest
+        from run_post import choose_fonts
+
+        logo_files_abs = [{**f, "path": str(ws.root / f["path"])} for f in profile.get("logo", {}).get("files", [])]
+        stand_in = None
+        if (profile.get("type") or {}).get("status") != "resolved":
+            cands = [c for c in (profile.get("type") or {}).get("candidates") or [] if c.get("file") and Path(str(c["file"])).exists()]
+            stand_in = str(cands[0]["file"]) if cands else None
+        hf, sf, _ = choose_fonts(profile, stand_in, ws.root / "website" / "fonts")
+        with chromium() as browser:
+            st = selftest.self_test(profile, designed, {"headline": hf, "subline": sf}, logo_files_abs, out / "selftest", browser)
+        marked = selftest.apply(profile, st)
+        print(f"self-test: {len(st)} typographic families rendered from their exemplars, {marked} unrenderable: "
+              f"{[(k, v[0]) for k, v in st.items() if v][:4]}")
+    except Exception as e:  # noqa: BLE001  the self-test is a guard; a broken guard is reported, not fatal
+        print(f"self-test failed: {e}")
     problems = validate(profile)
     print("validate:", "ok" if not problems else problems)
     board = render(profile, designed, out / "board.jpg", type_sheet=out / "type-sheet.jpg")
