@@ -10,6 +10,8 @@ import re
 import os
 import sys
 import time
+import contextlib
+import threading
 import traceback
 from pathlib import Path
 from typing import Any
@@ -22,7 +24,8 @@ from .store import FakeStore, Run, StoreError, SupabaseStore
 
 log = logging.getLogger("design_worker")
 POLL_SECONDS = 15
-LEASE_SECONDS = 300  # a run heartbeats every model turn; an abandoned one is picked up again within five minutes
+LEASE_SECONDS = 300  # an abandoned run is picked up again within five minutes
+KEEPALIVE_SECONDS = 60.0  # the lease is extended this often while a run is in flight, whatever its turns are doing
 
 
 def slugify(name: str) -> str:
@@ -174,13 +177,15 @@ def process(store: Any, run: Run, browser: Any, clients: dict) -> dict:
             raise StoreError("no confirmed brand profile for this client; confirm the brand on the Setup screen first")
         ws = workspace_for(run, profile)
         if is_video_format(run.format):
-            payload = process_video(store, run, profile, ws)
+            with keepalive(store, run.id):
+                payload = process_video(store, run, profile, ws)
             store.finish(run.id, payload["status"], payload["spent"], payload["sizes"], payload["failure"], payload["plan"])
             return payload
         ctx = build_context(run, profile, store.rules(run.client_id), store.prior_runs(run.client_id), ws, browser, clients)
         store.heartbeat(run.id, LEASE_SECONDS, plan={"stage": "reading", "sizes": [s.name for s in ctx.size_list]})
         ctx.on_progress = lambda p: store.heartbeat(run.id, LEASE_SECONDS, plan=p)
-        result = loop.run_post(ctx)
+        with keepalive(store, run.id):  # a turn whose pictures outlast the lease must not be picked up by a second worker
+            result = loop.run_post(ctx)
         rows = option_rows(store, run, ctx, result)
         store.write_options(rows)
         status = "offered" if result.options else "dropped"
@@ -193,6 +198,27 @@ def process(store: Any, run: Run, browser: Any, clients: dict) -> dict:
         payload = {"status": "failed", "spent": {}, "sizes": [], "failure": f"{type(e).__name__}: {e}"[:1000], "plan": {"stage": "failed"}}
     store.finish(run.id, payload["status"], payload["spent"], payload["sizes"], payload["failure"], payload["plan"])
     return payload
+
+
+@contextlib.contextmanager
+def keepalive(store: Any, run_id: str, every: float = KEEPALIVE_SECONDS):
+    """Extends the run's lease in the background while the body runs; the plan is left to the per-turn progress heartbeat."""
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(every):
+            try:
+                store.heartbeat(run_id, LEASE_SECONDS, plan=None)
+            except Exception as e:  # noqa: BLE001  a missed beat is logged; the next one may land
+                log.warning("keepalive for run %s failed: %s", run_id, e)
+
+    t = threading.Thread(target=beat, name=f"keepalive-{run_id[:8]}", daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        t.join(timeout=5)
 
 
 def serve(store: Any, browser_factory: Any, clients: dict, once: bool = False, poll: float = POLL_SECONDS) -> int:

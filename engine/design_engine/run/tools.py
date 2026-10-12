@@ -339,11 +339,22 @@ def new_family(ctx: RunContext, option_id: str, parts: list[str], bands: Mapping
 # ---- read_brand ----
 
 
-def _carousel_brief(profile: dict) -> dict:
+def role_families(profile: dict, families: list[dict]) -> dict[str, list[str]]:
+    """The families that serve each album role, limited to the families this run can render (the self-test's unrenderable ones are
+    not in `families`); a role whose every observed family dropped out is left empty, which the planner reads as unconstrained."""
+    keys = {f.get("key") for f in families}
+    roles = (profile.get("carousel") or {}).get("roles") or {}
+    return {role: [e["key"] for e in roles.get(role, []) if e.get("key") in keys] for role in ("cover", "body", "closing")}
+
+
+def _carousel_brief(profile: dict, families: list[dict]) -> dict:
     c = profile.get("carousel") or {}
     sc = c.get("slide_count") or {}
+    roles = role_families(profile, families)
+    notes = [f"the client's {role} layouts cannot render this copy; any family may serve the {role} role" for role, keys in roles.items()
+             if not keys and (c.get("roles") or {}).get(role)]
     return {"albums": c.get("albums", 0), "slide_count": {k: sc.get(k) for k in ("p25", "p50", "p75")},
-            "role_families": {role: [e["key"] for e in (c.get("roles") or {}).get(role, [])] for role in ("cover", "body", "closing")},
+            "role_families": roles, "role_notes": notes,
             "rules": ["one option = one set of slides; slide 1 uses a cover family, the last slide a closing family when the client has one, "
                       "every other slide one and the same body family (one grid); slide count inside the client's band; each slide's lines are the "
                       "post copy's own words in copy order; a slide on a family without a picture takes picture_brief null; one picture per slide"]}
@@ -367,7 +378,7 @@ def read_brand(ctx: RunContext) -> dict:
                     "people": imagery.get("people"), "grounds": imagery.get("grounds"), "never": imagery.get("never")},
         "voice": p.get("voice"),
         "floors": cal.get("floors"),
-        "carousel": _carousel_brief(p) if ctx.is_carousel else None,
+        "carousel": _carousel_brief(p, ctx.families) if ctx.is_carousel else None,
         "occlusion_floor": ctx.floor,
         "families": [_family_summary(f) for f in ctx.families],
         "rules": list(p.get("rules") or p.get("design_rules") or []),
@@ -562,7 +573,7 @@ def _check_carousel(ctx: RunContext, i: int, o: Mapping, recent_families: set[st
         return [], [f"{oid}: a carousel option needs `slides`"]
     if not lo <= len(slides) <= hi:
         problems.append(f"{oid}: {len(slides)} slides is outside the client's slide-count band {lo}..{hi}")
-    roles_ok = {r: {e["key"] for e in (car.get("roles") or {}).get(r, [])} for r in ("cover", "body", "closing")}
+    roles_ok = {r: set(v) for r, v in role_families(ctx.profile, ctx.families).items()}
     children: list[OptionState] = []
     body_keys: set[str] = set()
     copy = _norm(ctx.copy_text).lower()
