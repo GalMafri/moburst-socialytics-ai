@@ -31,6 +31,11 @@ class Run:
     attempts: int = 0
     raw: dict = field(default_factory=dict)
 
+    @property
+    def token(self) -> str:
+        """The lease token the store set when this run was leased; extend, finish and option writes carry it."""
+        return str(self.raw.get("lease_token") or "")
+
     @classmethod
     def from_row(cls, row: dict) -> Run:
         return cls(str(row["id"]), str(row["client_id"]), str(row["post_key"]), str(row.get("platform") or "Instagram"),
@@ -45,6 +50,7 @@ class SupabaseStore:
         if not url or not service_key:
             raise StoreError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required")
         self.url, self.key, self.timeout = url.rstrip("/"), service_key, timeout
+        self._tokens: dict[str, str] = {}  # run id -> the lease token this worker holds
 
     @classmethod
     def from_env(cls) -> SupabaseStore:
@@ -65,20 +71,29 @@ class SupabaseStore:
 
     def lease(self, seconds: int = 900) -> Run | None:
         rows = self._rest("POST", "rpc/design_runs_lease", json={"p_lease_seconds": seconds})
-        return Run.from_row(rows[0]) if rows else None
+        if not rows:
+            return None
+        run = Run.from_row(rows[0])
+        self._tokens[run.id] = run.token
+        return run
+
+    def _token(self, run_id: str) -> str:
+        return self._tokens.get(run_id, "")
 
     def heartbeat(self, run_id: str, seconds: int = 900, plan: dict | None = None) -> None:
-        body: dict = {"lease_until": f"now() + interval '{int(seconds)} seconds'"}
-        # PostgREST cannot evaluate now() in a PATCH body; extend through the rpc instead
-        self._rest("POST", "rpc/design_runs_extend", json={"p_run_id": run_id, "p_lease_seconds": seconds})
+        # PostgREST cannot evaluate now() in a PATCH body; the lease is extended through the rpc, which checks the token
+        ok = self._rest("POST", "rpc/design_runs_extend", json={"p_run_id": run_id, "p_token": self._token(run_id), "p_lease_seconds": seconds})
+        if ok is False:
+            raise StoreError(f"run {run_id} is no longer leased to this worker")
         if plan is not None:
-            self._rest("PATCH", f"design_runs?id=eq.{run_id}", json={"plan": plan}, headers={"Prefer": "return=minimal"})
+            self._rest("PATCH", f"design_runs?id=eq.{run_id}&lease_token=eq.{self._token(run_id)}", json={"plan": plan}, headers={"Prefer": "return=minimal"})
 
     def finish(self, run_id: str, status: str, spent: dict, sizes: list[dict], failure: str | None = None, plan: dict | None = None) -> None:
-        body = {"status": status, "spent": spent, "sizes": sizes, "failure": failure, "finished_at": "now()", "lease_until": None}
-        if plan is not None:
-            body["plan"] = plan
-        self._rest("PATCH", f"design_runs?id=eq.{run_id}", json=body, headers={"Prefer": "return=minimal"})
+        ok = self._rest("POST", "rpc/design_runs_finish", json={"p_run_id": run_id, "p_token": self._token(run_id), "p_status": status, "p_spent": spent,
+                                                              "p_sizes": sizes, "p_failure": failure, "p_plan": plan})
+        self._tokens.pop(run_id, None)
+        if ok is False:
+            raise StoreError(f"run {run_id} is no longer leased to this worker; its result was not written")
 
     # -- profile and rules --
 
@@ -171,6 +186,7 @@ class BridgeStore:
             raise StoreError("SOCIALYTICS_STORE_URL and SOCIALYTICS_ACT_AS_USER are required")
         self.url, self.act_as, self.secret, self.timeout = url, act_as, secret, timeout
         self.bridged = "n8n" in url
+        self._tokens: dict[str, str] = {}  # run id -> the lease token this worker holds
 
     @classmethod
     def from_env(cls) -> BridgeStore:
@@ -199,13 +215,21 @@ class BridgeStore:
 
     def lease(self, seconds: int = 900) -> Run | None:
         row = self._call("lease", seconds=seconds).get("run")
-        return Run.from_row(row) if row else None
+        if not row:
+            return None
+        run = Run.from_row(row)
+        self._tokens[run.id] = run.token
+        return run
+
+    def _token(self, run_id: str) -> str:
+        return self._tokens.get(run_id, "")
 
     def heartbeat(self, run_id: str, seconds: int = 900, plan: dict | None = None) -> None:
-        self._call("extend", run_id=run_id, seconds=seconds, plan=plan)
+        self._call("extend", run_id=run_id, token=self._token(run_id), seconds=seconds, plan=plan)
 
     def finish(self, run_id: str, status: str, spent: dict, sizes: list[dict], failure: str | None = None, plan: dict | None = None) -> None:
-        self._call("finish", run_id=run_id, status=status, spent=spent, sizes=sizes, failure=failure, plan=plan)
+        self._call("finish", run_id=run_id, token=self._token(run_id), status=status, spent=spent, sizes=sizes, failure=failure, plan=plan)
+        self._tokens.pop(run_id, None)
 
     def confirmed_profile(self, client_id: str) -> dict | None:
         row = self._call("profile", client_id=client_id).get("profile")
@@ -229,11 +253,13 @@ class BridgeStore:
         import base64
 
         data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
-        return str(self._call("upload", client_id=client_id, run_id=run_id, name=name, base64=data, content_type=mimetypes.guess_type(str(path))[0] or "image/png")["url"])
+        return str(self._call("upload", client_id=client_id, run_id=run_id, token=self._token(run_id), name=name, base64=data,
+                              content_type=mimetypes.guess_type(str(path))[0] or "image/png")["url"])
 
     def write_options(self, rows: list[dict]) -> None:
         if rows:
-            self._call("write_options", rows=json.loads(json.dumps(rows, default=str)))
+            run_id = str(rows[0].get("run_id") or "")
+            self._call("write_options", token=self._token(run_id), rows=json.loads(json.dumps(rows, default=str)))
 
     def publish_profile(self, client_id: str, profile: dict, version: int = 1, confirmed: bool = False, sources: list | None = None) -> dict:
         """The learner's output into brand_profiles (draft unless confirmed by the person acted for)."""
