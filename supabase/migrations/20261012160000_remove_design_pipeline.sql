@@ -14,5 +14,6 @@ drop table if exists public.platform_specs cascade;
 drop table if exists public.brand_profiles cascade;
 drop table if exists public.brand_assets cascade;
 drop function if exists public.can_act_for_client(uuid) cascade;
--- Storage is not touched here: Supabase refuses direct deletes from storage tables. The objects under generated-media/designs/
--- and the design-references bucket were removed through the Storage API on 2026-10-12.
+-- Storage is not touched here: Supabase refuses direct deletes from storage tables. The pipeline's files, the objects under
+-- generated-media/designs/, were removed through the Storage API on 2026-10-12. The design-references bucket predates the pipeline
+-- (ten functions read client reference images from it) and is untouched.
