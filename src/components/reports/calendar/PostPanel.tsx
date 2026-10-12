@@ -17,8 +17,9 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useAuth } from "@/hooks/useAuth";
 import { PlatformBadge } from "@/lib/platform-config";
 import { CopyEditor } from "./CopyEditor";
-import { DesignTab } from "@/components/reports/calendar/DesignTab";
+import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
 import { useGenerationForPost } from "@/components/reports/calendar/GenerationContext";
+import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
 import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
 import { isVideoFormat } from "@/lib/platform";
@@ -47,8 +48,6 @@ interface Props {
   onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
   /** Reject (with a reason the app learns from) or archive a variant. Staff only. */
   onFeedback?: (iterationId: string, verdict: "rejected" | "archived", reason?: string, note?: string) => Promise<void> | void;
-  /** The tab the panel opens on ("copy" | "design" | "video"); the copy tab when not given. */
-  initialTab?: string;
 }
 
 function isVideoUrl(url: string): boolean {
@@ -67,13 +66,12 @@ export function PostPanel({
   onCopySaved,
   onToggleSelected,
   onFeedback,
-  initialTab,
 }: Props) {
   const { isClient, isMoburstStaff } = useAuth();
   const queryClient = useQueryClient();
   const refreshMedia = () => { void queryClient.invalidateQueries({ queryKey: ["post-iterations", clientId] }); };
   const [editedPost, setEditedPost] = useState<CalendarPost | null>(null);
-  useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab(initialTab || "copy"); }, [sourcePost?._calendarPostKey, open, initialTab]);
+  useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab("copy"); }, [sourcePost?._calendarPostKey, open]);
   const post = editedPost && editedPost._calendarPostKey === sourcePost?._calendarPostKey ? editedPost : sourcePost;
   const designRun = useGenerationForPost(post);
   // Artwork the server completed while nobody was watching still needs its
@@ -175,52 +173,107 @@ export function PostPanel({
                   </Button>
                 </div>
               )}
-              <DesignTab post={post} clientId={clientId} reportId={reportId} onPicked={refreshMedia} />
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">
+                    {imageTiles.length > 0
+                      ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
+                      : designRun?.status === "running"
+                        ? `Generating designs · ${designRun.completed}/${designRun.total} done`
+                        : "No designs yet"}
+                  </p>
+                  <p className="t-secondary">
+                    {imageTiles.length > 0
+                      ? "Click any design to preview at full size. Star your favorites."
+                      : designRun?.status === "running"
+                        ? "The run continues while this panel is closed. Open Design to follow it."
+                        : "Generate brand-aligned variants to get started."}
+                  </p>
+                </div>
+                {isMoburstStaff && <CreatePostDesignButton
+                  post={post}
+                  clientContext={clientContext}
+                  clientId={clientId}
+                  onImagesGenerated={refreshMedia}
+                />}
+              </div>
 
-              {imageTiles.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold">Attached to this post</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {imageTiles.map((tile, i) => (
-                      <MediaTileCard
-                        key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
-                        tile={tile}
-                        index={i}
-                        isVideo={false}
-                        tileAspect={tileAspectFor(post)}
-                        filenameStub={`design-${post.platform || "post"}`}
-                        onPreview={() => openPreview(tile.url, false)}
-                        onToggleSelected={onToggleSelected}
-                        onFeedback={isClient ? undefined : onFeedback}
-                      />
-                    ))}
-                  </div>
+              {imageTiles.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {imageTiles.map((tile, i) => (
+                    <MediaTileCard
+                      key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
+                      tile={tile}
+                      index={i}
+                      isVideo={false}
+                      tileAspect={tileAspectFor(post)}
+                      filenameStub={`design-${post.platform || "post"}`}
+                      onPreview={() => openPreview(tile.url, false)}
+                      onToggleSelected={onToggleSelected}
+                      onFeedback={isClient ? undefined : onFeedback}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
+                  <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
+                  <p className="t-secondary">
+                    No designs generated for this post yet.
+                  </p>
+                  <p className="t-secondary/70">
+                    Click "Design" above to create artwork for this post.
+                  </p>
                 </div>
               )}
             </TabsContent>
 
             {/* Video tab */}
             <TabsContent value="video" className="mt-4 space-y-4">
-              <DesignTab post={post} clientId={clientId} reportId={reportId} onPicked={refreshMedia} kind="video" />
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">
+                    {videoTiles.length > 0
+                      ? `${videoTiles.length} video${videoTiles.length === 1 ? "" : "s"}`
+                      : "No videos yet"}
+                  </p>
+                  <p className="t-secondary">
+                    {videoTiles.length > 0
+                      ? "Click any video to preview at full size."
+                      : clientContext?.design_style_synthesis?.reference_pipeline_version === 1
+                        ? "Create a 12-second film with three moving scenes, guided by this client’s real social references."
+                        : "Create short video drafts, then preview and choose a favorite."}
+                  </p>
+                </div>
+                {isMoburstStaff && <CreatePostVideoButton
+                  post={post}
+                  clientContext={clientContext}
+                  clientId={clientId}
+                  onVideoGenerated={refreshMedia}
+                />}
+              </div>
 
-              {videoTiles.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold">Attached to this post</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {videoTiles.map((tile, i) => (
-                      <MediaTileCard
-                        key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
-                        tile={tile}
-                        index={i}
-                        isVideo={true}
-                        tileAspect={tileAspectFor(post)}
-                        filenameStub={`video-${post.platform || "post"}`}
-                        onPreview={() => openPreview(tile.url, true)}
-                        onToggleSelected={onToggleSelected}
-                        onFeedback={isClient ? undefined : onFeedback}
-                      />
-                    ))}
-                  </div>
+              {videoTiles.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {videoTiles.map((tile, i) => (
+                    <MediaTileCard
+                      key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
+                      tile={tile}
+                      index={i}
+                      isVideo={true}
+                      tileAspect={tileAspectFor(post)}
+                      filenameStub={`video-${post.platform || "post"}`}
+                      onPreview={() => openPreview(tile.url, true)}
+                      onToggleSelected={onToggleSelected}
+                      onFeedback={isClient ? undefined : onFeedback}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
+                  <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
+                  <p className="t-secondary">
+                    No videos generated for this post yet.
+                  </p>
                 </div>
               )}
             </TabsContent>

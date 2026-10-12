@@ -1,8 +1,0 @@
-/* Minimal frame styles for family renders: exact pixel frame, absolute slots, no browser defaults. */
-*, *::before, *::after { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
-body { overflow: hidden; position: relative; }
-.frame { position: relative; overflow: hidden; }
-.slot { position: absolute; margin: 0; padding: 0; }
-.slot img, img.slot { display: block; }
-.ink { display: inline-block; white-space: pre; margin: 0; padding: 0; }

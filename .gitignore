@@ -32,10 +32,3 @@ dist-ssr
 .env.*
 !.env.example
 *.tsbuildinfo
-engine/.venv/
-engine/work/
-engine/bin/
-engine/.env
-engine/**/__pycache__/
-engine/.pytest_cache/
-engine/.ruff_cache/

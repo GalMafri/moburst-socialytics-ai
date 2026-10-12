@@ -5,8 +5,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
 import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
 import { CalendarKanban, findLatestSelectedIteration } from "./CalendarKanban";
-import { DesignRunsProvider } from "./DesignRunsContext";
-import { DesignRunsDock } from "./DesignRunsDock";
 import { PostPanel } from "./PostPanel";
 import { WeeklyHighlights } from "./WeeklyHighlights";
 import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
@@ -50,8 +48,6 @@ export function ContentIdeasTab({
    *  we know the exact variant_group_id they want to see. Filtering by it is
    *  bulletproof — no copy-slice heuristic, no realtime lag dependency. */
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
-  // the tab the panel opens on: "design" or "video" when opened from the progress dock, the copy tab otherwise
-  const [panelTab, setPanelTab] = useState<string>("copy");
   const qc = useQueryClient();
   const { isMoburstStaff } = useAuth();
   const { toast } = useToast();
@@ -140,13 +136,6 @@ export function ContentIdeasTab({
   });
 
   const revisedCalendar = useMemo(() => calendarWithRevisions(contentCalendar, reportId, postIterations), [contentCalendar, reportId, postIterations]);
-  // calendarWithRevisions returns the days as an array; a post is found by the key the cards and runs carry
-  const postByKey = (key: string) => {
-    for (const day of (revisedCalendar as any[]) || []) {
-      for (const p of day?.posts || []) if (p?._calendarPostKey === key) return p;
-    }
-    return undefined;
-  };
   const currentPost = activePost ? applyCopyRevisions(activePost, postIterations) : null;
   const activeIteration = currentPost
     ? findLatestSelectedIteration(postIterations as any, currentPost)
@@ -187,7 +176,6 @@ export function ContentIdeasTab({
     : [];
 
   return (
-    <DesignRunsProvider clientId={clientId} reportId={reportId}>
     <GenerationProvider
       onOpenPanel={(post, opts) => {
         setActivePost(post);
@@ -257,28 +245,12 @@ export function ContentIdeasTab({
           />}
         </div>
 
-        <DesignRunsDock
-          titleFor={(key) => {
-            const p = postByKey(key);
-            return p ? `${p.platform || ""} · ${String(p.copy || p.content || "").split("\n")[0].slice(0, 48)}` : undefined;
-          }}
-          onOpen={(key, kind) => {
-            const p = postByKey(key);
-            if (!p) { toast({ title: "That post is no longer in this calendar." }); return; }
-            setPanelTab(kind === "video" ? "video" : "design");
-            setActivePost(p);
-            setActiveGroupId(null);
-          }}
-        />
-
         <PostPanel
           open={!!activePost && !iterationsFailed}
-          initialTab={panelTab}
           onOpenChange={(open) => {
             if (!open) {
               setActivePost(null);
               setActiveGroupId(null);
-              setPanelTab("copy");
             }
           }}
           post={currentPost}
@@ -324,6 +296,5 @@ export function ContentIdeasTab({
         <GenerationProgress />
       </div>
     </GenerationProvider>
-    </DesignRunsProvider>
   );
 }

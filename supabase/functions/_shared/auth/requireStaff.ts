@@ -90,36 +90,6 @@ export async function requireStaff(
  *
  * Returns null when the caller is staff. Otherwise returns the Response.
  */
-/**
- * Require someone who may act for one client: Moburst staff with write access,
- * or a signed-in member of that client (can_act_for_client, spec section 12).
- * Used where clients serve themselves: design runs, picking an option,
- * scheduling their own post. The project's own server calls pass as before.
- */
-export async function requireActor(req: Request, clientId: string): Promise<StaffCaller> {
-  const url = Deno.env.get("SUPABASE_URL")!;
-  const presented = req.headers.get(SERVER_SECRET_HEADER);
-  if (presented && (await secretEquals(presented, Deno.env.get("SOCIALYTICS_N8N_SECRET")))) {
-    const actAs = serverActAsUser(req.headers.get(SERVER_USER_HEADER));
-    if (!actAs) throw new AuthzError(400, "Server calls must name the user they act for.");
-    const asService = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
-    return { userId: actAs, asCaller: asService, viaSecret: true };
-  }
-  const jwt = bearerToken(req.headers.get("Authorization"));
-  if (!jwt) throw new AuthzError(401, "Sign-in required.");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-  const asCaller = createClient(url, anonKey, {
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
-    auth: { persistSession: false },
-  });
-  const { data: userData, error: userErr } = await asCaller.auth.getUser(jwt);
-  if (userErr || !userData?.user) throw new AuthzError(401, "Invalid or expired session.");
-  const { data: allowed, error: allowErr } = await asCaller.rpc("can_act_for_client", { _client_id: clientId });
-  if (allowErr) throw new AuthzError(500, `Access check failed: ${allowErr.message}`);
-  if (!allowed) throw new AuthzError(403, "You do not have access to this client.");
-  return { userId: userData.user.id, asCaller };
-}
-
 export async function staffGate(
   req: Request,
   corsHeaders: Record<string, string>,

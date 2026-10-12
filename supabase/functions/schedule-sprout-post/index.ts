@@ -2,7 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
-import { requireActor, AuthzError } from "../_shared/auth/requireStaff.ts";
+import { staffGate, requireStaff, AuthzError } from "../_shared/auth/requireStaff.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -52,6 +52,8 @@ serve(async (req) => {
   // This publishes to a client's real social accounts through Sprout. It ran
   // with verify_jwt = false and no check of its own, so anyone who knew the
   // URL could schedule a post to any profile on the agency's account.
+  const denied = await staffGate(req, corsHeaders);
+  if (denied) return denied;
 
   try {
     const {
@@ -87,8 +89,7 @@ serve(async (req) => {
       .eq("id", client_id)
       .single();
 
-    // Staff with write access, or a member of the client itself (spec section 12).
-    await requireActor(req, client_id);
+    await requireStaff(req, { writeClientId: client_id });
     if (!client) throw new AuthzError(404, "Client not found.");
     const { data: assigned, error: assignmentError } = await supabase.from("sprout_profiles")
       .select("id, network_type").eq("client_id", client_id)
