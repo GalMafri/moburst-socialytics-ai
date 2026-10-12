@@ -86,6 +86,19 @@ Deno.serve(async (req) => {
       const { data } = admin.storage.from(BUCKET).getPublicUrl(path);
       return json({ ok: true, path, url: data.publicUrl });
     }
+    if (op === "seed_profile") {
+      // The learner publishes a learned brand: one row per version, confirmed by the person named.
+      const profile = (a.profile && typeof a.profile === "object" ? a.profile : null) as Record<string, unknown> | null;
+      if (!profile) return json({ error: "profile is required" }, 400);
+      const row = {
+        client_id: String(a.client_id), version: Number(a.version || 1), status: a.confirmed ? "confirmed" : "draft",
+        profile, calibration: profile.calibration ?? {}, families: profile.families ?? [], sources: a.sources ?? [],
+        confirmed_by: a.confirmed ? caller.userId : null, confirmed_at: a.confirmed ? new Date().toISOString() : null,
+      };
+      const { data, error } = await admin.from("brand_profiles").upsert(row, { onConflict: "client_id,version" }).select("id, version, status").single();
+      if (error) return json({ error: error.message }, 500);
+      return json({ ok: true, profile: data });
+    }
     if (op === "status") {
       const { data, error } = await admin.rpc("design_runs_status");
       if (error) return json({ error: error.message }, 500);

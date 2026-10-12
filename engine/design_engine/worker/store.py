@@ -174,6 +174,11 @@ class BridgeStore:
 
     @classmethod
     def from_env(cls) -> BridgeStore:
+        from dotenv import load_dotenv
+
+        from ..config import ENGINE_ROOT
+
+        load_dotenv(ENGINE_ROOT / ".env")
         return cls(os.environ.get("SOCIALYTICS_STORE_URL", ""), os.environ.get("SOCIALYTICS_ACT_AS_USER", ""), os.environ.get("SOCIALYTICS_SERVER_SECRET", ""))
 
     def _call(self, op: str, **args: Any) -> dict:
@@ -229,3 +234,8 @@ class BridgeStore:
     def write_options(self, rows: list[dict]) -> None:
         if rows:
             self._call("write_options", rows=json.loads(json.dumps(rows, default=str)))
+
+    def publish_profile(self, client_id: str, profile: dict, version: int = 1, confirmed: bool = False, sources: list | None = None) -> dict:
+        """The learner's output into brand_profiles (draft unless confirmed by the person acted for)."""
+        return self._call("seed_profile", client_id=client_id, profile=json.loads(json.dumps(profile, default=str)), version=version,
+                          confirmed=confirmed, sources=sources or [])
