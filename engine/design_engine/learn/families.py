@@ -157,10 +157,13 @@ def cluster(reads: list[PostRead]) -> list[Family]:
         post_ids = sorted({m.source_post_id or m.path.stem for m in members})
         seen = len(post_ids)
         fam = Family(key, sig, post_ids, seen, "family" if seen >= 2 else "seen_once", sources=[m.source for m in members])
-        slots: dict[str, list[dict]] = {"logo": [], "headline": [], "subline": [], "footer": [], "picture": [], "accent": []}
+        slots: dict[str, list[dict]] = {"logo": [], "headline": [], "subline": [], "footer": [], "cta": [], "picture": [], "accent": []}
         src: dict[str, list[str]] = {k: [] for k in slots}
         per_member: list[dict[str, dict]] = []
         accent_hexes: list[str] = []
+        cta_hexes: list[str] = []
+        cta_texts: list[str] = []
+        footer_texts: list[str] = []
         for m in members:
             per_member.append({})
             if m.logo:
@@ -171,6 +174,14 @@ def cluster(reads: list[PostRead]) -> list[Family]:
                 per_member[-1]["subline"] = _frac(m.text.subline_box, m.W, m.H)
             if getattr(m.text, "footer_box", None):
                 per_member[-1]["footer"] = _frac(m.text.footer_box, m.W, m.H)
+                footer_texts.append(" ".join(l.text for l in m.text.footer).strip())
+            pills = (getattr(m, "extras", {}) or {}).get("pills") or []
+            if pills:
+                pill = max(pills, key=lambda pb: pb["box"][2] * pb["box"][3])
+                per_member[-1]["cta"] = _frac(pill["box"], m.W, m.H)
+                cta_hexes.append(pill.get("hex") or "")
+                if pill.get("text"):
+                    cta_texts.append(pill["text"])
             if m.picture_boxes and sig.picture_role != "none":  # a sliver under 4% of the frame is not a picture slot
                 per_member[-1]["picture"] = _frac(m.picture_boxes[0], m.W, m.H)
             dev = device_box(m)
@@ -185,8 +196,14 @@ def cluster(reads: list[PostRead]) -> list[Family]:
                 src[k].append(m.source)
         if len(slots["footer"]) < max(1, len(members) / 2):  # a footer is a family trait only when most members carry one
             slots["footer"], src["footer"] = [], []
+            footer_texts = []
             for pm in per_member:
                 pm.pop("footer", None)
+        if len(slots["cta"]) < max(1, len(members) / 2):  # likewise a button
+            slots["cta"], src["cta"] = [], []
+            cta_hexes, cta_texts = [], []
+            for pm in per_member:
+                pm.pop("cta", None)
         bands_ = {k: _slot_band(v, src[k]) for k, v in slots.items() if v}
         order = exemplar_order(per_member, {k: {c: b[c] for c in ("x", "y", "w", "h")} for k, b in bands_.items()})
         fam.slots = _exemplar_slots(per_member, order, bands_)
@@ -209,6 +226,9 @@ def cluster(reads: list[PostRead]) -> list[Family]:
             "picture_text_ratio": band(pic_ratio, [m.source for m in members if m.picture_boxes and m.text.headline_box]),
             "device_on": bool(slots["accent"]),
             "accent_hex": max(set(accent_hexes), key=accent_hexes.count) if accent_hexes else None,  # the band's measured colour
+            "cta_hex": max(set(h for h in cta_hexes if h), key=cta_hexes.count) if any(cta_hexes) else None,
+            "cta_texts": sorted({t for t in cta_texts if t}, key=lambda t: -cta_texts.count(t))[:5],  # the brand's own button phrases
+            "footer_texts": sorted({t for t in footer_texts if t}, key=lambda t: -footer_texts.count(t))[:5],  # its own bottom lines (a phone, a handle)
             "logo_variant": max(set(variants), key=variants.count) if variants else "none",
             "ground_hex": [m.ground.get("hex") for m in members if m.ground.get("hex")],
             "aspect": float(np.median([m.W / m.H for m in members])),

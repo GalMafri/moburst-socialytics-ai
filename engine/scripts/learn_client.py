@@ -32,6 +32,7 @@ from design_engine.learn.profile import build, validate
 from design_engine.learn.typeface import match_headlines, render_line
 from design_engine.measure.calibrate import calibrate
 from design_engine.measure.image import load_rgb
+from design_engine.learn.layers import pill_boxes
 from design_engine.measure.logo import file_ground, logo_templates_from_file, trim_to_ink
 from design_engine.measure.ocr import read_lines
 from design_engine.report.board import render
@@ -118,7 +119,7 @@ def dump_read(r) -> dict:
 
 
 def load_reads(cache: Path) -> list:
-    from design_engine.learn.layers import PostRead
+    from design_engine.learn.layers import PostRead, pill_boxes
     from design_engine.measure.logo import LogoMatch
     from design_engine.measure.ocr import Line
     from design_engine.measure.text_lines import classify
@@ -297,7 +298,9 @@ def main():
                 r.logo = find_logo_any(arr, templates, min(r.W, r.H))
                 if r.logo:
                     r.logo = type(r.logo)(r.logo.score, r.logo.box, r.logo.height_share, r.logo.variant.split(":")[-1], r.logo.match_box)
-                r.text = classify(r.lines, r.W, r.H, exclude_boxes=[r.logo.box] if r.logo else ())
+                pills = pill_boxes(arr, r.lines, [r.logo.box] if r.logo else [])
+                r.extras["pills"] = pills
+                r.text = classify(r.lines, r.W, r.H, exclude_boxes=([r.logo.box] if r.logo else []) + [pb["box"] for pb in pills])
                 r.extras["accent_hex"] = [device_colour(arr, b) for b in r.accent_boxes]
         designed = [r for r in reads if is_designed(r)]
         print(f"loaded {len(reads)} reads from cache; logo re-matched on {sum(1 for r in reads if r.logo)}")

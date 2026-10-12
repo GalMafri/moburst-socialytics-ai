@@ -5,6 +5,8 @@ Nothing here guesses positions from a description; every box is measured on the 
 """
 from __future__ import annotations
 
+import re
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -108,6 +110,40 @@ def _accent_boxes(arr: np.ndarray, exclude: list[Box]) -> list[Box]:
     return out
 
 
+PILL_MIN_AREA, PILL_MAX_AREA, PILL_MIN_ASPECT = 0.004, 0.08, 1.5
+
+
+def pill_boxes(arr: np.ndarray, lines: list, exclude: list[Box] | None = None) -> list[dict]:
+    """Saturated, solid, free-standing blocks of a pill's shape with a short line of text inside: the brand's buttons ("Let's Talk").
+    Each is {box, hex, text}; the text is the OCR line inside the block, trailing glyphs (a chevron read as a letter) dropped."""
+    H, W = arr.shape[:2]
+    ground = _dominant_colour(arr, exclude or [])
+    sat = _saturation(arr)
+    cell = max(8, min(W, H) // 60)
+    gy, gx = H // cell, W // cell
+    flat = np.zeros((gy, gx), dtype=bool)
+    for i in range(gy):
+        for j in range(gx):
+            blk = arr[i * cell:(i + 1) * cell, j * cell:(j + 1) * cell].reshape(-1, 3).astype(np.float64)
+            flat[i, j] = np.linalg.norm(blk.mean(axis=0) - ground) > 60 and float(blk.std(axis=0).max()) < 10.0 and sat[i * cell:(i + 1) * cell, j * cell:(j + 1) * cell].mean() > 0.45
+    out: list[dict] = []
+    for b in _components(flat, PILL_MIN_AREA, gx, gy):
+        box = [b[0] * cell, b[1] * cell, b[2] * cell, b[3] * cell]
+        area = box[2] * box[3] / (W * H)
+        touches = box[0] <= cell or box[1] <= cell or box[0] + box[2] >= W - cell or box[1] + box[3] >= H - cell
+        if touches or area > PILL_MAX_AREA or box[2] / max(1.0, box[3]) < PILL_MIN_ASPECT:
+            continue
+        inside = [ln for ln in lines if getattr(ln, "confidence", 1.0) >= 0.5 and _iou(ln.box, box) > 0 and
+                  box[0] <= ln.box[0] + ln.box[2] / 2 <= box[0] + box[2] and box[1] <= ln.box[1] + ln.box[3] / 2 <= box[1] + box[3]]
+        if not inside:
+            continue
+        text = " ".join(ln.text for ln in sorted(inside, key=lambda l: l.box[0])).strip()
+        text = re.sub(r"\s+[VvY>›»]$", "", text).strip()  # a chevron the OCR read as a letter
+        region = arr[int(box[1]):int(box[1] + box[3]), int(box[0]):int(box[0] + box[2])].reshape(-1, 3)
+        out.append({"box": box, "hex": _hex(np.median(region, axis=0)), "text": text})
+    return out
+
+
 def _iou(a: Box, b: Box) -> float:
     ix = max(0.0, min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0]))
     iy = max(0.0, min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1]))
@@ -178,9 +214,10 @@ def read_post(path, logo_gray: np.ndarray | None, ocr: Callable[[Path], list[Lin
     H, W = arr.shape[:2]
     logo = find_logo(arr, logo_gray, min(W, H)) if logo_gray is not None else None
     lines = ocr(path)
-    text = classify(lines, W, H, exclude_boxes=[logo.box] if logo else ())
-    text_boxes = [b for b in (text.headline_box, text.subline_box) if b] + [l.box for l in text.other]
-    exclude = text_boxes + ([logo.box] if logo else [])
+    pills = pill_boxes(arr, lines, [logo.box] if logo else [])
+    text = classify(lines, W, H, exclude_boxes=([logo.box] if logo else []) + [p["box"] for p in pills])
+    text_boxes = [b for b in (text.headline_box, text.subline_box, text.footer_box) if b] + [l.box for l in text.other]
+    exclude = text_boxes + ([logo.box] if logo else []) + [p["box"] for p in pills]
     # A picture is where the pixels vary (texture) or where the matting model finds an object; both are measured, neither guessed.
     mask = _texture_mask(arr)
     if matting:
@@ -194,5 +231,7 @@ def read_post(path, logo_gray: np.ndarray | None, ocr: Callable[[Path], list[Lin
     accents = _accent_boxes(arr, exclude + picture_boxes)
     ground = _ground(arr, exclude + picture_boxes + accents)
     m = meta or {}
-    return PostRead(path, W, H, lines, text, logo, picture_boxes, ground, accents,
+    read = PostRead(path, W, H, lines, text, logo, picture_boxes, ground, accents,
                     m.get("source_post_id", ""), m.get("platform", ""), m.get("posted_at", ""), int(m.get("slide_index", 0)), m.get("kind", "post"))
+    read.extras["pills"] = pills
+    return read

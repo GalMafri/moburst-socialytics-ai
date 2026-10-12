@@ -13,7 +13,7 @@ from ..platform.specs import Size
 from .typeset import Fit
 
 BASE_CSS = Path(__file__).with_name("base.css").read_text()
-TEXT_ROLES = ("headline", "subline", "footer")
+TEXT_ROLES = ("headline", "subline", "footer", "cta")
 
 
 @dataclass
@@ -26,6 +26,8 @@ class ComposeSpec:
     arrangement: str  # p50 (the slot medians) | p25 | p75 (positions from the slot bands) | new
     accent_hex: str | None = None  # the device colour; falls back to the family's recorded accent, then the ink
     footer: str | None = None  # the family's bottom-edge line
+    cta: str | None = None  # the family's button phrase, the client's own
+    cta_hex: str | None = None  # the pill's measured colour
     extra: dict = field(default_factory=dict)
 
 
@@ -162,6 +164,12 @@ def frame_boxes(family: dict, size: Size, arrangement: str = "p50") -> dict[str,
     return clear_of_logo(boxes, size)
 
 
+def _lum_hex(hex_colour: str) -> float:
+    c = hex_colour.lstrip("#")
+    r, g, b = (int(c[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
 def _darken(hex_colour: str, share: float = 0.25) -> str:
     c = hex_colour.lstrip("#")
     r, g, b = (int(c[i:i + 2], 16) for i in (0, 2, 4))
@@ -238,15 +246,25 @@ def build_html(family: dict, size: Size, spec: ComposeSpec, fonts: dict[str, Pat
             parts.append(f'<div class="slot" data-slot="accent" data-side="{dev.get("side", "")}" style="{_pos(x, y, w, h)}background:{accent};"></div>')
 
     for role in TEXT_ROLES:
-        text = spec.headline if role == "headline" else spec.subline if role == "subline" else spec.footer
+        text = {"headline": spec.headline, "subline": spec.subline, "footer": spec.footer, "cta": spec.cta}[role]
         if not text or role not in slots or role not in fit:
             continue
         f = fit[role]
         if not f.lines:
             continue
         x, y, w, h = boxes[role]
-        font_role = role if role in fonts else first_font
+        font_role = role if role in fonts else ("subline" if "subline" in fonts and role in ("footer", "cta") else first_font)
         body = html_mod.escape(f.text)
+        if role == "cta":
+            pill = spec.cta_hex or family.get("parameters", {}).get("cta_hex") or ink
+            pill_ink = "#ffffff" if _lum_hex(pill) < 0.4 else "#111111"
+            parts.append(
+                f'<div class="slot" data-slot="cta" data-role="cta" style="{_pos(x, y, w, h)}background:{pill};border-radius:{h / 2:.1f}px;'
+                f'display:flex;align-items:center;justify-content:center;">'
+                f'<span class="ink" style="font-family:\'Brand-{font_role}\';font-size:{f.size_px:.2f}px;line-height:{f.size_px * f.line_height:.2f}px;'
+                f'color:{pill_ink};white-space: pre;">{body}</span></div>'
+            )
+            continue
         parts.append(
             f'<div class="slot" data-role="{role}" style="{_pos(x, y, w, h)}text-align:{text_align};">'
             f'<span class="ink" data-slot="{role}" style="font-family:\'Brand-{font_role}\';font-size:{f.size_px:.2f}px;'

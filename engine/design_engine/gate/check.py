@@ -34,7 +34,7 @@ NEAR_COPY_HALF = 20
 PIXEL_COPY_WHOLE = 12  # near-identical pixels over the whole frame: a copy, whatever the words say. A half can be identical by design
 # (the skeleton half with the logo and the bar), so halves only feed the warning.
 SUBJECT_OVERLAP_MAX = 0.01
-TEXT_SLOTS = ("headline", "subline", "footer")
+TEXT_SLOTS = ("headline", "subline", "footer", "cta")
 
 
 @runtime_checkable

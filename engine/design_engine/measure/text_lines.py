@@ -32,7 +32,7 @@ class TextRead:
     footer_box: Box | None = None
 
 
-FOOTER_BAND = 0.15  # the bottom share of the frame a footer line sits in
+FOOTER_BAND = 0.22  # the bottom share of the frame a footer line sits in (a phone line under a button, a date row)
 
 
 def classify(lines: list[Line], W: int, H: int, exclude_boxes=()) -> TextRead:

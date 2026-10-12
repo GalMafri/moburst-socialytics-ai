@@ -58,7 +58,7 @@ PICTURES_PER_OPTION = 2
 FIX_ROUNDS = 1
 ROTATION_WINDOW = 3
 HEADLINE_LENGTH_FACTOR = 1.3
-TEXT_ROLES = ("headline", "subline", "footer")
+TEXT_ROLES = ("headline", "subline", "footer", "cta")
 NEW_ARRANGEMENT_PARTS = ("headline", "subline", "footer", "logo", "picture", "accent")
 _QUOTES = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
 
@@ -90,6 +90,7 @@ class OptionState:
     parts: list[str] = field(default_factory=list)
     bands: dict = field(default_factory=dict)
     footer: str | None = None  # the family's bottom-edge line, when it carries one
+    cta: str | None = None  # the family's button phrase, the client's own
     kind: str = "static"  # static | carousel (a parent whose slides are child options "<id>.<n>")
     slides: list[str] = field(default_factory=list)  # child option ids, in slide order
     parent: str | None = None  # the carousel this slide belongs to
@@ -106,7 +107,7 @@ class OptionState:
 
     @property
     def copy(self) -> dict:
-        return {"headline": self.headline, "subline": self.subline, "footer": self.footer}
+        return {"headline": self.headline, "subline": self.subline, "footer": self.footer, "cta": self.cta}
 
     @property
     def ok_pictures(self) -> list[PictureResult]:
@@ -264,6 +265,7 @@ def _family_summary(fam: dict) -> dict:
         "key": fam.get("key"), "status": fam.get("status"), "seen_count": fam.get("seen_count"),
         "alignment": tpl.get("alignment"), "picture_role": tpl.get("picture_role"), "logo_corner": tpl.get("logo_corner"),
         "devices": tpl.get("devices") or [], "ground": {"kinds": (tpl.get("ground") or {}).get("kinds"), "hex": (tpl.get("ground") or {}).get("hex")},
+        "button_phrases": (fam.get("parameters") or {}).get("cta_texts") or None, "bottom_lines": (fam.get("parameters") or {}).get("footer_texts") or None,
         "slots": {s: {k: round(float(v[k]), 3) for k in ("x", "y", "w", "h") if isinstance(v.get(k), (int, float))}
                   for s, v in (tpl.get("slots") or {}).items()},
         "headline_chars": chars, "headline_lines": _band(params.get("headline_lines")),
@@ -488,8 +490,16 @@ def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str]
                             f"{p75 * HEADLINE_LENGTH_FACTOR:.0f}; shorten it")
     if subline is not None and _norm(str(subline)).lower() not in copy:
         problems.append(f"{oid}: the subline must be the post copy's own words: {subline!r}")
-    if footer is not None and _norm(str(footer)).lower() not in copy:
-        problems.append(f"{oid}: the footer must be the post copy's own words: {footer!r}")
+    fparams = (family or {}).get("parameters") or {} if family else {}
+    observed_footers = {_norm(t).lower() for t in fparams.get("footer_texts") or []}
+    observed_ctas = {_norm(t).lower() for t in fparams.get("cta_texts") or []}
+    if footer is not None and _norm(str(footer)).lower() not in copy and _norm(str(footer)).lower() not in observed_footers:
+        problems.append(f"{oid}: the footer must be the post copy's own words or one of the client's own bottom lines {sorted(observed_footers)}: {footer!r}")
+    cta = o.get("cta") or None
+    if cta is not None and _norm(str(cta)).lower() not in observed_ctas:
+        problems.append(f"{oid}: the button must carry one of the client's own phrases {sorted(observed_ctas)}: {cta!r}")
+    if family is not None and "cta" in ((family.get("template") or {}).get("slots") or {}) and not cta and fparams.get("cta_texts"):
+        cta = fparams["cta_texts"][0]  # the family's button, in the client's own words, unless the plan named another
     if family is not None and isinstance(headline, str) and subline:
         order = reading_order(family)
         hi, si = copy.find(_norm(headline).lower()), copy.find(_norm(str(subline)).lower())
@@ -499,8 +509,11 @@ def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str]
         if order == "headline_first" and hi >= 0 and 0 <= si < hi:
             problems.append(f"{oid}: in family {family.get('key')!r} the subline sits below the headline, so it must follow the headline in the post copy")
     if family is not None and "footer" in ((family.get("template") or {}).get("slots") or {}) and not footer:
-        problems.append(f"{oid}: family {family.get('key')!r} carries a footer line at the bottom edge in the client's posts; give a `footer` from the "
-                        "post copy (a short closing line) or choose another family")
+        if fparams.get("footer_texts"):
+            footer = fparams["footer_texts"][0]  # the client's own bottom line (a phone, a handle) when the plan gives none
+        else:
+            problems.append(f"{oid}: family {family.get('key')!r} carries a footer line at the bottom edge in the client's posts; give a `footer` from the "
+                            "post copy (a short closing line) or choose another family")
     concept = o.get("picture_brief") or o.get("picture_concept") or ""
     no_picture_family = family is not None and ((family.get("template") or {}).get("picture_role", "none") == "none")
     if not isinstance(concept, str) or not concept.strip():
@@ -518,7 +531,7 @@ def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str]
         return None, problems
     return OptionState(oid, fkey, family, arrangement if arrangement == "new" else "family", str(headline).strip(),
                        str(subline).strip() if subline else None, concept.strip(), parts, dict(bands) if bands else {},
-                       footer=str(footer).strip() if footer else None), []
+                       footer=str(footer).strip() if footer else None, cta=str(cta).strip() if cta else None), []
 
 
 def _check_carousel(ctx: RunContext, i: int, o: Mapping, recent_families: set[str], recent_concepts: set[str]) -> tuple[list[OptionState], list[str]]:
@@ -630,7 +643,7 @@ def plan(ctx: RunContext, options: list[dict]) -> dict:
         ctx.options[opt.id] = opt
     return {"accepted": [o.id for o in built if o.parent is None],
             "options": [{"id": o.id, "kind": o.kind, "slides": o.slides or None, "slide_role": o.slide_role, "family_key": o.family_key,
-                         "arrangement": o.arrangement, "headline": o.headline, "subline": o.subline, "footer": o.footer,
+                         "arrangement": o.arrangement, "headline": o.headline, "subline": o.subline, "footer": o.footer, "cta": o.cta,
                          "picture_brief": o.picture_brief or None, "fix_rounds_used": o.fix_rounds} for o in built],
             "next": "call picture(option_id) for each option (a carousel id covers all its slides), then compose, measure and submit"}
 
@@ -638,7 +651,7 @@ def plan(ctx: RunContext, options: list[dict]) -> dict:
 # ---- picture ----
 
 
-def quiet_zone(family: dict, slots: tuple[str, ...] = ("headline", "subline", "footer", "logo")) -> dict | None:
+def quiet_zone(family: dict, slots: tuple[str, ...] = ("headline", "subline", "footer", "cta", "logo")) -> dict | None:
     """The part of the picture the text and logo cover, as fractions of the PICTURE (the brief names "the lower 40%" of the picture
     it asks for, and the dry run flattens that region of the picture it hands back): the union of the slots that overlap the
     family's picture area at their median position, mapped into the picture box. None when the family carries no picture or no
