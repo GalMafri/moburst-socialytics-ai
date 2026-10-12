@@ -202,3 +202,6 @@ verify_jwt = false
 # Files a client's Sprout posts under brand_assets for the brand learner; staff JWT or the operational secret.
 [functions.design-harvest]
 verify_jwt = false
+
+[functions.design-pick]
+verify_jwt = false

@@ -17,7 +17,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useAuth } from "@/hooks/useAuth";
 import { PlatformBadge } from "@/lib/platform-config";
 import { CopyEditor } from "./CopyEditor";
-import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
+import { DesignTab } from "@/components/reports/calendar/DesignTab";
 import { useGenerationForPost } from "@/components/reports/calendar/GenerationContext";
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
 import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
@@ -173,56 +173,26 @@ export function PostPanel({
                   </Button>
                 </div>
               )}
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold">
-                    {imageTiles.length > 0
-                      ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
-                      : designRun?.status === "running"
-                        ? `Generating designs · ${designRun.completed}/${designRun.total} done`
-                        : "No designs yet"}
-                  </p>
-                  <p className="t-secondary">
-                    {imageTiles.length > 0
-                      ? "Click any design to preview at full size. Star your favorites."
-                      : designRun?.status === "running"
-                        ? "The run continues while this panel is closed. Open Design to follow it."
-                        : "Generate brand-aligned variants to get started."}
-                  </p>
-                </div>
-                {isMoburstStaff && <CreatePostDesignButton
-                  post={post}
-                  clientContext={clientContext}
-                  clientId={clientId}
-                  onImagesGenerated={refreshMedia}
-                />}
-              </div>
+              <DesignTab post={post} clientId={clientId} reportId={reportId} onPicked={refreshMedia} />
 
-              {imageTiles.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {imageTiles.map((tile, i) => (
-                    <MediaTileCard
-                      key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
-                      tile={tile}
-                      index={i}
-                      isVideo={false}
-                      tileAspect={tileAspectFor(post)}
-                      filenameStub={`design-${post.platform || "post"}`}
-                      onPreview={() => openPreview(tile.url, false)}
-                      onToggleSelected={onToggleSelected}
-                      onFeedback={isClient ? undefined : onFeedback}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
-                  <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
-                  <p className="t-secondary">
-                    No designs generated for this post yet.
-                  </p>
-                  <p className="t-secondary/70">
-                    Click "Design" above to create artwork for this post.
-                  </p>
+              {imageTiles.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold">Attached to this post</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {imageTiles.map((tile, i) => (
+                      <MediaTileCard
+                        key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
+                        tile={tile}
+                        index={i}
+                        isVideo={false}
+                        tileAspect={tileAspectFor(post)}
+                        filenameStub={`design-${post.platform || "post"}`}
+                        onPreview={() => openPreview(tile.url, false)}
+                        onToggleSelected={onToggleSelected}
+                        onFeedback={isClient ? undefined : onFeedback}
+                      />
+                    ))}
+                  </div>
                 </div>
               )}
             </TabsContent>
