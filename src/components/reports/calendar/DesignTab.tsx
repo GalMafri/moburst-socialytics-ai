@@ -17,7 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 const db = supabase as unknown as SupabaseClient<any>;
 import { Check, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { STAGES, stageIndex, stageLabel, useDesignRuns } from "./DesignRunsContext";
+import { STAGES, kindOfFormat, runKey, stageIndex, stageLabel, useDesignRuns, type RunKind } from "./DesignRunsContext";
 
 export interface DesignTabPost {
   _calendarPostKey?: string;
@@ -45,7 +45,7 @@ interface DesignOptionRow {
   kind: "static" | "carousel" | "slide";
   parent_key: string | null;
   slide_role: string | null;
-  files: Record<string, { url?: string; w?: number; h?: number; passed?: boolean }>;
+  files: Record<string, { url?: string; w?: number; h?: number; passed?: boolean; video?: boolean; poster?: string | null; seconds?: number }>;
   status: "offered" | "picked" | "rejected";
 }
 
@@ -54,25 +54,29 @@ interface Props {
   clientId?: string;
   reportId?: string;
   onPicked?: () => void;
+  kind?: RunKind; // static designs (default) or the post's video
 }
 
 const POLL_MS = 10_000;
 
-export function DesignTab({ post, clientId, reportId, onPicked }: Props) {
+export function DesignTab({ post, clientId, reportId, onPicked, kind = "static" }: Props) {
   const postKey = post._calendarPostKey;
+  const video = kind === "video";
+  // a video post's stills are its cover: the run format is "Single Image" for the cover, the post's own format for the video
+  const runFormat = video ? (kindOfFormat(post.format) === "video" ? post.format || "Video" : "Video") : (kindOfFormat(post.format) === "video" ? "Single Image" : post.format || "Single Image");
   const [run, setRun] = useState<DesignRunRow | null>(null);
   const [options, setOptions] = useState<DesignOptionRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const shared = useDesignRuns();
-  const sharedRun = postKey ? shared.runs[postKey] : null;
+  const sharedRun = postKey ? shared.runs[runKey(postKey, kind)] : null;
 
   const load = async () => {
     if (!clientId || !postKey) return;
-    const { data: runs } = await db.from("design_runs").select("id, status, sizes, plan, failure, created_at")
-      .eq("client_id", clientId).eq("post_key", postKey).order("created_at", { ascending: false }).limit(1);
-    const latest = (runs?.[0] as DesignRunRow | undefined) || null;
+    const { data: runs } = await db.from("design_runs").select("id, status, sizes, plan, failure, created_at, format")
+      .eq("client_id", clientId).eq("post_key", postKey).order("created_at", { ascending: false }).limit(20);
+    const latest = ((runs || []) as Array<DesignRunRow & { format: string | null }>).find((r) => kindOfFormat(r.format) === kind) || null;
     setRun(latest);
     if (latest && (latest.status === "offered" || latest.status === "picked")) {
       const { data: opts } = await db.from("design_options").select("id, option_key, rank, kind, parent_key, slide_role, files, status")
@@ -102,11 +106,11 @@ export function DesignTab({ post, clientId, reportId, onPicked }: Props) {
       const copy = post.copy || post.content || "";
       const { error } = await db.from("design_runs").insert({
         client_id: clientId, post_key: postKey, report_id: reportId || null, platform: post.platform || "Instagram",
-        format: post.format || "Single Image", copy, pillar: post.pillar || post.content_pillar || null,
+        format: runFormat, copy, pillar: post.pillar || post.content_pillar || null,
         created_by: userData?.user?.id || null,
       });
       if (error) throw error;
-      toast.success("Designs are on their way. This takes a few minutes; you can close this panel.");
+      toast.success(video ? "Your video is on its way. A few minutes; you can close this panel." : "Designs are on their way. This takes a few minutes; you can close this panel.");
       await load();
       await shared.refresh();
     } catch (e) {
@@ -148,6 +152,7 @@ export function DesignTab({ post, clientId, reportId, onPicked }: Props) {
   };
 
   const tops = useMemo(() => options.filter((o) => o.kind !== "slide"), [options]);
+  const isVideoFile = (f?: { url?: string; video?: boolean }) => !!f && (f.video === true || /\.mp4($|\?)/i.test(f.url || ""));
   const slidesOf = (key: string) => options.filter((o) => o.kind === "slide" && o.parent_key === key);
   const primary = run?.sizes?.[0]?.name;
   const inProgress = run?.status === "queued" || run?.status === "running";
@@ -161,19 +166,21 @@ export function DesignTab({ post, clientId, reportId, onPicked }: Props) {
       <div className="flex items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold">
-            {inProgress ? "Creating your designs" : tops.length ? "Your options" : "No designs yet"}
+            {inProgress ? (video ? "Creating your video" : "Creating your designs") : tops.length ? "Your options" : (video ? "No video yet" : "No designs yet")}
           </p>
           <p className="t-secondary">
             {inProgress
               ? "Every option is checked against your brand before you see it. A few minutes."
               : tops.length
                 ? "Each option passed every check. Use one to attach it to this post."
-                : "Designs are made from your brand: your logo, your fonts, your layouts."}
+                : video
+                  ? "Your video is made from your brand: your words as cards, your fonts, your logo."
+                  : "Designs are made from your brand: your logo, your fonts, your layouts."}
           </p>
         </div>
         <Button size="sm" onClick={create} disabled={busy || inProgress}>
           {inProgress ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          <span className="ml-1.5">{tops.length ? "Create more" : "Create designs"}</span>
+          <span className="ml-1.5">{tops.length ? "Create more" : (video ? "Create video" : "Create designs")}</span>
         </Button>
       </div>
 
@@ -238,8 +245,12 @@ export function DesignTab({ post, clientId, reportId, onPicked }: Props) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {files.map(([size, f]) => f?.url ? (
                   <figure key={size} className="space-y-1">
-                    <img src={f.url} alt={`Option ${o.option_key}, ${f.w}×${f.h}`} className="w-full rounded-md" />
-                    <figcaption className="t-secondary">{f.w}×{f.h}</figcaption>
+                    {isVideoFile(f) ? (
+                      <video src={f.url} poster={f.poster || undefined} controls playsInline className="w-full rounded-md bg-black" />
+                    ) : (
+                      <img src={f.url} alt={`Option ${o.option_key}, ${f.w}×${f.h}`} className="w-full rounded-md" />
+                    )}
+                    <figcaption className="t-secondary">{f.w}×{f.h}{f.seconds ? ` · ${Math.round(f.seconds)} s` : ""}</figcaption>
                   </figure>
                 ) : null)}
               </div>

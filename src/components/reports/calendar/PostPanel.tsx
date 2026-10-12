@@ -19,7 +19,6 @@ import { PlatformBadge } from "@/lib/platform-config";
 import { CopyEditor } from "./CopyEditor";
 import { DesignTab } from "@/components/reports/calendar/DesignTab";
 import { useGenerationForPost } from "@/components/reports/calendar/GenerationContext";
-import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
 import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
 import { isVideoFormat } from "@/lib/platform";
@@ -199,51 +198,26 @@ export function PostPanel({
 
             {/* Video tab */}
             <TabsContent value="video" className="mt-4 space-y-4">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold">
-                    {videoTiles.length > 0
-                      ? `${videoTiles.length} video${videoTiles.length === 1 ? "" : "s"}`
-                      : "No videos yet"}
-                  </p>
-                  <p className="t-secondary">
-                    {videoTiles.length > 0
-                      ? "Click any video to preview at full size."
-                      : clientContext?.design_style_synthesis?.reference_pipeline_version === 1
-                        ? "Create a 12-second film with three moving scenes, guided by this client’s real social references."
-                        : "Create short video drafts, then preview and choose a favorite."}
-                  </p>
-                </div>
-                {isMoburstStaff && <CreatePostVideoButton
-                  post={post}
-                  clientContext={clientContext}
-                  clientId={clientId}
-                  onVideoGenerated={refreshMedia}
-                />}
-              </div>
+              <DesignTab post={post} clientId={clientId} reportId={reportId} onPicked={refreshMedia} kind="video" />
 
-              {videoTiles.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {videoTiles.map((tile, i) => (
-                    <MediaTileCard
-                      key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
-                      tile={tile}
-                      index={i}
-                      isVideo={true}
-                      tileAspect={tileAspectFor(post)}
-                      filenameStub={`video-${post.platform || "post"}`}
-                      onPreview={() => openPreview(tile.url, true)}
-                      onToggleSelected={onToggleSelected}
-                      onFeedback={isClient ? undefined : onFeedback}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
-                  <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
-                  <p className="t-secondary">
-                    No videos generated for this post yet.
-                  </p>
+              {videoTiles.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold">Attached to this post</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {videoTiles.map((tile, i) => (
+                      <MediaTileCard
+                        key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
+                        tile={tile}
+                        index={i}
+                        isVideo={true}
+                        tileAspect={tileAspectFor(post)}
+                        filenameStub={`video-${post.platform || "post"}`}
+                        onPreview={() => openPreview(tile.url, true)}
+                        onToggleSelected={onToggleSelected}
+                        onFeedback={isClient ? undefined : onFeedback}
+                      />
+                    ))}
+                  </div>
                 </div>
               )}
             </TabsContent>

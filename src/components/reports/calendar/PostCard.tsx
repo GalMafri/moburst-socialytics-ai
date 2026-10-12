@@ -4,7 +4,7 @@ import { PlatformBadge } from "@/lib/platform-config";
 import { Clock, ImagePlus, Loader2, Sparkles, Video as VideoIcon } from "lucide-react";
 import { PostStatusChip, type PostStatus } from "./PostStatusChip";
 import { useGenerationForPost } from "./GenerationContext";
-import { stageLabel, useDesignRunForPost } from "./DesignRunsContext";
+import { kindOfFormat, stageLabel, useDesignRunForPost } from "./DesignRunsContext";
 import { postCopyOf } from "@/lib/postCopy";
 
 interface Iteration {
@@ -33,7 +33,7 @@ interface Props {
 }
 
 export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: Props) {
-  const designRun = useDesignRunForPost(post._calendarPostKey);
+  const designRun = useDesignRunForPost(post._calendarPostKey, kindOfFormat(post.format));
   const designing = !!designRun && (designRun.status === "queued" || designRun.status === "running");
   const designsReady = !!designRun && (designRun.status === "offered" || designRun.status === "picked") && designRun.offered > 0;
   const copy = postCopyOf(post);

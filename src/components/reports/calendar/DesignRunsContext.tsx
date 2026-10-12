@@ -13,9 +13,17 @@ const db = supabase as unknown as SupabaseClient<any>;
 
 export type RunStage = "queued" | "reading" | "planned" | "pictures" | "checking" | "checked" | "finished";
 
+export type RunKind = "static" | "video";
+export const VIDEO_FORMAT = /\b(video|reel|reels|short|shorts|clip)\b/i;
+export function kindOfFormat(format: string | null | undefined): RunKind {
+  return VIDEO_FORMAT.test(String(format || "")) ? "video" : "static";
+}
+export const runKey = (postKey: string, kind: RunKind) => `${kind}|${postKey}`;
+
 export interface DesignRunSummary {
   id: string;
   postKey: string;
+  kind: RunKind;
   status: "queued" | "running" | "offered" | "picked" | "failed" | "dropped";
   stage: RunStage;
   turn: number;
@@ -44,19 +52,21 @@ export function DesignRunsProvider({ clientId, reportId, children }: { clientId?
 
   const refresh = useCallback(async () => {
     if (!clientId) return;
-    let q = db.from("design_runs").select("id, post_key, status, plan, sizes, failure, created_at").eq("client_id", clientId)
+    let q = db.from("design_runs").select("id, post_key, format, status, plan, sizes, failure, created_at").eq("client_id", clientId)
       .order("created_at", { ascending: false }).limit(200);
     if (reportId) q = q.eq("report_id", reportId);
     const { data } = await q;
-    const rows = (data || []) as Array<{ id: string; post_key: string; status: DesignRunSummary["status"]; plan: Record<string, unknown> | null;
+    const rows = (data || []) as Array<{ id: string; post_key: string; format: string | null; status: DesignRunSummary["status"]; plan: Record<string, unknown> | null;
       sizes: DesignRunSummary["sizes"] | null; failure: string | null; created_at: string }>;
     const latest: Record<string, DesignRunSummary> = {};
     for (const r of rows) {
-      if (latest[r.post_key]) continue;
+      const kind = kindOfFormat(r.format);
+      const key = runKey(r.post_key, kind);
+      if (latest[key]) continue;
       const plan = (r.plan || {}) as Record<string, unknown>;
       const offeredList = Array.isArray(plan.offered) ? (plan.offered as unknown[]) : [];
-      latest[r.post_key] = {
-        id: r.id, postKey: r.post_key, status: r.status,
+      latest[key] = {
+        id: r.id, postKey: r.post_key, kind, status: r.status,
         stage: (r.status === "queued" ? "queued" : (plan.stage as RunStage) || "reading"),
         turn: Number(plan.turn || 0), options: Number(plan.options || 0), pictures: Number(plan.pictures || 0),
         composed: Number(plan.composed || 0), passed: Number(plan.passed || 0),
@@ -85,9 +95,9 @@ export function useDesignRuns(): Ctx {
   return useContext(DesignRunsCtx);
 }
 
-export function useDesignRunForPost(postKey?: string): DesignRunSummary | null {
+export function useDesignRunForPost(postKey?: string, kind: RunKind = "static"): DesignRunSummary | null {
   const { runs } = useDesignRuns();
-  return postKey ? runs[postKey] || null : null;
+  return postKey ? runs[runKey(postKey, kind)] || null : null;
 }
 
 /** The step a person is told about, in their words. */
