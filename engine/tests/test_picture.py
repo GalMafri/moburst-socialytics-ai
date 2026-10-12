@@ -141,7 +141,7 @@ def test_brief_builds_from_profile():
     b = brief_mod.build(PROFILE, FAMILY, SLOT_ZONE, "a quiet law office at dusk", "instagram")
     assert "upper 45%" in b.text and "calm and uncluttered" in b.text
     assert "navy" in b.text.lower() and "#172c44" in b.text
-    assert "office interiors" in b.text.lower()
+    assert "office interiors" not in b.text.lower()  # the planner reads the imagery items; the prompt carries the concept
     assert "no stock photography" in b.text.lower()
     assert "no text overlays" not in b.text.lower()  # a profile line naming text never enters the brief
     assert b.aspect == "4:5" and b.params["aspect_ratio"] == "4:5"
@@ -269,4 +269,4 @@ def test_profile_fragments_never_put_forbidden_words_in_the_brief():
         {"kind": "photography", "description": "A hand holding a card with text on it.", "evidence_post_ids": [3]}]}}
     b = brief_mod.build(profile, FAMILY, SLOT_ZONE, "a quiet stadium at night", "instagram")
     assert brief_mod.is_clean(brief_mod.without_clause(b.text), "Bader Law") and "result card" not in b.text and "holding a card" not in b.text
-    assert "Office interiors" in b.text
+    assert "Office interiors" not in b.text
