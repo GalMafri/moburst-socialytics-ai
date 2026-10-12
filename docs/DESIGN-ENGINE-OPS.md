@@ -48,6 +48,8 @@ Static: about 18 to 26 Higgsfield credits and $1.6 to $3.4 of model spend per ru
 
 **A run never ends in a client-facing failure.** If the first pass offers nothing, the worker runs a second pass with the first pass's reasons as rules (`SECOND_PASS_MIN_CREDITS`), then offers the brand text cards as option `T` (Remotion stills on a plate, the video's frame gate), and only then drops. The app shows a dropped run as "Finishing up"; the hourly n8n workflow **Socialytics Design Runs Check** (`cFNQ8NienyJ1HJIL`, project "Mobi Moburst") reads `design-store` `status` and mails lital@moburst.com the runs that ended with nothing offered in the last two hours (`needs_staff`) and any run stuck past its lease.
 
+**Picture judge.** `measure.saliency.salient_share` is subject coverage: the share of the picture's subject mass under a slot, or the slot's detail level against `SUBJECT_LEVEL`, whichever is higher; a calm plate reads 0. (Until 12 October it was the slot's mean over the frame mean, which refused calm plates.)
+
 **Sizes.** The main size decides an option; a companion size that fails is left out of the offer (`left_out` in the measure result). Landscape companions (W/H ≥ 1.25) are judged by the platform's band and dead-space floors, not the client's feed floors.
 
 **Video.** A plate in the client's look (one Sonnet sentence for the concept, `PLATE_CREDITS_MAX` 20) sits under the cards in slow motion; a closing card shows the mark alone; the frame gate judges the closing card's own box. If the plate fails under the cards the video re-renders on the flat brand ground. Seedance b-roll is wired (`video/broll.py`) but off until Lital approves the spend (about 89 credits a clip).
