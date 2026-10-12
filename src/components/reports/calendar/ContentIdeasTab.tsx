@@ -6,6 +6,7 @@ import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
 import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
 import { CalendarKanban, findLatestSelectedIteration } from "./CalendarKanban";
 import { DesignRunsProvider } from "./DesignRunsContext";
+import { DesignRunsDock } from "./DesignRunsDock";
 import { PostPanel } from "./PostPanel";
 import { WeeklyHighlights } from "./WeeklyHighlights";
 import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
@@ -246,6 +247,24 @@ export function ContentIdeasTab({
             onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
           />}
         </div>
+
+        <DesignRunsDock
+          titleFor={(key) => {
+            for (const day of (revisedCalendar as any)?.days || []) {
+              for (const p of day?.posts || []) {
+                if (p?._calendarPostKey === key) return `${p.platform || ""} · ${String(p.copy || p.content || "").split("\n")[0].slice(0, 48)}`;
+              }
+            }
+            return undefined;
+          }}
+          onOpen={(key) => {
+            for (const day of (revisedCalendar as any)?.days || []) {
+              for (const p of day?.posts || []) {
+                if (p?._calendarPostKey === key) { setActivePost(p); setActiveGroupId(null); return; }
+              }
+            }
+          }}
+        />
 
         <PostPanel
           open={!!activePost && !iterationsFailed}

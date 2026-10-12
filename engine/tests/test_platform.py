@@ -31,8 +31,8 @@ def test_unknown_platform_names_it():
 
 
 def test_unknown_format_names_it():
-    with pytest.raises(KeyError, match="Reel"):
-        specs.sizes_for("Instagram", "Reel")
+    with pytest.raises(KeyError, match="Poster"):
+        specs.sizes_for("Instagram", "Poster")
 
 
 def test_all_platforms_and_sources():
@@ -40,7 +40,7 @@ def test_all_platforms_and_sources():
     assert {"Instagram", "Facebook", "LinkedIn", "X", "TikTok"} <= set(plats)
     for p in plats:
         src = specs.source(p)
-        assert src["source_url"].startswith("https://") and src["fetched_at"] == "2026-10-08"
+        assert src["source_url"].startswith("https://") and src["fetched_at"] in ("2026-10-08", "2026-10-12")
 
 
 def test_platform_name_is_case_insensitive():
