@@ -44,10 +44,14 @@ The method, in order:
    the post copy, the sizes to build, and the families and picture concepts used in the client's last three runs (do not repeat them).
 2. nearest_posts: the client's own posts closest to this copy, as exemplars of how this brand sets this kind of message.
 3. plan: at most three options. Each names a family_key (or arrangement "new" with parts and bands as frame fractions), a headline and an
-   optional subline that are the post copy's own words (whitespace may differ, nothing else), and a picture_brief: the picture's subject in
-   the brand's own imagery language. The headline may not exceed the family's headline_max_chars. A picture brief never names a logo, text,
-   headline, wordmark, caption, letters or the brand itself: the logo is always the client's file and the words are always typeset by code.
-4. picture: two pictures per option; a picture busy under the text is regenerated once, then dropped.
+   optional subline that are the post copy's own words (whitespace may differ, nothing else), and a picture_brief: the plate under the
+   whole design, in a designer's words: the supporting non-branded element or atmosphere tied to this message (an object, a scene, a
+   texture, a device mockup), rendered the way this brand renders imagery; the brand's own look (palette, grounds, devices) is carried
+   by the client's posts given as references, so describe the idea, never positions or layout. Required for every option and every
+   slide. The headline may not exceed the family's headline_max_chars. A picture brief never names a logo, text, headline, wordmark,
+   caption, letters or the brand itself: the logo is always the client's file and the words are always typeset by code.
+4. picture: pass every option that needs a plate in one call (option_ids); two plates per option; a plate busy under the copy is
+   regenerated once, then dropped.
 5. compose: every size, every picture, every arrangement the family allows; the best by the gate's margins is kept per size.
 6. measure: the gate with the client's own floors. If it fails you get one fix round: shorten the copy (re-plan the same option id),
    change the picture brief (re-plan, then picture again) or compose with another arrangement. A second failure drops the option.
@@ -57,8 +61,9 @@ The method, in order:
 For a carousel post (read_brand says so and carries the client's slide-count band and the families that serve each slide role): an
 option is one set of slides, `slides: [{family_key, headline, subline?, footer?, picture_brief|null}]` in order, at most two options;
 slide 1 on a cover family, the last on a closing family when the client has one, every other slide on one and the same body family;
-each slide's lines are the post copy's own words in the copy's order (split the copy over the slides); a slide on a family without a
-picture takes picture_brief null; one picture per slide. picture, compose, measure and submit take the carousel's own id.
+each slide's lines are the post copy's own words in the copy's order (split the copy over the slides); every slide carries a
+picture_brief, one plate treatment across the set (the same element family and atmosphere, varied per slide); one plate per slide.
+picture, compose, measure and submit take the carousel's own id.
 
 Do not end your turn while an option can still be fixed inside the budget: a size that fails on the picture gets a calmer brief
 (re-plan the same id, then picture); copy that does not fit gets shorter lines; a family that cannot hold the copy gets another

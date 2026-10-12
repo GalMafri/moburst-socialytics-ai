@@ -14,6 +14,7 @@ wraps for the model; every rule the spec gives the worker is enforced here, what
 """
 from __future__ import annotations
 
+import copy
 import threading
 
 import hashlib
@@ -57,6 +58,7 @@ MIN_SLIDES = 2
 LETTERING_CONFIDENCE = 0.6
 LETTERING_MIN_CHARS = 3
 PICTURES_PER_OPTION = 2
+PLATES = True  # every option's picture is a whole-frame plate in the brand's look; the copy and the logo are set on it by code
 PICTURE_WORKERS = 4  # pictures for this many options or slides are made at once
 FIX_ROUNDS = 1
 ROTATION_WINDOW = 3
@@ -470,6 +472,33 @@ def nearest_posts(ctx: RunContext, copy: str, k: int = 4) -> list[dict]:
 # ---- plan ----
 
 
+def plate_family(family: dict) -> dict:
+    """The family with its picture role set to full: the plate is the ground under every slot. Slot geometry is untouched."""
+    fam = copy.deepcopy(family)
+    tpl = fam.setdefault("template", {})
+    tpl["picture_role"] = "full"
+    return fam
+
+
+def plate_references(ctx: RunContext, family: dict, limit: int = 4) -> list[Path]:
+    """The client's own posts as look references for a plate: the family's exemplars first, then the nearest posts by message."""
+    by_id: dict[str, str] = {}
+    for r in ctx.reads or []:
+        pid = str(getattr(r, "source_post_id", "") or (r.get("source_post_id") if isinstance(r, Mapping) else "") or "")
+        path = str(getattr(r, "path", "") or (r.get("path") if isinstance(r, Mapping) else "") or "")
+        if pid and path and pid not in by_id:
+            by_id[pid] = path
+    wanted = [str(pid) for pid in family.get("post_ids") or []] + [str(n.get("source_post_id") or "") for n in ctx.nearest or []]
+    out: list[Path] = []
+    for pid in wanted:
+        path = by_id.get(pid) or (next((str(n.get("path")) for n in ctx.nearest or [] if str(n.get("source_post_id")) == pid), None))
+        if path and Path(path).exists() and Path(path) not in out:
+            out.append(Path(path))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str], recent_concepts: set[str],
                   allow_no_picture: bool = False) -> tuple[OptionState | None, list[str]]:
     problems: list[str] = []
@@ -491,12 +520,16 @@ def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str]
                 problems.append(f"{oid}: part {p!r} needs a band with x, y, w, h as fractions of the frame")
         if not problems:
             family = new_family(ctx, oid, parts, bands, o.get("alignment"))
+            if PLATES:
+                family = plate_family(family)
             fkey = None
     else:
         if not fkey:
             problems.append(f"{oid}: name a family_key or set arrangement to \"new\" with parts and bands")
         else:
             family = next((f for f in ctx.families if f.get("key") == fkey), None)
+            if family is not None and PLATES:
+                family = plate_family(family)
             if family is None:
                 problems.append(f"{oid}: unknown family {fkey!r}")
             elif "headline" not in (family.get("template") or {}).get("slots", {}):
@@ -593,7 +626,7 @@ def _check_carousel(ctx: RunContext, i: int, o: Mapping, recent_families: set[st
             problems.append(f"{cid}: family {fkey!r} does not serve the {role} role in the client's albums; {role} families are {sorted(roles_ok[role])}")
         if role == "body" and fkey:
             body_keys.add(str(fkey))
-        child, probs = _check_option(ctx, n, {**sl, "id": cid, "arrangement": "family"}, set(), recent_concepts, allow_no_picture=True)
+        child, probs = _check_option(ctx, n, {**sl, "id": cid, "arrangement": "family"}, set(), recent_concepts, allow_no_picture=not PLATES)
         problems.extend(probs)
         if child:
             # a slide carries as much copy as the family's posts do: a fragment leaves the family's text area empty and fails the gate
@@ -851,8 +884,13 @@ def picture(ctx: RunContext, option_id: str) -> dict:
                           "ground, the device, the copy and the logo")
     zone = quiet_zone(fam)
     out_dir = ctx.option_dir(opt.id)
-    brief = brief_mod.build(ctx.profile, fam, zone, opt.picture_brief, ctx.platform, reads=ctx.reads or None, ref_dir=out_dir / "refs",
-                            picture_aspect=(pic_box[2] / pic_box[3]) if pic_box[3] > 0 else None)
+    if PLATES:
+        logo_slot = ((fam.get("template") or {}).get("slots") or {}).get("logo")
+        brief = brief_mod.build_plate(ctx.profile, fam, zone, opt.picture_brief, ctx.platform, plate_references(ctx, fam),
+                                      picture_aspect=(pic_box[2] / pic_box[3]) if pic_box[3] > 0 else None, logo_zone=logo_slot)
+    else:
+        brief = brief_mod.build(ctx.profile, fam, zone, opt.picture_brief, ctx.platform, reads=ctx.reads or None, ref_dir=out_dir / "refs",
+                                picture_aspect=(pic_box[2] / pic_box[3]) if pic_box[3] > 0 else None)
     if ctx.host_reference:
         brief.reference_urls = [u for u in (ctx.host_reference(p) for p in brief.reference_paths) if u]
     elif hasattr(client, "upload"):  # no public host: the crops go straight into Higgsfield's storage
@@ -1110,8 +1148,12 @@ def measure(ctx: RunContext, option_id: str) -> dict:
             sizes[size.name] = {"passed": g.passed, "failures": g.failures, "warnings": g.warnings, "measurements": g.measurements,
                                 "margins": margins(g.measurements, ctx.profile, size)}
             fails = g.failures
-        if fails and first_failure is None:
+        if fails and size.name == ctx.primary.name and first_failure is None:
             first_failure = f"{size.name}: {fails[0]}"
+        elif fails and size.name != ctx.primary.name:
+            # a companion size that fails is left out of the offer; the main size decides the option
+            opt.renders.pop(size.name, None)
+            sizes[size.name]["left_out"] = True
     out: dict[str, Any] = {"option_id": opt.id, "sizes": sizes}
     if first_failure is None:
         opt.status = "passed"

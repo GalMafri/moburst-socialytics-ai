@@ -154,6 +154,53 @@ def reference_crops(reads: list, ref_dir: Path, limit: int = MAX_REFERENCES) -> 
     return out
 
 
+PLATE_MODEL = "gpt_image_2_5"  # holds a reference's look and a declared calm zone better than nano_banana_pro (measured 2026-10-06/08)
+PLATE_QUALITY = "high"
+MAX_PLATE_REFERENCES = 4
+
+
+def build_plate(profile: dict, family: dict, slot_zone: dict | None, concept: str, platform: str, reference_paths: list[Path],
+                picture_aspect: float | None = None, logo_zone: dict | None = None) -> Brief:
+    """The brief for a whole-frame plate: the client's own posts as look references (palette, grounds, devices, textures, atmosphere,
+    rendering style), the planner's concept for the supporting element, the copy area and the mark's corner declared calm, nothing
+    written anywhere. The copy and the logo are set by code on top of it; the plate is the design's ground, not a photo in a slot."""
+    brand = profile.get("client_name") or None
+    check(concept, brand)
+    imagery = profile.get("imagery") or {}
+    lines = ["A background plate for a social post in this brand's own visual language, as the reference posts show it: the same palette, "
+             "grounds, devices, textures, depth and rendering style, composed anew. Not any reference's layout, and none of their subjects, "
+             "people or objects repeated.",
+             concept.strip().rstrip(".") + "."]
+    grounds = [g for g in imagery.get("grounds") or [] if is_clean(g, brand)]
+    if grounds:
+        lines.append("Grounds the brand uses: " + ", ".join(grounds) + ".")
+    pal = palette_words(profile.get("palette") or [])
+    if pal:
+        lines.append("Palette: " + pal + ".")
+    never = [n for n in imagery.get("never") or [] if is_clean(n, brand)]
+    if never:
+        lines.append("Never: " + "; ".join(never) + ".")
+    instruction = zone_instruction(slot_zone) if slot_zone else ""
+    if instruction:
+        lines.append(instruction[0].upper() + instruction[1:] + ": the words go there afterwards.")
+    if logo_zone:
+        side, _o, _p = zone_sides(logo_zone)
+        lines.append(f"Leave a small clear patch at the {side} edge for the brand mark.")
+    lines.append(f"A single still picture for {platform}, in the rendering style the references share (photographic, graphic or illustrated as they are).")
+    text = " ".join(lines)
+    check(text, brand)
+    text = text + " " + NO_LETTERING
+    zone_side = None
+    if slot_zone:
+        side, other, _pct = zone_sides(slot_zone)
+        zone_side = (f"{side} part", f"{other} part")
+    aspect = nearest_aspect(float(picture_aspect)) if isinstance(picture_aspect, (int, float)) and picture_aspect > 0 else "4:5"
+    params = {"model": PLATE_MODEL, "aspect_ratio": aspect, "resolution": DEFAULT_RESOLUTION, "quality": PLATE_QUALITY, "use_unlim": False}
+    refs = [Path(r) for r in reference_paths if r and Path(r).exists()][:MAX_PLATE_REFERENCES]
+    return Brief(text=text, reference_paths=refs, model=PLATE_MODEL, params=params, aspect=aspect, brand_name=brand, zone_instruction=instruction,
+                 zone_side=zone_side)
+
+
 NO_LETTERING = ("No lettering, numbers, signage, logos, badges, crests, interface elements, buttons or captions anywhere in the picture; "
                 "the copy and the mark are added afterwards by the layout.")
 USE_REFERENCES = False  # the client's own crops fed as image references were pasted into the pictures (icons, headshots, footers)
