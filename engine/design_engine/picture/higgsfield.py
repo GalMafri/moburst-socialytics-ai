@@ -212,6 +212,24 @@ class Client:
         reqs = [{"index": int(r.get("index", i)), "params": {**r["params"], "use_unlim": False}} for i, r in enumerate(requests)]
         return read_jobs(self._call("generate_image_batch", {"requests": reqs}), "generate_image_batch")
 
+    def generate_video(self, requests: list[dict]) -> list[JobRef]:
+        """Submit video requests headlessly (generate_video_batch): [{index, params}], every params carrying use_unlim False."""
+        reqs = [{"index": int(r.get("index", i)), "params": {**r["params"], "use_unlim": False}} for i, r in enumerate(requests)]
+        return read_jobs(self._call("generate_video_batch", {"requests": reqs}), "generate_video_batch")
+
+    def video_cost(self, model: str, params: dict) -> float | None:
+        try:
+            data = self._call("generate_video", {"params": {**params, "model": model, "use_unlim": False, "get_cost": True}})
+        except HiggsfieldError:
+            return None
+        cost = data.get("cost") if isinstance(data, dict) else None
+        if not isinstance(cost, dict):
+            return None
+        try:
+            return float(cost.get("credits_exact", cost.get("credits")))
+        except (TypeError, ValueError):
+            return None
+
     def wait(self, jobs: list[JobRef], timeout: float = MAX_POLL_SECONDS, budget: float = 600.0) -> list[JobOutcome]:
         """Poll jobs_wait (12 jobs and 15 s per call at most) until every job is terminal or the budget is spent."""
         poll = int(min(max(timeout, 1), MAX_POLL_SECONDS))
