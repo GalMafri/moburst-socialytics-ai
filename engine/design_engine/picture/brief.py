@@ -167,12 +167,10 @@ def build(profile: dict, family: dict, slot_zone: dict | None, concept: str, pla
     brand = profile.get("client_name") or None
     check(concept, brand)
     imagery = profile.get("imagery") or {}
-    items = [it for it in imagery.get("items") or [] if isinstance(it, dict) and it.get("description")]
+    # The learned imagery items describe the client's whole posts (quote cards with headshots, flyers, screens showing a match)
+    # and pasted into every prompt they came back as lettered cards and signage. The planner reads them in the brand summary and
+    # writes the concept in that language; the prompt carries the concept, the grounds, the palette and the never list only.
     lines = [concept.strip().rstrip(".") + "."]
-    looks = [f"{it['kind'].replace('_', ' ')}: {it['description'].rstrip('.')}" for it in items
-             if str(it.get("kind", "")).lower() not in PICTURELESS_KINDS and is_clean(it["kind"].replace("_", " "), brand) and is_clean(it["description"], brand)]
-    if looks:
-        lines.append("In this brand's own picture language, " + "; ".join(looks) + ".")
     grounds = [g for g in imagery.get("grounds") or [] if is_clean(g, brand)]
     if grounds:
         lines.append("Grounds the brand uses: " + ", ".join(grounds) + ".")
