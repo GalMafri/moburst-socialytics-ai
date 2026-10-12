@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.1"
   }
   public: {
     Tables: {
@@ -1218,6 +1218,7 @@ export type Database = {
           finished_at: string | null
           format: string
           id: string
+          lease_token: string | null
           lease_until: string | null
           pillar: string | null
           plan: Json
@@ -1240,6 +1241,7 @@ export type Database = {
           finished_at?: string | null
           format?: string
           id?: string
+          lease_token?: string | null
           lease_until?: string | null
           pillar?: string | null
           plan?: Json
@@ -1262,6 +1264,7 @@ export type Database = {
           finished_at?: string | null
           format?: string
           id?: string
+          lease_token?: string | null
           lease_until?: string | null
           pillar?: string | null
           plan?: Json
@@ -2331,8 +2334,20 @@ export type Database = {
         }
       }
       design_runs_extend: {
-        Args: { p_lease_seconds?: number; p_run_id: string }
-        Returns: undefined
+        Args: { p_lease_seconds?: number; p_run_id: string; p_token: string }
+        Returns: boolean
+      }
+      design_runs_finish: {
+        Args: {
+          p_failure: string
+          p_plan: Json
+          p_run_id: string
+          p_sizes: Json
+          p_spent: Json
+          p_status: string
+          p_token: string
+        }
+        Returns: boolean
       }
       design_runs_lease: {
         Args: { p_lease_seconds?: number }
@@ -2347,6 +2362,7 @@ export type Database = {
           finished_at: string | null
           format: string
           id: string
+          lease_token: string | null
           lease_until: string | null
           pillar: string | null
           plan: Json
