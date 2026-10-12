@@ -145,7 +145,7 @@ def _norm(text: str) -> str:
     return s[:1].lower() + s[1:]
 
 
-COPY_SIMILARITY_MIN = 0.92  # OCR misreads a glyph or two on small type ("negotiation" as "pogotgation"); a dropped word still fails
+COPY_SIMILARITY_MIN = 0.88  # OCR misreads a glyph or two on small type ("negotiation" as "pogotgation", 0.90 on a 39-char line); a dropped word still fails on the word count
 
 
 def _copy_matches(lines: list[Line], expected: str) -> tuple[bool, str]:
