@@ -225,6 +225,11 @@ def run_post(ctx: RunContext, model: str | None = None, model_client: Any = None
             log.write(json.dumps({"turn": turns, "t": round(time.time() - started, 1), "stop_reason": message.stop_reason, "usd": usd,
                                   "content": [_block_record(b) for b in message.content], "tool_events_before": tool_events}, default=str) + "\n")
             log.flush()
+            if ctx.on_progress is not None:
+                try:
+                    ctx.on_progress(ctx.progress(turns))
+                except Exception as e:  # noqa: BLE001  progress is a courtesy; the run goes on
+                    ctx.spent["warnings"].append(f"progress report failed on turn {turns}: {e}")
             if ctx.done:
                 ended = "submitted"
                 break

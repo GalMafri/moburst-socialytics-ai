@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
 import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
 import { CalendarKanban, findLatestSelectedIteration } from "./CalendarKanban";
+import { DesignRunsProvider } from "./DesignRunsContext";
 import { PostPanel } from "./PostPanel";
 import { WeeklyHighlights } from "./WeeklyHighlights";
 import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
@@ -176,6 +177,7 @@ export function ContentIdeasTab({
     : [];
 
   return (
+    <DesignRunsProvider clientId={clientId} reportId={reportId}>
     <GenerationProvider
       onOpenPanel={(post, opts) => {
         setActivePost(post);
@@ -296,5 +298,6 @@ export function ContentIdeasTab({
         <GenerationProgress />
       </div>
     </GenerationProvider>
+    </DesignRunsProvider>
   );
 }

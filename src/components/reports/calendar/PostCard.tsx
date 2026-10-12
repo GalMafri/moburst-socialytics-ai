@@ -4,6 +4,7 @@ import { PlatformBadge } from "@/lib/platform-config";
 import { Clock, ImagePlus, Loader2, Sparkles, Video as VideoIcon } from "lucide-react";
 import { PostStatusChip, type PostStatus } from "./PostStatusChip";
 import { useGenerationForPost } from "./GenerationContext";
+import { stageLabel, useDesignRunForPost } from "./DesignRunsContext";
 import { postCopyOf } from "@/lib/postCopy";
 
 interface Iteration {
@@ -23,6 +24,7 @@ interface Props {
     copy?: string;
     caption_angle?: string;
     pillar?: string;
+    _calendarPostKey?: string;
   };
   iteration: Iteration | null;
   status: PostStatus;
@@ -31,6 +33,9 @@ interface Props {
 }
 
 export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: Props) {
+  const designRun = useDesignRunForPost(post._calendarPostKey);
+  const designing = !!designRun && (designRun.status === "queued" || designRun.status === "running");
+  const designsReady = !!designRun && (designRun.status === "offered" || designRun.status === "picked") && designRun.offered > 0;
   const copy = postCopyOf(post);
   const thumb = iteration?.media_urls?.[0] || null;
   const isVideo = !!thumb && /\.(mp4|webm|mov)/.test(thumb);
@@ -81,8 +86,10 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-[rgba(255,255,255,0.04)] border border-dashed border-white/10 group-hover:border-primary/40 transition-colors">
             <div className="flex items-center gap-2 text-muted-foreground">
-              <ImagePlus className="h-4 w-4" />
-              <span className="t-label">No design yet</span>
+              {designing ? <Loader2 className="h-4 w-4 animate-spin text-[#b9e045]" /> : designsReady ? <Sparkles className="h-4 w-4 text-[#b9e045]" /> : <ImagePlus className="h-4 w-4" />}
+              <span className="t-label">
+                {designing ? `Designing · ${stageLabel(designRun!)}` : designsReady ? `${designRun!.offered} design${designRun!.offered === 1 ? "" : "s"} ready` : designRun?.status === "failed" || designRun?.status === "dropped" ? "No design met the checks" : "No design yet"}
+              </span>
             </div>
           </div>
         )}
