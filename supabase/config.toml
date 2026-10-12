@@ -205,3 +205,6 @@ verify_jwt = false
 
 [functions.design-pick]
 verify_jwt = false
+
+[functions.design-store]
+verify_jwt = false

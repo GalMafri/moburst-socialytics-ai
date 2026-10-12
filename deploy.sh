@@ -69,3 +69,29 @@ fi
 
 echo "==> done"
 forever list
+
+echo "==> design worker"
+# The design engine's worker (engine/scripts/worker.py) runs beside the app under forever when the box carries its
+# environment file at engine/.env (ANTHROPIC_API_KEY, SOCIALYTICS_STORE_URL, SOCIALYTICS_PROBE_URL, SOCIALYTICS_ACT_AS_USER).
+# Without that file nothing starts and the app is unaffected.
+if [ -f engine/.env ]; then
+  if ! command -v uv >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || true
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+  if command -v uv >/dev/null 2>&1; then
+    (cd engine && uv sync --frozen >/dev/null 2>&1 || uv sync >/dev/null 2>&1) || echo "design worker: uv sync failed"
+    (cd engine && uv run python -m playwright install chromium >/dev/null 2>&1) || echo "design worker: chromium install failed"
+    (cd engine/video && npm ci --no-audit --no-fund >/dev/null 2>&1) || echo "design worker: video deps failed"
+    worker_running="$(forever list 2>/dev/null || true)"
+    if echo "$worker_running" | grep -q "design-worker"; then
+      forever restart design-worker
+    else
+      (cd engine && forever start --uid design-worker -c "uv run python scripts/worker.py" .)
+    fi
+  else
+    echo "design worker: uv unavailable, worker not started"
+  fi
+else
+  echo "design worker: engine/.env absent on this host, worker not started"
+fi

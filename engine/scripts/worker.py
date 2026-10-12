@@ -17,11 +17,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from dotenv import load_dotenv
+
 from design_engine.compose.render import chromium
 from design_engine.config import settings
 from design_engine.picture.higgsfield import PROBE_URL_ENV, Client, ProbeClient
 from design_engine.worker.main import POLL_SECONDS, serve
-from design_engine.worker.store import SupabaseStore
+from design_engine.worker.store import BridgeStore, SupabaseStore
 
 
 def main() -> None:
@@ -30,6 +32,7 @@ def main() -> None:
     ap.add_argument("--poll", type=float, default=POLL_SECONDS)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
     cfg = settings()
     if not cfg.anthropic_api_key:
         raise SystemExit("ANTHROPIC_API_KEY is not set")
@@ -37,7 +40,8 @@ def main() -> None:
 
     higgsfield = ProbeClient.from_env() if os.environ.get(PROBE_URL_ENV) else Client.from_env()
     clients = {"anthropic": anthropic.Anthropic(api_key=cfg.anthropic_api_key), "higgsfield": higgsfield}
-    store = SupabaseStore.from_env()
+    # the project's own door when the host holds no Supabase key (the store function, directly or through the n8n bridge)
+    store = BridgeStore.from_env() if os.environ.get("SOCIALYTICS_STORE_URL") else SupabaseStore.from_env()
     n = serve(store, chromium, clients, once=args.once, poll=args.poll)
     print(f"processed {n} run(s)")
 

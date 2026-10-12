@@ -159,4 +159,73 @@ class FakeStore:
         self.options.extend(json.loads(json.dumps(rows, default=str)))
 
 
-__all__ = ["BUCKET", "FakeStore", "Run", "StoreError", "SupabaseStore"]
+__all__ = ["BUCKET", "BridgeStore", "FakeStore", "Run", "StoreError", "SupabaseStore"]
+
+
+class BridgeStore:
+    """The same surface as SupabaseStore, through the project's own `design-store` edge function (reached directly with the server
+    secret, or through the n8n bridge that holds it). The worker then needs no Supabase key at all."""
+
+    def __init__(self, url: str, act_as: str, secret: str = "", timeout: float = 120.0):
+        if not url or not act_as:
+            raise StoreError("SOCIALYTICS_STORE_URL and SOCIALYTICS_ACT_AS_USER are required")
+        self.url, self.act_as, self.secret, self.timeout = url, act_as, secret, timeout
+        self.bridged = "n8n" in url
+
+    @classmethod
+    def from_env(cls) -> BridgeStore:
+        return cls(os.environ.get("SOCIALYTICS_STORE_URL", ""), os.environ.get("SOCIALYTICS_ACT_AS_USER", ""), os.environ.get("SOCIALYTICS_SERVER_SECRET", ""))
+
+    def _call(self, op: str, **args: Any) -> dict:
+        import httpx
+
+        headers = {"Content-Type": "application/json"}
+        if not self.bridged:
+            headers.update({"x-socialytics-secret": self.secret, "x-socialytics-user": self.act_as})
+        resp = httpx.post(self.url, json={"op": op, "args": args, "act_as": self.act_as}, headers=headers, timeout=self.timeout)
+        if resp.status_code >= 300:
+            raise StoreError(f"design-store {op} -> {resp.status_code}: {resp.text[:300]}")
+        body = resp.json()
+        if isinstance(body, dict) and body.get("error"):
+            raise StoreError(f"design-store {op}: {body['error']}")
+        if isinstance(body, dict) and isinstance(body.get("status"), int) and body["status"] >= 300:
+            raise StoreError(f"design-store {op} -> {body['status']}: {str(body)[:300]}")
+        return body
+
+    def lease(self, seconds: int = 900) -> Run | None:
+        row = self._call("lease", seconds=seconds).get("run")
+        return Run.from_row(row) if row else None
+
+    def heartbeat(self, run_id: str, seconds: int = 900, plan: dict | None = None) -> None:
+        self._call("extend", run_id=run_id, seconds=seconds, plan=plan)
+
+    def finish(self, run_id: str, status: str, spent: dict, sizes: list[dict], failure: str | None = None, plan: dict | None = None) -> None:
+        self._call("finish", run_id=run_id, status=status, spent=spent, sizes=sizes, failure=failure, plan=plan)
+
+    def confirmed_profile(self, client_id: str) -> dict | None:
+        row = self._call("profile", client_id=client_id).get("profile")
+        if not row:
+            return None
+        profile = dict(row.get("profile") or {})
+        profile.setdefault("calibration", row.get("calibration") or {})
+        profile.setdefault("families", row.get("families") or [])
+        return profile
+
+    def rules(self, client_id: str) -> list[str]:
+        return [str(t) for t in self._call("rules", client_id=client_id).get("rules") or []]
+
+    def prior_runs(self, client_id: str, limit: int = 3) -> list[dict]:
+        rows = self._call("prior", client_id=client_id, limit=limit).get("prior") or []
+        return [{"run_id": r["run_id"], "option_id": r["option_key"], "family_key": r.get("family_key"),
+                 "picture_concept": (r.get("measurements") or {}).get("picture_concept"), "signature": (r.get("measurements") or {}).get("signature"),
+                 "files": [f.get("url") for f in (r.get("files") or {}).values() if f.get("url")]} for r in rows]
+
+    def upload(self, client_id: str, run_id: str, path: Path, name: str) -> str:
+        import base64
+
+        data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+        return str(self._call("upload", client_id=client_id, run_id=run_id, name=name, base64=data, content_type=mimetypes.guess_type(str(path))[0] or "image/png")["url"])
+
+    def write_options(self, rows: list[dict]) -> None:
+        if rows:
+            self._call("write_options", rows=json.loads(json.dumps(rows, default=str)))
