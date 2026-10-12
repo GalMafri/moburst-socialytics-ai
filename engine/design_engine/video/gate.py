@@ -23,7 +23,9 @@ def check_frame(png: Path, spec: dict, size: Size, second: float, logo_path: Pat
     """Failures on one sampled frame, named with their numbers."""
     fails: list[str] = []
     arr = load_rgb(png)
-    logo_box = _px(spec["logo"]["box"], size)
+    cards_end = sum(float(c["seconds"]) for c in spec["cards"])
+    end_card = spec.get("endCard") or None
+    logo_box = _px(end_card["logoBox"], size) if end_card and second >= cards_end else _px(spec["logo"]["box"], size)
     region = crop(arr, logo_box)
     if region is None:
         fails.append("logo box lies outside the frame")

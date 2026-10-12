@@ -21,4 +21,5 @@ def test_spec_uses_measured_geometry_and_the_logo_floor(tmp_path):
     assert spec["logo"]["box"]["h"] * 1920 >= 0.05 * 1080 * 1.15 - 0.5  # raised to the client's floor (tall frame factor), in frame height
     assert spec["cards"][0]["headlinePx"] == round(0.08 * 1080, 1) and spec["cards"][0]["align"] == "center"  # the brand size, as statics typeset it
     assert spec["captionStyle"]["bottomInset"] == 380
-    assert abs(duration_seconds(spec) - sum(c["seconds"] for c in spec["cards"])) < 0.01
+    assert abs(duration_seconds(spec) - sum(c["seconds"] for c in spec["cards"]) - spec["endCard"]["seconds"]) < 0.01
+    assert abs(spec["endCard"]["logoBox"]["x"] + spec["endCard"]["logoBox"]["w"] / 2 - 0.5) < 0.01  # the closing mark is centred

@@ -152,9 +152,94 @@ def card_assets(profile: dict, ws: Path) -> tuple[dict, list[dict]]:
 
 
 FALLBACK_KEY = "T"  # the brand text cards, offered when no composed option passes
+PLATE_CREDITS_MAX = 20.0  # a video's or the brand cards' plate may cost this much; past it the cards sit on the flat brand ground
+PLATE_CONCEPT_MODEL = "claude-sonnet-5-5"
+PLATE_CONCEPT_FALLBACK = "a softly lit atmospheric ground with gentle depth and a calm, quiet surface"
 
 
-def fallback_rows(store: Any, run: Run, ctx: RunContext, profile: dict, ws: Path) -> tuple[list[dict], str | None]:
+def plate_concept(copy: str, client_name: str, model_client: Any) -> str:
+    """One designer's sentence: the supporting visual idea for a plate under this post's copy (no positions, no lettering, no marks)."""
+    from ..picture import brief as brief_mod
+
+    if model_client is None:
+        return PLATE_CONCEPT_FALLBACK
+    try:
+        msg = model_client.messages.create(
+            model=PLATE_CONCEPT_MODEL, max_tokens=120,
+            messages=[{"role": "user", "content": (
+                "You are an art director. In one sentence (at most 28 words) name the supporting visual idea for the background plate "
+                "of a social post: an object, scene, texture or atmosphere tied to this message, rendered with depth, no people's faces. "
+                "Never mention a logo, text, lettering, numbers, signage or the brand name; never say where things go.\n\n"
+                f"Post copy:\n{copy[:1200]}")}])
+        text = " ".join(getattr(b, "text", "") for b in msg.content).strip().split("\n")[0].strip().strip('"')
+        brief_mod.check(text, client_name or None)
+        return text or PLATE_CONCEPT_FALLBACK
+    except Exception as e:  # noqa: BLE001  the plate is still made, on the atmospheric idea
+        log.warning("plate concept fell back: %s", e)
+        return PLATE_CONCEPT_FALLBACK
+
+
+def make_plate(profile: dict, ws: Path, run: Run, size: Any, clients: dict, out_dir: Path, spent: dict) -> Path | None:
+    """One whole-frame plate in the client's look for the video and the brand cards: the client's posts (this platform's first) as look
+    references, the card column declared calm, judged under the column the way the frame gate will read it. None when it cannot be made
+    or afforded; the cards then sit on the flat brand ground."""
+    from ..compose.place import BUSY_MAX
+    from ..compose.template import frame_boxes
+    from ..measure.contrast import busy_ground
+    from ..measure.image import crop, load_rgb
+    from ..picture import brief as brief_mod
+    from ..picture import make_picture
+    from ..picture import zone as zone_mod
+    from ..run.tools import _FramedClient
+    from ..video.make import choose_family
+
+    client = clients.get("higgsfield")
+    fam = choose_family(profile)
+    if client is None or fam is None:
+        return None
+    boxes = frame_boxes(dict(fam), size, "p50")
+    head = boxes.get("headline") or (0.1 * size.w, 0.35 * size.h, 0.8 * size.w, 0.3 * size.h)
+    zone = {"x": 0.06, "y": max(0.0, float(head[1]) / size.h - 0.05), "w": 0.88, "h": min(1.0, float(head[3]) / size.h + 0.1 + 0.25)}
+    logo = boxes.get("logo")
+    logo_zone = {"x": logo[0] / size.w, "y": logo[1] / size.h, "w": logo[2] / size.w, "h": logo[3] / size.h} if logo else None
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    from learn_client import load_reads  # noqa: E402
+
+    try:
+        reads = load_reads(ws / "out" / "reads.json")
+    except Exception:  # noqa: BLE001
+        reads = []
+    plat = (run.platform or "").upper()
+    designed = [r for r in reads if getattr(r, "designed", True) and getattr(r, "path", None) and Path(str(r.path)).exists()]
+    refs = [Path(str(r.path)) for r in designed if str(getattr(r, "platform", "")).upper() == plat][:4]
+    refs += [Path(str(r.path)) for r in designed if Path(str(r.path)) not in refs][: max(0, 4 - len(refs))]
+    concept = plate_concept(run.copy, str(profile.get("client_name") or ""), clients.get("anthropic"))
+    brief = brief_mod.build_plate(profile, dict(fam), zone, concept, run.platform, refs, picture_aspect=size.w / size.h, logo_zone=logo_zone)
+    if hasattr(client, "upload"):
+        brief.reference_media_ids = [m for m in (client.upload(p) for p in brief.reference_paths) if m]
+    framed = _FramedClient(client, size.w, size.h)
+    zone_px = [zone["x"] * size.w, zone["y"] * size.h, zone["w"] * size.w, zone["h"] * size.h]
+
+    def reader(path: Path):
+        read = zone_mod.read(path, zone_px, zone_mod.DEFAULT_FLOOR)
+        region = crop(load_rgb(path), zone_px)
+        busy = float(busy_ground(region)) if region is not None and region.size else 0.0
+        if busy > BUSY_MAX:
+            read.ok = False
+            read.reason = f"busy under the copy ({busy:.2f} above {BUSY_MAX:.2f})"
+        return read
+
+    est = client.cost(brief.model, {**brief.params, "prompt": brief.text}) if hasattr(client, "cost") else None
+    if est is not None and est * 2 > PLATE_CREDITS_MAX:
+        log.warning("plate skipped: %s credits a generation is over the plate budget", est)
+        return None
+    result = make_picture(framed, brief, out_dir / "plate", reader)
+    spent["credits"] = float(spent.get("credits", 0.0)) + float(result.credits or 0.0)
+    spent["plate"] = {"status": result.status, "credits": result.credits, "concept": concept, "jobs": result.job_ids}
+    return result.path if result.status == "ok" and result.path else None
+
+
+def fallback_rows(store: Any, run: Run, ctx: RunContext, profile: dict, ws: Path, clients: dict | None = None) -> tuple[list[dict], str | None]:
     """The guaranteed deliverable: the brand's text cards (the video's own composition and frame gate) as stills at every size of the
     run. A static run offers the first card as option T; a carousel offers every card as the slides of T. Returns (rows, failure)."""
     from ..video.make import make_card_stills
@@ -163,7 +248,10 @@ def fallback_rows(store: Any, run: Run, ctx: RunContext, profile: dict, ws: Path
     out_dir = ctx.run_dir / "fallback"
     per_size: dict[str, list] = {}
     for size in ctx.size_list:
-        stills, fail = make_card_stills(profile, run.copy, size, fonts, logo_files, out_dir / size.name, only_first=not ctx.is_carousel)
+        plate = make_plate(profile, ws, run, size, clients or {}, out_dir / size.name, ctx.spent) if clients else None
+        stills, fail = make_card_stills(profile, run.copy, size, fonts, logo_files, out_dir / size.name, only_first=not ctx.is_carousel, plate=plate)
+        if plate is not None and (fail or not stills or any(not st.passed for st in stills)):  # the plate failed under the copy: flat ground
+            stills, fail = make_card_stills(profile, run.copy, size, fonts, logo_files, out_dir / size.name / "flat", only_first=not ctx.is_carousel)
         if fail or not stills:
             return [], fail or "no card could be rendered"
         per_size[size.name] = stills
@@ -195,7 +283,7 @@ def fallback_rows(store: Any, run: Run, ctx: RunContext, profile: dict, ws: Path
     return rows, None
 
 
-def process_video(store: Any, run: Run, profile: dict, ws: Path) -> dict:
+def process_video(store: Any, run: Run, profile: dict, ws: Path, clients: dict | None = None) -> dict:
     """A video run: text cards from the post copy in the brand, rendered and gated; one option row with the mp4 and a poster."""
     from ..video.make import make_video
 
@@ -204,20 +292,26 @@ def process_video(store: Any, run: Run, profile: dict, ws: Path) -> dict:
     fonts, logo_files = card_assets(profile, ws)
     out_dir = ws / "video" / f"{time.strftime('%Y%m%d-%H%M%S')}-{run.id[:8]}"
     store.heartbeat(run.id, LEASE_SECONDS, plan={"stage": "pictures", "turn": 1, "options": 1, "pictures": 0, "composed": 0, "passed": 0, "sizes": [size.name]})
-    res = make_video(profile, run.copy, size, fonts, logo_files, out_dir)
+    spent: dict = {"usd": 0.0, "credits": 0.0}
+    plate = make_plate(profile, ws, run, size, clients or {}, out_dir, spent) if clients else None
+    store.heartbeat(run.id, LEASE_SECONDS, plan={"stage": "checking", "turn": 2, "options": 1, "pictures": 1 if plate else 0, "composed": 0, "passed": 0, "sizes": [size.name]})
+    res = make_video(profile, run.copy, size, fonts, logo_files, out_dir, plate=plate)
+    if plate is not None and (res.status != "ok" or not res.mp4):  # the plate failed under the cards: the flat brand ground
+        spent["plate_rejected"] = res.failure
+        res = make_video(profile, run.copy, size, fonts, logo_files, out_dir / "flat")
     sizes = [{"name": size.name, "w": size.w, "h": size.h}]
     if res.status != "ok" or not res.mp4:
-        return {"status": "dropped", "spent": {"usd": 0.0, "credits": 0.0}, "sizes": sizes, "failure": res.failure or "the video did not pass the checks",
+        return {"status": "dropped", "spent": spent, "sizes": sizes, "failure": res.failure or "the video did not pass the checks",
                 "plan": {"stage": "finished", "offered": [], "dropped": [{"id": "V", "reason": res.failure}], "run_dir": str(out_dir)}}
-    store.heartbeat(run.id, LEASE_SECONDS, plan={"stage": "checking", "turn": 2, "options": 1, "pictures": 1, "composed": 1, "passed": 1, "sizes": [size.name]})
+    store.heartbeat(run.id, LEASE_SECONDS, plan={"stage": "checking", "turn": 3, "options": 1, "pictures": 1 if plate else 0, "composed": 1, "passed": 1, "sizes": [size.name]})
     mp4_url = store.upload(run.client_id, run.id, res.mp4, f"V-{size.name}.mp4")
     poster_url = store.upload(run.client_id, run.id, res.poster, f"V-{size.name}-poster.jpg") if res.poster else None
     files = {size.name: {"url": mp4_url, "path": f"designs/{run.client_id}/{run.id}/V-{size.name}.mp4", "w": size.w, "h": size.h, "passed": True,
                          "video": True, "seconds": res.seconds, "poster": poster_url}}
     store.write_options([{"run_id": run.id, "client_id": run.client_id, "option_key": "V", "rank": 1, "kind": "video", "family_key": res.family_key,
-                          "arrangement": "cards", "files": files, "picture_jobs": [], "measurements": {"video": res.gate, "seconds": res.seconds},
+                          "arrangement": "cards", "files": files, "picture_jobs": [], "measurements": {"video": res.gate, "seconds": res.seconds, "plate": bool(plate)},
                           "status": "offered"}])
-    return {"status": "offered", "spent": {"usd": 0.0, "credits": 0.0}, "sizes": sizes, "failure": None,
+    return {"status": "offered", "spent": spent, "sizes": sizes, "failure": None,
             "plan": {"stage": "finished", "offered": ["V"], "dropped": [], "run_dir": str(out_dir)}}
 
 
@@ -230,7 +324,7 @@ def process(store: Any, run: Run, browser: Any, clients: dict) -> dict:
         ws = workspace_for(run, profile)
         if is_video_format(run.format):
             with keepalive(store, run.id):
-                payload = process_video(store, run, profile, ws)
+                payload = process_video(store, run, profile, ws, clients)
             store.finish(run.id, payload["status"], payload["spent"], payload["sizes"], payload["failure"], payload["plan"])
             return payload
         ctx = build_context(run, profile, store.rules(run.client_id), store.prior_runs(run.client_id), ws, browser, clients)
@@ -261,7 +355,7 @@ def process(store: Any, run: Run, browser: Any, clients: dict) -> dict:
         note = None
         if not rows:  # nothing composed passed: the brand's own text cards are offered, through the video's renderer and frame gate
             store.heartbeat(run.id, LEASE_SECONDS, plan={**ctx.progress(ctx.spent.get("turns", 0)), "stage": "checking"})
-            rows, fb_failure = fallback_rows(store, run, ctx, profile, ws)
+            rows, fb_failure = fallback_rows(store, run, ctx, profile, ws, clients)
             if rows:
                 offered = [FALLBACK_KEY]
                 note = f"composed options dropped ({reasons}); the brand cards were offered"

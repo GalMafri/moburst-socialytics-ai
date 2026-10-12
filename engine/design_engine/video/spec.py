@@ -24,8 +24,13 @@ def card_seconds(text: str) -> float:
     return round(min(CARD_MAX_S, max(CARD_MIN_S, words / READ_WPS + 0.8)), 2)
 
 
+END_CARD_S = 2.0  # the closing card: the brand's mark alone on its ground
+END_LOGO_W = 0.5  # the mark's width on the closing card as a share of the frame width
+
+
 def build_spec(profile: Mapping, family: Mapping, size: Size, cards: Sequence[Mapping], fonts: Mapping[str, Path], logo_path: Path,
-               pair: Mapping, broll: Path | None = None, captions: Sequence[Mapping] | None = None) -> dict:
+               pair: Mapping, broll: Path | None = None, captions: Sequence[Mapping] | None = None, plate: Path | None = None,
+               end_card: bool = True) -> dict:
     """cards: [{headline, subline?}]. The headline block takes the family's headline slot at this size; the logo its slot, never
     below the client's floor; captions sit above the platform's bottom safe inset."""
     boxes = frame_boxes(dict(family), size, "p50")
@@ -67,6 +72,8 @@ def build_spec(profile: Mapping, family: Mapping, size: Size, cards: Sequence[Ma
         "fonts": {"headline": str(fonts["headline"]), "subline": str(fonts.get("subline") or fonts["headline"])},
         "logo": {"path": str(logo_path), "box": {"x": lx / size.w, "y": ly / size.h, "w": lw / size.w, "h": lh / size.h}},
         "broll": {"path": str(broll), "darken": 0.45} if broll else None,
+        "plate": {"path": str(plate), "darken": 0.0} if plate else None,
+        "endCard": None,
         "cards": [],
         "captions": [dict(c) for c in (captions or [])],
         "captionStyle": {"ink": pair["ink_hex"], "ground": "rgba(0,0,0,0.6)", "px": round(max(float(size.min_text_px), s_px / 1.25)),
@@ -82,6 +89,11 @@ def build_spec(profile: Mapping, family: Mapping, size: Size, cards: Sequence[Ma
                               "ink": pair["ink_hex"], "ground": pair["ground_hex"],
                               "slot": {"x": col_x / size.w, "y": y / size.h, "w": col_w / size.w, "h": block_h / size.h},
                               "headlinePx": round(head_px, 1), "sublinePx": round(sub_px, 1), "align": align})
+    if end_card:
+        ew = END_LOGO_W * size.w
+        eh = ew / aspect if aspect else ew * 0.3
+        spec["endCard"] = {"seconds": END_CARD_S, "ground": pair["ground_hex"],
+                           "logoBox": {"x": (size.w - ew) / 2 / size.w, "y": (size.h - eh) / 2 / size.h, "w": ew / size.w, "h": eh / size.h}}
     return spec
 
 
@@ -93,7 +105,8 @@ def write_spec(spec: Mapping, path: Path) -> Path:
 
 
 def duration_seconds(spec: Mapping) -> float:
-    return round(sum(float(c["seconds"]) for c in spec.get("cards", [])), 2)
+    end = float((spec.get("endCard") or {}).get("seconds") or 0.0)
+    return round(sum(float(c["seconds"]) for c in spec.get("cards", [])) + end, 2)
 
 
 __all__ = ["CARD_MAX_S", "CARD_MIN_S", "FPS", "READ_WPS", "build_spec", "card_seconds", "duration_seconds", "write_spec"]

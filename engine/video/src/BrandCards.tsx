@@ -32,18 +32,49 @@ const CardView: React.FC<{ card: Card; spec: VideoSpec; frames: number }> = ({ c
   );
 };
 
+const EndCard: React.FC<{ spec: VideoSpec; frames: number }> = ({ spec, frames }) => {
+  const frame = useCurrentFrame();
+  const inF = Math.min(12, Math.max(1, Math.floor(frames / 4)));
+  const opacity = interpolate(frame, [0, inF], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const end = spec.endCard!;
+  return (
+    <AbsoluteFill style={{ background: end.ground }}>
+      <Img
+        src={asset(spec.logo.path)}
+        data-slot="logo"
+        style={{ position: "absolute", left: end.logoBox.x * spec.width, top: end.logoBox.y * spec.height, width: end.logoBox.w * spec.width,
+                 height: end.logoBox.h * spec.height, objectFit: "contain", objectPosition: "center", opacity }}
+      />
+    </AbsoluteFill>
+  );
+};
+
+
 export const BrandCards: React.FC<{ spec: VideoSpec }> = ({ spec }) => {
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
   const frame = useCurrentFrame();
   let start = 0;
   const ground = spec.cards[0]?.ground || "#000";
   const second = frame / fps;
   const caption = (spec.captions || []).find((c) => second >= c.start && second < c.end);
   const cs = spec.captionStyle || { ink: "#ffffff", ground: "rgba(0,0,0,0.6)", px: 44, bottomInset: 480 };
+  const cardFrames = spec.cards.reduce((n, c) => n + Math.round(c.seconds * fps), 0);
+  const endFrames = spec.endCard ? Math.round(spec.endCard.seconds * fps) : 0;
+  const onEndCard = !!spec.endCard && frame >= cardFrames;
+  // the plate moves slowly the whole way (a push of 6% plus a drift), the way a designer animates a still
+  const plateScale = interpolate(frame, [0, Math.max(1, durationInFrames)], [1.0, 1.06], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const plateShift = interpolate(frame, [0, Math.max(1, durationInFrames)], [0, -0.015 * spec.width], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const hasGround = !!spec.broll?.path || !!spec.plate?.path;
   return (
     <AbsoluteFill style={{ background: ground }}>
       <style>{[face("Brand-headline", spec.fonts.headline), face("Brand-subline", spec.fonts.subline)].join("\n")}</style>
-      {spec.broll?.path ? (
+      {spec.plate?.path && !onEndCard ? (
+        <AbsoluteFill>
+          <Img src={asset(spec.plate.path)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${plateScale}) translateX(${plateShift}px)` }} />
+          {spec.plate.darken ? <AbsoluteFill style={{ background: `rgba(0,0,0,${spec.plate.darken})` }} /> : null}
+        </AbsoluteFill>
+      ) : null}
+      {spec.broll?.path && !onEndCard ? (
         <AbsoluteFill>
           <OffthreadVideo src={asset(spec.broll.path)} style={{ width: "100%", height: "100%", objectFit: "cover" }} muted />
           <AbsoluteFill style={{ background: `rgba(0,0,0,${spec.broll.darken ?? 0.45})` }} />
@@ -55,12 +86,17 @@ export const BrandCards: React.FC<{ spec: VideoSpec }> = ({ spec }) => {
         start += frames;
         return (
           <Sequence key={i} from={from} durationInFrames={frames}>
-            {!spec.broll?.path ? <AbsoluteFill style={{ background: card.ground }} /> : null}
+            {!hasGround ? <AbsoluteFill style={{ background: card.ground }} /> : null}
             <CardView card={card} spec={spec} frames={frames} />
           </Sequence>
         );
       })}
-      {spec.logo.path ? (
+      {spec.endCard && spec.logo.path ? (
+        <Sequence from={cardFrames} durationInFrames={Math.max(1, endFrames)}>
+          <EndCard spec={spec} frames={endFrames} />
+        </Sequence>
+      ) : null}
+      {spec.logo.path && !onEndCard ? (
         <Img
           src={asset(spec.logo.path)}
           data-slot="logo"
