@@ -22,7 +22,7 @@ from .store import FakeStore, Run, StoreError, SupabaseStore
 
 log = logging.getLogger("design_worker")
 POLL_SECONDS = 15
-LEASE_SECONDS = 900
+LEASE_SECONDS = 300  # a run heartbeats every model turn; an abandoned one is picked up again within five minutes
 
 
 def slugify(name: str) -> str:
