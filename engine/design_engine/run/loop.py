@@ -60,6 +60,10 @@ slide 1 on a cover family, the last on a closing family when the client has one,
 each slide's lines are the post copy's own words in the copy's order (split the copy over the slides); a slide on a family without a
 picture takes picture_brief null; one picture per slide. picture, compose, measure and submit take the carousel's own id.
 
+Do not end your turn while an option can still be fixed inside the budget: a size that fails on the picture gets a calmer brief
+(re-plan the same id, then picture); copy that does not fit gets shorter lines; a family that cannot hold the copy gets another
+family. End only after submit, or when every option is dropped, or when the tools say the budget is spent.
+
 Keep your text short: a sentence per turn at most. Do not describe a result as passed unless a tool said so."""
 
 _SCHEMAS: dict[str, dict] = {

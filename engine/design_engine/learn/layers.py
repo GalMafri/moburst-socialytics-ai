@@ -110,7 +110,7 @@ def _accent_boxes(arr: np.ndarray, exclude: list[Box]) -> list[Box]:
     return out
 
 
-PILL_MIN_AREA, PILL_MAX_AREA, PILL_MIN_ASPECT = 0.004, 0.08, 1.5
+PILL_MIN_AREA, PILL_MAX_AREA, PILL_MIN_ASPECT, PILL_MIN_BRIGHT = 0.004, 0.08, 1.5, 100
 
 
 def pill_boxes(arr: np.ndarray, lines: list, exclude: list[Box] | None = None) -> list[dict]:
@@ -132,6 +132,9 @@ def pill_boxes(arr: np.ndarray, lines: list, exclude: list[Box] | None = None) -
         area = box[2] * box[3] / (W * H)
         touches = box[0] <= cell or box[1] <= cell or box[0] + box[2] >= W - cell or box[1] + box[3] >= H - cell
         if touches or area > PILL_MAX_AREA or box[2] / max(1.0, box[3]) < PILL_MIN_ASPECT:
+            continue
+        region0 = arr[int(box[1]):int(box[1] + box[3]), int(box[0]):int(box[0] + box[2])].reshape(-1, 3)
+        if float(np.median(region0, axis=0).max()) < PILL_MIN_BRIGHT:  # a near-black strip or crest box is not a button
             continue
         inside = [ln for ln in lines if getattr(ln, "confidence", 1.0) >= 0.5 and _iou(ln.box, box) > 0 and
                   box[0] <= ln.box[0] + ln.box[2] / 2 <= box[0] + box[2] and box[1] <= ln.box[1] + ln.box[3] / 2 <= box[1] + box[3]]

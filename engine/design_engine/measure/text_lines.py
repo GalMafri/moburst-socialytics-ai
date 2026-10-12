@@ -58,6 +58,7 @@ def classify(lines: list[Line], W: int, H: int, exclude_boxes=()) -> TextRead:
             else:
                 break
     other = [line for line in rest if line not in sub] + furniture
-    footer = [line for line in other if line.box[1] >= (1 - FOOTER_BAND) * H and line.box[3] < 0.6 * tallest]
+    # a bottom-edge line is a footer when it is small set type, or furniture of any size (a phone number as tall as the headline)
+    footer = [line for line in other if line.box[1] >= (1 - FOOTER_BAND) * H and (line.box[3] < 0.6 * tallest or line in furniture)]
     other = [line for line in other if line not in footer]
     return TextRead(head, sub, other, union([line.box for line in head]), union([line.box for line in sub]), footer, union([line.box for line in footer]))
