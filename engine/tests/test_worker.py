@@ -44,7 +44,7 @@ def test_fallback_rows_offer_the_brand_cards(tmp_path, monkeypatch):
     """No composed option passed: the brand cards are offered as option T (one card for a static run, every card as slides for a carousel)."""
     from design_engine.worker import main as wm
 
-    def fake_stills(profile, copy, size, fonts, logo_files, out_dir, cards=5, only_first=False):
+    def fake_stills(profile, copy, size, fonts, logo_files, out_dir, cards=5, only_first=False, plate=None):
         out = []
         for i in range(1 if only_first else 3):
             png = Path(out_dir) / f"card-{i + 1}.png"

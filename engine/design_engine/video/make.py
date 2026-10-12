@@ -54,7 +54,7 @@ def choose_family(profile: dict) -> dict | None:
 
 
 def make_video(profile: dict, copy: str, size: Size, fonts: dict, logo_files: list[dict], out_dir: Path, broll: Path | None = None,
-               cards: int = MAX_CARDS) -> VideoResult:
+               cards: int = MAX_CARDS, plate: Path | None = None) -> VideoResult:
     fam = choose_family(profile)
     if fam is None:
         return VideoResult("failed", None, None, 0.0, None, {}, failure="no family with a headline and a logo slot")
@@ -64,7 +64,7 @@ def make_video(profile: dict, copy: str, size: Size, fonts: dict, logo_files: li
     card_list = cards_from_copy(copy, cards)
     if not card_list:
         return VideoResult("failed", None, None, 0.0, fam.get("key"), {}, failure="the post copy has no lines to set")
-    spec = vspec.build_spec(profile, fam, size, card_list, fonts, logo_path, pair, broll=broll)
+    spec = vspec.build_spec(profile, fam, size, card_list, fonts, logo_path, pair, broll=broll, plate=plate)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     spec_path = vspec.write_spec(spec, out_dir / "spec.json")
@@ -96,7 +96,7 @@ class CardStill:
 
 
 def make_card_stills(profile: dict, copy: str, size: Size, fonts: dict, logo_files: list[dict], out_dir: Path, cards: int = MAX_CARDS,
-                     only_first: bool = False) -> tuple[list[CardStill], str | None]:
+                     only_first: bool = False, plate: Path | None = None) -> tuple[list[CardStill], str | None]:
     """The brand text cards as stills: the same composition the video renders, one PNG per card at the middle of its time on screen,
     each judged by the video gate's frame check (logo from the file, contrast, busy ground, safe zone). The guaranteed deliverable
     when no composed option passes: the brand's ground, type and logo, with the post's own lines. Returns (stills, failure)."""
@@ -111,7 +111,7 @@ def make_card_stills(profile: dict, copy: str, size: Size, fonts: dict, logo_fil
         return [], "the post copy has no lines to set"
     if only_first:
         card_list = card_list[:1]
-    spec = vspec.build_spec(profile, fam, size, card_list, fonts, logo_path, pair)
+    spec = vspec.build_spec(profile, fam, size, card_list, fonts, logo_path, pair, plate=plate, end_card=False)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     vspec.write_spec(spec, out_dir / "spec.json")
