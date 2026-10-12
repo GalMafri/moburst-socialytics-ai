@@ -7,7 +7,9 @@ import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from ..compose.place import text_floor_px
 from ..compose.template import frame_boxes
+from ..compose.typeset import LINE_HEIGHT, fit_block
 from ..gate.check import logo_floor_for
 from ..measure.logo import ink_aspect
 from ..platform.specs import Size
@@ -28,10 +30,20 @@ def build_spec(profile: Mapping, family: Mapping, size: Size, cards: Sequence[Ma
     below the client's floor; captions sit above the platform's bottom safe inset."""
     boxes = frame_boxes(dict(family), size, "p50")
     head = boxes.get("headline") or (0.1 * size.w, 0.4 * size.h, 0.8 * size.w, 0.2 * size.h)
-    logo = boxes.get("logo") or (0.06 * size.w, 0.05 * size.h, 0.3 * size.w, 0.05 * size.h)
     grammar = profile.get("grammar") or {}
-    h_px = float((grammar.get("headline_h_share") or {}).get("p50") or 0.07) * size.short_edge
-    s_px = float((grammar.get("subline_h_share") or {}).get("p50") or 0.035) * size.short_edge
+    # the card's column: at least the brand's measured text column (a narrow exemplar line must not wrap a sentence word by word);
+    # the block may grow to the space between the platform's safe insets, centred on the exemplar's block
+    col_w = max(float(head[2]), float((grammar.get("text_column_w") or {}).get("p50") or 0.0) * size.w, 0.6 * size.w)
+    safe = size.safe or {}
+    top_in, bottom_in = float(safe.get("top", 0)), float(safe.get("bottom", 0))
+    max_h = 0.6 * (size.h - top_in - bottom_in)
+    cx = float(head[0]) + float(head[2]) / 2
+    col_x = min(max(0.06 * size.w, cx - col_w / 2), size.w - col_w - 0.06 * size.w)
+    logo = boxes.get("logo") or (0.06 * size.w, 0.05 * size.h, 0.3 * size.w, 0.05 * size.h)
+    h_band = grammar.get("headline_h_share") or {}
+    s_band = grammar.get("subline_h_share") or {}
+    h_px = float(h_band.get("p50") or 0.07) * size.short_edge
+    s_px = float(s_band.get("p50") or 0.035) * size.short_edge
     logo_min_h = logo_floor_for(profile, size.w, size.h) * size.short_edge
     lx, ly, lw, lh = logo
     if lh < logo_min_h:
@@ -40,21 +52,36 @@ def build_spec(profile: Mapping, family: Mapping, size: Size, cards: Sequence[Ma
     aspect = ink_aspect(logo_path) if Path(logo_path).exists() else None
     if aspect:
         lw = lh * aspect
-    safe = size.safe or {}
     align = "center" if (family.get("template") or {}).get("alignment") == "center" else "left"
+    head_font, sub_font = Path(fonts["headline"]), Path(fonts.get("subline") or fonts["headline"])
+
+    def fitted(text: str, font: Path, px: float, band: Mapping, max_lines: int) -> tuple[str, float, float]:
+        """(text with the fitted line breaks, size px, block height px); without a font file on disk the text is left as is."""
+        if not text or not font.exists():
+            return text, px, px * LINE_HEIGHT * max(1, text.count("\n") + 1)
+        floor = min(text_floor_px(band, size), px)
+        fit = fit_block(text, font, px, floor, int(col_w), int(max_h), max_lines)
+        return "\n".join(fit.lines) if fit.lines else text, fit.size_px, fit.block_h
     spec = {
         "width": size.w, "height": size.h, "fps": FPS,
         "fonts": {"headline": str(fonts["headline"]), "subline": str(fonts.get("subline") or fonts["headline"])},
         "logo": {"path": str(logo_path), "box": {"x": lx / size.w, "y": ly / size.h, "w": lw / size.w, "h": lh / size.h}},
         "broll": {"path": str(broll), "darken": 0.45} if broll else None,
-        "cards": [{"headline": str(c["headline"]), "subline": c.get("subline") or None, "seconds": card_seconds(str(c["headline"]) + " " + str(c.get("subline") or "")),
-                   "ink": pair["ink_hex"], "ground": pair["ground_hex"],
-                   "slot": {"x": head[0] / size.w, "y": head[1] / size.h, "w": head[2] / size.w, "h": head[3] / size.h},
-                   "headlinePx": round(h_px / 1.15), "sublinePx": round(s_px / 1.25), "align": align} for c in cards],
+        "cards": [],
         "captions": [dict(c) for c in (captions or [])],
         "captionStyle": {"ink": pair["ink_hex"], "ground": "rgba(0,0,0,0.6)", "px": round(max(float(size.min_text_px), s_px / 1.25)),
                          "bottomInset": int(safe.get("bottom", 0)) + 40},
     }
+    for c in cards:
+        head_text, head_px, head_h = fitted(str(c["headline"]), head_font, h_px, h_band, 6)
+        sub_text, sub_px, sub_h = fitted(str(c.get("subline") or ""), sub_font, s_px, s_band, 4)
+        block_h = head_h + (sub_h + head_px * 0.4 if sub_text else 0.0)
+        y = min(max(top_in, float(head[1]) + float(head[3]) / 2 - block_h / 2), size.h - bottom_in - block_h)
+        spec["cards"].append({"headline": head_text, "subline": sub_text or None,
+                              "seconds": card_seconds(str(c["headline"]) + " " + str(c.get("subline") or "")),
+                              "ink": pair["ink_hex"], "ground": pair["ground_hex"],
+                              "slot": {"x": col_x / size.w, "y": y / size.h, "w": col_w / size.w, "h": block_h / size.h},
+                              "headlinePx": round(head_px, 1), "sublinePx": round(sub_px, 1), "align": align})
     return spec
 
 

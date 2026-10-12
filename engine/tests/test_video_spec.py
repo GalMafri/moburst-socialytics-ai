@@ -19,6 +19,6 @@ def test_spec_uses_measured_geometry_and_the_logo_floor(tmp_path):
                       {"headline": Path("/f/h.ttf"), "subline": Path("/f/s.ttf")}, Path("/l/logo.png"), {"ink_hex": "#ffffff", "ground_hex": "#0e1b2e"})
     assert spec["width"] == 1080 and spec["height"] == 1920 and len(spec["cards"]) == 2
     assert spec["logo"]["box"]["h"] * 1920 >= 0.05 * 1080 * 1.15 - 0.5  # raised to the client's floor (tall frame factor), in frame height
-    assert spec["cards"][0]["headlinePx"] == round(0.08 * 1080 / 1.15) and spec["cards"][0]["align"] == "center"
+    assert spec["cards"][0]["headlinePx"] == round(0.08 * 1080, 1) and spec["cards"][0]["align"] == "center"  # the brand size, as statics typeset it
     assert spec["captionStyle"]["bottomInset"] == 380
     assert abs(duration_seconds(spec) - sum(c["seconds"] for c in spec["cards"])) < 0.01

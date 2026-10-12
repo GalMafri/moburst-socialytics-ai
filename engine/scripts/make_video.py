@@ -26,13 +26,17 @@ from design_engine.video import spec as vspec
 
 
 def cards_from_copy(copy: str, n: int) -> list[dict]:
-    """The copy's own lines, in order, one card each: the first non-empty lines without hashtags."""
+    """The copy's own lines, in order, one card each; a long line becomes one card per sentence. Nothing is cut or rewritten."""
+    import re
+
     lines = [ln.strip() for ln in (copy or "").splitlines() if ln.strip() and not ln.strip().startswith("#") and not ln.lower().startswith("language:")]
-    out = []
+    out: list[dict] = []
     for ln in lines:
-        if len(out) >= n:
-            break
-        out.append({"headline": ln[:90]})
+        parts = [ln] if len(ln) <= 110 else [p.strip() for p in re.split(r"(?<=[.!?:])\s+", ln) if p.strip()]
+        for part in parts:
+            if len(out) >= n:
+                return out
+            out.append({"headline": part})
     return out
 
 

@@ -21,7 +21,7 @@ from .render import render_html
 from .template import ComposeSpec, build_html
 from .typeset import LINE_HEIGHT, Fit, fit_block
 
-LOGO_FLOOR_MARGIN = 1.04  # the logo is drawn a little above the client's floor so a one-pixel rounding never fails the gate
+LOGO_FLOOR_MARGIN = 1.10  # the logo is drawn a tenth above the client's floor (still under its median): a lockup at the floor on a landscape frame blurs to the match floor
 TEXT_ROLES = ("headline", "subline", "footer")
 DEFAULT_MAX_LINES = {"headline": 3, "subline": 2, "footer": 1}
 GROUND_TAGS = ("dark", "light")

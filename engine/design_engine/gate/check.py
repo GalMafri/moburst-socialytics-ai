@@ -137,7 +137,7 @@ def _lines_in(lines: list[Line], box: Box) -> list[Line]:
     return inside
 
 
-_QUOTES = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
+_QUOTES = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"', "—": "-", "–": "-", "‒": "-"})  # OCR reads every dash as a hyphen
 
 
 def _norm(text: str) -> str:
