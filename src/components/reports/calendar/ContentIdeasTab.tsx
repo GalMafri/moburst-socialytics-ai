@@ -50,6 +50,8 @@ export function ContentIdeasTab({
    *  we know the exact variant_group_id they want to see. Filtering by it is
    *  bulletproof — no copy-slice heuristic, no realtime lag dependency. */
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  // the tab the panel opens on: "design" or "video" when opened from the progress dock, the copy tab otherwise
+  const [panelTab, setPanelTab] = useState<string>("copy");
   const qc = useQueryClient();
   const { isMoburstStaff } = useAuth();
   const { toast } = useToast();
@@ -138,6 +140,13 @@ export function ContentIdeasTab({
   });
 
   const revisedCalendar = useMemo(() => calendarWithRevisions(contentCalendar, reportId, postIterations), [contentCalendar, reportId, postIterations]);
+  // calendarWithRevisions returns the days as an array; a post is found by the key the cards and runs carry
+  const postByKey = (key: string) => {
+    for (const day of (revisedCalendar as any[]) || []) {
+      for (const p of day?.posts || []) if (p?._calendarPostKey === key) return p;
+    }
+    return undefined;
+  };
   const currentPost = activePost ? applyCopyRevisions(activePost, postIterations) : null;
   const activeIteration = currentPost
     ? findLatestSelectedIteration(postIterations as any, currentPost)
@@ -250,28 +259,26 @@ export function ContentIdeasTab({
 
         <DesignRunsDock
           titleFor={(key) => {
-            for (const day of (revisedCalendar as any)?.days || []) {
-              for (const p of day?.posts || []) {
-                if (p?._calendarPostKey === key) return `${p.platform || ""} · ${String(p.copy || p.content || "").split("\n")[0].slice(0, 48)}`;
-              }
-            }
-            return undefined;
+            const p = postByKey(key);
+            return p ? `${p.platform || ""} · ${String(p.copy || p.content || "").split("\n")[0].slice(0, 48)}` : undefined;
           }}
-          onOpen={(key) => {
-            for (const day of (revisedCalendar as any)?.days || []) {
-              for (const p of day?.posts || []) {
-                if (p?._calendarPostKey === key) { setActivePost(p); setActiveGroupId(null); return; }
-              }
-            }
+          onOpen={(key, kind) => {
+            const p = postByKey(key);
+            if (!p) { toast({ title: "That post is no longer in this calendar." }); return; }
+            setPanelTab(kind === "video" ? "video" : "design");
+            setActivePost(p);
+            setActiveGroupId(null);
           }}
         />
 
         <PostPanel
           open={!!activePost && !iterationsFailed}
+          initialTab={panelTab}
           onOpenChange={(open) => {
             if (!open) {
               setActivePost(null);
               setActiveGroupId(null);
+              setPanelTab("copy");
             }
           }}
           post={currentPost}

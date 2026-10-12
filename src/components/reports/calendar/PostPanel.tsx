@@ -47,6 +47,8 @@ interface Props {
   onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
   /** Reject (with a reason the app learns from) or archive a variant. Staff only. */
   onFeedback?: (iterationId: string, verdict: "rejected" | "archived", reason?: string, note?: string) => Promise<void> | void;
+  /** The tab the panel opens on ("copy" | "design" | "video"); the copy tab when not given. */
+  initialTab?: string;
 }
 
 function isVideoUrl(url: string): boolean {
@@ -65,12 +67,13 @@ export function PostPanel({
   onCopySaved,
   onToggleSelected,
   onFeedback,
+  initialTab,
 }: Props) {
   const { isClient, isMoburstStaff } = useAuth();
   const queryClient = useQueryClient();
   const refreshMedia = () => { void queryClient.invalidateQueries({ queryKey: ["post-iterations", clientId] }); };
   const [editedPost, setEditedPost] = useState<CalendarPost | null>(null);
-  useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab("copy"); }, [sourcePost?._calendarPostKey, open]);
+  useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab(initialTab || "copy"); }, [sourcePost?._calendarPostKey, open, initialTab]);
   const post = editedPost && editedPost._calendarPostKey === sourcePost?._calendarPostKey ? editedPost : sourcePost;
   const designRun = useGenerationForPost(post);
   // Artwork the server completed while nobody was watching still needs its

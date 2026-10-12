@@ -11,7 +11,7 @@ import { stageLabel, useDesignRuns, type DesignRunSummary } from "./DesignRunsCo
 interface Props {
   // the post a run belongs to, for its title; undefined when the calendar no longer has it
   titleFor: (postKey: string) => string | undefined;
-  onOpen: (postKey: string) => void;
+  onOpen: (postKey: string, kind: DesignRunSummary["kind"]) => void;
 }
 
 const RECENT_MS = 6 * 60 * 60 * 1000; // finished runs stay listed for six hours
@@ -70,7 +70,7 @@ export function DesignRunsDock({ titleFor, onOpen }: Props) {
                   </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <Button size="sm" variant={ready ? "default" : "outline"} onClick={() => onOpen(r.postKey)}>Open</Button>
+                  <Button size="sm" variant={ready ? "default" : "outline"} onClick={() => onOpen(r.postKey, r.kind)}>Open</Button>
                   {!live && (
                     <button type="button" className="text-muted-foreground hover:text-white" onClick={() => setHidden((h) => ({ ...h, [r.id]: true }))} aria-label="Dismiss">
                       <X className="h-4 w-4" />
