@@ -40,7 +40,8 @@ Deno.serve(async (req) => {
     // Staff first, before any lookup: an unauthenticated caller must not learn
     // whether an id exists. The per-client write check follows once the row
     // says which client this is.
-    const { userId, asCaller } = await requireStaff(req);
+    const caller = await requireStaff(req);
+    const { userId, asCaller } = caller;
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: it, error: itErr } = await supabase
