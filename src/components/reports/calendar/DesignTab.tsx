@@ -155,7 +155,9 @@ export function DesignTab({ post, clientId, reportId, onPicked, kind = "static" 
   const isVideoFile = (f?: { url?: string; video?: boolean }) => !!f && (f.video === true || /\.mp4($|\?)/i.test(f.url || ""));
   const slidesOf = (key: string) => options.filter((o) => o.kind === "slide" && o.parent_key === key);
   const primary = run?.sizes?.[0]?.name;
-  const inProgress = run?.status === "queued" || run?.status === "running";
+  // a run that ended without options is never a client-facing failure: it reads as still finishing while the team is alerted
+  const settling = run?.status === "failed" || run?.status === "dropped";
+  const inProgress = run?.status === "queued" || run?.status === "running" || (settling && tops.length === 0);
 
   if (!clientId || !postKey) {
     return <p className="t-secondary">Open this post from its calendar to create designs.</p>;
@@ -207,13 +209,6 @@ export function DesignTab({ post, clientId, reportId, onPicked, kind = "static" 
           )}
         </div>
       )}
-
-      {run?.status === "failed" || run?.status === "dropped" ? (
-        <div className="glass-inner p-4">
-          <p className="t-body">We could not make a design that meets your brand's standards for this post.</p>
-          <p className="t-secondary mt-1">Try again, or shorten the post copy.</p>
-        </div>
-      ) : null}
 
       {tops.map((o) => {
         const slides = o.kind === "carousel" ? slidesOf(o.option_key) : [];

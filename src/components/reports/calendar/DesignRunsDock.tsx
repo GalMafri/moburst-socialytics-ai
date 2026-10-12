@@ -36,13 +36,14 @@ export function DesignRunsDock({ titleFor, onOpen }: Props) {
     return Object.values(runs)
       .filter((r) => !hidden[r.id])
       .filter((r) => r.status === "queued" || r.status === "running" || now - new Date(r.createdAt).getTime() < RECENT_MS)
+      .filter((r) => !((r.status === "failed" || r.status === "dropped") && r.offered === 0 && now - new Date(r.createdAt).getTime() > RECENT_MS))
       .sort((a, b) => {
         const live = (r: DesignRunSummary) => (r.status === "queued" || r.status === "running" ? 0 : 1);
         return live(a) - live(b) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
   }, [runs, hidden]);
   if (!items.length) return null;
-  const active = items.filter((r) => r.status === "queued" || r.status === "running").length;
+  const active = items.filter((r) => r.status === "queued" || r.status === "running" || ((r.status === "failed" || r.status === "dropped") && r.offered === 0)).length;
 
   return (
     <aside className="fixed right-4 bottom-4 z-40 w-[320px] max-w-[calc(100vw-2rem)] glass rounded-[16px] shadow-xl border border-white/10" aria-live="polite" aria-label="Design progress">
@@ -58,7 +59,7 @@ export function DesignRunsDock({ titleFor, onOpen }: Props) {
       {!collapsed && (
         <ul className="max-h-[50vh] overflow-y-auto px-2 pb-2 space-y-1">
           {items.map((r) => {
-            const live = r.status === "queued" || r.status === "running";
+            const live = r.status === "queued" || r.status === "running" || ((r.status === "failed" || r.status === "dropped") && r.offered === 0);
             const ready = (r.status === "offered" || r.status === "picked") && r.offered > 0;
             const what = r.kind === "video" ? "video" : "design";
             return (
@@ -66,7 +67,7 @@ export function DesignRunsDock({ titleFor, onOpen }: Props) {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm truncate">{titleOf(r, titleFor)}</p>
                   <p className="t-secondary truncate">
-                    {live ? `${what === "video" ? "Video" : "Designs"} · ${stageLabel(r)}` : ready ? `${r.offered} ${what}${r.offered === 1 ? "" : "s"} ready` : `No ${what} met the checks`}
+                    {live ? `${what === "video" ? "Video" : "Designs"} · ${stageLabel(r)}` : `${r.offered} ${what}${r.offered === 1 ? "" : "s"} ready`}
                   </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">

@@ -106,6 +106,7 @@ export function useDesignRunForPost(postKey?: string, kind: RunKind = "static"):
 /** The step a person is told about, in their words. */
 export function stageLabel(run: DesignRunSummary): string {
   if (run.interrupted) return "Picking up again";
+  if (run.status === "failed" || run.status === "dropped") return "Finishing up";
   switch (run.stage) {
     case "queued": return "Waiting to start";
     case "reading": return "Reading your brand";

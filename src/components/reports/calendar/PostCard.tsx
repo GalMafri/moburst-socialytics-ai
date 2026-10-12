@@ -34,7 +34,9 @@ interface Props {
 
 export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: Props) {
   const designRun = useDesignRunForPost(post._calendarPostKey, kindOfFormat(post.format));
-  const designing = !!designRun && (designRun.status === "queued" || designRun.status === "running");
+  // a run that ended without options is still "designing" to the client (the team is alerted); never a failure badge
+  const designing = !!designRun && (designRun.status === "queued" || designRun.status === "running"
+    || ((designRun.status === "failed" || designRun.status === "dropped") && designRun.offered === 0));
   const designsReady = !!designRun && (designRun.status === "offered" || designRun.status === "picked") && designRun.offered > 0;
   const copy = postCopyOf(post);
   const thumb = iteration?.media_urls?.[0] || null;
@@ -88,7 +90,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
             <div className="flex items-center gap-2 text-muted-foreground">
               {designing ? <Loader2 className="h-4 w-4 animate-spin text-[#b9e045]" /> : designsReady ? <Sparkles className="h-4 w-4 text-[#b9e045]" /> : <ImagePlus className="h-4 w-4" />}
               <span className="t-label">
-                {designing ? `Designing · ${stageLabel(designRun!)}` : designsReady ? `${designRun!.offered} design${designRun!.offered === 1 ? "" : "s"} ready` : designRun?.status === "failed" || designRun?.status === "dropped" ? "No design met the checks" : "No design yet"}
+                {designing ? `Designing · ${stageLabel(designRun!)}` : designsReady ? `${designRun!.offered} design${designRun!.offered === 1 ? "" : "s"} ready` : "No design yet"}
               </span>
             </div>
           </div>
