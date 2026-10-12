@@ -68,3 +68,11 @@ def test_text_slots_are_pushed_off_the_logo():
     sx, sy, sw, sh = b["subline"]
     assert sx >= lx + lw - 0.5 or sy >= ly + lh - 0.5 or sx + sw <= lx + 0.5 or sy + sh <= ly + 0.5
     assert abs(sx - (lx + lw)) < 0.5  # pushed right, the shortest move
+
+
+def test_text_slots_do_not_share_pixels():
+    fam = {"parameters": {"aspect": 0.8}, "template": {"slots": {
+        "headline": {"x": 0.1, "y": 0.30, "w": 0.8, "h": 0.20},
+        "subline": {"x": 0.1, "y": 0.45, "w": 0.8, "h": 0.06}}}}  # the subline's box starts inside the headline's
+    b = frame_boxes(fam, PORTRAIT)
+    assert b["subline"][1] >= b["headline"][1] + b["headline"][3]

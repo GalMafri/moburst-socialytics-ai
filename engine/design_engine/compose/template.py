@@ -150,6 +150,24 @@ def clear_of_logo(boxes: dict[str, tuple[float, float, float, float]], size: Siz
     return out
 
 
+TEXT_ORDER = ("headline", "subline", "footer", "cta")
+
+
+def clear_text_of_text(boxes: dict[str, tuple[float, float, float, float]], size: Size) -> dict[str, tuple[float, float, float, float]]:
+    """Two text slots never share pixels: when a later slot (in reading order down the frame) lands on an earlier one, it moves
+    below it, inside the frame. Slot boxes come from OCR line unions whose descenders can touch; the typeset block must not."""
+    out = dict(boxes)
+    present = [r for r in TEXT_ORDER if r in out]
+    present.sort(key=lambda r: out[r][1])
+    for i, later in enumerate(present):
+        for earlier in present[:i]:
+            a, b = out[earlier], out[later]
+            if _overlap(a, b):
+                ny = min(a[1] + a[3] + 0.01 * size.h, size.h - b[3])
+                out[later] = (b[0], ny, b[2], b[3])
+    return out
+
+
 def frame_boxes(family: dict, size: Size, arrangement: str = "p50") -> dict[str, tuple[float, float, float, float]]:
     """Every slot of the family in pixels at this size: plain fraction scaling when the size has the family's aspect, the reflow
     otherwise; text slots never on the logo. The family's aspect is `parameters.aspect` (W/H of the posts it was measured on)."""
@@ -161,7 +179,7 @@ def frame_boxes(family: dict, size: Size, arrangement: str = "p50") -> dict[str,
         boxes = reflow(slots, size, float(ref), arrangement)
     else:
         boxes = {name: slot_px(slot, size, arrangement) for name, slot in slots.items()}
-    return clear_of_logo(boxes, size)
+    return clear_text_of_text(clear_of_logo(boxes, size), size)
 
 
 def _lum_hex(hex_colour: str) -> float:
