@@ -21,7 +21,7 @@ export const Root: React.FC = () => (
     defaultProps={{ spec: EMPTY }}
     calculateMetadata={({ props }) => {
       const spec = props.spec as VideoSpec;
-      const seconds = spec.cards.reduce((a, c) => a + c.seconds, 0);
+      const seconds = spec.cards.reduce((a, c) => a + c.seconds, 0) + (spec.endCard?.seconds || 0);
       return { durationInFrames: Math.max(1, Math.round(seconds * spec.fps)), fps: spec.fps, width: spec.width, height: spec.height };
     }}
   />
