@@ -394,3 +394,17 @@ def test_carousel_chain(tmp_path, family, fonts, logo_files, browser):
     record.write(ctx.run_dir, result)
     recs = {r["id"]: r for r in json.loads((ctx.run_dir / "options.json").read_text())}
     assert recs["K"]["kind"] == "carousel" and recs["K"]["slides"] == ["K.1", "K.2", "K.3"] and recs["K.3"]["parent"] == "K"
+
+
+def test_pictures_for_several_options_in_one_call(tmp_path, family, fonts, logo_files, browser):
+    """One picture call with option_ids makes every option's pictures at once; the budget is charged once per picture."""
+    ctx = make_ctx(tmp_path, family, fonts, logo_files, browser=browser, pictures=[dark_png(i) for i in range(1, 5)])
+    key = family["key"]
+    tools.plan(ctx, [option(key, id="o1"), option(key, id="o2", concept="a brass scale on a desk")])
+    out = tools.pictures(ctx, option_ids=["o1", "o2"])
+    assert set(out["options"]) == {"o1", "o2"}
+    assert all(len(v["pictures"]) == 2 for v in out["options"].values())
+    assert ctx.spent["credits"] == 24.0 == out["credits_spent_total"]
+    assert ctx.options["o1"].credits == 12.0 and ctx.options["o2"].credits == 12.0
+    with pytest.raises(ToolRefused, match="option_id"):
+        tools.pictures(ctx)

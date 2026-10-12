@@ -14,6 +14,8 @@ wraps for the model; every rule the spec gives the worker is enforced here, what
 """
 from __future__ import annotations
 
+import threading
+
 import hashlib
 import json
 import math
@@ -55,6 +57,7 @@ MIN_SLIDES = 2
 LETTERING_CONFIDENCE = 0.6
 LETTERING_MIN_CHARS = 3
 PICTURES_PER_OPTION = 2
+PICTURE_WORKERS = 4  # pictures for this many options or slides are made at once
 FIX_ROUNDS = 1
 ROTATION_WINDOW = 3
 HEADLINE_LENGTH_FACTOR = 1.3
@@ -159,6 +162,7 @@ class RunContext:
     nearest: list[dict] = field(default_factory=list)
     transcript: list[dict] = field(default_factory=list)
 
+    lock: threading.Lock = field(default_factory=threading.Lock)  # the credit budget, shared by concurrent picture calls
     def __post_init__(self) -> None:
         self.workspace = Path(self.workspace)
         self.logo_files = [{**f, "path": str(self._abs(f["path"]))} for f in self.logo_files if f.get("path")]
@@ -779,6 +783,39 @@ class _FramedClient:
         return path
 
 
+def _pictures_at_once(ctx: RunContext, ids: list[str]) -> dict[str, dict]:
+    """picture() for every id, concurrently (each is a slow Higgsfield round trip and a fix round); a refusal or a service error on one
+    becomes that option's result rather than the whole call's."""
+    if not ids:
+        return {}
+    if len(ids) == 1:
+        return {ids[0]: picture(ctx, ids[0])}
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(oid: str) -> dict:
+        try:
+            return picture(ctx, oid)
+        except (ToolRefused, BudgetExceeded) as e:
+            return {"option_id": oid, "status": "refused", "reason": str(e)}
+        except Exception as e:  # noqa: BLE001  the picture service failed for this option; the others go on
+            return {"option_id": oid, "status": "failed", "reason": f"{type(e).__name__}: {e}"}
+
+    with ThreadPoolExecutor(max_workers=min(len(ids), PICTURE_WORKERS)) as pool:
+        results = list(pool.map(one, ids))
+    return dict(zip(ids, results))
+
+
+def pictures(ctx: RunContext, option_id: str | None = None, option_ids: list[str] | None = None) -> dict:
+    """The picture tool: one option, or every option named in `option_ids` at once (the usual call after a plan)."""
+    ids = [str(i) for i in (option_ids or []) if i] or ([str(option_id)] if option_id else [])
+    if not ids:
+        raise ToolRefused("picture needs option_id or option_ids")
+    if len(ids) == 1:
+        return picture(ctx, ids[0])
+    out = _pictures_at_once(ctx, ids)
+    return {"options": out, "credits_spent_total": ctx.spent["credits"]}
+
+
 def picture(ctx: RunContext, option_id: str) -> dict:
     """Two measured pictures for an option through Task 4's make_picture (one per slide of a carousel). Every generation is preceded
     by the budget check and recorded on the option and on spent["credits"]; a picture whose text slots stay busy after one
@@ -786,14 +823,15 @@ def picture(ctx: RunContext, option_id: str) -> dict:
     opt = _option(ctx, option_id)
     if opt.kind == "carousel":
         out = {"option_id": opt.id, "slides": {}}
+        todo = []
         for child in ctx.children(opt):
             if child.status == "dropped":
                 out["slides"][child.id] = {"status": "dropped", "reason": child.dropped_reason}
-                continue
-            if place.picture_box(child.family, ctx.primary, "p50") is None:
+            elif place.picture_box(child.family, ctx.primary, "p50") is None:
                 out["slides"][child.id] = {"status": "no_picture_family"}
-                continue
-            out["slides"][child.id] = picture(ctx, child.id)
+            else:
+                todo.append(child.id)
+        out["slides"].update(_pictures_at_once(ctx, todo))
         dropped = [c.id for c in ctx.children(opt) if c.status == "dropped"]
         if dropped:
             ctx.drop(opt, f"slides dropped: {', '.join(dropped)}")
@@ -825,13 +863,15 @@ def picture(ctx: RunContext, option_id: str) -> dict:
     made = []
     wanted = PICTURES_PER_SLIDE if opt.parent else PICTURES_PER_OPTION
     while len(opt.ok_pictures) < wanted and len(made) < wanted:
-        if ctx.spent["credits"] >= ctx.budget.max_credits:
-            raise BudgetExceeded(f"credit budget of {ctx.budget.max_credits:g} is spent ({ctx.spent['credits']:g}); compose and submit what exists")
+        with ctx.lock:  # pictures for several options run at once; the budget is read and charged under one lock
+            if ctx.spent["credits"] >= ctx.budget.max_credits:
+                raise BudgetExceeded(f"credit budget of {ctx.budget.max_credits:g} is spent ({ctx.spent['credits']:g}); compose and submit what exists")
         result = make_picture(framed, brief, out_dir / "pictures", read)
         opt.pictures.append(result)
         made.append(result)
-        opt.credits += result.credits
-        ctx.spent["credits"] += result.credits
+        with ctx.lock:
+            opt.credits += result.credits
+            ctx.spent["credits"] += result.credits
     opt.status = "pictured" if opt.ok_pictures else opt.status
     summary = {"option_id": opt.id, "brief": brief.text, "model": brief.model,
                "quiet_zone": {k: round(v, 3) for k, v in zone.items()} if zone else None,
