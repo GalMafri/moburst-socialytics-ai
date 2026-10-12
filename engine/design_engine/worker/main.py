@@ -63,8 +63,17 @@ def build_context(run: Run, profile: dict, rules: list[str], prior: list[dict], 
     reads = load_reads(reads_path) if reads_path.exists() else []
     designed = [r for r in reads if is_designed(r)]
     platform, size_list = sizes_for(run.platform, run.format)
-    stand_in = (profile.get("type") or {}).get("accepted_stand_in")
-    headline_font, subline_font, _ = choose_fonts(profile, stand_in, ws / "website" / "fonts")
+    # an unresolved type (the site serves no font file) runs on the library's best match, recorded on the run; the Setup screen shows it
+    typ = profile.get("type") or {}
+    stand_in = typ.get("accepted_stand_in") or os.environ.get("DESIGN_STAND_IN_FONT")
+    if typ.get("status") != "resolved" and not stand_in:
+        cands = [c for c in (typ.get("candidates") or []) if c.get("file") and Path(str(c["file"])).exists()]
+        if cands:
+            stand_in = str(cands[0]["file"])
+    headline_font, subline_font, used_stand_in = choose_fonts(profile, stand_in, ws / "website" / "fonts")
+    if used_stand_in:
+        profile = dict(profile)
+        profile.setdefault("type", {})["accepted_stand_in"] = str(headline_font)
     logo_files = [f for f in (profile.get("logo") or {}).get("files") or []
                   if f.get("path") and (Path(f["path"]) if Path(f["path"]).is_absolute() else ws / f["path"]).exists()]
     if not logo_files:
