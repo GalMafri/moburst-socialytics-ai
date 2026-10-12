@@ -36,6 +36,8 @@ def stage_assets(spec: dict, public: Path | None = None) -> dict:
         out["logo"]["path"] = stage(out["logo"]["path"])
     if out.get("broll") and out["broll"].get("path"):
         out["broll"]["path"] = stage(out["broll"]["path"])
+    if out.get("plate") and out["plate"].get("path"):
+        out["plate"]["path"] = stage(out["plate"]["path"])
     return out
 
 

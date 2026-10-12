@@ -23,3 +23,13 @@ def test_spec_uses_measured_geometry_and_the_logo_floor(tmp_path):
     assert spec["captionStyle"]["bottomInset"] == 380
     assert abs(duration_seconds(spec) - sum(c["seconds"] for c in spec["cards"]) - spec["endCard"]["seconds"]) < 0.01
     assert abs(spec["endCard"]["logoBox"]["x"] + spec["endCard"]["logoBox"]["w"] / 2 - 0.5) < 0.01  # the closing mark is centred
+
+
+def test_stage_assets_stages_the_plate(tmp_path):
+    from design_engine.video.render import stage_assets
+    f = tmp_path / "h.ttf"; f.write_bytes(b"f")
+    logo = tmp_path / "logo.png"; logo.write_bytes(b"l")
+    plate = tmp_path / "plate-1.png"; plate.write_bytes(b"p")
+    spec = {"fonts": {"headline": str(f), "subline": str(f)}, "logo": {"path": str(logo)}, "plate": {"path": str(plate), "darken": 0.0}, "cards": []}
+    staged = stage_assets(spec, tmp_path / "public")
+    assert staged["plate"]["path"] == "plate-1.png" and (tmp_path / "public" / "plate-1.png").exists()
