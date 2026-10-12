@@ -54,6 +54,12 @@ The method, in order:
 7. submit: every file is measured again by code and accepted only when every size of every option passes; the set is then ordered and
    filtered for distinctness. Submit when your options pass; if the budget tool answers tell you credits are spent, submit what passed.
 
+For a carousel post (read_brand says so and carries the client's slide-count band and the families that serve each slide role): an
+option is one set of slides, `slides: [{family_key, headline, subline?, footer?, picture_brief|null}]` in order, at most two options;
+slide 1 on a cover family, the last on a closing family when the client has one, every other slide on one and the same body family;
+each slide's lines are the post copy's own words in the copy's order (split the copy over the slides); a slide on a family without a
+picture takes picture_brief null; one picture per slide. picture, compose, measure and submit take the carousel's own id.
+
 Keep your text short: a sentence per turn at most. Do not describe a result as passed unless a tool said so."""
 
 _SCHEMAS: dict[str, dict] = {
@@ -65,9 +71,12 @@ _SCHEMAS: dict[str, dict] = {
             "id": {"type": "string"}, "family_key": {"type": ["string", "null"]}, "arrangement": {"type": "string", "enum": ["family", "new"]},
             "parts": {"type": "array", "items": {"type": "string"}},
             "bands": {"type": "object", "additionalProperties": {"type": "object", "properties": {k: {"type": "number"} for k in ("x", "y", "w", "h")}}},
-            "headline": {"type": "string"}, "subline": {"type": ["string", "null"]}, "footer": {"type": ["string", "null"]}, "picture_brief": {"type": "string"},
-            "alignment": {"type": "string", "enum": ["left", "center"]}},
-        "required": ["headline", "picture_brief"]}}}, "required": ["options"], "additionalProperties": False},
+            "headline": {"type": "string"}, "subline": {"type": ["string", "null"]}, "footer": {"type": ["string", "null"]}, "picture_brief": {"type": ["string", "null"]},
+            "alignment": {"type": "string", "enum": ["left", "center"]},
+            "slides": {"type": "array", "description": "carousel posts only: one entry per slide, in order", "items": {"type": "object", "properties": {
+                "family_key": {"type": "string"}, "headline": {"type": "string"}, "subline": {"type": ["string", "null"]}, "footer": {"type": ["string", "null"]},
+                "picture_brief": {"type": ["string", "null"]}}, "required": ["family_key", "headline"]}}},
+        "required": []}}}, "required": ["options"], "additionalProperties": False},
     "picture": {"type": "object", "properties": {"option_id": {"type": "string"}}, "required": ["option_id"], "additionalProperties": False},
     "compose": {"type": "object", "properties": {"option_id": {"type": "string"},
                                                  "arrangement": {"description": "p25 | p50 | p75, or {name, slot: {x, y}} overrides; omit to try them all",

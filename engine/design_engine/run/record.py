@@ -60,7 +60,9 @@ def option_record(run_id: str, opt: Any, run_dir: Path, copy_files: bool = True)
     return {"id": opt.id, "run_id": run_id, "status": opt.status, "rank": opt.rank, "family_key": opt.family_key or opt.family.get("key"),
             "arrangement": opt.arrangement, "parts": opt.parts, "bands": opt.bands, "headline": opt.headline, "subline": opt.subline, "footer": getattr(opt, "footer", None),
             "picture_concept": opt.picture_brief, "picture_job_ids": opt.job_ids, "credits": opt.credits, "fix_rounds": opt.fix_rounds,
-            "dropped_reason": opt.dropped_reason, "signature": sig, "files": files, "pictures": pictures, "unrendered": opt.failures}
+            "dropped_reason": opt.dropped_reason, "signature": sig, "files": files, "pictures": pictures, "unrendered": opt.failures,
+            "kind": getattr(opt, "kind", "static"), "slides": list(getattr(opt, "slides", []) or []), "parent": getattr(opt, "parent", None),
+            "slide_role": getattr(opt, "slide_role", None)}
 
 
 def write(run_dir: Path, result: Any) -> dict:

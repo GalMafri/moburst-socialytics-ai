@@ -355,3 +355,38 @@ def test_plan_reading_order_and_case(tmp_path, family, fonts, logo_files):
     ctx2 = make_ctx(tmp_path / "k", kicker, fonts, logo_files)
     with pytest.raises(tools.ToolRefused, match="kicker"):
         tools.plan(ctx2, [option(kicker["key"], headline="Some injuries", subline="ruin summers")])
+
+
+def test_carousel_chain(tmp_path, family, fonts, logo_files, browser):
+    """A carousel option: slides as children, one picture per slide, the set check, submit by the carousel's id."""
+    ctx = make_ctx(tmp_path, family, fonts, logo_files, browser=browser, pictures=[dark_png(1), dark_png(2), dark_png(3)])
+    ctx.post["format"] = "Carousel"
+    key = family["key"]
+    ctx.profile["carousel"] = {"albums": 4, "slide_count": {"p25": 3.0, "p50": 3.0, "p75": 4.0},
+                               "roles": {"cover": [{"key": key, "n": 4}], "body": [{"key": key, "n": 6}], "closing": []}}
+    brand = tools.read_brand(ctx)
+    assert brand["carousel"]["role_families"]["cover"] == [key]
+    slides = [{"family_key": key, "headline": "Some injuries", "picture_brief": CONCEPT},
+              {"family_key": key, "headline": "ruin summers", "picture_brief": CONCEPT + " at dusk"},
+              {"family_key": key, "headline": "Some sense in rumours", "picture_brief": CONCEPT + " at dawn"}]
+    with pytest.raises(tools.ToolRefused, match="slide-count band"):
+        tools.plan(ctx, [{"id": "K", "slides": slides[:1]}])
+    with pytest.raises(tools.ToolRefused, match="copy's order"):
+        tools.plan(ctx, [{"id": "K", "slides": [slides[1], slides[0], slides[2]]}])
+    out = tools.plan(ctx, [{"id": "K", "slides": slides}])
+    assert out["accepted"] == ["K"] and ctx.options["K"].kind == "carousel" and ctx.options["K"].slides == ["K.1", "K.2", "K.3"]
+    assert ctx.options["K.1"].slide_role == "cover" and ctx.options["K.2"].slide_role == "body"
+    pic = tools.picture(ctx, "K")
+    assert pic["status"] == "ok" and ctx.spent["credits"] == 18.0  # one picture per slide
+    comp = tools.compose(ctx, "K")
+    assert comp["set"]["passed"], comp["set"]
+    meas = tools.measure(ctx, "K")
+    assert meas["status"] == "passed", meas
+    with pytest.raises(tools.ToolRefused, match="own id"):
+        tools.submit(ctx, ["K.1"])
+    sub = tools.submit(ctx, ["K"])
+    assert sub["accepted"] == ["K"] and ctx.options["K.2"].status == "offered"
+    result = loop.result_from(ctx, turns=0, transcript_path=ctx.run_dir / "transcript.jsonl")
+    record.write(ctx.run_dir, result)
+    recs = {r["id"]: r for r in json.loads((ctx.run_dir / "options.json").read_text())}
+    assert recs["K"]["kind"] == "carousel" and recs["K"]["slides"] == ["K.1", "K.2", "K.3"] and recs["K.3"]["parent"] == "K"

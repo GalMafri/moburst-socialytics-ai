@@ -490,6 +490,11 @@ def main():
     profile = build(client, site, [{"source": u.get("source")} for u in uploads], designed, pal, pair_rows, type_match, grammar, fams, imagery, cal,
                     logo_files=logo_files, measured_on=[r.source for r in designed])
     profile["site_accents"] = [{"hex": h, "source": f"site:{args.site} theme-color or CTA background"} for h in site_accents]
+    from design_engine.learn.carousel import carousel_block
+
+    profile["carousel"] = carousel_block(designed, profile["families"])
+    print(f"carousel: {profile['carousel']['albums']} albums, slide count p50 {profile['carousel']['slide_count'].get('p50')}, "
+          f"role families cover {len(profile['carousel']['roles']['cover'])} body {len(profile['carousel']['roles']['body'])} closing {len(profile['carousel']['roles']['closing'])}")
     profile["classification"] = {"designed_rule": "logo found by template match, or at least one set line of readable size (OCR confidence >= 0.8, height >= 2% of the short edge)",
                                  "read": len(reads), "designed": len(designed), "source": "measured:is_designed"}
     (out / "profile.json").write_text(json.dumps(profile, indent=1, default=str))

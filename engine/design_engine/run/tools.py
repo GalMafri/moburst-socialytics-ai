@@ -34,6 +34,7 @@ from ..gate.check import (
     HEADLINE_SHORT_EDGE_SHARE_MIN,
     LOGO_CONTRAST_MIN,
     LOGO_MATCH_MIN,
+    PIXEL_COPY_WHOLE,
     TEXT_CONTRAST_MIN,
     GateResult,
 )
@@ -47,6 +48,9 @@ from ..picture.zone import ZoneRead, floor_from_calibration
 from ..platform.specs import Size
 
 MAX_OPTIONS = 3
+MAX_CAROUSEL_OPTIONS = 2
+PICTURES_PER_SLIDE = 1
+MIN_SLIDES = 2
 LETTERING_CONFIDENCE = 0.6
 LETTERING_MIN_CHARS = 3
 PICTURES_PER_OPTION = 2
@@ -85,6 +89,10 @@ class OptionState:
     parts: list[str] = field(default_factory=list)
     bands: dict = field(default_factory=dict)
     footer: str | None = None  # the family's bottom-edge line, when it carries one
+    kind: str = "static"  # static | carousel (a parent whose slides are child options "<id>.<n>")
+    slides: list[str] = field(default_factory=list)  # child option ids, in slide order
+    parent: str | None = None  # the carousel this slide belongs to
+    slide_role: str | None = None  # cover | body | closing
     status: str = "planned"  # planned | pictured | composed | needs_fix | passed | offered | dropped
     pictures: list[PictureResult] = field(default_factory=list)
     renders: dict[str, dict] = field(default_factory=dict)  # size name -> {rendered, gate, picture, picture_sha, margin, arrangement}
@@ -170,6 +178,13 @@ class RunContext:
         return self.size_list[0]
 
     @property
+    def is_carousel(self) -> bool:
+        return str(self.post.get("format") or "").strip().lower() == "carousel"
+
+    def children(self, opt: OptionState) -> list[OptionState]:
+        return [self.options[c] for c in opt.slides if c in self.options]
+
+    @property
     def copy_text(self) -> str:
         return str(self.post.get("copy") or "")
 
@@ -193,6 +208,10 @@ class RunContext:
         opt.dropped_reason = reason
         if not any(d["id"] == opt.id for d in self.dropped):
             self.dropped.append({"id": opt.id, "reason": reason, "family_key": opt.family_key, "credits": opt.credits})
+        for cid in opt.slides:
+            child = self.options.get(cid)
+            if child is not None and child.status != "dropped":
+                child.status, child.dropped_reason = "dropped", f"its carousel {opt.id} was dropped: {reason}"
 
 
 # ---- helpers ----
@@ -303,6 +322,16 @@ def new_family(ctx: RunContext, option_id: str, parts: list[str], bands: Mapping
 # ---- read_brand ----
 
 
+def _carousel_brief(profile: dict) -> dict:
+    c = profile.get("carousel") or {}
+    sc = c.get("slide_count") or {}
+    return {"albums": c.get("albums", 0), "slide_count": {k: sc.get(k) for k in ("p25", "p50", "p75")},
+            "role_families": {role: [e["key"] for e in (c.get("roles") or {}).get(role, [])] for role in ("cover", "body", "closing")},
+            "rules": ["one option = one set of slides; slide 1 uses a cover family, the last slide a closing family when the client has one, "
+                      "every other slide one and the same body family (one grid); slide count inside the client's band; each slide's lines are the "
+                      "post copy's own words in copy order; a slide on a family without a picture takes picture_brief null; one picture per slide"]}
+
+
 def read_brand(ctx: RunContext) -> dict:
     """The confirmed profile in brief, the families, the floors, the standing rules, the post, the sizes and the last three runs."""
     p = ctx.profile
@@ -321,6 +350,7 @@ def read_brand(ctx: RunContext) -> dict:
                     "people": imagery.get("people"), "grounds": imagery.get("grounds"), "never": imagery.get("never")},
         "voice": p.get("voice"),
         "floors": cal.get("floors"),
+        "carousel": _carousel_brief(p) if ctx.is_carousel else None,
         "occlusion_floor": ctx.floor,
         "families": [_family_summary(f) for f in ctx.families],
         "rules": list(p.get("rules") or p.get("design_rules") or []),
@@ -408,7 +438,8 @@ def nearest_posts(ctx: RunContext, copy: str, k: int = 4) -> list[dict]:
 # ---- plan ----
 
 
-def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str], recent_concepts: set[str]) -> tuple[OptionState | None, list[str]]:
+def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str], recent_concepts: set[str],
+                  allow_no_picture: bool = False) -> tuple[OptionState | None, list[str]]:
     problems: list[str] = []
     oid = str(o.get("id") or f"o{i + 1}")
     arrangement = str(o.get("arrangement") or ("new" if not o.get("family_key") else "family")).lower()
@@ -470,8 +501,11 @@ def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str]
         problems.append(f"{oid}: family {family.get('key')!r} carries a footer line at the bottom edge in the client's posts; give a `footer` from the "
                         "post copy (a short closing line) or choose another family")
     concept = o.get("picture_brief") or o.get("picture_concept") or ""
+    no_picture_family = family is not None and ((family.get("template") or {}).get("picture_role", "none") == "none")
     if not isinstance(concept, str) or not concept.strip():
-        problems.append(f"{oid}: a picture_brief concept is required")
+        if not (allow_no_picture and no_picture_family):
+            problems.append(f"{oid}: a picture_brief concept is required" + (" (null is allowed only on a family without a picture)" if allow_no_picture else ""))
+        concept = ""
     else:
         try:
             brief_mod.check(concept, ctx.brand_name)
@@ -484,6 +518,55 @@ def _check_option(ctx: RunContext, i: int, o: Mapping, recent_families: set[str]
     return OptionState(oid, fkey, family, arrangement if arrangement == "new" else "family", str(headline).strip(),
                        str(subline).strip() if subline else None, concept.strip(), parts, dict(bands) if bands else {},
                        footer=str(footer).strip() if footer else None), []
+
+
+def _check_carousel(ctx: RunContext, i: int, o: Mapping, recent_families: set[str], recent_concepts: set[str]) -> tuple[list[OptionState], list[str]]:
+    """A carousel option: `slides` as a list of {family_key, headline, subline?, footer?, picture_brief|null}. The parent and its slide
+    children are returned together; every rule of a static applies to each slide, and the set rules apply on top."""
+    oid = str(o.get("id") or f"o{i + 1}")
+    slides = o.get("slides")
+    problems: list[str] = []
+    car = ctx.profile.get("carousel") or {}
+    band_ = car.get("slide_count") or {}
+    lo = max(MIN_SLIDES, int(round(band_.get("p25") or MIN_SLIDES)))
+    hi = int(round(band_.get("p75") or max(lo, 5)))
+    if not isinstance(slides, list) or not slides:
+        return [], [f"{oid}: a carousel option needs `slides`"]
+    if not lo <= len(slides) <= hi:
+        problems.append(f"{oid}: {len(slides)} slides is outside the client's slide-count band {lo}..{hi}")
+    roles_ok = {r: {e["key"] for e in (car.get("roles") or {}).get(r, [])} for r in ("cover", "body", "closing")}
+    children: list[OptionState] = []
+    body_keys: set[str] = set()
+    copy = _norm(ctx.copy_text).lower()
+    last_pos = -1
+    for n, sl in enumerate(slides):
+        if not isinstance(sl, Mapping):
+            problems.append(f"{oid}: slide {n + 1} is not an object")
+            continue
+        role = "cover" if n == 0 else "closing" if (n == len(slides) - 1 and roles_ok["closing"]) else "body"
+        cid = f"{oid}.{n + 1}"
+        fkey = sl.get("family_key")
+        if fkey and roles_ok[role] and fkey not in roles_ok[role]:
+            problems.append(f"{cid}: family {fkey!r} does not serve the {role} role in the client's albums; {role} families are {sorted(roles_ok[role])}")
+        if role == "body" and fkey:
+            body_keys.add(str(fkey))
+        child, probs = _check_option(ctx, n, {**sl, "id": cid, "arrangement": "family"}, set(), recent_concepts, allow_no_picture=True)
+        problems.extend(probs)
+        if child:
+            child.parent, child.slide_role, child.kind = oid, role, "static"
+            children.append(child)
+            pos = copy.find(_norm(child.headline).lower())
+            if pos >= 0 and pos < last_pos:
+                problems.append(f"{cid}: the slides must follow the post copy's order; this headline comes before the previous slide's in the copy")
+            last_pos = max(last_pos, pos)
+    if len(body_keys) > 1:
+        problems.append(f"{oid}: every body slide must use one and the same family (one grid); got {sorted(body_keys)}")
+    if problems:
+        return [], problems
+    parent = OptionState(oid, None, {"key": f"carousel:{oid}", "template": {"slots": {}}, "parameters": {}}, "family", children[0].headline if children else "",
+                         None, children[0].picture_brief if children else "", kind="carousel", slides=[c.id for c in children])
+    parent.family_key = f"carousel:{'+'.join(sorted({c.family_key or '' for c in children}))}"
+    return [parent, *children], []
 
 
 def plan(ctx: RunContext, options: list[dict]) -> dict:
@@ -502,6 +585,14 @@ def plan(ctx: RunContext, options: list[dict]) -> dict:
         if not isinstance(o, Mapping):
             problems.append(f"option {i + 1} is not an object")
             continue
+        if ctx.is_carousel or o.get("slides"):
+            if not ctx.is_carousel:
+                problems.append(f"option {i + 1}: this post is a {ctx.post.get('format') or 'Single Image'}, not a carousel; no slides")
+                continue
+            group, probs = _check_carousel(ctx, i, o, recent_families, recent_concepts)
+            problems.extend(probs)
+            built.extend(group)
+            continue
         opt, probs = _check_option(ctx, i, o, recent_families, recent_concepts)
         problems.extend(probs)
         if opt:
@@ -509,9 +600,11 @@ def plan(ctx: RunContext, options: list[dict]) -> dict:
     ids = [o.id for o in built]
     if len(set(ids)) != len(ids):
         problems.append(f"option ids repeat: {ids}")
-    live = {k for k, v in ctx.options.items() if v.status != "dropped"}
-    if len(live | set(ids)) > MAX_OPTIONS:
-        problems.append(f"at most {MAX_OPTIONS} options per run; {sorted(live)} already exist, reuse their ids to re-plan them")
+    top_ids = {o.id for o in built if o.parent is None}
+    live = {k for k, v in ctx.options.items() if v.status != "dropped" and v.parent is None}
+    limit = MAX_CAROUSEL_OPTIONS if ctx.is_carousel else MAX_OPTIONS
+    if len(live | top_ids) > limit:
+        problems.append(f"at most {limit} options per run; {sorted(live)} already exist, reuse their ids to re-plan them")
     if problems:
         raise ToolRefused("plan refused: " + "; ".join(problems))
     for opt in built:
@@ -522,11 +615,17 @@ def plan(ctx: RunContext, options: list[dict]) -> dict:
                 raise ToolRefused(f"plan refused: option {opt.id} was dropped ({old.dropped_reason}); use a new id")
             if _norm(old.picture_brief) == _norm(opt.picture_brief) and old.family_key == opt.family_key and old.arrangement == opt.arrangement:
                 opt.pictures = old.pictures
+        if old is not None and old.kind == "carousel":  # a re-planned carousel drops the slides it no longer has
+            for cid in old.slides:
+                if cid not in {b.id for b in built} and cid in ctx.options:
+                    ctx.options[cid].status = "dropped"
+                    ctx.options[cid].dropped_reason = "re-planned"
         ctx.options[opt.id] = opt
-    return {"accepted": [o.id for o in built],
-            "options": [{"id": o.id, "family_key": o.family_key, "arrangement": o.arrangement, "headline": o.headline, "subline": o.subline, "footer": o.footer,
-                         "picture_brief": o.picture_brief, "fix_rounds_used": o.fix_rounds} for o in built],
-            "next": "call picture(option_id) for each option, then compose, measure and submit"}
+    return {"accepted": [o.id for o in built if o.parent is None],
+            "options": [{"id": o.id, "kind": o.kind, "slides": o.slides or None, "slide_role": o.slide_role, "family_key": o.family_key,
+                         "arrangement": o.arrangement, "headline": o.headline, "subline": o.subline, "footer": o.footer,
+                         "picture_brief": o.picture_brief or None, "fix_rounds_used": o.fix_rounds} for o in built],
+            "next": "call picture(option_id) for each option (a carousel id covers all its slides), then compose, measure and submit"}
 
 
 # ---- picture ----
@@ -636,10 +735,28 @@ class _FramedClient:
 
 
 def picture(ctx: RunContext, option_id: str) -> dict:
-    """Two measured pictures for an option through Task 4's make_picture. Every generation is preceded by the budget check and
-    recorded on the option and on spent["credits"]; a picture whose text slots stay busy after one regeneration is dropped. The
-    picture is judged the way compose will place the text on it, so the two never disagree."""
+    """Two measured pictures for an option through Task 4's make_picture (one per slide of a carousel). Every generation is preceded
+    by the budget check and recorded on the option and on spent["credits"]; a picture whose text slots stay busy after one
+    regeneration is dropped. The picture is judged the way compose will place the text on it, so the two never disagree."""
     opt = _option(ctx, option_id)
+    if opt.kind == "carousel":
+        out = {"option_id": opt.id, "slides": {}}
+        for child in ctx.children(opt):
+            if child.status == "dropped":
+                out["slides"][child.id] = {"status": "dropped", "reason": child.dropped_reason}
+                continue
+            if place.picture_box(child.family, ctx.primary, "p50") is None:
+                out["slides"][child.id] = {"status": "no_picture_family"}
+                continue
+            out["slides"][child.id] = picture(ctx, child.id)
+        dropped = [c.id for c in ctx.children(opt) if c.status == "dropped"]
+        if dropped:
+            ctx.drop(opt, f"slides dropped: {', '.join(dropped)}")
+            out["status"] = "dropped"
+        else:
+            out["status"] = "ok"
+        out["credits_spent_total"] = ctx.spent["credits"]
+        return out
     client = ctx.clients.get("higgsfield")
     if client is None:
         raise ToolRefused("no Higgsfield client on this run; pictures cannot be made")
@@ -661,7 +778,8 @@ def picture(ctx: RunContext, option_id: str) -> dict:
     framed = _FramedClient(client, pw, ph)
     read = picture_reader(ctx, opt)
     made = []
-    while len(opt.ok_pictures) < PICTURES_PER_OPTION and len(made) < PICTURES_PER_OPTION:
+    wanted = PICTURES_PER_SLIDE if opt.parent else PICTURES_PER_OPTION
+    while len(opt.ok_pictures) < wanted and len(made) < wanted:
         if ctx.spent["credits"] >= ctx.budget.max_credits:
             raise BudgetExceeded(f"credit budget of {ctx.budget.max_credits:g} is spent ({ctx.spent['credits']:g}); compose and submit what exists")
         result = make_picture(framed, brief, out_dir / "pictures", read)
@@ -745,10 +863,58 @@ def _register(ctx: RunContext, opt: OptionState, size: Size, r: Rendered, pic: P
                              "picture_sha": sha}
 
 
+def carousel_set_check(ctx: RunContext, parent: OptionState) -> list[str]:
+    """What a set must hold beyond each slide passing: one type scale over the body slides (headline sizes within 3%), and no two
+    slides that are pixel copies of each other at the primary size."""
+    from ..measure.hashes import dhash, hamming
+
+    fails: list[str] = []
+    kids = [c for c in ctx.children(parent) if c.status != "dropped"]
+    prim = ctx.primary.name
+    sizes_px = []
+    hashes = []
+    for c in kids:
+        rec = c.renders.get(prim)
+        if not rec:
+            fails.append(f"{c.id}: nothing composed at {prim}")
+            continue
+        px = (rec["rendered"].text_px or {}).get("headline", {}).get("size")
+        if c.slide_role == "body" and isinstance(px, (int, float)):
+            sizes_px.append((c.id, float(px)))
+        try:
+            hashes.append((c.id, dhash(rec["rendered"].png)))
+        except Exception:  # noqa: BLE001  a missing render is reported above
+            pass
+    if len(sizes_px) >= 2:
+        lo, hi = min(v for _, v in sizes_px), max(v for _, v in sizes_px)
+        if hi > 0 and (hi - lo) / hi > 0.03:
+            fails.append(f"body slides do not share one type scale: headline sizes {[(i, round(v)) for i, v in sizes_px]} px")
+    for i in range(len(hashes)):
+        for j in range(i + 1, len(hashes)):
+            d = hamming(hashes[i][1], hashes[j][1])
+            if d <= PIXEL_COPY_WHOLE:
+                fails.append(f"slides {hashes[i][0]} and {hashes[j][0]} are pixel copies of each other (distance {d})")
+    return fails
+
+
 def compose(ctx: RunContext, option_id: str, arrangement: str | dict | None = None) -> dict:
     """Every size x every kept picture x the family's arrangements (or the one the model names), each rendered and screened by the gate;
-    per size the candidate with the best margins is kept. Overflow at the client's floor is reported as the size's failure."""
+    per size the candidate with the best margins is kept. Overflow at the client's floor is reported as the size's failure.
+    A carousel composes every slide, then checks the set."""
     opt = _option(ctx, option_id)
+    if opt.kind == "carousel":
+        out = {"option_id": opt.id, "slides": {}}
+        for child in ctx.children(opt):
+            if child.status == "dropped":
+                out["slides"][child.id] = {"status": "dropped", "reason": child.dropped_reason}
+                continue
+            out["slides"][child.id] = compose(ctx, child.id, arrangement)
+        set_fails = carousel_set_check(ctx, opt)
+        opt.failures = {"set": set_fails} if set_fails else {}
+        opt.status = "composed"
+        out["set"] = {"passed": not set_fails, "failures": set_fails}
+        out["next"] = f"call measure({opt.id!r})"
+        return out
     pics: list = opt.ok_pictures
     no_picture = place.picture_box(opt.family, ctx.primary, "p50") is None
     if no_picture:
@@ -816,6 +982,33 @@ def measure(ctx: RunContext, option_id: str) -> dict:
     """The full gate over every size of an option's kept renders; failures are named with their numbers. One fix round is allowed:
     the model may re-plan the copy length, the picture brief or compose with another arrangement; a second failure drops the option."""
     opt = _option(ctx, option_id)
+    if opt.kind == "carousel":
+        out: dict[str, Any] = {"option_id": opt.id, "slides": {}}
+        first_fail: str | None = None
+        for child in ctx.children(opt):
+            if child.status == "dropped":
+                out["slides"][child.id] = {"status": "dropped", "reason": child.dropped_reason}
+                first_fail = first_fail or f"{child.id} dropped: {child.dropped_reason}"
+                continue
+            res = measure(ctx, child.id)
+            out["slides"][child.id] = res
+            if res.get("status") != "passed" and first_fail is None:
+                first_fail = f"{child.id}: {res.get('reason') or 'failed'}"
+        set_fails = carousel_set_check(ctx, opt)
+        out["set"] = {"passed": not set_fails, "failures": set_fails}
+        if set_fails and first_fail is None:
+            first_fail = "set: " + set_fails[0]
+        if first_fail is None:
+            opt.status = "passed"
+            out["status"] = "passed"
+            out["next"] = "submit when every option you want to offer has passed"
+        else:
+            out["status"] = _fail_round(ctx, opt, first_fail)
+            if out["status"] == "needs_fix":
+                out["advice"] = "one fix round: re-plan the same option id with the failing slide changed (its copy, family or picture brief)"
+            else:
+                out["reason"] = opt.dropped_reason
+        return out
     if not opt.renders and not opt.failures:
         raise ToolRefused(f"option {opt.id} has nothing composed; call compose({opt.id!r}) first")
     sizes: dict[str, dict] = {}
@@ -860,18 +1053,27 @@ def submit(ctx: RunContext, option_ids: list[str]) -> dict:
     if not isinstance(option_ids, list) or not option_ids:
         raise ToolRefused("submit refused: name at least one option id")
     opts = [_option(ctx, oid) for oid in option_ids]
+    if any(o.parent for o in opts):
+        raise ToolRefused("submit refused: name carousel options by their own id, not a slide's")
     refused: dict[str, list[str]] = {}
     for opt in opts:
         fails: list[str] = []
-        for size in ctx.size_list:
-            rec = opt.renders.get(size.name)
-            if rec is None:
-                fails.append(f"{size.name}: " + "; ".join(opt.failures.get(size.name) or ["not composed"]))
+        members = ctx.children(opt) if opt.kind == "carousel" else [opt]
+        for m in members:
+            if m.status == "dropped":
+                fails.append(f"{m.id}: dropped ({m.dropped_reason})")
                 continue
-            g = _gate(ctx, rec["rendered"], size, opt.copy, full=True)
-            rec["gate"] = g
-            rec["margin"] = margin_sum(g.measurements, ctx.profile, size)
-            fails.extend(f"{size.name}: {f}" for f in g.failures)
+            for size in ctx.size_list:
+                rec = m.renders.get(size.name)
+                if rec is None:
+                    fails.append(f"{m.id} {size.name}: " + "; ".join(m.failures.get(size.name) or ["not composed"]))
+                    continue
+                g = _gate(ctx, rec["rendered"], size, m.copy, full=True)
+                rec["gate"] = g
+                rec["margin"] = margin_sum(g.measurements, ctx.profile, size)
+                fails.extend(f"{m.id} {size.name}: {f}" for f in g.failures)
+        if opt.kind == "carousel":
+            fails.extend("set: " + f for f in carousel_set_check(ctx, opt))
         if fails:
             refused[opt.id] = fails
     if refused:
@@ -880,21 +1082,27 @@ def submit(ctx: RunContext, option_ids: list[str]) -> dict:
             status = _fail_round(ctx, ctx.options[oid], fails[0])
             notes.append(f"{oid} ({status}): " + "; ".join(fails))
         raise ToolRefused("submit refused, the gate failed on re-measure: " + " | ".join(notes))
-    opts.sort(key=lambda o: -sum(r["margin"] for r in o.renders.values()))
+    def lead(o: OptionState) -> OptionState:
+        """The option whose renders stand for the whole: a carousel's cover slide."""
+        return ctx.children(o)[0] if o.kind == "carousel" else o
+
+    opts.sort(key=lambda o: -sum(r["margin"] for r in lead(o).renders.values()))
     vision = ctx.clients.get("anthropic") if ctx.rank_with_vision else None
-    ordered = rank_mod.pairwise(opts, ctx.nearest, vision, png_of=lambda o: o.png)
+    ordered = rank_mod.pairwise(opts, ctx.nearest, vision, png_of=lambda o: lead(o).png)
     for i, opt in enumerate(ordered):
         opt.rank = i + 1
-        first = opt.renders[ctx.primary.name]
+        first = lead(opt).renders[ctx.primary.name]
         opt.distinct_signature = signature(first["rendered"].boxes, ctx.primary)
-    gate_opts = [Option(o.id, o.rank, o.family_key or o.family.get("key"), o.renders[ctx.primary.name]["picture_sha"],
-                        o.renders[ctx.primary.name]["rendered"].boxes, ctx.primary) for o in ordered]
+    gate_opts = [Option(o.id, o.rank, o.family_key or o.family.get("key"), lead(o).renders[ctx.primary.name]["picture_sha"],
+                        lead(o).renders[ctx.primary.name]["rendered"].boxes, ctx.primary) for o in ordered]
     dropped_msgs: list[str] = []
     kept_ids = {o.id for o in filter_set(gate_opts, recent_signatures=ctx.recent_signatures(), dropped=dropped_msgs)}
     kept: list[OptionState] = []
     for opt in ordered:
         if opt.id in kept_ids:
             opt.status = "offered"
+            for c in ctx.children(opt):
+                c.status, c.rank = "offered", opt.rank
             kept.append(opt)
         else:
             ctx.drop(opt, next((m for m in dropped_msgs if m.startswith(f"{opt.id}:")), "dropped by the set-level distinctness check"))
