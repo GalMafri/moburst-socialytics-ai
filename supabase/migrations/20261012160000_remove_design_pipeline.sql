@@ -14,6 +14,5 @@ drop table if exists public.platform_specs cascade;
 drop table if exists public.brand_profiles cascade;
 drop table if exists public.brand_assets cascade;
 drop function if exists public.can_act_for_client(uuid) cascade;
-delete from storage.objects where bucket_id = 'generated-media' and name like 'designs/%';
-delete from storage.objects where bucket_id = 'design-references';
-delete from storage.buckets where id = 'design-references';
+-- Storage is not touched here: Supabase refuses direct deletes from storage tables. The objects under generated-media/designs/
+-- and the design-references bucket were removed through the Storage API on 2026-10-12.
