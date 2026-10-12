@@ -38,18 +38,24 @@ Deno.serve(async (req) => {
       if (error) return json({ error: error.message }, 500);
       return json({ run: Array.isArray(data) ? data[0] || null : data || null });
     }
+    // A run belongs to the worker that leased it: extend, finish and every option write carry the lease token.
+    const owns = async (runId: string, token: unknown) => {
+      if (!runId || typeof token !== "string" || !token) return false;
+      const { data } = await admin.from("design_runs").select("id").eq("id", runId).eq("status", "running").eq("lease_token", token).maybeSingle();
+      return !!data;
+    };
     if (op === "extend") {
-      const { error } = await admin.rpc("design_runs_extend", { p_run_id: String(a.run_id), p_lease_seconds: Number(a.seconds || 900) });
+      const { data: ok, error } = await admin.rpc("design_runs_extend", { p_run_id: String(a.run_id), p_token: String(a.token || ""), p_lease_seconds: Number(a.seconds || 900) });
       if (error) return json({ error: error.message }, 500);
-      if (a.plan && typeof a.plan === "object") await admin.from("design_runs").update({ plan: a.plan }).eq("id", String(a.run_id));
+      if (!ok) return json({ error: "This run is no longer leased to this worker." }, 409);
+      if (a.plan && typeof a.plan === "object") await admin.from("design_runs").update({ plan: a.plan }).eq("id", String(a.run_id)).eq("lease_token", String(a.token));
       return json({ ok: true });
     }
     if (op === "finish") {
-      const patch: Record<string, unknown> = { status: String(a.status), spent: a.spent ?? {}, sizes: a.sizes ?? [], failure: a.failure ?? null,
-        finished_at: new Date().toISOString(), lease_until: null };
-      if (a.plan && typeof a.plan === "object") patch.plan = a.plan;
-      const { error } = await admin.from("design_runs").update(patch).eq("id", String(a.run_id));
+      const { data: ok, error } = await admin.rpc("design_runs_finish", { p_run_id: String(a.run_id), p_token: String(a.token || ""), p_status: String(a.status),
+        p_spent: a.spent ?? {}, p_sizes: a.sizes ?? [], p_failure: a.failure ?? null, p_plan: a.plan && typeof a.plan === "object" ? a.plan : null });
       if (error) return json({ error: error.message }, 500);
+      if (!ok) return json({ error: "This run is no longer leased to this worker; its result was not written." }, 409);
       return json({ ok: true });
     }
     if (op === "profile") {
@@ -73,13 +79,20 @@ Deno.serve(async (req) => {
     if (op === "write_options") {
       const rows = Array.isArray(a.rows) ? a.rows : [];
       if (!rows.length) return json({ ok: true, written: 0 });
+      const runIds = new Set(rows.map((r: Record<string, unknown>) => String(r.run_id)));
+      if (runIds.size !== 1 || !(await owns([...runIds][0], a.token))) return json({ error: "Options may only be written by the run's current worker." }, 409);
       const { error } = await admin.from("design_options").insert(rows);
       if (error) return json({ error: error.message }, 500);
       return json({ ok: true, written: rows.length });
     }
     if (op === "upload") {
-      // base64 PNG in, public URL out; the path is designs/<client>/<run>/<name>
-      const path = `designs/${String(a.client_id)}/${String(a.run_id)}/${String(a.name)}`;
+      // base64 file in, public URL out; the path is designs/<client>/<run>/<name>, written only by the run's current worker
+      const name = String(a.name || "");
+      if (!/^[A-Za-z0-9._-]{1,120}$/.test(name)) return json({ error: "The file name may carry letters, digits, dots, dashes and underscores only." }, 400);
+      if (!(await owns(String(a.run_id), a.token))) return json({ error: "Files may only be uploaded by the run's current worker." }, 409);
+      const { data: runRow } = await admin.from("design_runs").select("client_id").eq("id", String(a.run_id)).maybeSingle();
+      if (!runRow || String(runRow.client_id) !== String(a.client_id)) return json({ error: "That run does not belong to that client." }, 400);
+      const path = `designs/${String(a.client_id)}/${String(a.run_id)}/${name}`;
       const bytes = Uint8Array.from(atob(String(a.base64 || "")), (c) => c.charCodeAt(0));
       const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: String(a.content_type || "image/png"), upsert: true });
       if (error) return json({ error: error.message }, 500);
