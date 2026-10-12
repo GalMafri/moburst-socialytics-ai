@@ -74,9 +74,25 @@ def quiet_rects(sal: np.ndarray, thresh: float, min_cells: tuple[int, int] = (3,
     return out
 
 
+SUBJECT_LEVEL = 0.03  # cell saliency that counts as subject-level detail under a slot (a floor of 0.35 refuses a slot above 0.0105)
+SUBJECT_MIN = 0.01  # cell saliency (mean luminance gradient over a cell) below which nothing in the picture competes with the copy;
+# measured 2026-10-12: calm plates sit at 0.0004 (max 0.002-0.016), plates with a subject reach 0.02-0.2 where the subject is
+
+
+def subject_mask(sal: np.ndarray) -> np.ndarray:
+    """The cells that carry the picture's subject: above an absolute floor and above the frame's mean by a standard deviation."""
+    thresh = max(SUBJECT_MIN, float(sal.mean() + sal.std()))
+    return sal > thresh
+
+
 def salient_share(sal: np.ndarray, cell_box: CellBox) -> float:
-    """Mean saliency inside the cell box divided by the frame mean."""
+    """The share of the picture's subject mass that lies inside the cell box: what copy placed there would cover. A picture with
+    no subject (a flat or softly graded plate) has nothing to cover and reads 0. (The earlier measure divided the box's mean
+    saliency by the frame mean, which read every slot of a calm plate as ~1.0 and rejected the plates best suited to copy.)"""
     cy, cx, ch, cw = cell_box
-    inside = sal[cy:cy + ch, cx:cx + cw]
-    mean_all = float(sal.mean()) or 1e-9
-    return float(inside.mean()) / mean_all
+    inside_raw = sal[cy:cy + ch, cx:cx + cw]
+    level = float(inside_raw.mean()) / SUBJECT_LEVEL if inside_raw.size else 0.0  # detail under the slot, 1.0 = subject-level contrast
+    subject = np.where(subject_mask(sal), sal, 0.0)
+    total = float(subject.sum())
+    mass = float(subject[cy:cy + ch, cx:cx + cw].sum()) / total if total > 0.0 else 0.0
+    return max(mass, level)
