@@ -16,7 +16,7 @@ DEFAULT_FLOOR = 0.35
 
 @dataclass
 class ZoneRead:
-    salient_share: float  # mean saliency inside the zone over the frame mean (0 = flat, 1 = as busy as the rest)
+    salient_share: float  # share of the picture's subject mass inside the zone (0 = nothing to cover, 1 = as busy as the rest)
     quiet_rects: list[CellBox] = field(default_factory=list)  # maximal quiet rectangles of the whole frame, cells, largest first
     ok: bool = False
     floor: float = DEFAULT_FLOOR

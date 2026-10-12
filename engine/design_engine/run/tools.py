@@ -787,7 +787,12 @@ def picture_reader(ctx: RunContext, opt: OptionState) -> Callable[[Path], ZoneRe
         if not ranked:
             return ZoneRead(salient_share=0.0, ok=True, floor=float(ctx.floor))
         best = ranked[0]
-        return ZoneRead(salient_share=best.share, ok=best.ok, floor=float(ctx.floor), reason="" if best.ok else "busy under the text")
+        if best.ok:
+            return ZoneRead(salient_share=best.share, ok=True, floor=float(ctx.floor))
+        busy = max(best.busy.values()) if best.busy else 0.0
+        reason = (f"busy under the copy ({busy:.2f} above {best.busy_max:.2f})" if busy > best.busy_max
+                  else f"the copy would cover {best.share:.0%} of the picture's subject (floor {best.floor:.0%})")
+        return ZoneRead(salient_share=best.share, ok=False, floor=float(ctx.floor), reason=reason)
 
     return read
 
