@@ -234,6 +234,13 @@ def build_html(family: dict, size: Size, spec: ComposeSpec, fonts: dict[str, Pat
     slots = tpl["slots"]
     arrangement = spec.arrangement if spec.arrangement in ("p25", "p50", "p75") else "p50"
     boxes = frame_boxes(family, size, arrangement)
+    # a fitted block taller than its slot takes its own height; whatever sat below moves down
+    grown = dict(boxes)
+    for role, f in fit.items():
+        if role in grown and f.lines:
+            x, y, w, h = grown[role]
+            grown[role] = (x, y, w, max(h, f.block_h))
+    boxes = clear_text_of_text(grown, size)
     ink = spec.pair["ink_hex"]
     ground_hex = spec.pair["ground_hex"]
     kinds = list(tpl.get("ground", {}).get("kinds") or ["flat"])

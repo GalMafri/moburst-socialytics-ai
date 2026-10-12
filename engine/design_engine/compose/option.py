@@ -88,6 +88,8 @@ def _typeset(profile: dict, family: dict, size: Size, copy: Mapping, boxes: dict
             raise ValueError(f"no font file for the {role}")
         _x, _y, w, h = boxes[role]
         max_lines = _max_lines(family, role, floors)
+        # the exemplar's box is as tall as its own lines; the family allows up to max_lines, so the block may run that tall
+        h = max(h, max_lines * size_px * LINE_HEIGHT)
         fit = fit_block(str(text), Path(font), size_px, floor_px, int(w), int(h), max_lines)
         if fit.overflow:
             raise OverflowError(f"{role} does not fit {size.name} at the client's floor {floor_px:.0f}px: "

@@ -168,3 +168,14 @@ def test_set_distinctness_drops_duplicate():
     kept = filter_set(opts, recent_signatures=[signature(other, S())], dropped=dropped)
     assert [o.id for o in kept] == ["a", "c"]
     assert any(d.startswith("b: ") for d in dropped) and any(d.startswith("d: ") for d in dropped)
+
+
+def test_copy_match_tolerates_ocr_glyph_errors_but_not_missing_words():
+    from design_engine.gate.check import _copy_matches
+    from design_engine.measure.ocr import Line
+
+    exp = "The work starts before any negotiation:"
+    ok, _ = _copy_matches([Line("The work starts before any pogotgation:", [0, 0, 10, 10], 0.9)], exp)
+    assert ok
+    bad, _ = _copy_matches([Line("The work starts before any", [0, 0, 10, 10], 0.9)], exp)
+    assert not bad
