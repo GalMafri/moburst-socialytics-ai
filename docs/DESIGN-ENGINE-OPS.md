@@ -41,3 +41,17 @@ uv run python scripts/publish_profile.py --client "Bader Law" --client-id <clien
 ## Costs
 
 Static: about 18 to 26 Higgsfield credits and $1.6 to $3.4 of model spend per run of up to three options. Carousel: about 18 credits and $3 to $6 per run. Video text cards: no credits; a b-roll clip through Seedance is about 89 credits and is asked for before generation.
+
+## 12 October 2026: what changed after the first live day
+
+**Generation.** Every option's picture is now a whole-frame plate in the client's own look: `picture.brief.build_plate` sends the client's published posts as image references to GPT Image 2.5 (high), with the planner's concept for the supporting element, the family's copy area and logo corner declared calm, and nothing written anywhere. `run.tools.plate_family` sets the family's picture role to `full`, so the plate is the ground under every slot; copy and the exact logo are set on it by code and the gate is unchanged. The self-test's `unrenderable` marks no longer exclude families (the plate carries what the flat ground lacked). One `picture` call takes `option_ids` and makes every option's plates at once (`PICTURE_WORKERS`).
+
+**A run never ends in a client-facing failure.** If the first pass offers nothing, the worker runs a second pass with the first pass's reasons as rules (`SECOND_PASS_MIN_CREDITS`), then offers the brand text cards as option `T` (Remotion stills on a plate, the video's frame gate), and only then drops. The app shows a dropped run as "Finishing up"; the hourly n8n workflow **Socialytics Design Runs Check** (`cFNQ8NienyJ1HJIL`, project "Mobi Moburst") reads `design-store` `status` and mails lital@moburst.com the runs that ended with nothing offered in the last two hours (`needs_staff`) and any run stuck past its lease.
+
+**Sizes.** The main size decides an option; a companion size that fails is left out of the offer (`left_out` in the measure result). Landscape companions (W/H ≥ 1.25) are judged by the platform's band and dead-space floors, not the client's feed floors.
+
+**Video.** A plate in the client's look (one Sonnet sentence for the concept, `PLATE_CREDITS_MAX` 20) sits under the cards in slow motion; a closing card shows the mark alone; the frame gate judges the closing card's own box. If the plate fails under the cards the video re-renders on the flat brand ground. Seedance b-roll is wired (`video/broll.py`) but off until Lital approves the spend (about 89 credits a clip).
+
+**Database (migration 20261012140000, 150000, 153000).** `design_runs.lease_token`: set on lease, required by `design_runs_extend`, `design_runs_finish` and by `design-store` on `extend`, `finish`, `write_options`, `upload` (the worker's `BridgeStore` keeps the token per run). An insert trigger resets the worker's columns to server defaults (budget 45 credits), caps the copy, refuses a second queued/running run for the same post and format, and caps a client at 60 runs a day. `UPDATE` on `design_options` and `design_rules` is revoked for signed-in users (`design-pick` writes as the service role). `design_runs_status()` carries `needs_staff`.
+
+**Workers.** There is no graceful stop: to roll code, start a new worker (`nohup uv run python scripts/worker.py --poll 10 > work/_worker<N>.log 2>&1 &`) and kill an old one only when its last log lines are nothing but store polls. Runs can be queued by hand with an insert into `design_runs` (the trigger fills the rest); formats `Single Image`, `Carousel`, `Video`.
