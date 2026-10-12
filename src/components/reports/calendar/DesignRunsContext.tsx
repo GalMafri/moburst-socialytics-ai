@@ -35,6 +35,8 @@ export interface DesignRunSummary {
   sizes: Array<{ name: string; w: number; h: number }>;
   failure: string | null;
   createdAt: string;
+  leaseUntil: string | null;
+  interrupted: boolean; // running, but its worker stopped reporting: it is picked up again shortly
 }
 
 interface Ctx {
@@ -52,12 +54,12 @@ export function DesignRunsProvider({ clientId, reportId, children }: { clientId?
 
   const refresh = useCallback(async () => {
     if (!clientId) return;
-    let q = db.from("design_runs").select("id, post_key, format, status, plan, sizes, failure, created_at").eq("client_id", clientId)
+    let q = db.from("design_runs").select("id, post_key, format, status, plan, sizes, failure, created_at, lease_until").eq("client_id", clientId)
       .order("created_at", { ascending: false }).limit(200);
     if (reportId) q = q.eq("report_id", reportId);
     const { data } = await q;
     const rows = (data || []) as Array<{ id: string; post_key: string; format: string | null; status: DesignRunSummary["status"]; plan: Record<string, unknown> | null;
-      sizes: DesignRunSummary["sizes"] | null; failure: string | null; created_at: string }>;
+      sizes: DesignRunSummary["sizes"] | null; failure: string | null; created_at: string; lease_until: string | null }>;
     const latest: Record<string, DesignRunSummary> = {};
     for (const r of rows) {
       const kind = kindOfFormat(r.format);
@@ -71,7 +73,8 @@ export function DesignRunsProvider({ clientId, reportId, children }: { clientId?
         turn: Number(plan.turn || 0), options: Number(plan.options || 0), pictures: Number(plan.pictures || 0),
         composed: Number(plan.composed || 0), passed: Number(plan.passed || 0),
         offered: r.status === "offered" || r.status === "picked" ? Math.max(offeredList.length, Number(plan.passed || 0)) : 0,
-        sizes: r.sizes || [], failure: r.failure, createdAt: r.created_at,
+        sizes: r.sizes || [], failure: r.failure, createdAt: r.created_at, leaseUntil: r.lease_until,
+        interrupted: r.status === "running" && !!r.lease_until && new Date(r.lease_until).getTime() < Date.now(),
       };
     }
     setRuns(latest);
@@ -102,6 +105,7 @@ export function useDesignRunForPost(postKey?: string, kind: RunKind = "static"):
 
 /** The step a person is told about, in their words. */
 export function stageLabel(run: DesignRunSummary): string {
+  if (run.interrupted) return "Picking up again";
   switch (run.stage) {
     case "queued": return "Waiting to start";
     case "reading": return "Reading your brand";
