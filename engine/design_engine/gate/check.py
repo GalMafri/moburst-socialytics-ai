@@ -35,6 +35,7 @@ PIXEL_COPY_WHOLE = 12  # near-identical pixels over the whole frame: a copy, wha
 # (the skeleton half with the logo and the bar), so halves only feed the warning.
 SUBJECT_OVERLAP_MAX = 0.01
 TEXT_SLOTS = ("headline", "subline", "footer", "cta")
+LANDSCAPE_ASPECT = 1.25  # at or above this width/height the client's feed floors for bands and dead space give way to the platform's
 
 
 @runtime_checkable
@@ -270,13 +271,15 @@ def check(png: Path, boxes: dict, profile: dict, size: SizeLike | Mapping, refer
     # ---- composition: edge bands, dead space, content span ----
     element_boxes = [b for k, b in boxes.items() if b and k != "subject"]
     top, bot = empty_bands(arr, element_boxes)
-    band_max = float(floors.get("edge_band_max", 0.16))
+    # the client's composition floors were measured on its feed (portrait and square); a landscape companion is judged by the platform's
+    landscape = W / max(H, 1) >= LANDSCAPE_ASPECT
+    band_max = 0.16 if landscape else float(floors.get("edge_band_max", 0.16))
     m["empty_bands"] = {"top": round(top, 3), "bottom": round(bot, 3)}
     for name, v in (("top", top), ("bottom", bot)):
         if v > band_max:
             fails.append(f"empty {name} band {_fmt(v)} of the height is above {_fmt(band_max)}")
     dead = largest_free_rect(W, H, element_boxes)
-    dead_max = float(floors.get("dead_space_max", 0.38))
+    dead_max = 0.38 if landscape else float(floors.get("dead_space_max", 0.38))
     m["dead_space"] = round(dead, 3)
     if dead > dead_max:
         fails.append(f"largest free rectangle {_fmt(dead)} of the frame is above {_fmt(dead_max)}")

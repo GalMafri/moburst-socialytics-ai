@@ -270,3 +270,21 @@ def test_profile_fragments_never_put_forbidden_words_in_the_brief():
     b = brief_mod.build(profile, FAMILY, SLOT_ZONE, "a quiet stadium at night", "instagram")
     assert brief_mod.is_clean(brief_mod.without_clause(b.text), "Bader Law") and "result card" not in b.text and "holding a card" not in b.text
     assert "Office interiors" not in b.text
+
+
+def test_plate_brief_carries_the_clients_posts_as_references(tmp_path):
+    """A plate brief: the client's posts as look references, the concept, the calm zone and the mark's corner, nothing written; GPT Image."""
+    refs = []
+    for i in range(6):
+        p = tmp_path / f"post-{i}.jpg"
+        p.write_bytes(b"jpg")
+        refs.append(p)
+    b = brief_mod.build_plate(PROFILE, FAMILY, SLOT_ZONE, "a rain-streaked windshield at dusk, soft brake lights ahead", "linkedin", refs,
+                              picture_aspect=0.8, logo_zone={"x": 0.06, "y": 0.05, "w": 0.3, "h": 0.05})
+    assert b.model == "gpt_image_2_5" and b.params["quality"] == "high" and b.aspect == "4:5"
+    assert len(b.reference_paths) == brief_mod.MAX_PLATE_REFERENCES
+    assert "reference posts" in b.text and "windshield" in b.text and "upper 45%" in b.text and "brand mark" in b.text
+    assert brief_mod.is_clean(brief_mod.without_clause(b.text), "Bader Law")
+    assert "Office interiors" not in b.text  # the look comes from the references, not from pasted scene descriptions
+    with pytest.raises(brief_mod.BriefRefused):
+        brief_mod.build_plate(PROFILE, FAMILY, SLOT_ZONE, "the firm's logo carved in marble", "linkedin", refs)

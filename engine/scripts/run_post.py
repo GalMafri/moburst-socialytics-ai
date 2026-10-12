@@ -292,7 +292,7 @@ def build_context(args: argparse.Namespace, browser) -> tuple[RunContext, dict]:
     if not profile_path.exists():
         raise SystemExit(f"no profile at {profile_path}; run scripts/learn_client.py first")
     profile = json.loads(profile_path.read_text())
-    families = [f for f in profile.get("families") or [] if f.get("status", "family") == "family" and "headline" in ((f.get("template") or {}).get("slots") or {})]
+    families = [f for f in profile.get("families") or [] if f.get("status", "family") in ("family", "unrenderable") and "headline" in ((f.get("template") or {}).get("slots") or {})]
     if not families:
         raise SystemExit("the profile has no family with a headline slot; nothing can be typeset")
     reads_path = ws / "out" / "reads.json"
