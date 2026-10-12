@@ -134,15 +134,11 @@ def is_video_format(fmt: str | None) -> bool:
     return bool(VIDEO_FORMATS.search(str(fmt or "")))
 
 
-def process_video(store: Any, run: Run, profile: dict, ws: Path) -> dict:
-    """A video run: text cards from the post copy in the brand, rendered and gated; one option row with the mp4 and a poster."""
-    from ..video.make import make_video
-
+def card_assets(profile: dict, ws: Path) -> tuple[dict, list[dict]]:
+    """The fonts and logo files the brand cards (video and the fallback stills) are set with."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
     from run_post import choose_fonts  # noqa: E402
 
-    platform, size_list = sizes_for(run.platform, run.format)
-    size = size_list[0]
     typ = profile.get("type") or {}
     stand_in = typ.get("accepted_stand_in") or os.environ.get("DESIGN_STAND_IN_FONT")
     if typ.get("status") != "resolved" and not stand_in:
@@ -150,9 +146,63 @@ def process_video(store: Any, run: Run, profile: dict, ws: Path) -> dict:
         stand_in = str(cands[0]["file"]) if cands else None
     headline_font, subline_font, _ = choose_fonts(profile, stand_in, ws / "website" / "fonts")
     logo_files = [{**f, "path": str(ws / f["path"]) if not Path(str(f["path"])).is_absolute() else f["path"]} for f in (profile.get("logo") or {}).get("files") or []]
+    return {"headline": headline_font, "subline": subline_font}, logo_files
+
+
+FALLBACK_KEY = "T"  # the brand text cards, offered when no composed option passes
+
+
+def fallback_rows(store: Any, run: Run, ctx: RunContext, profile: dict, ws: Path) -> tuple[list[dict], str | None]:
+    """The guaranteed deliverable: the brand's text cards (the video's own composition and frame gate) as stills at every size of the
+    run. A static run offers the first card as option T; a carousel offers every card as the slides of T. Returns (rows, failure)."""
+    from ..video.make import make_card_stills
+
+    fonts, logo_files = card_assets(profile, ws)
+    out_dir = ctx.run_dir / "fallback"
+    per_size: dict[str, list] = {}
+    for size in ctx.size_list:
+        stills, fail = make_card_stills(profile, run.copy, size, fonts, logo_files, out_dir / size.name, only_first=not ctx.is_carousel)
+        if fail or not stills:
+            return [], fail or "no card could be rendered"
+        per_size[size.name] = stills
+    n_cards = min(len(v) for v in per_size.values())
+    if n_cards == 0 or any(not s.passed for v in per_size.values() for s in v[:n_cards]):
+        fails = [f"{name} card {s.index + 1}: {'; '.join(s.failures[:2])}" for name, v in per_size.items() for s in v[:n_cards] if not s.passed]
+        return [], "the brand cards failed the frame checks: " + "; ".join(fails)[:600]
+
+    def files_for(card_index: int) -> dict:
+        files = {}
+        for size in ctx.size_list:
+            still = per_size[size.name][card_index]
+            name = f"{FALLBACK_KEY}{'' if n_cards == 1 and not ctx.is_carousel else '.' + str(card_index + 1)}-{size.name}.png"
+            url = store.upload(run.client_id, run.id, Path(still.png), name)
+            files[size.name] = {"url": url, "path": f"designs/{run.client_id}/{run.id}/{name}", "w": size.w, "h": size.h, "passed": True}
+        return files
+
+    base = {"run_id": run.id, "client_id": run.client_id, "family_key": None, "arrangement": "cards", "picture_jobs": [], "status": "offered"}
+    rank = 1 + sum(1 for o in ctx.options.values() if o.status == "offered" and not o.parent)
+    if not ctx.is_carousel:
+        return [{**base, "option_key": FALLBACK_KEY, "rank": rank, "kind": "static", "parent_key": None, "slide_role": None, "files": files_for(0),
+                 "measurements": {"fallback": True, "copy": per_size[ctx.size_list[0].name][0].headline}}], None
+    rows = [{**base, "option_key": FALLBACK_KEY, "rank": rank, "kind": "carousel", "parent_key": None, "slide_role": None, "files": {},
+             "measurements": {"fallback": True, "slides": n_cards}}]
+    for i in range(n_cards):
+        role = "cover" if i == 0 else "closing" if i == n_cards - 1 else "body"
+        rows.append({**base, "option_key": f"{FALLBACK_KEY}.{i + 1}", "rank": i + 1, "kind": "slide", "parent_key": FALLBACK_KEY, "slide_role": role,
+                     "files": files_for(i), "measurements": {"fallback": True, "copy": per_size[ctx.size_list[0].name][i].headline}})
+    return rows, None
+
+
+def process_video(store: Any, run: Run, profile: dict, ws: Path) -> dict:
+    """A video run: text cards from the post copy in the brand, rendered and gated; one option row with the mp4 and a poster."""
+    from ..video.make import make_video
+
+    platform, size_list = sizes_for(run.platform, run.format)
+    size = size_list[0]
+    fonts, logo_files = card_assets(profile, ws)
     out_dir = ws / "video" / f"{time.strftime('%Y%m%d-%H%M%S')}-{run.id[:8]}"
     store.heartbeat(run.id, LEASE_SECONDS, plan={"stage": "pictures", "turn": 1, "options": 1, "pictures": 0, "composed": 0, "passed": 0, "sizes": [size.name]})
-    res = make_video(profile, run.copy, size, {"headline": headline_font, "subline": subline_font}, logo_files, out_dir)
+    res = make_video(profile, run.copy, size, fonts, logo_files, out_dir)
     sizes = [{"name": size.name, "w": size.w, "h": size.h}]
     if res.status != "ok" or not res.mp4:
         return {"status": "dropped", "spent": {"usd": 0.0, "credits": 0.0}, "sizes": sizes, "failure": res.failure or "the video did not pass the checks",
@@ -187,12 +237,22 @@ def process(store: Any, run: Run, browser: Any, clients: dict) -> dict:
         with keepalive(store, run.id):  # a turn whose pictures outlast the lease must not be picked up by a second worker
             result = loop.run_post(ctx)
         rows = option_rows(store, run, ctx, result)
+        offered = [o.id for o in result.options]
+        reasons = "; ".join(f"{d['id']}: {d['reason']}" for d in result.dropped)[:1000] or "nothing passed the gate"
+        note = None
+        if not rows:  # nothing composed passed: the brand's own text cards are offered, through the video's renderer and frame gate
+            store.heartbeat(run.id, LEASE_SECONDS, plan={**ctx.progress(ctx.spent.get("turns", 0)), "stage": "checking"})
+            rows, fb_failure = fallback_rows(store, run, ctx, profile, ws)
+            if rows:
+                offered = [FALLBACK_KEY]
+                note = f"composed options dropped ({reasons}); the brand cards were offered"
+            else:
+                reasons = f"{reasons}; brand cards: {fb_failure}"
         store.write_options(rows)
-        status = "offered" if result.options else "dropped"
-        failure = None if result.options else "; ".join(f"{d['id']}: {d['reason']}" for d in result.dropped)[:1000] or "nothing passed the gate"
+        status = "offered" if rows else "dropped"
         payload = {"status": status, "spent": {k: v for k, v in ctx.spent.items() if k != "model_calls"} | {"model_calls": len(ctx.spent.get("model_calls") or [])},
-                   "sizes": [{"name": s.name, "w": s.w, "h": s.h} for s in ctx.size_list], "failure": failure,
-                   "plan": {"stage": "finished", "offered": [o.id for o in result.options], "dropped": result.dropped, "run_dir": str(ctx.run_dir)}}
+                   "sizes": [{"name": s.name, "w": s.w, "h": s.h} for s in ctx.size_list], "failure": None if rows else reasons,
+                   "plan": {"stage": "finished", "offered": offered, "dropped": result.dropped, "run_dir": str(ctx.run_dir), "note": note}}
     except Exception as e:  # noqa: BLE001  the run row carries the reason; the worker lives on
         log.error("run %s failed: %s\n%s", run.id, e, traceback.format_exc())
         payload = {"status": "failed", "spent": {}, "sizes": [], "failure": f"{type(e).__name__}: {e}"[:1000], "plan": {"stage": "failed"}}
