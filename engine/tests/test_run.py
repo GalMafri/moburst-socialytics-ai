@@ -373,6 +373,10 @@ def test_carousel_chain(tmp_path, family, fonts, logo_files, browser):
         tools.plan(ctx, [{"id": "K", "slides": slides[:1]}])
     with pytest.raises(tools.ToolRefused, match="copy's order"):
         tools.plan(ctx, [{"id": "K", "slides": [slides[1], slides[0], slides[2]]}])
+    family["parameters"]["headline_chars"] = {"p25": 40.0, "p50": 44.0, "p75": 48.0}
+    with pytest.raises(tools.ToolRefused, match="under the family's measure"):
+        tools.plan(ctx, [{"id": "K", "slides": slides}])
+    family["parameters"]["headline_chars"] = {"p25": 12.0, "p50": 14.0, "p75": 28.0}
     out = tools.plan(ctx, [{"id": "K", "slides": slides}])
     assert out["accepted"] == ["K"] and ctx.options["K"].kind == "carousel" and ctx.options["K"].slides == ["K.1", "K.2", "K.3"]
     assert ctx.options["K.1"].slide_role == "cover" and ctx.options["K.2"].slide_role == "body"

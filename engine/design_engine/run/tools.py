@@ -49,6 +49,7 @@ from ..platform.specs import Size
 
 MAX_OPTIONS = 3
 MAX_CAROUSEL_OPTIONS = 2
+SLIDE_MIN_SHARE = 0.6  # a slide's copy length against the family's headline_chars p25
 PICTURES_PER_SLIDE = 1
 MIN_SLIDES = 2
 LETTERING_CONFIDENCE = 0.6
@@ -553,6 +554,12 @@ def _check_carousel(ctx: RunContext, i: int, o: Mapping, recent_families: set[st
         child, probs = _check_option(ctx, n, {**sl, "id": cid, "arrangement": "family"}, set(), recent_concepts, allow_no_picture=True)
         problems.extend(probs)
         if child:
+            # a slide carries as much copy as the family's posts do: a fragment leaves the family's text area empty and fails the gate
+            p25 = ((child.family.get("parameters") or {}).get("headline_chars") or {}).get("p25")
+            total = len(_norm(child.headline)) + len(_norm(child.subline or ""))
+            if isinstance(p25, (int, float)) and p25 > 0 and total < SLIDE_MIN_SHARE * float(p25):
+                problems.append(f"{cid}: {total} characters of copy is under the family's measure ({p25:.0f} x {SLIDE_MIN_SHARE} = {p25 * SLIDE_MIN_SHARE:.0f}); "
+                                "give the slide a fuller line or pair it with a subline")
             child.parent, child.slide_role, child.kind = oid, role, "static"
             children.append(child)
             pos = copy.find(_norm(child.headline).lower())
