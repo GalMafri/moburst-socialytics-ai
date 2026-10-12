@@ -145,8 +145,14 @@ def _norm(text: str) -> str:
     return s[:1].lower() + s[1:]
 
 
+COPY_SIMILARITY_MIN = 0.92  # OCR misreads a glyph or two on small type ("negotiation" as "pogotgation"); a dropped word still fails
+
+
 def _copy_matches(lines: list[Line], expected: str) -> tuple[bool, str]:
-    """True when the OCR'd lines equal the copy ignoring whitespace, the first letter's case and line order."""
+    """True when the OCR'd lines equal the copy ignoring whitespace, the first letter's case and line order, or come within
+    COPY_SIMILARITY_MIN of it (OCR's own errors on small type), never when words are missing or added."""
+    from difflib import SequenceMatcher
+
     texts = [ln.text for ln in lines]
     target = _norm(expected)
     read = " ".join(t.strip() for t in texts)
@@ -156,6 +162,11 @@ def _copy_matches(lines: list[Line], expected: str) -> tuple[bool, str]:
         for perm in itertools.permutations(texts):
             if _norm("".join(perm)) == target:
                 return True, read
+    joined = _norm("".join(texts))
+    if target and abs(len(joined) - len(target)) <= max(2, len(target) // 25):
+        ratio = SequenceMatcher(None, joined.lower(), target.lower()).ratio()
+        if ratio >= COPY_SIMILARITY_MIN and len(read.split()) == len(expected.split()):
+            return True, read
     return False, read
 
 
