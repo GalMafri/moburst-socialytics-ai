@@ -82,7 +82,8 @@ _SCHEMAS: dict[str, dict] = {
                 "family_key": {"type": "string"}, "headline": {"type": "string"}, "subline": {"type": ["string", "null"]}, "footer": {"type": ["string", "null"]},
                 "picture_brief": {"type": ["string", "null"]}}, "required": ["family_key", "headline"]}}},
         "required": []}}}, "required": ["options"], "additionalProperties": False},
-    "picture": {"type": "object", "properties": {"option_id": {"type": "string"}}, "required": ["option_id"], "additionalProperties": False},
+    "picture": {"type": "object", "properties": {"option_id": {"type": "string"}, "option_ids": {"type": "array", "items": {"type": "string"}}},
+                "additionalProperties": False},
     "compose": {"type": "object", "properties": {"option_id": {"type": "string"},
                                                  "arrangement": {"description": "p25 | p50 | p75, or {name, slot: {x, y}} overrides; omit to try them all",
                                                                  "anyOf": [{"type": "string"}, {"type": "object"}, {"type": "null"}]}},
@@ -95,7 +96,8 @@ _DESCRIPTIONS = {
     "read_brand": "The measured brand profile, families, floors, rules, the post, the sizes and the last three runs.",
     "nearest_posts": "The client's own posts closest to this copy, with their family and measurements.",
     "plan": "Record up to three options (family or new arrangement, headline and subline from the post copy, picture brief). Refused when a rule breaks.",
-    "picture": "Make two measured pictures for an option through Higgsfield; credits are recorded.",
+    "picture": "Make two measured pictures per option through Higgsfield; credits are recorded. Pass option_ids with every option that needs a "
+               "picture in ONE call: they are made at the same time, so one call for three options takes as long as one option.",
     "compose": "Render every size x picture x arrangement for an option and keep the best per size by gate margins.",
     "measure": "Run the full gate on an option's kept renders; returns pass or the failures with numbers.",
     "submit": "Re-measure every file of the named options; accept only when all pass; order and filter the set.",
@@ -161,7 +163,7 @@ def build_tools(ctx: RunContext) -> list:
         return beta_tool(tool, name=name, description=_DESCRIPTIONS[name], input_schema=_SCHEMAS[name])
 
     return [wrap("read_brand", tools.read_brand), wrap("nearest_posts", tools.nearest_posts), wrap("plan", tools.plan),
-            wrap("picture", tools.picture), wrap("compose", tools.compose), wrap("measure", tools.measure), wrap("submit", tools.submit)]
+            wrap("picture", tools.pictures), wrap("compose", tools.compose), wrap("measure", tools.measure), wrap("submit", tools.submit)]
 
 
 def _first_message(ctx: RunContext) -> str:
