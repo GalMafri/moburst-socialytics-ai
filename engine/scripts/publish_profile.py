@@ -63,7 +63,9 @@ def main() -> None:
     profile = json.loads((ws / "out" / "profile.json").read_text())
     body = compact(profile, args.client_id, args.version)
     store = BridgeStore.from_env()
-    out = store.publish_profile(args.client_id, body, args.version, args.confirm, (profile.get("sources") or [])[:20])
+    sources = profile.get("sources") or []
+    sources = sources[:20] if isinstance(sources, list) else [sources]
+    out = store.publish_profile(args.client_id, body, args.version, args.confirm, sources)
     print(f"published {args.client} v{args.version}: {out.get('profile')} ({len(json.dumps(body))} bytes)")
 
 
