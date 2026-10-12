@@ -11,6 +11,7 @@ import os
 import sys
 import time
 import contextlib
+from dataclasses import replace
 import threading
 import traceback
 from pathlib import Path
@@ -25,6 +26,7 @@ from .store import FakeStore, Run, StoreError, SupabaseStore
 log = logging.getLogger("design_worker")
 POLL_SECONDS = 15
 LEASE_SECONDS = 300  # an abandoned run is picked up again within five minutes
+SECOND_PASS_MIN_CREDITS = 8.0  # a run whose first pass offered nothing gets a fresh plan when this many credits remain
 KEEPALIVE_SECONDS = 60.0  # the lease is extended this often while a run is in flight, whatever its turns are doing
 
 
@@ -236,6 +238,23 @@ def process(store: Any, run: Run, browser: Any, clients: dict) -> dict:
         ctx.on_progress = lambda p: store.heartbeat(run.id, LEASE_SECONDS, plan=p)
         with keepalive(store, run.id):  # a turn whose pictures outlast the lease must not be picked up by a second worker
             result = loop.run_post(ctx)
+            if not result.options and ctx.budget.max_credits - ctx.spent["credits"] >= SECOND_PASS_MIN_CREDITS:
+                # a second pass with a fresh plan: the first pass's reasons become rules it must design around
+                reasons = "; ".join(f"{d['id']}: {d['reason']}" for d in result.dropped)[:800] or "nothing passed the gate"
+                rules = store.rules(run.client_id) + [f"The previous attempt on this post dropped every option ({reasons}). Choose other families, "
+                                                      "calmer picture concepts (plain or softly graded grounds under the copy) and shorter lines."]
+                ctx2 = build_context(run, profile, rules, store.prior_runs(run.client_id), ws, browser, clients)
+                ctx2.budget = replace(ctx2.budget, max_credits=max(0.0, ctx.budget.max_credits - ctx.spent["credits"]),
+                                      max_usd=max(0.5, ctx.budget.max_usd - ctx.spent["usd"]))
+                ctx2.run_dir = ctx.run_dir / "pass-2"
+                ctx2.on_progress = ctx.on_progress
+                result2 = loop.run_post(ctx2)
+                first_spent = dict(ctx.spent)
+                ctx, result = ctx2, result2
+                ctx.spent["credits"] += first_spent.get("credits", 0.0)
+                ctx.spent["usd"] = round(ctx.spent["usd"] + first_spent.get("usd", 0.0), 6)
+                ctx.spent["turns"] += first_spent.get("turns", 0)
+                ctx.spent["first_pass"] = {"credits": first_spent.get("credits", 0.0), "usd": first_spent.get("usd", 0.0), "reasons": reasons}
         rows = option_rows(store, run, ctx, result)
         offered = [o.id for o in result.options]
         reasons = "; ".join(f"{d['id']}: {d['reason']}" for d in result.dropped)[:1000] or "nothing passed the gate"
