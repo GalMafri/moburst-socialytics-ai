@@ -20,7 +20,7 @@ export interface DesignRequest {
   calendar_post_key: string;
   platform: string | null;
   post_copy: string;
-  status: "preparing" | "ready" | "needs_staff";
+  status: "preparing" | "ready" | "needs_staff" | "canceled";
   stage: DesignStage;
   kind?: "single" | "carousel" | "video";
   options_wanted: number;
@@ -167,4 +167,10 @@ export async function sendDesignFeedback(args: { iterationId: string; verdict: "
 /** Whether a design's media is a video file. */
 export function isVideoMedia(url: string): boolean {
   return /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(url);
+}
+
+/** Stop a design being prepared. The post keeps the design it already had. */
+export async function cancelDesign(requestId: string): Promise<void> {
+  const { data, error } = await supabase.functions.invoke("design-request", { body: { action: "cancel", request_id: requestId } });
+  if (error || data?.error) throw new Error(data?.error || error?.message || "Could not stop the design.");
 }

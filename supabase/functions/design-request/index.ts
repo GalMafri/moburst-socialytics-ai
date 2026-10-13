@@ -64,6 +64,22 @@ Deno.serve(async (req) => {
       return json({ request });
     }
 
+    // Stop a design being prepared: whoever could start it can stop it. The
+    // request and its unfinished jobs are cancelled, so the workers spend
+    // nothing more on it; the post keeps the design it already had, and the
+    // automatic designs leave a cancelled post alone.
+    if (body?.action === "cancel") {
+      const { data: request } = await admin.from("design_requests").select("id, client_id, status").eq("id", String(body.request_id || "")).maybeSingle();
+      if (!request) return json({ error: "That design is not being prepared." }, 404);
+      await requireMember(req, request.client_id);
+      if (request.status !== "preparing" && request.status !== "needs_staff") return json({ request });
+      await admin.from("canva_finish_jobs").update({ status: "canceled", lease_until: null, updated_at: new Date().toISOString() })
+        .eq("design_request_id", request.id).in("status", ["queued", "running"]);
+      const { data: updated } = await admin.from("design_requests").update({ status: "canceled", updated_at: new Date().toISOString() })
+        .eq("id", request.id).select("*").single();
+      return json({ request: updated });
+    }
+
     // Designs for upcoming calendar posts that have none, for clients whose
     // staff switched it on. Run by the hourly schedule.
     if (body?.action === "auto") {

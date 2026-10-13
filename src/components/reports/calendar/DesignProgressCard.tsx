@@ -5,8 +5,11 @@
  */
 
 import { useEffect, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
-import { DESIGN_STEPS, elapsedLabel, progressPercent, stageIndex, typicalMinutes, type DesignRequest } from "@/lib/designRequests";
+import { Check, Loader2, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DESIGN_STEPS, cancelDesign, elapsedLabel, progressPercent, stageIndex, typicalMinutes, type DesignRequest } from "@/lib/designRequests";
 import { useDesignRequests } from "./DesignRequestsContext";
 
 export function DesignProgressCard({ request, isStaff, replacing = false }: { request: DesignRequest; isStaff: boolean; replacing?: boolean }) {
@@ -15,7 +18,18 @@ export function DesignProgressCard({ request, isStaff, replacing = false }: { re
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-  const history = useDesignRequests()?.requests ?? [];
+  const ctx = useDesignRequests();
+  const history = ctx?.requests ?? [];
+  const [confirming, setConfirming] = useState(false);
+  const stop = async () => {
+    try {
+      await cancelDesign(request.id);
+      ctx?.refresh();
+      toast.success(`The ${request.kind === "carousel" ? "carousel" : request.kind === "video" ? "video" : "design"} was stopped`);
+    } catch (e) {
+      toast.error("Could not stop it", { description: e instanceof Error ? e.message : "Try again." });
+    }
+  };
   const current = stageIndex(request);
   const pct = progressPercent(request);
   const staffAttention = isStaff && request.status === "needs_staff";
@@ -36,8 +50,21 @@ export function DesignProgressCard({ request, isStaff, replacing = false }: { re
               : `${over ? "Taking a little longer than usual" : `Usually about ${usual} minutes`}. ${replacing ? `The current ${noun} stays until the new one is ready. ` : ""}You can close this panel; it keeps going.`}
           </p>
         </div>
-        <span className="t-label shrink-0 tabular-nums">{elapsedLabel(request.created_at, now)}</span>
+        <div className="shrink-0 flex items-center gap-1">
+          <span className="t-label tabular-nums">{elapsedLabel(request.created_at, now)}</span>
+          <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => setConfirming(true)} aria-label={`Stop preparing this ${noun}`}>
+            <X className="h-3.5 w-3.5 mr-1" aria-hidden />Cancel
+          </Button>
+        </div>
       </div>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`Stop preparing this ${noun}?`}
+        description={replacing ? `It stops now, and the current ${noun} stays on the post. You can make a new one any time.` : `It stops now. You can start a new one any time.`}
+        confirmLabel="Stop it"
+        onConfirm={async () => { setConfirming(false); await stop(); }}
+      />
 
       <ol className="grid grid-cols-3 gap-2" aria-label="Steps">
         {DESIGN_STEPS.map((step, i) => {
