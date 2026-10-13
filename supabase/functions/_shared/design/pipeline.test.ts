@@ -70,6 +70,7 @@ describe("logo check", () => {
     expect(parseLogoCheck('{"clear": false, "touching": "a white frame line runs through it"}')).toEqual({ clear: false, touching: "a white frame line runs through it" });
     expect(parseLogoCheck('Sure: {"clear": true, "touching": ""}')).toEqual({ clear: true, touching: "" });
     expect(parseLogoCheck("it looks fine")).toBeNull();
+    expect(parseLogoCheck('{"clear": false, "touching": "a glow behind the "L" of the wordmark"}')).toEqual({ clear: false, touching: 'a glow behind the "L" of the wordmark' });
   });
 });
 

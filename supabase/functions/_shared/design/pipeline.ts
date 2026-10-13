@@ -54,16 +54,23 @@ export function logoCheckPrompt(brand: string): string {
     'Reply with JSON only: {"clear": true or false, "touching": "what touches or crosses the logo, or empty"}';
 }
 
-/** The logo check's answer, or null when it is not the JSON asked for. */
+/**
+ * The logo check's answer, or null when it gives none. The description of
+ * what touches the logo can quote letters and break the JSON, so the yes or
+ * no is also read on its own.
+ */
 export function parseLogoCheck(text: string): { clear: boolean; touching: string } | null {
   const a = text.indexOf("{"), b = text.lastIndexOf("}");
-  if (a < 0 || b <= a) return null;
-  try {
-    const v = JSON.parse(text.slice(a, b + 1));
-    return typeof v?.clear === "boolean" ? { clear: v.clear, touching: String(v.touching ?? "") } : null;
-  } catch {
-    return null;
+  if (a >= 0 && b > a) {
+    try {
+      const v = JSON.parse(text.slice(a, b + 1));
+      if (typeof v?.clear === "boolean") return { clear: v.clear, touching: String(v.touching ?? "") };
+    } catch { /* read the fields on their own below */ }
   }
+  const clear = /"clear"\s*:\s*"?(true|false)"?/i.exec(text);
+  if (!clear) return null;
+  const touching = /"touching"\s*:\s*"([\s\S]*?)"\s*}/.exec(text);
+  return { clear: clear[1].toLowerCase() === "true", touching: touching ? touching[1] : "" };
 }
 
 /** Text compared the way a reader sees it: case, quote style, dash style and spacing do not count. */

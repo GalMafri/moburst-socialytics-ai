@@ -322,7 +322,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
           },
         });
         const seen = parseLogoCheck(look.text);
-        if (!seen) throw new Error("The area around the logo could not be read.");
+        if (!seen) throw new Error(`The area around the logo could not be read: ${look.text.slice(0, 200)}`);
         s.logo_check = seen;
         if (!seen.clear) {
           console.warn(`[design-worker] job ${job.id}: the logo is touched by ${seen.touching}; designing again.`);
