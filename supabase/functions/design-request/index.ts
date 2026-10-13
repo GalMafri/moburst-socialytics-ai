@@ -231,6 +231,10 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   if (!briefs.length) throw new Error("The options could not be planned.");
   briefs = withRefs(briefs, library, recentList);
 
+  // Stopped while it was being planned: nothing is started.
+  const { data: still } = await admin.from("design_requests").select("status").eq("id", request.id).maybeSingle();
+  if (still?.status !== "preparing") return;
+
   const planned: DesignRequest = { ...request, briefs };
   // The jobs exist before the request leaves planning. The worker settles
   // every request past planning, and one it found with no jobs yet started a
