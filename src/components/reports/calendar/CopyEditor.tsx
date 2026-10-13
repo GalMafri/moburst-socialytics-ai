@@ -223,9 +223,10 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
         <>
           <div className="bg-background rounded-md p-4 border">
             <p className="text-base leading-relaxed whitespace-pre-line">{displayCopy}</p>
-            {post.hashtags?.length > 0 && (
+            {/* Hashtags the copy does not already end with; most copy carries its own. */}
+            {post.hashtags?.length > 0 && post.hashtags.some((h: string) => !String(displayCopy || "").toLowerCase().includes((h.startsWith("#") ? h : `#${h}`).toLowerCase())) && (
               <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t">
-                {post.hashtags.map((h: string) => (
+                {post.hashtags.filter((h: string) => !String(displayCopy || "").toLowerCase().includes((h.startsWith("#") ? h : `#${h}`).toLowerCase())).map((h: string) => (
                   <span key={h} className="text-sm text-primary">
                     {h.startsWith("#") ? h : `#${h}`}
                   </span>
