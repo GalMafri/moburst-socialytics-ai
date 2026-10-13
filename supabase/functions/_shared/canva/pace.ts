@@ -42,8 +42,9 @@ export class Pace {
 
 /** Canva is at its rate limit: the step waits for a later pass instead of failing. */
 export class CanvaBusy extends Error {
-  constructor(public waitMs: number, what: string) {
-    super(`Canva is at its rate limit for ${what}; trying again in ${Math.ceil(waitMs / 1000)}s.`);
+  /** why: "at its rate limit for" (a 429), or "unavailable for" (server errors that outlasted the resends). */
+  constructor(public waitMs: number, what: string, why = "at its rate limit for") {
+    super(`Canva is ${why} ${what}; trying again in ${Math.ceil(waitMs / 1000)}s.`);
     this.name = "CanvaBusy";
   }
 }

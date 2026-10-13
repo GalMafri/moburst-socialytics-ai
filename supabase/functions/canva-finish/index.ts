@@ -526,6 +526,8 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
     // next pass, so a pass ends on time.
     case "edit": return await editStep(deadline, () => editLayers(admin, token, job));
     case "place_logo": return await editStep(deadline, () => placeLogo(admin, token, job));
+    // Finished, but its request ended before the job was marked done.
+    case "finished": return "done";
   }
   throw new Error(`FINAL: Unknown step '${job.step}'`);
 }

@@ -18,6 +18,8 @@ const URL_MCP = "https://mcp.canva.com/mcp";
 const RETRIES = 5;
 /** Longest a call waits for its turn under the pace before handing the step back to a later pass. */
 const MAX_PACE_WAIT_MS = 12_000;
+/** How long a step waits when Canva keeps answering with server errors. */
+const UNAVAILABLE_WAIT_MS = 60_000;
 /** How long until a call to this tool may go (0: go now, and it is counted). */
 export type PaceFn = (tool: string) => Promise<number>;
 /** Without a shared count, sessions in one process share this one. */
@@ -46,8 +48,11 @@ export class CanvaMcp {
         await new Promise((r) => setTimeout(r, wait));
         continue;
       }
-      if (resp.status >= 500 && attempt < RETRIES) {
+      if (resp.status >= 500) {
         await resp.body?.cancel();
+        // An outage on Canva's side is waited out on a later pass; it is not
+        // the design's failure (four slides failed in a few minutes on 13 Oct).
+        if (attempt >= RETRIES) throw new CanvaBusy(UNAVAILABLE_WAIT_MS, String((body.params as any)?.name ?? body.method), "unavailable for");
         await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
         continue;
       }

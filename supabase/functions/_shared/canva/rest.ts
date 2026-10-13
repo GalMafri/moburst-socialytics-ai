@@ -30,6 +30,13 @@ async function call(token: string, method: string, path: string, body?: unknown,
       await new Promise((r) => setTimeout(r, wait));
       continue;
     }
+    if (resp.status >= 500) {
+      await resp.body?.cancel();
+      // Canva's own outage: resent with backoff, then waited out on a later pass.
+      if (attempt >= RATE_RETRIES) throw new CanvaBusy(60_000, `${method} ${path.split("/")[1] ?? path}`, "unavailable for");
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+      continue;
+    }
     const text = await resp.text();
     if (!resp.ok) throw new Error(`Canva ${method} ${path} ${resp.status}: ${text.slice(0, 300)}`);
     return text ? JSON.parse(text) : {};
