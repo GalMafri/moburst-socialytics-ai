@@ -1,8 +1,10 @@
 // @vitest-environment node
 // Node, like the Deno runtime, has AbortSignal.timeout; jsdom does not.
 import { describe, it, expect } from "vitest";
-import { makePoster, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
+import { makePoster, NEEDS_TRACKING, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
+import { RETRY_MINUTES } from "./worker";
 import type { ScheduledJob } from "./types";
+import type { LandscapeCheck } from "../_shared/competitive/landscapeCheck";
 
 // The behaviours QA-10, QA-11 and QA-04 in scripts/qa-backend.cjs checked
 // against the old single-request scheduler, now checked against the queue's
@@ -25,6 +27,10 @@ function world(opts: { kinds?: Array<"competitive" | "social">; set?: boolean } 
     reports: [] as Array<{ id: string; client_id: string; status: string; date_range_start: string; date_range_end: string; error?: string }>,
     setStatus: {} as Record<string, string>,
     notes: [] as Array<{ id: string; result: string }>,
+    /** Status of each schedule's dispatch job for its current occurrence. Both are enqueued together. */
+    jobStatus: Object.fromEntries(kinds.map((kind) => [`sched-${kind}`, "queued"])) as Record<string, string>,
+    /** Social jobs put back in the queue by releaseHeldSocial. */
+    released: [] as string[],
     webhooks: { social: "https://n8n.fixture/social", competitive: "https://n8n.fixture/competitive" } as { social: string | null; competitive: string | null },
   };
   const writes: string[] = [];
@@ -34,8 +40,18 @@ function world(opts: { kinds?: Array<"competitive" | "social">; set?: boolean } 
     async competitorSet(clientId) { return tables.sets.find((s) => s.client_id === clientId) ?? null; },
     async competitiveReport(id, clientId) { return tables.competitive.find((r) => r.id === id && r.client_id === clientId) ?? null; },
     async reportStatus(table, id) { return (table === "reports" ? tables.reports : tables.competitive).find((r) => r.id === id)?.status ?? null; },
-    async pairedCompetitiveDue(clientId, now) {
-      return tables.schedules.some((s) => s.client_id === clientId && s.report_kind === "competitive" && s.is_active && new Date(s.next_run_at) <= now);
+    async pairedCompetitivePending(clientId, now) {
+      return tables.schedules.some((s) => s.client_id === clientId && s.report_kind === "competitive" && s.is_active && new Date(s.next_run_at) <= now
+        && ["queued", "running", undefined].includes(tables.jobStatus[s.id]));
+    },
+    async releaseHeldSocial(clientId) {
+      for (const s of tables.schedules) {
+        if (s.client_id === clientId && s.report_kind === "social" && s.is_active && !s.pending_competitive_report_id && tables.jobStatus[s.id] === "waiting") {
+          tables.jobStatus[s.id] = "queued";
+          tables.released.push(s.id);
+        }
+      }
+      writes.push(`release social ${clientId}`);
     },
     async webhooks() { return tables.webhooks; },
     async insertCompetitiveReport(row) {
@@ -87,10 +103,20 @@ function jobFor(kind: "competitive" | "social", over: Partial<ScheduledJob> = {}
   };
 }
 
-function harness(w: ReturnType<typeof world>, transport: "accept" | "reject" | "throw" = "accept", opts: { onCompetitivePost?: () => void; dryRun?: boolean } = {}) {
+const TRACKED: LandscapeCheck = {
+  ok: true, linked: true,
+  summary: { id: "ls-1", name: "Socialytics - Fixture - set-1", focus_company: "Fixture", is_match: true, client_company_id: "1", match_reason: "focus company", companies: [] },
+  landscape: { id: "ls-1", name: "Socialytics - Fixture - set-1", focusCompanyId: 1, companies: [] },
+};
+const NOT_TRACKED: LandscapeCheck = { ok: false, code: "RIVALIQ_CLIENT_NOT_TRACKED", landscapeId: null, message: "No RivalIQ landscape tracks Fixture." };
+const MISSING: LandscapeCheck = { ok: false, code: "RIVALIQ_LANDSCAPE_MISSING", landscapeId: "ls-gone", message: "The RivalIQ landscape linked to Fixture's competitor set (ls-gone) no longer exists." };
+const BUSY: LandscapeCheck = { ok: false, code: "RIVALIQ_BUSY", status: 429, message: "RivalIQ cannot accept a new request yet." };
+
+function harness(w: ReturnType<typeof world>, transport: "accept" | "reject" | "throw" = "accept", opts: { onCompetitivePost?: () => void; dryRun?: boolean; tracking?: LandscapeCheck } = {}) {
   const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
   const saved: Array<Record<string, unknown>> = [];
   const jobs: Record<string, ScheduledJob> = {};
+  const checks: string[] = [];
   const deps = (job: ScheduledJob): DispatchDeps => ({
     store: w.store,
     now: () => NOW,
@@ -108,9 +134,17 @@ function harness(w: ReturnType<typeof world>, transport: "accept" | "reject" | "
     async buildCompetitivePayload(a) {
       return { report_id: a.reportId, set_id: a.set.id, attempt_started_at: a.attemptStartedAt, date_range_start: a.range.start, date_range_end: a.range.end, stagger_seconds: a.staggerSeconds };
     },
+    async checkLandscape(client, set) { checks.push(`${client.id}:${set.id}`); return opts.tracking ?? TRACKED; },
     async saveJob(patch) { saved.push(patch); Object.assign(job, patch); jobs[job.id] = job; },
   });
-  return { posts, saved, run: (job: ScheduledJob) => runDispatch(job, deps(job)) };
+  // The job's status as the worker would leave it, so the paired job can read it.
+  const run = async (job: ScheduledJob) => {
+    if (job.schedule_id) w.tables.jobStatus[job.schedule_id] = "running";
+    const outcome = await runDispatch(job, deps(job));
+    if (job.schedule_id && !opts.dryRun) w.tables.jobStatus[job.schedule_id] = outcome.status;
+    return outcome;
+  };
+  return { posts, saved, checks, run };
 }
 
 describe("runDispatch", () => {
@@ -159,27 +193,111 @@ describe("runDispatch", () => {
     expect(h.posts[1].body.competitive_report_id).toBe(w.tables.competitive.at(-1)!.id);
   });
 
-  it("holds both schedules when the client has no competitor set", async () => {
+  it("never holds the social report for a client with no competitor set", async () => {
     const w = world({ set: false });
     const h = harness(w);
     const comp = await h.run(jobFor("competitive"));
     const social = await h.run(jobFor("social"));
-    expect([comp.status, social.status]).toEqual(["waiting", "waiting"]);
-    expect(h.posts).toHaveLength(0);
-    expect(w.tables.schedules.every((s) => s.next_run_at === DUE)).toBe(true);
-    expect(w.tables.notes.map((n) => n.result)).toContain("Waiting for a confirmed competitor set; paired social report is held.");
+    expect(comp.status).toBe("waiting");
+    expect(h.checks).toHaveLength(0);
+    expect(w.tables.competitive.map((r) => r.id)).toEqual(["old-complete"]);
+    // The competitive schedule stays due for its daily recheck; the social report goes out.
+    expect(social.status).toBe("done");
+    expect(h.posts.map((p) => p.url)).toEqual(["https://n8n.fixture/social"]);
+    expect(w.tables.schedules.find((s) => s.report_kind === "competitive")!.next_run_at).toBe(DUE);
+    expect(w.tables.notes.map((n) => n.result)).toContain("Waiting for a confirmed competitor set. The paired social report goes ahead without it.");
   });
 
-  it("blocks the social job, visibly, when its competitive report failed", async () => {
+  it("goes ahead with the social report when its competitive report failed", async () => {
     const w = world();
     const h = harness(w);
     await h.run(jobFor("competitive"));
-    w.tables.competitive.at(-1)!.status = "failed";
+    const failed = w.tables.competitive.at(-1)!;
+    failed.status = "failed";
     const social = await h.run(jobFor("social"));
-    expect(social.status).toBe("blocked");
-    expect(social.reason).toMatch(/Retry that report/);
-    expect(w.tables.reports).toHaveLength(0);
-    expect(w.tables.schedules.find((s) => s.report_kind === "social")!.next_run_at).toBe(DUE);
+    expect(social.status).toBe("done");
+    expect(social.result?.competitive_report_skipped).toBe(failed.id);
+    expect(w.tables.reports).toHaveLength(1);
+    // Built on the latest complete analysis, never on the failed one.
+    const post = h.posts.find((p) => p.url.endsWith("/social"))!;
+    expect(post.body.competitive_report_id).toBe("old-complete");
+    const schedule = w.tables.schedules.find((s) => s.report_kind === "social")!;
+    expect(schedule.next_run_at).toBe("2026-11-07T07:15:00.000Z");
+    expect(schedule.pending_competitive_report_id).toBeNull();
+    expect(w.tables.notes.at(-1)!.result).toMatch(new RegExp(`without competitive report ${failed.id} \\(failed\\)`));
+  });
+
+  it("goes ahead with the social report when its pinned competitive report is gone", async () => {
+    const w = world({ kinds: ["social"] });
+    w.tables.schedules[0].pending_competitive_report_id = "deleted-report";
+    const h = harness(w);
+    const social = await h.run(jobFor("social"));
+    expect(social.status).toBe("done");
+    expect(h.posts[0].body.competitive_report_id).toBe("old-complete");
+  });
+
+  it("waits, without blocking, while the pinned competitive report is still running", async () => {
+    const w = world();
+    const h = harness(w);
+    await h.run(jobFor("competitive"));
+    const social = await h.run(jobFor("social"));
+    expect(social.status).toBe("waiting");
+    expect(social.reason).toMatch(/to finish/);
+  });
+
+  for (const [label, tracking, status] of [["not set up", NOT_TRACKED, "waiting"], ["linked landscape missing", MISSING, "blocked"]] as const) {
+    it(`records needs tracking and creates no competitive report when RivalIQ tracking is ${label}`, async () => {
+      const w = world();
+      const h = harness(w, "accept", { tracking });
+      const comp = await h.run(jobFor("competitive"));
+      expect(comp.status).toBe(status);
+      expect(comp.result?.code).toBe(tracking.ok ? undefined : tracking.code);
+      expect(comp.reason).toMatch(new RegExp(`^${NEEDS_TRACKING}: `));
+      expect(w.tables.notes.find((n) => n.id === "sched-competitive")!.result).toMatch(new RegExp(`^${NEEDS_TRACKING}: `));
+      expect(w.tables.competitive.map((r) => r.id)).toEqual(["old-complete"]);
+      expect(w.writes.filter((x) => /insert competitive|hold |analyzing /.test(x))).toEqual([]);
+      expect(h.posts).toHaveLength(0);
+      // The competitive schedule is not advanced, so it is checked again; the social report is not held.
+      expect(w.tables.schedules.find((s) => s.report_kind === "competitive")!.next_run_at).toBe(DUE);
+      const social = await h.run(jobFor("social"));
+      expect(social.status).toBe("done");
+      expect(h.posts.map((p) => p.url)).toEqual(["https://n8n.fixture/social"]);
+    });
+  }
+
+  it("releases a social report that started waiting before the competitive check said no", async () => {
+    const w = world();
+    const h = harness(w, "accept", { tracking: NOT_TRACKED });
+    const first = await h.run(jobFor("social"));
+    expect(first.status).toBe("waiting");
+    await h.run(jobFor("competitive"));
+    expect(w.tables.released).toEqual(["sched-social"]);
+    const again = await h.run(jobFor("social"));
+    expect(again.status).toBe("done");
+  });
+
+  it("retries a RivalIQ check that could not be made, then blocks and lets the social report go", async () => {
+    const w = world();
+    const h = harness(w, "accept", { tracking: BUSY });
+    const first = await h.run(jobFor("competitive", { attempts: 1 }));
+    expect(first.status).toBe("queued");
+    expect(first.available_at).toBe(new Date(NOW.getTime() + RETRY_MINUTES * 60000).toISOString());
+    // A queued competitive job may still start, so the social report waits for it.
+    expect((await h.run(jobFor("social"))).status).toBe("waiting");
+    const last = await h.run(jobFor("competitive", { attempts: 3 }));
+    expect(last.status).toBe("blocked");
+    expect(w.tables.competitive.map((r) => r.id)).toEqual(["old-complete"]);
+    expect(w.tables.released).toEqual(["sched-social"]);
+    expect((await h.run(jobFor("social"))).status).toBe("done");
+  });
+
+  it("does not repeat the tracking check when it resumes a prepared competitive report", async () => {
+    const w = world({ kinds: ["competitive"] });
+    w.tables.competitive.push({ id: "comp-1", client_id: "client-1", status: "running", date_range_start: "2026-09-01", date_range_end: "2026-09-30", set_id: "set-1" });
+    const h = harness(w, "accept", { tracking: NOT_TRACKED });
+    const r = await h.run(jobFor("competitive", { phase: "prepared", report_id: "comp-1", attempts: 2, result: { set_id: "set-1", attempt_started_at: "2026-10-07T07:16:00.000Z", range: { start: "2026-09-01", end: "2026-09-30" } } }));
+    expect(r.status).toBe("done");
+    expect(h.checks).toHaveLength(0);
   });
 
   it("keeps the competitive report period when the social report is released later", async () => {

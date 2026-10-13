@@ -6,7 +6,7 @@ type Company = {
   rivaliq_audience_snapshot?: { as_of: string; audience: number; by_network?: Record<string, number> };
   linkedin_metrics?: { provider: string; period: {start: string; end: string}; posts: number; engagement: number; coverage: string };
   comparison_metrics?: any;
-  is_client?: boolean; post_count?: number; observed_post_count?: number; engagement_total?: number; engagement_sum?: number; impressions_total?: number;
+  is_client?: boolean; post_count?: number; observed_post_count?: number; engagement_total?: number; engagement_sum?: number; impressions_total?: Numeric;
   cadence_per_week?: number; by_channel?: Record<string, { post_count?: number; cadence_per_week?: number }>;
   rivaliq_metrics?: { posts?: ProviderMetric; audience?: { current?: Numeric }; engagement?: { current?: Numeric }; estimated_impressions?: ProviderMetric; engagement_rate_per_post?: ProviderMetric; by_network?: Record<string, ProviderNetwork> };
 };

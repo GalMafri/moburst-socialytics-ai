@@ -10,7 +10,7 @@
 // Moved out of refresh-competitor-feed on 2026-10-06; the behaviour is unchanged.
 
 import {collectOwnedCompetitive,mergeOwnedCompetitivePosts} from './ownedSource.ts';
-import { bestLandscapeMatch, summarizeLandscapes } from "./rivaliqLandscape.ts";
+import { checkClientLandscape, isTrackingProblem, recordTrackingCheck } from "./landscapeCheck.ts";
 import { selectedFeedSources, collectLinkedInSource } from "./linkedinSource.ts";
 import { rivalIqFetch } from "./rivaliqFetch.ts";
 import { harvestedPaths, type HarvestedRef } from "../design-prompts/designRefs.ts";
@@ -207,24 +207,32 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
 
   // The landscape comes from the confirmed set when it was imported from
   // RivalIQ; otherwise match the landscape whose focus company is the client.
+  // Newest confirmation first with unconfirmed rows last, as run-report and
+  // the scheduler order it: without nullsFirst: false, Postgres puts NULLs
+  // first in a descending sort and an older set could win.
   const { data: set } = await admin
     .from("competitor_sets")
     .select("id, rivaliq_landscape_id")
     .eq("client_id", clientId)
     .in("status", ["confirmed", "analyzing", "complete", "failed"])
-    .order("confirmed_at", { ascending: false })
+    .order("confirmed_at", { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle();
   // An explicit ID is a selection, not proof of client identity. Validate
   // before fetching posts, saving snapshots, generating alerts or harvesting.
-  const list = await rivaliq("/landscapes", key);
-  const landscapes = summarizeLandscapes(list.landscapes || [], client.name, client.website_url);
-  const match = set?.rivaliq_landscape_id
-    ? landscapes.find((l) => l.id === String(set.rivaliq_landscape_id))
-    : bestLandscapeMatch(landscapes);
-  if (!match?.is_match || !match.client_company_id) {
-    throw new FeedRefreshError(`No uniquely matched RivalIQ company tracks ${client.name} in the selected landscape. Configure tracking or import a matching landscape first.`, 422, "RIVALIQ_CLIENT_NOT_TRACKED");
+  // The same check run-report and the scheduled dispatch use.
+  const check = await checkClientLandscape(key, client, set?.rivaliq_landscape_id);
+  await recordTrackingCheck(admin, set?.id, set?.rivaliq_landscape_id, check);
+  if (isTrackingProblem(check)) {
+    // Not set up (RIVALIQ_CLIENT_NOT_TRACKED) and a linked landscape that
+    // vanished or stopped matching (RIVALIQ_LANDSCAPE_MISSING) are different
+    // facts: the scheduler skips the first and alerts on the second.
+    throw new FeedRefreshError(check.message, 422, check.code);
   }
+  // A provider that could not be asked stays an ordinary error, so the
+  // scheduled refresh retries it and the page says what happened.
+  if (!check.ok) throw new Error(`RivalIQ /landscapes failed [${check.status ?? "network"}]: ${check.message}`);
+  const match = check.summary;
   const landscapeId = match.id;
 
   const days = Math.min(30, Math.max(1, Number(env.days) || 7));

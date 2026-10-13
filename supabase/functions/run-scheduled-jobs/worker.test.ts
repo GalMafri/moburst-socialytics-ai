@@ -21,6 +21,12 @@ describe("runFeedJob", () => {
     expect(r.status).toBe("skipped");
     expect(r.result).toEqual({ code: "RIVALIQ_CLIENT_NOT_TRACKED" });
   });
+  it("fails at once, for the daily alert, when the linked landscape is missing", async () => {
+    const r = await runFeedJob(job("j", { attempts: 1 }), { now: () => T0, refreshFeed: async () => { throw err("The linked landscape no longer exists.", 422, "RIVALIQ_LANDSCAPE_MISSING"); } });
+    expect(r.status).toBe("failed");
+    expect(r.result).toEqual({ code: "RIVALIQ_LANDSCAPE_MISSING" });
+    expect(summarize([{ ...job("j"), status: "failed", finished_at: T0.toISOString(), reason: r.reason ?? null }], T0).ok).toBe(false);
+  });
   for (const status of [401, 403, 429, 500, 502]) {
     it(`keeps a provider failure (${status}) a failure even when it carries the not-tracked code`, async () => {
       const r = await runFeedJob(job("j", { attempts: 3 }), { now: () => T0, refreshFeed: async () => { throw err("Provider failed", status, "RIVALIQ_CLIENT_NOT_TRACKED"); } });

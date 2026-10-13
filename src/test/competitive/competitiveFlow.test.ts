@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, competitiveRecovery, type SetRow } from "@/lib/competitiveFlow";
+import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, competitiveRecovery, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
 
 const set = (o: Partial<SetRow> & { id: string; status: string; created_at: string }): SetRow => o as SetRow;
 
@@ -43,11 +43,33 @@ describe("describeTracking", () => {
     const unconnected = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01" }));
     expect(unconnected.ready).toBe(false);
     expect(unconnected.headline).toMatch(/not connected/i);
-    const connected = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909" }));
+    const connected = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909",
+      tracking_check: { code: "ok", landscape_id: "612909", message: null, checked_at: "2026-10-01T07:00:00Z" } }));
     expect(connected.ready).toBe(true);
+    expect(connected.headline).toBe("Tracking connected");
     // A created landscape must never be presented as historical data.
     expect(connected.detail).toMatch(/little history/i);
     expect(connected.detail).not.toMatch(/history is available/i);
+  });
+
+  it("never claims a connection no check has confirmed", () => {
+    const linked = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909" }));
+    expect(linked.headline).toBe("");
+    expect(linked.detail).toBeUndefined();
+    // A check about an earlier landscape says nothing about this one.
+    const stale = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909",
+      tracking_check: { code: "ok", landscape_id: "500", message: null, checked_at: "2026-10-01T07:00:00Z" } }));
+    expect(stale.headline).toBe("");
+  });
+
+  it("shows a linked landscape that has gone, without locking the run that re-checks it", () => {
+    const gone = describeTracking(set({ id: "a", status: "complete", created_at: "2026-09-01", rivaliq_landscape_id: "612909",
+      tracking_check: { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "612909", message: "The RivalIQ landscape linked to Fixture's competitor set (612909) no longer exists.", checked_at: "2026-10-01T07:00:00Z" } }));
+    expect(gone.headline).toBe("Tracking needs reconnecting");
+    expect(gone.detail).toMatch(/no longer exists/);
+    expect(gone.ready).toBe(false);
+    expect(trackingAllowsRun(gone)).toBe(true);
+    expect(trackingAllowsRun(describeTracking(set({ id: "b", status: "confirmed", created_at: "2026-09-01" })))).toBe(false);
   });
 
   it("does not offer tracking for a draft-only client", () => {

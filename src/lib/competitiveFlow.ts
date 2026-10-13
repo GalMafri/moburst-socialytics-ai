@@ -18,6 +18,8 @@ export type SetRow = {
   created_at: string;
   confirmed_at?: string | null;
   rivaliq_landscape_id?: string | null;
+  /** The last RivalIQ landscape check recorded on the set (landscapeCheck.ts). Absent until one has run. */
+  tracking_check?: unknown;
 };
 
 export type ReportRow = {
@@ -55,6 +57,12 @@ export type FlowState = {
   detail?: string;
   /** Whether this step is satisfied. */
   ready: boolean;
+  /**
+   * Whether a report may still be started although the step is not
+   * satisfied. A run makes the tracking check again, so a stale "needs
+   * reconnecting" never locks the button that would clear it.
+   */
+  runnable?: boolean;
 };
 
 /** Step 1: are three competitors saved, and is the saved one the newest? */
@@ -72,8 +80,22 @@ export function describeSelection(sets: SetRow[]): FlowState {
   return { headline: "Three competitors confirmed", ready: true };
 }
 
+/** The set's recorded landscape check, when it is about the landscape the set links to now. */
+export function currentTrackingCheck(set: SetRow | null): { code: string; message: string | null; checked_at: string } | null {
+  const raw = set?.tracking_check as { code?: unknown; landscape_id?: unknown; message?: unknown; checked_at?: unknown } | null | undefined;
+  if (!raw || typeof raw !== "object" || typeof raw.code !== "string" || typeof raw.checked_at !== "string") return null;
+  if (String(raw.landscape_id ?? "") !== String(set?.rivaliq_landscape_id ?? "")) return null;
+  return { code: raw.code, message: typeof raw.message === "string" ? raw.message : null, checked_at: raw.checked_at };
+}
+
 /**
  * Step 2: is the selection connected to RivalIQ tracking?
+ *
+ * A stored landscape id says the set was linked, not that the landscape still
+ * exists. The real state is the last check a run, the scheduler or the feed
+ * made (competitor_sets.tracking_check); the page never asks RivalIQ itself.
+ * With no check recorded yet the headline is empty: saying nothing beats
+ * claiming a connection nobody has verified.
  *
  * A connected landscape means the companies are being tracked from now on. It
  * does not mean RivalIQ holds their past posts, so this never promises history.
@@ -89,12 +111,28 @@ export function describeTracking(set: SetRow | null): FlowState {
       ready: false,
     };
   }
-  return {
-    headline: "Tracking connected",
-    detail: "Companies added recently may have little history before they were tracked.",
-    ready: true,
-  };
+  const check = currentTrackingCheck(set);
+  if (check && check.code !== "ok") {
+    return {
+      headline: "Tracking needs reconnecting",
+      detail: check.message || "The linked RivalIQ landscape no longer tracks this client. Import a landscape that does, or set up tracking for a new selection.",
+      ready: false,
+      runnable: true,
+    };
+  }
+  if (check) {
+    const when = new Date(check.checked_at);
+    return {
+      headline: "Tracking connected",
+      detail: `${Number.isFinite(when.getTime()) ? `Last checked ${when.toLocaleDateString()}. ` : ""}Companies added recently may have little history before they were tracked.`,
+      ready: true,
+    };
+  }
+  return { headline: "", ready: true };
 }
+
+/** Whether the tracking step lets a report start (see FlowState.runnable). */
+export const trackingAllowsRun = (state: FlowState) => state.runnable ?? state.ready;
 
 /** Step 4: the outcome of the last run, kept apart from the two steps above. */
 export function describeReport(report: ReportRow | null): FlowState {
@@ -147,15 +185,24 @@ export function competitiveFailureMessage(data: unknown): string {
   return "The analysis could not be completed. Its saved status is available in report history.";
 }
 
-/** Explain a source hold as a recoverable outcome, rather than an unnamed review. */
-export function competitiveRecovery(data: any): { title: string; detail: string } {
+/**
+ * Explain a source hold as a recoverable outcome, rather than an unnamed review.
+ *
+ * Staff get the provider's name and the next step; a client (staff = false)
+ * gets the same fact with no vendor named and no step only staff can take.
+ */
+export function competitiveRecovery(data: any, staff = true): { title: string; detail: string } {
   const reasons = (data?.quality_check?.reasons || []).join(' ');
   if (data?.provider_status === 2 || /still collecting/i.test(reasons + ' ' + (data?.error || ''))) {
-    return { title: 'Source data was still loading', detail: 'RivalIQ had not finished collecting these profiles when this report ran. Retry after collection finishes; the original attempt is kept unavailable because its figures are incomplete.' };
+    return { title: 'Source data was still loading', detail: staff
+      ? 'RivalIQ had not finished collecting these profiles when this report ran. Retry after collection finishes; the original attempt is kept unavailable because its figures are incomplete.'
+      : 'The tracked profiles were still being collected when this report ran, so its figures are incomplete. It is held back until they are complete.' };
   }
   const companies = data?.aggregates?.companies;
   if (Array.isArray(companies) && companies.length && companies.every(c => c.post_count === 0 && (c.observed_post_count ?? c.post_count) === 0)) {
-    return { title: 'No posts available for this period', detail: 'RivalIQ returned no posts for the client or selected competitors in this date range. Choose another period or review the tracked profiles. This does not establish that these companies did not publish.' };
+    return { title: 'No posts available for this period', detail: staff
+      ? 'RivalIQ returned no posts for the client or selected competitors in this date range. Choose another period or review the tracked profiles. This does not establish that these companies did not publish.'
+      : 'No posts were found for the client or the selected competitors in this date range. This does not establish that these companies did not publish.' };
   }
   return { title: 'Report awaiting review', detail: 'We need to verify the source data before this report can be released.' };
 }

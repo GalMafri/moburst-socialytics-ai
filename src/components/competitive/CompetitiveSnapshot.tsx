@@ -14,6 +14,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/ui/load-error";
 import { Loading } from "@/components/ui/loading";
 import { platformLabel } from "@/components/competitive/PostVisual";
 import { insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
@@ -26,6 +27,7 @@ import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../.
 import { competitiveRecovery } from "@/lib/competitiveFlow";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
+const whole = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? "–" : Math.round(n).toLocaleString());
 
 function Tile({ label, value, sub, accent = false }: { label: string; value: string; sub?: string; accent?: boolean }) {
   return <StatCard label={label} value={value} sub={sub} accent={accent} />;
@@ -43,8 +45,10 @@ export function CompetitiveSnapshot({
   const { isMoburstStaff } = useAuth();
   const { rows: feedback, verdictFor } = useInsightFeedback(clientId);
 
-  const { data: latest, isLoading } = useQuery({
-    queryKey: ["competitive-latest", clientId],
+  // Its own key: ReportView reads a different column set for its own summary,
+  // and a shared key let whichever loaded first answer for both.
+  const { data: latest, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["competitive-snapshot", clientId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("competitive_reports")
@@ -61,6 +65,7 @@ export function CompetitiveSnapshot({
   });
 
   if (isLoading) return <Loading label="Loading competitive analysis" />;
+  if (isError) return <LoadError title="The competitive analysis did not load" error={error} onRetry={() => refetch()} />;
 
   if (!latest) {
     return (
@@ -84,7 +89,7 @@ export function CompetitiveSnapshot({
   }
 
   if (!competitiveReportQuality(latest.report_data).ready) {
-    const recovery = competitiveRecovery(latest.report_data);
+    const recovery = competitiveRecovery(latest.report_data, isMoburstStaff);
     return <EmptyState icon={Crosshair} title={recovery.title} description={recovery.detail}
       action={<Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports/${latest.id}`)}>View report status</Button>} />;
   }
@@ -102,7 +107,6 @@ export function CompetitiveSnapshot({
   const avg = (f: (c: any) => number) => { const values = active.map(f).filter(n => typeof n === "number" && Number.isFinite(n)); return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null; };
   const totalPosts = companies.reduce((s, c) => s + (c.post_count || 0), 0);
   const share = me && totalPosts ? Math.round((me.post_count / totalPosts) * 100) : null;
-  const score = ai.benchmark_scorecard?.client_score;
   const { visible } = partitionGaps<any>(ai.gaps_for_client || [], feedback);
   const gaps = visible.slice(0, 3);
   const period = rd.period?.start ? formatRange(rd.period) : latest.date_range_start ? formatRange({ start: latest.date_range_start, end: latest.date_range_end }) : "";
@@ -111,7 +115,10 @@ export function CompetitiveSnapshot({
     <div className="space-y-5">
       <div className="glass px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
         <p className="t-secondary">
-          {rivals.length} competitors{rd.landscape?.name ? ` · ${rd.landscape.name}` : ""}{period ? ` · ${period}` : ""} · analyzed {new Date(latest.created_at).toLocaleDateString()}
+          {rivals.length} competitors
+          {/* The tracking setup's name is for staff, and stays out of an exported PDF. */}
+          {isMoburstStaff && rd.landscape?.name ? <span data-print="hide">{` · ${rd.landscape.name}`}</span> : null}
+          {period ? ` · ${period}` : ""} · analyzed {new Date(latest.created_at).toLocaleDateString()}
         </p>
         <div className="flex gap-2 flex-wrap">
           {isMoburstStaff && (
@@ -129,10 +136,11 @@ export function CompetitiveSnapshot({
           Competitive tab on both the monthly report and Analytics. */}
       {me && (
         <div id="snapshot-numbers" className="grid gap-3 grid-cols-2 lg:grid-cols-4 scroll-mt-[156px]">
-          <Tile accent label="Benchmark score" value={score != null ? `${score}` : "–"} sub="out of 100 against the set" />
+          {/* Measured figures only, each against the competitors' average, as on the full report. */}
+          <Tile accent label="Avg engagement" value={me.post_count ? whole(me.engagement_avg) : "–"} sub={`competitor average ${whole(avg((c) => c.engagement_avg))}`} />
           <Tile label="Share of voice" value={share == null ? "–" : `${share}%`} sub={`${me.post_count} of ${totalPosts} posts`} />
-          <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`set average ${(rivals.length ? (rivals.reduce((sum, c) => sum + c.cadence_per_week, 0) / rivals.length).toFixed(1) : "–")}/wk`} />
-          <Tile label="Engagement rate" value={pct(me.engagement_rate_avg)} sub={`set average ${pct(avg((c) => c.engagement_rate_avg))}`} />
+          <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`competitor average ${(rivals.length ? (rivals.reduce((sum, c) => sum + c.cadence_per_week, 0) / rivals.length).toFixed(1) : "–")}/wk`} />
+          <Tile label="Engagement rate" value={pct(me.engagement_rate_avg)} sub={`competitor average ${pct(avg((c) => c.engagement_rate_avg))}`} />
         </div>
       )}
 
@@ -144,7 +152,7 @@ export function CompetitiveSnapshot({
         <div id="snapshot-takeaways" className="glass-accent p-5 space-y-3 scroll-mt-[156px]">
           <div>
             <h3 className="t-h3">How this report used the competitive picture</h3>
-            <p className="t-secondary">Written by the report synthesis with the competitor analysis in hand.</p>
+            <p className="t-secondary">Drawn from the latest competitor analysis.</p>
           </div>
           <InsightGrid items={takeaways} />
         </div>

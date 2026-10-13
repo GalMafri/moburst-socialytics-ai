@@ -23,6 +23,15 @@
     --destructive: 0 70% 50%;
     --success: 160 84% 39%;
     --success-foreground: 0 0% 100%;
+    /* tailwind.config.ts maps warning and info to these, and pages use
+       text-warning, bg-warning/5 and border-warning/30, but they were never
+       set, so those classes drew nothing. Colors already in the palette:
+       warning is the amber the PDF export prints for .text-warning
+       (#f59e0b), info is --chart-2. */
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
     --destructive-foreground: 0 0% 100%;
     --border: 0 0% 100%;
     --input: 0 0% 100%;

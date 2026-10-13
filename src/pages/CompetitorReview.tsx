@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RivalIqSetup } from "@/components/competitive/RivalIqSetup";
 import { CompetitiveSteps } from "@/components/competitive/CompetitiveSteps";
-import { describeSelection, describeTracking, pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
+import { describeSelection, describeTracking, pickRunSelection, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
 
 import { classifyProfileUrl, isProfileUrlInput } from "@/lib/profileUrl";
 import { isReviewReadyHandle } from "../../supabase/functions/_shared/competitive/extractSocialHandles";
@@ -54,6 +54,16 @@ type CompetitorRow = {
   selected_rank: number | null;
   profile_detection?: { status: string; detail?: string; checked_at?: string; discovery_version?: number } | null;
 };
+
+/**
+ * A profile search that has said nothing for this long has stopped. The
+ * server stamps checked_at when a search starts, so a row still saying
+ * "running" after this is not going to change on its own: the page stops
+ * polling for it and says so, rather than showing a spinner for ever.
+ */
+const PROFILE_CHECK_STALE_MS = 3 * 60000;
+const liveProfileCheck = (c: { profile_detection?: CompetitorRow["profile_detection"] }, now = Date.now()) =>
+  c.profile_detection?.status === "running" && now - Date.parse(c.profile_detection.checked_at || "") < PROFILE_CHECK_STALE_MS;
 
 function readProfileCheck(value: unknown): CompetitorRow["profile_detection"] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -149,6 +159,11 @@ export default function CompetitorReview() {
   const [landscapesError, setLandscapesError] = useState<string | null>(null);
   const [showOtherLandscapes, setShowOtherLandscapes] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
+  // Proposing competitors spends AI and web lookups, so it is asked first.
+  const [confirmIdentify, setConfirmIdentify] = useState(false);
+  // Listing and importing landscapes each spend a RivalIQ request, so both are asked first.
+  const [confirmList, setConfirmList] = useState(false);
+  const [pendingImport, setPendingImport] = useState<{ id: string; name: string } | null>(null);
 
   const { data: client, isLoading: clientLoading, isError: clientFailed, error: clientError, refetch: refetchClient } = useQuery({
     queryKey: ["client", clientId],
@@ -163,7 +178,7 @@ export default function CompetitorReview() {
   // Every set for this client, newest first. The whole (short) list is needed
   // because a newer draft and the older confirmed set that a report would
   // actually use are different rows, and both have to be shown.
-  const { data: sets, isLoading: setLoading } = useQuery({
+  const { data: sets, isLoading: setLoading, isError: setsFailed, error: setsError, refetch: refetchSets } = useQuery({
     queryKey: ["competitor-set", clientId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -196,7 +211,7 @@ export default function CompetitorReview() {
       return (data || []).map(row => ({ ...row, profile_detection: readProfileCheck(row.profile_detection) }));
     },
     enabled: !!currentSet?.id,
-    refetchInterval: query => (query.state.data || []).some(c => c.profile_detection?.status === "running") ? 5000 : false,
+    refetchInterval: query => (query.state.data || []).some(c => liveProfileCheck(c)) ? 5000 : false,
   });
 
   const { data: handles, isLoading: handlesLoading, isError: handlesFailed } = useQuery({
@@ -633,6 +648,16 @@ export default function CompetitorReview() {
     );
   }
 
+  // Not "no competitor set yet": that state offers to start a new draft,
+  // and starting one on top of a set that merely failed to load duplicates it.
+  if (setsFailed) {
+    return (
+      <AppLayout title={`Competitors: ${client.name}`}>
+        <LoadError title="Could not load the competitor selection" error={setsError} onRetry={() => refetchSets()} />
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout title={`Competitors: ${client.name}`}>
       <div className="w-full space-y-6">
@@ -666,7 +691,7 @@ export default function CompetitorReview() {
                         {landscapeMatches.length === 1 ? "" : "s"} in RivalIQ
                       </p>
                       {landscapeMatches.map((l: any) => (
-                        <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
+                        <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={() => setPendingImport(l)} />
                       ))}
                     </>
                   ) : (
@@ -682,7 +707,7 @@ export default function CompetitorReview() {
                         size="sm"
                         onClick={() => {
                           setImportOpen(false);
-                          identify();
+                          setConfirmIdentify(true);
                         }}
                         disabled={identifying}
                       >
@@ -710,7 +735,7 @@ export default function CompetitorReview() {
                               </span>
                             </p>
                             {(sets as any[]).map((l: any) => (
-                              <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
+                              <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={() => setPendingImport(l)} />
                             ))}
                           </div>
                         ))}
@@ -760,7 +785,7 @@ export default function CompetitorReview() {
                 </CardDescription>
               </div>
               <div className="flex gap-2 flex-wrap">
-                <Button variant="outline" size="sm" onClick={openImport} disabled={identifying || detecting}>
+                <Button variant="outline" size="sm" onClick={() => setConfirmList(true)} disabled={identifying || detecting}>
                   <Download className="h-3.5 w-3.5 mr-1" /> Import from RivalIQ
                 </Button>
                 {currentSet && ["confirmed", "complete", "failed"].includes(currentSet.status) && (
@@ -777,7 +802,7 @@ export default function CompetitorReview() {
                     Finding profiles automatically · {detectProgress.done}/{detectProgress.total}
                   </p>
                 )}
-                <Button size="sm" onClick={identify} disabled={identifying || detecting}>
+                <Button size="sm" onClick={() => setConfirmIdentify(true)} disabled={identifying || detecting}>
                   {identifying ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
                   {currentSet ? "Re-identify (new draft)" : "Identify competitors"}
                 </Button>
@@ -787,10 +812,12 @@ export default function CompetitorReview() {
           <CardContent className="pt-0 space-y-2">
             {/* Tracking is its own fact: a confirmed selection is not a
                 connected one, and neither says anything about a report. */}
-            <p className="t-secondary">
-              <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
-              {trackingState.detail ? ` ${trackingState.detail}` : ""}
-            </p>
+            {trackingState.headline && (
+              <p className="t-secondary">
+                <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
+                {trackingState.detail ? ` ${trackingState.detail}` : ""}
+              </p>
+            )}
             {client.competitor_seed_notes ? (
               <p className="t-secondary">
                 <span className="font-medium">Account team notes fed to the AI:</span> {client.competitor_seed_notes}
@@ -848,7 +875,7 @@ export default function CompetitorReview() {
                     <Button
                       className="gap-2"
                       onClick={() => navigate(`/clients/${clientId}/competitive/run`)}
-                      disabled={runNeedsProfileReview || !trackingState.ready || currentSet?.id !== runnableSet?.id}
+                      disabled={runNeedsProfileReview || !trackingAllowsRun(trackingState) || currentSet?.id !== runnableSet?.id}
                     >
                       <Play className="h-4 w-4" /> Run deep analysis
                     </Button>
@@ -911,7 +938,7 @@ export default function CompetitorReview() {
                 <Button variant="outline" size="sm" onClick={() => setShowUnverified(v => !v)}>{showUnverified ? "Hide unverified suggestions" : "Show unverified suggestions"}</Button>
               </div>}
               {competitors!.filter(c => showUnverified || !isUnverified(c)).map((c) => {
-                const profileCheck = profileChecks[c.id] || (c.profile_detection ? { state: c.profile_detection.status === "running" ? "searching" : c.profile_detection.status, detail: c.profile_detection.detail } : undefined);
+                const profileCheck = profileChecks[c.id] || (c.profile_detection ? { state: c.profile_detection.status === "running" ? (liveProfileCheck(c) ? "searching" : "stalled") : c.profile_detection.status, detail: c.profile_detection.detail } : undefined);
                 const compHandles = (handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active);
                 return (
                   <div
@@ -970,6 +997,7 @@ export default function CompetitorReview() {
                                 profileCheck?.state === "session_required" ? "Waiting for portal sign-in" :
                                 profileCheck?.state === "queued" ? "Profile search queued" :
                                 profileCheck?.state === "searching" ? "Searching company pages…" :
+                                profileCheck?.state === "stalled" ? "Profile search stopped. Reload the page to search again." :
                                 profileCheck?.state === "failed" ? "Profile lookup failed" :
                                 profileCheck?.state === "unverified" ? "Company could not be verified" :
                                 profileCheck?.state === "partial" ? "Profile lookup incomplete" :
@@ -1093,6 +1121,64 @@ export default function CompetitorReview() {
           </Card>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmList}
+        onOpenChange={setConfirmList}
+        title="Read the RivalIQ landscapes?"
+        description={
+          <p>
+            This reads the agency's RivalIQ landscapes, which uses one request from the account's hourly allowance, and
+            lists the ones that track {client.name}. Nothing is imported until you choose one.
+          </p>
+        }
+        confirmLabel="Show landscapes"
+        destructive={false}
+        onConfirm={() => {
+          setConfirmList(false);
+          void openImport();
+        }}
+      />
+      <ConfirmDialog
+        open={!!pendingImport}
+        onOpenChange={(o) => !o && setPendingImport(null)}
+        title={`Import ${pendingImport?.name || "this landscape"}?`}
+        description={
+          <>
+            <p>
+              This reads RivalIQ once more (one request) and creates a new draft for {client.name} with the landscape's
+              competitors and their tracked profiles, with the top three pre-selected for you to adjust.
+            </p>
+            <p>Nothing is changed in RivalIQ. The confirmed selection, its tracking and past reports stay as they are.</p>
+          </>
+        }
+        confirmLabel="Import as a draft"
+        destructive={false}
+        onConfirm={() => {
+          const id = pendingImport?.id;
+          setPendingImport(null);
+          if (id) void importLandscape(id);
+        }}
+      />
+      <ConfirmDialog
+        open={confirmIdentify}
+        onOpenChange={setConfirmIdentify}
+        title={currentSet ? "Propose a new set of competitors?" : "Propose competitors?"}
+        description={
+          <>
+            <p>
+              This asks the AI to propose 8 to 12 likely competitors for {client.name} from the client profile, checks each
+              website, then searches those websites for social profiles. Each run uses AI and web lookups.
+            </p>
+            {currentSet && <p>The proposals go into a new draft. The confirmed selection, its tracking and past reports stay as they are.</p>}
+          </>
+        }
+        confirmLabel="Propose competitors"
+        destructive={false}
+        onConfirm={() => {
+          setConfirmIdentify(false);
+          void identify();
+        }}
+      />
       <ConfirmDialog
         open={!!removingHandle}
         onOpenChange={open => !open && setRemovingHandle(null)}

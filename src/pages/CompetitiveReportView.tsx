@@ -24,6 +24,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/ui/load-error";
+import { competitiveStatusBadge } from "@/lib/competitiveStatus";
+import { watchExpired, watchInterval } from "@/lib/runWatch";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { PlatformIcon } from "@/lib/platform-config";
@@ -77,8 +80,10 @@ type Company = Bucket & {
 const EMPTY: Bucket = { post_count: 0, cadence_per_week: 0, engagement_avg: 0, engagement_rate_avg: 0, impressions_avg: 0, views_total: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, top_hashtags: [], media_type_mix: [], top_posts: [] };
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i));
-const ACCENT = "185,224,69";
-const RECOMMEND = "120,190,255";
+/** Heat and bar colors come from the theme tokens: the lime accent, and the second chart color for recommendations. */
+const ACCENT = "--primary";
+const RECOMMEND = "--chart-2";
+const tint = (token: string, alpha = 1) => `hsl(var(${token}) / ${alpha})`;
 
 /**
  * The busiest key in a set of counts, with its share of the total.
@@ -119,7 +124,7 @@ function HeatStrip({ counts, keys, labelEvery = 1, cell = 24, color = ACCENT }: 
         const v = Number(counts?.[k]) || 0;
         return (
           <div key={k} className="flex flex-col items-center gap-1 min-w-0" title={`${k}: ${v} post${v === 1 ? "" : "s"}`}>
-            <div className="h-6 w-full rounded-[6px]" style={{ backgroundColor: `rgba(${color},${v ? 0.18 + 0.82 * (v / max) : 0.06})` }} />
+            <div className="h-6 w-full rounded-[6px]" style={{ backgroundColor: tint(color, v ? 0.18 + 0.82 * (v / max) : 0.06) }} />
             {i % labelEvery === 0 && <span className="t-secondary leading-none">{k}</span>}
           </div>
         );
@@ -193,7 +198,7 @@ function MetricRow({ label, value, format = compactNumber, signed = false }: { l
   if (!value || value.current == null) return <Stat label={label} value="Not available" />;
   const change = deltaPct(value);
   const rounded = change == null ? null : Number(fmtDelta(change).replace(/[+%]/g, ""));
-  const tone = !signed || !rounded ? "text-[#b1b7c1]" : change! > 0 ? "text-success" : "text-[#f87171]";
+  const tone = !signed || !rounded ? "" : change! > 0 ? "text-success" : "text-destructive";
   return (
     <div className="min-w-0">
       <p className="t-body font-semibold leading-tight">
@@ -216,7 +221,7 @@ export default function CompetitiveReportView() {
   const printRef = useRef<HTMLDivElement>(null);
   const { rows: feedback, verdictFor, vote } = useInsightFeedback(clientId);
 
-  const { data: report, isLoading } = useQuery({
+  const { data: report, isLoading, isError, error: reportError, refetch } = useQuery({
     queryKey: ["competitive-report", reportId],
     queryFn: async () => {
       const { data, error } = await supabase.from("competitive_reports").select("*").eq("id", reportId!).maybeSingle();
@@ -224,7 +229,9 @@ export default function CompetitiveReportView() {
       return data;
     },
     enabled: !!reportId,
-    refetchInterval: (query) => query.state.data?.status === "running" ? 5000 : false,
+    // Polls a running report, but not for ever: past the watch limit the
+    // abandoned-run sweep should have closed it, and the page says so.
+    refetchInterval: (query) => watchInterval(query.state.data?.status === "running", query.state.data?.created_at, 5000),
     refetchIntervalInBackground: true,
   });
 
@@ -265,7 +272,9 @@ export default function CompetitiveReportView() {
   }, [report?.status]);
   const retryReady = report ? canRetry(report, now, "competitive") : false;
   const retryAt = report?.created_at ? Date.parse(report.created_at) + STUCK_AFTER_MINUTES * 60000 : NaN;
-  const recovery = competitiveRecovery(report?.report_data);
+  const recovery = competitiveRecovery(report?.report_data, isMoburstStaff);
+  // Data sources are named to staff only; a client reads what the figure is, not who supplied it.
+  const vendor = (staffText: string, clientText: string) => (isMoburstStaff ? staffText : clientText);
   const ai = rd.ai_analysis || {};
   const companies: Company[] = rd.aggregates?.companies || [];
   const previous = useMemo(() => (report ? pickComparableReport(report as any, (priorReports || []) as any[]) : null), [report, priorReports]);
@@ -300,6 +309,14 @@ export default function CompetitiveReportView() {
   const effectivePlat = plat !== "all" && platforms.includes(plat) ? plat : "all";
 
   if (isLoading) return <AppLayout><Loading label="Loading report" /></AppLayout>;
+  // A failed request is not a missing report: say it failed and offer a retry.
+  if (isError) {
+    return (
+      <AppLayout>
+        <LoadError title="This report did not load" error={reportError} onRetry={() => refetch()} />
+      </AppLayout>
+    );
+  }
   if (!report) {
     return (
       <AppLayout>
@@ -310,7 +327,11 @@ export default function CompetitiveReportView() {
 
   if (report.status === "running") return <AppLayout>
     <Loading label="Competitive analysis in progress" />
-    <p className="text-muted-foreground">Allow up to 90 minutes. This page updates automatically when the report is ready.</p>
+    {watchExpired(report.created_at, now) ? (
+      <p className="t-secondary" role="status">This analysis is taking longer than usual, so this page has stopped checking on its own. Refresh the page to see its latest status.</p>
+    ) : (
+      <p className="text-muted-foreground">Allow up to 90 minutes. This page updates automatically when the report is ready.</p>
+    )}
     <div className="flex gap-2 mt-4">
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
       {canRetry(report, Date.now(), "competitive") && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
@@ -329,7 +350,7 @@ export default function CompetitiveReportView() {
     </CardContent></Card>
   </AppLayout>;
   if (report.status === "failed") return <AppLayout>
-    <EmptyState icon={Crosshair} title="This report needs attention" description={rd.error || "The analysis did not complete. Its figures are unavailable."} />
+    <EmptyState icon={Crosshair} title="This report needs attention" description={isMoburstStaff && rd.error ? rd.error : "The analysis did not complete. Its figures are unavailable."} />
     <div className="flex gap-2 mt-4">
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
       {canRetry(report, Date.now(), "competitive") && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
@@ -481,7 +502,7 @@ export default function CompetitiveReportView() {
     <div key={key} data-pdf-unit className="glass-inner p-4 space-y-2.5 h-full flex flex-col">
       {p.authorship === "collaboration" && <Badge variant="secondary" className="self-start">Company collaboration</Badge>}
       <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} maxHeight="26rem" />
-      <p className={`t-body line-clamp-2 min-h-[3rem] ${p.text ? "" : "text-[#b1b7c1]"}`}>{p.text || (normalizePlatform(p.channel) === "x" || normalizePlatform(p.channel) === "twitter" ? "X posts arrive from RivalIQ without a caption or link." : "No caption provided.")}</p>
+      <p className={`t-body line-clamp-2 min-h-[3rem] ${p.text ? "" : "text-[#b1b7c1]"}`}>{p.text || (normalizePlatform(p.channel) === "x" || normalizePlatform(p.channel) === "twitter" ? vendor("X posts arrive from RivalIQ without a caption or link.", "X posts arrive without a caption or link.") : "No caption provided.")}</p>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
         <Stat label="Est. impr." value={p.est_impressions != null ? fmt(p.est_impressions) : "–"} />
         <Stat label="Engagements" value={fmt(p.engagement)} />
@@ -493,7 +514,7 @@ export default function CompetitiveReportView() {
           <span title="Likes and reactions · comments · shares">{fmt(p.applause || 0)} likes · {fmt(p.conversation || 0)} comments · {fmt(p.amplification || 0)} shares</span>
         ) : <span />}
         <span className="flex items-center gap-2">
-          {p.likely_boosted && <Badge variant="secondary" title="RivalIQ estimates this Facebook post was paid promotion">Likely boosted</Badge>}
+          {p.likely_boosted && <Badge variant="secondary" title={vendor("RivalIQ estimates this Facebook post was paid promotion", "Estimated to be paid promotion on Facebook")}>Likely boosted</Badge>}
           {p.created ? new Date(p.created).toLocaleDateString(undefined, { timeZone: "UTC" }) : ""}
         </span>
       </div>
@@ -528,7 +549,7 @@ export default function CompetitiveReportView() {
   const SECTION_LABELS: Record<string, string> = {
     summary: "Summary",
     changes: "Since last report",
-    scorecard: "Scorecard",
+    scorecard: "Standing",
     field: "Company comparison",
     audience: "Audience",
     rhythm: "Posting rhythm",
@@ -568,10 +589,12 @@ export default function CompetitiveReportView() {
             </Button>
             <h1 className="t-h1">{clientName} vs. the field</h1>
             <div className="flex items-center gap-2 flex-wrap t-secondary">
-              <Badge variant={report.status === "complete" ? "default" : report.status === "failed" ? "destructive" : "secondary"}>{report.status}</Badge>
+              <Badge variant={competitiveStatusBadge(report.status).variant}>{competitiveStatusBadge(report.status).label}</Badge>
               {period && <Chip>{period}{rd.period?.days ? ` · ${rd.period.days} days` : ""}</Chip>}
-              {rd.landscape?.name && <Chip>RivalIQ · {rd.landscape.name}</Chip>}
-              {companies.some((c: Company) => c.linkedin_metrics) && <Chip>LinkedIn · Apify</Chip>}
+              {/* Sources and the tracking setup's name are for the account team,
+                  and stay out of a PDF they export for the client. */}
+              {isMoburstStaff && rd.landscape?.name && <span data-print="hide"><Chip>RivalIQ · {rd.landscape.name}</Chip></span>}
+              {isMoburstStaff && companies.some((c: Company) => c.linkedin_metrics) && <span data-print="hide"><Chip>LinkedIn · Apify</Chip></span>}
               {rivals.length > 0 && <Chip>{rivals.length} competitors</Chip>}
               {effectivePlat !== "all" && <Chip>{platformLabel(effectivePlat)} only</Chip>}
             </div>
@@ -615,7 +638,10 @@ export default function CompetitiveReportView() {
           </div>
         )}
         {!hasChannels && companies.length > 0 && (
-          <p className="t-secondary">Per-platform breakdowns are produced for runs from September 2, 2026 onward. Re-run the analysis to get them for this client.</p>
+          <p className="t-secondary">
+            Per-platform breakdowns are available for reports from September 2, 2026 onward.
+            {isMoburstStaff ? " Run the analysis again to get them for this client." : ""}
+          </p>
         )}
 
 
@@ -632,13 +658,13 @@ export default function CompetitiveReportView() {
               <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={`${effectivePlat === "all" ? "Tracked networks · excluding LinkedIn" : `on ${platformLabel(effectivePlat)}`}${meM.audience_as_of ? ` · as of ${meM.audience_as_of}` : ""}`} />
             )}
             <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} tracked posts`} />
-            <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`set avg ${avgCadence.toFixed(1)}/wk`} />
+            <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`competitor avg ${avgCadence.toFixed(1)}/wk`} />
             <Kpi label="Engagement rate" value={meB.post_count ? pct(meB.engagement_rate_avg) : "Not available"} sub={`${effectivePlat === "all" ? "Excluding LinkedIn · " : ""}active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`} />
             <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`active peers avg ${fmt(avg((b) => b.engagement_avg))}`} />
           </div>
         )}
 
-        {(report.report_data as { period?: { days?: number } })?.period?.days && (report.report_data as { period?: { days?: number } }).period.days !== rd.period?.days && <p className="t-body text-amber-400">Cadence figures have been corrected to include both dates in the period. The original AI commentary below may still quote older figures.</p>}
+        {(report.report_data as { period?: { days?: number } })?.period?.days && (report.report_data as { period?: { days?: number } }).period.days !== rd.period?.days && <p className="t-secondary">Cadence figures have been corrected to include both dates in the period. The written commentary below may still quote the earlier figures.</p>}
 
 
         {/* Executive summary */}
@@ -683,7 +709,7 @@ export default function CompetitiveReportView() {
                       <span className="t-secondary text-right">{Number(d.client).toLocaleString(undefined, { maximumFractionDigits: 1 })} <span className="opacity-60">vs</span> {Number(d.competitor_avg).toLocaleString(undefined, { maximumFractionDigits: 1 })} {d.unit}</span>
                     </div>
                     <div className="relative h-3 rounded-full bg-[rgba(255,255,255,0.06)]">
-                      <div className="absolute left-0 top-0 h-3 rounded-full" style={{ width: `${comparisonScale(d.client, d.competitor_avg).client}%`, backgroundColor: `rgb(${ACCENT})` }} />
+                      <div className="absolute left-0 top-0 h-3 rounded-full" style={{ width: `${comparisonScale(d.client, d.competitor_avg).client}%`, backgroundColor: tint(ACCENT) }} />
                       <div className="absolute top-[-4px] h-5 w-[3px] -translate-x-1/2 rounded bg-white/80" style={{ left: `${comparisonScale(d.client, d.competitor_avg).competitor}%` }} title="competitor average" />
                     </div>
                     {d.note && <p className="t-secondary">{nameifyDomains(d.note)}</p>}
@@ -743,7 +769,7 @@ export default function CompetitiveReportView() {
                           <TileStat
                             value={b.impressions_avg == null ? "Not available" : compactNumber(b.impressions_avg)}
                             exact={fmt(b.impressions_avg)}
-                            label={effectivePlat === "all" ? "Est. impressions / RivalIQ post" : "Est. impressions / post"}
+                            label={effectivePlat === "all" ? vendor("Est. impressions / RivalIQ post", "Est. impressions / tracked post") : "Est. impressions / post"}
                           />
                           <TileStat value={b.views_total == null ? "Not available" : compactNumber(b.views_total)} exact={b.views_total == null ? undefined : fmt(b.views_total)} label="Reported video views" />
                         </div>
@@ -800,7 +826,7 @@ export default function CompetitiveReportView() {
                             </th>
                             {ordered.map((c) => (
                               <td key={c.company_id} className="t-body py-4 pr-6 last:pr-0 min-w-[240px]">
-                                {row.valueFor(c.name) ? nameifyDomains(row.valueFor(c.name)!) : <span className="t-label">—</span>}
+                                {row.valueFor(c.name) ? nameifyDomains(row.valueFor(c.name)!) : <span className="t-label">–</span>}
                               </td>
                             ))}
                           </tr>
@@ -822,13 +848,13 @@ export default function CompetitiveReportView() {
             style={{ order: orderOf("audience") }}
             title={<><Users className="h-5 w-5" /> Audience and momentum</>}
             action={scopeTag(true)}
-            description={<>Verified source totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}.{effectivePlat === "all" ? " Posts and engagement include collected LinkedIn activity. Followers, estimated impressions and engagement rates cover Tracked networks, excluding LinkedIn." : ""} Dated audience snapshots show the latest measurement when historical counts are unavailable.{anyBoosted ? " \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook." : ""}</>}
+            description={<>Verified source totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}.{effectivePlat === "all" ? " Posts and engagement include collected LinkedIn activity. Followers, estimated impressions and engagement rates cover Tracked networks, excluding LinkedIn." : ""} Dated audience snapshots show the latest measurement when historical counts are unavailable.{anyBoosted ? vendor(" \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook.", " \"Likely boosted\" is an estimate of paid promotion on Facebook.") : ""}</>}
           >
             <Card>
               <CardContent className="pt-5 space-y-6">
                 {followersRows.length > 0 && (
                   <div className="space-y-2">
-                    <p className="t-subhead">Followers{effectivePlat === "all" ? " · RivalIQ networks" : ""}</p>
+                    <p className="t-subhead">Followers{effectivePlat === "all" ? vendor(" · RivalIQ networks", " · tracked networks") : ""}</p>
                     <RankedBars rows={followersRows} emphasis legend={{ subject: clientName, others: "Competitors" }} />
                   </div>
                 )}
@@ -846,7 +872,7 @@ export default function CompetitiveReportView() {
                           <MetricRow label="Followers" value={m.audience} signed={c.is_client} />
                           <MetricRow label="Engagement" value={m.engagement} signed={c.is_client} />
                           {m.actual_impressions && <MetricRow label="Client impressions" value={m.actual_impressions} signed={c.is_client} />}
-                          {m.impressions && <MetricRow label="Est. impressions (RivalIQ)" value={m.impressions} signed={c.is_client} />}
+                          {m.impressions && <MetricRow label={vendor("Est. impressions (RivalIQ)", "Est. impressions")} value={m.impressions} signed={c.is_client} />}
                           <MetricRow label="Posts" value={m.posts} format={(v) => String(Math.round(v))} signed={c.is_client} />
                         </div>
                         {m.profiles?.length>0 && <p className="t-secondary">Connected profiles: {m.profiles.map(p=>p.name).join(", ")}</p>}
@@ -1122,7 +1148,7 @@ export default function CompetitiveReportView() {
 
         {/* Top posts */}
         {ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length) && (
-            <Section id="posts" index={num("posts")} style={{ order: orderOf("posts") }} action={scopeTag(true)} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. Client posts come from connected Sprout profiles. Other posts come from RivalIQ and reviewed public LinkedIn pages. Competitor impressions are estimates.</>}>
+            <Section id="posts" index={num("posts")} style={{ order: orderOf("posts") }} action={scopeTag(true)} title={<><Layers className="h-5 w-5" /> Top 5 posts per company</>} description={<>Ranked by total engagement in the period. {vendor("Client posts come from connected Sprout profiles. Other posts come from RivalIQ and reviewed public LinkedIn pages.", "Client posts come from the client's connected social profiles. Other posts come from the companies' public profiles and reviewed public LinkedIn pages.")} Competitor impressions are estimates.</>}>
             <Card>
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
@@ -1131,7 +1157,7 @@ export default function CompetitiveReportView() {
                     <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] items-start">
                       {b.top_posts.filter(hasContent).slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}
                       {b.top_posts.filter((p) => !hasContent(p)).length > 0 && (
-                        <p className="t-label col-span-full">{b.top_posts.filter((p) => !hasContent(p)).length} X {b.top_posts.filter((p) => !hasContent(p)).length === 1 ? "post is" : "posts are"} counted in the totals only: RivalIQ sends no link, caption or image for X.</p>
+                        <p className="t-label col-span-full">{b.top_posts.filter((p) => !hasContent(p)).length} X {b.top_posts.filter((p) => !hasContent(p)).length === 1 ? "post is" : "posts are"} counted in the totals only: {vendor("RivalIQ sends no link, caption or image for X.", "X posts come without a link, caption or image.")}</p>
                       )}
                     </div>
                   </div>

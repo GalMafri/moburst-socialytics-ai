@@ -95,9 +95,28 @@ export function makeDispatchStore(db: SupabaseClient): DispatchStore {
       const r = (await must(db.from(table).select("status").eq("id", id).maybeSingle())) as { status: string } | null;
       return r?.status ?? null;
     },
-    async pairedCompetitiveDue(clientId, now) {
-      const rows = await must(db.from("report_schedules").select("id").eq("client_id", clientId).eq("report_kind", "competitive").eq("is_active", true).lte("next_run_at", now.toISOString()).limit(1));
-      return ((rows ?? []) as unknown[]).length > 0;
+    async pairedCompetitivePending(clientId, now) {
+      const due = (await must(db.from("report_schedules").select("id, next_run_at").eq("client_id", clientId).eq("report_kind", "competitive")
+        .eq("is_active", true).lte("next_run_at", now.toISOString()))) as Array<{ id: string; next_run_at: string }> | null;
+      for (const s of due ?? []) {
+        const jobs = (await must(db.from("scheduled_jobs").select("status").eq("kind", "dispatch").eq("schedule_id", s.id)
+          .eq("occurrence", s.next_run_at).limit(1))) as Array<{ status: string }> | null;
+        const status = jobs?.[0]?.status;
+        // Not queued yet, or about to run: the analysis may still start now.
+        if (!status || status === "queued" || status === "running") return true;
+      }
+      return false;
+    },
+    async releaseHeldSocial(clientId) {
+      // Only schedules not pinned to a competitive report: a pinned one is
+      // released by release_ready_dispatches when that report finishes.
+      const rows = (await must(db.from("report_schedules").select("id").eq("client_id", clientId).eq("report_kind", "social")
+        .eq("is_active", true).is("pending_competitive_report_id", null))) as Array<{ id: string }> | null;
+      const ids = (rows ?? []).map((r) => r.id);
+      if (!ids.length) return;
+      const now = new Date().toISOString();
+      await must(db.from("scheduled_jobs").update({ status: "queued", available_at: now, lease_until: null, updated_at: now })
+        .eq("kind", "dispatch").eq("status", "waiting").in("schedule_id", ids));
     },
     async webhooks() {
       const rows = (await must(db.from("app_settings").select("key, value").in("key", ["n8n_webhook_url", "competitive_n8n_webhook_url"]))) as Array<{ key: string; value: string | null }> | null;

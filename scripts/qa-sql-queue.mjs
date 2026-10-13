@@ -9,13 +9,17 @@ await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_
 CREATE TABLE public.clients(id uuid PRIMARY KEY, name text, archived_at timestamptz);
 CREATE TABLE public.report_schedules(id uuid PRIMARY KEY, client_id uuid REFERENCES public.clients(id), report_kind text, is_active boolean, next_run_at timestamptz,
   pending_competitive_report_id uuid, created_at timestamptz DEFAULT now());
-CREATE TABLE public.competitor_sets(id uuid PRIMARY KEY, client_id uuid, status text);
+CREATE TABLE public.competitor_sets(id uuid PRIMARY KEY, client_id uuid, status text, confirmed_at timestamptz, rivaliq_landscape_id text, created_at timestamptz DEFAULT now());
 CREATE TABLE public.rivaliq_snapshots(id serial PRIMARY KEY, client_id uuid, endpoint text, fetched_at timestamptz);
 CREATE TABLE public.competitive_reports(id uuid PRIMARY KEY, status text);`);
 
 const migration = readFileSync(new URL('../supabase/migrations/20261006150000_scheduled_report_queue.sql', import.meta.url), 'utf8');
 await db.exec(migration);
 await db.exec(migration); // applies twice
+// Feed refreshes only for clients whose current set is linked to a landscape.
+const feedMigration = readFileSync(new URL('../supabase/migrations/20261014090000_feed_refresh_linked_landscapes_only.sql', import.meta.url), 'utf8');
+await db.exec(feedMigration);
+await db.exec(feedMigration);
 
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 // A past tick, so the jobs it makes are already due for the lease checks below.
@@ -31,6 +35,14 @@ INSERT INTO public.report_schedules(id,client_id,report_kind,is_active,next_run_
  ('${id(41)}','${id(4)}','social',false,'2026-09-09T07:00:00Z','2026-01-04'),
  ('${id(42)}','${id(4)}','competitive',true,'2026-10-09T07:00:00Z','2026-01-04');
 INSERT INTO public.competitor_sets VALUES ('${id(101)}','${id(1)}','complete'),('${id(102)}','${id(2)}','confirmed'),('${id(103)}','${id(3)}','complete'),('${id(104)}','${id(4)}','draft');
+-- Alpha and Beta are linked to landscapes. Unlinked (5) has a set but no landscape; Relinked (6) has an older
+-- linked set behind a newer unlinked one. Neither 5 nor 6 may get a feed refresh.
+UPDATE public.competitor_sets SET rivaliq_landscape_id = 'landscape-' || right(client_id::text, 1), confirmed_at = '2026-08-01' WHERE id IN ('${id(101)}','${id(102)}');
+INSERT INTO public.clients VALUES ('${id(5)}','Unlinked',null),('${id(6)}','Relinked',null);
+INSERT INTO public.competitor_sets(id,client_id,status,confirmed_at,rivaliq_landscape_id) VALUES
+ ('${id(105)}','${id(5)}','complete','2026-08-01',null),
+ ('${id(106)}','${id(6)}','complete','2026-07-01','landscape-6'),
+ ('${id(107)}','${id(6)}','confirmed','2026-09-01','  ');
 INSERT INTO public.rivaliq_snapshots(client_id,endpoint,fetched_at) VALUES ('${id(1)}','feed','2026-09-01T07:00:00Z'),('${id(2)}','feed','2026-09-07T07:15:00Z'),('${id(2)}','metrics','2026-01-01');`);
 
 const asService = async (sql) => { await db.exec('RESET ROLE; SET ROLE service_role'); try { return (await db.query(sql)).rows; } finally { await db.exec('RESET ROLE'); } };
@@ -53,7 +65,8 @@ assert.equal(preview.dry_run, true);
 assert.equal((await jobs()).length, 0, 'dry run wrote rows');
 const plan = preview.enqueued.map((j) => `${j.kind}:${j.detail}:${j.client_id.slice(-1)}`);
 // Alpha's feed is 8 days old: due. Beta's is two days old: due only when today is its weekday.
-// Archived Gone and set-less NoSet never get a feed; inactive and future schedules never dispatch.
+// Archived Gone and set-less NoSet never get a feed, nor do Unlinked and Relinked, whose current set has no
+// landscape; inactive and future schedules never dispatch.
 assert.deepEqual(plan.filter((p) => p.startsWith('dispatch')).sort(), ['dispatch:competitive:1', 'dispatch:competitive:2', 'dispatch:social:1', 'dispatch:social:2']);
 const betaWeekday = (await db.query(`SELECT public.feed_refresh_weekday('${id(2)}') AS d`)).rows[0].d;
 const expectBetaFeed = betaWeekday === new Date(NOW).getUTCDay();
@@ -140,4 +153,4 @@ assert(days.every((d) => d >= 0 && d <= 6));
 assert.equal((await db.query(`SELECT public.feed_refresh_weekday('${id(1)}') = public.feed_refresh_weekday('${id(1)}') AS same`)).rows[0].same, true);
 
 await db.close();
-console.log('PASS: queue migration applies twice; only service_role reaches it; dry run writes nothing; enqueue is idempotent and ordered with the old stagger; lease is exclusive and counts attempts; the sweep releases only social jobs whose competitive report finished; the daily tick rechecks waiting and blocked jobs; overdue schedules with no job are reported.');
+console.log('PASS: queue migration applies twice; feeds are queued only for clients whose current set is linked to a landscape; only service_role reaches it; dry run writes nothing; enqueue is idempotent and ordered with the old stagger; lease is exclusive and counts attempts; the sweep releases only social jobs whose competitive report finished; the daily tick rechecks waiting and blocked jobs; overdue schedules with no job are reported.');
