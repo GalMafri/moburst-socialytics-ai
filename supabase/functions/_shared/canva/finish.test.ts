@@ -88,3 +88,36 @@ describe("inkBox and logoRect", () => {
     expect(logoRect([395, 51, 687, 148], 701, 251)).toEqual({ left: 395, top: 47, width: 293, height: 104.9 });
   });
 });
+
+import { canvasLogoRect, designPrompt } from "./brief";
+
+describe("designPrompt", () => {
+  it("is the instruction the 13 Oct proof used", () => {
+    expect(designPrompt({ brand_name: "Moburst", platform: "Facebook", concept: "a glowing crystal brain on a glass pedestal" }, ["AI answers are changing how brands get discovered."], 3)).toBe(
+      "The first image is the canvas for a new Moburst Facebook post (4:5). Its logo is final: keep it exactly as it is, where it is. " +
+      "Design the whole post around it in the visual language of the other three images, which are Moburst's own posts. The picture shows a glowing crystal brain on a glass pedestal. " +
+      "Headline, spelled exactly: \"AI answers are changing how brands get discovered.\" Add no other text and no other logo.",
+    );
+  });
+  it("adds a second line when the copy has one", () => {
+    expect(designPrompt({ brand_name: "LegaBot", platform: "Instagram", concept: "x" }, ["THE NEXT SPORTS LEAGUE WON'T BE MANAGED.", "It'll be computed."], 3))
+      .toContain("Headline, spelled exactly: \"THE NEXT SPORTS LEAGUE WON'T BE MANAGED.\" Second line, spelled exactly: \"It'll be computed.\"");
+  });
+});
+
+describe("canvasLogoRect", () => {
+  it("places the logo where the proof's canvases had it", () => {
+    expect(canvasLogoRect({ anchor: "center", width: 0.323, top: 0.048 }, 701, 251, 1088, 1360)).toEqual({ x: 368, y: 65, width: 351, height: 126 });
+    expect(canvasLogoRect({ anchor: "left", width: 0.23, top: 0.029, left: 0.035 }, 2054, 553, 1088, 1360)).toEqual({ x: 38, y: 39, width: 250, height: 67 });
+  });
+});
+
+import { resampleRGBA } from "./brief";
+
+describe("resampleRGBA", () => {
+  it("averages coverage, keeping colour where only some pixels are inked", () => {
+    // 2x2 → 1x1: one opaque red pixel, three transparent ones.
+    const src = [255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    expect(Array.from(resampleRGBA(src, 2, 2, 1, 1))).toEqual([255, 0, 0, 64]);
+  });
+});

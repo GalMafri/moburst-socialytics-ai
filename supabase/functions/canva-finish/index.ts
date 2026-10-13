@@ -28,6 +28,9 @@ import { PROVIDER, accessTokenFor, authorizeUrl, clientCredentials, exchangeCode
 import { getExport, getImageToDesign, startExport, startImageToDesign, uploadAsset } from "../_shared/canva/rest.ts";
 import { CanvaMcp } from "../_shared/canva/mcp.ts";
 import { type Box, type Layer, type Placement, copyOperations, elementBox, inkBox, logoRect, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
+import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
+
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -40,6 +43,10 @@ const TICK_BUDGET_MS = 50_000;
 const LEASE_MS = 120_000;
 const MAX_ATTEMPTS = 4;
 const INTENT = "Socialytics finishing: replace the drawn logo with the client's logo file and set the post's exact copy";
+/** The image model can take minutes; its run is held under a longer lease. */
+const GENERATE_LEASE_MS = 420_000;
+const MAX_GENERATIONS = 3;
+const PAGE = { width: 1088, height: 1360 };
 
 const db = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const redirectUri = () => `${Deno.env.get("SUPABASE_URL")}/functions/v1/canva-finish`;
@@ -103,14 +110,19 @@ Deno.serve(async (req) => {
       const caller = await requireStaff(req, { writeClientId: clientId });
       const placement = body.placement as Placement;
       const copy: string[] = Array.isArray(body.copy) ? body.copy.map(String) : [];
-      if (!clientId || !body.design_path || !body.logo_path || !copy.length || !placement?.anchor) {
-        return json({ error: "client_id, design_path, logo_path, copy and placement are required." }, 400);
+      const generate = body.generate as GenerateInput | undefined;
+      if (generate && (!generate.concept || !generate.background || !Array.isArray(generate.refs) || !generate.refs.length || !generate.brand_name || !generate.platform)) {
+        return json({ error: "generate needs brand_name, platform, concept, background and refs." }, 400);
+      }
+      if (!clientId || (!body.design_path && !generate) || !body.logo_path || !copy.length || !placement?.anchor) {
+        return json({ error: "client_id, logo_path, copy, placement and either design_path or generate are required." }, 400);
       }
       const logo = await download(admin, String(body.logo_path));
       const [lw, lh] = pngSize(logo);
       const { data, error } = await admin.from("canva_finish_jobs").insert({
         client_id: clientId, created_by: caller.userId,
-        input: { design_path: body.design_path, logo_path: body.logo_path, logo_size: [lw, lh], copy, placement, title: body.title ?? null },
+        step: generate ? "generate" : "upload",
+        input: { design_path: body.design_path ?? null, logo_path: body.logo_path, logo_size: [lw, lh], copy, placement, generate: generate ?? null, title: body.title ?? null },
       }).select("id").single();
       if (error) throw new Error(error.message);
       return json({ job_id: data.id });
@@ -173,7 +185,8 @@ function back(status: "linked" | "failed", reason?: string): Response {
 // ── The worker ──────────────────────────────────────────────────────────────
 
 type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any };
-type StepResult = "next" | "wait" | "done";
+/** next: run the following step now; wait: check again next tick; held: work continues in the background under its lease. */
+type StepResult = "next" | "wait" | "done" | "held";
 
 async function tick(admin: any) {
   const started = Date.now();
@@ -212,7 +225,7 @@ async function advance(admin: any, token: string, job: Job, started: number): Pr
       await admin.from("canva_finish_jobs").update({ status: "done", output_path: job.state.final_path, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
       return "done";
     }
-    await admin.from("canva_finish_jobs").update({ lease_until: null }).eq("id", job.id);
+    if (result !== "held") await admin.from("canva_finish_jobs").update({ lease_until: null }).eq("id", job.id);
     return job.step;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -230,8 +243,21 @@ async function runStep(admin: any, token: string, job: Job): Promise<StepResult>
   const s = job.state;
   const base = `${job.client_id}/canva-finish/${job.id}`;
   switch (job.step) {
+    case "generate": {
+      s.generations = (s.generations ?? 0) + 1;
+      if (s.generations > MAX_GENERATIONS) throw new Error("FINAL: The design could not be generated.");
+      await admin.from("canva_finish_jobs").update({ lease_until: new Date(Date.now() + GENERATE_LEASE_MS).toISOString(), state: s }).eq("id", job.id);
+      const work = generateDesign(admin, job).catch(async (e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[canva-finish] job ${job.id} generate:`, msg);
+        await admin.from("canva_finish_jobs").update({ error: msg, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+      });
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(work);
+      else await work;
+      return "held";
+    }
     case "upload": {
-      s.design_asset = await uploadAsset(token, await download(admin, job.input.design_path), `${job.id}-design.png`);
+      s.design_asset = await uploadAsset(token, await download(admin, s.design_path ?? job.input.design_path), `${job.id}-design.png`);
       s.logo_asset = await uploadAsset(token, await download(admin, job.input.logo_path), `${job.id}-logo.png`);
       job.step = "layers"; return "next";
     }
@@ -329,6 +355,82 @@ async function runStep(admin: any, token: string, job: Job): Promise<StepResult>
     }
   }
   throw new Error(`FINAL: Unknown step '${job.step}'`);
+}
+
+/**
+ * Design the post with the image model: the client's background colour with
+ * its logo file locked at the habitual spot (a mask shaped like the logo's
+ * letters), three of the client's own posts as references, and the brief from
+ * _shared/canva/brief.ts. The result is stored and handed to the upload step.
+ */
+async function generateDesign(admin: any, job: Job): Promise<void> {
+  const g: GenerateInput = job.input.generate;
+  const base = `${job.client_id}/canva-finish/${job.id}`;
+  const file = await Image.decode(await download(admin, job.input.logo_path));
+  const rect = canvasLogoRect(job.input.placement, file.width, file.height, PAGE.width, PAGE.height);
+  const logo = new Image(rect.width, rect.height);
+  logo.bitmap.set(resampleRGBA(file.bitmap, file.width, file.height, rect.width, rect.height));
+
+  const [r, gr, b] = hexRgb(g.background);
+  const canvas = new Image(PAGE.width, PAGE.height).fill(Image.rgbaToColor(r, gr, b, 255));
+  canvas.composite(logo, rect.x, rect.y);
+  // OpenAI's mask: transparent pixels are redrawn, opaque ones are kept. Only
+  // the logo's own ink is opaque, so no box appears behind it.
+  const mask = new Image(PAGE.width, PAGE.height);
+  for (let y = 0; y < logo.height; y++) {
+    for (let x = 0; x < logo.width; x++) {
+      if (logo.bitmap[(y * logo.width + x) * 4 + 3] === 0) continue;
+      const tx = x + rect.x, ty = y + rect.y;
+      if (tx < 0 || ty < 0 || tx >= PAGE.width || ty >= PAGE.height) continue;
+      mask.bitmap.set([255, 255, 255, 255], (ty * PAGE.width + tx) * 4);
+    }
+  }
+
+  const form = new FormData();
+  form.append("model", "gpt-image-2.5-flare");
+  form.append("size", `${PAGE.width}x${PAGE.height}`);
+  form.append("quality", "high");
+  form.append("n", "1");
+  form.append("image[]", new Blob([(await canvas.encode()) as unknown as BlobPart], { type: "image/png" }), "canvas.png");
+  for (const [i, path] of g.refs.entries()) {
+    const { data, error } = await admin.storage.from("design-references").download(path);
+    if (error || !data) throw new Error(`Could not read the client post ${path}: ${error?.message ?? "missing"}`);
+    form.append("image[]", data, `ref${i}${path.slice(path.lastIndexOf("."))}`);
+  }
+  form.append("mask", new Blob([(await mask.encode()) as unknown as BlobPart], { type: "image/png" }), "mask.png");
+  form.append("prompt", designPrompt(g, job.input.copy, g.refs.length));
+
+  const resp = await fetch("https://api.openai.com/v1/images/edits", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${await openaiKey(admin)}` },
+    body: form,
+    signal: AbortSignal.timeout(360_000),
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(`Image model ${resp.status}: ${text.slice(0, 300)}`);
+  const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
+  if (!b64) throw new Error("The image model returned no image.");
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const path = `${base}/design.png`;
+  const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "image/png", upsert: true });
+  if (error) throw new Error(`Could not store the design: ${error.message}`);
+
+  const state = { ...job.state, design_path: path };
+  await admin.from("canva_finish_jobs").update({ step: "upload", state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+}
+
+async function openaiKey(admin: any): Promise<string> {
+  const fromEnv = Deno.env.get("OPENAI_API_KEY");
+  if (fromEnv) return fromEnv;
+  const { data } = await admin.from("app_settings").select("value").eq("key", "openai_api_key").maybeSingle();
+  if (!data?.value) throw new Error("FINAL: No OpenAI key is configured.");
+  return data.value as string;
+}
+
+function hexRgb(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (!m) throw new Error(`FINAL: '${hex}' is not a colour like #0B0E1A.`);
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
 }
 
 async function download(admin: any, path: string): Promise<Uint8Array> {
