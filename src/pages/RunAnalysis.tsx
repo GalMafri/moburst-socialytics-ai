@@ -1,4 +1,5 @@
 import { useActiveReportRun } from "@/hooks/useActiveReportRun";
+import { WATCH_LIMIT_MINUTES } from "@/lib/runWatch";
 import { ReportRunStatus } from "@/components/reports/ReportRunStatus";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { RUN_ESTIMATE, canRetry } from "@/lib/reportRun";
@@ -449,6 +450,9 @@ export default function RunAnalysis() {
             )}
 
             {activeRun.isError && <p className="t-secondary">Could not check for an existing run. Reconnect or refresh before starting an analysis.</p>}
+            {activeRun.watchStopped && !running && (
+              <p className="t-secondary" role="status">This page stopped checking for runs started elsewhere after {WATCH_LIMIT_MINUTES} minutes. Refresh it before starting an analysis.</p>
+            )}
             {running && <ReportRunStatus reportId={reportId} startedAt={startedAt} kind="monthly" onStarted={() => { setStartedAt(new Date().toISOString()); activeRun.refetch(); refetchReports(); }} />}
 
             {currentStep >= STEPS.length && !error && (

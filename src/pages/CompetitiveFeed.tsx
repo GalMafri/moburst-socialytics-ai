@@ -53,6 +53,8 @@ export default function CompetitiveFeed() {
   const [plat, setPlat] = useState("all");
   // A refresh spends a RivalIQ request and an AI pass, so it is asked first.
   const [confirmRefresh, setConfirmRefresh] = useState(false);
+  // So does drafting a post: the draft waits here until it is confirmed.
+  const [pendingDraft, setPendingDraft] = useState<{ topic: string; platform: string; alertId?: string; about: string } | null>(null);
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -263,7 +265,7 @@ export default function CompetitiveFeed() {
                           </div>
                         )}
                         {canRunAnalysis && (
-                          <Button size="sm" disabled={draft.isPending} onClick={() => draft.mutate({ topic: `${a.topic}. ${a.summary || ""} Competitors ${(a.companies || []).join(", ")} are posting about this now; give ${clientName} its own angle.`, platform: (a.platforms || [])[0] ? platformLabel((a.platforms || [])[0]) : "Instagram", alertId: a.id })}>
+                          <Button size="sm" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: `${a.topic}. ${a.summary || ""} Competitors ${(a.companies || []).join(", ")} are posting about this now; give ${clientName} its own angle.`, platform: (a.platforms || [])[0] ? platformLabel((a.platforms || [])[0]) : "Instagram", alertId: a.id, about: `the shared topic "${a.topic}"` })}>
                             {draft.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1.5" />} Draft our take
                           </Button>
                         )}
@@ -328,7 +330,7 @@ export default function CompetitiveFeed() {
                         <a href={p.postLink} target="_blank" rel="noreferrer" className="t-label text-primary hover:underline inline-flex items-center gap-1">Open <ExternalLink className="h-3 w-3" /></a>
                       ) : <span />}
                       {canRunAnalysis && (
-                        <Button size="sm" variant="outline" className="min-h-10 h-auto t-label whitespace-normal" disabled={draft.isPending} onClick={() => draft.mutate({ topic: topicFor(p), platform: platformLabel(p.channel) })}>
+                        <Button size="sm" variant="outline" className="min-h-10 h-auto t-label whitespace-normal" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: topicFor(p), platform: platformLabel(p.channel), about: `this post by ${p.companyName || "a competitor"}` })}>
                           <Sparkles className="h-3 w-3 mr-1" /> Draft our take
                         </Button>
                       )}
@@ -366,6 +368,26 @@ export default function CompetitiveFeed() {
         onConfirm={() => {
           setConfirmRefresh(false);
           refresh.mutate();
+        }}
+      />
+      <ConfirmDialog
+        open={!!pendingDraft}
+        onOpenChange={(o) => !o && setPendingDraft(null)}
+        title="Draft our take?"
+        description={
+          <>
+            <p>
+              The AI writes one {pendingDraft?.platform || "social"} post for {clientName} on {pendingDraft?.about || "this topic"} and
+              saves it to {clientName}'s posts as a draft.
+            </p>
+            <p>Nothing is published or scheduled.{pendingDraft?.alertId ? " The topic is marked as drafted." : ""}</p>
+          </>
+        }
+        confirmLabel="Draft the post"
+        destructive={false}
+        onConfirm={() => {
+          if (pendingDraft) draft.mutate({ topic: pendingDraft.topic, platform: pendingDraft.platform, alertId: pendingDraft.alertId });
+          setPendingDraft(null);
         }}
       />
       <ConfirmDialog
