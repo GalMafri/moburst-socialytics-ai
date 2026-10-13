@@ -8,7 +8,9 @@ export function compactNumber(v: number): string {
   if (!Number.isFinite(v)) return "0";
   if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
   if (Math.abs(v) >= 10_000) return `${(v / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
-  return v.toLocaleString();
+  // Below 100 one decimal is enough ("5.4 engagements / post", not "5.357");
+  // above it, whole numbers.
+  return v.toLocaleString(undefined, { maximumFractionDigits: Math.abs(v) < 100 ? 1 : 0 });
 }
 
 function Bar({ value, max, color, label, title }: { value: number; max: number; color: string; label: string; title: string }) {

@@ -17,6 +17,7 @@ import { LoadError } from "@/components/ui/load-error";
 import { Eye, ExternalLink, Crosshair, FileText } from "lucide-react";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { formatRange } from "@/lib/dateRange";
+import { landscapeLabel } from "@/lib/competitiveStatus";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function AllReports() {
@@ -248,7 +249,7 @@ export default function AllReports() {
                               <Badge variant={r.status === "complete" ? "default" : r.status === "running" ? "secondary" : "destructive"}>{r.status}</Badge>
                             </TableCell>
                             <TableCell className="t-secondary">{period}</TableCell>
-                            <TableCell className="t-secondary">{rd.landscape?.name || "—"}</TableCell>
+                            <TableCell className="t-secondary">{rd.landscape?.name ? landscapeLabel(rd.landscape.name) : "—"}</TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
                                 <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.client_id}/competitive/reports`)}>All runs</Button>

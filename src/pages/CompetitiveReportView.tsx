@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/ui/load-error";
-import { competitiveStatusBadge } from "@/lib/competitiveStatus";
+import { competitiveStatusBadge, landscapeLabel } from "@/lib/competitiveStatus";
 import { watchExpired, watchInterval } from "@/lib/runWatch";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
@@ -197,6 +197,18 @@ const fmtDelta = formatPercentChange;
  * wrong way round; competitor movement stays neutral, as it does on the change
  * cards. A change that rounds to zero wears no colour either.
  */
+const FORMAT_LABELS: Record<string, string> = { photo: "Image", image: "Image", video: "Video", reel: "Video", carousel: "Carousel", album: "Carousel", document: "Document", text: "Text", link: "Link", poll: "Poll" };
+
+/** The format mix in plain labels, with photo and image counted together and unrecognized types as Other. */
+function formatMix(mix: Array<{ key: string; count: number }>): Array<{ label: string; count: number }> {
+  const totals = new Map<string, number>();
+  for (const m of mix) {
+    const label = FORMAT_LABELS[String(m.key).toLowerCase()] ?? "Other";
+    totals.set(label, (totals.get(label) ?? 0) + m.count);
+  }
+  return [...totals].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || (a.label === "Other" ? 1 : b.label === "Other" ? -1 : 0));
+}
+
 const andList = (xs: string[]) => xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 
 /** "Brand on Facebook and Instagram", one entry per profile name, instead of the name once per network. */
@@ -488,9 +500,10 @@ export default function CompetitiveReportView() {
     moodboards: ordered.some((c) => moodPosts(c).length > 0),
     posts: ordered.some((c) => bucketFor(c, effectivePlat).top_posts?.length),
   };
-  const SCOPED_IDS = ["field", "audience", "rhythm", "gaps", "wins", "moodboards", "posts"];
+  const SCOPED_IDS = ["rhythm", "field", "audience", "gaps", "wins", "moodboards", "posts"];
   const WIDE_IDS = ["summary", "changes", "scorecard"];
-  const NATURAL_IDS = ["summary", "changes", "scorecard", "field", "audience", "rhythm", "gaps", "wins", "moodboards", "posts"];
+  // Posting rhythm sits right after the standing (Lital, 13 Oct).
+  const NATURAL_IDS = ["summary", "changes", "scorecard", "rhythm", "field", "audience", "gaps", "wins", "moodboards", "posts"];
   const displayIds = (effectivePlat === "all" ? NATURAL_IDS : [...SCOPED_IDS, ...WIDE_IDS]).filter((id) => present[id]);
   /** The section's number in the order it is read. */
   const num = (id: string) => displayIds.indexOf(id) + 1;
@@ -609,11 +622,27 @@ export default function CompetitiveReportView() {
               {period && <Chip>{period}{rd.period?.days ? ` · ${rd.period.days} days` : ""}</Chip>}
               {/* Sources and the tracking setup's name are for the account team,
                   and stay out of a PDF they export for the client. */}
-              {isMoburstStaff && rd.landscape?.name && <span data-print="hide"><Chip>RivalIQ · {rd.landscape.name}</Chip></span>}
+              {isMoburstStaff && rd.landscape?.name && <span data-print="hide"><Chip>RivalIQ · {landscapeLabel(rd.landscape.name)}</Chip></span>}
               {isMoburstStaff && companies.some((c: Company) => c.linkedin_metrics) && <span data-print="hide"><Chip>LinkedIn · Apify</Chip></span>}
-              {rivals.length > 0 && <Chip>{rivals.length} competitors</Chip>}
               {effectivePlat !== "all" && <Chip>{platformLabel(effectivePlat)} only</Chip>}
             </div>
+            {/* The competitors, by name, before anything else is read. */}
+            {rivals.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap pt-1">
+                <span className="t-label uppercase tracking-wider">Compared with</span>
+                {rivals.map((r) => (
+                  <button
+                    key={r.company_id}
+                    type="button"
+                    title={`${r.name}: jump to its top posts`}
+                    onClick={() => document.getElementById(`company-posts-${r.company_id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    className="rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 t-body font-semibold text-white hover:border-[#b9e045]/50"
+                  >
+                    {displayCompanyName(r.name)}
+                  </button>
+                ))}
+              </div>
+            )}
             <p className="t-secondary">Snapshot from the report run started {new Date(report.created_at).toLocaleString()}. Posts were published within the selected UTC dates; their performance reflects the collected source snapshots, not only interactions made within those dates. Client impressions from connected profiles are measured; competitor impressions are estimates.</p>
           </div>
           <div data-print="hide" className="flex gap-2 flex-wrap">
@@ -722,7 +751,7 @@ export default function CompetitiveReportView() {
                   <div key={i} className="space-y-2">
                     <div className="flex justify-between items-baseline gap-4">
                       <span className="font-medium">{d.dimension}</span>
-                      <span className="t-secondary text-right">{Number(d.client).toLocaleString(undefined, { maximumFractionDigits: 1 })} <span className="opacity-60">vs</span> {Number(d.competitor_avg).toLocaleString(undefined, { maximumFractionDigits: 1 })} {d.unit}</span>
+                      <span className="t-secondary text-right">{compactNumber(Number(d.client))} <span className="opacity-60">vs</span> {compactNumber(Number(d.competitor_avg))} {d.unit}</span>
                     </div>
                     <div className="relative h-3 rounded-full bg-[rgba(255,255,255,0.06)]">
                       <div className="absolute left-0 top-0 h-3 rounded-full" style={{ width: `${comparisonScale(d.client, d.competitor_avg).client}%`, backgroundColor: tint(ACCENT) }} />
@@ -797,7 +826,7 @@ export default function CompetitiveReportView() {
                         </div>
                       )}
                       {(b.media_type_mix || []).length > 0 && (
-                        <div><p className="t-label mb-1">Formats in analyzed posts</p><p className="t-secondary">{b.media_type_mix.slice(0, 4).map(m => `${m.key}: ${m.count}`).join(" · ")}</p></div>
+                        <div><p className="t-label mb-1">Formats in analyzed posts</p><p className="t-secondary">{formatMix(b.media_type_mix).slice(0, 4).map(m => `${m.label} ${m.count}`).join(" · ")}</p></div>
                       )}
                       {(b.top_posts || []).some(hasContent) && <Button asChild size="sm" variant="outline"><a href={`#company-posts-${c.company_id}`}>View {displayCompanyName(c.name)} posts</a></Button>}
                       {platformNote && (

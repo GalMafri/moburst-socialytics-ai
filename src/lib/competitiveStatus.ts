@@ -19,3 +19,12 @@ export function competitiveStatusBadge(status: string | null | undefined, opts: 
   if (status === "failed") return { label: "Did not finish", variant: "destructive" };
   return { label: "Not available", variant: "secondary" };
 }
+
+/**
+ * A RivalIQ landscape name for staff screens. Landscapes the app creates are
+ * named "Socialytics - <client> - <set id>"; the id means nothing to a reader.
+ */
+export function landscapeLabel(name: string | null | undefined): string {
+  const raw = String(name ?? "").trim();
+  return raw.replace(/^Socialytics - /, "").replace(/ - [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "").trim() || raw;
+}

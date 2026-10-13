@@ -92,7 +92,7 @@ it('keeps a held report vendor-free for a client and named for staff', async () 
 it('still shows staff the landscape and sources', async () => {
   fixture.staff = true;
   mount(<CompetitiveReportView />); await tick(20);
-  expect(screen.getByText(/RivalIQ · Socialytics - QA client/)).toBeInTheDocument();
+  expect(screen.getByText(/RivalIQ · QA client$/)).toBeInTheDocument();
   expect(screen.getByText('LinkedIn · Apify')).toBeInTheDocument();
 });
 

@@ -25,6 +25,7 @@ import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
 import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../../supabase/functions/_shared/competitive/reportEvidence";
 import { competitiveRecovery } from "@/lib/competitiveFlow";
+import { landscapeLabel } from "@/lib/competitiveStatus";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
 const whole = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? "–" : Math.round(n).toLocaleString());
@@ -117,7 +118,7 @@ export function CompetitiveSnapshot({
         <p className="t-secondary">
           {rivals.length} competitors
           {/* The tracking setup's name is for staff, and stays out of an exported PDF. */}
-          {isMoburstStaff && rd.landscape?.name ? <span data-print="hide">{` · ${rd.landscape.name}`}</span> : null}
+          {isMoburstStaff && rd.landscape?.name ? <span data-print="hide">{` · ${landscapeLabel(rd.landscape.name)}`}</span> : null}
           {period ? ` · ${period}` : ""} · analyzed {new Date(latest.created_at).toLocaleDateString()}
         </p>
         <div className="flex gap-2 flex-wrap">
