@@ -214,3 +214,6 @@ verify_jwt = false
 
 [functions.revise-suggestion]
 verify_jwt = false
+
+[functions.video-worker]
+verify_jwt = false

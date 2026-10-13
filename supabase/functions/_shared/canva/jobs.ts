@@ -149,6 +149,20 @@ async function takeOverPost(admin: any, req: DesignRequest): Promise<boolean> {
  * replacement for any option that did not finish, and record the stage.
  */
 export async function settleRequest(admin: any, requestId: string): Promise<void> {
+  // The Canva worker and the video worker both settle requests; one at a time
+  // per request, so a finished design is handed to its post once.
+  const holder = crypto.randomUUID();
+  const lease = `settle:${requestId}`;
+  const { data: claimed } = await admin.rpc("claim_worker_lease", { p_name: lease, p_holder: holder, p_seconds: 60 });
+  if (!claimed) return;
+  try {
+    await settleRequestNow(admin, requestId);
+  } finally {
+    await admin.rpc("release_worker_lease", { p_name: lease, p_holder: holder });
+  }
+}
+
+async function settleRequestNow(admin: any, requestId: string): Promise<void> {
   const { data: req } = await admin.from("design_requests").select("*").eq("id", requestId).maybeSingle();
   if (!req || req.status !== "preparing") return;
   const { data: jobs } = await admin.from("canva_finish_jobs").select("id, status, step, option_index, slide_index, slide_count, output_path, state, input").eq("design_request_id", requestId).order("created_at");

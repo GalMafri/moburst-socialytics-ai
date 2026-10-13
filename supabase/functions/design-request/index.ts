@@ -24,7 +24,7 @@ import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, parseVideoBriefs, plannerPrompt, recentLines, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
-import { wakeWorker } from "../_shared/canva/worker.ts";
+import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
 import { learningLines, recordFeedback } from "../_shared/design-prompts/feedback.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
@@ -200,6 +200,8 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   for (let i = 0; i < first; i++) await startOption(admin, planned, settings, brand, i, i);
   await admin.from("design_requests").update({ briefs, stage: "designing", candidates_started: first, updated_at: new Date().toISOString() }).eq("id", request.id);
   await wakeWorker();
+  // A video's footage starts now, on its own worker, while the cards are drawn.
+  if (request.kind === "video") await wakeVideoWorker();
 }
 
 /** The client's most recent designs: the posts each was built on and what it showed (a carousel by its cover). */
