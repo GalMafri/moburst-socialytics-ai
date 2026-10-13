@@ -1,8 +1,12 @@
 // supabase/functions/_shared/video/steps.ts
 //
 // A video job's steps, run by the video worker (video-worker):
-//   footage      start the footage on Higgsfield, with the client's own
-//                published videos as its reference and with sound;
+//   references   short cuts of the client's own published videos, made once
+//                per video in a hosted sandbox (the video model refuses long
+//                references), then kept beside the videos;
+//   references_wait  until the cuts are stored;
+//   footage      start the footage on Higgsfield, with those cuts as its
+//                reference and with sound;
 //   hook         while it renders, the image model draws the hook on a
 //                transparent layer in the type of the client's posts;
 //   hook_check   the hook's words are read back and must be the copy's exactly;
@@ -22,12 +26,12 @@ import { BUCKET } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
-import { CARD_SIZE, TIMING, VIDEO_SIZE, composeScript, parseComposed } from "./compose.ts";
+import { CARD_SIZE, TIMING, VIDEO_SIZE, clipScript, composeScript, parseClipped, parseComposed, referenceClipPath } from "./compose.ts";
 import { hookPrompt } from "./hook.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
 
 /** The steps a video job goes through. */
-export const VIDEO_STEPS = ["footage", "hook", "hook_check", "footage_wait", "compose", "compose_wait"] as const;
+export const VIDEO_STEPS = ["references", "references_wait", "footage", "hook", "hook_check", "footage_wait", "compose", "compose_wait"] as const;
 /** The same, as a PostgREST list for not.in / in filters. */
 export const VIDEO_STEPS_FILTER = `(${VIDEO_STEPS.join(",")})`;
 
@@ -38,6 +42,8 @@ export const VIDEO_POLL_MS = 30_000;
 const MAX_FOOTAGE = 2;
 const MAX_HOOKS = 3;
 const MAX_COMPOSE = 3;
+const MAX_CLIPS = 3;
+const REFERENCES = "design-references";
 const FOOTAGE_RULES = " One continuous shot, vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, signs, screens with writing, logos or watermarks anywhere in frame. No real or identifiable people.";
 
 export type VideoJob = { id: string; client_id: string; step: string; state: any; input: any; design_request_id: string | null; option_index: number | null };
@@ -56,15 +62,52 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
   const base = `${job.client_id}/canva-finish/${job.id}`;
   const recently = (at: unknown) => typeof at === "number" && Date.now() - at < VIDEO_POLL_MS;
   switch (job.step) {
+    case "references": {
+      // The short cuts already kept for this client are reused.
+      const sources: string[] = (input.video_refs ?? []).slice(0, 3);
+      const clips = sources.map(referenceClipPath);
+      const missing: number[] = [];
+      for (let i = 0; i < clips.length; i++) if (!(await stored(admin, REFERENCES, clips[i]))) missing.push(i);
+      if (!missing.length) {
+        s.clip_paths = clips;
+        job.step = "footage"; return "next";
+      }
+      s.clip_tries = (s.clip_tries ?? 0) + 1;
+      if (s.clip_tries > MAX_CLIPS) throw new Error("FINAL: The client's own videos could not be prepared as references.");
+      const parts = [];
+      for (const i of missing) {
+        const { data: signed, error } = await admin.storage.from(REFERENCES).createSignedUploadUrl(clips[i], { upsert: true });
+        if (error || !signed?.signedUrl) throw new Error(`Could not prepare a reference upload: ${error?.message ?? "no URL"}`);
+        parts.push({ sourceUrl: publicUrl(admin, REFERENCES, sources[i]), uploadUrl: signed.signedUrl });
+      }
+      s.clip_session = await startScript(clipScript(parts), `Socialytics video references ${job.client_id}`);
+      s.clip_count = parts.length;
+      s.clip_checked_at = Date.now();
+      job.step = "references_wait"; return "next";
+    }
+    case "references_wait": {
+      if (recently(s.clip_checked_at)) return "wait";
+      s.clip_checked_at = Date.now();
+      const r = await checkScript(s.clip_session);
+      if (r.state === "running") return "wait";
+      await endScript(s.clip_session);
+      if (!(r.state === "finished" && parseClipped(r.reply, s.clip_count))) {
+        console.error(`[video-worker] job ${job.id} references:`, r.state === "failed" ? r.reason : r.reply.slice(0, 300));
+      }
+      // Either way the stored cuts are looked at again; any still missing are made again.
+      job.step = "references"; return "next";
+    }
     case "footage": {
+      // A job from before the reference cuts gets them first.
+      if (!Array.isArray(s.clip_paths)) { job.step = "references"; return "next"; }
       s.footage_tries = (s.footage_tries ?? 0) + 1;
       if (s.footage_tries > MAX_FOOTAGE) throw new Error("FINAL: The footage could not be generated.");
       const mcp = await higgsfield(admin);
       const balance = await creditBalance(mcp);
       if (balance && balance.credits < FOOTAGE_CREDIT_FLOOR) throw new Error(`FINAL: The Higgsfield account has ${Math.floor(balance.credits)} credits left, too few for the footage.`);
-      // The client's own published videos are the reference, imported once per job.
+      // Short cuts of the client's own published videos are the reference, imported once per job.
       if (!Array.isArray(s.video_ref_ids)) {
-        const refs: string[] = (input.video_refs ?? []).map((p: string) => publicUrl(admin, "design-references", p));
+        const refs: string[] = s.clip_paths.map((p: string) => publicUrl(admin, REFERENCES, p));
         s.video_ref_ids = refs.length ? await importReferences(mcp, refs, "video") : [];
       }
       const [first] = await submitVideo(mcp, {
@@ -202,6 +245,14 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
     }
   }
   throw new Error(`FINAL: Unknown video step '${job.step}'`);
+}
+
+/** Whether a file is in storage. */
+async function stored(admin: any, bucket: string, path: string): Promise<boolean> {
+  const at = path.lastIndexOf("/");
+  const { data, error } = await admin.storage.from(bucket).list(path.slice(0, at), { search: path.slice(at + 1), limit: 5 });
+  if (error) throw new Error(`Could not look in storage: ${error.message}`);
+  return (data ?? []).some((f: { name: string }) => f.name === path.slice(at + 1));
 }
 
 async function openaiKey(admin: any): Promise<string> {

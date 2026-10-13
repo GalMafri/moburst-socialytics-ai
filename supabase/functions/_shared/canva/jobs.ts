@@ -98,7 +98,7 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
     created_by: req.requested_by,
     design_request_id: req.id,
     option_index: optionIndex,
-    step: "footage",
+    step: "references",
     input: {
       kind: "video",
       title,

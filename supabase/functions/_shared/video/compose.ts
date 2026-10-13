@@ -82,3 +82,53 @@ export function parseComposed(reply: string): { bytes: number; seconds: number; 
   const bytes = Number(m[1]), seconds = Number(m[2]), audio = Number(m[3]);
   return bytes > 10_000 && seconds > 3 ? { bytes, seconds, audio } : null;
 }
+
+/**
+ * The longest stretch of a client's own video handed to the video model as a
+ * reference. Its references must be short (Moburst's videos, 20 to 80 seconds
+ * long, were refused; LegaBot's 5-second Reels were taken).
+ */
+export const REFERENCE_SECONDS = 5;
+
+/** Where the short reference cut from a client's video is kept, beside the video. */
+export function referenceClipPath(videoPath: string): string {
+  return `${videoPath.replace(/\.mp4$/i, "")}-ref${REFERENCE_SECONDS}s.mp4`;
+}
+
+export interface ClipInput {
+  /** The client's own video. */
+  sourceUrl: string;
+  /** A signed upload URL for its short reference (Supabase Storage, PUT). */
+  uploadUrl: string;
+}
+
+/**
+ * The bash script that cuts REFERENCE_SECONDS from the middle of each video
+ * (past any opening title or closing card), keeping its sound, and uploads
+ * each cut. Its last line is "CLIPPED <count>" on success.
+ */
+export function clipScript(clips: ClipInput[]): string {
+  const lines = [
+    "set -euo pipefail",
+    "command -v ffmpeg >/dev/null || (apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null)",
+    "W=$(mktemp -d) && cd \"$W\"",
+  ];
+  clips.forEach((c, i) => {
+    lines.push(
+      `curl -fsSL --retry 3 -o src${i}.mp4 ${shellQuote(c.sourceUrl)}`,
+      `D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 src${i}.mp4)`,
+      `S=$(awk -v d="$D" 'BEGIN { s = d / 2 - ${REFERENCE_SECONDS / 2}; if (s < 0) s = 0; print s }')`,
+      `ffmpeg -hide_banner -loglevel error -y -ss "$S" -i src${i}.mp4 -t ${REFERENCE_SECONDS} -map 0:v:0 -map "0:a?" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart clip${i}.mp4`,
+      `curl -fsS --retry 3 -X PUT -H 'Content-Type: video/mp4' -H 'x-upsert: true' --data-binary @clip${i}.mp4 ${shellQuote(c.uploadUrl)} >/dev/null`,
+    );
+  });
+  lines.push(`echo "CLIPPED ${clips.length}"`);
+  return lines.join("\n");
+}
+
+/** Whether the sandbox's reply says every cut was made and uploaded. */
+export function parseClipped(reply: string, count: number): boolean {
+  const m = /CLIPPED\s+(\d+)/.exec(reply);
+  return !!m && Number(m[1]) === count;
+}
+

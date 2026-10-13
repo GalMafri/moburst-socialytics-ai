@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { composeScript, parseComposed, shellQuote } from "./compose";
+import { REFERENCE_SECONDS, clipScript, composeScript, parseClipped, parseComposed, referenceClipPath, shellQuote } from "./compose";
 import { parseVideoBriefs, videoPlannerPrompt, VIDEO_SECONDS } from "../canva/options";
 import { hookPrompt } from "./hook";
 
@@ -57,3 +57,26 @@ describe("video briefs", () => {
     expect(p).toMatch(/no logo/i);
   });
 });
+
+describe("reference cuts", () => {
+  it("cuts a short stretch from the middle of each of the client's videos, keeping its sound", () => {
+    const script = clipScript([
+      { sourceUrl: "https://s/a.mp4", uploadUrl: "https://s/up-a" },
+      { sourceUrl: "https://s/b.mp4", uploadUrl: "https://s/up-b" },
+    ]);
+    expect(script).toContain("-o src0.mp4 'https://s/a.mp4'");
+    expect(script).toContain("-o src1.mp4 'https://s/b.mp4'");
+    expect(script).toContain(`-t ${REFERENCE_SECONDS}`);
+    expect(script).toContain("s = d / 2 -");
+    expect(script).toContain('-map "0:a?"');
+    expect(script).toContain("@clip1.mp4 'https://s/up-b'");
+    expect(script.split("\n").pop()).toBe('echo "CLIPPED 2"');
+  });
+  it("keeps each cut beside its video, and accepts only a reply that counts every cut", () => {
+    expect(referenceClipPath("c/video-ab.mp4")).toBe(`c/video-ab-ref${REFERENCE_SECONDS}s.mp4`);
+    expect(parseClipped("CLIPPED 3", 3)).toBe(true);
+    expect(parseClipped("CLIPPED 2", 3)).toBe(false);
+    expect(parseClipped("FAILED: curl (22)", 1)).toBe(false);
+  });
+});
+
