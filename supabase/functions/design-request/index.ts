@@ -20,6 +20,7 @@ import { bearerToken } from "../_shared/auth/authz.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, plannerPrompt } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
+import { wakeWorker } from "../_shared/canva/worker.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -156,6 +157,7 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
   const first = Math.min(request.options_wanted, briefs.length);
   for (let i = 0; i < first; i++) await startOption(admin, planned, settings, brand, i, i);
   await admin.from("design_requests").update({ candidates_started: first, updated_at: new Date().toISOString() }).eq("id", request.id);
+  await wakeWorker();
 }
 
 function json(body: unknown, status = 200) {

@@ -14,7 +14,7 @@
 //   POST {action:"prepare_upload", client_id, files:[name]}   staff: signed upload URLs for inputs
 //   POST {action:"enqueue", client_id, design_path, logo_path, copy:[..], placement:{..}}   staff: queue a design
 //   POST {action:"job", job_id}        staff: a job's state and finished file
-//   POST {action:"tick"}               the minute worker (operational secret only)
+//   POST {action:"tick"}               one worker pass, which starts the next (operational secret only)
 //
 // Each design is a row in canva_finish_jobs that moves through these steps,
 // one or more per tick. Canva's jobs are started on one tick and checked on
@@ -28,6 +28,7 @@ import { PROVIDER, accessTokenFor, authorizeUrl, clientCredentials, exchangeCode
 import { getExport, getImageToDesign, startExport, startImageToDesign, uploadAsset } from "../_shared/canva/rest.ts";
 import { CanvaMcp } from "../_shared/canva/mcp.ts";
 import { settleRequest } from "../_shared/canva/jobs.ts";
+import { wakeWorker } from "../_shared/canva/worker.ts";
 import { type Box, type Layer, type Placement, copyOperations, elementBox, inkBox, logoRect, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 
@@ -67,7 +68,14 @@ Deno.serve(async (req) => {
       if (!(await secretEquals(req.headers.get("x-socialytics-secret") ?? "", Deno.env.get("SOCIALYTICS_N8N_SECRET")))) {
         return json({ error: "Not allowed." }, 401);
       }
-      return json(await tick(admin));
+      // Answer at once and run the pass in the background, so whoever started
+      // it (the timer, or the previous pass) never waits on it.
+      const pass = runPass(admin);
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+        EdgeRuntime.waitUntil(pass);
+        return json({ accepted: true }, 202);
+      }
+      return json(await pass);
     }
 
     if (action === "connect") {
@@ -213,6 +221,62 @@ async function closeEditingSession(): Promise<void> {
   const m = tickMcp;
   tickMcp = null;
   if (m) await m.close();
+}
+
+const WORKER = "canva-finish";
+/** Longer than a pass can take: its budget, settling requests, closing the Canva session. */
+const PASS_LEASE_S = 180;
+/** After a pass that had nothing to advance (designs still being drawn), wait this long before the next. */
+const IDLE_PAUSE_MS = 10_000;
+
+/**
+ * One pass of the worker, then the next pass straight away while work
+ * remains. The minute timer only restarts the worker if a pass ever fails to
+ * start the next one: its calls wait behind other scheduled jobs and reached
+ * the worker only every 2 to 4 minutes (13 Oct).
+ *
+ * One pass runs at a time, held by a lease, since the Canva account takes one
+ * editing session at a time. A call that finds the lease held ends at once.
+ */
+async function runPass(admin: any) {
+  const holder = crypto.randomUUID();
+  const { data: claimed, error } = await admin.rpc("claim_worker_lease", { p_name: WORKER, p_holder: holder, p_seconds: PASS_LEASE_S });
+  if (error) {
+    console.error("[canva-finish] could not claim the worker:", error.message);
+    return { error: error.message };
+  }
+  if (!claimed) return { skipped: "A pass is already running." };
+
+  let result: { ran: number; report?: Record<string, string> } = { ran: 0 };
+  let failed = false;
+  try {
+    result = await tick(admin);
+  } catch (e) {
+    // Left to the timer: a failure that repeats (Canva unreachable, say)
+    // should not be retried every few seconds.
+    failed = true;
+    console.error("[canva-finish] pass failed:", e instanceof Error ? e.message : e);
+  } finally {
+    await closeEditingSession().catch(() => undefined);
+    await admin.rpc("release_worker_lease", { p_name: WORKER, p_holder: holder });
+  }
+  if (!failed && (await workRemains(admin))) {
+    if (!result.ran) await new Promise((r) => setTimeout(r, IDLE_PAUSE_MS));
+    await wakeWorker();
+  }
+  return result;
+}
+
+/**
+ * Jobs still to finish, or requests past planning still being prepared.
+ * Requests in planning are left out: design-request starts the worker itself
+ * once their first options exist.
+ */
+async function workRemains(admin: any): Promise<boolean> {
+  const { count: jobs } = await admin.from("canva_finish_jobs").select("id", { count: "exact", head: true }).in("status", ["queued", "running"]);
+  if (jobs) return true;
+  const { count: open } = await admin.from("design_requests").select("id", { count: "exact", head: true }).eq("status", "preparing").neq("stage", "planning");
+  return !!open;
 }
 
 type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any; design_request_id: string | null; option_index: number | null; slide_index: number | null; slide_count: number | null };
