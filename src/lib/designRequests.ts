@@ -22,7 +22,7 @@ export interface DesignRequest {
   post_copy: string;
   status: "preparing" | "ready" | "needs_staff";
   stage: DesignStage;
-  kind?: "single" | "carousel";
+  kind?: "single" | "carousel" | "video";
   options_wanted: number;
   options_ready: number;
   /** Who asked; null when the design was prepared without anyone asking. */
@@ -45,6 +45,8 @@ export const DESIGN_STEPS: Array<{ stage: Exclude<DesignStage, "ready">; label: 
  */
 export const TYPICAL_MINUTES = 7;
 export const TYPICAL_MINUTES_CAROUSEL = 12;
+/** A video: two cards like a short carousel, plus footage that takes several minutes to generate. */
+export const TYPICAL_MINUTES_VIDEO = 18;
 
 /**
  * How long this kind of request usually takes: the median of the client's
@@ -58,7 +60,7 @@ export function typicalMinutes(r: Pick<DesignRequest, "kind">, history: DesignRe
     .filter((m) => m > 0 && m < 180)
     .sort((a, b) => a - b);
   if (took.length >= 3) return Math.max(1, Math.round(took[Math.floor(took.length / 2)]));
-  return kind === "carousel" ? TYPICAL_MINUTES_CAROUSEL : TYPICAL_MINUTES;
+  return kind === "carousel" ? TYPICAL_MINUTES_CAROUSEL : kind === "video" ? TYPICAL_MINUTES_VIDEO : TYPICAL_MINUTES;
 }
 
 export function isPreparing(r: DesignRequest | null | undefined, isStaff: boolean): boolean {
@@ -79,7 +81,7 @@ export function progressPercent(r: DesignRequest): number {
 }
 
 export function stageLine(r: DesignRequest, isStaff: boolean): string {
-  const noun = r.kind === "carousel" ? "Carousel" : "Design";
+  const noun = r.kind === "carousel" ? "Carousel" : r.kind === "video" ? "Video" : "Design";
   if (r.status === "ready") return `${noun} ready`;
   if (r.status === "needs_staff" && isStaff) return "Needs a look from the team";
   return DESIGN_STEPS[Math.min(stageIndex(r), DESIGN_STEPS.length - 1)].label;
@@ -160,4 +162,9 @@ export async function sendDesignFeedback(args: { iterationId: string; verdict: "
   });
   if (error || data?.error) throw new Error(await describeInvokeError(error, data));
   return { request: (data?.request as DesignRequest | null) ?? null };
+}
+
+/** Whether a design's media is a video file. */
+export function isVideoMedia(url: string): boolean {
+  return /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(url);
 }

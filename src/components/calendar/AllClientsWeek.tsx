@@ -5,6 +5,7 @@
  */
 
 import { useMemo } from "react";
+import { isVideoMedia } from "@/lib/designRequests";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Clock, ImageOff } from "lucide-react";
@@ -37,7 +38,9 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
       if (error) throw error;
       const out: Record<string, string> = {};
       for (const r of data || []) {
-        const url = (r.media_urls || []).find((u: string) => !/\.(mp4|webm|mov)/i.test(u));
+        // A still if the post has one, else its video (whose first frame is the cover card).
+        const media: string[] = r.media_urls || [];
+        const url = media.find((u) => !isVideoMedia(u)) ?? media[0];
         if (!url || !r.calendar_post_key || !keys.has(r.calendar_post_key)) continue;
         if (r.is_selected || !out[r.calendar_post_key]) out[r.calendar_post_key] = url;
       }
@@ -68,7 +71,9 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
               >
                 {designs[p.post_key] ? (
                   <div className="aspect-[4/5] rounded-[8px] overflow-hidden bg-black/60">
-                    <img src={designs[p.post_key]} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    {isVideoMedia(designs[p.post_key])
+                      ? <video src={designs[p.post_key]} muted playsInline preload="metadata" className="w-full h-full object-cover" />
+                      : <img src={designs[p.post_key]} alt="" className="w-full h-full object-cover" loading="lazy" />}
                   </div>
                 ) : (
                   <p className="t-label inline-flex items-center gap-1"><ImageOff className="h-3 w-3" aria-hidden />No design yet</p>

@@ -19,7 +19,7 @@ export function DesignProgressCard({ request, isStaff, replacing = false }: { re
   const current = stageIndex(request);
   const pct = progressPercent(request);
   const staffAttention = isStaff && request.status === "needs_staff";
-  const noun = request.kind === "carousel" ? "carousel" : "design";
+  const noun = request.kind === "carousel" ? "carousel" : request.kind === "video" ? "video" : "design";
   const usual = typicalMinutes(request, history);
   const over = now - new Date(request.created_at).getTime() > usual * 60_000;
 

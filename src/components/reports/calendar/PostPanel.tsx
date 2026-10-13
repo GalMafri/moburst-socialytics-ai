@@ -60,6 +60,9 @@ interface Props {
   initialTab?: string;
 }
 
+/** Tailwind needs whole class names: the tab grid for 2, 3 or 4 tabs. */
+const TAB_COLUMNS: Record<number, string> = { 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4" };
+
 function isVideoUrl(url: string): boolean {
   return /\.(mp4|webm|mov)/i.test(url);
 }
@@ -175,8 +178,10 @@ export function PostPanel({
 
   const imageTiles = tilesFromIterations(postIterations, (u) => !isVideoUrl(u));
   const videoTiles = tilesFromIterations(postIterations, isVideoUrl);
-  // One design per post; earlier ones stay on the post to switch back to.
-  const versions = designVersions(postIterations, (u) => !isVideoUrl(u));
+  // One design per post; earlier ones stay on the post to switch back to. A
+  // video post's design is its video (cover card, footage, end card).
+  const videoDesigns = plannedVideo && designsReady;
+  const versions = designVersions(postIterations, videoDesigns ? isVideoUrl : (u) => !isVideoUrl(u));
   const otherTiles = imageTiles.filter((t) => !isDesignOption({ variant_angle: t.variantAngle }));
   const isCarouselPost = /carousel|document|pdf/i.test(String(post.format || "")) || (versions[0]?.urls.length ?? 0) > 1;
 
@@ -218,13 +223,16 @@ export function PostPanel({
           <SheetDescription className="sr-only">Review the copy and creative for this post.</SheetDescription>
 
           <Tabs value={tab} onValueChange={setTab} className="mt-4">
-            <TabsList className={`grid ${isClient ? "grid-cols-3" : "grid-cols-4"}`}>
+            <TabsList className={`grid ${TAB_COLUMNS[(isClient ? 3 : 4) - (videoDesigns ? 1 : 0)]}`}>
               <TabsTrigger value="copy">Copy</TabsTrigger>
-              <TabsTrigger value="design">{plannedVideo ? "Cover" : "Design"}</TabsTrigger>
-              <TabsTrigger value="video" className="gap-1.5">
-                Video
-                {plannedVideo && <span className="h-1.5 w-1.5 rounded-full bg-[#b9e045]" aria-hidden />}
-              </TabsTrigger>
+              {/* A video post's design is made as a video, so its one media tab is Video. */}
+              <TabsTrigger value="design">{videoDesigns ? "Video" : plannedVideo ? "Cover" : "Design"}</TabsTrigger>
+              {!videoDesigns && (
+                <TabsTrigger value="video" className="gap-1.5">
+                  Video
+                  {plannedVideo && <span className="h-1.5 w-1.5 rounded-full bg-[#b9e045]" aria-hidden />}
+                </TabsTrigger>
+              )}
               {!isClient && <TabsTrigger value="schedule">Schedule</TabsTrigger>}
             </TabsList>
 
@@ -238,7 +246,7 @@ export function PostPanel({
 
             {/* Design tab */}
             <TabsContent value="design" className="mt-4 space-y-4">
-              {plannedVideo && (
+              {plannedVideo && !designsReady && (
                 <div className="glass-inner p-4 flex items-start justify-between gap-3 flex-wrap">
                   <p className="t-body min-w-0">
                     This post is planned as a <span className="font-semibold text-white">{post.format}</span>. Designs here are stills, useful as a cover frame; the clip itself is generated on the Video tab.
@@ -251,14 +259,16 @@ export function PostPanel({
               {designsReady ? (
                 <>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold">{isCarouselPost ? "Carousel" : "Design"}</p>
-                    <p className="t-secondary">Made in your brand's style, with your logo and the post's words.</p>
+                    <p className="text-sm font-semibold">{videoDesigns ? "Video" : isCarouselPost ? "Carousel" : "Design"}</p>
+                    <p className="t-secondary">{videoDesigns
+                      ? "Made in your brand's style: an opening card with the hook, filmed footage, and a closing card with your logo."
+                      : "Made in your brand's style, with your logo and the post's words."}</p>
                   </div>
                   <PostDesign
                     versions={versions}
                     preparing={preparingDesigns ? designRequest : null}
                     isStaff={isMoburstStaff}
-                    aspect={tileAspectFor(post) || "aspect-[4/5]"}
+                    aspect={videoDesigns ? "aspect-[9/16]" : tileAspectFor(post) || "aspect-[4/5]"}
                     filenameStub={`design-${post.platform || "post"}`}
                     onCreate={startDesigns}
                     creating={startingDesigns}

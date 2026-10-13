@@ -16,7 +16,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { DesignProgressCard } from "./DesignProgressCard";
-import { DESIGN_FEEDBACK_REASONS, currentDesign, type DesignRequest, type DesignVersion } from "@/lib/designRequests";
+import { DESIGN_FEEDBACK_REASONS, currentDesign, isVideoMedia, type DesignRequest, type DesignVersion } from "@/lib/designRequests";
 
 interface Props {
   versions: DesignVersion[];
@@ -44,6 +44,8 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const isCarousel = (design?.urls.length ?? 0) > 1;
+  const isVideo = !!design && isVideoMedia(design.urls[0]);
+  const noun = isVideo ? "video" : isCarousel ? "carousel" : "design";
 
   if (!design) {
     return (
@@ -74,12 +76,16 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
     <div className="space-y-4">
       {preparing && <DesignProgressCard request={preparing} isStaff={isStaff} replacing />}
 
-      <SlideViewer
-        key={design.iterationId}
-        urls={design.urls}
-        aspect={aspect}
-        onOpen={(index) => setLightbox({ urls: design.urls, index })}
-      />
+      {isVideo ? (
+        <VideoViewer key={design.iterationId} url={design.urls[0]} />
+      ) : (
+        <SlideViewer
+          key={design.iterationId}
+          urls={design.urls}
+          aspect={aspect}
+          onOpen={(index) => setLightbox({ urls: design.urls, index })}
+        />
+      )}
 
       <div className="flex items-center gap-2 flex-wrap">
         {design.isSelected ? (
@@ -89,7 +95,7 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
         ) : (
           <Button size="sm" className="h-9" onClick={() => onUse(design.iterationId)} disabled={usingId === design.iterationId}>
             {usingId === design.iterationId ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
-            Use this {isCarousel ? "carousel" : "design"}
+            Use this {noun}
           </Button>
         )}
         <Button size="sm" variant="outline" className="h-9" onClick={onCreate} disabled={creating || !!preparing}>
@@ -101,13 +107,13 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
           <Button size="sm" variant="ghost" className="h-9" onClick={() => setRejecting(design.iterationId)} aria-label="Not right: tell us why">
             <ThumbsDown className="h-3.5 w-3.5 mr-1.5" />Not right
           </Button>
-          <Button size="icon" variant="ghost" className="h-9 w-9 text-muted-foreground hover:text-white" onClick={() => setDeleting(design.iterationId)} aria-label={`Delete this ${isCarousel ? "carousel" : "design"}`}>
+          <Button size="icon" variant="ghost" className="h-9 w-9 text-muted-foreground hover:text-white" onClick={() => setDeleting(design.iterationId)} aria-label={`Delete this ${noun}`}>
             <Trash2 className="h-4 w-4" />
           </Button>
         </div>
       </div>
       {!preparing && (
-        <p className="t-secondary">Regenerate makes a new {isCarousel ? "carousel" : "design"} from the post as it is now, including any copy changes. This one stays until the new one is ready.</p>
+        <p className="t-secondary">Regenerate makes a new {noun} from the post as it is now, including any copy changes. This one stays until the new one is ready.</p>
       )}
 
       {earlier.length > 0 && (
@@ -131,7 +137,9 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
                     className={`relative block w-full bg-black group ${aspect}`}
                     aria-label={`Open the design from ${dateLabel(v.createdAt)}`}
                   >
-                    <img src={v.urls[0]} alt="" className="w-full h-full object-contain" />
+                    {isVideoMedia(v.urls[0])
+                      ? <video src={`${v.urls[0]}#t=1`} muted playsInline preload="metadata" className="w-full h-full object-contain" />
+                      : <img src={v.urls[0]} alt="" className="w-full h-full object-contain" />}
                     {v.urls.length > 1 && <span className="absolute top-1.5 right-1.5 rounded-full bg-black/70 px-1.5 py-0.5 t-badge text-white">{v.urls.length} slides</span>}
                     <span className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
                       <Expand className="h-4 w-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden />
@@ -160,14 +168,14 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
       <FeedbackDialog
         open={!!rejecting}
         isCurrent={rejecting === design.iterationId}
-        noun={isCarousel ? "carousel" : "design"}
+        noun={noun}
         onOpenChange={(o) => !o && setRejecting(null)}
         onSubmit={async (reason, note, makeNew) => { if (rejecting) await onFeedback(rejecting, "rejected", reason, note, makeNew); setRejecting(null); }}
       />
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}
-        title={`Delete this ${isCarousel ? "carousel" : "design"}?`}
+        title={`Delete this ${noun}?`}
         description="It's removed from this post. To say what was wrong so the next designs improve, use Not right instead."
         confirmLabel="Delete"
         onConfirm={async () => { if (deleting) await onFeedback(deleting, "deleted"); setDeleting(null); }}
@@ -226,6 +234,15 @@ function FeedbackDialog({ open, isCurrent, noun, onOpenChange, onSubmit }: {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A video design: its cover card, footage and end card, played in place at its own 9:16 shape. */
+function VideoViewer({ url }: { url: string }) {
+  return (
+    <div className="relative mx-auto w-full max-w-[320px] aspect-[9/16] rounded-[12px] overflow-hidden bg-black border border-white/[0.06]">
+      <video src={url} controls playsInline loop preload="metadata" className="w-full h-full object-contain" aria-label="Post video" />
+    </div>
   );
 }
 
@@ -330,7 +347,9 @@ function SlideLightbox({ state, onClose }: { state: { urls: string[]; index: num
         <DialogTitle className="sr-only">{count > 1 ? `Slide ${index + 1} of ${count}` : "Post design"}</DialogTitle>
         {state && (
           <div className="relative">
-            <img src={state.urls[index]} alt={count > 1 ? `Slide ${index + 1} of ${count}` : "Post design"} className="w-full h-auto max-h-[88vh] object-contain" />
+            {isVideoMedia(state.urls[index])
+              ? <video src={state.urls[index]} controls autoPlay playsInline className="w-full h-auto max-h-[88vh] object-contain" />
+              : <img src={state.urls[index]} alt={count > 1 ? `Slide ${index + 1} of ${count}` : "Post design"} className="w-full h-auto max-h-[88vh] object-contain" />}
             {count > 1 && (
               <>
                 <span className="absolute top-3 left-3 rounded-full bg-black/70 px-2.5 py-1 t-badge text-white tabular-nums">{index + 1} / {count}</span>
@@ -354,7 +373,8 @@ function DownloadButton({ urls, filenameStub }: { urls: string[]; filenameStub: 
         const blob = await (await fetch(urls[i])).blob();
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = urls.length > 1 ? `${filenameStub}-slide-${i + 1}.png` : `${filenameStub}.png`;
+        const ext = isVideoMedia(urls[i]) ? "mp4" : "png";
+        a.download = urls.length > 1 ? `${filenameStub}-slide-${i + 1}.${ext}` : `${filenameStub}.${ext}`;
         a.click();
         URL.revokeObjectURL(a.href);
       }
