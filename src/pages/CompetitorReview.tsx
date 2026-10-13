@@ -196,7 +196,10 @@ export default function CompetitorReview() {
   const currentSet = (requestedSet ? sets?.find(s => s.id === requestedSet) : sets?.[0]) ?? null;
   const { runnable: runnableSet } = pickRunSelection((sets || []) as SetRow[]);
   const selectionState = describeSelection((sets || []) as SetRow[]);
-  const trackingState = describeTracking(currentSet);
+  // The steps say what a report would use: the confirmed selection, which is
+  // not the set on screen while a newer draft waits for review.
+  const trackingState = describeTracking(runnableSet ?? currentSet);
+  const viewingDraftBesideRun = !!runnableSet && currentSet?.status === "draft";
 
 
   const { data: competitors, isLoading: competitorsLoading, isError: competitorsFailed, error: competitorsError, refetch: refetchCompetitors } = useQuery({
@@ -752,11 +755,12 @@ export default function CompetitorReview() {
           current={selectionState.ready ? 1 : 0}
           steps={[
             { title: "Review competitors", ...selectionState },
-            { title: "Connect tracking", ...trackingState },
+            // A linked set nobody has checked yet says only what is known: it is linked.
+            { title: "Connect tracking", ...trackingState, ...(!trackingState.headline && runnableSet?.rivaliq_landscape_id ? { headline: "Linked to a RivalIQ landscape", detail: "The next report run checks that it still tracks these companies." } : {}) },
             {
               title: "Choose period and run",
-              headline: selectionState.ready && trackingState.ready ? "Ready to run" : "Not ready yet",
-              detail: selectionState.ready && trackingState.ready ? undefined : "Finish the two steps on the left first.",
+              headline: selectionState.ready && trackingAllowsRun(trackingState) ? "Ready to run" : "Not ready yet",
+              detail: selectionState.ready && trackingAllowsRun(trackingState) ? undefined : "Finish the two steps on the left first.",
               ready: false,
               href: selectionState.ready ? `/clients/${clientId}/competitive/run` : undefined,
               linkLabel: "Open the run page",
@@ -812,7 +816,13 @@ export default function CompetitorReview() {
           <CardContent className="pt-0 space-y-2">
             {/* Tracking is its own fact: a confirmed selection is not a
                 connected one, and neither says anything about a report. */}
-            {trackingState.headline && (
+            {viewingDraftBesideRun ? (
+              <p className="t-secondary">
+                <span className="font-medium">RivalIQ tracking:</span> Reports use the confirmed selection
+                {trackingState.headline ? ` (${trackingState.headline.toLowerCase()})` : runnableSet?.rivaliq_landscape_id ? ", which is linked" : ""}.
+                {" "}This draft gets its own tracking after it is confirmed.
+              </p>
+            ) : trackingState.headline && (
               <p className="t-secondary">
                 <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
                 {trackingState.detail ? ` ${trackingState.detail}` : ""}
