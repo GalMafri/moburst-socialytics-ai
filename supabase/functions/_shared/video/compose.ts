@@ -33,6 +33,8 @@ export interface ComposeInput {
   logo: LogoBox;
   /** A signed upload URL for the finished MP4 (Supabase Storage, PUT). */
   uploadUrl: string;
+  /** Signed upload URLs for stills of the footage alone, spread across it, read for stray writing. */
+  frameUploads?: string[];
 }
 
 /** Single-quote a value for bash. */
@@ -63,6 +65,12 @@ export function composeScript(input: ComposeInput): string {
     `curl -fsSL --retry 3 -o clip.mp4 ${shellQuote(input.footageUrl)}`,
     `curl -fsSL --retry 3 -o hook.png ${shellQuote(input.overlayUrl)}`,
     `curl -fsSL --retry 3 -o logo.png ${shellQuote(input.logoUrl)}`,
+    // Stills of the footage alone, before anything is laid over it.
+    ...(input.frameUploads ?? []).flatMap((url, i, all) => [
+      `T=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4 | awk '{ printf "%.2f", $1 * ${((i + 0.5) / all.length).toFixed(3)} }')`,
+      `ffmpeg -hide_banner -loglevel error -y -ss "$T" -i clip.mp4 -frames:v 1 -vf scale=720:-2 -q:v 3 still${i}.jpg`,
+      `curl -fsS --retry 3 -X PUT -H 'Content-Type: image/jpeg' -H 'x-upsert: true' --data-binary @still${i}.jpg ${shellQuote(url)} >/dev/null`,
+    ]),
     [
       "ffmpeg -hide_banner -loglevel error -y",
       "-i clip.mp4 -loop 1 -i hook.png -loop 1 -i logo.png",
@@ -130,5 +138,23 @@ export function clipScript(clips: ClipInput[]): string {
 export function parseClipped(reply: string, count: number): boolean {
   const m = /CLIPPED\s+(\d+)/.exec(reply);
   return !!m && Number(m[1]) === count;
+}
+
+/** How many stills of the footage are read for stray writing. */
+export const FOOTAGE_STILLS = 4;
+
+/** The instruction for reading the footage's stills. */
+export function footageTextPrompt(): string {
+  return "These are stills from the footage of a social video, before any title or logo is laid over it. " +
+    "Is there any writing anywhere in them: letters, words, numbers, labels on screens, dashboards or charts, signs, captions, logos or watermarks, however small or garbled? " +
+    'Reply with JSON only: {"writing": true or false, "where": "where it is, or empty"}';
+}
+
+/** The answer about the footage's stills, or null when it gives none. */
+export function parseFootageText(text: string): { writing: boolean; where: string } | null {
+  const w = /"writing"\s*:\s*"?(true|false)"?/i.exec(text);
+  if (!w) return null;
+  const where = /"where"\s*:\s*"([\s\S]*?)"\s*}/.exec(text);
+  return { writing: w[1].toLowerCase() === "true", where: where ? where[1] : "" };
 }
 

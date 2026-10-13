@@ -12,8 +12,11 @@
 //   hook_check   the hook's words are read back and must be the copy's exactly;
 //   footage_wait store the footage once it is ready;
 //   compose      join footage, hook and the client's logo file in a hosted
-//                sandbox (sandbox.ts), keeping the footage's sound;
-//   compose_wait store the finished MP4.
+//                sandbox (sandbox.ts), keeping the footage's sound, and keep
+//                four stills of the footage alone;
+//   compose_wait store the finished MP4; footage with any writing in its
+//                stills (14 Oct: garbled words on dashboard screens) or with
+//                no sound is made again.
 // (13 Oct: video follows the client's own videos, carries the exact copy and
 // the logo file, and is never silent.)
 
@@ -26,7 +29,7 @@ import { BUCKET } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
-import { CARD_SIZE, TIMING, VIDEO_SIZE, clipScript, composeScript, parseClipped, parseComposed, referenceClipPath } from "./compose.ts";
+import { CARD_SIZE, FOOTAGE_STILLS, TIMING, VIDEO_SIZE, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
 import { hookPrompt } from "./hook.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
 
@@ -208,6 +211,16 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       if (error || !signed?.signedUrl) throw new Error(`Could not prepare the video's upload: ${error?.message ?? "no URL"}`);
       const [lw, lh] = input.logo_size;
       const rect = canvasLogoRect(input.placement, lw, lh, VIDEO_SIZE.width, VIDEO_SIZE.height);
+      const stills: string[] = [];
+      const frameUploads: string[] = [];
+      for (let i = 0; i < FOOTAGE_STILLS; i++) {
+        const path = `${base}/still-${s.footage_tries}-${i}.jpg`;
+        const { data: up, error: upError } = await admin.storage.from(BUCKET).createSignedUploadUrl(path, { upsert: true });
+        if (upError || !up?.signedUrl) throw new Error(`Could not prepare a still's upload: ${upError?.message ?? "no URL"}`);
+        stills.push(path);
+        frameUploads.push(up.signedUrl);
+      }
+      s.still_paths = stills;
       s.compose_session = await startScript(
         composeScript({
           footageUrl: publicUrl(admin, BUCKET, s.footage_path),
@@ -215,6 +228,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           logoUrl: publicUrl(admin, BUCKET, input.logo_path),
           logo: { x: rect.x, y: rect.y, width: rect.width },
           uploadUrl: signed.signedUrl,
+          frameUploads,
         }),
         `Socialytics video ${job.id}`,
       );
@@ -239,12 +253,38 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
         delete s.footage_job;
         job.step = "footage"; return "next";
       }
+      // The footage carries no writing of its own: the only words are the hook's.
+      const seen = await footageWriting(admin, s.still_paths ?? []);
+      s.footage_writing = seen;
+      if (seen.writing) {
+        console.warn(`[video-worker] job ${job.id}: the footage has writing (${seen.where}); making it again.`);
+        delete s.footage_job;
+        job.step = "footage"; return "next";
+      }
       s.video_seconds = made.seconds;
       s.final_path = s.video_path;
       job.step = "finished"; return "done";
     }
   }
   throw new Error(`FINAL: Unknown video step '${job.step}'`);
+}
+
+/** Whether the footage's stills show any writing, read by the vision model. */
+async function footageWriting(admin: any, paths: string[]): Promise<{ writing: boolean; where: string }> {
+  if (!paths.length) throw new Error("The footage's stills are missing.");
+  const content: unknown[] = [];
+  for (const p of paths) {
+    const { data, error } = await admin.storage.from(BUCKET).download(p);
+    if (error || !data) throw new Error(`Could not read a still of the footage: ${error?.message ?? "missing"}`);
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode(new Uint8Array(await data.arrayBuffer()) as unknown as ArrayBuffer) } });
+  }
+  content.push({ type: "text", text: footageTextPrompt() });
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
+  const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: 300, messages: [{ role: "user", content }] } });
+  const seen = parseFootageText(result.text);
+  if (!seen) throw new Error(`The footage's stills could not be read: ${result.text.slice(0, 200)}`);
+  return seen;
 }
 
 /** Whether a file is in storage. */

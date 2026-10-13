@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { REFERENCE_SECONDS, clipScript, composeScript, parseClipped, parseComposed, referenceClipPath, shellQuote } from "./compose";
+import { REFERENCE_SECONDS, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
 import { parseVideoBriefs, videoPlannerPrompt, VIDEO_SECONDS } from "../canva/options";
 import { hookPrompt } from "./hook";
 
@@ -77,6 +77,25 @@ describe("reference cuts", () => {
     expect(parseClipped("CLIPPED 3", 3)).toBe(true);
     expect(parseClipped("CLIPPED 2", 3)).toBe(false);
     expect(parseClipped("FAILED: curl (22)", 1)).toBe(false);
+  });
+});
+
+describe("footage stills", () => {
+  it("keeps stills of the footage alone, spread across it, before anything is laid over it", () => {
+    const script = composeScript({
+      footageUrl: "https://s/f.mp4", overlayUrl: "https://s/hook.png", logoUrl: "https://s/logo.png",
+      logo: { x: 1, y: 2, width: 3 }, uploadUrl: "https://s/up", frameUploads: ["https://s/s0", "https://s/s1"],
+    });
+    expect(script).toContain("$1 * 0.250");
+    expect(script).toContain("$1 * 0.750");
+    expect(script).toContain("@still1.jpg 'https://s/s1'");
+    expect(script.indexOf("still0.jpg")).toBeLessThan(script.indexOf("-filter_complex"));
+  });
+  it("asks about any writing, garbled or not, and reads the answer", () => {
+    expect(footageTextPrompt()).toMatch(/labels on screens, dashboards or charts.*garbled/);
+    expect(parseFootageText('{"writing": true, "where": "labels on the "dashboard" panels"}')).toEqual({ writing: true, where: 'labels on the "dashboard" panels' });
+    expect(parseFootageText('{"writing": false, "where": ""}')).toEqual({ writing: false, where: "" });
+    expect(parseFootageText("no idea")).toBeNull();
   });
 });
 
