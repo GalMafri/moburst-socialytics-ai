@@ -39,13 +39,25 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
       if (error) throw error;
       const out: Record<string, string> = {};
       for (const r of data || []) {
-        // A still if the post has one, else its video (whose first frame is the cover card).
+        // A still if the post has one, else its video.
         const media: string[] = r.media_urls || [];
         const url = media.find((u) => !isVideoMedia(u)) ?? media[0];
         if (!url || !r.calendar_post_key || !keys.has(r.calendar_post_key)) continue;
         if (r.is_selected || !out[r.calendar_post_key]) out[r.calendar_post_key] = url;
       }
       return out;
+    },
+  });
+
+  // Video posts with a real person on camera are filmed, so they never get a design.
+  const { data: filmed = new Set<string>() } = useQuery({
+    queryKey: ["calendar-week-filmed", week, clientIds.join(",")],
+    enabled: clientIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await (supabase.from("design_requests" as any) as any)
+        .select("calendar_post_key").in("client_id", clientIds).eq("status", "needs_filming").limit(5000);
+      if (error) throw error;
+      return new Set<string>((data || []).map((r: { calendar_post_key: string }) => r.calendar_post_key));
     },
   });
 
@@ -78,6 +90,8 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                   </div>
                 ) : isTextOnlyFormat(p.format) ? (
                   <p className="t-label">Text post</p>
+                ) : filmed.has(p.post_key) ? (
+                  <p className="t-label">Filmed video</p>
                 ) : (
                   <p className="t-label inline-flex items-center gap-1"><ImageOff className="h-3 w-3" aria-hidden />No design yet</p>
                 )}

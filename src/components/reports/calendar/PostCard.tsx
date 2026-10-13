@@ -102,6 +102,8 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
             <div className="flex items-center gap-2 text-muted-foreground">
               {isTextOnlyFormat(post.format) ? (
                 <span className="t-label">Text post</span>
+              ) : designRequest?.status === "needs_filming" ? (
+                <span className="t-label">Filmed video</span>
               ) : (
                 <>
                   <ImagePlus className="h-4 w-4" />
