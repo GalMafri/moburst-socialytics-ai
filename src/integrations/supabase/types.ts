@@ -1281,6 +1281,7 @@ export type Database = {
           started_at: string
           status: string
           updated_at: string
+          visual_direction: string | null
         }
         Insert: {
           briefs?: Json
@@ -1302,6 +1303,7 @@ export type Database = {
           started_at?: string
           status?: string
           updated_at?: string
+          visual_direction?: string | null
         }
         Update: {
           briefs?: Json
@@ -1323,6 +1325,7 @@ export type Database = {
           started_at?: string
           status?: string
           updated_at?: string
+          visual_direction?: string | null
         }
         Relationships: [
           {
