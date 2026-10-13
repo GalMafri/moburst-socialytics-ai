@@ -10,7 +10,9 @@
 //                one there is designed again.
 //   3. unlogo:   the same picture redrawn whole with every logo and brand
 //                mark taken out (a whole redraw: patching boxes left blocks
-//                and stray letters on 13 Oct).
+//                and stray letters on 13 Oct). The logo's place stays clear:
+//                a frame line broken around the logo in the brand's style
+//                stays broken (closing it put the line through Bader's logo).
 //   4. finish:   the client's logo file laid exactly where and at the size the
 //                model drew it, so the design keeps the room it made for it,
 //                then brought down to the delivered size.
@@ -25,7 +27,7 @@
 /** The instruction for step 3. */
 export function removePrompt(brand: string): string {
   return `Remove every logo and brand mark of ${brand} from this image: its wordmark and symbol, and any copy of the symbol anywhere else, including on objects, signs, clothing or screens. ` +
-    "Where each was, continue exactly what is behind it or the surface it was on. " +
+    "Where each was, continue only the background or surface around it, so its place stays clear; a line, rule, border or frame that stopped at a mark still stops there, leaving the same gap. " +
     "Keep everything else exactly as it is: every word of the text with its spelling, font, size, color and position, the picture, the layout, the colors, the light and the sharpness. Add nothing.";
 }
 
