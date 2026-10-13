@@ -272,6 +272,93 @@ export type Database = {
           },
         ]
       }
+      calendar_posts: {
+        Row: {
+          client_id: string
+          copy: string
+          created_at: string
+          created_by: string | null
+          cta: string | null
+          format: string | null
+          hashtags: string[]
+          id: string
+          language: string | null
+          pillar: string | null
+          platform: string
+          post_date: string
+          post_key: string
+          posting_time: string | null
+          rationale: string | null
+          raw: Json | null
+          reasons: Json
+          report_id: string | null
+          source: string
+          updated_at: string
+          visual_direction: string | null
+        }
+        Insert: {
+          client_id: string
+          copy?: string
+          created_at?: string
+          created_by?: string | null
+          cta?: string | null
+          format?: string | null
+          hashtags?: string[]
+          id?: string
+          language?: string | null
+          pillar?: string | null
+          platform: string
+          post_date: string
+          post_key: string
+          posting_time?: string | null
+          rationale?: string | null
+          raw?: Json | null
+          reasons?: Json
+          report_id?: string | null
+          source?: string
+          updated_at?: string
+          visual_direction?: string | null
+        }
+        Update: {
+          client_id?: string
+          copy?: string
+          created_at?: string
+          created_by?: string | null
+          cta?: string | null
+          format?: string | null
+          hashtags?: string[]
+          id?: string
+          language?: string | null
+          pillar?: string | null
+          platform?: string
+          post_date?: string
+          post_key?: string
+          posting_time?: string | null
+          rationale?: string | null
+          raw?: Json | null
+          reasons?: Json
+          report_id?: string | null
+          source?: string
+          updated_at?: string
+          visual_direction?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calendar_posts_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "calendar_posts_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       canva_finish_jobs: {
         Row: {
           attempts: number
@@ -1021,6 +1108,7 @@ export type Database = {
       }
       design_brand_settings: {
         Row: {
+          auto_designs: boolean
           background: string
           client_id: string
           confirmed_at: string | null
@@ -1031,6 +1119,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          auto_designs?: boolean
           background: string
           client_id: string
           confirmed_at?: string | null
@@ -1041,6 +1130,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          auto_designs?: boolean
           background?: string
           client_id?: string
           confirmed_at?: string | null
