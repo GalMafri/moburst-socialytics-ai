@@ -35,7 +35,8 @@ export function DesignProgressCard({ request, isStaff, replacing = false }: { re
   const staffAttention = isStaff && request.status === "needs_staff";
   const noun = request.kind === "carousel" ? "carousel" : request.kind === "video" ? "video" : "design";
   const usual = typicalMinutes(request, history);
-  const over = now - new Date(request.created_at).getTime() > usual * 60_000;
+  const since = request.started_at ?? request.created_at;
+  const over = now - new Date(since).getTime() > usual * 60_000;
 
   return (
     <div role="status" aria-live="polite" className="glass-inner p-4 space-y-4">
@@ -51,7 +52,7 @@ export function DesignProgressCard({ request, isStaff, replacing = false }: { re
           </p>
         </div>
         <div className="shrink-0 flex items-center gap-1">
-          <span className="t-label tabular-nums">{elapsedLabel(request.created_at, now)}</span>
+          <span className="t-label tabular-nums">{elapsedLabel(since, now)}</span>
           <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => setConfirming(true)} aria-label={`Stop preparing this ${noun}`}>
             <X className="h-3.5 w-3.5 mr-1" aria-hidden />Cancel
           </Button>

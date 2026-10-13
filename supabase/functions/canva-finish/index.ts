@@ -30,7 +30,7 @@ import { CanvaMcp } from "../_shared/canva/mcp.ts";
 import { CanvaBusy, databasePace } from "../_shared/canva/pace.ts";
 import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
-import { type Box, type Layer, type Placement, CLEAN_PROMPT, composeOver, copyOperations, elementBox, inkBox, logoRect, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
+import { type Box, type Layer, type Placement, CLEAN_PROMPT, composeOver, outputSize, pictureSize, copyOperations, elementBox, inkBox, logoRect, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 import { VIDEO_STEPS_FILTER } from "../_shared/video/steps.ts";
 
@@ -498,8 +498,10 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       // The page size comes from the design file itself, without an extra
       // Canva read per slide.
       if (!s.size) s.size = s.page ? [s.page.width, s.page.height] : pngSize(await download(admin, s.design_path ?? job.input.design_path));
-      // The last export is the copy and the logo alone, on a transparent page.
-      s.export_job = await startExport(token, s.design_id, s.size[0], s.size[1], { transparent: job.step === "export_final" });
+      // The last export is the copy and the logo alone, on a transparent page,
+      // at the delivered size (Canva draws the text and the logo file sharp at any size).
+      const [ew, eh] = job.step === "export_final" ? outputSize(s.size) : s.size;
+      s.export_job = await startExport(token, s.design_id, ew, eh, { transparent: job.step === "export_final" });
       job.step = `${job.step}_wait`; return "next";
     }
     case "export_before_wait":
@@ -522,8 +524,11 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
     case "join": {
       const picture = await Image.decode(await download(admin, s.clean_path));
       const layer = await Image.decode(await download(admin, s.foreground_path));
+      // A picture drawn before the delivered size grew (13 Oct) is drawn again
+      // at that size; the copy layer is exported again with it.
       if (picture.width !== layer.width || picture.height !== layer.height) {
-        throw new Error(`FINAL: The copy layer is ${layer.width}x${layer.height}; the picture is ${picture.width}x${picture.height}.`);
+        s.redraw_only = true; s.cleans = 0;
+        job.step = "clean"; return "next";
       }
       picture.bitmap.set(composeOver(picture.bitmap, layer.bitmap, picture.width, picture.height));
       // Each finished file gets a name of its own, so a design finished again
@@ -694,7 +699,9 @@ async function generateDesign(admin: any, job: Job): Promise<void> {
 async function cleanBackground(admin: any, job: Job): Promise<void> {
   const s = job.state;
   const designBytes = await download(admin, s.design_path);
-  const [w, h] = pngSize(designBytes, "The design");
+  const page = pngSize(designBytes, "The design");
+  const [w, h] = pictureSize(page);
+  const [ow, oh] = outputSize(page);
 
   const form = new FormData();
   form.append("model", "gpt-image-2.5-flare");
@@ -714,16 +721,19 @@ async function cleanBackground(admin: any, job: Job): Promise<void> {
   if (!resp.ok) throw new Error(`Image model ${resp.status}: ${text.slice(0, 300)}`);
   const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
   if (!b64) throw new Error("The image model returned no image.");
-  let bytes: Uint8Array = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  // The model answers at the size asked; anything else is brought to the design's size.
-  const [rw, rh] = pngSize(bytes, "The redrawn picture");
-  if (rw !== w || rh !== h) bytes = await (await Image.decode(bytes)).resize(w, h).encode();
+  // Drawn large, brought down to the delivered size by averaging (sharp, no jagged edges).
+  const drawn = await Image.decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+  const picture = new Image(ow, oh);
+  picture.bitmap.set(resampleRGBA(drawn.bitmap, drawn.width, drawn.height, ow, oh));
+  const bytes = await picture.encode();
 
   const path = `${job.client_id}/canva-finish/${job.id}/clean.png`;
   const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "image/png", upsert: true });
   if (error) throw new Error(`Could not store the redrawn picture: ${error.message}`);
-  const state = { ...s, clean_path: path };
-  await admin.from("canva_finish_jobs").update({ step: "export_before", state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+  // A design already finished in Canva only needs its copy layer at the new size.
+  const next = s.redraw_only ? "export_final" : "export_before";
+  const state = { ...s, clean_path: path, redraw_only: false };
+  await admin.from("canva_finish_jobs").update({ step: next, state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
 }
 
 /** The image model is at its rate limit or briefly down; the step is tried again on a later pass. */

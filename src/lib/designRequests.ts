@@ -29,6 +29,8 @@ export interface DesignRequest {
   requested_by?: string | null;
   error: string | null;
   created_at: string;
+  /** When the current preparation began (a request can prepare again). */
+  started_at?: string;
   updated_at: string;
 }
 
@@ -56,7 +58,7 @@ export function typicalMinutes(r: Pick<DesignRequest, "kind">, history: DesignRe
   const kind = r.kind ?? "single";
   const took = history
     .filter((h) => h.status === "ready" && (h.kind ?? "single") === kind && h.options_wanted === 1)
-    .map((h) => (new Date(h.updated_at).getTime() - new Date(h.created_at).getTime()) / 60000)
+    .map((h) => (new Date(h.updated_at).getTime() - new Date(h.started_at ?? h.created_at).getTime()) / 60000)
     .filter((m) => m > 0 && m < 180)
     .sort((a, b) => a - b);
   if (took.length >= 3) return Math.max(1, Math.round(took[Math.floor(took.length / 2)]));

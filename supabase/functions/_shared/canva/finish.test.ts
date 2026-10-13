@@ -135,7 +135,7 @@ describe("designPrompt for carousel slides", () => {
   });
 });
 
-import { composeOver } from "./finish";
+import { composeOver, outputSize, pictureSize } from "./finish";
 
 describe("composeOver", () => {
   it("keeps the picture where the copy layer is empty and is opaque everywhere", () => {
@@ -147,5 +147,19 @@ describe("composeOver", () => {
     const pic = new Uint8ClampedArray([0, 0, 0, 255, 0, 0, 0, 255]);
     const layer = new Uint8ClampedArray([255, 255, 255, 255, 255, 255, 255, 51]);
     expect(Array.from(composeOver(pic, layer, 2, 1))).toEqual([255, 255, 255, 255, 51, 51, 51, 255]);
+  });
+});
+
+describe("picture and output sizes", () => {
+  it("draws a 4:5 page at twice its size and delivers it 1440 wide", () => {
+    expect(pictureSize([1088, 1360])).toEqual([2176, 2720]);
+    expect(outputSize([1088, 1360])).toEqual([1440, 1800]);
+  });
+  it("keeps a 9:16 page within the model's longest edge", () => {
+    const [w, h] = pictureSize([1088, 1936]);
+    expect(h).toBeLessThanOrEqual(3840);
+    expect(w % 16).toBe(0);
+    expect(h % 16).toBe(0);
+    expect(Math.abs(w / h - 1088 / 1936)).toBeLessThan(0.005);
   });
 });

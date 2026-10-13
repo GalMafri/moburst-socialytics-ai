@@ -1275,6 +1275,7 @@ export type Database = {
           report_id: string | null
           requested_by: string | null
           stage: string
+          started_at: string
           status: string
           updated_at: string
         }
@@ -1295,6 +1296,7 @@ export type Database = {
           report_id?: string | null
           requested_by?: string | null
           stage?: string
+          started_at?: string
           status?: string
           updated_at?: string
         }
@@ -1315,6 +1317,7 @@ export type Database = {
           report_id?: string | null
           requested_by?: string | null
           stage?: string
+          started_at?: string
           status?: string
           updated_at?: string
         }

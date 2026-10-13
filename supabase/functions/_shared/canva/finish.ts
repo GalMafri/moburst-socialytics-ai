@@ -167,6 +167,29 @@ export function logoRect(ink: Box, logoW: number, logoH: number): { left: number
 //     the picture, because it re-renders a page background zoomed by about 2%
 //     and with a fraction of its detail (measured on 13 Oct).
 
+/** Delivered width: Instagram's largest feed width, which every other network takes as it is. */
+export const OUTPUT_WIDTH = 1440;
+/** The image model's longest edge. */
+export const MODEL_MAX_EDGE = 3840;
+
+/** The size a finished design is delivered at, in the page's proportions. */
+export function outputSize(page: [number, number]): [number, number] {
+  return [OUTPUT_WIDTH, Math.round((OUTPUT_WIDTH * page[1]) / page[0])];
+}
+
+/**
+ * The size the picture is redrawn at: twice the page, or as near as the
+ * model's longest edge allows, in multiples of 16. Drawn at 1x the picture
+ * came out soft (13 Oct); drawn larger and brought down to the delivered
+ * size, it keeps its detail.
+ */
+export function pictureSize(page: [number, number]): [number, number] {
+  const scale = Math.min(2, MODEL_MAX_EDGE / Math.max(page[0], page[1]));
+  const w = Math.floor((page[0] * scale) / 16) * 16;
+  const h = Math.min(MODEL_MAX_EDGE, Math.round((w * page[1]) / page[0] / 16) * 16);
+  return [w, h];
+}
+
 export const CLEAN_PROMPT =
   "Remove every letter, word, number and logo from this image, including their glows and shadows. " +
   "Where they were, continue exactly the surface that was beneath them (the same panel, glass, gradient, light and texture). " +
