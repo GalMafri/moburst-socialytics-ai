@@ -23,9 +23,11 @@ export interface Slide {
   picture: string;
 }
 
-/** One option: a single design (headline + picture), or a carousel (slides, cover first). */
+/** One option: a single design (headline + picture), a carousel (slides, cover first), or a video (cover and end card, with the footage between). */
 export interface Brief extends Slide {
   slides?: Slide[];
+  /** A video's footage, as one written shot for the video model. */
+  footage?: string;
   /** The client's own posts (paths in its library) whose layout this design builds on. */
   refs?: string[];
   /** A few words naming that layout, e.g. "quote card with portrait". */
@@ -127,6 +129,29 @@ export function parseCarouselBriefs(text: string, slideCount = CAROUSEL_SLIDES, 
   return out;
 }
 
+/**
+ * Video briefs from the planner's reply: a cover card, an end card and the
+ * footage between them. An option missing any of the three is dropped.
+ */
+export function parseVideoBriefs(text: string, library: string[] = []): Brief[] {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return [];
+  let data: unknown;
+  try { data = JSON.parse(text.slice(start, end + 1)); } catch { return []; }
+  const raw = (data as { options?: unknown })?.options;
+  if (!Array.isArray(raw)) return [];
+  const out: Brief[] = [];
+  for (const o of raw as Array<Record<string, unknown>>) {
+    const cover = cleanSlide(o?.cover);
+    const endCard = cleanSlide(o?.end);
+    const footage = String(o?.footage ?? "").replace(/\s+/g, " ").trim();
+    if (!cover || !endCard || footage.length < 20) continue;
+    out.push(withChoice({ ...cover, slides: [cover, endCard], footage }, o, library));
+  }
+  return out;
+}
+
 /** Briefs from the planner's reply, keeping only well-formed ones. */
 export function parseBriefs(text: string, library: string[] = []): Brief[] {
   const start = text.indexOf("{");
@@ -191,7 +216,8 @@ export function optionStates(jobs: Array<JobState & { option_index: number; slid
     const expected = slides[0].slide_count ?? 1;
     if (slides.some((j) => j.status === "failed")) return { status: "failed", step: "failed" };
     if (slides.length >= expected && slides.every((j) => j.status === "done")) return { status: "done", step: "finished" };
-    return { status: "running", step: slides.some((j) => j.step === "generate") ? "generate" : "finishing" };
+    // A video's footage being generated counts as designing, like a card being drawn.
+    return { status: "running", step: slides.some((j) => j.step === "generate" || j.step === "footage" || j.step === "footage_wait") ? "generate" : "finishing" };
   });
 }
 
@@ -230,6 +256,32 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
     "  - picture: one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show. Describe what is in the picture. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead. The slides of one option share one setting and look, so they read as a series.",
     "The options differ from each other in layout or setting, and in wording. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
     `Reply with JSON only: {"options":[{"posts":[2],"layout":"...","slides":[{"headline":["line one","optional line two"],"picture":"..."}]}]}`,
+  ].filter(Boolean).join("\n");
+}
+
+/**
+ * The planner's instruction for video posts: a cover card that carries the
+ * hook, footage that shows the idea, and an end card that closes it. The cards
+ * are designs like any other; the footage is written as one shot for a video
+ * model, with nothing in it the model would get wrong (text, logos, people).
+ */
+export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string }): string {
+  const picture = "one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person.";
+  return [
+    `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
+    args.recent,
+    args.guidance ?? "",
+    `Plan ${args.count} different options for a new ${args.platform} vertical video post (9:16) with this copy:`,
+    `"""${args.copy}"""`,
+    args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+    "The video opens on a cover card that carries the hook, cuts to about eight seconds of footage that shows the idea, and ends on an end card that closes with the copy's call to action or takeaway. The two cards are designed in the look of the posts you chose; the footage is filmed in the same world.",
+    "For each option give:",
+    CHOOSE_POSTS(args.brand),
+    `- cover: headline (the hook, in ${args.brand}'s voice from the copy, in the copy's language: one line of at most 8 words, optionally a second, shorter line) and picture (${picture})`,
+    "- end: headline (the closing line or call to action, same rules) and picture (the same setting and look as the cover, so the cards read as a pair)",
+    "- footage: one shot of about eight seconds, described for a video model in two or three sentences: what is in frame, how it moves, how the camera moves, the light and the palette, all in the world of the cover. It is one continuous shot. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person: use objects, materials, places, hands or abstract motion instead.",
+    "The options differ from each other in layout, setting and wording. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
+    'Reply with JSON only: {"options":[{"posts":[2],"layout":"...","cover":{"headline":["line one","optional line two"],"picture":"..."},"end":{"headline":["..."],"picture":"..."},"footage":"..."}]}',
   ].filter(Boolean).join("\n");
 }
 

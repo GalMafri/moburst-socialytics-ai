@@ -6,6 +6,7 @@
 // and replace any option that did not finish).
 
 import { type Brief, optionStates, requestProgress, type JobState } from "./options.ts";
+import { CARD_SIZE, TIMING } from "../video/compose.ts";
 
 export const BUCKET = "generated-media";
 
@@ -27,7 +28,7 @@ export interface DesignRequest {
   post_copy: string;
   requested_by: string | null;
   status: string;
-  kind?: "single" | "carousel";
+  kind?: "single" | "carousel" | "video";
   options_wanted: number;
   candidates_started: number;
   briefs: Brief[];
@@ -54,6 +55,7 @@ async function logoSize(admin: any, path: string): Promise<[number, number]> {
 export async function startOption(admin: any, req: DesignRequest, settings: Settings, brandName: string, briefIndex: number, optionIndex: number): Promise<void> {
   const brief = req.briefs[briefIndex % req.briefs.length];
   const [lw, lh] = await logoSize(admin, settings.logo_path);
+  if (req.kind === "video") return startVideoOption(admin, req, settings, brandName, brief, optionIndex, [lw, lh]);
   const slides = req.kind === "carousel" && brief.slides?.length ? brief.slides : [brief];
   const carousel = req.kind === "carousel" && slides.length > 1;
   const rows = slides.map((slide, i) => ({
@@ -78,6 +80,48 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
   }));
   const { error } = await admin.from("canva_finish_jobs").insert(rows);
   if (error) throw new Error(`Could not start a design option: ${error.message}`);
+}
+
+/**
+ * A video option: its cover card and end card, designed like a carousel's
+ * slides but at 9:16 (the end card waits for the cover and follows its look),
+ * and a third job that generates the footage and joins the three.
+ */
+async function startVideoOption(admin: any, req: DesignRequest, settings: Settings, brandName: string, brief: Brief, optionIndex: number, logo: [number, number]): Promise<void> {
+  const [cover, end] = brief.slides?.length === 2 ? brief.slides : [brief, brief];
+  const refs = brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3);
+  const title = `${brandName} ${req.platform ?? ""} video ${optionIndex + 1}`.replace(/\s+/g, " ");
+  const card = (slide: { headline: string[]; picture: string }, i: 0 | 1) => ({
+    client_id: req.client_id,
+    created_by: req.requested_by,
+    design_request_id: req.id,
+    option_index: optionIndex,
+    slide_index: i,
+    slide_count: 3,
+    step: "generate",
+    input: {
+      kind: "video_card",
+      logo_path: settings.logo_path,
+      logo_size: logo,
+      copy: slide.headline,
+      placement: settings.placement,
+      title: `${title} ${i === 0 ? "cover" : "end card"}`,
+      layout: brief.layout ?? null,
+      generate: { brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: settings.background, refs, size: CARD_SIZE, video_card: i === 0 ? "cover" : "end" },
+    },
+  });
+  const rows = [card(cover, 0), card(end, 1), {
+    client_id: req.client_id,
+    created_by: req.requested_by,
+    design_request_id: req.id,
+    option_index: optionIndex,
+    slide_index: 2,
+    slide_count: 3,
+    step: "footage",
+    input: { kind: "video", title, video: { prompt: brief.footage ?? brief.picture, seconds: TIMING.footage } },
+  }];
+  const { error } = await admin.from("canva_finish_jobs").insert(rows);
+  if (error) throw new Error(`Could not start the video: ${error.message}`);
 }
 
 /** Designs made by design requests, as opposed to media from older generators or uploads. */
@@ -121,7 +165,9 @@ export async function settleRequest(admin: any, requestId: string): Promise<void
     const expected = lead.slide_count ?? 1;
     if (lead.state?.iteration_id) continue;
     if (ordered.length < expected || !ordered.every((j) => j.status === "done" && j.output_path)) continue;
-    const urls = ordered.map((j) => admin.storage.from(BUCKET).getPublicUrl(j.output_path).data.publicUrl);
+    // A video's post media is the finished MP4 alone; its cards are inside it.
+    const media = ordered.some((j) => j.input?.kind === "video") ? ordered.filter((j) => j.input?.kind === "video") : ordered;
+    const urls = media.map((j) => admin.storage.from(BUCKET).getPublicUrl(j.output_path).data.publicUrl);
     const job = { ...lead, option_index: optionIndex };
     const inUse = await takeOverPost(admin, req);
     const { data: row, error } = await admin.from("post_iterations").insert({

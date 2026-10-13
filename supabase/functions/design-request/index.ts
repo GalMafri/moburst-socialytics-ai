@@ -22,7 +22,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
-import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, plannerPrompt, recentLines, withRefs } from "../_shared/canva/options.ts";
+import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, parseVideoBriefs, plannerPrompt, recentLines, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
@@ -173,19 +173,20 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const carousel = request.kind === "carousel";
+  const video = request.kind === "video";
   const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance };
-  const instruction = carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
+  const instruction = video ? videoPlannerPrompt(common) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
       apiKey,
       body: {
         model: PLANNER_MODEL,
-        max_tokens: carousel ? 6000 : 2000,
+        max_tokens: carousel ? 6000 : video ? 4000 : 2000,
         messages: [{ role: "user", content: [...content, { type: "text", text: instruction }] }],
       },
     });
-    briefs = carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES, library) : parseBriefs(result.text, library);
+    briefs = video ? parseVideoBriefs(result.text, library) : carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES, library) : parseBriefs(result.text, library);
   }
   if (!briefs.length) throw new Error("The options could not be planned.");
   briefs = withRefs(briefs, library, recentList);
@@ -222,8 +223,9 @@ async function startRequest(admin: any, settings: Settings, p: { clientId: strin
   const { data: created, error } = await admin.from("design_requests").insert({
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
     platform: p.platform, format: p.format, post_copy: p.copy, requested_by: p.requestedBy,
-    // A LinkedIn document is a deck of slides: it is made like a carousel.
-    kind: /carousel|document|pdf/i.test(String(p.format || "")) ? "carousel" : "single", options_wanted: OPTIONS_WANTED,
+    // A LinkedIn document is a deck of slides: it is made like a carousel. A
+    // Reel, short or any video post gets a video: cover, footage, end card.
+    kind: designKind(p.format, p.platform), options_wanted: OPTIONS_WANTED,
   }).select("*").single();
   if (error) {
     // Two starts at once: the unique index let one through; answer with it.
@@ -253,8 +255,17 @@ const AUTO_DAYS_AHEAD = 7;
  * makes each wait, and a person's own request would queue behind them.
  */
 const AUTO_AT_ONCE = 2;
-/** Posts whose design is a video; the Design tab only makes stills. */
-const VIDEO_POST = /reel|video|short|tiktok/i;
+/**
+ * What a post's design is made as, from its format: a LinkedIn document is a
+ * deck of slides like a carousel; a Reel, short, story video or any post on
+ * TikTok is a video.
+ */
+export function designKind(format: string | null | undefined, platform: string | null | undefined): "single" | "carousel" | "video" {
+  const f = String(format || "");
+  if (/carousel|document|pdf/i.test(f)) return "carousel";
+  if (/reel|video|short|tiktok/i.test(f) || /tiktok/i.test(String(platform || ""))) return "video";
+  return "single";
+}
 
 /**
  * Upcoming calendar posts with no design and no request yet, for clients with
@@ -274,7 +285,7 @@ async function prepareUpcoming(admin: any, opts: { dryRun?: boolean; clientId?: 
   const due: Array<{ settings: Settings; post: any }> = [];
   for (const settings of clients) {
     const { data: posts } = await admin.from("calendar_posts").select("*").eq("client_id", settings.client_id).gte("post_date", today).lte("post_date", until).order("post_date");
-    const candidates = (posts ?? []).filter((p: any) => !VIDEO_POST.test(`${p.format ?? ""} ${p.platform === "TikTok" ? "tiktok" : ""}`));
+    const candidates = posts ?? [];
     if (!candidates.length) continue;
     // Matched in code: a report post's key is JSON text (quotes, commas),
     // which an in() filter on the key does not survive.

@@ -23,6 +23,10 @@ export interface GenerateInput {
   background: string;
   /** Paths in the design-references bucket: the client's own posts. */
   refs: string[];
+  /** The canvas size in pixels; 4:5 (1088x1360) when absent. Video cards are 9:16. */
+  size?: { width: number; height: number };
+  /** A video's opening or closing card, rather than a post or a carousel slide. */
+  video_card?: "cover" | "end";
 }
 
 export interface SlideContext {
@@ -33,9 +37,21 @@ export interface SlideContext {
   withCover: boolean;
 }
 
-export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept">, copy: string[], refCount: number, slide?: SlideContext): string {
+export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept" | "video_card">, copy: string[], refCount: number, slide?: SlideContext): string {
   const lines = [`Headline, spelled exactly: "${copy[0]}"`, ...copy.slice(1).map((t) => `Second line, spelled exactly: "${t}"`)].join(" ");
   const refsWord = refCount === 1 ? "the other image, which is" : `the other ${numberWord(refCount)} images, which are`;
+  if (g.video_card) {
+    // The cards open and close a vertical video; the end card follows the cover's look.
+    const which = g.video_card === "cover" ? "the opening card" : "the closing card";
+    const cover = slide?.withCover ? "The second image is this video's opening card: keep its background, palette, type and layout so the two cards read as a pair. " : "";
+    const refs = slide?.withCover
+      ? (refCount === 1 ? "the last image, which is" : `the last ${numberWord(refCount)} images, which are`)
+      : refsWord;
+    return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} vertical video (9:16). Its logo is final: keep it exactly as it is, where it is. ` +
+      cover +
+      `Design the card around the logo in the visual language of ${refs} ${g.brand_name}'s own posts, filling the tall frame. The picture shows ${g.concept}. ` +
+      `${lines} Add no other text and no other logo.`;
+  }
   if (!slide) {
     return `The first image is the canvas for a new ${g.brand_name} ${g.platform} post (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
       `Design the whole post around it in the visual language of ${refsWord} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ` +

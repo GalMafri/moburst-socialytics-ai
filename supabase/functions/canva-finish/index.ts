@@ -31,6 +31,11 @@ import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
 import { type Box, type Layer, type Placement, CLEAN_PROMPT, cleanMask, cleanRegions, copyOperations, elementBox, inkBox, logoRect, pasteRegions, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
+import { MCP_URL as HIGGSFIELD_MCP, accessTokenFor as higgsfieldToken } from "../_shared/higgsfield/oauth.ts";
+import { McpClient } from "../_shared/higgsfield/mcp.ts";
+import { VIDEO_MODEL, awaitJobs, creditBalance, submitVideo } from "../_shared/higgsfield/generate.ts";
+import { TIMING, composeScript, parseComposed } from "../_shared/video/compose.ts";
+import { checkScript, endScript, startScript } from "../_shared/video/sandbox.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -49,7 +54,7 @@ const INTENT = "Socialytics finishing: replace the drawn logo with the client's 
 const GENERATE_LEASE_MS = 420_000;
 const MAX_GENERATIONS = 3;
 const MAX_CLEANS = 2;
-const PAGE = { width: 1088, height: 1360 };
+const DEFAULT_PAGE = { width: 1088, height: 1360 };
 
 const db = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const redirectUri = () => `${Deno.env.get("SUPABASE_URL")}/functions/v1/canva-finish`;
@@ -447,6 +452,12 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
     // of working through the whole queue.
     case "edit": return await oneEditAtATime(() => Date.now() < deadline ? editLayers(token, job) : Promise.resolve<StepResult>("wait"));
     case "place_logo": return await oneEditAtATime(() => Date.now() < deadline ? placeLogo(admin, token, job) : Promise.resolve<StepResult>("wait"));
+    // A video's footage and its join with the cover and end cards.
+    case "footage":
+    case "footage_wait":
+    case "compose":
+    case "compose_wait":
+      return await videoStep(admin, job, base);
   }
   throw new Error(`FINAL: Unknown step '${job.step}'`);
 }
@@ -534,6 +545,8 @@ async function placeLogo(admin: any, token: string, job: Job): Promise<StepResul
 async function generateDesign(admin: any, job: Job): Promise<void> {
   const g: GenerateInput = job.input.generate;
   const base = `${job.client_id}/canva-finish/${job.id}`;
+  // A post or carousel slide is 4:5; a video's cards are 9:16.
+  const PAGE = g.size ?? DEFAULT_PAGE;
   const file = await Image.decode(await download(admin, job.input.logo_path));
   const rect = canvasLogoRect(job.input.placement, file.width, file.height, PAGE.width, PAGE.height);
   const logo = new Image(rect.width, rect.height);
@@ -681,6 +694,106 @@ async function settle<T extends { status: string }>(check: () => Promise<T>, dea
     r = await check();
   }
   return r;
+}
+
+/** Higgsfield credits a video's footage needs on the account before it is started (a 1080p clip is under 100). */
+const FOOTAGE_CREDIT_FLOOR = 120;
+/** How often a running clip or join is asked about; passes come every few seconds. */
+const VIDEO_POLL_MS = 30_000;
+const MAX_FOOTAGE = 2;
+const MAX_COMPOSE = 3;
+const FOOTAGE_RULES = " One continuous shot, filmed, vertical 9:16. No text, letters, numbers, captions, subtitles, signs, screens with writing, logos or watermarks anywhere in frame. No real or identifiable people.";
+
+async function higgsfield(admin: any): Promise<McpClient> {
+  return new McpClient({ url: HIGGSFIELD_MCP, accessToken: await higgsfieldToken(admin), timeoutMs: 30_000 });
+}
+
+/**
+ * A video's own job (the third of its option, after the two cards): generate
+ * the footage on Higgsfield, store it, then join cover, footage and end card in
+ * a hosted sandbox and store the finished MP4.
+ */
+async function videoStep(admin: any, job: Job, base: string): Promise<StepResult> {
+  const s = job.state;
+  const recently = (at: unknown) => typeof at === "number" && Date.now() - at < VIDEO_POLL_MS;
+  switch (job.step) {
+    case "footage": {
+      s.footage_tries = (s.footage_tries ?? 0) + 1;
+      if (s.footage_tries > MAX_FOOTAGE) throw new Error("FINAL: The footage could not be generated.");
+      const mcp = await higgsfield(admin);
+      const balance = await creditBalance(mcp);
+      if (balance && balance.credits < FOOTAGE_CREDIT_FLOOR) throw new Error(`FINAL: The Higgsfield account has ${Math.floor(balance.credits)} credits left, too few for the footage.`);
+      const [first] = await submitVideo(mcp, {
+        prompt: `${job.input.video.prompt}${FOOTAGE_RULES}`,
+        aspect: "9:16",
+        seconds: job.input.video.seconds ?? TIMING.footage,
+        resolution: "1080p",
+        model: VIDEO_MODEL,
+      });
+      if (!first?.job_id) throw new Error("Higgsfield did not start the footage.");
+      s.footage_job = first;
+      s.footage_checked_at = Date.now();
+      job.step = "footage_wait"; return "next";
+    }
+    case "footage_wait": {
+      if (recently(s.footage_checked_at)) return "wait";
+      s.footage_checked_at = Date.now();
+      const res = await awaitJobs(await higgsfield(admin), [s.footage_job], { budgetMs: 0 });
+      const o = res.outcomes[0];
+      if (!o || o.status === "pending" || o.status === "queued" || o.status === "running" || o.status === "in_progress" || (!o.result_url && !o.error && o.status !== "failed")) return "wait";
+      if (o.status !== "completed" || !o.result_url) {
+        // Generated again from the same shot; a second failure ends the option.
+        console.error(`[canva-finish] job ${job.id} footage ${o.status}: ${o.error ?? ""}`);
+        job.step = "footage"; return "next";
+      }
+      const resp = await fetch(o.result_url, { signal: AbortSignal.timeout(90_000) });
+      if (!resp.ok) throw new Error(`Could not fetch the footage: ${resp.status}`);
+      const bytes = new Uint8Array(await resp.arrayBuffer());
+      const path = `${base}/footage.mp4`;
+      const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "video/mp4", upsert: true });
+      if (error) throw new Error(`Could not store the footage: ${error.message}`);
+      s.footage_path = path;
+      job.step = "compose"; return "next";
+    }
+    case "compose": {
+      // The cards are the option's other two jobs; the join waits for both.
+      const { data: cards } = await admin.from("canva_finish_jobs").select("slide_index, status, output_path")
+        .eq("design_request_id", job.design_request_id).eq("option_index", job.option_index).in("slide_index", [0, 1]);
+      if ((cards ?? []).some((c: any) => c.status === "failed")) throw new Error("FINAL: A card of this video could not be made.");
+      const cover = (cards ?? []).find((c: any) => c.slide_index === 0 && c.status === "done" && c.output_path);
+      const end = (cards ?? []).find((c: any) => c.slide_index === 1 && c.status === "done" && c.output_path);
+      if (!cover || !end) return "wait";
+      s.composes = (s.composes ?? 0) + 1;
+      if (s.composes > MAX_COMPOSE) throw new Error("FINAL: The video could not be put together.");
+      const out = `${base}/video.mp4`;
+      const { data: signed, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(out, { upsert: true });
+      if (error || !signed?.signedUrl) throw new Error(`Could not prepare the video's upload: ${error?.message ?? "no URL"}`);
+      const url = (path: string) => admin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+      s.compose_session = await startScript(
+        composeScript({ coverUrl: url(cover.output_path), endUrl: url(end.output_path), footageUrl: url(s.footage_path), uploadUrl: signed.signedUrl }),
+        `Socialytics video ${job.id}`,
+      );
+      s.compose_checked_at = Date.now();
+      s.video_path = out;
+      job.step = "compose_wait"; return "next";
+    }
+    case "compose_wait": {
+      if (recently(s.compose_checked_at)) return "wait";
+      s.compose_checked_at = Date.now();
+      const r = await checkScript(s.compose_session);
+      if (r.state === "running") return "wait";
+      await endScript(s.compose_session);
+      const made = r.state === "finished" ? parseComposed(r.reply) : null;
+      if (!made) {
+        console.error(`[canva-finish] job ${job.id} compose:`, r.state === "failed" ? r.reason : r.reply.slice(0, 300));
+        job.step = "compose"; return "next";
+      }
+      s.video_seconds = made.seconds;
+      s.final_path = s.video_path;
+      job.step = "finished"; return "done";
+    }
+  }
+  throw new Error(`FINAL: Unknown step '${job.step}'`);
 }
 
 async function download(admin: any, path: string): Promise<Uint8Array> {
