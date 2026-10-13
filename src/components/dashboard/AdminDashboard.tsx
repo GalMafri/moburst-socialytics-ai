@@ -1,4 +1,5 @@
 import { ClientPicker } from "@/components/clients/ClientPicker";
+import { ClientOverview } from "@/components/dashboard/ClientOverview";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -276,6 +277,8 @@ export function AdminDashboard() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-5">
+                  {/* The client's status at a glance, with what needs doing. */}
+                  {!client.archived_at && <ClientOverview clientId={client.id} isStaff />}
                   <div className="flex items-center gap-2 t-secondary">
                     <Calendar className="h-3.5 w-3.5" />
                     {lastReport

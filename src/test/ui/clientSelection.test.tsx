@@ -11,6 +11,7 @@ const clients = [
  {id:'archived',name:'Archived',reports:[],platforms:[],archived_at:'2026-01-01'},
  {id:'demo',name:'Demo Brand',reports:[],platforms:[],archived_at:null,demo_job_id:'job-1'},
 ];
+vi.mock('@/components/dashboard/ClientOverview', () => ({ ClientOverview: () => null }));
 vi.mock('@/hooks/useAuth',()=>({useAuth:()=>({canManageClients:true,canRunAnalysis:state.canRun,canDelete:true})}));
 vi.mock('@/components/layout/AppLayout',()=>({AppLayout:({children}:any)=><main>{children}</main>}));
 vi.mock('@/integrations/supabase/client',()=>({supabase:{channel:()=>({on:()=>({subscribe:()=>({})})}),removeChannel:vi.fn()}}));
