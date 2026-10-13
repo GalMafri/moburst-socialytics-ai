@@ -203,7 +203,7 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
     CHOOSE_POSTS(args.brand),
     "- slides, and for each slide:",
     `  - headline: the words set on that slide, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
-    "  - picture: one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show. Describe what is in the picture. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. The slides of one option share one setting and look, so they read as a series.",
+    "  - picture: one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show. Describe what is in the picture. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead. The slides of one option share one setting and look, so they read as a series.",
     "The options differ from each other in layout or setting, and in wording. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
     `Reply with JSON only: {"options":[{"posts":[2],"layout":"...","slides":[{"headline":["line one","optional line two"],"picture":"..."}]}]}`,
   ].filter(Boolean).join("\n");
@@ -221,7 +221,7 @@ export function plannerPrompt(args: { brand: string; platform: string; copy: str
     "For each option give:",
     CHOOSE_POSTS(args.brand),
     `- headline: the words that will be set on the design, written in ${args.brand}'s voice from the post's message, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
-    "- picture: one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show. Describe what is in the picture. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand.",
+    "- picture: one sentence describing the picture behind the words, using the kinds of subjects, materials, light and composition of the posts you chose, with a subject the recent designs did not show. Describe what is in the picture. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. It shows no real or identifiable person and no portrait standing in for one: where a chosen post has a person, use an object, a scene or hands instead.",
     "The options differ from each other in layout or picture, and in headline. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
     'Reply with JSON only: {"options":[{"posts":[2],"layout":"...","headline":["line one","optional line two"],"picture":"..."}]}',
   ].filter(Boolean).join("\n");
