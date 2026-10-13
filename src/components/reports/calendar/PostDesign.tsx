@@ -134,6 +134,9 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
 /** The design at a readable size; a carousel adds arrows, the slide count and every slide below. */
 function SlideViewer({ urls, aspect, onOpen }: { urls: string[]; aspect: string; onOpen: (index: number) => void }) {
   const [index, setIndex] = useState(0);
+  // The frame takes the design's own proportions once it loads, so a 4:5
+  // design is never boxed into a square (or the other way round).
+  const [ratio, setRatio] = useState<number | null>(null);
   const count = urls.length;
   const go = useCallback((d: number) => setIndex((i) => Math.min(count - 1, Math.max(0, i + d))), [count]);
   const onKey = (e: KeyboardEvent) => {
@@ -151,9 +154,17 @@ function SlideViewer({ urls, aspect, onOpen }: { urls: string[]; aspect: string;
       aria-roledescription={carousel ? "carousel" : undefined}
       aria-label={carousel ? `Carousel, ${count} slides` : undefined}
     >
-      <div className={`relative mx-auto w-full max-w-[440px] ${aspect} rounded-[12px] overflow-hidden bg-black border border-white/[0.06]`}>
+      <div
+        className={`relative mx-auto w-full max-w-[440px] ${ratio ? "" : aspect} rounded-[12px] overflow-hidden bg-black border border-white/[0.06]`}
+        style={ratio ? { aspectRatio: String(ratio) } : undefined}
+      >
         <button type="button" onClick={() => onOpen(index)} className="block w-full h-full group" aria-label={carousel ? `Slide ${index + 1} of ${count}, open full screen` : "Open full screen"}>
-          <img src={urls[index]} alt={carousel ? `Slide ${index + 1} of ${count}` : "Post design"} className="w-full h-full object-contain" />
+          <img
+            src={urls[index]}
+            alt={carousel ? `Slide ${index + 1} of ${count}` : "Post design"}
+            className="w-full h-full object-contain"
+            onLoad={(e) => { const im = e.currentTarget; if (!ratio && im.naturalWidth && im.naturalHeight) setRatio(im.naturalWidth / im.naturalHeight); }}
+          />
           <span className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
             <Expand className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden />
           </span>
@@ -176,7 +187,8 @@ function SlideViewer({ urls, aspect, onOpen }: { urls: string[]; aspect: string;
               aria-selected={i === index}
               aria-label={`Slide ${i + 1}`}
               onClick={() => setIndex(i)}
-              className={`relative shrink-0 w-14 ${aspect} rounded-[6px] overflow-hidden bg-black border transition-colors ${i === index ? "border-[#b9e045] ring-1 ring-[#b9e045]/60" : "border-white/10 opacity-70 hover:opacity-100"}`}
+              className={`relative shrink-0 w-14 ${ratio ? "" : aspect} rounded-[6px] overflow-hidden bg-black border transition-colors ${i === index ? "border-[#b9e045] ring-1 ring-[#b9e045]/60" : "border-white/10 opacity-70 hover:opacity-100"}`}
+              style={ratio ? { aspectRatio: String(ratio) } : undefined}
             >
               <img src={u} alt="" className="w-full h-full object-cover" />
             </button>

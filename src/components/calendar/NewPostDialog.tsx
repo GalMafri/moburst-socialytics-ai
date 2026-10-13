@@ -55,6 +55,8 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated }: {
       const p = data.post;
       const hashtags = Array.isArray(p.hashtags) ? p.hashtags.map(String) : typeof p.hashtags === "string" ? p.hashtags.split(/[\s,]+/).filter(Boolean) : [];
       const { data: auth } = await supabase.auth.getUser();
+      // calendar_posts is not in the generated types yet.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error: insertError } = await (supabase.from("calendar_posts" as never) as any).insert({
         client_id: clientId,
         post_date: date,

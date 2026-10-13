@@ -41,6 +41,8 @@ export default function ClientCalendar() {
     queryKey: ["calendar-posts", id],
     enabled: !!id,
     queryFn: async () => {
+      // calendar_posts is not in the generated types yet.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase.from("calendar_posts" as never) as any)
         .select("*")
         .eq("client_id", id)

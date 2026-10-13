@@ -17,6 +17,8 @@ export function ReportCalendarLink({ clientId, reportId, children }: { clientId:
   const { data: posts, isLoading } = useQuery({
     queryKey: ["report-calendar-posts", reportId],
     queryFn: async () => {
+      // calendar_posts is not in the generated types yet.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase.from("calendar_posts" as never) as any)
         .select("id, post_date, posting_time, platform, format, copy")
         .eq("report_id", reportId)
