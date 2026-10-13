@@ -758,6 +758,47 @@ export type Database = {
           },
         ]
       }
+      competitive_learnings: {
+        Row: {
+          client_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          source_feedback: string | null
+          source_insight_key: string | null
+          text: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          source_feedback?: string | null
+          source_insight_key?: string | null
+          text: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          source_feedback?: string | null
+          source_insight_key?: string | null
+          text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitive_learnings_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       competitive_reports: {
         Row: {
           client_id: string
