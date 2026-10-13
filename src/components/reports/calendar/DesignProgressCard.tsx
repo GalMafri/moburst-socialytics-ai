@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
-import { DESIGN_STEPS, TYPICAL_MINUTES, elapsedLabel, progressPercent, stageIndex, type DesignRequest } from "@/lib/designRequests";
+import { DESIGN_STEPS, elapsedLabel, progressPercent, stageIndex, typicalMinutes, type DesignRequest } from "@/lib/designRequests";
 
 export function DesignProgressCard({ request, isStaff }: { request: DesignRequest; isStaff: boolean }) {
   const [now, setNow] = useState(Date.now());
@@ -28,7 +28,7 @@ export function DesignProgressCard({ request, isStaff }: { request: DesignReques
           <p className="t-secondary mt-0.5">
             {staffAttention
               ? request.error || "No option finished. The client still sees the designs as being prepared."
-              : `Usually about ${TYPICAL_MINUTES} minutes. You can close this panel; your designs keep being prepared.`}
+              : `Usually about ${typicalMinutes(request)} minutes. You can close this panel; your designs keep being prepared.`}
           </p>
         </div>
         <span className="t-label shrink-0 tabular-nums">{elapsedLabel(request.created_at, now)}</span>
@@ -52,7 +52,7 @@ export function DesignProgressCard({ request, isStaff }: { request: DesignReques
 
       {request.options_ready > 0 && (
         <p className="t-secondary">
-          {request.options_ready} of {request.options_wanted} designs ready. They appear below as they finish.
+          {request.options_ready} of {request.options_wanted} {request.kind === "carousel" ? "carousels" : "designs"} ready. They appear below as they finish.
         </p>
       )}
       <span className="sr-only">{pct}% done</span>

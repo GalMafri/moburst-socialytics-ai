@@ -37,3 +37,33 @@ describe("requestProgress", () => {
     expect(requestProgress(Array(MAX_CANDIDATES).fill(failed))).toMatchObject({ status: "needs_staff", options_ready: 0 });
   });
 });
+
+import { optionStates, parseCarouselBriefs } from "./options";
+
+describe("parseCarouselBriefs", () => {
+  const slide = (n: number) => ({ headline: [`Point ${n}`], picture: `scene ${n}` });
+  it("keeps options with every slide asked for, cover first", () => {
+    const text = JSON.stringify({ options: [{ slides: [1, 2, 3].map(slide) }, { slides: [1, 2].map(slide) }] });
+    expect(parseCarouselBriefs(text, 3)).toEqual([{ headline: ["Point 1"], picture: "scene 1", slides: [1, 2, 3].map(slide) }]);
+  });
+  it("drops an option with a malformed slide", () => {
+    const text = JSON.stringify({ options: [{ slides: [slide(1), { headline: [], picture: "x" }, slide(3)] }] });
+    expect(parseCarouselBriefs(text, 3)).toEqual([]);
+  });
+});
+
+describe("optionStates", () => {
+  it("counts a carousel option done only when every slide is", () => {
+    const jobs = [0, 1, 2].map((i) => ({ option_index: 0, slide_count: 3, status: i < 2 ? "done" : "running", step: i < 2 ? "finished" : "edit" } as const));
+    expect(optionStates(jobs as never)).toEqual([{ status: "running", step: "finishing" }]);
+    const all = [0, 1, 2].map(() => ({ option_index: 0, slide_count: 3, status: "done", step: "finished" } as const));
+    expect(optionStates(all as never)).toEqual([{ status: "done", step: "finished" }]);
+  });
+  it("counts an option failed when any slide failed", () => {
+    const jobs = [{ option_index: 1, slide_count: 2, status: "failed", step: "edit" }, { option_index: 1, slide_count: 2, status: "running", step: "generate" }];
+    expect(optionStates(jobs as never)).toEqual([{ status: "failed", step: "failed" }]);
+  });
+  it("treats a single design as an option of one", () => {
+    expect(optionStates([{ option_index: 0, slide_count: null, status: "done", step: "finished" }] as never)).toEqual([{ status: "done", step: "finished" }]);
+  });
+});

@@ -5,7 +5,7 @@
 // (after every step, to record progress, hand finished options to the post,
 // and replace any option that did not finish).
 
-import { type Brief, requestProgress, type JobState } from "./options.ts";
+import { type Brief, optionStates, requestProgress, type JobState } from "./options.ts";
 
 export const BUCKET = "generated-media";
 
@@ -27,6 +27,7 @@ export interface DesignRequest {
   post_copy: string;
   requested_by: string | null;
   status: string;
+  kind?: "single" | "carousel";
   options_wanted: number;
   candidates_started: number;
   briefs: Brief[];
@@ -45,25 +46,34 @@ async function logoSize(admin: any, path: string): Promise<[number, number]> {
   return pngSize(new Uint8Array(await data.arrayBuffer()));
 }
 
-/** Start one option: a job that designs the post from a brief, then finishes it in Canva. */
+/**
+ * Start one option: a job that designs the post from a brief and finishes it
+ * in Canva, or for a carousel one such job per slide (the slides after the
+ * cover wait for it and follow its look).
+ */
 export async function startOption(admin: any, req: DesignRequest, settings: Settings, brandName: string, briefIndex: number, optionIndex: number): Promise<void> {
   const brief = req.briefs[briefIndex % req.briefs.length];
   const [lw, lh] = await logoSize(admin, settings.logo_path);
-  const { error } = await admin.from("canva_finish_jobs").insert({
+  const slides = req.kind === "carousel" && brief.slides?.length ? brief.slides : [brief];
+  const carousel = req.kind === "carousel" && slides.length > 1;
+  const rows = slides.map((slide, i) => ({
     client_id: req.client_id,
     created_by: req.requested_by,
     design_request_id: req.id,
     option_index: optionIndex,
+    slide_index: carousel ? i : null,
+    slide_count: carousel ? slides.length : null,
     step: "generate",
     input: {
       logo_path: settings.logo_path,
       logo_size: [lw, lh],
-      copy: brief.headline,
+      copy: slide.headline,
       placement: settings.placement,
-      title: `${brandName} ${req.platform ?? ""} option ${optionIndex + 1}`.replace(/\s+/g, " "),
-      generate: { brand_name: brandName, platform: req.platform ?? "social", concept: brief.picture, background: settings.background, refs: settings.reference_paths },
+      title: `${brandName} ${req.platform ?? ""} option ${optionIndex + 1}${carousel ? ` slide ${i + 1}` : ""}`.replace(/\s+/g, " "),
+      generate: { brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: settings.background, refs: settings.reference_paths },
     },
-  });
+  }));
+  const { error } = await admin.from("canva_finish_jobs").insert(rows);
   if (error) throw new Error(`Could not start a design option: ${error.message}`);
 }
 
@@ -75,12 +85,22 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
 export async function settleRequest(admin: any, requestId: string): Promise<void> {
   const { data: req } = await admin.from("design_requests").select("*").eq("id", requestId).maybeSingle();
   if (!req || req.status !== "preparing") return;
-  const { data: jobs } = await admin.from("canva_finish_jobs").select("id, status, step, option_index, output_path, state, input").eq("design_request_id", requestId).order("created_at");
-  const list = (jobs ?? []) as Array<JobState & { id: string; option_index: number; output_path: string | null; state: any; input: any }>;
+  const { data: jobs } = await admin.from("canva_finish_jobs").select("id, status, step, option_index, slide_index, slide_count, output_path, state, input").eq("design_request_id", requestId).order("created_at");
+  type Row = JobState & { id: string; option_index: number; slide_index: number | null; slide_count: number | null; output_path: string | null; state: any; input: any };
+  const list = (jobs ?? []) as Row[];
 
-  for (const job of list) {
-    if (job.status !== "done" || !job.output_path || job.state?.iteration_id) continue;
-    const url = admin.storage.from(BUCKET).getPublicUrl(job.output_path).data.publicUrl;
+  // One finished option, one design on the post: a single design, or a
+  // carousel's slides in order. The first job of the option records the row.
+  const byOption = new Map<number, Row[]>();
+  for (const j of list) byOption.set(j.option_index, [...(byOption.get(j.option_index) ?? []), j]);
+  for (const [optionIndex, rows] of byOption) {
+    const ordered = [...rows].sort((a, b) => (a.slide_index ?? 0) - (b.slide_index ?? 0));
+    const lead = ordered[0];
+    const expected = lead.slide_count ?? 1;
+    if (lead.state?.iteration_id) continue;
+    if (ordered.length < expected || !ordered.every((j) => j.status === "done" && j.output_path)) continue;
+    const urls = ordered.map((j) => admin.storage.from(BUCKET).getPublicUrl(j.output_path).data.publicUrl);
+    const job = { ...lead, option_index: optionIndex };
     const { data: row, error } = await admin.from("post_iterations").insert({
       client_id: req.client_id,
       report_id: req.report_id,
@@ -89,7 +109,7 @@ export async function settleRequest(admin: any, requestId: string): Promise<void
       post_copy: req.post_copy,
       format: req.format,
       source: "calendar",
-      media_urls: [url],
+      media_urls: urls,
       variant_group_id: req.id,
       variant_angle: `Design option ${job.option_index + 1}`,
       concept: job.input?.generate?.concept ?? null,
@@ -100,8 +120,9 @@ export async function settleRequest(admin: any, requestId: string): Promise<void
     await admin.from("canva_finish_jobs").update({ state: { ...job.state, iteration_id: row.id } }).eq("id", job.id);
   }
 
-  const progress = requestProgress(list, req.options_wanted, (req.briefs ?? []).length);
-  let started = list.length;
+  const options = optionStates(list);
+  const progress = requestProgress(options, req.options_wanted, (req.briefs ?? []).length);
+  let started = options.length;
   if (progress.start_brief !== null) {
     const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", req.client_id).maybeSingle();
     const { data: client } = await admin.from("clients").select("name").eq("id", req.client_id).maybeSingle();

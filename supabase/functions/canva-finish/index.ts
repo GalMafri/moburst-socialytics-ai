@@ -215,7 +215,7 @@ async function closeEditingSession(): Promise<void> {
   if (m) await m.close();
 }
 
-type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any; design_request_id: string | null };
+type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any; design_request_id: string | null; option_index: number | null; slide_index: number | null; slide_count: number | null };
 /** next: run the following step now; wait: check again next tick; held: work continues in the background under its lease. */
 type StepResult = "next" | "wait" | "done" | "held";
 
@@ -240,7 +240,7 @@ async function tick(admin: any) {
       .update({ lease_until: new Date(now.getTime() + LEASE_MS).toISOString(), status: "running", updated_at: now.toISOString() })
       .eq("id", id).in("status", ["queued", "running"])
       .or(`lease_until.is.null,lease_until.lt.${now.toISOString()}`)
-      .select("id, client_id, step, status, attempts, input, state, design_request_id");
+      .select("id, client_id, step, status, attempts, input, state, design_request_id, option_index, slide_index, slide_count");
     if (claimed?.[0]) leased.push(claimed[0]);
   }
   const outcomes = await Promise.all(leased.map((job) => advance(admin, token, job, started)));
@@ -299,6 +299,14 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
   const base = `${job.client_id}/canva-finish/${job.id}`;
   switch (job.step) {
     case "generate": {
+      // A carousel slide after the cover follows the cover's look, so it waits
+      // for the cover's design; if the cover cannot be made, neither can it.
+      if (job.slide_index && job.slide_index > 0) {
+        const { data: cover } = await admin.from("canva_finish_jobs").select("status, state").eq("design_request_id", job.design_request_id).eq("option_index", job.option_index).eq("slide_index", 0).maybeSingle();
+        if (!cover || cover.status === "failed") throw new Error("FINAL: The carousel's cover could not be made.");
+        if (!cover.state?.design_path) return "wait";
+        s.cover_path = cover.state.design_path;
+      }
       s.generations = (s.generations ?? 0) + 1;
       if (s.generations > MAX_GENERATIONS) throw new Error("FINAL: The design could not be generated.");
       await admin.from("canva_finish_jobs").update({ lease_until: new Date(Date.now() + GENERATE_LEASE_MS).toISOString(), state: s }).eq("id", job.id);
@@ -440,6 +448,9 @@ async function generateDesign(admin: any, job: Job): Promise<void> {
   const [r, gr, b] = hexRgb(g.background);
   const canvas = new Image(PAGE.width, PAGE.height).fill(Image.rgbaToColor(r, gr, b, 255));
   canvas.composite(logo, rect.x, rect.y);
+  const slide = job.slide_count && job.slide_count > 1
+    ? { index: job.slide_index ?? 0, count: job.slide_count, withCover: !!job.state.cover_path }
+    : undefined;
   // OpenAI's mask: transparent pixels are redrawn, opaque ones are kept. Only
   // the logo's own ink is opaque, so no box appears behind it.
   const mask = new Image(PAGE.width, PAGE.height);
@@ -458,13 +469,14 @@ async function generateDesign(admin: any, job: Job): Promise<void> {
   form.append("quality", "high");
   form.append("n", "1");
   form.append("image[]", new Blob([(await canvas.encode()) as unknown as BlobPart], { type: "image/png" }), "canvas.png");
+  if (slide?.withCover) form.append("image[]", new Blob([(await download(admin, job.state.cover_path)) as unknown as BlobPart], { type: "image/png" }), "cover.png");
   for (const [i, path] of g.refs.entries()) {
     const { data, error } = await admin.storage.from("design-references").download(path);
     if (error || !data) throw new Error(`Could not read the client post ${path}: ${error?.message ?? "missing"}`);
     form.append("image[]", data, `ref${i}${path.slice(path.lastIndexOf("."))}`);
   }
   form.append("mask", new Blob([(await mask.encode()) as unknown as BlobPart], { type: "image/png" }), "mask.png");
-  form.append("prompt", designPrompt(g, job.input.copy, g.refs.length));
+  form.append("prompt", designPrompt(g, job.input.copy, g.refs.length, slide));
 
   const resp = await fetch("https://api.openai.com/v1/images/edits", {
     method: "POST",

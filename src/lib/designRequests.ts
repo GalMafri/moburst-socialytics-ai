@@ -21,6 +21,7 @@ export interface DesignRequest {
   post_copy: string;
   status: "preparing" | "ready" | "needs_staff";
   stage: DesignStage;
+  kind?: "single" | "carousel";
   options_wanted: number;
   options_ready: number;
   error: string | null;
@@ -34,8 +35,13 @@ export const DESIGN_STEPS: Array<{ stage: Exclude<DesignStage, "ready">; label: 
   { stage: "finishing", label: "Adding your logo and copy" },
 ];
 
-/** Typical time from "Create designs" to options, measured on the first live runs. */
-export const TYPICAL_MINUTES = 5;
+/** Typical time from "Create designs" to options: 6 min 24 s measured on 13 Oct for single designs; carousels to be measured. */
+export const TYPICAL_MINUTES = 7;
+export const TYPICAL_MINUTES_CAROUSEL = 15;
+
+export function typicalMinutes(r: Pick<DesignRequest, "kind">): number {
+  return r.kind === "carousel" ? TYPICAL_MINUTES_CAROUSEL : TYPICAL_MINUTES;
+}
 
 export function isPreparing(r: DesignRequest | null | undefined, isStaff: boolean): boolean {
   if (!r) return false;
@@ -55,7 +61,8 @@ export function progressPercent(r: DesignRequest): number {
 }
 
 export function stageLine(r: DesignRequest, isStaff: boolean): string {
-  if (r.status === "ready") return `${r.options_ready} design${r.options_ready === 1 ? "" : "s"} ready`;
+  const noun = r.kind === "carousel" ? "carousel" : "design";
+  if (r.status === "ready") return `${r.options_ready} ${noun}${r.options_ready === 1 ? "" : "s"} ready`;
   if (r.status === "needs_staff" && isStaff) return "Needs a look from the team";
   const step = DESIGN_STEPS[Math.min(stageIndex(r), DESIGN_STEPS.length - 1)].label;
   return r.options_ready > 0 ? `${step} · ${r.options_ready} of ${r.options_wanted} ready` : step;

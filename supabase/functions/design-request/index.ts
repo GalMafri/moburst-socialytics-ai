@@ -18,7 +18,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { bearerToken } from "../_shared/auth/authz.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
-import { BRIEFS_PLANNED, OPTIONS_WANTED, parseBriefs, plannerPrompt } from "../_shared/canva/options.ts";
+import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, plannerPrompt } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
 
 const corsHeaders = {
@@ -70,6 +70,7 @@ Deno.serve(async (req) => {
       const { data: created, error } = await admin.from("design_requests").insert({
         client_id: clientId, report_id: body.report_id || null, calendar_post_key: postKey,
         platform: body.platform || null, format: body.format || null, post_copy: copy, requested_by: userId,
+        kind: /carousel/i.test(String(body.format || "")) ? "carousel" : "single",
       }).select("*").single();
       if (error) {
         // Two clicks at once: the unique index let one through; answer with it.
@@ -132,17 +133,21 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
 
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
+  const carousel = request.kind === "carousel";
+  const instruction = carousel
+    ? carouselPlannerPrompt({ brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, slides: CAROUSEL_SLIDES })
+    : plannerPrompt({ brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED });
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
       apiKey,
       body: {
         model: PLANNER_MODEL,
-        max_tokens: 2000,
-        messages: [{ role: "user", content: [...images, { type: "text", text: plannerPrompt({ brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED }) }] }],
+        max_tokens: carousel ? 6000 : 2000,
+        messages: [{ role: "user", content: [...images, { type: "text", text: instruction }] }],
       },
     });
-    briefs = parseBriefs(result.text);
+    briefs = carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES) : parseBriefs(result.text);
   }
   if (!briefs.length) throw new Error("The options could not be planned.");
 

@@ -121,3 +121,16 @@ describe("resampleRGBA", () => {
     expect(Array.from(resampleRGBA(src, 2, 2, 1, 1))).toEqual([255, 0, 0, 64]);
   });
 });
+
+describe("designPrompt for carousel slides", () => {
+  const g = { brand_name: "Moburst", platform: "LinkedIn", concept: "a glass panel in deep space" };
+  it("tells the cover it opens a series", () => {
+    expect(designPrompt(g, ["Four checkpoints."], 3, { index: 0, count: 5, withCover: false })).toContain("the canvas for the cover, slide 1 of 5 of a new Moburst LinkedIn carousel");
+  });
+  it("hands every later slide the cover to follow", () => {
+    const p = designPrompt(g, ["Checkpoint two."], 3, { index: 2, count: 5, withCover: true });
+    expect(p).toContain("slide 3 of 5");
+    expect(p).toContain("The second image is slide 1 of this same carousel");
+    expect(p).toContain("the last three images, which are Moburst's own posts");
+  });
+});

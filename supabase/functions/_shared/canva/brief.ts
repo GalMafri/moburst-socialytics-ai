@@ -25,12 +25,33 @@ export interface GenerateInput {
   refs: string[];
 }
 
-export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept">, copy: string[], refCount: number): string {
+export interface SlideContext {
+  /** 0 for the cover. */
+  index: number;
+  count: number;
+  /** Whether the cover is passed as the second image (every slide after the first). */
+  withCover: boolean;
+}
+
+export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept">, copy: string[], refCount: number, slide?: SlideContext): string {
   const lines = [`Headline, spelled exactly: "${copy[0]}"`, ...copy.slice(1).map((t) => `Second line, spelled exactly: "${t}"`)].join(" ");
   const refsWord = refCount === 1 ? "the other image, which is" : `the other ${numberWord(refCount)} images, which are`;
-  return `The first image is the canvas for a new ${g.brand_name} ${g.platform} post (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
-    `Design the whole post around it in the visual language of ${refsWord} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ` +
-    `${lines} Add no other text and no other logo.`;
+  if (!slide) {
+    return `The first image is the canvas for a new ${g.brand_name} ${g.platform} post (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
+      `Design the whole post around it in the visual language of ${refsWord} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ` +
+      `${lines} Add no other text and no other logo.`;
+  }
+  const which = slide.index === 0 ? `the cover, slide 1 of ${slide.count}` : `slide ${slide.index + 1} of ${slide.count}`;
+  const cover = slide.withCover
+    ? `The second image is slide 1 of this same carousel: keep its background, palette, type and layout so the slides read as one series. `
+    : "";
+  const refs = slide.withCover
+    ? (refCount === 1 ? "the last image, which is" : `the last ${numberWord(refCount)} images, which are`)
+    : refsWord;
+  return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} carousel (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
+    cover +
+    `Design the slide around the logo in the visual language of ${refs} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ` +
+    `${lines} Add no other text, no slide numbers and no other logo.`;
 }
 
 function numberWord(n: number): string {
