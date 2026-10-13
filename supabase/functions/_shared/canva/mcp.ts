@@ -47,6 +47,21 @@ export class CanvaMcp {
     }
   }
 
+  /** End the session on Canva's side; a session left open counts against the account. */
+  async close(): Promise<void> {
+    if (!this.session) return;
+    try {
+      await fetch(URL_MCP, { method: "DELETE", headers: { Authorization: `Bearer ${this.token}`, "Mcp-Session-Id": this.session } });
+    } catch {
+      // Best effort: Canva expires idle sessions on its own.
+    }
+    this.session = null;
+  }
+
+  get ready(): boolean {
+    return !!this.session;
+  }
+
   async init(): Promise<void> {
     await this.post({ jsonrpc: "2.0", id: this.nextId++, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "socialytics", version: "1" } } });
     await this.post({ jsonrpc: "2.0", method: "notifications/initialized" });

@@ -198,6 +198,23 @@ function oneEditAtATime<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * One Canva editing session per tick, shared by the queued edits and closed
+ * when the tick ends. Opening a new session per step (and never closing it)
+ * left sessions piling up on the account, and Canva refused new ones.
+ */
+let tickMcp: CanvaMcp | null = null;
+async function editingSession(token: string): Promise<CanvaMcp> {
+  if (!tickMcp) tickMcp = new CanvaMcp(token);
+  if (!tickMcp.ready) await tickMcp.init();
+  return tickMcp;
+}
+async function closeEditingSession(): Promise<void> {
+  const m = tickMcp;
+  tickMcp = null;
+  if (m) await m.close();
+}
+
 type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any; design_request_id: string | null };
 /** next: run the following step now; wait: check again next tick; held: work continues in the background under its lease. */
 type StepResult = "next" | "wait" | "done" | "held";
@@ -234,6 +251,7 @@ async function tick(admin: any) {
     await settleRequest(admin, job.design_request_id).catch((e) => console.error(`[canva-finish] request ${job.design_request_id}:`, e instanceof Error ? e.message : e));
   }
   await settleOpenRequests(admin, settled);
+  await closeEditingSession();
   return { ran: leased.length, report: Object.fromEntries(leased.map((job, i) => [job.id, outcomes[i]])) };
 }
 
@@ -255,7 +273,7 @@ async function advance(admin: any, token: string, job: Job, started: number): Pr
   try {
     let result: StepResult = "next";
     while (result === "next" && Date.now() - started < TICK_BUDGET_MS) {
-      result = await runStep(admin, token, job);
+      result = await runStep(admin, token, job, started + TICK_BUDGET_MS);
       await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, updated_at: new Date().toISOString() }).eq("id", job.id);
     }
     if (result === "done") {
@@ -276,7 +294,7 @@ async function advance(admin: any, token: string, job: Job, started: number): Pr
   }
 }
 
-async function runStep(admin: any, token: string, job: Job): Promise<StepResult> {
+async function runStep(admin: any, token: string, job: Job, deadline: number): Promise<StepResult> {
   const s = job.state;
   const base = `${job.client_id}/canva-finish/${job.id}`;
   switch (job.step) {
@@ -303,7 +321,7 @@ async function runStep(admin: any, token: string, job: Job): Promise<StepResult>
       job.step = "layers_wait"; return "next";
     }
     case "layers_wait": {
-      const r = await getImageToDesign(token, s.layers_job);
+      const r = await settle(() => getImageToDesign(token, s.layers_job), deadline);
       if (r.status === "in_progress") return "wait";
       if (r.status !== "success" || !r.designId) throw new Error(`FINAL: Magic Layers did not finish: ${r.error ?? r.status}`);
       s.design_id = r.designId; job.step = "export_before"; return "next";
@@ -313,8 +331,7 @@ async function runStep(admin: any, token: string, job: Job): Promise<StepResult>
     case "export_final": {
       if (!s.page) {
         s.page = await oneEditAtATime(async () => {
-          const mcp = new CanvaMcp(token);
-          await mcp.init();
+          const mcp = await editingSession(token);
           const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
           await mcp.call("cancel-editing-transaction", { transaction_id: tx.transaction.transaction_id, user_intent: INTENT }).catch(() => {});
           return { id: tx.pages[0].page_id, width: tx.pages[0].dimension.width, height: tx.pages[0].dimension.height };
@@ -326,7 +343,7 @@ async function runStep(admin: any, token: string, job: Job): Promise<StepResult>
     case "export_before_wait":
     case "export_nologo_wait":
     case "export_final_wait": {
-      const r = await getExport(token, s.export_job);
+      const r = await settle(() => getExport(token, s.export_job), deadline);
       if (r.status === "in_progress") return "wait";
       if (r.status !== "success" || !r.url) throw new Error(`Export did not finish: ${r.error ?? r.status}`);
       const which = job.step.replace(/^export_/, "").replace(/_wait$/, "");
@@ -348,8 +365,7 @@ async function runStep(admin: any, token: string, job: Job): Promise<StepResult>
 async function editLayers(token: string, job: Job): Promise<StepResult> {
   const s = job.state;
   {
-      const mcp = new CanvaMcp(token);
-      await mcp.init();
+      const mcp = await editingSession(token);
       const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
       const tid = tx.transaction.transaction_id;
       const texts: Layer[] = (tx.richtexts ?? []).map((r: any) => ({ id: r.element_id, box: elementBox(r), text: (r.regions ?? []).map((g: any) => g.text ?? "").join("") }));
@@ -390,8 +406,7 @@ async function placeLogo(admin: any, token: string, job: Job): Promise<StepResul
       const [lw, lh] = job.input.logo_size;
       const rect = logoRect(ink, lw, lh);
       s.logo_rect = rect;
-      const mcp = new CanvaMcp(token);
-      await mcp.init();
+      const mcp = await editingSession(token);
       const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
       // A retried step must not place a second logo when the first attempt
       // committed before it could record that it had.
@@ -482,6 +497,20 @@ function hexRgb(hex: string): [number, number, number] {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
   if (!m) throw new Error(`FINAL: '${hex}' is not a colour like #0B0E1A.`);
   return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+}
+
+/**
+ * Check a Canva job until it leaves in_progress or this tick runs low on time.
+ * Exports finish in seconds and Magic Layers in under a minute; leaving each
+ * check to the next minute's tick added minutes to every design.
+ */
+async function settle<T extends { status: string }>(check: () => Promise<T>, deadline: number): Promise<T> {
+  let r = await check();
+  while (r.status === "in_progress" && Date.now() + 2500 < deadline) {
+    await new Promise((res) => setTimeout(res, 2000));
+    r = await check();
+  }
+  return r;
 }
 
 async function download(admin: any, path: string): Promise<Uint8Array> {
