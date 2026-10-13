@@ -47,7 +47,7 @@ const MAX_HOOKS = 3;
 const MAX_COMPOSE = 3;
 const MAX_CLIPS = 3;
 const REFERENCES = "design-references";
-const FOOTAGE_RULES = " One continuous shot, vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, signs, screens with writing, logos or watermarks anywhere in frame. No real or identifiable people.";
+const FOOTAGE_RULES = " One continuous shot, vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame, and no screens, dashboards, charts, documents or interfaces. No real or identifiable people.";
 
 export type VideoJob = { id: string; client_id: string; step: string; state: any; input: any; design_request_id: string | null; option_index: number | null };
 /** next: run the following step now; wait: ask again on a later pass; done: the MP4 is stored (state.final_path). */
