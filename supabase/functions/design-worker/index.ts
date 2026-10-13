@@ -299,7 +299,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       if (!copyMatches(lines, job.input.copy)) {
         // Wrong words are never fixed by hand: the design is made again.
         console.warn(`[design-worker] job ${job.id}: read ${JSON.stringify(lines)}, wanted ${JSON.stringify(job.input.copy)}`);
-        await designAgain(admin, job);
+        await designAgain(admin, job, `words read as ${JSON.stringify(lines)}`);
         return "next";
       }
       // Nothing may touch or cross the logo, seen at full size around its known place.
@@ -326,7 +326,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         s.logo_check = seen;
         if (!seen.clear) {
           console.warn(`[design-worker] job ${job.id}: the logo is touched by ${seen.touching}; designing again.`);
-          await designAgain(admin, job);
+          await designAgain(admin, job, `logo touched by ${seen.touching}`);
           return "next";
         }
       }
@@ -340,8 +340,10 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
  * Send a design back to be made again. A carousel cover made again takes its
  * other slides with it, so every slide follows the cover the client sees.
  */
-async function designAgain(admin: any, job: Job): Promise<void> {
+async function designAgain(admin: any, job: Job, reason: string): Promise<void> {
   const s = job.state;
+  // Why each earlier design was made again, kept for review.
+  s.redesigns = [...(Array.isArray(s.redesigns) ? s.redesigns : []), reason].slice(-5);
   for (const k of ["design_path", "logo_rect", "logo_frame", "logo_score", "logo_check", "nologo_path", "unlogos", "final_path", "read"]) delete s[k];
   job.step = "generate";
   if ((job.slide_count ?? 1) > 1 && (job.slide_index ?? 0) === 0 && job.design_request_id) {
