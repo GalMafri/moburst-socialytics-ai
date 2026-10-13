@@ -142,6 +142,12 @@ async function takeOverPost(admin: any, req: DesignRequest): Promise<boolean> {
   return true;
 }
 
+/** Whether a design on a post is the one in use. */
+async function wasInUse(admin: any, iterationId: string): Promise<boolean> {
+  const { data } = await admin.from("post_iterations").select("is_selected, archived_at").eq("id", iterationId).maybeSingle();
+  return !!data?.is_selected && !data?.archived_at;
+}
+
 /**
  * Bring a request up to date with its jobs: hand every finished option to the
  * post (a post_iterations row in the request's group, in use unless someone
@@ -183,7 +189,10 @@ async function settleRequestNow(admin: any, requestId: string): Promise<void> {
     const media = ordered.some((j) => j.input?.kind === "video") ? ordered.filter((j) => j.input?.kind === "video") : ordered;
     const urls = media.map((j) => admin.storage.from(BUCKET).getPublicUrl(j.output_path).data.publicUrl);
     const job = { ...lead, option_index: optionIndex };
-    const inUse = await takeOverPost(admin, req);
+    // A design finished again (state.replaces) takes the earlier one's place:
+    // in use only if that one was, which then leaves the post.
+    const replaces: string | undefined = lead.state?.replaces;
+    const inUse = replaces ? await wasInUse(admin, replaces) : await takeOverPost(admin, req);
     const { data: row, error } = await admin.from("post_iterations").insert({
       client_id: req.client_id,
       report_id: req.report_id,
@@ -200,6 +209,7 @@ async function settleRequestNow(admin: any, requestId: string): Promise<void> {
       created_by: req.requested_by,
     }).select("id").single();
     if (error) throw new Error(`Could not add the finished design to the post: ${error.message}`);
+    if (replaces) await admin.from("post_iterations").update({ is_selected: false, archived_at: new Date().toISOString() }).eq("id", replaces);
     await admin.from("canva_finish_jobs").update({ state: { ...job.state, iteration_id: row.id } }).eq("id", job.id);
   }
 

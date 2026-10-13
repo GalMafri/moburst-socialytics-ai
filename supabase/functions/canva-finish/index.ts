@@ -516,7 +516,9 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
         throw new Error(`FINAL: The copy layer is ${layer.width}x${layer.height}; the picture is ${picture.width}x${picture.height}.`);
       }
       picture.bitmap.set(composeOver(picture.bitmap, layer.bitmap, picture.width, picture.height));
-      const path = `${base}/final.png`;
+      // Each finished file gets a name of its own, so a design finished again
+      // is never shown from a cached copy of the earlier file.
+      const path = `${base}/final-${Date.now().toString(36)}.png`;
       const { error } = await admin.storage.from(BUCKET).upload(path, await picture.encode(), { contentType: "image/png", upsert: true });
       if (error) throw new Error(`Could not store the finished design: ${error.message}`);
       s.final_path = path;
