@@ -116,14 +116,15 @@ export function parseWeek(text: string, monday: string, reportId: string | null)
 }
 
 /** The instruction for writing a trend slot from what is trending now. */
-export function trendSlotPrompt(c: { brand: string; voice: string | null; languages: string[]; platform: string; format: string | null; date: string; trends: string[]; nearby: Array<{ date: string; platform: string; copy: string }> }): string {
+export function trendSlotPrompt(c: { brand: string; voice: string | null; languages: string[]; platform: string; format: string | null; date: string; trends: string[]; nearby: Array<{ date: string; platform: string; copy: string }>; taken?: string[] }): string {
   return [
     `Write one ${c.platform}${c.format ? ` ${c.format}` : ""} post for ${c.brand}, to go out on ${c.date}.`,
     c.voice ? `${c.brand}'s voice: ${c.voice}` : "",
     c.languages.length ? `Write in: ${c.languages.join(", ")}.` : "",
     ["What is trending now for this brand's audience and category:", ...c.trends.slice(0, 12).map((t) => `- ${t}`)].join("\n"),
     c.nearby.length ? ["Posts planned around that date (do not repeat their topics):", ...c.nearby.slice(0, 20).map((n) => `- ${n.date} ${n.platform}: ${n.copy.split("\n")[0].slice(0, 120)}`)].join("\n") : "",
-    "Pick the one trend that suits this brand best and write the post on it.",
-    'Reply with JSON only: {"copy":"the full caption","hashtags":["..."],"cta":"...","visual_direction":"one sentence","format":"...","trend":"the trend it acts on, in one short sentence"}',
+    c.taken?.length ? ["Trends other posts around that date already act on (choose a different one):", ...c.taken.map((t) => `- ${t}`)].join("\n") : "",
+    `Pick the one trend that suits this brand best and is not already taken, and write the post on it as a ${c.platform}${c.format ? ` ${c.format}` : ""}.`,
+    'Reply with JSON only: {"copy":"the full caption","hashtags":["..."],"cta":"...","visual_direction":"one sentence","trend":"the trend it acts on, in one short sentence"}',
   ].filter(Boolean).join("\n\n");
 }

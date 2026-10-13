@@ -243,7 +243,11 @@ async function fillTrendSlots(admin: any): Promise<{ filled: number; waiting: nu
       ...built.ctx.findings.trends,
     ];
     if (!trends.length) continue;
-    const result = await anthropicMessages({ apiKey, body: { model: PLANNER_MODEL, max_tokens: 2500, messages: [{ role: "user", content: trendSlotPrompt({ brand: built.ctx.brand, voice: built.ctx.voice, languages: built.ctx.languages, platform: slot.platform, format: slot.format, date: slot.post_date, trends, nearby: built.ctx.nearby }) }] } });
+    // Trends other posts near this date already act on, so two slots in a week do not take the same one.
+    const { data: takenRows } = await admin.from("calendar_posts").select("reasons").eq("client_id", slot.client_id).neq("id", slot.id)
+      .gte("post_date", addDays(slot.post_date, -7)).lte("post_date", addDays(slot.post_date, 7)).neq("copy", "");
+    const taken = (takenRows ?? []).map((r: any) => r.reasons?.[0]).filter((r: any) => r?.type === "trend" && r.label).map((r: any) => String(r.label));
+    const result = await anthropicMessages({ apiKey, body: { model: PLANNER_MODEL, max_tokens: 2500, messages: [{ role: "user", content: trendSlotPrompt({ brand: built.ctx.brand, voice: built.ctx.voice, languages: built.ctx.languages, platform: slot.platform, format: slot.format, date: slot.post_date, trends, nearby: built.ctx.nearby, taken }) }] } });
     const start = result.text.indexOf("{"), end = result.text.lastIndexOf("}");
     let out: any = null;
     try { out = start >= 0 && end > start ? JSON.parse(result.text.slice(start, end + 1)) : null; } catch { out = null; }
@@ -254,7 +258,6 @@ async function fillTrendSlots(admin: any): Promise<{ filled: number; waiting: nu
       hashtags: Array.isArray(out.hashtags) ? out.hashtags.map(String).slice(0, 12) : [],
       cta: out.cta ? String(out.cta) : null,
       visual_direction: out.visual_direction ? String(out.visual_direction) : null,
-      format: out.format ? String(out.format) : slot.format,
       reasons: [{ type: "trend", label: String(out.trend || "A current trend").slice(0, 200) }],
     }).eq("id", slot.id).eq("copy", "");
     filled++;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseWeek, weekDates, weekPrompt, type PlanContext } from "./planner";
+import { parseWeek, trendSlotPrompt, weekDates, weekPrompt, type PlanContext } from "./planner";
 
 const ctx: PlanContext = {
   brand: "Moburst", voice: "Confident, expert", pillars: [{ name: "Thought leadership" }], market: ["US"], languages: ["English"],
@@ -32,5 +32,14 @@ describe("week planning", () => {
     expect(posts[0].reasons).toEqual([{ type: "competitor", label: "Competitors post more", report_id: "report-1" }]);
     expect(posts[1]).toMatchObject({ copy: "", reasons: [{ type: "trend" }] });
     expect(posts[2].reasons[0]).toMatchObject({ type: "performance", label: "Planned from the monthly report" });
+  });
+});
+
+describe("trend slots", () => {
+  it("tells the writer which trends nearby posts already took, and keeps the planned format", () => {
+    const p = trendSlotPrompt({ brand: "Moburst", voice: null, languages: [], platform: "LinkedIn", format: "Single Image", date: "2026-10-23", trends: ["Black Friday app store pages", "Short expert explainers"], nearby: [], taken: ["Black Friday app store pages"] });
+    expect(p).toContain("choose a different one");
+    expect(p).toContain("as a LinkedIn Single Image");
+    expect(p).not.toContain('"format"');
   });
 });
