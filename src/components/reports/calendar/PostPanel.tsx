@@ -185,6 +185,8 @@ export function PostPanel({
   // One design per post; earlier ones stay on the post to switch back to. A
   // video post's design is its video (cover card, footage, end card).
   const videoDesigns = plannedVideo && designsReady;
+  // A still post's Video tab is the team's tool; a client sees it only once the post has a video.
+  const showVideoTab = !videoDesigns && (!isClient || videoTiles.length > 0);
   const versions = designVersions(postIterations, videoDesigns ? isVideoUrl : (u) => !isVideoUrl(u));
   const otherTiles = imageTiles.filter((t) => !isDesignOption({ variant_angle: t.variantAngle }));
   const isCarouselPost = /carousel|document|pdf/i.test(String(post.format || "")) || (versions[0]?.urls.length ?? 0) > 1;
@@ -227,11 +229,11 @@ export function PostPanel({
           <SheetDescription className="sr-only">Review the copy and creative for this post.</SheetDescription>
 
           <Tabs value={tab} onValueChange={setTab} className="mt-4">
-            <TabsList className={`grid ${TAB_COLUMNS[(isClient ? 3 : 4) - (videoDesigns ? 1 : 0)]}`}>
+            <TabsList className={`grid ${TAB_COLUMNS[2 + (showVideoTab ? 1 : 0) + (isClient ? 0 : 1)]}`}>
               <TabsTrigger value="copy">Copy</TabsTrigger>
               {/* A video post's design is made as a video, so its one media tab is Video. */}
               <TabsTrigger value="design">{videoDesigns ? "Video" : plannedVideo ? "Cover" : "Design"}</TabsTrigger>
-              {!videoDesigns && (
+              {showVideoTab && (
                 <TabsTrigger value="video" className="gap-1.5">
                   Video
                   {plannedVideo && <span className="h-1.5 w-1.5 rounded-full bg-[#b9e045]" aria-hidden />}
