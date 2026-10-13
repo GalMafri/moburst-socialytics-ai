@@ -28,6 +28,7 @@ import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
 import { learningLines, recordFeedback } from "../_shared/design-prompts/feedback.ts";
 import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
+import { discoverVideoReferences } from "../_shared/brand-references/videos.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -78,6 +79,18 @@ Deno.serve(async (req) => {
       const { data: updated } = await admin.from("design_requests").update({ status: "canceled", updated_at: new Date().toISOString() })
         .eq("id", request.id).select("*").single();
       return json({ request: updated });
+    }
+
+    // The client's own published videos, kept so its video posts follow its
+    // own video style. Staff or the project's own calls.
+    if (body?.action === "video_references") {
+      await requireStaff(req);
+      const clientId = String(body.client_id || "");
+      const { data: client } = await admin.from("clients").select("id, sprout_customer_id").eq("id", clientId).maybeSingle();
+      if (!client) return json({ error: "No such client." }, 404);
+      const found = await discoverVideoReferences(admin, client);
+      if (found.refs.length) await admin.from("clients").update({ video_references: found.refs }).eq("id", clientId);
+      return json(found);
     }
 
     // Designs for upcoming calendar posts that have none, for clients whose

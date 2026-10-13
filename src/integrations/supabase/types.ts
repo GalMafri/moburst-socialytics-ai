@@ -552,6 +552,7 @@ export type Database = {
           primary_platforms: string[] | null
           social_keywords: string[] | null
           sprout_customer_id: string | null
+          video_references: Json
           strategy_doc_file_path: string | null
           timezone: string | null
           trends_keywords: string | null
@@ -590,6 +591,7 @@ export type Database = {
           primary_platforms?: string[] | null
           social_keywords?: string[] | null
           sprout_customer_id?: string | null
+          video_references?: Json
           strategy_doc_file_path?: string | null
           timezone?: string | null
           trends_keywords?: string | null
@@ -628,6 +630,7 @@ export type Database = {
           primary_platforms?: string[] | null
           social_keywords?: string[] | null
           sprout_customer_id?: string | null
+          video_references?: Json
           strategy_doc_file_path?: string | null
           timezone?: string | null
           trends_keywords?: string | null
