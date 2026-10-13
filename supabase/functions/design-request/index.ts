@@ -275,9 +275,9 @@ async function personOnCamera(copy: string, visual: string): Promise<string | nu
         model: PLANNER_MODEL, max_tokens: 200,
         messages: [{ role: "user", content: [{ type: "text", text:
           `A social video post is planned.\nCopy: """${copy.slice(0, 1500)}"""\nPlanned visual: """${visual || "(none given)"}"""\n` +
-          "Does the video depend on a specific real person appearing on camera (for example the firm's founder speaking to camera, or a named team member)? " +
-          "Anonymous hands, objects, places or abstract motion do not count. " +
-          'Reply with JSON only: {"person": true or false, "who": "the person, as the copy or visual names them, or empty"}' }] }],
+          "Does the video depend on a real person appearing on camera for the brand: its founder, an executive, a spokesperson, an expert or a team member speaking or presenting, named or not? " +
+          "Anonymous hands, objects, places, abstract motion, or people who are only an unidentifiable part of a scene (a crowd, players in a match) do not count. " +
+          'Reply with JSON only: {"person": true or false, "who": "the person, as the copy or visual names them (a name when one is given, otherwise a short description such as an executive), or empty"}' }] }],
       },
     });
     const m = result.text.match(/\{[\s\S]*\}/);
