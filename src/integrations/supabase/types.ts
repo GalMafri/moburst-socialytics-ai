@@ -278,10 +278,12 @@ export type Database = {
           client_id: string
           created_at: string
           created_by: string | null
+          design_request_id: string | null
           error: string | null
           id: string
           input: Json
           lease_until: string | null
+          option_index: number | null
           output_path: string | null
           state: Json
           status: string
@@ -293,10 +295,12 @@ export type Database = {
           client_id: string
           created_at?: string
           created_by?: string | null
+          design_request_id?: string | null
           error?: string | null
           id?: string
           input: Json
           lease_until?: string | null
+          option_index?: number | null
           output_path?: string | null
           state?: Json
           status?: string
@@ -308,10 +312,12 @@ export type Database = {
           client_id?: string
           created_at?: string
           created_by?: string | null
+          design_request_id?: string | null
           error?: string | null
           id?: string
           input?: Json
           lease_until?: string | null
+          option_index?: number | null
           output_path?: string | null
           state?: Json
           status?: string
@@ -324,6 +330,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "canva_finish_jobs_design_request_id_fkey"
+            columns: ["design_request_id"]
+            isOneToOne: false
+            referencedRelation: "design_requests"
             referencedColumns: ["id"]
           },
         ]
@@ -1000,6 +1013,47 @@ export type Database = {
           },
         ]
       }
+      design_brand_settings: {
+        Row: {
+          background: string
+          client_id: string
+          confirmed_at: string | null
+          confirmed_by: string | null
+          logo_path: string
+          placement: Json
+          reference_paths: string[]
+          updated_at: string
+        }
+        Insert: {
+          background: string
+          client_id: string
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          logo_path: string
+          placement: Json
+          reference_paths: string[]
+          updated_at?: string
+        }
+        Update: {
+          background?: string
+          client_id?: string
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          logo_path?: string
+          placement?: Json
+          reference_paths?: string[]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_brand_settings_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: true
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       design_learnings: {
         Row: {
           client_id: string
@@ -1047,6 +1101,81 @@ export type Database = {
             columns: ["source_iteration_id"]
             isOneToOne: false
             referencedRelation: "post_iterations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      design_requests: {
+        Row: {
+          briefs: Json
+          calendar_post_key: string
+          candidates_started: number
+          client_id: string
+          created_at: string
+          error: string | null
+          format: string | null
+          id: string
+          options_ready: number
+          options_wanted: number
+          platform: string | null
+          post_copy: string
+          report_id: string | null
+          requested_by: string | null
+          stage: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          briefs?: Json
+          calendar_post_key: string
+          candidates_started?: number
+          client_id: string
+          created_at?: string
+          error?: string | null
+          format?: string | null
+          id?: string
+          options_ready?: number
+          options_wanted?: number
+          platform?: string | null
+          post_copy: string
+          report_id?: string | null
+          requested_by?: string | null
+          stage?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          briefs?: Json
+          calendar_post_key?: string
+          candidates_started?: number
+          client_id?: string
+          created_at?: string
+          error?: string | null
+          format?: string | null
+          id?: string
+          options_ready?: number
+          options_wanted?: number
+          platform?: string | null
+          post_copy?: string
+          report_id?: string | null
+          requested_by?: string | null
+          stage?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_requests_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "design_requests_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
             referencedColumns: ["id"]
           },
         ]
