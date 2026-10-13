@@ -136,8 +136,33 @@ Deno.serve(async (req) => {
   }
 });
 
-/** Plan the options from the post and the client's own posts, then start the first ones. */
+/** How long a request waits for another of the same client's requests to finish planning. */
+const PLAN_WAIT_MS = 150_000;
+
+/**
+ * Plan the options from the post and the client's own posts, then start the
+ * first ones. One request per client plans at a time: each plan is told what
+ * the client's recent designs were built on, and two planned side by side
+ * could not see each other's choices and picked the same posts (13 Oct).
+ */
 async function plan(admin: any, request: DesignRequest, settings: Settings): Promise<void> {
+  const lease = `plan:${request.client_id}`;
+  const holder = crypto.randomUUID();
+  const until = Date.now() + PLAN_WAIT_MS;
+  for (;;) {
+    const { data: got } = await admin.rpc("claim_worker_lease", { p_name: lease, p_holder: holder, p_seconds: 120 });
+    if (got) break;
+    if (Date.now() > until) break; // plan anyway rather than never
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  try {
+    await planNow(admin, request, settings);
+  } finally {
+    await admin.rpc("release_worker_lease", { p_name: lease, p_holder: holder });
+  }
+}
+
+async function planNow(admin: any, request: DesignRequest, settings: Settings): Promise<void> {
   const { data: client } = await admin.from("clients").select("name, brand_identity").eq("id", request.client_id).maybeSingle();
   const brand = client?.name ?? "the brand";
   const voice = client?.brand_identity?.tone_of_voice ?? null;

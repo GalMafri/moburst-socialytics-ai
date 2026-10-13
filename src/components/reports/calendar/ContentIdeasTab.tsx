@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -27,6 +27,8 @@ interface Props {
   availableLanguages: string[];
   /** "calendar": the Calendar tab's week board, which has its own New post and no report highlights. */
   mode?: "report" | "calendar";
+  /** A post to open as soon as the board has it (arriving from the all-clients calendar). */
+  openPostKey?: string;
 }
 
 export function ContentIdeasTab({
@@ -40,6 +42,7 @@ export function ContentIdeasTab({
   availablePlatforms,
   availableLanguages,
   mode = "report",
+  openPostKey,
 }: Props) {
   const [filters, setFilters] = useState<CalendarFilterState>({
     day: "all",
@@ -180,6 +183,17 @@ export function ContentIdeasTab({
           );
         })
     : [];
+
+  // Arriving with a post to open: open it once, when the board has it.
+  const openedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openPostKey || openedRef.current === openPostKey || iterationsLoading) return;
+    const post = (revisedCalendar as any[]).flatMap((d: any) => (Array.isArray(d?.posts) ? d.posts : [])).find((p: any) => p?._calendarPostKey === openPostKey);
+    if (!post) return;
+    openedRef.current = openPostKey;
+    setActivePost(post);
+    setActiveGroupId(null);
+  }, [openPostKey, revisedCalendar, iterationsLoading]);
 
   // A design progress card names its post by key; find that post on the board.
   const openDesignsFor = useCallback((postKey: string) => {

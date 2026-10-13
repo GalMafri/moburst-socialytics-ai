@@ -8,7 +8,7 @@
 import { useMemo } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -18,8 +18,9 @@ import { LoadError } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
+import { ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
 import { CLIENT_CONTEXT_COLUMNS, buildClientContext } from "@/lib/clientContext";
-import { addDays, mondayOf, shortDate, todayIn, weekBoard, weekLabel, type CalendarPostRow } from "@/lib/calendarPosts";
+import { addDays, mondayOf, shortDate, todayIn, weekBoard, type CalendarPostRow } from "@/lib/calendarPosts";
 
 const DEFAULT_PLATFORMS = ["Instagram", "LinkedIn", "TikTok", "Facebook", "X"];
 
@@ -66,13 +67,20 @@ export default function ClientCalendar() {
   const languages = [...new Set(all.map((p) => p.language).filter(Boolean))] as string[];
   const goTo = (monday: string) => setParams((prev) => { const next = new URLSearchParams(prev); next.set("week", monday); return next; }, { replace: false });
 
-  const title = client.data ? `${(client.data as { name?: string }).name} calendar` : "Calendar";
+  // Opened from the all-clients view: the post to open, by id.
+  const openPostId = params.get("post");
+  const openPostKey = openPostId ? all.find((p) => p.id === openPostId)?.post_key : undefined;
 
   return (
     <AppLayout
-      title={title}
+      title="Calendar"
       description="Every planned post on its date. Open a post to edit its copy, see its design or schedule it."
-      actions={isMoburstStaff && id ? <NewPostDialog clientId={id} platforms={platforms} defaultDate={week > today ? week : today} onCreated={(d) => goTo(mondayOf(d))} /> : undefined}
+      actions={isMoburstStaff && id ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <ClientPicker value={id} week={week} />
+          <NewPostDialog clientId={id} platforms={platforms} defaultDate={week > today ? week : today} onCreated={(d) => goTo(mondayOf(d))} />
+        </div>
+      ) : undefined}
     >
       {client.isLoading || posts.isLoading ? (
         <Loading label="Loading the calendar" />
@@ -80,19 +88,7 @@ export default function ClientCalendar() {
         <LoadError title="Could not load the calendar" error={client.error || posts.error} onRetry={() => { void client.refetch(); void posts.refetch(); }} />
       ) : (
         <div className="space-y-4">
-          <nav className="flex items-center gap-2 flex-wrap" aria-label="Weeks">
-            <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => goTo(addDays(week, -7))} aria-label="Previous week">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => goTo(addDays(week, 7))} aria-label="Next week">
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <h2 className="text-[17px] font-semibold tracking-[-0.3px] text-white px-1" aria-live="polite">{weekLabel(week)}</h2>
-            {week !== thisWeek && (
-              <Button variant="ghost" size="sm" onClick={() => goTo(thisWeek)}>This week</Button>
-            )}
-            <span className="t-secondary ml-auto">{inWeek.length} post{inWeek.length === 1 ? "" : "s"} this week</span>
-          </nav>
+          <WeekNav week={week} thisWeek={thisWeek} count={inWeek.length} onGo={goTo} />
 
           {inWeek.length === 0 ? (
             <EmptyState
@@ -121,6 +117,7 @@ export default function ClientCalendar() {
               clientTimezone={clientContext.timezone}
               availablePlatforms={platforms}
               availableLanguages={languages}
+              openPostKey={openPostKey}
             />
           )}
 
