@@ -89,7 +89,7 @@ export function CompetitiveSnapshot({
   }
 
   if (!competitiveReportQuality(latest.report_data).ready) {
-    const recovery = competitiveRecovery(latest.report_data);
+    const recovery = competitiveRecovery(latest.report_data, isMoburstStaff);
     return <EmptyState icon={Crosshair} title={recovery.title} description={recovery.detail}
       action={<Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports/${latest.id}`)}>View report status</Button>} />;
   }

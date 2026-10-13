@@ -1,6 +1,7 @@
 const metricsOf = (company: any) => company?.comparison_metrics || company?.rivaliq_metrics;
 
 /** Keep an empty post sample from becoming a claim about a company's strategy.
+ * The summaries written here are shown to clients, so they name no data vendor.
  * Provider totals remain unchanged, including explicit measured zeros. The raw
  * workflow output/snapshots remain the audit source; this is a derived view.
  */
@@ -14,7 +15,7 @@ export function sourceCompetitiveSummary(report: Record<string, any>): string | 
   const rate = (n: number) => `${(n * 100).toFixed(2)}%`;
   const lines: string[] = [];
   if (valid(m.posts?.current)) lines.push(`Publishing: ${fmt(m.posts.current)} tracked posts from ${client.name} in this period${valid(m.posts.previous) ? `, compared with ${fmt(m.posts.previous)} in the previous equal-length period` : ""}.`);
-  if (valid(m.engagement_rate_per_post?.current)) lines.push(`Engagement: ${rate(m.engagement_rate_per_post.current)} is ${client.name}'s average engagement rate per post on RivalIQ-tracked networks (excluding LinkedIn)${valid(m.engagement_rate_per_post.previous) ? `, versus ${rate(m.engagement_rate_per_post.previous)} previously` : ""}.`);
+  if (valid(m.engagement_rate_per_post?.current)) lines.push(`Engagement: ${rate(m.engagement_rate_per_post.current)} is ${client.name}'s average engagement rate per post on tracked networks (excluding LinkedIn)${valid(m.engagement_rate_per_post.previous) ? `, versus ${rate(m.engagement_rate_per_post.previous)} previously` : ""}.`);
   if (valid(m.audience?.current)) lines.push(`Audience: ${fmt(m.audience.current)} followers across tracked networks (excluding LinkedIn)${m.audience_as_of ? ` as of ${m.audience_as_of}` : ''}${valid(m.audience.previous) ? `, ${m.audience.current >= m.audience.previous ? "up" : "down"} ${fmt(Math.abs(m.audience.current - m.audience.previous))} from the previous period` : ""}.`);
   const rivals = companies.filter((c: any) => !c.is_client && valid(metricsOf(c)?.posts?.current));
   const leader = [...rivals].sort((a: any, b: any) => metricsOf(b).posts.current - metricsOf(a).posts.current)[0];
@@ -82,7 +83,7 @@ export function withCompetitiveEvidenceLimits<T>(input: T): T {
       !names.has(String(item.competitor || "").trim().toLowerCase()));
   }
   if (client) {
-    ai.executive_summary = `No posts for ${client.name} were returned for the selected period. The report retains RivalIQ's supplied metrics and the observed competitor posts. Client content gaps, strategy assessments and posting recommendations are withheld because there is no client post sample to support them.`;
+    ai.executive_summary = `No posts for ${client.name} were returned for the selected period. The report keeps the measured period metrics and the observed competitor posts. Client content gaps, strategy assessments and posting recommendations are withheld because there is no client post sample to support them.`;
     ai.gaps_for_client = [];
     ai.recommended_schedule = null;
     ai.posting_time_insights = null;

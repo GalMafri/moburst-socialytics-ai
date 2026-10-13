@@ -33,13 +33,15 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: (table: str
   }; return query;
 } } }));
 
-const bucket = { post_count: 6, cadence_per_week: 1.4, engagement_rate_avg: 0.012, engagement_avg: 40, impressions_total: 900, top_posts: [], media_type_mix: [], top_hashtags: [], by_weekday: {}, by_hour: {} };
+const xPost = { channel: 'x', engagement: 3, engagement_rate: null, views: null, text: '', url: null, image: null, created: '2026-09-02', media_type: 'text', likely_boosted: true };
+const bucket = { post_count: 6, cadence_per_week: 1.4, engagement_rate_avg: 0.012, engagement_avg: 40, impressions_total: 900, top_posts: [xPost], media_type_mix: [], top_hashtags: [], by_weekday: {}, by_hour: {} };
+const metrics = { posts: { current: 6, previous: 5 }, audience: { current: 1200, previous: 1100 }, engagement: { current: 240, previous: 200 }, estimated_impressions: { current: 900, previous: 800 }, likely_boosted_facebook_posts: { current: 1, previous: 0 } };
 const complete = () => ({
   period: { start: '2026-09-01', end: '2026-09-30' },
   landscape: { name: 'Socialytics - QA client - 2f1d7c1e-5b0a-4a51-9a51-7d1fbcd0e111' },
   aggregates: { companies: [
-    { ...bucket, company_id: 'c1', name: 'QA client', url: null, is_client: true, in_confirmed_top3: false, channel_mix: [], linkedin_metrics: { provider: 'apify', profile_url: 'https://www.linkedin.com/company/qa', posts: 2, coverage: 'complete', engagement: 3, period: { start: '2026-09-01', end: '2026-09-30' } } },
-    { ...bucket, company_id: 'c2', name: 'Rival', url: null, is_client: false, in_confirmed_top3: true, channel_mix: [] },
+    { ...bucket, company_id: 'c1', name: 'QA client', url: null, is_client: true, in_confirmed_top3: false, channel_mix: [], rivaliq_metrics: metrics, linkedin_metrics: { provider: 'apify', profile_url: 'https://www.linkedin.com/company/qa', posts: 2, coverage: 'complete', engagement: 3, period: { start: '2026-09-01', end: '2026-09-30' } } },
+    { ...bucket, company_id: 'c2', name: 'Competitor', url: null, is_client: false, in_confirmed_top3: true, channel_mix: [], rivaliq_metrics: metrics },
   ] },
   ai_analysis: { benchmark_scorecard: { client_score: 64 } },
 });
@@ -55,8 +57,8 @@ async function tick(ms: number) { await act(async () => { await vi.advanceTimers
 function mount(element: React.ReactElement, path = '/clients/client/reports/report', route = '/clients/:id/reports/:reportId') {
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><Routes><Route path={route} element={element} /></Routes></MemoryRouter></QueryClientProvider>);
 }
-// Whole words, any case (so "aggregate" is not "gate"), plus the landscape name, the vendor and em dashes.
-const banned = /\bAI\b|\b(prompts?|models?|scores?|pipelines?|gates?)\b|Socialytics -|Apify|—/i;
+// Whole words, any case (so "aggregate" is not "gate"), plus the landscape name, data vendors and em dashes.
+const banned = /\bAI\b|\b(prompts?|models?|scores?|pipelines?|gates?)\b|Socialytics -|Rival ?IQ|Sprout|Apify|—/i;
 
 it('shows a client a plain status and no landscape, vendor or internal wording', async () => {
   mount(<CompetitiveReportView />); await tick(20);
@@ -67,6 +69,24 @@ it('shows a client a plain status and no landscape, vendor or internal wording',
   expect(screen.queryByText(/Re-run|Run the analysis again/)).toBeNull();
   expect(document.body.textContent).not.toMatch(banned);
   expect(document.body.textContent).not.toMatch(/\bset avg\b/);
+});
+
+it('names no data vendor to a client, even where the figures come from one', async () => {
+  mount(<CompetitiveReportView />); await tick(20);
+  // The sections that used to name the provider are on the page.
+  expect(screen.getAllByText('Est. impressions').length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/counted in the totals only/).length).toBeGreaterThan(0);
+  expect(document.body.innerHTML).not.toMatch(/Rival ?IQ|Sprout/);
+});
+
+it('keeps a held report vendor-free for a client and named for staff', async () => {
+  fixture.data = { ...complete(), provider_status: 2 };
+  mount(<CompetitiveReportView />); await tick(20);
+  expect(screen.getByText(/still being collected when this report ran/)).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(banned);
+  cleanup(); fixture.staff = true;
+  mount(<CompetitiveReportView />); await tick(20);
+  expect(screen.getByText(/RivalIQ had not finished collecting/)).toBeInTheDocument();
 });
 
 it('still shows staff the landscape and sources', async () => {

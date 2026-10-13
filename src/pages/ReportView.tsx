@@ -52,6 +52,7 @@ import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
 import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
 import { useInsightFeedback } from "@/hooks/useInsightFeedback";
+import { measuredEngagements } from "@/lib/trendEngagement";
 import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
 import { Prose } from "@/components/ui/prose";
@@ -966,6 +967,8 @@ function TrendsSection({
   const shown = validPosts.slice(0, 6);
   const platformColor = getPlatformColor(platform);
   const { previews } = usePostPreviews(shown.map((p: any) => p.url));
+  // The weighted engagement score is an internal ranking; clients see the measured engagements instead.
+  const { isMoburstStaff } = useAuth();
   if (!analysis && !validPosts.length) return null;
   const opportunities: string[] = analysis?.opportunities_for_client || [];
   const formats: string[] = analysis?.successful_formats || [];
@@ -1024,7 +1027,8 @@ function TrendsSection({
               these stay a two-column grid with a fixed-width visual. */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-pdf-flow>
             {shown.map((post: any, i: number) => {
-              const sl = post.engagement_score != null ? getScoreLabel(post.engagement_score, platform) : null;
+              const sl = isMoburstStaff && post.engagement_score != null ? getScoreLabel(post.engagement_score, platform) : null;
+              const engagements = isMoburstStaff ? null : measuredEngagements(post);
               return (
                 <Card key={i} className="overflow-hidden">
                   <CardContent className="pt-5">
@@ -1038,7 +1042,10 @@ function TrendsSection({
                             <div className="h-8 w-8 rounded-full flex items-center justify-center t-badge shrink-0" style={{ backgroundColor: `${platformColor}22`, color: platformColor }}>{(post.author || "?")[0]?.toUpperCase()}</div>
                             <span className="t-body font-medium truncate">@{post.author}</span>
                           </div>
-                          {sl && <Badge variant="outline" className="t-label shrink-0" style={{ color: sl.color, borderColor: `${sl.color}55` }} title={getScoreExplanation(platform)}>Score: {Number(post.engagement_score).toLocaleString()} {sl.label}</Badge>}
+                          {/* Staff only, and kept out of a PDF they export for the client. sl.color is a
+                              text-color class; it used to be passed as a style value, which the browser ignored. */}
+                          {sl && <Badge data-print="hide" variant="outline" className={`t-label shrink-0 ${sl.color}`} title={getScoreExplanation(platform)}>Score: {Number(post.engagement_score).toLocaleString()} {sl.label}</Badge>}
+                          {engagements != null && <Badge variant="outline" className="t-label shrink-0" title="Likes, comments and shares on this post">{engagements.toLocaleString()} engagements</Badge>}
                         </div>
                         <p className="t-body line-clamp-4">{post.caption}</p>
                         {/* A hashtag has no spaces to wrap at, so one long enough (#fyppppp…) runs past the card unless it may break mid-word. */}

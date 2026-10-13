@@ -44,3 +44,13 @@ describe("run watch", () => {
     expect(watchExpired("not a date", at(500))).toBe(false);
   });
 });
+
+describe("measuredEngagements", () => {
+  it("adds up the measured likes, comments and shares", async () => {
+    const { measuredEngagements } = await import("@/lib/trendEngagement");
+    expect(measuredEngagements({ likes: 1200, comments: 30, shares: 4 })).toBe(1234);
+    expect(measuredEngagements({ likes: "10", comments: null, shares: undefined })).toBe(10);
+    expect(measuredEngagements({})).toBeNull();
+    expect(measuredEngagements({ likes: "n/a" })).toBeNull();
+  });
+});
