@@ -291,10 +291,19 @@ type StepResult = "next" | "wait" | "done" | "held";
 
 async function tick(admin: any) {
   const started = Date.now();
-  const { data: due } = await admin.from("canva_finish_jobs").select("id")
+  // Canva jobs share one editing session, so a pass takes the ten oldest. A
+  // video's footage and join do not touch Canva and the footage takes minutes
+  // to generate, so they are taken on every pass rather than queued behind
+  // other posts' slides.
+  const dueQuery = () => admin.from("canva_finish_jobs").select("id")
     .in("status", ["queued", "running"])
     .or(`lease_until.is.null,lease_until.lt.${new Date().toISOString()}`)
     .order("created_at").limit(10);
+  const [{ data: canvaDue }, { data: videoDue }] = await Promise.all([
+    dueQuery().not("step", "in", `(${VIDEO_STEPS.join(",")})`),
+    dueQuery().in("step", VIDEO_STEPS),
+  ]);
+  const due = [...(canvaDue ?? []), ...(videoDue ?? [])];
   if (!due?.length) {
     await settleOpenRequests(admin, new Set());
     return { ran: 0 };
@@ -696,6 +705,8 @@ async function settle<T extends { status: string }>(check: () => Promise<T>, dea
   return r;
 }
 
+/** A video job's own steps (videoStep); none of them uses Canva. */
+const VIDEO_STEPS = ["footage", "footage_wait", "compose", "compose_wait"];
 /** Higgsfield credits a video's footage needs on the account before it is started (a 1080p clip is under 100). */
 const FOOTAGE_CREDIT_FLOOR = 120;
 /** How often a running clip or join is asked about; passes come every few seconds. */
