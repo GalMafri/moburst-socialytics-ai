@@ -12,9 +12,13 @@
 //        report, one week per call, starting the next itself
 //   POST {action:"plan_after_report", report_id}   operational secret: the three weeks after a report's own week
 //   POST {action:"fill_trend_slots"}           operational secret: write trend slots due in the next 10 days
+//   POST {action:"save_copy", client_id, calendar_post_key, post_copy, ...}
+//        a member of the client or staff: save a copy edit (a revision row
+//        without media) and update the calendar post
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
+import { requireMember } from "../_shared/auth/requireMember.ts";
 import { importReportPosts } from "../_shared/calendar/fromReport.ts";
 import { type PlanContext, WEEKDAYS, parseWeek, trendSlotPrompt, weekDates, weekPrompt } from "../_shared/calendar/planner.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
@@ -55,6 +59,26 @@ Deno.serve(async (req) => {
         catch (e) { results[clientId] = { error: e instanceof Error ? e.message : String(e) }; }
       }
       return json({ clients: latest.size, results });
+    }
+
+    if (body?.action === "save_copy") {
+      const clientId = String(body.client_id || "");
+      const key = String(body.calendar_post_key || "");
+      const copy = String(body.post_copy || "").trim();
+      if (!clientId || !key || !copy) return json({ error: "client_id, calendar_post_key and post_copy are required." }, 400);
+      const userId = await requireMember(req, clientId);
+      const hashtags = Array.isArray(body.hashtags) ? body.hashtags.map(String).slice(0, 30) : null;
+      const { error } = await admin.from("post_iterations").insert({
+        client_id: clientId, report_id: body.report_id || null, calendar_post_key: key,
+        version: Number(body.version) || 1, platform: body.platform || null, post_copy: copy,
+        hashtags, cta: body.cta || null, concept: body.concept || null, visual_direction: body.visual_direction || null,
+        format: body.format || null, source: body.source === "regeneration" ? "regeneration" : "calendar", created_by: userId,
+      });
+      if (error) throw new Error(`Could not save the copy: ${error.message}`);
+      // The calendar post holds the current copy too, for every view that reads it directly.
+      await admin.from("calendar_posts").update({ copy, ...(hashtags ? { hashtags } : {}), ...(body.cta ? { cta: String(body.cta) } : {}) })
+        .eq("client_id", clientId).eq("post_key", key);
+      return json({ ok: true });
     }
 
     if (body?.action === "plan_weeks") {

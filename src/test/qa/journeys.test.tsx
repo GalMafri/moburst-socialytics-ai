@@ -32,6 +32,11 @@ vi.mock('@/integrations/supabase/client',()=>({supabase:{
     if(name==='sprout-profiles')return{data:{profiles:[{id:1,name:'Fixture brand',network_type:'linkedin_company'}]},error:null};
     if(name==='regenerate-post-copy')return{data:{post:{copy:'Regenerated fixture copy'}},error:null};
     if(name==='schedule-sprout-post')return{data:{success:true,recorded:true},error:null};
+    // Copy edits are saved by calendar-posts, which writes the revision row as the server would.
+    if(name==='calendar-posts'&&args?.body?.action==='save_copy'){
+      if(f.insertError)return{data:{error:f.insertError.message},error:null};
+      const {action,...row}=args.body;f.rows.push({...row,created_at:new Date().toISOString()});return{data:{ok:true},error:null};
+    }
     return{data:{},error:null};
   }},
   from:(table:string)=>{

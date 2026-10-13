@@ -20,7 +20,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
-import { bearerToken } from "../_shared/auth/authz.ts";
+import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, plannerPrompt, recentLines } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
@@ -40,24 +40,6 @@ const MAX_LIBRARY = 16;
 const RECENT_DESIGNS = 10;
 
 const service = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
-
-/** Staff with write access to the client, or a signed-in member of the client. Returns the user id. */
-async function requireMember(req: Request, clientId: string): Promise<string> {
-  if (req.headers.get("x-socialytics-secret")) return (await requireStaff(req, { writeClientId: clientId })).userId;
-  const jwt = bearerToken(req.headers.get("Authorization"));
-  if (!jwt) throw new AuthzError(401, "Sign-in required.");
-  const asCaller = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: `Bearer ${jwt}` } }, auth: { persistSession: false },
-  });
-  const { data: user, error } = await asCaller.auth.getUser(jwt);
-  if (error || !user?.user) throw new AuthzError(401, "Invalid or expired session.");
-  const [{ data: canWrite }, { data: member }] = await Promise.all([
-    asCaller.rpc("can_write_client", { _client_id: clientId }),
-    asCaller.rpc("is_client_member", { _client_id: clientId }),
-  ]);
-  if (!canWrite && !member) throw new AuthzError(403, "You do not have access to this client.");
-  return user.user.id;
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });

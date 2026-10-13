@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Pencil, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { describeInvokeError } from "@/lib/invokeError";
 import { toast } from "sonner";
 import { track, editDistancePct } from "@/lib/telemetry";
 import { postCopyOf } from "@/lib/postCopy";
@@ -31,8 +32,8 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
   }, [initialCopy, post._calendarPostKey]);
 
   const saveRevision = async (copy: string, generated?: any) => {
-    if (!clientId || !reportId || !post._calendarPostKey) {
-      throw new Error("Open this post from its report calendar before saving changes.");
+    if (!clientId || !post._calendarPostKey) {
+      throw new Error("This post can't be edited here.");
     }
     const updated = {
       ...post, copy, _originalCopy: post._originalCopy ?? initialCopy,
@@ -41,14 +42,19 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
       hashtags: generated?.hashtags ?? post.hashtags,
       CTA: generated?.CTA ?? generated?.cta ?? post.CTA ?? post.cta,
     };
-    const { error } = await supabase.from("post_iterations").insert({
-      client_id: clientId, report_id: reportId, calendar_post_key: post._calendarPostKey,
-      version: updated._copyVersion, platform: post.platform || null, post_copy: copy,
-      hashtags: updated.hashtags || null, cta: updated.CTA || null,
-      concept: post.concept || null, visual_direction: post.visual_direction || null,
-      format: post.format || null, source: generated ? "regeneration" : "calendar",
+    // Saved through calendar-posts, which checks the caller belongs to the
+    // client: a client's own users can edit their posts' copy too.
+    const { data, error } = await supabase.functions.invoke("calendar-posts", {
+      body: {
+        action: "save_copy",
+        client_id: clientId, report_id: reportId ?? null, calendar_post_key: post._calendarPostKey,
+        version: updated._copyVersion, platform: post.platform || null, post_copy: copy,
+        hashtags: Array.isArray(updated.hashtags) ? updated.hashtags : typeof updated.hashtags === "string" ? updated.hashtags.split(/[\s,]+/).filter(Boolean) : null,
+        cta: updated.CTA || null, concept: post.concept || null, visual_direction: post.visual_direction || null,
+        format: post.format || null, source: generated ? "regeneration" : "calendar",
+      },
     });
-    if (error) throw error;
+    if (error || data?.error) throw new Error(await describeInvokeError(error, data));
     onCopySaved?.(updated);
     return updated;
   };
