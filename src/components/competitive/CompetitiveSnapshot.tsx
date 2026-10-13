@@ -26,6 +26,7 @@ import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../../supabase/functions/_shared/competitive/reportEvidence";
 import { competitiveRecovery } from "@/lib/competitiveFlow";
 import { landscapeLabel } from "@/lib/competitiveStatus";
+import { editedSuggestion } from "../../../supabase/functions/_shared/competitive/suggestionEdits";
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
 const whole = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? "–" : Math.round(n).toLocaleString());
@@ -44,7 +45,7 @@ export function CompetitiveSnapshot({
 }) {
   const navigate = useNavigate();
   const { isMoburstStaff } = useAuth();
-  const { rows: feedback, verdictFor } = useInsightFeedback(clientId);
+  const { rows: feedback, verdictFor, editFor } = useInsightFeedback(clientId);
 
   // Its own key: ReportView reads a different column set for its own summary,
   // and a shared key let whichever loaded first answer for both.
@@ -169,8 +170,8 @@ export function CompetitiveSnapshot({
                   {g.platform && g.platform !== "all" && <Badge variant="outline" className="t-label">{platformLabel(g.platform)}</Badge>}
                   {verdictFor(g.gap) === "up" && <Badge className="t-label gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                 </div>
-                <p className="t-body font-medium">{g.gap}</p>
-                {g.suggested_play && <p className="t-body"><span className="text-[#b9e045] font-semibold">Play: </span>{g.suggested_play}</p>}
+                <p className="t-body font-medium">{editedSuggestion(g, editFor(g.gap)).gap}</p>
+                {editedSuggestion(g, editFor(g.gap)).suggested_play && <p className="t-body"><span className="text-[#b9e045] font-semibold">Play: </span>{editedSuggestion(g, editFor(g.gap)).suggested_play}</p>}
               </div>
             ))}
           </div>
@@ -207,6 +208,7 @@ export function buildCompetitiveContext(
   const totalPosts = companies.reduce((s, c) => s + (c.post_count || 0), 0);
   const rows = feedback || [];
   const verdict = new Map(rows.map((r) => [r.insight_key, r.verdict]));
+  const edits = new Map(rows.map((r) => [r.insight_key, r.edited]));
   const gaps = (ai.gaps_for_client || []).filter((g: any) => verdict.get(insightKey(g.gap)) !== "down");
   const channelSummary = (c: any) =>
     Object.entries(c.by_channel || {}).map(([channel, b]: [string, any]) => ({
@@ -235,8 +237,8 @@ export function buildCompetitiveContext(
       top_hashtags: (c.top_hashtags || []).slice(0, 5).map((h: any) => h.key),
     })),
     executive_summary: ai.executive_summary || null,
-    gaps: gaps.map((g: any) => ({ gap: g.gap, platform: g.platform || "all", suggested_play: g.suggested_play, endorsed: verdict.get(insightKey(g.gap)) === "up" })),
-    endorsed_gaps: rows.filter((r) => r.verdict === "up").map((r) => r.gap_text || r.insight_key),
+    gaps: gaps.map((g: any) => { const e = editedSuggestion(g, edits.get(insightKey(g.gap))); return { gap: e.gap, platform: g.platform || "all", suggested_play: e.suggested_play, endorsed: verdict.get(insightKey(g.gap)) === "up" }; }),
+    endorsed_gaps: rows.filter((r) => r.verdict === "up").map((r) => r.edited?.gap || r.gap_text || r.insight_key),
     suppressed_gaps: rows.filter((r) => r.verdict === "down").map((r) => r.gap_text || r.insight_key),
     winner_patterns: (ai.winner_teardown || []).map((w: any) => ({ competitor: w.competitor, pattern: w.pattern, example_post_urls: w.example_post_urls || [] })),
     posting_time: ai.posting_time_insights || null,

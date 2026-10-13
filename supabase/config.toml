@@ -211,3 +211,6 @@ verify_jwt = false
 
 [functions.calendar-posts]
 verify_jwt = false
+
+[functions.revise-suggestion]
+verify_jwt = false

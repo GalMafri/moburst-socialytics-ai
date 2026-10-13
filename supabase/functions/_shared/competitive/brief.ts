@@ -4,6 +4,7 @@
 // gaps must be addressed, hidden gaps must not be proposed, everything else is
 // context. Returns "" when the client has no competitive analysis yet.
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from './reportEvidence.ts';
+import { type CompetitiveLearning, editedSuggestion, learningLines } from './suggestionEdits.ts';
 
 // deno-lint-ignore no-explicit-any
 type AnyClient = any;
@@ -23,18 +24,27 @@ export async function competitiveBrief(supabase: AnyClient, clientId: string, pl
   if (!report || !competitiveReportQuality(report.report_data).ready) return "";
   const { data: feedback } = await supabase
     .from("competitive_insight_feedback")
-    .select("insight_key, verdict, gap_text")
+    .select("insight_key, verdict, gap_text, edited")
     .eq("client_id", clientId);
+  const { data: learned } = await supabase
+    .from("competitive_learnings")
+    .select("kind, text")
+    .eq("client_id", clientId)
+    .order("created_at", { ascending: false })
+    .limit(20);
   const verdict = new Map<string, string>((feedback || []).map((f: any) => [f.insight_key, f.verdict]));
+  // The team's edits replace the report's wording; verdicts stay keyed on the original.
+  const edits = new Map<string, unknown>((feedback || []).map((f: any) => [f.insight_key, f.edited]));
 
   const rd: any = withCompetitiveEvidenceLimits(report.report_data || {});
   const ai = rd.ai_analysis || {};
   const plat = String(platform || "").toLowerCase();
   const gaps: any[] = Array.isArray(ai.gaps_for_client) ? ai.gaps_for_client : [];
   const relevant = gaps.filter((g) => !plat || !g.platform || g.platform === "all" || String(g.platform).toLowerCase().includes(plat.slice(0, 4)));
-  const endorsed = relevant.filter((g) => verdict.get(insightKey(g.gap)) === "up");
-  const open = relevant.filter((g) => !verdict.has(insightKey(g.gap)));
-  const suppressed = (feedback || []).filter((f: any) => f.verdict === "down").map((f: any) => f.gap_text).filter(Boolean);
+  const asEdited = (g: any) => editedSuggestion(g, edits.get(insightKey(g.gap)) as any);
+  const endorsed = relevant.filter((g) => verdict.get(insightKey(g.gap)) === "up").map(asEdited);
+  const open = relevant.filter((g) => !verdict.get(insightKey(g.gap))).map(asEdited);
+  const suppressed = (feedback || []).filter((f: any) => f.verdict === "down").map((f: any) => f.edited?.gap || f.gap_text).filter(Boolean);
   const winners: any[] = Array.isArray(ai.winner_teardown) ? ai.winner_teardown : [];
   const schedule = ai.recommended_schedule;
 
@@ -54,6 +64,10 @@ export async function competitiveBrief(supabase: AnyClient, clientId: string, pl
     for (const w of winners.slice(0, 3)) lines.push(`- ${w.competitor}: ${w.pattern}`);
   }
   if (schedule?.rationale) lines.push(`Recommended posting rhythm: ${String(schedule.rationale).slice(0, 300)}`);
+  if (learned?.length) {
+    lines.push("The account team's standing preferences for this client (follow them):");
+    for (const l of learningLines(learned as CompetitiveLearning[])) lines.push(`- ${l}`);
+  }
   if (suppressed.length) {
     lines.push("Do NOT propose these ideas; the team rejected them:");
     for (const s of suppressed.slice(0, 8)) lines.push(`- ${s}`);

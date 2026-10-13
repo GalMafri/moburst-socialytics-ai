@@ -30,7 +30,8 @@ import { watchExpired, watchInterval } from "@/lib/runWatch";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { PlatformIcon } from "@/lib/platform-config";
-import { partitionGaps, useInsightFeedback } from "@/hooks/useInsightFeedback";
+import { partitionGaps, useCompetitiveLearnings, useInsightFeedback } from "@/hooks/useInsightFeedback";
+import { toast as sonnerToast } from "sonner";
 import { formatRange } from "@/lib/dateRange";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
@@ -40,6 +41,8 @@ import { RankedBars, compactNumber } from "@/components/ui/bars";
 import { ChangeCards } from "@/components/competitive/ChangeCards";
 import { companiesFromReport, diffCompanies, pickComparableReport, reportPeriod as periodOf } from "@/lib/competitiveChanges";
 import { comparisonScale, normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
+import { editedSuggestion } from "../../supabase/functions/_shared/competitive/suggestionEdits";
+import { SuggestionEditor } from "@/components/competitive/SuggestionEditor";
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images, Users } from "lucide-react";
 
 type TopPost = {
@@ -247,7 +250,8 @@ export default function CompetitiveReportView() {
   const [showHidden, setShowHidden] = useState(false);
   const [now, setNow] = useState(Date.now);
   const printRef = useRef<HTMLDivElement>(null);
-  const { rows: feedback, verdictFor, vote } = useInsightFeedback(clientId);
+  const { rows: feedback, verdictFor, vote, editFor, saveEdit, resetEdit } = useInsightFeedback(clientId);
+  const { learnings, remove: removeLearning } = useCompetitiveLearnings(clientId, isMoburstStaff);
 
   const { data: report, isLoading, isError, error: reportError, refetch } = useQuery({
     queryKey: ["competitive-report", reportId],
@@ -797,7 +801,7 @@ export default function CompetitiveReportView() {
                       <CardTitle className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>
                         {displayCompanyName(c.name)}
                         {c.is_client && <Badge>client</Badge>}
-                        {c.in_confirmed_top3 && <Badge variant="secondary">Competitor</Badge>}
+                        {!c.is_client && <Badge variant="secondary">Competitor</Badge>}
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -914,7 +918,7 @@ export default function CompetitiveReportView() {
                           {c.is_client && <span className="t-label !text-[#b9e045] ml-2 align-middle">client</span>}
                         </p>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-3">
-                          <MetricRow label="Followers" value={m.audience} signed={c.is_client} />
+                          <MetricRow label={effectivePlat === "all" && (m.by_network?.linkedin?.followers?.current ?? 0) > 0 ? "Followers excl. LinkedIn" : "Followers"} value={m.audience} signed={c.is_client} />
                           <MetricRow label="Engagement" value={m.engagement} signed={c.is_client} />
                           {m.actual_impressions && <MetricRow label="Client impressions" value={m.actual_impressions} signed={c.is_client} />}
                           {m.impressions && <MetricRow label={vendor("Est. impressions (RivalIQ)", "Est. impressions")} value={m.impressions} signed={c.is_client} />}
@@ -1043,23 +1047,26 @@ export default function CompetitiveReportView() {
             <div className="grid gap-4 md:grid-cols-2">
               {gaps.map((g: any, i: number) => {
                 const v = verdictFor(g.gap);
+                // The team's edit, if any, in place of the report's wording; votes stay keyed on the original.
+                const shown = editedSuggestion(g, editFor(g.gap));
                 return (
                   <Card key={i} className={v === "up" ? "glass-accent" : ""}>
                     <CardContent className="pt-5 space-y-3">
                       <div className="flex items-start gap-3">
                         <span className="flex-shrink-0 h-7 w-7 rounded-full bg-primary text-primary-foreground t-badge flex items-center justify-center mt-0.5">{i + 1}</span>
                         <div className="min-w-0 space-y-1.5">
-                          <p className="t-h3 leading-snug">{nameifyDomains(g.gap)}</p>
+                          <p className="t-h3 leading-snug">{nameifyDomains(shown.gap)}</p>
                           <div className="flex gap-1.5 flex-wrap">
                             {g.platform && <Badge variant="outline">{g.platform === "all" ? "All platforms" : platformLabel(g.platform)}</Badge>}
                             {v === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
+                            {isMoburstStaff && shown.edited && <span data-print="hide"><Badge variant="secondary">Edited by the team</Badge></span>}
                           </div>
                         </div>
                       </div>
-                      {g.why_it_matters && <p className="t-body">{nameifyDomains(g.why_it_matters)}</p>}
-                      {g.suggested_play && (
+                      {shown.why_it_matters && <p className="t-body">{nameifyDomains(shown.why_it_matters)}</p>}
+                      {shown.suggested_play && (
                         <div className="glass-accent p-3 t-body">
-                          <span className="font-semibold">Proposed test: </span>{nameifyDomains(g.suggested_play)}
+                          <span className="font-semibold">Proposed test: </span>{nameifyDomains(shown.suggested_play)}
                         </div>
                       )}
                       {isMoburstStaff && (
@@ -1070,6 +1077,17 @@ export default function CompetitiveReportView() {
                           <Button size="sm" variant="ghost" onClick={() => castVote(g, "down")} aria-label="Hide this suggestion">
                             <ThumbsDown className="h-4 w-4 mr-1.5" /> Not for us
                           </Button>
+                          <SuggestionEditor
+                            reportId={report.id}
+                            originalGap={g.gap}
+                            shown={{ gap: shown.gap || "", why_it_matters: shown.why_it_matters || "", suggested_play: shown.suggested_play || "" }}
+                            edited={shown.edited}
+                            onSave={async (edit, fb) => {
+                              const learned = await saveEdit({ gapText: g.gap, platform: g.platform ?? null, reportId: report.id, edit, feedback: fb, before: { gap: shown.gap, why_it_matters: shown.why_it_matters, suggested_play: shown.suggested_play } });
+                              if (learned.length) sonnerToast.success(`Learned for ${clientName}`, { description: learned.map((l) => l.text).join(" ") });
+                            }}
+                            onReset={() => resetEdit(g.gap)}
+                          />
                         </div>
                       )}
                     </CardContent>
@@ -1077,6 +1095,20 @@ export default function CompetitiveReportView() {
                 );
               })}
             </div>
+            {isMoburstStaff && learnings.length > 0 && (
+              <div data-print="hide" className="glass-inner p-4 space-y-2">
+                <p className="t-subhead">What it has learned for {clientName}</p>
+                <p className="t-secondary">From the team's edits. The next competitive run, rewrites, the monthly report and content briefs follow these.</p>
+                <ul className="space-y-1.5">
+                  {learnings.map((l) => (
+                    <li key={l.id} className="flex items-start justify-between gap-3 t-body">
+                      <span><span className="font-semibold">{l.kind === "avoid" ? "Avoid: " : "Prefer: "}</span>{l.text}</span>
+                      <Button size="sm" variant="ghost" className="shrink-0" onClick={() => removeLearning(l.id).catch(() => sonnerToast.error("Could not remove it. Try again."))}>Remove</Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {isMoburstStaff && showHidden && hiddenGaps.length > 0 && (
                 <Card>
                   <CardHeader>
@@ -1086,7 +1118,7 @@ export default function CompetitiveReportView() {
                   <CardContent className="space-y-2">
                     {hiddenGaps.map((g: any, i: number) => (
                       <div key={i} className="flex items-center justify-between gap-3 t-body">
-                        <span className="text-muted-foreground line-through">{g.gap}</span>
+                        <span className="text-muted-foreground line-through">{editedSuggestion(g, editFor(g.gap)).gap}</span>
                         <Button size="sm" variant="ghost" onClick={() => castVote(g, "down")}><RotateCcw className="h-3.5 w-3.5 mr-1" /> Restore</Button>
                       </div>
                     ))}

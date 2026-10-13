@@ -12,6 +12,7 @@
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../competitive/reportEvidence.ts";
 import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
+import { type CompetitiveLearning, editedSuggestion, learningLines, type SuggestionEdit } from "../competitive/suggestionEdits.ts";
 /**
  * How long a run may sit on "running" before it is treated as dead.
  *
@@ -51,8 +52,10 @@ export function insightKey(text: string | null | undefined): string {
 
 export interface InsightFeedbackRow {
   insight_key: string;
-  verdict: string;
+  /** Null when the row only carries an edit. */
+  verdict: string | null;
   gap_text?: string | null;
+  edited?: SuggestionEdit | null;
 }
 
 /**
@@ -63,6 +66,7 @@ export interface InsightFeedbackRow {
 export function competitiveContext(
   reportRow: { created_at: string; report_data: unknown } | null | undefined,
   feedback: InsightFeedbackRow[] = [],
+  learnings: CompetitiveLearning[] = [],
 ): Record<string, unknown> | null {
   if (!reportRow?.report_data || !competitiveReportQuality(reportRow.report_data).ready) return null;
   const rd: any = withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(reportRow.report_data));
@@ -73,6 +77,7 @@ export function competitiveContext(
   const totalPosts = companies.reduce((sum, c) => sum + (c.post_count || 0), 0);
   const verdict = new Map(feedback.map((r) => [r.insight_key, r.verdict]));
   const gaps: any[] = Array.isArray(ai.gaps_for_client) ? ai.gaps_for_client : [];
+  const edits = new Map(feedback.map((r) => [r.insight_key, r.edited]));
   const visible = gaps.filter((g) => verdict.get(insightKey(g.gap)) !== "down");
   const channelSummary = (c: any) =>
     Object.entries(c.by_channel || {}).map(([channel, b]: [string, any]) => ({
@@ -111,14 +116,15 @@ export function competitiveContext(
       top_hashtags: (c.top_hashtags || []).slice(0, 5).map((h: any) => h.key),
     })),
     executive_summary: ai.executive_summary || null,
-    gaps: visible.map((g) => ({
-      gap: g.gap,
-      platform: g.platform || "all",
-      suggested_play: g.suggested_play,
-      endorsed: verdict.get(insightKey(g.gap)) === "up",
-    })),
-    endorsed_gaps: feedback.filter((r) => r.verdict === "up").map((r) => r.gap_text || r.insight_key),
+    // The team's edits replace the report's wording; the verdict stays keyed on the original.
+    gaps: visible.map((g) => {
+      const e = editedSuggestion(g, edits.get(insightKey(g.gap)));
+      return { gap: e.gap, platform: g.platform || "all", suggested_play: e.suggested_play, endorsed: verdict.get(insightKey(g.gap)) === "up" };
+    }),
+    endorsed_gaps: feedback.filter((r) => r.verdict === "up").map((r) => r.edited?.gap || r.gap_text || r.insight_key),
     suppressed_gaps: feedback.filter((r) => r.verdict === "down").map((r) => r.gap_text || r.insight_key),
+    // What the team's edits taught about this client's suggestions.
+    team_preferences: learningLines(learnings),
     winner_patterns: (ai.winner_teardown || []).map((w: any) => ({
       competitor: w.competitor,
       pattern: w.pattern,
@@ -170,8 +176,14 @@ export async function buildSocialPayload(args: {
   if (args.competitiveReportId && !latestCompetitive) throw new Error("The required competitive report is not complete for this client.");
   const { data: feedback } = await supabase
     .from("competitive_insight_feedback")
-    .select("insight_key, verdict, gap_text")
+    .select("insight_key, verdict, gap_text, edited")
     .eq("client_id", client.id);
+  const { data: learnings } = await supabase
+    .from("competitive_learnings")
+    .select("kind, text")
+    .eq("client_id", client.id)
+    .order("created_at", { ascending: false })
+    .limit(20);
 
   const { voice, notes } = splitBrandVoice(client.brand_notes);
   return {
@@ -205,7 +217,7 @@ export async function buildSocialPayload(args: {
     skip_trends: args.skipTrends === true,
     timezone: client.timezone || "UTC",
     competitive_report_id: latestCompetitive?.id || null,
-    competitive_context: competitiveContext(latestCompetitive, (feedback || []) as InsightFeedbackRow[]),
+    competitive_context: competitiveContext(latestCompetitive, (feedback || []) as InsightFeedbackRow[], (learnings || []) as CompetitiveLearning[]),
     ...(args.scheduled ? { scheduled: true } : {}),
     ...(args.staggerSeconds ? { stagger_seconds: args.staggerSeconds } : {}),
   };
@@ -234,6 +246,12 @@ export async function buildCompetitivePayload(args: {
     .select("gap_text, insight_key")
     .eq("client_id", client.id)
     .eq("verdict", "down");
+  const { data: learned } = await supabase
+    .from("competitive_learnings")
+    .select("kind, text")
+    .eq("client_id", client.id)
+    .order("created_at", { ascending: false })
+    .limit(20);
 
   const { data: ownProfiles, error: ownError } = await supabase.from("sprout_profiles")
     .select("sprout_profile_id,network_type,native_link,native_name,profile_name").eq("client_id", client.id).neq("is_active", false);
@@ -252,6 +270,8 @@ export async function buildCompetitivePayload(args: {
     date_range_start: range.start,
     date_range_end: range.end,
     suppressed_insights: (down || []).map((f: any) => f.gap_text || f.insight_key).filter(Boolean),
+    // Standing preferences learned from the team's edits; the analysis follows them when it writes suggestions.
+    team_preferences: learningLines((learned || []) as CompetitiveLearning[]),
     competitors: (comps || []).map((c: any) => ({
       id: c.id,
       rank: c.selected_rank,

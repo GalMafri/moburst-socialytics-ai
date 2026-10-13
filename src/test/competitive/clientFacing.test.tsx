@@ -14,7 +14,7 @@ import { WATCH_LIMIT_MINUTES } from '@/lib/runWatch';
 // stops polling a run that outlived the sweep.
 const fixture = vi.hoisted(() => ({ staff: false, status: 'complete', createdAt: '', data: null as any, fail: false, reads: 0 }));
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isMoburstStaff: fixture.staff, canRunAnalysis: fixture.staff, canDelete: false }) }));
-vi.mock('@/hooks/useInsightFeedback', () => ({ useInsightFeedback: () => ({ rows: [], verdictFor: () => null, vote: vi.fn() }), partitionGaps: (gaps: any[]) => ({ visible: gaps, hidden: [] }) }));
+vi.mock('@/hooks/useInsightFeedback', () => ({ useInsightFeedback: () => ({ rows: [], verdictFor: () => null, vote: vi.fn(), editFor: () => null, saveEdit: vi.fn(), resetEdit: vi.fn() }), useCompetitiveLearnings: () => ({ learnings: [], remove: vi.fn() }), partitionGaps: (gaps: any[]) => ({ visible: gaps, hidden: [] }) }));
 vi.mock('@/components/competitive/PostVisual', () => ({ usePostPreviews: () => ({ previews: {} }), PostVisual: () => null, normalizePlatform: (x: string) => x, platformLabel: (x: string) => x }));
 vi.mock('@/components/layout/AppLayout', () => ({ AppLayout: ({ children }: any) => <main>{children}</main> }));
 vi.mock('@/components/reports/ReportActions', () => ({ ReportActions: () => null }));

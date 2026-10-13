@@ -699,35 +699,47 @@ export type Database = {
         Row: {
           client_id: string
           created_at: string
+          edit_feedback: string | null
+          edited: Json | null
+          edited_at: string | null
+          edited_by: string | null
           gap_text: string
           id: string
           insight_key: string
           platform: string | null
           report_id: string | null
           user_id: string | null
-          verdict: string
+          verdict: string | null
         }
         Insert: {
           client_id: string
           created_at?: string
+          edit_feedback?: string | null
+          edited?: Json | null
+          edited_at?: string | null
+          edited_by?: string | null
           gap_text: string
           id?: string
           insight_key: string
           platform?: string | null
           report_id?: string | null
           user_id?: string | null
-          verdict: string
+          verdict?: string | null
         }
         Update: {
           client_id?: string
           created_at?: string
+          edit_feedback?: string | null
+          edited?: Json | null
+          edited_at?: string | null
+          edited_by?: string | null
           gap_text?: string
           id?: string
           insight_key?: string
           platform?: string | null
           report_id?: string | null
           user_id?: string | null
-          verdict?: string
+          verdict?: string | null
         }
         Relationships: [
           {

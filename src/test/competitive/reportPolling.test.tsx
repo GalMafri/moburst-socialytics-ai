@@ -8,7 +8,7 @@ import { CompetitiveSnapshot } from '@/components/competitive/CompetitiveSnapsho
 
 const fixture = vi.hoisted(() => ({ status: 'running', reads: 0, createdAt: '', data: null as any }));
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ isMoburstStaff: true, canRunAnalysis: true }) }));
-vi.mock('@/hooks/useInsightFeedback', () => ({ useInsightFeedback: () => ({ rows: [], verdictFor: () => null, vote: vi.fn() }), partitionGaps: () => ({ visible: [], hidden: [] }) }));
+vi.mock('@/hooks/useInsightFeedback', () => ({ useInsightFeedback: () => ({ rows: [], verdictFor: () => null, vote: vi.fn(), editFor: () => null, saveEdit: vi.fn(), resetEdit: vi.fn() }), useCompetitiveLearnings: () => ({ learnings: [], remove: vi.fn() }), partitionGaps: () => ({ visible: [], hidden: [] }) }));
 vi.mock('@/components/competitive/PostVisual', () => ({ usePostPreviews: () => ({ previews: {} }), PostVisual: () => null, normalizePlatform: (x: string) => x, platformLabel: (x: string) => x }));
 vi.mock('@/components/layout/AppLayout', () => ({ AppLayout: ({ children }: any) => <main>{children}</main> }));
 vi.mock('@/components/reports/ReportActions', () => ({ ReportActions: () => null }));
