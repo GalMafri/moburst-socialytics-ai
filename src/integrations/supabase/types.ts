@@ -876,6 +876,7 @@ export type Database = {
           rivaliq_landscape_id: string | null
           source: string
           status: string
+          tracking_check: Json | null
           updated_at: string
         }
         Insert: {
@@ -890,6 +891,7 @@ export type Database = {
           rivaliq_landscape_id?: string | null
           source?: string
           status?: string
+          tracking_check?: Json | null
           updated_at?: string
         }
         Update: {
@@ -904,6 +906,7 @@ export type Database = {
           rivaliq_landscape_id?: string | null
           source?: string
           status?: string
+          tracking_check?: Json | null
           updated_at?: string
         }
         Relationships: [
