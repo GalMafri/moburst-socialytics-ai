@@ -51,6 +51,8 @@ export default function CompetitiveFeed() {
   const [company, setCompany] = useState("all");
   const [dismissing, setDismissing] = useState<string | null>(null);
   const [plat, setPlat] = useState("all");
+  // A refresh spends a RivalIQ request and an AI pass, so it is asked first.
+  const [confirmRefresh, setConfirmRefresh] = useState(false);
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -206,7 +208,7 @@ export default function CompetitiveFeed() {
       meta={<span className="t-label">{snapshot ? <>Pulled {new Date(snapshot.fetched_at).toLocaleString()}{payload.window ? ` · ${payload.window.start} to ${payload.window.end}` : ""}{payload.truncated ? ` · capped at ${posts.length} posts` : ""}</> : "No pull yet for this client."}</span>}
       actions={
         canRunAnalysis ? (
-          <Button onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+          <Button onClick={() => setConfirmRefresh(true)} disabled={refresh.isPending}>
             {refresh.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />} Refresh now
           </Button>
         ) : undefined
@@ -223,7 +225,7 @@ export default function CompetitiveFeed() {
             icon={Rss}
             title="No competitor feed yet"
             description="Pull the last week of posts from this client’s tracked social profiles. The weekly scheduler keeps it fresh afterwards."
-            action={canRunAnalysis ? <Button onClick={() => refresh.mutate()} disabled={refresh.isPending}>Pull the last 7 days</Button> : undefined}
+            action={canRunAnalysis ? <Button onClick={() => setConfirmRefresh(true)} disabled={refresh.isPending}>Pull the last 7 days</Button> : undefined}
           />
         ) : (
           <>
@@ -346,6 +348,26 @@ export default function CompetitiveFeed() {
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmRefresh}
+        onOpenChange={setConfirmRefresh}
+        title={snapshot ? "Refresh the competitor feed?" : "Pull the last 7 days?"}
+        description={
+          <>
+            <p>
+              This pulls the last seven days of posts for every tracked company from RivalIQ, which uses one request from the
+              account's hourly allowance, and collects the reviewed LinkedIn pages and {clientName}'s own posts.
+            </p>
+            <p>The AI then looks for topics two or more companies posted about. It can take a minute or more.</p>
+          </>
+        }
+        confirmLabel={snapshot ? "Refresh now" : "Pull posts"}
+        destructive={false}
+        onConfirm={() => {
+          setConfirmRefresh(false);
+          refresh.mutate();
+        }}
+      />
       <ConfirmDialog
         open={!!dismissing}
         onOpenChange={(o) => !o && setDismissing(null)}

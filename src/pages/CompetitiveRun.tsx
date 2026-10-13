@@ -4,6 +4,8 @@ import { useActiveReportRun } from "@/hooks/useActiveReportRun";
 import { ReportRunStatus } from "@/components/reports/ReportRunStatus";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { RUN_ESTIMATE, canRetry } from "@/lib/reportRun";
+import { watchExpired, WATCH_LIMIT_MINUTES } from "@/lib/runWatch";
+import { competitiveStatusBadge } from "@/lib/competitiveStatus";
 // Step 2: the competitive-analysis "go" button, with the same visible-status
 // contract as the social report (RunAnalysis.tsx): insert a row in status
 // 'running', fire the n8n webhook, watch the row via realtime + poll, land on
@@ -66,6 +68,10 @@ export default function CompetitiveRun() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const runStartedAt = useRef(0);
+  /** When the watched run started (its row's created_at), for the polling limit. */
+  const watchedSince = useRef<string | null>(null);
+  /** The page stopped polling a run that outlasted the watch limit. */
+  const [watchStopped, setWatchStopped] = useState(false);
 
   const { data: client, isLoading: clientLoading, isError: clientFailed, error: clientError, refetch: refetchClient } = useQuery({
     queryKey: ["client", id],
@@ -152,7 +158,15 @@ export default function CompetitiveRun() {
   const pollForCompletion = useCallback(
     (rId: string) => {
       if (pollRef.current) clearInterval(pollRef.current);
+      setWatchStopped(false);
       pollRef.current = setInterval(async () => {
+        // Past the watch limit the abandoned-run sweep should have closed the
+        // run; polling on would only spin. Stop and say so.
+        if (watchExpired(watchedSince.current)) {
+          stopAllTimers();
+          setWatchStopped(true);
+          return;
+        }
         try {
           const { data } = await supabase
             .from("competitive_reports")
@@ -196,6 +210,7 @@ export default function CompetitiveRun() {
     if (!active || running || reportId) return;
     setReportId(active.id);
     setStartedAt(active.created_at);
+    watchedSince.current = active.created_at;
     if (active.date_range_start && active.date_range_end) { setPreset("custom"); setCustom({start: active.date_range_start, end: active.date_range_end}); }
     setError(null);
     setCurrentStep(0);
@@ -233,6 +248,7 @@ export default function CompetitiveRun() {
       const reportRowId: string = started.report_id;
       setReportId(reportRowId);
       setStartedAt(started.created_at || new Date().toISOString());
+      watchedSince.current = started.created_at || new Date().toISOString();
 
       pollForCompletion(reportRowId);
     } catch (err: any) {
@@ -416,7 +432,17 @@ export default function CompetitiveRun() {
             )}
 
             {activeRun.isError && <p className="t-secondary">Could not check for an existing run. Reconnect or refresh before starting an analysis.</p>}
-            {running && <ReportRunStatus reportId={reportId} startedAt={startedAt} kind="competitive" onStarted={() => { setStartedAt(new Date().toISOString()); activeRun.refetch(); refetchRuns(); }} />}
+            {running && <ReportRunStatus reportId={reportId} startedAt={startedAt} kind="competitive" onStarted={() => { setStartedAt(new Date().toISOString()); watchedSince.current = new Date().toISOString(); if (reportId) pollForCompletion(reportId); activeRun.refetch(); refetchRuns(); }} />}
+            {running && watchStopped && (
+              <div className="space-y-3" role="status">
+                <p className="t-secondary mx-auto">
+                  This run has gone past {WATCH_LIMIT_MINUTES} minutes, so this page stopped checking on its own. It may still finish; report history shows its latest status.
+                </p>
+                <Button variant="outline" onClick={() => navigate(`/clients/${id}/competitive/reports`)}>
+                  <History className="h-4 w-4 mr-2" /> Open report history
+                </Button>
+              </div>
+            )}
 
             {currentStep >= STEPS.length && !error && (
               // The page used to end here. The run button renders only while
@@ -450,7 +476,7 @@ export default function CompetitiveRun() {
                 <p className="t-secondary mx-auto">{error}</p>
                 {reportId ? (
                   canRetry({ status: "failed", created_at: startedAt }, Date.now(), "competitive") ?
-                    <RetryReportButton reportId={reportId} kind="competitive" variant="outline" onStarted={() => { setError(null); setRunning(true); setCurrentStep(0); setStartedAt(new Date().toISOString()); pollForCompletion(reportId); }} /> :
+                    <RetryReportButton reportId={reportId} kind="competitive" variant="outline" onStarted={() => { setError(null); setRunning(true); setCurrentStep(0); setStartedAt(new Date().toISOString()); watchedSince.current = new Date().toISOString(); pollForCompletion(reportId); }} /> :
                     <p className="t-secondary">Retry becomes available 90 minutes after this run started. You can return later from report history.</p>
                 ) : (
                 <Button
@@ -483,10 +509,8 @@ export default function CompetitiveRun() {
                     onClick={() => r.status !== "running" && navigate(`/clients/${id}/competitive/reports/${r.id}`)}
                   >
                     <div className="flex items-center gap-3">
-                      <Badge
-                        variant={r.status === "complete" ? "default" : r.status === "running" ? "secondary" : "destructive"}
-                      >
-                        {r.status}
+                      <Badge variant={competitiveStatusBadge(r.status).variant}>
+                        {competitiveStatusBadge(r.status).label}
                       </Badge>
                       <span className="t-body">{new Date(r.created_at).toLocaleString()}</span>
                       {r.date_range_start && (

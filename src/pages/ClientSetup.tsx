@@ -1166,10 +1166,11 @@ export default function ClientSetup() {
 
 function ReportScheduleManager({ clientId }: { clientId: string }) {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const KINDS = [
     { kind: "social", label: "Monthly social report", description: "Sprout performance, trends and the content calendar for the previous calendar month." },
-    { kind: "competitive", label: "Monthly competitive analysis", description: "RivalIQ landscape pull for the previous calendar month. Needs a confirmed competitor set and is skipped otherwise." },
+    { kind: "competitive", label: "Monthly competitive analysis", description: "RivalIQ landscape pull for the previous calendar month. Needs a confirmed competitor set connected to RivalIQ tracking; until then it waits, and the social report goes ahead without it." },
   ] as const;
 
   const { data: schedules, isLoading } = useQuery({
@@ -1234,7 +1235,11 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
         {KINDS.map(({ kind, label, description }) => {
           const row: any = (schedules || []).find((s: any) => (s.report_kind || "social") === kind);
           const active = !!row?.is_active;
-          const last: any = row?.last_result || null;
+          // last_result is the scheduler's text note. A competitive schedule
+          // that cannot run because RivalIQ does not track the client says
+          // "needs tracking: ..." (run-scheduled-jobs/dispatch.ts NEEDS_TRACKING).
+          const last: string | null = typeof row?.last_result === "string" && row.last_result.trim() ? row.last_result : null;
+          const needsTracking = kind === "competitive" && !!last && /^needs tracking:/i.test(last);
           return (
             <div key={kind} className="flex items-start justify-between gap-4 glass-inner p-4">
               <div className="space-y-1">
@@ -1242,8 +1247,16 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
                 <p className="t-secondary">{description}</p>
                 <p className="t-secondary">
                   {active && row?.next_run_at ? `Next run ${new Date(row.next_run_at).toLocaleDateString()}` : "Paused"}
-                  {row?.last_run_at ? ` · Last run ${new Date(row.last_run_at).toLocaleDateString()}${last?.status ? ` (${last.status})` : ""}` : ""}
+                  {row?.last_run_at ? ` · Last run ${new Date(row.last_run_at).toLocaleDateString()}` : ""}
                 </p>
+                {needsTracking ? (
+                  <div className="space-y-2">
+                    <p className="t-secondary">Needs tracking: {last!.replace(/^needs tracking:\s*/i, "")}</p>
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive`)}>Open competitors</Button>
+                  </div>
+                ) : last ? (
+                  <p className="t-label">Latest: {last}</p>
+                ) : null}
               </div>
               <Switch checked={active} disabled={toggle.isPending} onCheckedChange={(v) => toggle.mutate({ kind, active: v })} />
             </div>

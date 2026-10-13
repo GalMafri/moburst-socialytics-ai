@@ -26,6 +26,9 @@ it('searches all missing profiles once, preserves tracked profiles, and shows fa
 it('starts profile detection automatically after identifying competitors and shows in-progress rows',async()=>{
  f.auto=false;let finish!:()=>void;const gate=new Promise<void>(resolve=>finish=resolve);f.detect=async()=>{await gate;return{data:{results:[{status:'not_found',detected:[]}]},error:null}};
  mount();fireEvent.click(await screen.findByRole('button',{name:'Re-identify (new draft)'}));
+ // Proposing competitors spends AI and web lookups, so nothing is called until it is confirmed.
+ expect(screen.getByRole('alertdialog')).toHaveTextContent(/uses AI and web lookups/);expect(f.calls.filter(c=>c.name==='identify-competitors')).toHaveLength(0);
+ fireEvent.click(screen.getByRole('button',{name:'Propose competitors'}));
  await waitFor(()=>expect(f.calls.filter(c=>c.name==='detect-competitor-handles')).toHaveLength(2));
  expect(screen.getAllByText('Searching company pages…')).toHaveLength(2);expect(screen.queryByText('No handles found')).toBeNull();finish();await waitFor(()=>expect(screen.getByRole('button',{name:'Re-identify (new draft)'})).toBeEnabled());
 });
