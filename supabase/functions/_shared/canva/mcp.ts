@@ -6,10 +6,12 @@
 // token is accepted here as it is by the REST API.
 //
 // Canva's MCP answers some calls, initialize most often, with a transient
-// 500 that succeeds when sent again; calls are resent with backoff.
+// 500 that succeeds when sent again; calls are resent with backoff. It also
+// fails far more often when one account holds several editing sessions at
+// once, so callers run their edits one at a time (see canva-finish).
 
 const URL_MCP = "https://mcp.canva.com/mcp";
-const RETRIES = 4;
+const RETRIES = 5;
 
 export class CanvaMcp {
   private session: string | null = null;

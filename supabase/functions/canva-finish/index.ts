@@ -185,6 +185,19 @@ function back(status: "linked" | "failed", reason?: string): Response {
 
 // ── The worker ──────────────────────────────────────────────────────────────
 
+/**
+ * Canva's editing service fails when one account holds several editing
+ * sessions at once (the first live run, one design at a time, had no errors;
+ * three at once failed two). Steps that edit run through this queue, one at a
+ * time; uploads, Magic Layers and exports still run side by side.
+ */
+let editQueue: Promise<unknown> = Promise.resolve();
+function oneEditAtATime<T>(fn: () => Promise<T>): Promise<T> {
+  const run = editQueue.then(fn, fn);
+  editQueue = run.catch(() => undefined);
+  return run;
+}
+
 type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any; design_request_id: string | null };
 /** next: run the following step now; wait: check again next tick; held: work continues in the background under its lease. */
 type StepResult = "next" | "wait" | "done" | "held";
@@ -298,12 +311,14 @@ async function runStep(admin: any, token: string, job: Job): Promise<StepResult>
     case "export_before":
     case "export_nologo":
     case "export_final": {
-      const mcp = new CanvaMcp(token);
       if (!s.page) {
-        await mcp.init();
-        const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
-        s.page = { id: tx.pages[0].page_id, width: tx.pages[0].dimension.width, height: tx.pages[0].dimension.height };
-        await mcp.call("cancel-editing-transaction", { transaction_id: tx.transaction.transaction_id, user_intent: INTENT }).catch(() => {});
+        s.page = await oneEditAtATime(async () => {
+          const mcp = new CanvaMcp(token);
+          await mcp.init();
+          const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
+          await mcp.call("cancel-editing-transaction", { transaction_id: tx.transaction.transaction_id, user_intent: INTENT }).catch(() => {});
+          return { id: tx.pages[0].page_id, width: tx.pages[0].dimension.width, height: tx.pages[0].dimension.height };
+        });
       }
       s.export_job = await startExport(token, s.design_id, s.page.width, s.page.height);
       job.step = `${job.step}_wait`; return "next";
@@ -323,7 +338,16 @@ async function runStep(admin: any, token: string, job: Job): Promise<StepResult>
       job.step = which === "before" ? "edit" : which === "nologo" ? "place_logo" : "finished";
       return which === "final" ? "done" : "next";
     }
-    case "edit": {
+    case "edit": return await oneEditAtATime(() => editLayers(token, job));
+    case "place_logo": return await oneEditAtATime(() => placeLogo(admin, token, job));
+  }
+  throw new Error(`FINAL: Unknown step '${job.step}'`);
+}
+
+/** Delete the drawn logo's layers and set the exact copy, in one Canva editing session. */
+async function editLayers(token: string, job: Job): Promise<StepResult> {
+  const s = job.state;
+  {
       const mcp = new CanvaMcp(token);
       await mcp.init();
       const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
@@ -352,8 +376,13 @@ async function runStep(admin: any, token: string, job: Job): Promise<StepResult>
       }
       s.edits = { deleted: logo.map((l) => l.id), copy: copy.ops.map((o) => o.text) };
       job.step = "export_nologo"; return "next";
-    }
-    case "place_logo": {
+  }
+}
+
+/** Place the client's logo file where the drawn logo was, in one Canva editing session. */
+async function placeLogo(admin: any, token: string, job: Job): Promise<StepResult> {
+  const s = job.state;
+  {
       const before = await Image.decode(await download(admin, s.before_path));
       const after = await Image.decode(await download(admin, s.nologo_path));
       const ink: Box | null = inkBox(before.bitmap, after.bitmap, before.width, before.height, s.logo_boxes);
@@ -376,9 +405,7 @@ async function runStep(admin: any, token: string, job: Job): Promise<StepResult>
       });
       await mcp.call("commit-editing-transaction", { transaction_id: tx.transaction.transaction_id, user_intent: INTENT });
       job.step = "export_final"; return "next";
-    }
   }
-  throw new Error(`FINAL: Unknown step '${job.step}'`);
 }
 
 /**
