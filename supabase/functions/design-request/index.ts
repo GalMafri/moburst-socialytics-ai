@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     if (body?.action === "auto") {
       const caller = await requireStaff(req);
       if (!caller.viaSecret) return json({ error: "Not allowed." }, 403);
-      return json(await prepareUpcoming(admin));
+      return json(await prepareUpcoming(admin, { dryRun: body.dry_run === true, clientId: body.client_id ? String(body.client_id) : null }));
     }
 
     // Turn a design down (with a reason the client's next designs learn from)
@@ -259,8 +259,11 @@ const VIDEO_POST = /reel|video|short|tiktok/i;
  * request uses the post's current copy, so edits made before it starts are in
  * the design.
  */
-async function prepareUpcoming(admin: any): Promise<{ started: string[]; waiting: number }> {
-  const { data: clients } = await admin.from("design_brand_settings").select("*").eq("auto_designs", true).not("confirmed_at", "is", null);
+async function prepareUpcoming(admin: any, opts: { dryRun?: boolean; clientId?: string | null } = {}): Promise<{ started: string[]; waiting: number; due?: Array<{ client_id: string; post_date: string; platform: string; format: string | null }> }> {
+  // A dry run (staff checking what would start) also covers a client whose switch is off.
+  let query = admin.from("design_brand_settings").select("*").not("confirmed_at", "is", null);
+  query = opts.dryRun && opts.clientId ? query.eq("client_id", opts.clientId) : query.eq("auto_designs", true);
+  const { data: clients } = await query;
   if (!clients?.length) return { started: [], waiting: 0 };
   const today = new Date().toISOString().slice(0, 10);
   const until = new Date(Date.now() + AUTO_DAYS_AHEAD * 86400000).toISOString().slice(0, 10);
@@ -280,6 +283,9 @@ async function prepareUpcoming(admin: any): Promise<{ started: string[]; waiting
   }
   due.sort((a, b) => String(a.post.post_date).localeCompare(String(b.post.post_date)));
 
+  if (opts.dryRun) {
+    return { started: [], waiting: due.length, due: due.map(({ post }) => ({ client_id: post.client_id, post_date: post.post_date, platform: post.platform, format: post.format })) };
+  }
   const { count: running } = await admin.from("design_requests").select("id", { count: "exact", head: true }).eq("status", "preparing").is("requested_by", null);
   const room = Math.max(0, AUTO_AT_ONCE - (running ?? 0));
 
