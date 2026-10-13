@@ -15,7 +15,10 @@
 //                model drew it, so the design keeps the room it made for it,
 //                then brought down to the delivered size.
 //   5. verify:   the words on the finished post are read back and must be the
-//                headline's words exactly; otherwise the post is designed again.
+//                headline's words exactly, and nothing may touch or cross the
+//                logo (seen at full size around its known place); otherwise
+//                the post is designed again. A carousel whose cover is designed
+//                again has its other slides designed again from the new cover.
 //
 // Free of Deno and network imports so it can be tested.
 
@@ -38,6 +41,26 @@ export function parseRead(text: string): string[] | null {
   try {
     const lines = JSON.parse(text.slice(a, b + 1))?.lines;
     return Array.isArray(lines) ? lines.map(String) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The instruction for the logo part of step 5: the image is the area around the logo, at full size. */
+export function logoCheckPrompt(brand: string): string {
+  return `This is the area around the ${brand} logo on a social post, at full size; the logo is in the middle. ` +
+    "Does any line, rule, border, shape, text, picture or object touch the logo, cross it, run through it or pass behind it? " +
+    "Plain background, soft light or empty space around it is fine. " +
+    'Reply with JSON only: {"clear": true or false, "touching": "what touches or crosses the logo, or empty"}';
+}
+
+/** The logo check's answer, or null when it is not the JSON asked for. */
+export function parseLogoCheck(text: string): { clear: boolean; touching: string } | null {
+  const a = text.indexOf("{"), b = text.lastIndexOf("}");
+  if (a < 0 || b <= a) return null;
+  try {
+    const v = JSON.parse(text.slice(a, b + 1));
+    return typeof v?.clear === "boolean" ? { clear: v.clear, touching: String(v.touching ?? "") } : null;
   } catch {
     return null;
   }

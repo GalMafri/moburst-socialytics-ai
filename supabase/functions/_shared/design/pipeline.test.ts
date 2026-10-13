@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { copyMatches, parseRead, readable } from "./pipeline";
+import { copyMatches, logoCheckPrompt, parseLogoCheck, parseRead, readable } from "./pipeline";
 import { findLogo, logoFound } from "./logoMatch";
 
 describe("copyMatches", () => {
@@ -63,3 +63,13 @@ describe("findLogo", () => {
     expect(logoFound(huge, usual.width)).toBe(false);
   });
 });
+
+describe("logo check", () => {
+  it("asks about anything touching or crossing the logo, and reads a yes or no", () => {
+    expect(logoCheckPrompt("Bader Law")).toMatch(/line, rule, border.*touch the logo, cross it/);
+    expect(parseLogoCheck('{"clear": false, "touching": "a white frame line runs through it"}')).toEqual({ clear: false, touching: "a white frame line runs through it" });
+    expect(parseLogoCheck('Sure: {"clear": true, "touching": ""}')).toEqual({ clear: true, touching: "" });
+    expect(parseLogoCheck("it looks fine")).toBeNull();
+  });
+});
+

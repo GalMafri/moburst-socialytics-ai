@@ -20,7 +20,7 @@ import { anthropicMessages } from "../_shared/anthropic.ts";
 import { settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
-import { copyMatches, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
+import { copyMatches, logoCheckPrompt, parseLogoCheck, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
 import { LOGO_SCALES, findLogo, logoFound } from "../_shared/design/logoMatch.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
@@ -296,14 +296,65 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       const lines = parseRead(result.text);
       if (!lines) throw new Error("The words on the design could not be read.");
       s.read = lines;
-      if (copyMatches(lines, job.input.copy)) return "done";
-      // Wrong words are never fixed by hand: the design is made again.
-      console.warn(`[design-worker] job ${job.id}: read ${JSON.stringify(lines)}, wanted ${JSON.stringify(job.input.copy)}`);
-      job.step = "generate";
-      return "next";
+      if (!copyMatches(lines, job.input.copy)) {
+        // Wrong words are never fixed by hand: the design is made again.
+        console.warn(`[design-worker] job ${job.id}: read ${JSON.stringify(lines)}, wanted ${JSON.stringify(job.input.copy)}`);
+        await designAgain(admin, job);
+        return "next";
+      }
+      // Nothing may touch or cross the logo, seen at full size around its known place.
+      if (s.logo_rect && s.logo_frame) {
+        const k = final.width / s.logo_frame[0];
+        const r = s.logo_rect;
+        const mx = Math.round(r.height * k * 0.6), my = Math.round(r.height * k * 0.6);
+        const x0 = Math.max(0, Math.round(r.x * k) - mx), y0 = Math.max(0, Math.round(r.y * k) - my);
+        const x1 = Math.min(final.width, Math.round((r.x + r.width) * k) + mx), y1 = Math.min(final.height, Math.round((r.y + r.height) * k) + my);
+        const area = final.clone().crop(x0, y0, x1 - x0, y1 - y0);
+        const look = await anthropicMessages({
+          apiKey,
+          body: {
+            model: READ_MODEL,
+            max_tokens: 300,
+            messages: [{ role: "user", content: [
+              { type: "image", source: { type: "base64", media_type: "image/png", data: base64Encode((await area.encode()) as unknown as ArrayBuffer) } },
+              { type: "text", text: logoCheckPrompt(g.brand_name) },
+            ] }],
+          },
+        });
+        const seen = parseLogoCheck(look.text);
+        if (!seen) throw new Error("The area around the logo could not be read.");
+        s.logo_check = seen;
+        if (!seen.clear) {
+          console.warn(`[design-worker] job ${job.id}: the logo is touched by ${seen.touching}; designing again.`);
+          await designAgain(admin, job);
+          return "next";
+        }
+      }
+      return "done";
     }
   }
   throw new Error(`FINAL: Unknown step '${job.step}'`);
+}
+
+/**
+ * Send a design back to be made again. A carousel cover made again takes its
+ * other slides with it, so every slide follows the cover the client sees.
+ */
+async function designAgain(admin: any, job: Job): Promise<void> {
+  const s = job.state;
+  for (const k of ["design_path", "logo_rect", "logo_frame", "logo_score", "logo_check", "nologo_path", "unlogos", "final_path", "read"]) delete s[k];
+  job.step = "generate";
+  if ((job.slide_count ?? 1) > 1 && (job.slide_index ?? 0) === 0 && job.design_request_id) {
+    // The cover's old design is gone from its record before any slide can look for it.
+    await admin.from("canva_finish_jobs").update({ step: job.step, state: s, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
+    const { data: slides } = await admin.from("canva_finish_jobs").select("id, state")
+      .eq("design_request_id", job.design_request_id).eq("option_index", job.option_index).gt("slide_index", 0)
+      .in("status", ["queued", "running", "done"]);
+    for (const slide of slides ?? []) {
+      const keep = slide.state?.replaces ? { replaces: slide.state.replaces } : {};
+      await admin.from("canva_finish_jobs").update({ step: "generate", status: "running", state: keep, output_path: null, attempts: 0, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", slide.id);
+    }
+  }
 }
 
 function pageOf(job: Job): { width: number; height: number } {
