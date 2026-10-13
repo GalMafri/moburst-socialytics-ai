@@ -6,12 +6,20 @@
 // token is accepted here as it is by the REST API.
 //
 // Canva's MCP answers some calls, initialize most often, with a transient
-// 500 that succeeds when sent again; calls are resent with backoff. It also
-// fails far more often when one account holds several editing sessions at
-// once, so callers run their edits one at a time (see canva-finish).
+// 500 that succeeds when sent again; calls are resent with backoff. Edits may
+// run side by side: calls are paced under Canva's published per-tool limits
+// (pace.ts), and a 429 is resent with bounded backoff, as Canva's usage
+// policy asks. When Canva stays busy, CanvaBusy tells the caller to wait for
+// a later pass rather than fail.
+
+import { CANVA_PACE, CanvaBusy, Pace, backoffMs } from "./pace.ts";
 
 const URL_MCP = "https://mcp.canva.com/mcp";
 const RETRIES = 5;
+/** Longest a call waits for its turn under the pace before handing the step back to a later pass. */
+const MAX_PACE_WAIT_MS = 12_000;
+/** One pace for every Canva session this worker opens, so passes share it. */
+const pace = new Pace(CANVA_PACE);
 
 export class CanvaMcp {
   private session: string | null = null;
@@ -27,6 +35,13 @@ export class CanvaMcp {
       };
       if (this.session) headers["Mcp-Session-Id"] = this.session;
       const resp = await fetch(URL_MCP, { method: "POST", headers, body: JSON.stringify(body) });
+      if (resp.status === 429) {
+        const wait = backoffMs(resp.headers.get("Retry-After"), attempt);
+        await resp.body?.cancel();
+        if (attempt >= RETRIES || wait > MAX_PACE_WAIT_MS) throw new CanvaBusy(wait, String((body.params as any)?.name ?? body.method));
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
       if (resp.status >= 500 && attempt < RETRIES) {
         await resp.body?.cancel();
         await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
@@ -69,6 +84,14 @@ export class CanvaMcp {
 
   /** Call a tool and return its parsed text result; a tool error throws. */
   async call(name: string, args: Record<string, unknown>): Promise<any> {
+    // Wait for this tool's turn under Canva's per-minute limit; past a short
+    // wait, the step goes back to a later pass.
+    for (;;) {
+      const wait = pace.tryTake(name);
+      if (!wait) break;
+      if (wait > MAX_PACE_WAIT_MS) throw new CanvaBusy(wait, name);
+      await new Promise((r) => setTimeout(r, wait));
+    }
     const d = await this.post({ jsonrpc: "2.0", id: this.nextId++, method: "tools/call", params: { name, arguments: args } });
     if (d?.error) throw new Error(`Canva ${name}: ${JSON.stringify(d.error).slice(0, 300)}`);
     const res = d?.result;

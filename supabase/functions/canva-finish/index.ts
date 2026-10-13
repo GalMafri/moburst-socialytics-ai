@@ -27,6 +27,7 @@ import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { PROVIDER, accessTokenFor, authorizeUrl, clientCredentials, exchangeCode, expiryFrom, makePkce, randomState } from "../_shared/canva/oauth.ts";
 import { getExport, getImageToDesign, startExport, startImageToDesign, uploadAsset } from "../_shared/canva/rest.ts";
 import { CanvaMcp } from "../_shared/canva/mcp.ts";
+import { CanvaBusy } from "../_shared/canva/pace.ts";
 import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
 import { type Box, type Layer, type Placement, CLEAN_PROMPT, cleanMask, cleanRegions, copyOperations, elementBox, inkBox, logoRect, pasteRegions, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
@@ -196,16 +197,14 @@ function back(status: "linked" | "failed", reason?: string): Response {
 // ── The worker ──────────────────────────────────────────────────────────────
 
 /**
- * Canva's editing service fails when one account holds several editing
- * sessions at once (the first live run, one design at a time, had no errors;
- * three at once failed two). Steps that edit run through this queue, one at a
- * time; uploads, Magic Layers and exports still run side by side.
+ * An editing step, if the pass still has time for it. Edits run side by side:
+ * Canva documents per-minute limits per tool and no limit on open editing
+ * sessions, so the Canva client paces its calls under those limits (pace.ts)
+ * instead of the worker running one edit at a time, which it did from 13 Oct
+ * on a belief that came from a night when sessions were also never closed.
  */
-let editQueue: Promise<unknown> = Promise.resolve();
-function oneEditAtATime<T>(fn: () => Promise<T>): Promise<T> {
-  const run = editQueue.then(fn, fn);
-  editQueue = run.catch(() => undefined);
-  return run;
+function editStep(deadline: number, fn: () => Promise<StepResult>): Promise<StepResult> {
+  return Date.now() < deadline ? fn() : Promise.resolve<StepResult>("wait");
 }
 
 /**
@@ -352,6 +351,11 @@ async function advance(admin: any, token: string, job: Job, started: number): Pr
     if (result !== "held") await admin.from("canva_finish_jobs").update({ lease_until: null }).eq("id", job.id);
     return job.step;
   } catch (e) {
+    // Canva at its rate limit: the step waits for a later pass; it has not failed.
+    if (e instanceof CanvaBusy) {
+      await admin.from("canva_finish_jobs").update({ state: job.state, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+      return `busy ${job.step}`;
+    }
     const msg = e instanceof Error ? e.message : String(e);
     const attempts = job.attempts + 1;
     const failed = attempts >= MAX_ATTEMPTS || msg.startsWith("FINAL:");
@@ -407,7 +411,7 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       s.design_id = r.designId; job.step = "clean_read"; return "next";
     }
     // Where the drawn text and logo are, from the layers Magic Layers made.
-    case "clean_read": return await oneEditAtATime(() => Date.now() < deadline ? readCleanRegions(token, job) : Promise.resolve<StepResult>("wait"));
+    case "clean_read": return await editStep(deadline, () => readCleanRegions(token, job));
     // Redraw those areas from their surroundings, in the background (minutes).
     case "clean": {
       s.cleans = (s.cleans ?? 0) + 1;
@@ -425,8 +429,8 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
     case "export_before":
     case "export_nologo":
     case "export_final": {
-      // The page size comes from the design file itself. Reading it from Canva
-      // took an editing session per slide, and those run one at a time.
+      // The page size comes from the design file itself, without an extra
+      // Canva read per slide.
       if (!s.size) s.size = s.page ? [s.page.width, s.page.height] : pngSize(await download(admin, s.design_path ?? job.input.design_path));
       s.export_job = await startExport(token, s.design_id, s.size[0], s.size[1]);
       job.step = `${job.step}_wait`; return "next";
@@ -446,11 +450,10 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       job.step = which === "before" ? "edit" : which === "nologo" ? "place_logo" : "finished";
       return which === "final" ? "done" : "next";
     }
-    // Edits queue behind each other. One whose turn comes after the pass's
-    // budget is spent waits for the next pass, so a pass ends on time instead
-    // of working through the whole queue.
-    case "edit": return await oneEditAtATime(() => Date.now() < deadline ? editLayers(token, job) : Promise.resolve<StepResult>("wait"));
-    case "place_logo": return await oneEditAtATime(() => Date.now() < deadline ? placeLogo(admin, token, job) : Promise.resolve<StepResult>("wait"));
+    // An edit that would start after the pass's budget is spent waits for the
+    // next pass, so a pass ends on time.
+    case "edit": return await editStep(deadline, () => editLayers(token, job));
+    case "place_logo": return await editStep(deadline, () => placeLogo(admin, token, job));
   }
   throw new Error(`FINAL: Unknown step '${job.step}'`);
 }

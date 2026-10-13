@@ -4,9 +4,15 @@
 // start-then-check job on Canva's side; the job function stores the job id
 // and checks it on a later tick instead of waiting inside one request.
 
+import { CanvaBusy, backoffMs } from "./pace.ts";
+
 const API = "https://api.canva.com/rest/v1";
 
 export type CanvaJob = { id: string; status: "in_progress" | "success" | "failed"; [k: string]: unknown };
+
+/** Resends after a 429, with Canva's Retry-After or exponential backoff, before handing the step back to a later pass. */
+const RATE_RETRIES = 3;
+const MAX_RATE_WAIT_MS = 12_000;
 
 async function call(token: string, method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<any> {
   const init: RequestInit = { method, headers: { Authorization: `Bearer ${token}`, ...headers } };
@@ -15,10 +21,19 @@ async function call(token: string, method: string, path: string, body?: unknown,
     init.body = JSON.stringify(body);
     (init.headers as Record<string, string>)["Content-Type"] = "application/json";
   }
-  const resp = await fetch(`${API}${path}`, init);
-  const text = await resp.text();
-  if (!resp.ok) throw new Error(`Canva ${method} ${path} ${resp.status}: ${text.slice(0, 300)}`);
-  return text ? JSON.parse(text) : {};
+  for (let attempt = 0; ; attempt++) {
+    const resp = await fetch(`${API}${path}`, init);
+    if (resp.status === 429) {
+      const wait = backoffMs(resp.headers.get("Retry-After"), attempt);
+      await resp.body?.cancel();
+      if (attempt >= RATE_RETRIES || wait > MAX_RATE_WAIT_MS) throw new CanvaBusy(wait, `${method} ${path.split("/")[1] ?? path}`);
+      await new Promise((r) => setTimeout(r, wait));
+      continue;
+    }
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(`Canva ${method} ${path} ${resp.status}: ${text.slice(0, 300)}`);
+    return text ? JSON.parse(text) : {};
+  }
 }
 
 function nameMetadata(name: string): string {
