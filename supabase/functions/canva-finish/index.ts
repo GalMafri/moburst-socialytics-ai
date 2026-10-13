@@ -184,41 +184,46 @@ async function tick(admin: any) {
   if (!due?.length) return { ran: 0 };
 
   const token = await accessTokenFor(admin);
-  const report: Record<string, string> = {};
+  // Lease every due job, then advance them side by side: most of a step is
+  // waiting on Canva, so one design's wait should not hold up the others.
+  const leased: Job[] = [];
   for (const { id } of due) {
-    if (Date.now() - started > TICK_BUDGET_MS) break;
     const now = new Date();
     const { data: claimed } = await admin.from("canva_finish_jobs")
       .update({ lease_until: new Date(now.getTime() + LEASE_MS).toISOString(), status: "running", updated_at: now.toISOString() })
       .eq("id", id).in("status", ["queued", "running"])
       .or(`lease_until.is.null,lease_until.lt.${now.toISOString()}`)
       .select("id, client_id, step, status, attempts, input, state");
-    const job: Job | undefined = claimed?.[0];
-    if (!job) continue;
-    try {
-      let result: StepResult = "next";
-      while (result === "next" && Date.now() - started < TICK_BUDGET_MS) {
-        result = await runStep(admin, token, job);
-        await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, updated_at: new Date().toISOString() }).eq("id", job.id);
-      }
-      if (result === "done") {
-        await admin.from("canva_finish_jobs").update({ status: "done", output_path: job.state.final_path, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
-      } else {
-        await admin.from("canva_finish_jobs").update({ lease_until: null }).eq("id", job.id);
-      }
-      report[job.id] = result === "done" ? "done" : job.step;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      const attempts = job.attempts + 1;
-      const failed = attempts >= MAX_ATTEMPTS || msg.startsWith("FINAL:");
-      console.error(`[canva-finish] job ${job.id} step ${job.step}:`, msg);
-      await admin.from("canva_finish_jobs").update({
-        attempts, error: msg.replace(/^FINAL:\s*/, ""), status: failed ? "failed" : "running", lease_until: null, updated_at: new Date().toISOString(),
-      }).eq("id", job.id);
-      report[job.id] = failed ? "failed" : `retry ${job.step}`;
-    }
+    if (claimed?.[0]) leased.push(claimed[0]);
   }
-  return { ran: Object.keys(report).length, report };
+  const outcomes = await Promise.all(leased.map((job) => advance(admin, token, job, started)));
+  return { ran: leased.length, report: Object.fromEntries(leased.map((job, i) => [job.id, outcomes[i]])) };
+}
+
+/** Run one leased job's steps until it waits on Canva, finishes, or the tick runs out of time. */
+async function advance(admin: any, token: string, job: Job, started: number): Promise<string> {
+  try {
+    let result: StepResult = "next";
+    while (result === "next" && Date.now() - started < TICK_BUDGET_MS) {
+      result = await runStep(admin, token, job);
+      await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+    }
+    if (result === "done") {
+      await admin.from("canva_finish_jobs").update({ status: "done", output_path: job.state.final_path, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+      return "done";
+    }
+    await admin.from("canva_finish_jobs").update({ lease_until: null }).eq("id", job.id);
+    return job.step;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const attempts = job.attempts + 1;
+    const failed = attempts >= MAX_ATTEMPTS || msg.startsWith("FINAL:");
+    console.error(`[canva-finish] job ${job.id} step ${job.step}:`, msg);
+    await admin.from("canva_finish_jobs").update({
+      attempts, error: msg.replace(/^FINAL:\s*/, ""), status: failed ? "failed" : "running", lease_until: null, updated_at: new Date().toISOString(),
+    }).eq("id", job.id);
+    return failed ? "failed" : `retry ${job.step}`;
+  }
 }
 
 async function runStep(admin: any, token: string, job: Job): Promise<StepResult> {
