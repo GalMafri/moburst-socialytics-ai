@@ -54,7 +54,10 @@ type TopPost = {
 type Both = { current: number | null; previous: number | null };
 type RivalIQMetrics = {
   actual_impressions?: Both;
-  owned_profile_scope?: Array<{id:string;name:string}>;
+  /** The connected networks the client impressions cover, and those without an impressions figure. */
+  actual_impressions_networks?: string[];
+  actual_impressions_missing?: string[];
+  owned_profile_scope?: Array<{id:string;name:string;network?:string}>;
   audience_as_of?: string;
   period?: { start: string; end: string };
   previous_period?: { start: string; end: string } | null;
@@ -194,6 +197,19 @@ const fmtDelta = formatPercentChange;
  * wrong way round; competitor movement stays neutral, as it does on the change
  * cards. A change that rounds to zero wears no colour either.
  */
+const andList = (xs: string[]) => xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+
+/** "Brand on Facebook and Instagram", one entry per profile name, instead of the name once per network. */
+function profilesLine(profiles: Array<{ name: string; network?: string }>): string {
+  const byName = new Map<string, string[]>();
+  for (const p of profiles) {
+    const nets = byName.get(p.name) ?? [];
+    if (p.network && !nets.includes(platformLabel(p.network))) nets.push(platformLabel(p.network));
+    byName.set(p.name, nets);
+  }
+  return [...byName].map(([name, nets]) => (nets.length ? `${name} on ${andList(nets)}` : name)).join(" · ");
+}
+
 function MetricRow({ label, value, format = compactNumber, signed = false }: { label: string; value: Both | null | undefined; format?: (v: number) => string; signed?: boolean }) {
   if (!value || value.current == null) return <Stat label={label} value="Not available" />;
   const change = deltaPct(value);
@@ -380,10 +396,10 @@ export default function CompetitiveReportView() {
   const metricsFor = (c: Company) => {
     const m = c.comparison_metrics || c.rivaliq_metrics;
     if (!m) return null;
-    if (effectivePlat === "all") return { audience: m.audience, audience_as_of:m.audience_as_of, engagement: m.engagement, actual_impressions:m.actual_impressions, profiles:m.owned_profile_scope, impressions: m.estimated_impressions, posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
+    if (effectivePlat === "all") return { audience: m.audience, audience_as_of:m.audience_as_of, engagement: m.engagement, actual_impressions:m.actual_impressions, impressions_missing:m.actual_impressions_missing, profiles:m.owned_profile_scope, impressions: m.estimated_impressions, posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
     const n = m.by_network?.[netKey];
     if (!n) return null;
-    return { audience: n.followers, audience_as_of:n.audience_as_of, engagement: n.engagement, actual_impressions:(n as {source?:string}).source==='sprout'?n.impressions:undefined, profiles:(n as {profiles?:Array<{id:string;name:string}>}).profiles, impressions:(n as {source?:string}).source==='sprout'?undefined:n.impressions, posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
+    return { audience: n.followers, audience_as_of:n.audience_as_of, engagement: n.engagement, actual_impressions:(n as {source?:string}).source==='sprout'?n.impressions:undefined, impressions_missing:undefined as string[] | undefined, profiles:(n as {profiles?:Array<{id:string;name:string}>}).profiles, impressions:(n as {source?:string}).source==='sprout'?undefined:n.impressions, posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
   };
   const withMetrics = ordered.map((c) => ({ c, m: metricsFor(c) })).filter((x) => x.m) as { c: Company; m: NonNullable<ReturnType<typeof metricsFor>> }[];
   const hasMetrics = withMetrics.length > 0;
@@ -848,7 +864,7 @@ export default function CompetitiveReportView() {
             style={{ order: orderOf("audience") }}
             title={<><Users className="h-5 w-5" /> Audience and momentum</>}
             action={scopeTag(true)}
-            description={<>Verified source totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}.{effectivePlat === "all" ? " Posts and engagement include collected LinkedIn activity. Followers, estimated impressions and engagement rates cover Tracked networks, excluding LinkedIn." : ""} Dated audience snapshots show the latest measurement when historical counts are unavailable.{anyBoosted ? vendor(" \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook.", " \"Likely boosted\" is an estimate of paid promotion on Facebook.") : ""}</>}
+            description={<>Verified source totals for the period{previousDays ? ` against the ${previousDays} days before it` : ""}.{effectivePlat === "all" ? " Posts and engagement include collected LinkedIn activity. Followers, estimated impressions and engagement rates cover tracked networks, excluding LinkedIn." : ""} Dated audience snapshots show the latest measurement when historical counts are unavailable.{anyBoosted ? vendor(" \"Likely boosted\" is RivalIQ's estimate of paid promotion on Facebook.", " \"Likely boosted\" is an estimate of paid promotion on Facebook.") : ""}</>}
           >
             <Card>
               <CardContent className="pt-5 space-y-6">
@@ -875,7 +891,8 @@ export default function CompetitiveReportView() {
                           {m.impressions && <MetricRow label={vendor("Est. impressions (RivalIQ)", "Est. impressions")} value={m.impressions} signed={c.is_client} />}
                           <MetricRow label="Posts" value={m.posts} format={(v) => String(Math.round(v))} signed={c.is_client} />
                         </div>
-                        {m.profiles?.length>0 && <p className="t-secondary">Connected profiles: {m.profiles.map(p=>p.name).join(", ")}</p>}
+                        {m.profiles?.length>0 && <p className="t-secondary">Connected profiles: {profilesLine(m.profiles)}</p>}
+                        {m.actual_impressions?.current != null && (m.impressions_missing?.length ?? 0) > 0 && <p className="t-secondary">Client impressions exclude {andList(m.impressions_missing!.map(platformLabel))}, which {m.impressions_missing!.length === 1 ? "has" : "have"} no impressions figure.</p>}
                         {m.audience_as_of && <p className="t-secondary">Audience measured {m.audience_as_of}. Activity above covers the selected report dates.</p>}
                         {nets.length > 0 && (
                           <div className="space-y-1.5">

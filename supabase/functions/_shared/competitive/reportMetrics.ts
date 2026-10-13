@@ -82,14 +82,24 @@ function applyOwnedMetrics(base:any,owned:any) {
     current:combined('followers','current',audienceNets.map(([,n])=>n)),
     previous:audienceNets.some(([,n]:[string,any])=>n.audience_as_of)?null:combined('followers','previous',audienceNets.map(([,n])=>n)),
   }:base.audience;
-  const ownedNetworks=Object.values(owned.by_network) as any[];
+  // Client impressions are summed over the connected networks that report
+  // them, and those networks are named; one network without impressions
+  // (YouTube, through Sprout) must not hide the others' measured totals.
+  const ownedEntries=Object.entries(owned.by_network) as [string,any][];
+  const impressionNets=ownedEntries.filter(([,n])=>valid(n.impressions?.current));
+  const actual_impressions=impressionNets.length?{
+    current:combined('impressions','current',impressionNets.map(([,n])=>n)),
+    previous:combined('impressions','previous',impressionNets.map(([,n])=>n)),
+  }:{current:null,previous:null};
   return {...base,by_network,posts:both('posts'),engagement:both('engagement'),audience,
     audience_as_of:audienceNets.some(([,n]:[string,any])=>n.audience_as_of)?[...new Set(audienceNets.map(([,n]:[string,any])=>n.audience_as_of||base.period.end))].sort().join(' / '):undefined,
     metric_scopes:{...base.metric_scopes,audience:'connected_and_public',engagement_rate_per_post:'connected_and_public'},
     audience_networks:audienceNets.map(([key])=>key),
     engagement_rate_per_post:{current:rate('current'),previous:rate('previous')},
-    actual_impressions:{current:combined('impressions','current',ownedNetworks),previous:combined('impressions','previous',ownedNetworks)},
-    owned_profile_scope:Object.values(owned.by_network).flatMap((n:any)=>n.profiles||[]),
+    actual_impressions,
+    actual_impressions_networks:impressionNets.map(([key])=>key),
+    actual_impressions_missing:ownedEntries.filter(([,n])=>!valid(n.impressions?.current)).map(([key])=>key),
+    owned_profile_scope:ownedEntries.flatMap(([network,n])=>(n.profiles||[]).map((p:any)=>({...p,network}))),
   };
 }
 

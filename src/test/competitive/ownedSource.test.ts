@@ -48,6 +48,16 @@ describe('owned competitive sources',()=>{
   expect(result.actual_impressions.current).toBe(300);expect(result.owned_profile_scope).toHaveLength(3);
   expect(()=>competitiveCompanyMetrics({rivaliq_metrics:r,owned_metrics:{...owned.metrics,period:{...period,start:'2026-08-02'}}})).toThrow('period');
  });
+ it('sums client impressions over the networks that report them and names the rest',()=>{
+  const owned=normalize([post(1,'2026-08-02'),post(3,'2026-08-04')]);
+  owned.metrics.by_network.linkedin.impressions={current:null,previous:null};
+  const r={period,posts:{current:0,previous:0},engagement:{current:0,previous:0},audience:{current:1000,previous:1000},by_network:{}};
+  const result=competitiveCompanyMetrics({rivaliq_metrics:r,owned_metrics:owned.metrics});
+  expect(result.actual_impressions.current).toBe(100);
+  expect(result.actual_impressions_networks).toEqual(['instagram']);
+  expect(result.actual_impressions_missing).toEqual(['linkedin']);
+  expect(result.owned_profile_scope.map((p:any)=>p.network)).toEqual(['instagram','instagram','linkedin']);
+ });
  it('blocks delivery when observed posts do not reconcile with owned totals',()=>{
   const owned=normalize([post(1,'2026-08-02'),post(2,'2026-08-03')]);
   const quality=competitiveReportQuality({period,aggregates:{metric_semantics_version:4,companies:[{name:'Brand',owned_metrics:owned.metrics,by_channel:{instagram:{observed_post_count:1}},rivaliq_metrics:{period,posts:{current:1}}}]}});
