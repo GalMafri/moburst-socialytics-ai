@@ -61,11 +61,13 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                 className="w-full text-left glass-inner p-2 space-y-2 border border-white/5 hover:border-white/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 aria-label={`Open ${p.client_name}'s ${p.platform} post`}
               >
-                <div className="aspect-[4/5] rounded-[8px] overflow-hidden bg-black/60 flex items-center justify-center">
-                  {designs[p.post_key]
-                    ? <img src={designs[p.post_key]} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    : <ImageOff className="h-4 w-4 text-muted-foreground/60" aria-label="No design yet" />}
-                </div>
+                {designs[p.post_key] ? (
+                  <div className="aspect-[4/5] rounded-[8px] overflow-hidden bg-black/60">
+                    <img src={designs[p.post_key]} alt="" className="w-full h-full object-cover" loading="lazy" />
+                  </div>
+                ) : (
+                  <p className="t-label inline-flex items-center gap-1"><ImageOff className="h-3 w-3" aria-hidden />No design yet</p>
+                )}
                 <p className="text-xs font-semibold text-white truncate">{p.client_name}</p>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <PlatformBadge platform={p.platform} size="sm" />
