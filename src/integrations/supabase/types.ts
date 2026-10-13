@@ -2076,6 +2076,24 @@ export type Database = {
         }
         Relationships: []
       }
+      worker_leases: {
+        Row: {
+          holder: string | null
+          lease_until: string | null
+          name: string
+        }
+        Insert: {
+          holder?: string | null
+          lease_until?: string | null
+          name: string
+        }
+        Update: {
+          holder?: string | null
+          lease_until?: string | null
+          name?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       gos_events: {
@@ -2158,6 +2176,10 @@ export type Database = {
       can_manage_roster: { Args: never; Returns: boolean }
       can_write_client: { Args: { _client_id: string }; Returns: boolean }
       claim_rivaliq_request: { Args: { request_token: string }; Returns: Json }
+      claim_worker_lease: {
+        Args: { p_holder: string; p_name: string; p_seconds: number }
+        Returns: boolean
+      }
       demo_jobs_lease: {
         Args: { p_lease_seconds?: number; p_limit?: number }
         Returns: {
@@ -2320,6 +2342,10 @@ export type Database = {
       release_ready_dispatches: { Args: never; Returns: number }
       release_rivaliq_request: {
         Args: { cooldown_seconds?: number; request_token: string }
+        Returns: undefined
+      }
+      release_worker_lease: {
+        Args: { p_holder: string; p_name: string }
         Returns: undefined
       }
       scheduled_jobs_lease: {
