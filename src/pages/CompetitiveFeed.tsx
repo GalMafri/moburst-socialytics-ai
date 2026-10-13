@@ -212,7 +212,7 @@ export default function CompetitiveFeed() {
   const topicFor = (p: FeedPost) => `Our own take on this competitor post by ${p.companyName || "a competitor"} (${platformLabel(p.channel)}): "${clipText(p.message, 240)}". Do not copy it; use the angle that works and make it ours.`;
   // The client's own posts are in the feed for comparison; a "take" on them makes no sense.
   const isOwnPost = (p: FeedPost) => (p as { source?: string }).source === "sprout" || (!!client?.name && sameCompany(String(p.companyName || ""), client.name.toLowerCase().trim()));
-  const reasonFor = (p: FeedPost) => `Our take on ${displayCompanyName(p.companyName || "a competitor")}'s ${platformLabel(p.channel)} post`;
+  const reasonFor = (p: FeedPost) => `Our take on a ${displayCompanyName(p.companyName || "competitor")} ${platformLabel(p.channel)} post`;
 
   return (
     <AppLayout
