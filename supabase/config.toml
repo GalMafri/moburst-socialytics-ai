@@ -24,6 +24,11 @@ verify_jwt = false
 [functions.run-scheduled-jobs]
 verify_jwt = false
 
+# Canva finishing: the minute worker presents the operational secret, and Canva's
+# OAuth redirect lands here with no JWT, so the function checks its callers itself.
+[functions.canva-finish]
+verify_jwt = false
+
 [functions.firecrawl-scrape]
 verify_jwt = false
 
