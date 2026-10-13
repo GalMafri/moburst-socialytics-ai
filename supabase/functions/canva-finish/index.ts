@@ -504,12 +504,12 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "image/png", upsert: true });
       if (error) throw new Error(`Could not store the ${which} export: ${error.message}`);
       s[`${which}_path`] = path;
-      job.step = which === "before" ? "edit" : which === "nologo" ? "place_logo" : "compose";
+      job.step = which === "before" ? "edit" : which === "nologo" ? "place_logo" : "join";
       // The join decodes two full images, so it runs in a request of its own.
       return which === "foreground" ? "wait" : "next";
     }
     // The copy and logo laid over the redrawn picture, at the picture's own resolution.
-    case "compose": {
+    case "join": {
       const picture = await Image.decode(await download(admin, s.clean_path));
       const layer = await Image.decode(await download(admin, s.foreground_path));
       if (picture.width !== layer.width || picture.height !== layer.height) {

@@ -77,7 +77,7 @@ async function runPass(admin: any) {
 // deno-lint-ignore no-explicit-any
 async function workRemains(admin: any): Promise<boolean> {
   const { count } = await admin.from("canva_finish_jobs").select("id", { count: "exact", head: true })
-    .in("status", ["queued", "running"]).in("step", [...VIDEO_STEPS]);
+    .in("status", ["queued", "running"]).in("step", [...VIDEO_STEPS]).eq("input->>kind", "video");
   return !!count;
 }
 
@@ -87,7 +87,7 @@ async function pass(admin: any): Promise<number> {
   const started = Date.now();
   const now = new Date();
   const { data: due } = await admin.from("canva_finish_jobs").select("id")
-    .in("status", ["queued", "running"]).in("step", [...VIDEO_STEPS])
+    .in("status", ["queued", "running"]).in("step", [...VIDEO_STEPS]).eq("input->>kind", "video")
     .or(`lease_until.is.null,lease_until.lt.${now.toISOString()}`)
     .order("created_at").limit(20);
   let advanced = 0;
