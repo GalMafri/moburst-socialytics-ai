@@ -26,6 +26,8 @@ import ReportHistory from "./pages/ReportHistory";
 import AllReports from "./pages/AllReports";
 import Analytics from "./pages/Analytics";
 import AnalyticsIndex from "./pages/AnalyticsIndex";
+import CalendarIndex from "./pages/CalendarIndex";
+import ClientCalendar from "./pages/ClientCalendar";
 import Settings from "./pages/Settings";
 import Usage from "./pages/Usage";
 import NotFound from "./pages/NotFound";
@@ -64,6 +66,7 @@ const App = () => (
               <Route path="/clients/:id/competitive/reports" element={<CompetitiveReportHistory />} />
               <Route path="/clients/:id/competitive/reports/:reportId" element={<CompetitiveReportView />} />
               <Route path="/analytics" element={<AnalyticsIndex />} />
+              <Route path="/calendar" element={<CalendarIndex />} />
               <Route path="/reports" element={<StaffOnlyRoute><AllReports /></StaffOnlyRoute>} />
               <Route path="/settings" element={<StaffOnlyRoute><Settings /></StaffOnlyRoute>} />
               <Route path="/usage" element={<AdminOnlyRoute><Usage /></AdminOnlyRoute>} />
@@ -71,6 +74,7 @@ const App = () => (
               <Route path="/clients/:id/reports/:reportId" element={<ReportView />} />
               <Route path="/clients/:id/reports" element={<ReportHistory />} />
               <Route path="/clients/:id/analytics" element={<Analytics />} />
+              <Route path="/clients/:id/calendar" element={<ClientCalendar />} />
               {/* Dev-only — see src/pages/DevCalendarPreview.tsx. Remove after launch. */}
               {import.meta.env.DEV && (
                 <Route path="/dev/calendar" element={<DevCalendarPreview />} />

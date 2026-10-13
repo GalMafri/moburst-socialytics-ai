@@ -44,7 +44,8 @@ export function calendarWithRevisions(
       ...post,
       // Full original content avoids collisions and prevents edits leaking into a re-run.
       // The key is not indexed; report/client indexes bound the revision query.
-      _calendarPostKey: reportId ? JSON.stringify([reportId, dayIndex, postIndex, day.day, day.date_label, post.platform, postCopyOf(post)]) : undefined,
+      // Calendar posts arrive with their stored key; a report's posts get theirs here.
+      _calendarPostKey: post._calendarPostKey ?? (reportId ? JSON.stringify([reportId, dayIndex, postIndex, day.day, day.date_label, post.platform, postCopyOf(post)]) : undefined),
     }, revisions)),
   }));
 }

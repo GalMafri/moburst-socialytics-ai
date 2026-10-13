@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
+import { importReportPosts } from "../_shared/calendar/fromReport.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -79,6 +80,17 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Report not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // A finished report plans its posts into the calendar, which is its own
+    // tab. A failure here is logged; it must not fail the report itself.
+    if (data[0].status === "completed") {
+      try {
+        const result = await importReportPosts(supabase, report_id);
+        console.log(`[update-report] calendar: +${result.added}, -${result.removed} for report ${report_id}`);
+      } catch (e) {
+        console.error("[update-report] calendar import failed:", e instanceof Error ? e.message : e);
+      }
     }
 
     return new Response(JSON.stringify(data[0]), {

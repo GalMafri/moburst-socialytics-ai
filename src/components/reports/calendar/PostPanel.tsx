@@ -389,7 +389,7 @@ export function PostPanel({
                   Schedule this post to your Sprout profile. Make sure design and copy are
                   finalized first.
                 </p>
-                {clientId && reportId ? (
+                {clientId ? (
                   <>
                     <Button onClick={() => setScheduleOpen(true)}>Open scheduler</Button>
                     <SchedulePostModal
@@ -407,7 +407,7 @@ export function PostPanel({
                   </>
                 ) : (
                   <p className="t-secondary">
-                    Cannot schedule — missing client or report context.
+                    This post can't be scheduled from here.
                   </p>
                 )}
               </TabsContent>

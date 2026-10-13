@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -84,6 +85,8 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
   const [refs, setRefs] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [autoDesigns, setAutoDesigns] = useState(false);
+  const [savingAuto, setSavingAuto] = useState(false);
 
   const logoUrl = useMemo(() => (logoPath ? supabase.storage.from("generated-media").getPublicUrl(logoPath).data.publicUrl : null), [logoPath]);
 
@@ -95,6 +98,7 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
     setLogoPath(s.logo_path);
     setBackground(s.background);
     setRefs(s.reference_paths || []);
+    setAutoDesigns(!!s.auto_designs);
     const img = new Image();
     img.onload = () => {
       const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
@@ -153,6 +157,22 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
       toast.error("Could not save the design settings", { description: e instanceof Error ? e.message : "Try again." });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const setAuto = async (on: boolean) => {
+    setSavingAuto(true);
+    setAutoDesigns(on);
+    try {
+      const { error } = await (supabase.from("design_brand_settings" as any) as any).update({ auto_designs: on, updated_at: new Date().toISOString() }).eq("client_id", clientId);
+      if (error) throw error;
+      toast.success(on ? "Designs will be prepared automatically" : "Automatic designs are off");
+      void qc.invalidateQueries({ queryKey: ["design-settings-full", clientId] });
+    } catch (e) {
+      setAutoDesigns(!on);
+      toast.error("Could not change that", { description: e instanceof Error ? e.message : "Try again." });
+    } finally {
+      setSavingAuto(false);
     }
   };
 
@@ -241,6 +261,16 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
               <p className="t-secondary">This client has no reference posts yet. Add some in the Brief tab.</p>
             )}
           </div>
+
+          {confirmedAt && (
+            <div className="glass-inner p-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <Label htmlFor="design-auto" className="text-sm font-semibold text-white">Prepare designs automatically</Label>
+                <p className="t-secondary">Each post in the calendar gets its design during the week before its date, from its copy at the time. Every design uses the team's Canva and image allowances.</p>
+              </div>
+              <Switch id="design-auto" checked={autoDesigns} disabled={savingAuto} onCheckedChange={(v) => void setAuto(v)} />
+            </div>
+          )}
 
           <div className="flex justify-end">
             <Button onClick={confirm} disabled={!ready || saving}>

@@ -25,6 +25,8 @@ interface Props {
   clientTimezone?: string;
   availablePlatforms: string[];
   availableLanguages: string[];
+  /** "calendar": the Calendar tab's week board, which has its own New post and no report highlights. */
+  mode?: "report" | "calendar";
 }
 
 export function ContentIdeasTab({
@@ -37,6 +39,7 @@ export function ContentIdeasTab({
   clientTimezone,
   availablePlatforms,
   availableLanguages,
+  mode = "report",
 }: Props) {
   const [filters, setFilters] = useState<CalendarFilterState>({
     day: "all",
@@ -204,7 +207,7 @@ export function ContentIdeasTab({
       }}
     >
       <div className="space-y-4">
-        {isMoburstStaff && availablePlatforms.length > 0 && clientId && (
+        {mode === "report" && isMoburstStaff && availablePlatforms.length > 0 && clientId && (
           <div className="flex justify-end">
             <CreateAdHocPost
               clientId={clientId}
@@ -214,12 +217,14 @@ export function ContentIdeasTab({
           </div>
         )}
 
-        <div id="ideas-week" className="scroll-mt-[156px]">
-          <WeeklyHighlights
-            aiAnalysis={aiAnalysis}
-            sproutMonthSummary={sproutPerformance?.month_comparison?.summary || null}
-          />
-        </div>
+        {mode === "report" && (
+          <div id="ideas-week" className="scroll-mt-[156px]">
+            <WeeklyHighlights
+              aiAnalysis={aiAnalysis}
+              sproutMonthSummary={sproutPerformance?.month_comparison?.summary || null}
+            />
+          </div>
+        )}
 
         <CalendarFilters
           filters={filters}
@@ -277,7 +282,7 @@ export function ContentIdeasTab({
           postIterations={activePostIterations}
           clientContext={clientContext}
           clientId={clientId}
-          reportId={reportId}
+          reportId={(currentPost as { _reportId?: string } | null)?._reportId ?? reportId}
           clientTimezone={clientTimezone}
           initialTab={panelTab}
           onFeedback={async (iterationId, verdict, reason, note) => {

@@ -48,6 +48,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTrackView } from "@/hooks/useTrackView";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
+import { ReportCalendarLink } from "@/components/calendar/ReportCalendarLink";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
 import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
@@ -556,17 +557,19 @@ export default function ReportView() {
           {/* ── CONTENT IDEAS ── */}
           {hasContent && (
             <TabsContent value="content" className="space-y-4">
-              <ContentIdeasTab
-                contentCalendar={contentCalendar}
-                aiAnalysis={aiAnalysis}
-                sproutPerformance={sproutPerformance}
-                clientContext={clientContext}
-                clientId={id}
-                reportId={reportId}
-                clientTimezone={clientContext.timezone}
-                availablePlatforms={availablePlatforms}
-                availableLanguages={availableLanguages}
-              />
+              <ReportCalendarLink clientId={id!} reportId={reportId!}>
+                <ContentIdeasTab
+                  contentCalendar={contentCalendar}
+                  aiAnalysis={aiAnalysis}
+                  sproutPerformance={sproutPerformance}
+                  clientContext={clientContext}
+                  clientId={id}
+                  reportId={reportId}
+                  clientTimezone={clientContext.timezone}
+                  availablePlatforms={availablePlatforms}
+                  availableLanguages={availableLanguages}
+                />
+              </ReportCalendarLink>
             </TabsContent>
           )}
 

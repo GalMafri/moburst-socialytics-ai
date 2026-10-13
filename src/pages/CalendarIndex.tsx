@@ -1,0 +1,90 @@
+import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { Card, CardContent } from "@/components/ui/card";
+import { ClickableCard } from "@/components/ui/clickable-card";
+import { Loading } from "@/components/ui/loading";
+import { EmptyState } from "@/components/ui/empty-state";
+import { LoadError } from "@/components/ui/load-error";
+import { CalendarDays } from "lucide-react";
+
+export default function CalendarIndex() {
+  const navigate = useNavigate();
+  const { isClient, user, isGosSession } = useAuth();
+
+  const { data: clients, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["clients-for-calendar"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("clients")
+        .select("id, name, logo_url, hub_company_name")
+        .order("name");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Client-role users should skip the chooser and go straight to their own
+  // client's calendar.
+  useEffect(() => {
+    if (!isClient || !clients?.length) return;
+    const userCompany = (user?.company ?? "").trim().toLowerCase();
+    // gOS client sessions are RLS-scoped, so any returned client is theirs — take
+    // the first. Legacy sessions match on hub_company_name.
+    const mine = isGosSession
+      ? clients[0]
+      : (clients.find((c) => (c.hub_company_name ?? "").trim().toLowerCase() === userCompany) ??
+        (clients.length === 1 ? clients[0] : null));
+    if (mine) navigate(`/clients/${mine.id}/calendar`, { replace: true });
+  }, [isClient, clients, user?.company, isGosSession, navigate]);
+
+  return (
+    <AppLayout title="Calendar"
+      description="Choose a client to open its content calendar.">
+      <div className="space-y-6">
+        <div>
+        </div>
+
+        {isLoading ? (
+          <Loading label="Loading clients" />
+        ) : isError ? (
+          <LoadError title="Could not load the clients" error={error} onRetry={() => refetch()} />
+        ) : !clients?.length ? (
+          <EmptyState
+            icon={CalendarDays}
+            title="No clients yet"
+            description="Create a client first to plan its posts."
+          />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {clients.map((c) => (
+              <ClickableCard
+                key={c.id}
+                className="hover-lift transition-shadow"
+                onClick={() => navigate(`/clients/${c.id}/calendar`)}
+                ariaLabel={`Open the calendar for ${c.name}`}
+              >
+                <CardContent className="pt-5 flex items-center gap-3">
+                  {c.logo_url ? (
+                    <img src={c.logo_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+                  ) : (
+                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+                      {c.name.charAt(0)}
+                    </div>
+                  )}
+                  <div>
+                    <div className="font-medium">{c.name}</div>
+                    <div className="t-secondary">Open calendar →</div>
+                  </div>
+                </CardContent>
+              </ClickableCard>
+            ))}
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  );
+}

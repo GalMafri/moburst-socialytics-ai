@@ -19,7 +19,8 @@ interface SchedulePostModalProps {
   onOpenChange: (open: boolean) => void;
   post: any;
   clientId: string;
-  reportId: string;
+  /** The report that planned the post; posts added to the calendar by hand have none. */
+  reportId?: string;
   generatedMediaUrls?: string[];
   clientTimezone?: string;
 }
@@ -176,7 +177,7 @@ export function SchedulePostModal({
       const { data, error } = await supabase.functions.invoke("schedule-sprout-post", {
         body: {
           client_id: clientId,
-          report_id: reportId,
+          report_id: reportId ?? null,
           sprout_profile_id: Number(selectedProfileId),
           platform: post.platform,
           scheduled_time: scheduledTimeIso,

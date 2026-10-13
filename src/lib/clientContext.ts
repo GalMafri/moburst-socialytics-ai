@@ -59,3 +59,27 @@ export function stripVoicePreset(brandNotes: string | null | undefined): string 
   if (!brandNotes) return null;
   return brandNotes.replace(/^\[VOICE:[^\]]+]\n?/, "") || null;
 }
+
+/** The columns a ClientContext is built from. */
+export const CLIENT_CONTEXT_COLUMNS = "id, name, brand_identity, design_references, brand_book_file_path, brand_book_url, content_pillars, brief_text, brand_notes, geo, language, timezone, design_style_synthesis";
+
+/** A ClientContext from a clients row selected with CLIENT_CONTEXT_COLUMNS. */
+// deno-lint-ignore no-explicit-any
+export function buildClientContext(row: Record<string, any> | null | undefined, fallbackId = ""): ClientContext {
+  const r = row || {};
+  return {
+    client_id: r.id || fallbackId,
+    client_name: r.name || "Client",
+    brand_identity: r.brand_identity || null,
+    design_references: Array.isArray(r.design_references) ? (r.design_references as string[]) : [],
+    brand_book_file_path: r.brand_book_file_path || null,
+    brand_book_url: r.brand_book_url || null,
+    content_pillars: Array.isArray(r.content_pillars) ? (r.content_pillars as ContentPillar[]) : [],
+    brief_text: r.brief_text || null,
+    brand_notes: stripVoicePreset(r.brand_notes),
+    geo: parseCsv(r.geo),
+    languages: parseCsv(r.language),
+    timezone: r.timezone || "UTC",
+    design_style_synthesis: r.design_style_synthesis || null,
+  };
+}

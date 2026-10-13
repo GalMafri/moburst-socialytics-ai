@@ -13,7 +13,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Crosshair } from "lucide-react";
+import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Crosshair, CalendarDays } from "lucide-react";
 import { PORTAL_URL } from "@/utils/gosAuth";
 
 export function AppSidebar() {
@@ -25,6 +25,7 @@ export function AppSidebar() {
     // Cross-client "All Reports" view is Moburst-staff only. Clients use the
     // per-client report history linked from ClientDashboard.
     ...(isMoburstStaff ? [{ icon: FileText, label: "Reports", href: "/reports" }] : []),
+    { icon: CalendarDays, label: "Calendar", href: "/calendar" },
     { icon: TrendingUp, label: "Analytics", href: "/analytics" },
     // Competitive analysis: staff review competitor sets and run the RivalIQ
     // deep analysis here; clients reach finished reports from their dashboard.

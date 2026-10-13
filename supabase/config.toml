@@ -208,3 +208,6 @@ verify_jwt = false
 
 [functions.preview-brand-design]
 verify_jwt = false
+
+[functions.calendar-posts]
+verify_jwt = false

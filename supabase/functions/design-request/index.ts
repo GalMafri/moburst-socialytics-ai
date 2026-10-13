@@ -7,6 +7,7 @@
 //        Plans the options from the post and the client's own posts, then
 //        starts them. A second call while the post's designs are being
 //        prepared returns the open request.
+//   POST {action:"auto"}   (operational secret) designs for upcoming calendar posts that have none
 //   POST {action:"use", iteration_id}
 //        Puts one finished design in use for its post; every other design of
 //        that post stops being in use.
@@ -65,32 +66,18 @@ Deno.serve(async (req) => {
       // Answered as a 200 so the screen can read the code (invoke() hides non-2xx bodies).
       if (!settings?.confirmed_at) return json({ code: "not_set_up" });
 
-      const { data: open } = await admin.from("design_requests").select("*").eq("client_id", clientId).eq("calendar_post_key", postKey).eq("status", "preparing").maybeSingle();
-      if (open) return json({ request: open });
-
-      const { data: created, error } = await admin.from("design_requests").insert({
-        client_id: clientId, report_id: body.report_id || null, calendar_post_key: postKey,
-        platform: body.platform || null, format: body.format || null, post_copy: copy, requested_by: userId,
-        kind: /carousel/i.test(String(body.format || "")) ? "carousel" : "single", options_wanted: OPTIONS_WANTED,
-      }).select("*").single();
-      if (error) {
-        // Two clicks at once: the unique index let one through; answer with it.
-        const { data: raced } = await admin.from("design_requests").select("*").eq("client_id", clientId).eq("calendar_post_key", postKey).eq("status", "preparing").maybeSingle();
-        if (raced) return json({ request: raced });
-        throw new Error(error.message);
-      }
-
-      // Planning takes a few seconds; the caller already has the request and
-      // shows it as being prepared while this runs.
-      const work = plan(admin, created as DesignRequest, settings as Settings).catch(async (e) => {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error("[design-request] planning failed:", msg);
-        await admin.from("design_requests").update({ status: "needs_staff", error: msg, updated_at: new Date().toISOString() }).eq("id", created.id);
+      const request = await startRequest(admin, settings as Settings, {
+        clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId,
       });
-      // deno-lint-ignore no-explicit-any
-      const runtime = (globalThis as any).EdgeRuntime;
-      if (runtime?.waitUntil) runtime.waitUntil(work); else await work;
-      return json({ request: created });
+      return json({ request });
+    }
+
+    // Designs for upcoming calendar posts that have none, for clients whose
+    // staff switched it on. Run by the hourly schedule.
+    if (body?.action === "auto") {
+      const caller = await requireStaff(req);
+      if (!caller.viaSecret) return json({ error: "Not allowed." }, 403);
+      return json(await prepareUpcoming(admin));
     }
 
     if (body?.action === "use") {
@@ -158,6 +145,98 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
   for (let i = 0; i < first; i++) await startOption(admin, planned, settings, brand, i, i);
   await admin.from("design_requests").update({ candidates_started: first, updated_at: new Date().toISOString() }).eq("id", request.id);
   await wakeWorker();
+}
+
+/** Start a design request for a post, or answer with the one already being prepared. Planning runs in the background. */
+async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null }): Promise<DesignRequest> {
+  const { data: open } = await admin.from("design_requests").select("*").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "preparing").maybeSingle();
+  if (open) return open;
+
+  const { data: created, error } = await admin.from("design_requests").insert({
+    client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
+    platform: p.platform, format: p.format, post_copy: p.copy, requested_by: p.requestedBy,
+    kind: /carousel/i.test(String(p.format || "")) ? "carousel" : "single", options_wanted: OPTIONS_WANTED,
+  }).select("*").single();
+  if (error) {
+    // Two starts at once: the unique index let one through; answer with it.
+    const { data: raced } = await admin.from("design_requests").select("*").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "preparing").maybeSingle();
+    if (raced) return raced;
+    throw new Error(error.message);
+  }
+
+  // Planning takes a few seconds; the caller already has the request and
+  // shows it as being prepared while this runs.
+  const work = plan(admin, created as DesignRequest, settings).catch(async (e) => {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[design-request] planning failed:", msg);
+    await admin.from("design_requests").update({ status: "needs_staff", error: msg, updated_at: new Date().toISOString() }).eq("id", created.id);
+  });
+  // deno-lint-ignore no-explicit-any
+  const runtime = (globalThis as any).EdgeRuntime;
+  if (runtime?.waitUntil) runtime.waitUntil(work); else await work;
+  return created as DesignRequest;
+}
+
+/** How far ahead designs are prepared automatically. */
+const AUTO_DAYS_AHEAD = 7;
+/**
+ * Automatic requests being prepared at once, across clients. The worker
+ * finishes designs one Canva edit at a time, so starting more at once only
+ * makes each wait, and a person's own request would queue behind them.
+ */
+const AUTO_AT_ONCE = 2;
+/** Posts whose design is a video; the Design tab only makes stills. */
+const VIDEO_POST = /reel|video|short|tiktok/i;
+
+/**
+ * Upcoming calendar posts with no design and no request yet, for clients with
+ * confirmed settings and automatic designs switched on, soonest first. Each
+ * request uses the post's current copy, so edits made before it starts are in
+ * the design.
+ */
+async function prepareUpcoming(admin: any): Promise<{ started: string[]; waiting: number }> {
+  const { data: clients } = await admin.from("design_brand_settings").select("*").eq("auto_designs", true).not("confirmed_at", "is", null);
+  if (!clients?.length) return { started: [], waiting: 0 };
+  const today = new Date().toISOString().slice(0, 10);
+  const until = new Date(Date.now() + AUTO_DAYS_AHEAD * 86400000).toISOString().slice(0, 10);
+
+  const due: Array<{ settings: Settings; post: any }> = [];
+  for (const settings of clients) {
+    const { data: posts } = await admin.from("calendar_posts").select("*").eq("client_id", settings.client_id).gte("post_date", today).lte("post_date", until).order("post_date");
+    const candidates = (posts ?? []).filter((p: any) => !VIDEO_POST.test(`${p.format ?? ""} ${p.platform === "TikTok" ? "tiktok" : ""}`));
+    if (!candidates.length) continue;
+    const keys = candidates.map((p: any) => p.post_key);
+    const [{ data: designed }, { data: requested }] = await Promise.all([
+      admin.from("post_iterations").select("calendar_post_key").eq("client_id", settings.client_id).in("calendar_post_key", keys).like("variant_angle", "Design option %"),
+      admin.from("design_requests").select("calendar_post_key").eq("client_id", settings.client_id).in("calendar_post_key", keys),
+    ]);
+    const has = new Set([...(designed ?? []), ...(requested ?? [])].map((r: any) => r.calendar_post_key));
+    for (const post of candidates) if (!has.has(post.post_key)) due.push({ settings, post });
+  }
+  due.sort((a, b) => String(a.post.post_date).localeCompare(String(b.post.post_date)));
+
+  const { count: running } = await admin.from("design_requests").select("id", { count: "exact", head: true }).eq("status", "preparing").is("requested_by", null);
+  const room = Math.max(0, AUTO_AT_ONCE - (running ?? 0));
+
+  const started: string[] = [];
+  for (const { settings, post } of due.slice(0, room)) {
+    const copy = await currentCopy(admin, post);
+    if (!copy) continue;
+    const request = await startRequest(admin, settings, {
+      clientId: post.client_id, postKey: post.post_key, copy, reportId: post.report_id, platform: post.platform, format: post.format, requestedBy: null,
+    });
+    started.push(request.id);
+  }
+  return { started, waiting: Math.max(0, due.length - started.length) };
+}
+
+/** A post's copy as it is now: its latest saved edit, or the copy it was planned with. */
+async function currentCopy(admin: any, post: { client_id: string; post_key: string; copy: string }): Promise<string> {
+  const { data: edits } = await admin.from("post_iterations").select("post_copy, media_urls, created_at, version")
+    .eq("client_id", post.client_id).eq("calendar_post_key", post.post_key)
+    .order("created_at", { ascending: false }).limit(20);
+  const edit = (edits ?? []).find((r: any) => !(Array.isArray(r.media_urls) && r.media_urls.length) && r.post_copy);
+  return String(edit?.post_copy || post.copy || "").trim();
 }
 
 function json(body: unknown, status = 200) {

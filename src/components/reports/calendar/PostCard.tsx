@@ -33,8 +33,19 @@ interface Props {
   onToggleApproved?: () => void;
 }
 
+/** Why a calendar post is in the plan, as short tags; the full reason is the tag's tooltip. */
+const REASON_LABELS: Record<string, string> = {
+  report: "From report",
+  performance: "Performance",
+  trend: "Trend",
+  competitor: "Competitor",
+  seasonal: "Seasonal",
+  idea: "Idea",
+};
+
 export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: Props) {
   const copy = postCopyOf(post);
+  const reasons = Array.isArray((post as { _reasons?: unknown })._reasons) ? ((post as { _reasons: Array<{ type: string; label: string }> })._reasons) : [];
   const thumb = iteration?.media_urls?.[0] || null;
   const isVideo = !!thumb && /\.(mp4|webm|mov)/.test(thumb);
 
@@ -160,12 +171,19 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         )}
       </div>
 
-      {/* Pillar */}
-      {post.pillar && (
-        <div>
-          <Badge className="bg-accent text-accent-foreground t-badge tracking-[-0.2px] py-1 px-2.5 rounded-full">
-            {post.pillar}
-          </Badge>
+      {/* Pillar, and why the post is in the plan */}
+      {(post.pillar || reasons.length > 0) && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {post.pillar && (
+            <Badge className="bg-accent text-accent-foreground t-badge tracking-[-0.2px] py-1 px-2.5 rounded-full">
+              {post.pillar}
+            </Badge>
+          )}
+          {reasons.map((r, i) => (
+            <span key={`${r.type}:${i}`} title={r.label} className="inline-flex items-center px-2 py-0.5 rounded-full border border-white/10 t-badge text-[#b1b7c1]">
+              {REASON_LABELS[r.type] ?? "Idea"}
+            </span>
+          ))}
         </div>
       )}
 
