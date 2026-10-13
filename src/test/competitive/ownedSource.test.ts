@@ -1,7 +1,7 @@
 import {describe,it,expect} from 'vitest';
 import {normalizeOwnedCompetitive} from '../../../supabase/functions/_shared/competitive/ownedSource';
 import {mergeOwnedCompetitivePosts} from '../../../supabase/functions/_shared/competitive/ownedMerge';
-import {competitiveCompanyMetrics} from '../../../supabase/functions/_shared/competitive/reportMetrics';
+import {competitiveCompanyMetrics,normalizedCompetitiveMetrics} from '../../../supabase/functions/_shared/competitive/reportMetrics';
 import {competitiveReportQuality} from '../../../supabase/functions/_shared/competitive/reportEvidence';
 
 const period={start:'2026-08-01',end:'2026-08-31'};
@@ -57,6 +57,14 @@ describe('owned competitive sources',()=>{
   expect(result.actual_impressions_networks).toEqual(['instagram']);
   expect(result.actual_impressions_missing).toEqual(['linkedin']);
   expect(result.owned_profile_scope.map((p:any)=>p.network)).toEqual(['instagram','instagram','linkedin']);
+ });
+ it('recomputes client metrics at read time instead of keeping the ones stored with the report',()=>{
+  const owned=normalize([post(1,'2026-08-02'),post(3,'2026-08-04')]);
+  const r={period,posts:{current:2,previous:0},engagement:{current:0,previous:0},audience:{current:1000,previous:1000},by_network:{}};
+  const stored={actual_impressions:{current:null,previous:null},owned_profile_scope:[{id:'1',name:'Brand'}]};
+  const out:any=normalizedCompetitiveMetrics({period,aggregates:{metric_semantics_version:4,period,companies:[{name:'Brand',is_client:true,post_count:2,rivaliq_metrics:r,owned_metrics:owned.metrics,comparison_metrics:stored}]}});
+  expect(out.aggregates.companies[0].comparison_metrics.actual_impressions.current).toBe(200);
+  expect(out.aggregates.companies[0].comparison_metrics.owned_profile_scope[0].network).toBe('instagram');
  });
  it('blocks delivery when observed posts do not reconcile with owned totals',()=>{
   const owned=normalize([post(1,'2026-08-02'),post(2,'2026-08-03')]);

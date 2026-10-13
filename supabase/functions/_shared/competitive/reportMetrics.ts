@@ -157,8 +157,10 @@ export function normalizedCompetitiveMetrics<T>(input: T): T & MetricReport {
     }
     return {
       ...c,
-      comparison_metrics: metrics,
       ...normalizeBucket(c, { ...metrics, rate: metrics?.engagement_rate_per_post, impressions: metrics?.estimated_impressions }),
+      // After the bucket, which spreads the stored company again: the metrics
+      // recomputed now replace the ones stored when the report was written.
+      comparison_metrics: metrics,
       by_channel: Object.fromEntries(Object.entries(channels).map(([key, b]) => [key,
         normalizeBucket(b, metrics?.by_network?.[key === 'x' ? 'twitter' : key]),
       ])),
