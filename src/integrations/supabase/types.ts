@@ -285,6 +285,8 @@ export type Database = {
           lease_until: string | null
           option_index: number | null
           output_path: string | null
+          slide_count: number | null
+          slide_index: number | null
           state: Json
           status: string
           step: string
@@ -302,6 +304,8 @@ export type Database = {
           lease_until?: string | null
           option_index?: number | null
           output_path?: string | null
+          slide_count?: number | null
+          slide_index?: number | null
           state?: Json
           status?: string
           step?: string
@@ -319,6 +323,8 @@ export type Database = {
           lease_until?: string | null
           option_index?: number | null
           output_path?: string | null
+          slide_count?: number | null
+          slide_index?: number | null
           state?: Json
           status?: string
           step?: string
@@ -1115,6 +1121,7 @@ export type Database = {
           error: string | null
           format: string | null
           id: string
+          kind: string
           options_ready: number
           options_wanted: number
           platform: string | null
@@ -1134,6 +1141,7 @@ export type Database = {
           error?: string | null
           format?: string | null
           id?: string
+          kind?: string
           options_ready?: number
           options_wanted?: number
           platform?: string | null
@@ -1153,6 +1161,7 @@ export type Database = {
           error?: string | null
           format?: string | null
           id?: string
+          kind?: string
           options_ready?: number
           options_wanted?: number
           platform?: string | null
