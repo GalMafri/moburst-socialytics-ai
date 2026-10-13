@@ -1271,6 +1271,7 @@ export type Database = {
           format: string | null
           id: string
           kind: string
+          on_camera: string | null
           options_ready: number
           options_wanted: number
           platform: string | null
@@ -1293,6 +1294,7 @@ export type Database = {
           format?: string | null
           id?: string
           kind?: string
+          on_camera?: string | null
           options_ready?: number
           options_wanted?: number
           platform?: string | null
@@ -1315,6 +1317,7 @@ export type Database = {
           format?: string | null
           id?: string
           kind?: string
+          on_camera?: string | null
           options_ready?: number
           options_wanted?: number
           platform?: string | null
