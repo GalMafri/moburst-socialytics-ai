@@ -759,8 +759,13 @@ export default function CompetitorReview() {
             { title: "Connect tracking", ...trackingState, ...(!trackingState.headline && runnableSet?.rivaliq_landscape_id ? { headline: "Linked to a RivalIQ landscape", detail: "The next report run checks that it still tracks these companies." } : {}) },
             {
               title: "Choose period and run",
-              headline: selectionState.ready && trackingAllowsRun(trackingState) ? "Ready to run" : "Not ready yet",
-              detail: selectionState.ready && trackingAllowsRun(trackingState) ? undefined : "Finish the two steps on the left first.",
+              // A run checks tracking again before it starts, so a stale
+              // "needs reconnecting" still lets one through; say what it does.
+              ...(!selectionState.ready || !trackingAllowsRun(trackingState)
+                ? { headline: "Not ready yet", detail: "Finish the two steps on the left first." }
+                : trackingState.ready
+                  ? { headline: "Ready to run" }
+                  : { headline: "A run checks tracking first", detail: "If tracking is still missing, the run stops before a report starts." }),
               ready: false,
               href: selectionState.ready ? `/clients/${clientId}/competitive/run` : undefined,
               linkLabel: "Open the run page",
