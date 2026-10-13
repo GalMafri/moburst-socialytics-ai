@@ -43,6 +43,9 @@ export type LandscapeCheck =
 export const isTrackingProblem = (c: LandscapeCheck): c is Extract<LandscapeResolution, { ok: false }> =>
   "code" in c && (c.code === CLIENT_NOT_TRACKED || c.code === LANDSCAPE_MISSING);
 
+/** A set keeps the landscape it was linked to, so the way back is a selection linked afresh. */
+const RECONNECT = "On the Competitors screen, import a landscape that tracks the client, or set up tracking for a new selection.";
+
 const linkedIdOf = (value: unknown): string | null => {
   const id = value == null ? "" : String(value).trim();
   return id ? id : null;
@@ -73,8 +76,8 @@ export function resolveClientLandscape(
       code: LANDSCAPE_MISSING,
       landscapeId: linked,
       message: match
-        ? `The RivalIQ landscape linked to ${client.name}'s competitor set (${linked}) no longer tracks ${client.name} as exactly one company. Reconnect tracking on the Competitors screen.`
-        : `The RivalIQ landscape linked to ${client.name}'s competitor set (${linked}) no longer exists. Reconnect tracking on the Competitors screen.`,
+        ? `The RivalIQ landscape linked to ${client.name}'s competitor set (${linked}) no longer tracks ${client.name} as exactly one company. ${RECONNECT}`
+        : `The RivalIQ landscape linked to ${client.name}'s competitor set (${linked}) no longer exists. ${RECONNECT}`,
     };
   }
   return {
