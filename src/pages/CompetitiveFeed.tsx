@@ -132,17 +132,23 @@ export default function CompetitiveFeed() {
       const post = (data as any)?.post;
       if (!post) throw new Error("The generator returned no post.");
       const hashtags = Array.isArray(post.hashtags) ? post.hashtags : typeof post.hashtags === "string" ? post.hashtags.split(/[\s,]+/).filter(Boolean) : null;
-      const { error: insErr } = await supabase.from("post_iterations").insert({
+      // Drafts go to the client's Calendar (today, to be moved), with the topic as the reason.
+      // calendar_posts is not in the generated types yet.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: insErr } = await (supabase.from("calendar_posts" as never) as any).insert({
         client_id: id!,
-        version: 1,
+        post_date: new Date().toISOString().slice(0, 10),
         platform: post.platform || platform,
-        post_copy: post.caption_angle,
-        hashtags,
-        cta: post.CTA,
-        concept: post.concept,
-        visual_direction: post.visual_direction,
-        format: post.format,
-        source: "ad_hoc",
+        format: post.format || null,
+        pillar: post.pillar || null,
+        copy: post.caption_angle || post.concept || "",
+        hashtags: hashtags || [],
+        cta: post.CTA || null,
+        visual_direction: post.visual_direction || null,
+        rationale: post.concept || null,
+        reasons: [{ type: "competitor", label: String(topic).slice(0, 200) }],
+        source: "insight",
+        raw: post,
       });
       if (insErr) throw insErr;
       if (alertId) await supabase.from("competitive_alerts").update({ status: "drafted" }).eq("id", alertId);
@@ -150,7 +156,7 @@ export default function CompetitiveFeed() {
     },
     onSuccess: (post: any) => {
       qc.invalidateQueries({ queryKey: ["competitive-alerts", id] });
-      toast({ title: "Draft saved to this client's posts", description: post.hook || post.concept?.slice(0, 120) });
+      toast({ title: "Added to the client's calendar for today", description: "Open the Calendar to move it to its date or change it." });
     },
     onError: (e: any) => toast({ title: "Could not draft the post", description: e.message, variant: "destructive" }),
   });
@@ -377,8 +383,8 @@ export default function CompetitiveFeed() {
         description={
           <>
             <p>
-              The AI writes one {pendingDraft?.platform || "social"} post for {clientName} on {pendingDraft?.about || "this topic"} and
-              saves it to {clientName}'s posts as a draft.
+              One {pendingDraft?.platform || "social"} post is written for {clientName} on {pendingDraft?.about || "this topic"} and
+              added to {clientName}'s calendar for today, where it can be moved to its date.
             </p>
             <p>Nothing is published or scheduled.{pendingDraft?.alertId ? " The topic is marked as drafted." : ""}</p>
           </>
