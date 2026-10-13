@@ -54,3 +54,20 @@ export function backoffMs(retryAfter: string | null, attempt: number): number {
   if (retryAfter && Number.isFinite(s) && s >= 0) return Math.min(60_000, s * 1000);
   return Math.min(30_000, 1000 * 2 ** attempt);
 }
+
+/**
+ * The pace kept in the database (claim_rate_slot), shared by every worker
+ * request: each design job advances in its own request, so an in-memory count
+ * would only see its own calls. A database error lets the call go; Canva's own
+ * 429 and the backoff still hold the line.
+ */
+// deno-lint-ignore no-explicit-any
+export function databasePace(admin: any, account = "canva"): (tool: string) => Promise<number> {
+  return async (tool) => {
+    const limit = CANVA_PACE[tool];
+    if (!limit) return 0;
+    const { data, error } = await admin.rpc("claim_rate_slot", { p_key: `${account}:${tool}`, p_limit: limit });
+    if (error) return 0;
+    return Number(data) || 0;
+  };
+}

@@ -162,3 +162,27 @@ describe("a clean background under the live text", () => {
     expect(m[(1 * 4 + 1) * 4 + 3]).toBe(0);
   });
 });
+
+describe("pasteRegions visits only the regions", () => {
+  it("gives the same image as blending every pixel, with overlapping regions", () => {
+    const w = 40, h = 30;
+    const orig = new Uint8ClampedArray(w * h * 4).map((_, i) => (i * 7) % 256);
+    const redrawn = new Uint8ClampedArray(w * h * 4).map((_, i) => (i * 13) % 256);
+    const regions: [number, number, number, number][] = [[2, 3, 20, 15], [10, 8, 35, 28]];
+    // The reference: every pixel weighed against every region.
+    const ref = new Uint8ClampedArray(orig);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let wt = 0;
+      for (const [x0, y0, x1, y1] of regions) {
+        if (x < x0 || y < y0 || x >= x1 || y >= y1) continue;
+        const d = Math.min(x - x0, y - y0, x1 - 1 - x, y1 - 1 - y);
+        wt = Math.max(wt, Math.min(1, (d + 1) / 6));
+      }
+      if (wt <= 0) continue;
+      const i = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) ref[i + c] = Math.round(orig[i + c] * (1 - wt) + redrawn[i + c] * wt);
+      ref[i + 3] = 255;
+    }
+    expect(Array.from(pasteRegions(orig, redrawn, w, h, regions, 6))).toEqual(Array.from(ref));
+  });
+});

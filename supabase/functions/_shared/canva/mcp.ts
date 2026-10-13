@@ -18,13 +18,17 @@ const URL_MCP = "https://mcp.canva.com/mcp";
 const RETRIES = 5;
 /** Longest a call waits for its turn under the pace before handing the step back to a later pass. */
 const MAX_PACE_WAIT_MS = 12_000;
-/** One pace for every Canva session this worker opens, so passes share it. */
-const pace = new Pace(CANVA_PACE);
+/** How long until a call to this tool may go (0: go now, and it is counted). */
+export type PaceFn = (tool: string) => Promise<number>;
+/** Without a shared count, sessions in one process share this one. */
+const localPace = new Pace(CANVA_PACE);
+const inMemory: PaceFn = (tool) => Promise.resolve(localPace.tryTake(tool));
 
 export class CanvaMcp {
   private session: string | null = null;
   private nextId = 1;
-  constructor(private token: string) {}
+  /** pace: the shared count of Canva calls (the worker passes one kept in the database, so every request sees it). */
+  constructor(private token: string, private pace: PaceFn = inMemory) {}
 
   private async post(body: Record<string, unknown>): Promise<any> {
     for (let attempt = 0; ; attempt++) {
@@ -87,7 +91,7 @@ export class CanvaMcp {
     // Wait for this tool's turn under Canva's per-minute limit; past a short
     // wait, the step goes back to a later pass.
     for (;;) {
-      const wait = pace.tryTake(name);
+      const wait = await this.pace(name);
       if (!wait) break;
       if (wait > MAX_PACE_WAIT_MS) throw new CanvaBusy(wait, name);
       await new Promise((r) => setTimeout(r, wait));

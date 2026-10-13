@@ -27,7 +27,7 @@ import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { PROVIDER, accessTokenFor, authorizeUrl, clientCredentials, exchangeCode, expiryFrom, makePkce, randomState } from "../_shared/canva/oauth.ts";
 import { getExport, getImageToDesign, startExport, startImageToDesign, uploadAsset } from "../_shared/canva/rest.ts";
 import { CanvaMcp } from "../_shared/canva/mcp.ts";
-import { CanvaBusy } from "../_shared/canva/pace.ts";
+import { CanvaBusy, databasePace } from "../_shared/canva/pace.ts";
 import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
 import { type Box, type Layer, type Placement, CLEAN_PROMPT, cleanMask, cleanRegions, copyOperations, elementBox, inkBox, logoRect, pasteRegions, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
@@ -66,6 +66,22 @@ Deno.serve(async (req) => {
     }
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const action = body?.action || "connection";
+
+    // One design job, handed out by a pass: advanced in this request, with its
+    // own CPU time and Canva session.
+    if (action === "advance") {
+      if (!(await secretEquals(req.headers.get("x-socialytics-secret") ?? "", Deno.env.get("SOCIALYTICS_N8N_SECRET")))) {
+        return json({ error: "Not allowed." }, 401);
+      }
+      const jobId = typeof body?.job_id === "string" ? body.job_id : "";
+      if (!jobId) return json({ error: "job_id is required." }, 400);
+      const work = advanceOne(admin, jobId).catch((e) => console.error(`[canva-finish] job ${jobId}:`, e instanceof Error ? e.message : e));
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+        EdgeRuntime.waitUntil(work);
+        return json({ accepted: true }, 202);
+      }
+      return json(await work);
+    }
 
     if (action === "tick") {
       if (!(await secretEquals(req.headers.get("x-socialytics-secret") ?? "", Deno.env.get("SOCIALYTICS_N8N_SECRET")))) {
@@ -208,24 +224,29 @@ function editStep(deadline: number, fn: () => Promise<StepResult>): Promise<Step
 }
 
 /**
- * One Canva editing session per tick, shared by the queued edits and closed
- * when the tick ends. Opening a new session per step (and never closing it)
- * left sessions piling up on the account, and Canva refused new ones.
+ * Each job's own Canva editing session, opened when its first edit needs one
+ * and always closed when the job's request ends (sessions left open used to
+ * pile up on the account). Its calls are paced by the count every request
+ * shares (claim_rate_slot), under Canva's per-tool limits.
  */
-let tickMcp: CanvaMcp | null = null;
-async function editingSession(token: string): Promise<CanvaMcp> {
-  if (!tickMcp) tickMcp = new CanvaMcp(token);
-  if (!tickMcp.ready) await tickMcp.init();
-  return tickMcp;
+const sessions = new Map<string, CanvaMcp>();
+async function editingSession(admin: any, token: string, jobId: string): Promise<CanvaMcp> {
+  let m = sessions.get(jobId);
+  if (!m) {
+    m = new CanvaMcp(token, databasePace(admin));
+    sessions.set(jobId, m);
+  }
+  if (!m.ready) await m.init();
+  return m;
 }
-async function closeEditingSession(): Promise<void> {
-  const m = tickMcp;
-  tickMcp = null;
+async function closeEditingSession(jobId: string): Promise<void> {
+  const m = sessions.get(jobId);
+  sessions.delete(jobId);
   if (m) await m.close();
 }
 
 const WORKER = "canva-finish";
-/** Longer than a pass can take: its budget, settling requests, closing the Canva session. */
+/** Longer than a pass can take: handing out the due jobs and settling requests. */
 const PASS_LEASE_S = 180;
 /** After a pass that had nothing to advance (designs still being drawn), wait this long before the next. */
 const IDLE_PAUSE_MS = 10_000;
@@ -236,8 +257,11 @@ const IDLE_PAUSE_MS = 10_000;
  * start the next one: its calls wait behind other scheduled jobs and reached
  * the worker only every 2 to 4 minutes (13 Oct).
  *
- * One pass runs at a time, held by a lease, since the Canva account takes one
- * editing session at a time. A call that finds the lease held ends at once.
+ * A pass hands out the due jobs; each job advances in its own request (the
+ * advance action), with its own CPU time and its own Canva session. Steps
+ * that decode, mask and encode a whole design used to share one request's CPU
+ * time, and two 9:16 video cards ran it out (13 Oct). One pass runs at a time,
+ * held by a lease, so a job is handed out once.
  */
 async function runPass(admin: any) {
   const holder = crypto.randomUUID();
@@ -258,7 +282,6 @@ async function runPass(admin: any) {
     failed = true;
     console.error("[canva-finish] pass failed:", e instanceof Error ? e.message : e);
   } finally {
-    await closeEditingSession().catch(() => undefined);
     await admin.rpc("release_worker_lease", { p_name: WORKER, p_holder: holder });
   }
   if (!failed && (await workRemains(admin))) {
@@ -285,9 +308,8 @@ type Job = { id: string; client_id: string; step: string; status: string; attemp
 type StepResult = "next" | "wait" | "done" | "held";
 
 async function tick(admin: any) {
-  const started = Date.now();
   // Canva jobs only: a video's footage and join are the video worker's
-  // (video-worker), which does not wait on Canva's one editing session.
+  // (video-worker), which does not use Canva.
   const { data: due } = await admin.from("canva_finish_jobs").select("id")
     .in("status", ["queued", "running"])
     .not("step", "in", VIDEO_STEPS_FILTER)
@@ -298,9 +320,9 @@ async function tick(admin: any) {
     return { ran: 0 };
   }
 
-  const token = await accessTokenFor(admin);
-  // Lease every due job, then advance them side by side: most of a step is
-  // waiting on Canva, so one design's wait should not hold up the others.
+  // Lease every due job, then hand each to its own request: most of a step is
+  // waiting on Canva, so one design's wait should not hold up the others, and
+  // a design's image work should not spend another's CPU time.
   const leased: Job[] = [];
   for (const { id } of due) {
     const now = new Date();
@@ -311,16 +333,49 @@ async function tick(admin: any) {
       .select("id, client_id, step, status, attempts, input, state, design_request_id, option_index, slide_index, slide_count");
     if (claimed?.[0]) leased.push(claimed[0]);
   }
-  const outcomes = await Promise.all(leased.map((job) => advance(admin, token, job, started)));
-  const settled = new Set<string>();
-  for (const job of leased) {
-    if (!job.design_request_id || settled.has(job.design_request_id)) continue;
-    settled.add(job.design_request_id);
+  const outcomes = await Promise.all(leased.map((job) => handOut(admin, job.id)));
+  // Requests of the jobs handed out are settled by those jobs' own requests.
+  await settleOpenRequests(admin, new Set(leased.map((job) => job.design_request_id).filter(Boolean) as string[]));
+  return { ran: leased.length, report: Object.fromEntries(leased.map((job, i) => [job.id, outcomes[i]])) };
+}
+
+/** Start one leased job's own request; if it cannot be started, the job is released for the next pass. */
+async function handOut(admin: any, jobId: string): Promise<string> {
+  const url = Deno.env.get("SUPABASE_URL");
+  const secret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
+  try {
+    const res = await fetch(`${url}/functions/v1/canva-finish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret ?? "" },
+      body: JSON.stringify({ action: "advance", job_id: jobId }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    await res.body?.cancel();
+    if (!res.ok) throw new Error(`advance answered ${res.status}`);
+    return "handed out";
+  } catch (e) {
+    console.error(`[canva-finish] could not hand out job ${jobId}:`, e instanceof Error ? e.message : e);
+    await admin.from("canva_finish_jobs").update({ lease_until: null }).eq("id", jobId);
+    return "released";
+  }
+}
+
+/** One job's request: advance it until it waits or its budget is spent, close its Canva session, settle its request. */
+async function advanceOne(admin: any, jobId: string) {
+  const { data: job } = await admin.from("canva_finish_jobs")
+    .select("id, client_id, step, status, attempts, input, state, design_request_id, option_index, slide_index, slide_count")
+    .eq("id", jobId).in("status", ["queued", "running"]).maybeSingle();
+  if (!job) return { skipped: "Not running." };
+  let outcome = "";
+  try {
+    outcome = await advance(admin, await accessTokenFor(admin), job as Job, Date.now());
+  } finally {
+    await closeEditingSession(jobId).catch(() => undefined);
+  }
+  if (job.design_request_id) {
     await settleRequest(admin, job.design_request_id).catch((e) => console.error(`[canva-finish] request ${job.design_request_id}:`, e instanceof Error ? e.message : e));
   }
-  await settleOpenRequests(admin, settled);
-  await closeEditingSession();
-  return { ran: leased.length, report: Object.fromEntries(leased.map((job, i) => [job.id, outcomes[i]])) };
+  return { outcome };
 }
 
 /**
@@ -411,7 +466,7 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       s.design_id = r.designId; job.step = "clean_read"; return "next";
     }
     // Where the drawn text and logo are, from the layers Magic Layers made.
-    case "clean_read": return await editStep(deadline, () => readCleanRegions(token, job));
+    case "clean_read": return await editStep(deadline, () => readCleanRegions(admin, token, job));
     // Redraw those areas from their surroundings, in the background (minutes).
     case "clean": {
       s.cleans = (s.cleans ?? 0) + 1;
@@ -452,17 +507,17 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
     }
     // An edit that would start after the pass's budget is spent waits for the
     // next pass, so a pass ends on time.
-    case "edit": return await editStep(deadline, () => editLayers(token, job));
+    case "edit": return await editStep(deadline, () => editLayers(admin, token, job));
     case "place_logo": return await editStep(deadline, () => placeLogo(admin, token, job));
   }
   throw new Error(`FINAL: Unknown step '${job.step}'`);
 }
 
 /** Delete the drawn logo's layers and set the exact copy, in one Canva editing session. */
-async function editLayers(token: string, job: Job): Promise<StepResult> {
+async function editLayers(admin: any, token: string, job: Job): Promise<StepResult> {
   const s = job.state;
   {
-      const mcp = await editingSession(token);
+      const mcp = await editingSession(admin, token, job.id);
       const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
       const tid = tx.transaction.transaction_id;
       s.page = { id: tx.pages[0].page_id, width: tx.pages[0].dimension.width, height: tx.pages[0].dimension.height };
@@ -515,7 +570,7 @@ async function placeLogo(admin: any, token: string, job: Job): Promise<StepResul
       const [lw, lh] = job.input.logo_size;
       const rect = logoRect(ink, lw, lh);
       s.logo_rect = rect;
-      const mcp = await editingSession(token);
+      const mcp = await editingSession(admin, token, job.id);
       const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
       // A retried step must not place a second logo when the first attempt
       // committed before it could record that it had.
@@ -601,9 +656,9 @@ async function generateDesign(admin: any, job: Job): Promise<void> {
 }
 
 /** Where the drawn text and logo sit, read from the design's layers (one Canva session, nothing changed). */
-async function readCleanRegions(token: string, job: Job): Promise<StepResult> {
+async function readCleanRegions(admin: any, token: string, job: Job): Promise<StepResult> {
   const s = job.state;
-  const mcp = await editingSession(token);
+  const mcp = await editingSession(admin, token, job.id);
   const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
   await mcp.call("cancel-editing-transaction", { transaction_id: tx.transaction.transaction_id, user_intent: INTENT }).catch(() => {});
   s.page = { id: tx.pages[0].page_id, width: tx.pages[0].dimension.width, height: tx.pages[0].dimension.height };
@@ -626,7 +681,10 @@ async function readCleanRegions(token: string, job: Job): Promise<StepResult> {
 async function cleanBackground(admin: any, job: Job): Promise<void> {
   const s = job.state;
   const regions = s.clean_regions as Box[];
-  const original = await Image.decode(await download(admin, s.design_path));
+  // The design's own file goes to the image model as it is; it is decoded once,
+  // for pasting the redrawn regions back.
+  const originalBytes = await download(admin, s.design_path);
+  const original = await Image.decode(originalBytes);
   const w = original.width, h = original.height;
   const mask = new Image(w, h);
   mask.bitmap.set(cleanMask(w, h, regions));
@@ -636,7 +694,7 @@ async function cleanBackground(admin: any, job: Job): Promise<void> {
   form.append("size", `${w}x${h}`);
   form.append("quality", "high");
   form.append("n", "1");
-  form.append("image[]", new Blob([(await original.encode()) as unknown as BlobPart], { type: "image/png" }), "design.png");
+  form.append("image[]", new Blob([originalBytes as unknown as BlobPart], { type: "image/png" }), "design.png");
   form.append("mask", new Blob([(await mask.encode()) as unknown as BlobPart], { type: "image/png" }), "mask.png");
   form.append("prompt", CLEAN_PROMPT);
   const resp = await fetch("https://api.openai.com/v1/images/edits", {

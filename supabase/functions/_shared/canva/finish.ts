@@ -192,13 +192,24 @@ function weightAt(x: number, y: number, regions: Box[], feather: number): number
  */
 export function pasteRegions(original: ArrayLike<number>, redrawn: ArrayLike<number>, width: number, height: number, regions: Box[], feather = 6): Uint8ClampedArray {
   const out = new Uint8ClampedArray(original as ArrayLike<number>);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const w = weightAt(x, y, regions, feather);
-      if (w <= 0) continue;
-      const i = (y * width + x) * 4;
-      for (let c = 0; c < 3; c++) out[i + c] = Math.round(original[i + c] * (1 - w) + redrawn[i + c] * w);
-      out[i + 3] = 255;
+  // Only the pixels inside the regions change, so only they are visited (the
+  // whole 9:16 card, 2 million pixels, used to be, and ran the worker out of
+  // CPU time on 13 Oct). Where regions overlap, a pixel is done once.
+  const done = new Uint8Array(width * height);
+  for (const [rx0, ry0, rx1, ry1] of regions) {
+    const x0 = Math.max(0, Math.floor(rx0)), y0 = Math.max(0, Math.floor(ry0));
+    const x1 = Math.min(width, Math.ceil(rx1)), y1 = Math.min(height, Math.ceil(ry1));
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const p = y * width + x;
+        if (done[p]) continue;
+        done[p] = 1;
+        const w = weightAt(x, y, regions, feather);
+        if (w <= 0) continue;
+        const i = p * 4;
+        for (let c = 0; c < 3; c++) out[i + c] = Math.round(original[i + c] * (1 - w) + redrawn[i + c] * w);
+        out[i + 3] = 255;
+      }
     }
   }
   return out;
