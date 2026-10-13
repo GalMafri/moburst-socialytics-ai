@@ -36,9 +36,11 @@ interface Props {
   waitingForCopy?: boolean;
   /** A video filmed with this person on camera: nothing is made here. */
   onCamera?: string | null;
+  /** A post of words alone: it has no design. */
+  textOnly?: boolean;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera }: Props) {
+export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly }: Props) {
   const design = currentDesign(versions);
   const earlier = versions.filter((v) => v !== design);
   const [showEarlier, setShowEarlier] = useState(false);
@@ -61,6 +63,8 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
               <p className="t-secondary">This post is written shortly before its date from what's trending then. Its design follows once it's written.</p>
             ) : onCamera ? (
               <p className="t-secondary">This video is filmed: it features {onCamera} on camera.</p>
+            ) : textOnly ? (
+              <p className="t-secondary">This is a text post, so it has no design.</p>
             ) : (
               <>
                 <p className="t-secondary">No design for this post yet.</p>

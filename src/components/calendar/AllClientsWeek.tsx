@@ -6,6 +6,7 @@
 
 import { useMemo } from "react";
 import { isVideoMedia } from "@/lib/designRequests";
+import { isTextOnlyFormat } from "@/lib/platform";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Clock, ImageOff } from "lucide-react";
@@ -75,6 +76,8 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                       ? <video src={designs[p.post_key]} muted playsInline preload="metadata" className="w-full h-full object-cover" />
                       : <img src={designs[p.post_key]} alt="" className="w-full h-full object-cover" loading="lazy" />}
                   </div>
+                ) : isTextOnlyFormat(p.format) ? (
+                  <p className="t-label">Text post</p>
                 ) : (
                   <p className="t-label inline-flex items-center gap-1"><ImageOff className="h-3 w-3" aria-hidden />No design yet</p>
                 )}

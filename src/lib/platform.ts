@@ -40,6 +40,11 @@ export function platformLabel(value: string | null | undefined): string {
  * asset. Kept beside the other platform helpers so it stays free of the
  * Supabase client and can be unit tested.
  */
+/** A post made of words alone (a text-only tweet, say): it has no design. */
+export function isTextOnlyFormat(format: string | null | undefined): boolean {
+  return /^\s*text(\s*only)?\s*$|text[-\s]only/i.test(String(format || ""));
+}
+
 export function isVideoFormat(format: string | null | undefined, platform?: string | null): boolean {
   const f = String(format || "").toLowerCase();
   if (/\b(video|reel|reels|short|shorts|igtv|clip|tiktok)\b/.test(f)) return true;

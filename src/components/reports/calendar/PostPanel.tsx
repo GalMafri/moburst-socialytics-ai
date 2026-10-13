@@ -29,7 +29,7 @@ import { useGenerationForPost } from "@/components/reports/calendar/GenerationCo
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
 import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
-import { isVideoFormat } from "@/lib/platform";
+import { isTextOnlyFormat, isVideoFormat } from "@/lib/platform";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { CalendarPost } from "@/lib/calendarRevision";
@@ -272,6 +272,7 @@ export function PostPanel({
                     versions={versions}
                     preparing={preparingDesigns ? designRequest : null}
                     onCamera={designRequest?.status === "needs_filming" ? designRequest.on_camera || "a real person" : null}
+                    textOnly={isTextOnlyFormat(post.format)}
                     isStaff={isMoburstStaff}
                     aspect={videoDesigns ? "aspect-[9/16]" : tileAspectFor(post) || "aspect-[4/5]"}
                     filenameStub={`design-${post.platform || "post"}`}

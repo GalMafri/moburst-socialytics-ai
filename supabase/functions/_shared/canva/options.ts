@@ -207,6 +207,9 @@ export function requestProgress(jobs: JobState[], wanted = OPTIONS_WANTED, brief
     : { status: "needs_staff", stage: "designing", options_ready: 0, start_brief: null };
 }
 
+/** The steps of a design or video still being made, before the logo and words go on. */
+const DESIGNING_STEPS = new Set(["generate", "references", "references_wait", "footage", "hook", "hook_check", "footage_wait"]);
+
 function stageOf(active: JobState[]): RequestProgress["stage"] {
   if (!active.length) return "designing";
   return active.some((j) => j.step === "generate") ? "designing" : "finishing";
@@ -225,8 +228,8 @@ export function optionStates(jobs: Array<JobState & { option_index: number; slid
     const expected = slides[0].slide_count ?? 1;
     if (slides.some((j) => j.status === "failed")) return { status: "failed", step: "failed" };
     if (slides.length >= expected && slides.every((j) => j.status === "done")) return { status: "done", step: "finished" };
-    // A video's footage being generated counts as designing, like a card being drawn.
-    return { status: "running", step: slides.some((j) => j.step === "generate" || j.step === "footage" || j.step === "footage_wait") ? "generate" : "finishing" };
+    // A video counts as designing until its footage is ready; the join is its finishing.
+    return { status: "running", step: slides.some((j) => DESIGNING_STEPS.has(j.step)) ? "generate" : "finishing" };
   });
 }
 

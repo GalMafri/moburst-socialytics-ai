@@ -83,7 +83,7 @@ function DockCard({ request, isStaff, onOpen, onDismiss }: { request: DesignRequ
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold tracking-[-0.2px] text-white">
-            {ready ? stageLine(request, isStaff) : preparing ? (request.kind === "carousel" ? "Preparing your carousel" : "Preparing your design") : stageLine(request, isStaff)}
+            {ready ? stageLine(request, isStaff) : preparing ? `Preparing your ${nounOf(request)}` : stageLine(request, isStaff)}
           </p>
           <p className="t-label tracking-[-0.2px] truncate mt-0.5">{postLabel(request)}</p>
         </div>
@@ -99,10 +99,15 @@ function DockCard({ request, isStaff, onOpen, onDismiss }: { request: DesignRequ
       {preparing && <p className="mt-1.5 t-subhead">{stageLine(request, isStaff)}</p>}
       <div className="mt-3 flex gap-2">
         <button type="button" onClick={onOpen} className="flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-[8px] bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.10)] text-sm font-medium text-white tracking-[-0.2px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-          {ready ? (request.kind === "carousel" ? "View carousel" : "View design") : "Open"}
+          {ready ? `View ${nounOf(request)}` : "Open"}
           <ArrowRight className="h-3.5 w-3.5" />
         </button>
       </div>
     </div>
   );
 }
+
+function nounOf(r: DesignRequest): string {
+  return r.kind === "carousel" ? "carousel" : r.kind === "video" ? "video" : "design";
+}
+

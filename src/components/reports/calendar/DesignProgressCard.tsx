@@ -9,7 +9,7 @@ import { Check, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { DESIGN_STEPS, cancelDesign, elapsedLabel, progressPercent, stageIndex, typicalMinutes, type DesignRequest } from "@/lib/designRequests";
+import { stepsFor, cancelDesign, elapsedLabel, progressPercent, stageIndex, typicalMinutes, type DesignRequest } from "@/lib/designRequests";
 import { useDesignRequests } from "./DesignRequestsContext";
 
 export function DesignProgressCard({ request, isStaff, replacing = false }: { request: DesignRequest; isStaff: boolean; replacing?: boolean }) {
@@ -68,7 +68,7 @@ export function DesignProgressCard({ request, isStaff, replacing = false }: { re
       />
 
       <ol className="grid grid-cols-3 gap-2" aria-label="Steps">
-        {DESIGN_STEPS.map((step, i) => {
+        {stepsFor(request).map((step, i) => {
           const done = i < current;
           const active = i === current && !staffAttention;
           return (

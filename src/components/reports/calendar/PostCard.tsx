@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isTextOnlyFormat } from "@/lib/platform";
 import { Badge } from "@/components/ui/badge";
 import { PlatformBadge } from "@/lib/platform-config";
 import { Clock, ImagePlus, Loader2, Sparkles, Video as VideoIcon } from "lucide-react";
@@ -99,8 +100,14 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-[rgba(255,255,255,0.04)] border border-dashed border-white/10 group-hover:border-primary/40 transition-colors">
             <div className="flex items-center gap-2 text-muted-foreground">
-              <ImagePlus className="h-4 w-4" />
-              <span className="t-label">No design yet</span>
+              {isTextOnlyFormat(post.format) ? (
+                <span className="t-label">Text post</span>
+              ) : (
+                <>
+                  <ImagePlus className="h-4 w-4" />
+                  <span className="t-label">No design yet</span>
+                </>
+              )}
             </div>
           </div>
         )}

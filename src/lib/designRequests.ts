@@ -42,6 +42,17 @@ export const DESIGN_STEPS: Array<{ stage: Exclude<DesignStage, "ready">; label: 
   { stage: "finishing", label: "Adding your logo and copy" },
 ];
 
+/** A video's steps: its footage is made, then its hook and logo go on. */
+export const VIDEO_STEPS: Array<{ stage: Exclude<DesignStage, "ready">; label: string }> = [
+  { stage: "planning", label: "Planning" },
+  { stage: "designing", label: "Making the footage" },
+  { stage: "finishing", label: "Adding the hook and your logo" },
+];
+
+export function stepsFor(r: Pick<DesignRequest, "kind">): typeof DESIGN_STEPS {
+  return r.kind === "video" ? VIDEO_STEPS : DESIGN_STEPS;
+}
+
 /**
  * Used until a client has three finished requests of the kind to measure:
  * 6 min 24 s measured on 13 Oct for a single design; a carousel's five slides
@@ -73,8 +84,9 @@ export function isPreparing(r: DesignRequest | null | undefined, isStaff: boolea
 }
 
 export function stageIndex(r: DesignRequest): number {
-  const i = DESIGN_STEPS.findIndex((s) => s.stage === r.stage);
-  return i < 0 ? DESIGN_STEPS.length : i;
+  const steps = stepsFor(r);
+  const i = steps.findIndex((s) => s.stage === r.stage);
+  return i < 0 ? steps.length : i;
 }
 
 /** 0–100 for a progress bar: the stage, plus the share of options already finished. */
@@ -88,7 +100,8 @@ export function stageLine(r: DesignRequest, isStaff: boolean): string {
   const noun = r.kind === "carousel" ? "Carousel" : r.kind === "video" ? "Video" : "Design";
   if (r.status === "ready") return `${noun} ready`;
   if (r.status === "needs_staff" && isStaff) return "Needs a look from the team";
-  return DESIGN_STEPS[Math.min(stageIndex(r), DESIGN_STEPS.length - 1)].label;
+  const steps = stepsFor(r);
+  return steps[Math.min(stageIndex(r), steps.length - 1)].label;
 }
 
 export function elapsedLabel(fromIso: string, now = Date.now()): string {
