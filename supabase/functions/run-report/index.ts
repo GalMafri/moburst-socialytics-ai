@@ -16,7 +16,7 @@ import { competitiveRangeError } from "../_shared/reports/competitiveRange.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { buildCompetitivePayload, buildSocialPayload, isStuckRun, STUCK_AFTER_MINUTES, type ReportRange } from "../_shared/reports/payloads.ts";
-import { bestLandscapeMatch, summarizeLandscapes } from "../_shared/competitive/rivaliqLandscape.ts";
+import { checkClientLandscape, isAppCreatedLandscape, LANDSCAPE_MISSING, RIVALIQ_BUSY, RIVALIQ_UNAVAILABLE } from "../_shared/competitive/landscapeCheck.ts";
 import { rivalIqFetch } from "../_shared/competitive/rivaliqFetch.ts";
 import { isReviewReadyHandle } from "../_shared/competitive/extractSocialHandles.ts";
 import { missingProfileRepairs } from "../_shared/competitive/profileRepairs.ts";
@@ -240,49 +240,52 @@ Deno.serve(async (req) => {
 
       // The analysis reads a RivalIQ landscape, not the competitor list in
       // the app. A client with no landscape used to spend a whole run to be
-      // told so by a JavaScript error inside the workflow. Checked here, so
-      // the scheduler and a retry get the same protection as the run page.
+      // told so by a JavaScript error inside the workflow. The check is the
+      // shared one (_shared/competitive/landscapeCheck.ts), so a scheduled
+      // run and a retry get exactly the protection the run page gets.
       const rivaliqKey = Deno.env.get("RIVALIQ_API_KEY");
       if (!rivaliqKey) return json({ error: "RivalIQ is not configured. No report was started." }, 503);
-      if (rivaliqKey) {
-        try {
-          const resp = await rivalIqFetch(`https://api.rivaliq.com/v3/landscapes?apiKey=${encodeURIComponent(rivaliqKey)}`);
-          if (resp.status === 429) {
-            return json({ error: "RivalIQ cannot accept a new request yet. No report was started; please wait before trying again.", code: "RIVALIQ_BUSY" }, 429);
-          }
-          if (!resp.ok) return json({ error: `RivalIQ connection check failed (HTTP ${resp.status}). No report was started.` }, 502);
-          if (resp.ok) {
-            const landscapes = (await resp.json()).landscapes || [];
-            const listed = summarizeLandscapes(landscapes, client.name, client.website_url);
-            const wanted = set.rivaliq_landscape_id
-              ? listed.find((l) => String(l.id) === String(set.rivaliq_landscape_id))
-              : bestLandscapeMatch(listed);
-            if (!wanted?.is_match) {
-              return json({
-                error:
-                  `No RivalIQ landscape tracks ${client.name}. Use Set up RivalIQ tracking on the Competitors screen ` +
-                  `to connect the reviewed companies, or import an existing matching landscape. No RivalIQ sign-in is required.`,
-              }, 422);
-            }
-            try {
-              const tracked = landscapes.find((l: any) => String(l.id) === wanted.id)?.companies || [];
-              for (const repair of missingProfileRepairs(reviewedCompanies, tracked)) {
-                const updated = await rivalIqFetch(`https://api.rivaliq.com/v3/landscapes/${encodeURIComponent(wanted.id)}/companies/${encodeURIComponent(String(repair.companyId))}?apiKey=${encodeURIComponent(rivaliqKey)}`, {
-                  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(repair.patch), signal: AbortSignal.timeout(25000),
-                });
-                if (!updated.ok) return json({ error: `${repair.name}'s reviewed profiles could not be connected to RivalIQ (HTTP ${updated.status}). No report was started. Review tracking before trying again.` }, 422);
-                const company = (await updated.json()).company;
-                if (Object.keys(repair.patch).some(field => !company?.[field]?.handle && !company?.[field]?.nativeId && !company?.[field]?.url)) {
-                  return json({ error: `${repair.name}'s profile update is not confirmed yet. No report was started. Check tracking again after RivalIQ finishes collecting it.` }, 422);
-                }
-              }
-            } catch (error) {
-              return json({ error: error instanceof Error ? error.message.replaceAll(rivaliqKey, '[redacted]').replaceAll(encodeURIComponent(rivaliqKey), '[redacted]') : 'Could not verify reviewed competitor profiles. No report was started.' }, 422);
-            }
-          }
-        } catch {
-          return json({ error: "RivalIQ connection could not be verified. No report was started." }, 502);
+      const redact = (text: string) => text.replaceAll(rivaliqKey, "[redacted]").replaceAll(encodeURIComponent(rivaliqKey), "[redacted]");
+      const tracking = await checkClientLandscape(rivaliqKey, client, set.rivaliq_landscape_id);
+      if (!tracking.ok) {
+        if (tracking.code === RIVALIQ_BUSY) {
+          return json({ error: "RivalIQ cannot accept a new request yet. No report was started; please wait before trying again.", code: RIVALIQ_BUSY }, 429);
         }
+        if (tracking.code === RIVALIQ_UNAVAILABLE) {
+          return json({ error: tracking.status ? `RivalIQ connection check failed (HTTP ${tracking.status}). No report was started.` : "RivalIQ connection could not be verified. No report was started." }, 502);
+        }
+        return json({ error: tracking.code === LANDSCAPE_MISSING ? `${tracking.message} No report was started.` : tracking.message, code: tracking.code }, 422);
+      }
+
+      // Reviewed profiles RivalIQ is missing are filled in, but only on a
+      // landscape this app created. A strategy team's shared landscape (the
+      // "TIER 2 FIRMS" kind) is theirs: it is read, and its companies are
+      // never edited from here. The selection is still checked against it.
+      try {
+        const wantedId = tracking.summary.id;
+        const repairs = missingProfileRepairs(reviewedCompanies, (tracking.landscape.companies || []) as any[]);
+        let ours = false;
+        if (repairs.length) {
+          const { data: setupJobs, error: setupError } = await admin
+            .from("rivaliq_setup_jobs")
+            .select("landscape_id, plan")
+            .eq("landscape_id", wantedId);
+          if (setupError) throw new Error(`Could not check who owns the tracked landscape: ${setupError.message}`);
+          ours = isAppCreatedLandscape(tracking.landscape, setupJobs || []);
+          if (!ours) console.log(`[run-report] ${client.name}: ${repairs.length} profile update(s) skipped on landscape ${wantedId}, which this app did not create`);
+        }
+        for (const repair of ours ? repairs : []) {
+          const updated = await rivalIqFetch(`https://api.rivaliq.com/v3/landscapes/${encodeURIComponent(wantedId)}/companies/${encodeURIComponent(String(repair.companyId))}?apiKey=${encodeURIComponent(rivaliqKey)}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(repair.patch), signal: AbortSignal.timeout(25000),
+          });
+          if (!updated.ok) return json({ error: `${repair.name}'s reviewed profiles could not be connected to RivalIQ (HTTP ${updated.status}). No report was started. Review tracking before trying again.` }, 422);
+          const company = (await updated.json()).company;
+          if (Object.keys(repair.patch).some(field => !company?.[field]?.handle && !company?.[field]?.nativeId && !company?.[field]?.url)) {
+            return json({ error: `${repair.name}'s profile update is not confirmed yet. No report was started. Check tracking again after RivalIQ finishes collecting it.` }, 422);
+          }
+        }
+      } catch (error) {
+        return json({ error: error instanceof Error ? redact(error.message) : 'Could not verify reviewed competitor profiles. No report was started.' }, 422);
       }
 
       if (existing) {

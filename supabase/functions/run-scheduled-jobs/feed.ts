@@ -1,5 +1,6 @@
 // One competitor feed refresh, run in-process by the worker.
 
+import { CLIENT_NOT_TRACKED, LANDSCAPE_MISSING } from "../_shared/competitive/landscapeCheck.ts";
 import type { JobOutcome, ScheduledJob } from "./types.ts";
 
 export const FEED_RETRY_MINUTES = 10;
@@ -21,8 +22,14 @@ export async function runFeedJob(job: ScheduledJob, d: FeedDeps): Promise<JobOut
     const reason = err?.message ?? String(e);
     // An unconfigured client needs setup, not a failure alert. Only this exact
     // contract is downgraded; a provider error carrying the code is still a failure.
-    if (err?.status === 422 && err?.code === "RIVALIQ_CLIENT_NOT_TRACKED") {
+    if (err?.status === 422 && err?.code === CLIENT_NOT_TRACKED) {
       return { status: "skipped", reason, result: { code: err.code } };
+    }
+    // A linked landscape that disappeared or stopped matching is a break, not
+    // setup still to do. It fails at once (retrying cannot bring it back), and
+    // the daily status check lists failed jobs, which is what alerts staff.
+    if (err?.status === 422 && err?.code === LANDSCAPE_MISSING) {
+      return { status: "failed", reason, result: { code: err.code } };
     }
     if (job.attempts >= job.max_attempts) {
       return { status: "failed", reason };
