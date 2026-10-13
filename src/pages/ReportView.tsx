@@ -52,6 +52,8 @@ import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
 import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
 import { useInsightFeedback } from "@/hooks/useInsightFeedback";
+import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
+import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
 import { Prose } from "@/components/ui/prose";
 import { Section, SectionNav } from "@/components/ui/section";
 import { InsightGrid } from "@/components/ui/insight-card";
@@ -73,9 +75,13 @@ export default function ReportView() {
   const { verdictFor } = useInsightFeedback(id);
 
   // The latest competitive analysis, so the overview can place this month
-  // against the field and surface the gaps the team decided to act on.
+  // against the field and surface the gaps the team decided to act on. Only
+  // one that passed the source checks: a held-back analysis is not shown here
+  // (the competitive tab says it is awaiting review), and its figures go
+  // through the same normalization as every other competitive screen. Its
+  // own query key, since CompetitiveSnapshot reads different columns.
   const { data: latestCompetitive } = useQuery({
-    queryKey: ["competitive-latest", id],
+    queryKey: ["competitive-latest-ready", id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("competitive_reports")
@@ -86,7 +92,8 @@ export default function ReportView() {
         .limit(1)
         .maybeSingle();
       if (error) throw error;
-      return data;
+      if (!data || !competitiveReportQuality(data.report_data).ready) return null;
+      return { ...data, report_data: withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(data.report_data)) };
     },
     enabled: !!id,
   });
@@ -307,7 +314,7 @@ export default function ReportView() {
   const compAgg = (latestCompetitive?.report_data as any)?.aggregates;
   const compMe = compAgg?.companies?.find((c: any) => c.is_client);
   const compTotal = (compAgg?.companies || []).reduce((s: number, c: any) => s + (c.post_count || 0), 0);
-  const compScore = (latestCompetitive?.report_data as any)?.ai_analysis?.benchmark_scorecard?.client_score;
+  const compRate: number | null = typeof compMe?.engagement_rate_avg === "number" && Number.isFinite(compMe.engagement_rate_avg) ? compMe.engagement_rate_avg : null;
   const openAction = (a: Action) => {
     if (a.href) return navigate(a.href);
     if (a.tab) return setTab(a.tab);
@@ -463,7 +470,7 @@ export default function ReportView() {
                 <Card className="glass-accent">
                   <CardContent className="pt-5 flex items-center justify-between gap-6 flex-wrap">
                     <dl className="flex items-center gap-10 flex-wrap">
-                      <div><dt className="t-subhead">Benchmark score</dt><dd className="t-stat tabular-nums">{compScore != null ? `${compScore}/100` : "pending"}</dd></div>
+                      {compRate != null && <div><dt className="t-subhead">Engagement rate</dt><dd className="t-stat tabular-nums">{(compRate * 100).toFixed(2)}%</dd></div>}
                       {compTotal ? <div><dt className="t-subhead">Share of voice</dt><dd className="t-stat tabular-nums">{Math.round((compMe.post_count / compTotal) * 100)}%</dd></div> : null}
                       {compMe.cadence_per_week != null && <div><dt className="t-subhead">Posts a week</dt><dd className="t-stat tabular-nums">{compMe.cadence_per_week}</dd></div>}
                     </dl>

@@ -1,6 +1,18 @@
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+
+const PLAIN_MESSAGE = "The request did not complete. Your connection or the server may be having a moment.";
+
+/** Staff see why a load failed; anyone else, or a render outside the auth provider, does not. */
+function useShowsRawDetail(): boolean {
+  try {
+    return useAuth().isMoburstStaff === true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * A query that failed, said so.
@@ -13,6 +25,10 @@ import { cn } from "@/lib/utils";
  *
  * Kept separate from EmptyState so the two can never be confused at a call
  * site: this one carries a way to try again, and an empty state never should.
+ *
+ * A thrown error's own text (a raw Supabase or network message) is shown to
+ * staff only; a client sees the plain sentence. A string passed as `error`
+ * is copy written for the reader and is shown to everyone.
  */
 export function LoadError({
   title = "That did not load",
@@ -25,12 +41,14 @@ export function LoadError({
   onRetry?: () => void;
   className?: string;
 }) {
-  const message =
+  const staff = useShowsRawDetail();
+  const raw =
     error instanceof Error && error.message
       ? error.message
-      : typeof error === "string" && error
-        ? error
-        : "The request did not complete. Your connection or the server may be having a moment.";
+      : error && typeof error === "object" && typeof (error as { message?: unknown }).message === "string"
+        ? (error as { message: string }).message
+        : "";
+  const message = typeof error === "string" && error ? error : staff && raw ? raw : PLAIN_MESSAGE;
 
   return (
     <div

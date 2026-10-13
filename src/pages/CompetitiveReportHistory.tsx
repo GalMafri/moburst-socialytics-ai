@@ -6,6 +6,7 @@ import { competitiveReportQuality } from "../../supabase/functions/_shared/compe
 import { useNavigate, useParams } from "react-router-dom";
 import { canRetry, retryLabel } from "@/lib/reportRun";
 import { competitiveFailureMessage } from "@/lib/competitiveFlow";
+import { competitiveStatusBadge } from "@/lib/competitiveStatus";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,6 +20,7 @@ import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/ui/load-error";
 import { formatRange } from "@/lib/dateRange";
+import { watchExpired } from "@/lib/runWatch";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ArrowLeft, Crosshair, Eye, Loader2, Play, Rss } from "lucide-react";
 
@@ -49,7 +51,8 @@ export default function CompetitiveReportHistory() {
       return data;
     },
     enabled: !!id,
-    refetchInterval: (q) => ((q.state.data as any[] | undefined)?.some((r) => r.status === "running") ? 10000 : false),
+    // Only while a run is going and inside the watch limit; the abandoned-run sweep closes the rest.
+    refetchInterval: (q) => ((q.state.data as any[] | undefined)?.some((r) => r.status === "running" && !watchExpired(r.created_at)) ? 10000 : false),
   });
 
   return (
@@ -88,7 +91,7 @@ export default function CompetitiveReportHistory() {
                     <TableHead>Run</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Period analyzed</TableHead>
-                    <TableHead>Landscape</TableHead>
+                    {isMoburstStaff && <TableHead>Landscape</TableHead>}
                     <TableHead>Duration</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -98,14 +101,15 @@ export default function CompetitiveReportHistory() {
                     const rd = (r.report_data || {}) as any;
                     const running = r.status === "running";
                     const held = !running && !competitiveReportQuality(rd).ready;
-                    const period = rd.period?.start ? formatRange(rd.period) : r.date_range_start ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "—";
+                    const period = rd.period?.start ? formatRange(rd.period) : r.date_range_start ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "–";
+                    const badge = competitiveStatusBadge(r.status, { held });
                     return (
                       <TableRow key={r.id} className={running ? "animate-pulse" : ""}>
                         <TableCell className="t-body">{new Date(r.created_at).toLocaleString()}</TableCell>
                         <TableCell>
-                          <Badge variant={held ? "secondary" : r.status === "complete" ? "default" : running ? "secondary" : "destructive"} className="gap-1">
+                          <Badge variant={badge.variant} className="gap-1">
                             {running && <Loader2 className="h-3 w-3 animate-spin" />}
-                            {held ? "Awaiting review" : r.status}
+                            {badge.label}
                           </Badge>
                         </TableCell>
                         <TableCell className="t-secondary">
@@ -114,8 +118,8 @@ export default function CompetitiveReportHistory() {
                             <span className="block t-label text-destructive break-words">{competitiveFailureMessage(rd)}</span>
                           )}
                         </TableCell>
-                        <TableCell className="t-secondary">{rd.landscape?.name || "—"}</TableCell>
-                        <TableCell className="t-secondary">{!running && r.duration_minutes ? `${r.duration_minutes}m` : "—"}</TableCell>
+                        {isMoburstStaff && <TableCell className="t-secondary">{rd.landscape?.name || "–"}</TableCell>}
+                        <TableCell className="t-secondary">{!running && r.duration_minutes ? `${r.duration_minutes}m` : "–"}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             {!running && (

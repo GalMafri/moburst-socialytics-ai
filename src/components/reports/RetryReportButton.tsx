@@ -15,6 +15,8 @@ const COMPETITIVE_KEYS = [
   "competitive-reports",
   "competitive-report",
   "competitive-latest",
+  "competitive-latest-ready",
+  "competitive-snapshot",
   "competitive-runs",
   "active-report-run",
 ];

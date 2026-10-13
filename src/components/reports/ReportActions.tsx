@@ -94,7 +94,7 @@ export function ReportActions({ report, kind = "monthly", onDeleted }: ReportAct
     } else {
       toast({ title: "Report deleted" });
       for (const key of kind === "competitive"
-        ? ["all-competitive-reports", "competitive-reports-history", "competitive-reports", "competitive-report", "competitive-latest", "competitive-runs"]
+        ? ["all-competitive-reports", "competitive-reports-history", "competitive-reports", "competitive-report", "competitive-latest", "competitive-latest-ready", "competitive-snapshot", "competitive-runs"]
         : ["reports", "reports-history", "all-reports", "report"]) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
