@@ -138,3 +138,26 @@ export function designVersions(iterations: Iteration[], isImage: (url: string) =
 export function currentDesign(versions: DesignVersion[]): DesignVersion | null {
   return versions.find((v) => v.isSelected) ?? versions[0] ?? null;
 }
+
+/** Reasons a person can give for turning a design down; the client's next designs learn from them. */
+export const DESIGN_FEEDBACK_REASONS: Array<{ value: string; label: string }> = [
+  { value: "wrong_style", label: "Wrong style or layout" },
+  { value: "repetitive", label: "Too similar to other designs" },
+  { value: "off_brand_colours", label: "Off-brand colors" },
+  { value: "not_relevant", label: "Doesn't fit the message" },
+  { value: "text_errors", label: "Text is wrong or hard to read" },
+  { value: "logo_or_mark", label: "A logo or mark looks wrong" },
+  { value: "other", label: "Something else" },
+];
+
+/**
+ * Turn a design down (its reason teaches the client's next designs, and a new
+ * design is started unless makeNew is false) or delete it.
+ */
+export async function sendDesignFeedback(args: { iterationId: string; verdict: "rejected" | "deleted"; reason?: string; note?: string; makeNew?: boolean }): Promise<{ request: DesignRequest | null }> {
+  const { data, error } = await supabase.functions.invoke("design-request", {
+    body: { action: "feedback", iteration_id: args.iterationId, verdict: args.verdict, reason: args.reason, note: args.note, make_new: args.makeNew },
+  });
+  if (error || data?.error) throw new Error(await describeInvokeError(error, data));
+  return { request: (data?.request as DesignRequest | null) ?? null };
+}

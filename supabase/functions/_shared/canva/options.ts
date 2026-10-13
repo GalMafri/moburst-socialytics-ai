@@ -190,10 +190,11 @@ const CHOOSE_POSTS = (brand: string) =>
   `- layout: a few words naming the layout of the posts you chose.`;
 
 /** The planner's instruction for carousels: every option is a set of slides read in order. */
-export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string }): string {
+export function carouselPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; slides: number; postCount: number; recent: string; guidance?: string }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     args.recent,
+    args.guidance ?? "",
     `Plan ${args.count} different carousel options for a new ${args.platform} carousel post with this copy:`,
     `"""${args.copy}"""`,
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
@@ -209,10 +210,11 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
 }
 
 /** The planner's instruction. The pictures it writes go to the image model as they are. */
-export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string }): string {
+export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     args.recent,
+    args.guidance ?? "",
     `Plan ${args.count} different design options for a new ${args.platform} post with this copy:`,
     `"""${args.copy}"""`,
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",

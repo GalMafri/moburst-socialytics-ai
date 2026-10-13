@@ -7,11 +7,16 @@
  */
 
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, Expand, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, Expand, Loader2, RefreshCw, Sparkles, ThumbsDown, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { DesignProgressCard } from "./DesignProgressCard";
-import { currentDesign, type DesignRequest, type DesignVersion } from "@/lib/designRequests";
+import { DESIGN_FEEDBACK_REASONS, currentDesign, type DesignRequest, type DesignVersion } from "@/lib/designRequests";
 
 interface Props {
   versions: DesignVersion[];
@@ -25,13 +30,17 @@ interface Props {
   creating: boolean;
   onUse: (iterationId: string) => void;
   usingId: string | null;
+  /** Turn a design down with a reason the client's next designs learn from (and start a new one), or delete it. */
+  onFeedback: (iterationId: string, verdict: "rejected" | "deleted", reason?: string, note?: string, makeNew?: boolean) => Promise<void>;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId }: Props) {
+export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback }: Props) {
   const design = currentDesign(versions);
   const earlier = versions.filter((v) => v !== design);
   const [showEarlier, setShowEarlier] = useState(false);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
+  const [rejecting, setRejecting] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const isCarousel = (design?.urls.length ?? 0) > 1;
 
   if (!design) {
@@ -80,6 +89,14 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
           Regenerate
         </Button>
         <DownloadButton urls={design.urls} filenameStub={filenameStub} />
+        <div className="ml-auto flex items-center gap-1">
+          <Button size="sm" variant="ghost" className="h-9" onClick={() => setRejecting(design.iterationId)} aria-label="Not right: tell us why">
+            <ThumbsDown className="h-3.5 w-3.5 mr-1.5" />Not right
+          </Button>
+          <Button size="icon" variant="ghost" className="h-9 w-9 text-muted-foreground hover:text-white" onClick={() => setDeleting(design.iterationId)} aria-label={`Delete this ${isCarousel ? "carousel" : "design"}`}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
       {!preparing && (
         <p className="t-secondary">Regenerate makes a new {isCarousel ? "carousel" : "design"} from the post as it is now, including any copy changes. This one stays until the new one is ready.</p>
@@ -113,7 +130,12 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
                     </span>
                   </button>
                   <div className="p-2 space-y-1.5 bg-[rgba(0,0,0,0.4)]">
-                    <p className="t-label">{dateLabel(v.createdAt)}</p>
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="t-label">{dateLabel(v.createdAt)}</p>
+                      <button type="button" onClick={() => setDeleting(v.iterationId)} className="text-muted-foreground hover:text-white p-1 rounded" aria-label={`Delete the design from ${dateLabel(v.createdAt)}`}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                     <Button size="sm" variant="outline" className="w-full h-8" onClick={() => onUse(v.iterationId)} disabled={usingId === v.iterationId}>
                       {usingId === v.iterationId ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
                       Use this one
@@ -127,7 +149,75 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
       )}
 
       <SlideLightbox state={lightbox} onClose={() => setLightbox(null)} />
+      <FeedbackDialog
+        open={!!rejecting}
+        isCurrent={rejecting === design.iterationId}
+        noun={isCarousel ? "carousel" : "design"}
+        onOpenChange={(o) => !o && setRejecting(null)}
+        onSubmit={async (reason, note, makeNew) => { if (rejecting) await onFeedback(rejecting, "rejected", reason, note, makeNew); setRejecting(null); }}
+      />
+      <ConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title={`Delete this ${isCarousel ? "carousel" : "design"}?`}
+        description="It's removed from this post. To say what was wrong so the next designs improve, use Not right instead."
+        confirmLabel="Delete"
+        onConfirm={async () => { if (deleting) await onFeedback(deleting, "deleted"); setDeleting(null); }}
+      />
     </div>
+  );
+}
+
+/** What was wrong with a design, in a few clicks; the client's next designs learn from it. */
+function FeedbackDialog({ open, isCurrent, noun, onOpenChange, onSubmit }: {
+  open: boolean;
+  isCurrent: boolean;
+  noun: string;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (reason: string, note: string, makeNew: boolean) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("wrong_style");
+  const [note, setNote] = useState("");
+  const [makeNew, setMakeNew] = useState(true);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) { setReason("wrong_style"); setNote(""); setMakeNew(true); } }, [open]);
+  const submit = async () => {
+    setBusy(true);
+    try { await onSubmit(reason, note.trim(), isCurrent && makeNew); } finally { setBusy(false); }
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="t-h3">What's not right?</DialogTitle>
+          <DialogDescription>This {noun} is removed, and every next design for this brand takes your feedback into account.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <RadioGroup value={reason} onValueChange={setReason} className="grid gap-2">
+            {DESIGN_FEEDBACK_REASONS.map((r) => (
+              <div key={r.value} className="flex items-center gap-2">
+                <RadioGroupItem value={r.value} id={`design-reason-${r.value}`} />
+                <Label htmlFor={`design-reason-${r.value}`} className="font-normal">{r.label}</Label>
+              </div>
+            ))}
+          </RadioGroup>
+          <div className="space-y-1.5">
+            <Label htmlFor="design-feedback-note">Anything specific? (optional)</Label>
+            <Textarea id="design-feedback-note" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="For example: we never use rockets; show people instead" />
+          </div>
+          {isCurrent && (
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="design-feedback-new" className="font-normal">Make a new {noun} with this feedback</Label>
+              <Switch id="design-feedback-new" checked={makeNew} onCheckedChange={setMakeNew} />
+            </div>
+          )}
+          <Button className="w-full" onClick={submit} disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-2" />}
+            Send feedback
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

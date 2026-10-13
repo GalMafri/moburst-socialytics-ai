@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { useDesignRequestForPost, useDesignRequests } from "./DesignRequestsContext";
 import { PostDesign } from "./PostDesign";
-import { createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse } from "@/lib/designRequests";
+import { createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback } from "@/lib/designRequests";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -126,6 +126,16 @@ export function PostPanel({
       toast.error("Could not use this design", { description: e instanceof Error ? e.message : "Try again." });
     } finally {
       setUsingId(null);
+    }
+  };
+  const designFeedback = async (iterationId: string, verdict: "rejected" | "deleted", reason?: string, note?: string, makeNew?: boolean) => {
+    try {
+      const { request } = await sendDesignFeedback({ iterationId, verdict, reason, note, makeNew });
+      refreshMedia();
+      designRequests?.refresh();
+      toast.success(verdict === "deleted" ? "Deleted" : request ? "Thanks. A new design is being made with your feedback." : "Thanks. The next designs will take it into account.");
+    } catch (e) {
+      toast.error(verdict === "deleted" ? "Could not delete it" : "Could not send that", { description: e instanceof Error ? e.message : "Try again." });
     }
   };
   // Artwork the server completed while nobody was watching still needs its
@@ -247,6 +257,7 @@ export function PostPanel({
                     creating={startingDesigns}
                     onUse={applyDesign}
                     usingId={usingId}
+                    onFeedback={designFeedback}
                   />
                   {!isClient && otherTiles.length > 0 && (
                     <div className="space-y-2 pt-2">

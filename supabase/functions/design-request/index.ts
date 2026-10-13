@@ -8,6 +8,9 @@
 //        starts them. A second call while the post's designs are being
 //        prepared returns the open request.
 //   POST {action:"auto"}   (operational secret) designs for upcoming calendar posts that have none
+//   POST {action:"feedback", iteration_id, verdict:"rejected"|"deleted", reason?, note?, make_new?}
+//        Turns a design down (its reason becomes a rule for the client's next
+//        designs, and a new design is started) or deletes it.
 //   POST {action:"use", iteration_id}
 //        Puts one finished design in use for its post; every other design of
 //        that post stops being in use.
@@ -22,6 +25,9 @@ import { anthropicMessages } from "../_shared/anthropic.ts";
 import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, plannerPrompt, recentLines } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
+import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
+import { learningLines, recordFeedback } from "../_shared/design-prompts/feedback.ts";
+import { loadDesignLearnings } from "../_shared/design-prompts/learnings.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -84,6 +90,31 @@ Deno.serve(async (req) => {
       return json(await prepareUpcoming(admin));
     }
 
+    // Turn a design down (with a reason the client's next designs learn from)
+    // or delete it. Turning down the post's current design starts a new one.
+    if (body?.action === "feedback") {
+      const verdict = body.verdict === "rejected" ? "rejected" : body.verdict === "deleted" ? "archived" : null;
+      if (!verdict) return json({ error: "verdict must be rejected or deleted." }, 400);
+      const { data: it } = await admin.from("post_iterations").select("id, client_id, calendar_post_key, report_id, platform, format, post_copy, visual_direction, variant_angle, concept, is_selected").eq("id", String(body.iteration_id || "")).maybeSingle();
+      if (!it || !DESIGN_ANGLE.test(it.variant_angle ?? "")) return json({ error: "That design is no longer available." }, 404);
+      const userId = await requireMember(req, it.client_id);
+      const learnings = await recordFeedback(admin, it, verdict, body.reason, body.note, userId);
+
+      let request: DesignRequest | null = null;
+      if (verdict === "rejected" && body.make_new !== false && it.calendar_post_key) {
+        const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", it.client_id).maybeSingle();
+        if (settings?.confirmed_at) {
+          const copy = await currentCopy(admin, { client_id: it.client_id, post_key: it.calendar_post_key, copy: it.post_copy ?? "" });
+          if (copy) {
+            request = await startRequest(admin, settings as Settings, {
+              clientId: it.client_id, postKey: it.calendar_post_key, copy, reportId: it.report_id, platform: it.platform, format: it.format, requestedBy: userId,
+            });
+          }
+        }
+      }
+      return json({ ok: true, learnings: learnings.length, request });
+    }
+
     if (body?.action === "use") {
       const { data: it } = await admin.from("post_iterations").select("id, client_id, calendar_post_key, variant_group_id").eq("id", String(body.iteration_id || "")).maybeSingle();
       if (!it) return json({ error: "That design is no longer available." }, 404);
@@ -128,11 +159,13 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
   }
   if (!library.length) throw new Error("None of the client's reference posts could be read.");
   const recent = recentLines(await recentDesigns(admin, request.client_id), library);
+  // What people who turned down this client's earlier designs asked for.
+  const guidance = learningLines(await loadDesignLearnings(admin, request.client_id));
 
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const carousel = request.kind === "carousel";
-  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent };
+  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance };
   const instruction = carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
