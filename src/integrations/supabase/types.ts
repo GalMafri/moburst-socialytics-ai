@@ -272,6 +272,62 @@ export type Database = {
           },
         ]
       }
+      canva_finish_jobs: {
+        Row: {
+          attempts: number
+          client_id: string
+          created_at: string
+          created_by: string | null
+          error: string | null
+          id: string
+          input: Json
+          lease_until: string | null
+          output_path: string | null
+          state: Json
+          status: string
+          step: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          client_id: string
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          id?: string
+          input: Json
+          lease_until?: string | null
+          output_path?: string | null
+          state?: Json
+          status?: string
+          step?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          client_id?: string
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          id?: string
+          input?: Json
+          lease_until?: string | null
+          output_path?: string | null
+          state?: Json
+          status?: string
+          step?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canva_finish_jobs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_design_systems: {
         Row: {
           approved_at: string | null
@@ -1103,6 +1159,7 @@ export type Database = {
           pending_verifier: string | null
           provider: string
           refresh_token: string | null
+          refreshing_until: string | null
           updated_at: string
         }
         Insert: {
@@ -1116,6 +1173,7 @@ export type Database = {
           pending_verifier?: string | null
           provider: string
           refresh_token?: string | null
+          refreshing_until?: string | null
           updated_at?: string
         }
         Update: {
@@ -1129,6 +1187,7 @@ export type Database = {
           pending_verifier?: string | null
           provider?: string
           refresh_token?: string | null
+          refreshing_until?: string | null
           updated_at?: string
         }
         Relationships: []
