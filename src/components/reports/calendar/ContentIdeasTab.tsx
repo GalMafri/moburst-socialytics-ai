@@ -7,7 +7,7 @@ import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
 import { CalendarKanban, findLatestSelectedIteration } from "./CalendarKanban";
 import { PostPanel } from "./PostPanel";
 import { WeeklyHighlights } from "./WeeklyHighlights";
-import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
+import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { GenerationProvider } from "./GenerationContext";
 import { GenerationProgress } from "./GenerationProgress";
 import { DesignRequestsProvider } from "./DesignRequestsContext";
@@ -221,12 +221,14 @@ export function ContentIdeasTab({
       }}
     >
       <div className="space-y-4">
+        {/* A post added here goes to the Calendar, where every post now lives. */}
         {mode === "report" && isMoburstStaff && availablePlatforms.length > 0 && clientId && (
           <div className="flex justify-end">
-            <CreateAdHocPost
+            <NewPostDialog
               clientId={clientId}
               platforms={availablePlatforms}
-              clientContext={clientContext}
+              defaultDate={new Date().toISOString().slice(0, 10)}
+              reportId={reportId}
             />
           </div>
         )}
