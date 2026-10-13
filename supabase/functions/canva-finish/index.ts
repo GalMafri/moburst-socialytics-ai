@@ -27,6 +27,7 @@ import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { PROVIDER, accessTokenFor, authorizeUrl, clientCredentials, exchangeCode, expiryFrom, makePkce, randomState } from "../_shared/canva/oauth.ts";
 import { getExport, getImageToDesign, startExport, startImageToDesign, uploadAsset } from "../_shared/canva/rest.ts";
 import { CanvaMcp } from "../_shared/canva/mcp.ts";
+import { settleRequest } from "../_shared/canva/jobs.ts";
 import { type Box, type Layer, type Placement, copyOperations, elementBox, inkBox, logoRect, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 
@@ -184,7 +185,7 @@ function back(status: "linked" | "failed", reason?: string): Response {
 
 // ── The worker ──────────────────────────────────────────────────────────────
 
-type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any };
+type Job = { id: string; client_id: string; step: string; status: string; attempts: number; input: any; state: any; design_request_id: string | null };
 /** next: run the following step now; wait: check again next tick; held: work continues in the background under its lease. */
 type StepResult = "next" | "wait" | "done" | "held";
 
@@ -194,7 +195,10 @@ async function tick(admin: any) {
     .in("status", ["queued", "running"])
     .or(`lease_until.is.null,lease_until.lt.${new Date().toISOString()}`)
     .order("created_at").limit(10);
-  if (!due?.length) return { ran: 0 };
+  if (!due?.length) {
+    await settleOpenRequests(admin, new Set());
+    return { ran: 0 };
+  }
 
   const token = await accessTokenFor(admin);
   // Lease every due job, then advance them side by side: most of a step is
@@ -206,11 +210,31 @@ async function tick(admin: any) {
       .update({ lease_until: new Date(now.getTime() + LEASE_MS).toISOString(), status: "running", updated_at: now.toISOString() })
       .eq("id", id).in("status", ["queued", "running"])
       .or(`lease_until.is.null,lease_until.lt.${now.toISOString()}`)
-      .select("id, client_id, step, status, attempts, input, state");
+      .select("id, client_id, step, status, attempts, input, state, design_request_id");
     if (claimed?.[0]) leased.push(claimed[0]);
   }
   const outcomes = await Promise.all(leased.map((job) => advance(admin, token, job, started)));
+  const settled = new Set<string>();
+  for (const job of leased) {
+    if (!job.design_request_id || settled.has(job.design_request_id)) continue;
+    settled.add(job.design_request_id);
+    await settleRequest(admin, job.design_request_id).catch((e) => console.error(`[canva-finish] request ${job.design_request_id}:`, e instanceof Error ? e.message : e));
+  }
+  await settleOpenRequests(admin, settled);
   return { ran: leased.length, report: Object.fromEntries(leased.map((job, i) => [job.id, outcomes[i]])) };
+}
+
+/**
+ * Requests whose jobs all ended outside this tick (an option generated in the
+ * background, or a replacement still to start) are settled here too, so a
+ * request never waits on a job that is no longer running.
+ */
+async function settleOpenRequests(admin: any, skip: Set<string>): Promise<void> {
+  const { data: open } = await admin.from("design_requests").select("id, updated_at").eq("status", "preparing").neq("stage", "planning");
+  for (const r of open ?? []) {
+    if (skip.has(r.id)) continue;
+    await settleRequest(admin, r.id).catch((e) => console.error(`[canva-finish] request ${r.id}:`, e instanceof Error ? e.message : e));
+  }
 }
 
 /** Run one leased job's steps until it waits on Canva, finishes, or the tick runs out of time. */

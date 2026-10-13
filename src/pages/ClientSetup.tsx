@@ -1,5 +1,5 @@
 import { mergeStrategySuggestions } from "@/lib/strategySuggestions";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { StrategyDocUpload } from "@/components/onboarding/StrategyDocUpload";
 import { PillarDerivationCard } from "@/components/onboarding/PillarDerivationCard";
 import { PlatformIcon, normalizePlatformKey } from "@/lib/platform-config";
@@ -27,6 +27,7 @@ import { DesignReferencesUpload } from "@/components/onboarding/DesignReferences
 import { AutomaticBrandReferences } from "@/components/onboarding/AutomaticBrandReferences";
 import { LogoFileField } from "@/components/onboarding/LogoFileField";
 import { DesignSynthesisCard } from "@/components/onboarding/DesignSynthesisCard";
+import { DesignSettingsCard } from "@/components/onboarding/DesignSettingsCard";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 
@@ -86,6 +87,8 @@ const DEFAULT_PILLARS: ContentPillar[] = [
 
 export default function ClientSetup() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const setupTab = searchParams.get("tab") || "info";
   const navigate = useNavigate();
   const { user, canManageClients } = useAuth();
   const { toast } = useToast();
@@ -417,16 +420,17 @@ export default function ClientSetup() {
           savedVersion={savedVersion}
           onReady={(synthesis) => setForm(f => ({ ...f, design_style_synthesis: synthesis }))}
         />
-        <Tabs defaultValue="info">
+        <Tabs defaultValue={setupTab}>
           {/* On mobile (<sm), tabs scroll horizontally to keep labels readable.
               From sm and up, they fill the row in a 5-column grid. */}
-          <TabsList className="w-full overflow-x-auto sm:grid sm:grid-cols-5 flex sm:flex-none gap-1 sm:gap-0 justify-start">
+          <TabsList className="w-full overflow-x-auto sm:grid sm:grid-cols-7 flex sm:flex-none gap-1 sm:gap-0 justify-start">
             <TabsTrigger value="info" className="flex-shrink-0">Client info</TabsTrigger>
             <TabsTrigger value="sprout" className="flex-shrink-0">Sprout Social</TabsTrigger>
             <TabsTrigger value="strategy" className="flex-shrink-0">Content strategy</TabsTrigger>
             <TabsTrigger value="competitors" className="flex-shrink-0">Competitors</TabsTrigger>
             <TabsTrigger value="brief" className="flex-shrink-0">Brief</TabsTrigger>
             <TabsTrigger value="schedule" className="flex-shrink-0">Schedule</TabsTrigger>
+            {!isNew && <TabsTrigger value="designs" className="flex-shrink-0">Designs</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="info" className="space-y-4 mt-4">
@@ -1136,6 +1140,12 @@ export default function ClientSetup() {
               </Card>
             )}
           </TabsContent>
+
+          {!isNew && id && (
+            <TabsContent value="designs" className="space-y-4 mt-4">
+              <DesignSettingsCard clientId={id} />
+            </TabsContent>
+          )}
 
           <TabsContent value="schedule" className="space-y-4 mt-4">
             {!isNew && id ? (

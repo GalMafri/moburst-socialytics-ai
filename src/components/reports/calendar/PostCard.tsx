@@ -5,6 +5,9 @@ import { Clock, ImagePlus, Loader2, Sparkles, Video as VideoIcon } from "lucide-
 import { PostStatusChip, type PostStatus } from "./PostStatusChip";
 import { useGenerationForPost } from "./GenerationContext";
 import { postCopyOf } from "@/lib/postCopy";
+import { useAuth } from "@/hooks/useAuth";
+import { useDesignRequestForPost } from "./DesignRequestsContext";
+import { isPreparing, stageLine } from "@/lib/designRequests";
 
 interface Iteration {
   id?: string;
@@ -54,6 +57,9 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
     return () => ro.disconnect();
   }, [copy]);
 
+  const { isMoburstStaff } = useAuth();
+  const designRequest = useDesignRequestForPost(post as { _calendarPostKey?: string });
+  const designing = isPreparing(designRequest, isMoburstStaff) && !activeGen;
   const isGenerating = activeGen?.status === "running";
   const genJustCompleted =
     activeGen?.status === "completed" &&
@@ -97,6 +103,14 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
             <span className="t-label tracking-[-0.2px]">
               {activeGen.completed}/{activeGen.total} complete
             </span>
+          </div>
+        )}
+
+        {/* Designs being prepared on the server — shown wherever the card is */}
+        {designing && designRequest && (
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center gap-2 text-white">
+            <Loader2 className="h-4 w-4 animate-spin text-[#b9e045]" />
+            <span className="text-sm font-semibold tracking-[-0.2px]">Preparing designs</span>
           </div>
         )}
 
@@ -166,6 +180,11 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[rgba(185,224,69,0.10)] text-[#b9e045] t-badge tracking-[-0.2px]">
             <Loader2 className="h-3 w-3 animate-spin" />
             Generating {activeGen.completed}/{activeGen.total}
+          </span>
+        ) : designing && designRequest ? (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[rgba(185,224,69,0.10)] text-[#b9e045] t-badge tracking-[-0.2px]">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            {stageLine(designRequest, isMoburstStaff)}
           </span>
         ) : (
           <PostStatusChip status={status} onToggleApproved={onToggleApproved} />

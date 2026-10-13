@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -10,6 +10,7 @@ import { WeeklyHighlights } from "./WeeklyHighlights";
 import { CreateAdHocPost } from "@/components/reports/CreateAdHocPost";
 import { GenerationProvider } from "./GenerationContext";
 import { GenerationProgress } from "./GenerationProgress";
+import { DesignRequestsProvider } from "./DesignRequestsContext";
 import type { ClientContext } from "@/lib/clientContext";
 import { applyCopyRevisions, calendarWithRevisions, iterationMatchesPost } from "@/lib/calendarRevision";
 import { useAuth } from "@/hooks/useAuth";
@@ -48,6 +49,8 @@ export function ContentIdeasTab({
    *  we know the exact variant_group_id they want to see. Filtering by it is
    *  bulletproof — no copy-slice heuristic, no realtime lag dependency. */
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  /** The tab the panel opens on; "design" when arriving from a design progress card. */
+  const [panelTab, setPanelTab] = useState<string | undefined>(undefined);
   const qc = useQueryClient();
   const { isMoburstStaff } = useAuth();
   const { toast } = useToast();
@@ -175,7 +178,17 @@ export function ContentIdeasTab({
         })
     : [];
 
+  // A design progress card names its post by key; find that post on the board.
+  const openDesignsFor = useCallback((postKey: string) => {
+    const post = (revisedCalendar as any[]).flatMap((d: any) => (Array.isArray(d?.posts) ? d.posts : [d])).find((p: any) => p?._calendarPostKey === postKey);
+    if (!post) return;
+    setActivePost(post);
+    setActiveGroupId(null);
+    setPanelTab("design");
+  }, [revisedCalendar]);
+
   return (
+    <DesignRequestsProvider clientId={clientId} onOpenPost={openDesignsFor}>
     <GenerationProvider
       onOpenPanel={(post, opts) => {
         setActivePost(post);
@@ -240,6 +253,7 @@ export function ContentIdeasTab({
               // floating "View" button.
               setActivePost(post);
               setActiveGroupId(null);
+              setPanelTab(undefined);
             }}
             onToggleApproved={(iterationId) => toggleApproved.mutate(iterationId)}
           />}
@@ -251,6 +265,7 @@ export function ContentIdeasTab({
             if (!open) {
               setActivePost(null);
               setActiveGroupId(null);
+              setPanelTab(undefined);
             }
           }}
           post={currentPost}
@@ -264,6 +279,7 @@ export function ContentIdeasTab({
           clientId={clientId}
           reportId={reportId}
           clientTimezone={clientTimezone}
+          initialTab={panelTab}
           onFeedback={async (iterationId, verdict, reason, note) => {
             const { data, error } = await supabase.functions.invoke("record-design-feedback", {
               body: { iteration_id: iterationId, verdict, reason, note },
@@ -296,5 +312,6 @@ export function ContentIdeasTab({
         <GenerationProgress />
       </div>
     </GenerationProvider>
+    </DesignRequestsProvider>
   );
 }

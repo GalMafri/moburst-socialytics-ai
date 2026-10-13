@@ -12,6 +12,8 @@ export interface MediaTile {
   iterationId?: string;
   url: string;
   isSelected: boolean;
+  /** The row's variant label; design options read "Design option N". */
+  variantAngle?: string | null;
 }
 
 /**
@@ -62,6 +64,7 @@ export function tilesFromIterations(
         iterationId: it.id,
         url,
         isSelected: !!it.is_selected,
+        ...(it.variant_angle ? { variantAngle: it.variant_angle } : {}),
       });
     }
   }

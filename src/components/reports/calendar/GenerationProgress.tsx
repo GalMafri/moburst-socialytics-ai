@@ -8,6 +8,7 @@
 
 import { Sparkles, Video as VideoIcon, X, ArrowRight, CheckCircle2, AlertCircle, Ban } from "lucide-react";
 import { useGenerationContext } from "./GenerationContext";
+import { DesignRequestsDockItems } from "./DesignRequestsDock";
 
 const DISMISS_AFTER_MS = 90_000; // auto-dismiss completed entries after 90s
 
@@ -15,10 +16,10 @@ export function GenerationProgress() {
   const { generations, openPanel, dismissGeneration, cancelGeneration } = useGenerationContext();
   const entries = Object.values(generations).sort((a, b) => b.startedAt - a.startedAt);
 
-  if (entries.length === 0) return null;
-
+  // Design progress shares this column, so cards never stack on top of each other.
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm print:hidden">
+      <DesignRequestsDockItems />
       {entries.map((g) => {
         // Auto-dismiss completed older than threshold (best-effort, fires on
         // re-render; user can also click × any time).

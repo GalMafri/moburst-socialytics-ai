@@ -10,7 +10,13 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Archive, Check, Download, Expand, Sparkles, Star, ThumbsDown } from "lucide-react";
+import { Archive, Check, Download, Expand, Loader2, Settings2, Sparkles, Star, ThumbsDown } from "lucide-react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
+import { useDesignRequestForPost, useDesignRequests } from "./DesignRequestsContext";
+import { DesignProgressCard } from "./DesignProgressCard";
+import { createDesigns, isPreparing, putDesignInUse } from "@/lib/designRequests";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -48,6 +54,8 @@ interface Props {
   onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
   /** Reject (with a reason the app learns from) or archive a variant. Staff only. */
   onFeedback?: (iterationId: string, verdict: "rejected" | "archived", reason?: string, note?: string) => Promise<void> | void;
+  /** The tab to open on, e.g. "design" when arriving from a design progress card. */
+  initialTab?: string;
 }
 
 function isVideoUrl(url: string): boolean {
@@ -66,14 +74,60 @@ export function PostPanel({
   onCopySaved,
   onToggleSelected,
   onFeedback,
+  initialTab,
 }: Props) {
   const { isClient, isMoburstStaff } = useAuth();
   const queryClient = useQueryClient();
   const refreshMedia = () => { void queryClient.invalidateQueries({ queryKey: ["post-iterations", clientId] }); };
   const [editedPost, setEditedPost] = useState<CalendarPost | null>(null);
-  useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab("copy"); }, [sourcePost?._calendarPostKey, open]);
+  useEffect(() => { setEditedPost(null); setScheduleOpen(false); setTab(initialTab || "copy"); }, [sourcePost?._calendarPostKey, open, initialTab]);
   const post = editedPost && editedPost._calendarPostKey === sourcePost?._calendarPostKey ? editedPost : sourcePost;
   const designRun = useGenerationForPost(post);
+  const designRequest = useDesignRequestForPost(post);
+  const designRequests = useDesignRequests();
+  const preparingDesigns = isPreparing(designRequest, isMoburstStaff);
+  const [startingDesigns, setStartingDesigns] = useState(false);
+  const [usingId, setUsingId] = useState<string | null>(null);
+  // Whether this client's design settings are confirmed decides who sees what:
+  // staff get a way to confirm them, clients only ever see a ready feature.
+  const { data: designSettings, isLoading: designSettingsLoading } = useQuery({
+    queryKey: ["design-settings", clientId],
+    enabled: !!clientId && open,
+    queryFn: async () => {
+      const { data, error } = await (supabase.from("design_brand_settings" as any) as any).select("confirmed_at").eq("client_id", clientId).maybeSingle();
+      if (error) throw error;
+      return data as { confirmed_at: string | null } | null;
+    },
+  });
+  const designsReady = !!designSettings?.confirmed_at;
+  const startDesigns = async () => {
+    if (!clientId || !post) return;
+    setStartingDesigns(true);
+    try {
+      const result = await createDesigns({ clientId, reportId, post });
+      if (result.notSetUp) {
+        toast.error("Design settings are not confirmed for this client yet.");
+        return;
+      }
+      designRequests?.refresh();
+    } catch (e) {
+      toast.error("Could not start the designs", { description: e instanceof Error ? e.message : "Try again." });
+    } finally {
+      setStartingDesigns(false);
+    }
+  };
+  const applyDesign = async (iterationId: string) => {
+    setUsingId(iterationId);
+    try {
+      await putDesignInUse(iterationId);
+      refreshMedia();
+      toast.success("Design in use for this post");
+    } catch (e) {
+      toast.error("Could not use this design", { description: e instanceof Error ? e.message : "Try again." });
+    } finally {
+      setUsingId(null);
+    }
+  };
   // Artwork the server completed while nobody was watching still needs its
   // headline card, type and logo. Finish it here, once per row.
   const finishingRef = useRef(new Set<string>());
@@ -173,30 +227,51 @@ export function PostPanel({
                   </Button>
                 </div>
               )}
-              <div className="flex items-center justify-between gap-2">
-                <div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
                   <p className="text-sm font-semibold">
-                    {imageTiles.length > 0
-                      ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
-                      : designRun?.status === "running"
-                        ? `Generating designs · ${designRun.completed}/${designRun.total} done`
-                        : "No designs yet"}
+                    {preparingDesigns
+                      ? "Preparing designs"
+                      : imageTiles.length > 0
+                        ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
+                        : designRun?.status === "running"
+                          ? `Generating designs · ${designRun.completed}/${designRun.total} done`
+                          : "No designs yet"}
                   </p>
                   <p className="t-secondary">
                     {imageTiles.length > 0
-                      ? "Click any design to preview at full size. Star your favorites."
-                      : designRun?.status === "running"
-                        ? "The run continues while this panel is closed. Open Design to follow it."
-                        : "Generate brand-aligned variants to get started."}
+                      ? "Click a design to see it at full size, then choose Use this design."
+                      : designsReady
+                        ? "Designs are made in your brand's style, with your logo and the post's words."
+                        : designRun?.status === "running"
+                          ? "The run continues while this panel is closed. Open Design to follow it."
+                          : isMoburstStaff ? "Generate brand-aligned variants to get started." : "Designs for this post will appear here."}
                   </p>
                 </div>
-                {isMoburstStaff && <CreatePostDesignButton
+                {designsReady && !preparingDesigns && (
+                  <Button size="sm" variant={imageTiles.length > 0 ? "outline" : "default"} className="shrink-0" onClick={startDesigns} disabled={startingDesigns}>
+                    {startingDesigns ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                    {imageTiles.length > 0 ? "Create more designs" : "Create designs"}
+                  </Button>
+                )}
+                {!designsReady && !designSettingsLoading && isMoburstStaff && <CreatePostDesignButton
                   post={post}
                   clientContext={clientContext}
                   clientId={clientId}
                   onImagesGenerated={refreshMedia}
                 />}
               </div>
+
+              {!designsReady && !designSettingsLoading && isMoburstStaff && clientId && (
+                <div className="glass-inner p-3 flex items-center justify-between gap-3 flex-wrap">
+                  <p className="t-secondary min-w-0">Confirm this client's design settings once to offer designs here, for your team and the client.</p>
+                  <Button asChild size="sm" variant="outline" className="shrink-0">
+                    <Link to={`/clients/${clientId}/setup?tab=designs`}><Settings2 className="h-3.5 w-3.5 mr-1.5" />Design settings</Link>
+                  </Button>
+                </div>
+              )}
+
+              {preparingDesigns && designRequest && <DesignProgressCard request={designRequest} isStaff={isMoburstStaff} />}
 
               {imageTiles.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -209,20 +284,24 @@ export function PostPanel({
                       tileAspect={tileAspectFor(post)}
                       filenameStub={`design-${post.platform || "post"}`}
                       onPreview={() => openPreview(tile.url, false)}
-                      onToggleSelected={onToggleSelected}
+                      onToggleSelected={isClient || /^Design option \d+$/.test(tile.variantAngle || "") ? undefined : onToggleSelected}
                       onFeedback={isClient ? undefined : onFeedback}
+                      onUse={/^Design option \d+$/.test(tile.variantAngle || "") ? () => applyDesign(tile.iterationId!) : undefined}
+                      using={usingId === tile.iterationId}
                     />
                   ))}
                 </div>
-              ) : (
+              ) : !preparingDesigns && (
                 <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
                   <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
                   <p className="t-secondary">
-                    No designs generated for this post yet.
+                    No designs for this post yet.
                   </p>
-                  <p className="t-secondary/70">
-                    Click "Design" above to create artwork for this post.
-                  </p>
+                  {designsReady && (
+                    <p className="t-secondary/70">
+                      Choose Create designs to see options for this post.
+                    </p>
+                  )}
                 </div>
               )}
             </TabsContent>
@@ -350,6 +429,9 @@ interface TileCardProps {
   onPreview: () => void;
   onToggleSelected?: (iterationId: string, nextSelected: boolean) => void;
   onFeedback?: (iterationId: string, verdict: "rejected" | "archived", reason?: string, note?: string) => Promise<void> | void;
+  /** For a design option: put it in use for the post. */
+  onUse?: () => void;
+  using?: boolean;
 }
 
 const REJECT_REASONS: Array<{ value: string; label: string }> = [
@@ -370,6 +452,8 @@ function MediaTileCard({
   onPreview,
   onToggleSelected,
   onFeedback,
+  onUse,
+  using,
 }: TileCardProps) {
   const canToggle = !!tile.iterationId && !!onToggleSelected;
   const canReview = !!tile.iterationId && !!onFeedback;
@@ -414,6 +498,20 @@ function MediaTileCard({
         )}
       </button>
 
+      {onUse && (
+        <div className="px-2 pt-2 bg-[rgba(0,0,0,0.4)]">
+          {tile.isSelected ? (
+            <span className="w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-[10px] bg-[rgba(185,224,69,0.10)] text-[#b9e045] text-sm font-medium">
+              <Check className="h-3.5 w-3.5" /> In use
+            </span>
+          ) : (
+            <Button size="sm" className="w-full h-9" onClick={(e) => { e.stopPropagation(); onUse(); }} disabled={using}>
+              {using ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
+              Use this design
+            </Button>
+          )}
+        </div>
+      )}
       <div className="flex items-center justify-between px-2 py-1.5 bg-[rgba(0,0,0,0.4)]">
         <span className="t-secondary uppercase tracking-wide">
           #{index + 1}

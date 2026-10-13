@@ -29,6 +29,11 @@ verify_jwt = false
 [functions.canva-finish]
 verify_jwt = false
 
+# Design options for a post: called by staff and by the client's own users with
+# their session; the function checks staff access or client membership itself.
+[functions.design-request]
+verify_jwt = false
+
 [functions.firecrawl-scrape]
 verify_jwt = false
 
