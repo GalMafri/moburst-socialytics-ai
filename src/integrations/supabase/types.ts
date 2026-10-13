@@ -552,11 +552,11 @@ export type Database = {
           primary_platforms: string[] | null
           social_keywords: string[] | null
           sprout_customer_id: string | null
-          video_references: Json
           strategy_doc_file_path: string | null
           timezone: string | null
           trends_keywords: string | null
           updated_at: string | null
+          video_references: Json
           website_url: string | null
         }
         Insert: {
@@ -591,11 +591,11 @@ export type Database = {
           primary_platforms?: string[] | null
           social_keywords?: string[] | null
           sprout_customer_id?: string | null
-          video_references?: Json
           strategy_doc_file_path?: string | null
           timezone?: string | null
           trends_keywords?: string | null
           updated_at?: string | null
+          video_references?: Json
           website_url?: string | null
         }
         Update: {
@@ -630,11 +630,11 @@ export type Database = {
           primary_platforms?: string[] | null
           social_keywords?: string[] | null
           sprout_customer_id?: string | null
-          video_references?: Json
           strategy_doc_file_path?: string | null
           timezone?: string | null
           trends_keywords?: string | null
           updated_at?: string | null
+          video_references?: Json
           website_url?: string | null
         }
         Relationships: []
