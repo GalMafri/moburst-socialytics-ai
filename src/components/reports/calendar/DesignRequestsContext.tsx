@@ -40,14 +40,15 @@ export function DesignRequestsProvider({ clientId, onOpenPost, children }: { cli
     enabled: !!clientId,
     queryFn: async () => {
       const { data, error } = await (supabase.from("design_requests" as any) as any)
-        .select("id, client_id, report_id, calendar_post_key, platform, post_copy, status, stage, kind, options_wanted, options_ready, requested_by, error, created_at, updated_at")
+        .select("id, client_id, report_id, calendar_post_key, platform, post_copy, status, stage, kind, options_wanted, options_ready, requested_by, error, on_camera, created_at, updated_at")
         .eq("client_id", clientId)
         .order("created_at", { ascending: false })
         .limit(200);
       if (error) throw error;
       return (data || []) as DesignRequest[];
     },
-    refetchInterval: (query) => ((query.state.data as DesignRequest[] | undefined)?.some((r) => r.status !== "ready") ? POLL_MS : false),
+    // Asked again only while something is being prepared or waits on the team.
+    refetchInterval: (query) => ((query.state.data as DesignRequest[] | undefined)?.some((r) => r.status === "preparing" || r.status === "needs_staff") ? POLL_MS : false),
   });
 
   // A finished option is a new post_iterations row: refresh the post's designs

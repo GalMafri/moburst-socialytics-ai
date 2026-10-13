@@ -115,7 +115,7 @@ export function PostPanel({
         return;
       }
       if (result.needsFilming) {
-        toast.info("This video needs real filming", { description: `It features ${result.needsFilming} on camera.` });
+        designRequests?.refresh();
         return;
       }
       designRequests?.refresh();
@@ -265,12 +265,13 @@ export function PostPanel({
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">{videoDesigns ? "Video" : isCarouselPost ? "Carousel" : "Design"}</p>
                     <p className="t-secondary">{videoDesigns
-                      ? "Made in your brand's style: an opening card with the hook, filmed footage, and a closing card with your logo."
+                      ? "Made in your brand's video style, with the post's hook, your logo and sound."
                       : "Made in your brand's style, with your logo and the post's words."}</p>
                   </div>
                   <PostDesign
                     versions={versions}
                     preparing={preparingDesigns ? designRequest : null}
+                    onCamera={designRequest?.status === "needs_filming" ? designRequest.on_camera || "a real person" : null}
                     isStaff={isMoburstStaff}
                     aspect={videoDesigns ? "aspect-[9/16]" : tileAspectFor(post) || "aspect-[4/5]"}
                     filenameStub={`design-${post.platform || "post"}`}

@@ -65,7 +65,10 @@ Deno.serve(async (req) => {
       // ever made up. The answer says so plainly instead of starting anything.
       if (designKind(body.format, body.platform) === "video") {
         const person = await personOnCamera(copy, visual);
-        if (person) return json({ code: "needs_filming", who: person });
+        if (person) {
+          const request = await recordFilming(admin, { clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null }, person);
+          return json({ code: "needs_filming", who: person, request });
+        }
       }
       const request = await startRequest(admin, settings as Settings, {
         clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null,
@@ -287,6 +290,31 @@ async function personOnCamera(copy: string, visual: string): Promise<string | nu
   }
 }
 
+/**
+ * Keep the answer that a video post is filmed: one row per post, updated when
+ * asked again, so the post's panel says so whenever it is opened and the
+ * automatic designs leave the post alone.
+ */
+async function recordFilming(admin: any, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null; visual?: string | null }, who: string): Promise<DesignRequest> {
+  const fields = { post_copy: p.copy, platform: p.platform, format: p.format, visual_direction: p.visual ?? null, on_camera: who, updated_at: new Date().toISOString() };
+  const { data: known } = await admin.from("design_requests").select("id").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "needs_filming").limit(1).maybeSingle();
+  if (known) {
+    const { data } = await admin.from("design_requests").update(fields).eq("id", known.id).select("*").single();
+    return data as DesignRequest;
+  }
+  const { data, error } = await admin.from("design_requests").insert({
+    ...fields, client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey, requested_by: p.requestedBy,
+    kind: "video", status: "needs_filming", stage: "ready", options_wanted: 0,
+  }).select("*").single();
+  if (error) throw new Error(error.message);
+  return data as DesignRequest;
+}
+
+/** A post with nothing to design: its format is words alone. */
+export function needsNoDesign(format: string | null | undefined): boolean {
+  return /^\s*text(\s*only)?\s*$|text[-\s]only/i.test(String(format || ""));
+}
+
 /** Start a design request for a post, or answer with the one already being prepared. Planning runs in the background. */
 async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null; visual?: string | null }): Promise<DesignRequest> {
   const { data: open } = await admin.from("design_requests").select("*").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "preparing").maybeSingle();
@@ -367,7 +395,7 @@ async function prepareUpcoming(admin: any, opts: { dryRun?: boolean; clientId?: 
       admin.from("design_requests").select("calendar_post_key").eq("client_id", settings.client_id).limit(10000),
     ]);
     const has = new Set([...(designed ?? []), ...(requested ?? [])].map((r: any) => r.calendar_post_key));
-    for (const post of candidates) if (!has.has(post.post_key)) due.push({ settings, post });
+    for (const post of candidates) if (!has.has(post.post_key) && !needsNoDesign(post.format)) due.push({ settings, post });
   }
   due.sort((a, b) => String(a.post.post_date).localeCompare(String(b.post.post_date)));
 
@@ -381,9 +409,13 @@ async function prepareUpcoming(admin: any, opts: { dryRun?: boolean; clientId?: 
   for (const { settings, post } of due.slice(0, room)) {
     const copy = await currentCopy(admin, post);
     if (!copy) continue;
-    const request = await startRequest(admin, settings, {
-      clientId: post.client_id, postKey: post.post_key, copy, reportId: post.report_id, platform: post.platform, format: post.format, requestedBy: null,
-    });
+    const p = { clientId: post.client_id, postKey: post.post_key, copy, reportId: post.report_id, platform: post.platform, format: post.format, requestedBy: null, visual: post.visual_direction || null };
+    // The same rule as a person asking: a video of a real person on camera is filmed.
+    if (designKind(post.format, post.platform) === "video") {
+      const person = await personOnCamera(copy, post.visual_direction || "");
+      if (person) { await recordFilming(admin, p, person); continue; }
+    }
+    const request = await startRequest(admin, settings, p);
     started.push(request.id);
   }
   return { started, waiting: Math.max(0, due.length - started.length) };

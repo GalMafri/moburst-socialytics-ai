@@ -20,7 +20,9 @@ export interface DesignRequest {
   calendar_post_key: string;
   platform: string | null;
   post_copy: string;
-  status: "preparing" | "ready" | "needs_staff" | "canceled";
+  status: "preparing" | "ready" | "needs_staff" | "canceled" | "needs_filming";
+  /** For a video that is filmed rather than made here: who appears on camera. */
+  on_camera?: string | null;
   stage: DesignStage;
   kind?: "single" | "carousel" | "video";
   options_wanted: number;
@@ -109,8 +111,8 @@ export async function createDesigns(args: { clientId: string; reportId?: string;
     },
   });
   if (data?.code === "not_set_up") return { notSetUp: true };
-  // A video that needs a real person on camera is filmed, not generated.
-  if (data?.code === "needs_filming") return { needsFilming: String(data.who || "a real person") };
+  // A video with a real person on camera is filmed; the post keeps that answer.
+  if (data?.code === "needs_filming") return { request: data.request, needsFilming: String(data.who || "a real person") };
   if (error || data?.error) throw new Error(await describeInvokeError(error, data));
   return { request: data.request as DesignRequest };
 }

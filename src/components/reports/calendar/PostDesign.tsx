@@ -34,9 +34,11 @@ interface Props {
   onFeedback: (iterationId: string, verdict: "rejected" | "deleted", reason?: string, note?: string, makeNew?: boolean) => Promise<void>;
   /** The post has no copy yet (a trend post not yet written), so there is nothing to design. */
   waitingForCopy?: boolean;
+  /** A video filmed with this person on camera: nothing is made here. */
+  onCamera?: string | null;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy }: Props) {
+export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera }: Props) {
   const design = currentDesign(versions);
   const earlier = versions.filter((v) => v !== design);
   const [showEarlier, setShowEarlier] = useState(false);
@@ -57,6 +59,8 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
             <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" aria-hidden />
             {waitingForCopy ? (
               <p className="t-secondary">This post is written shortly before its date from what's trending then. Its design follows once it's written.</p>
+            ) : onCamera ? (
+              <p className="t-secondary">This video is filmed: it features {onCamera} on camera.</p>
             ) : (
               <>
                 <p className="t-secondary">No design for this post yet.</p>
