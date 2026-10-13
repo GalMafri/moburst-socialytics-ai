@@ -1,6 +1,6 @@
 // supabase/functions/_shared/canva/worker.ts
 //
-// Starting a pass of the design worker (canva-finish's tick) right away,
+// Starting a pass of the design worker (design-worker's tick) right away,
 // instead of waiting for the minute timer. Used by the worker to start its
 // next pass, and by design-request once a request's first options exist.
 //
@@ -9,10 +9,10 @@
 // the worker instead.
 
 export async function wakeWorker(): Promise<void> {
-  await wake("canva-finish");
+  await wake("design-worker");
 }
 
-/** The video worker (video-worker): a video's footage and its join, which never wait on Canva. */
+/** The video worker (video-worker): a video's footage and its join. */
 export async function wakeVideoWorker(): Promise<void> {
   await wake("video-worker");
 }
