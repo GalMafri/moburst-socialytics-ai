@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/ui/load-error";
+import { toast as sonnerToast } from "sonner";
+import { mondayOf } from "@/lib/calendarPosts";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { describeInvokeError } from "@/lib/invokeError";
@@ -135,7 +137,7 @@ export default function CompetitiveFeed() {
       // Drafts go to the client's Calendar (today, to be moved), with the topic as the reason.
       // calendar_posts is not in the generated types yet.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: insErr } = await (supabase.from("calendar_posts" as never) as any).insert({
+      const { data: row, error: insErr } = await (supabase.from("calendar_posts" as never) as any).insert({
         client_id: id!,
         post_date: new Date().toISOString().slice(0, 10),
         platform: post.platform || platform,
@@ -149,14 +151,16 @@ export default function CompetitiveFeed() {
         reasons: [{ type: "competitor", label: String(topic).slice(0, 200) }],
         source: "insight",
         raw: post,
-      });
+      }).select("id, post_date").single();
       if (insErr) throw insErr;
       if (alertId) await supabase.from("competitive_alerts").update({ status: "drafted" }).eq("id", alertId);
-      return post;
+      return row as { id: string; post_date: string };
     },
-    onSuccess: (post: any) => {
+    onSuccess: (row) => {
       qc.invalidateQueries({ queryKey: ["competitive-alerts", id] });
-      toast({ title: "Added to the client's calendar for today", description: "Open the Calendar to move it to its date or change it." });
+      qc.invalidateQueries({ queryKey: ["calendar-posts", id] });
+      const open = () => navigate(`/clients/${id}/calendar?week=${mondayOf(row.post_date)}&post=${row.id}`);
+      sonnerToast.success(`Added to ${clientName}'s calendar for today`, { description: "Open it to read the post, move it to its date or change it.", action: { label: "Open the post", onClick: open }, duration: 12000 });
     },
     onError: (e: any) => toast({ title: "Could not draft the post", description: e.message, variant: "destructive" }),
   });
