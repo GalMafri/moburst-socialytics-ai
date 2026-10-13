@@ -211,7 +211,7 @@ function FeedbackDialog({ open, isCurrent, noun, onOpenChange, onSubmit }: {
           </RadioGroup>
           <div className="space-y-1.5">
             <Label htmlFor="design-feedback-note">Anything specific? (optional)</Label>
-            <Textarea id="design-feedback-note" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="For example: we never use rockets; show people instead" />
+            <Textarea id="design-feedback-note" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="For example: we never use rockets; show our product instead" />
           </div>
           {isCurrent && (
             <div className="flex items-center justify-between gap-3">
