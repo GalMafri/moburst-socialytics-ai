@@ -59,8 +59,16 @@ Deno.serve(async (req) => {
       // Answered as a 200 so the screen can read the code (invoke() hides non-2xx bodies).
       if (!settings?.confirmed_at) return json({ code: "not_set_up" });
 
+      const visual = typeof body.visual_direction === "string" ? body.visual_direction.trim().slice(0, 600) : "";
+      // A video whose idea is a real person on camera (the founder speaking,
+      // say) is filmed, never generated: no real or identifiable person is
+      // ever made up. The answer says so plainly instead of starting anything.
+      if (designKind(body.format, body.platform) === "video") {
+        const person = await personOnCamera(copy, visual);
+        if (person) return json({ code: "needs_filming", who: person });
+      }
       const request = await startRequest(admin, settings as Settings, {
-        clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId,
+        clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null,
       });
       return json({ request });
     }
@@ -204,7 +212,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const carousel = request.kind === "carousel";
   const video = request.kind === "video";
   const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance };
-  const instruction = video ? videoPlannerPrompt(common) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
+  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
@@ -249,16 +257,47 @@ async function recentDesigns(admin: any, clientId: string): Promise<RecentDesign
   return out;
 }
 
+/**
+ * Who has to appear on camera for this video post, or null when nobody does.
+ * Decided from the post's copy and planned visual by a model that only
+ * answers this question.
+ */
+async function personOnCamera(copy: string, visual: string): Promise<string | null> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) return null;
+  try {
+    const result = await anthropicMessages({
+      apiKey,
+      body: {
+        model: PLANNER_MODEL, max_tokens: 200,
+        messages: [{ role: "user", content: [{ type: "text", text:
+          `A social video post is planned.\nCopy: """${copy.slice(0, 1500)}"""\nPlanned visual: """${visual || "(none given)"}"""\n` +
+          "Does the video depend on a specific real person appearing on camera (for example the firm's founder speaking to camera, or a named team member)? " +
+          "Anonymous hands, objects, places or abstract motion do not count. " +
+          'Reply with JSON only: {"person": true or false, "who": "the person, as the copy or visual names them, or empty"}' }] }],
+      },
+    });
+    const m = result.text.match(/\{[\s\S]*\}/);
+    const v = m ? JSON.parse(m[0]) : null;
+    if (v?.person !== true) return null;
+    return String(v.who || "a real person").trim().slice(0, 80) || "a real person";
+  } catch (e) {
+    console.warn("[design-request] person check failed:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 /** Start a design request for a post, or answer with the one already being prepared. Planning runs in the background. */
-async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null }): Promise<DesignRequest> {
+async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null; visual?: string | null }): Promise<DesignRequest> {
   const { data: open } = await admin.from("design_requests").select("*").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "preparing").maybeSingle();
   if (open) return open;
 
   const { data: created, error } = await admin.from("design_requests").insert({
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
-    platform: p.platform, format: p.format, post_copy: p.copy, requested_by: p.requestedBy,
+    platform: p.platform, format: p.format, post_copy: p.copy, requested_by: p.requestedBy, visual_direction: p.visual ?? null,
     // A LinkedIn document is a deck of slides: it is made like a carousel. A
-    // Reel, short or any video post gets a video: cover, footage, end card.
+    // Reel, short or any video post gets a video: footage in the client's own
+    // video style with the hook and logo over it.
     kind: designKind(p.format, p.platform), options_wanted: OPTIONS_WANTED,
   }).select("*").single();
   if (error) {

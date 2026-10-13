@@ -237,7 +237,7 @@ function FeedbackDialog({ open, isCurrent, noun, onOpenChange, onSubmit }: {
   );
 }
 
-/** A video design: its cover card, footage and end card, played in place at its own 9:16 shape. */
+/** A video design: footage in the client's own video style with its hook and logo, played in place at its own 9:16 shape, with sound. */
 function VideoViewer({ url }: { url: string }) {
   return (
     <div className="relative mx-auto w-full max-w-[320px] aspect-[9/16] rounded-[12px] overflow-hidden bg-black border border-white/[0.06]">

@@ -267,6 +267,8 @@ export interface VideoRequest {
   /** The designed still the clip moves, if there is one. */
   startImageId?: string;
   referenceIds?: string[];
+  /** Videos whose look and motion the clip follows (a client's own published videos). */
+  videoReferenceIds?: string[];
   resolution?: "480p" | "720p" | "1080p";
   withAudio?: boolean;
   model?: string;
@@ -276,6 +278,7 @@ export async function submitVideo(mcp: ToolCaller, req: VideoRequest): Promise<J
   const medias: Array<{ value: string; role: string }> = [];
   if (req.startImageId) medias.push({ value: req.startImageId, role: "start_image" });
   for (const value of req.referenceIds || []) medias.push({ value, role: "image_references" });
+  for (const value of req.videoReferenceIds || []) medias.push({ value, role: "video_references" });
 
   const params: Record<string, unknown> = {
     model: req.model || VIDEO_MODEL,

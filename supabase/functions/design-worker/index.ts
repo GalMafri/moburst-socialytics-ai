@@ -21,7 +21,6 @@ import { settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
 import { copyMatches, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
-import { VIDEO_STEPS_FILTER } from "../_shared/video/steps.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -78,13 +77,14 @@ const JOB_COLUMNS = "id, client_id, step, status, attempts, input, state, design
 // ── The pass ────────────────────────────────────────────────────────────────
 
 async function runPass(admin: any) {
-  const { data: due } = await admin.from("canva_finish_jobs").select("id")
+  const { data: rows } = await admin.from("canva_finish_jobs").select("id, kind:input->>kind")
     .in("status", ["queued", "running"])
-    .not("step", "in", VIDEO_STEPS_FILTER)
     .or(`lease_until.is.null,lease_until.lt.${new Date().toISOString()}`)
-    .order("created_at").limit(12);
+    .order("created_at").limit(40);
+  // Video jobs are the video worker's.
+  const due = (rows ?? []).filter((r: { kind: string | null }) => r.kind !== "video").slice(0, 12);
   const leased: string[] = [];
-  for (const { id } of due ?? []) {
+  for (const { id } of due) {
     const now = new Date();
     const { data: claimed } = await admin.from("canva_finish_jobs")
       .update({ lease_until: new Date(now.getTime() + LEASE_MS).toISOString(), status: "running", updated_at: now.toISOString() })

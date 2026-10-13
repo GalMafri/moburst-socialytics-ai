@@ -114,6 +114,10 @@ export function PostPanel({
         toast.error("Design settings are not confirmed for this client yet.");
         return;
       }
+      if (result.needsFilming) {
+        toast.info("This video needs real filming", { description: `It features ${result.needsFilming} on camera.` });
+        return;
+      }
       designRequests?.refresh();
     } catch (e) {
       toast.error("Could not start the designs", { description: e instanceof Error ? e.message : "Try again." });

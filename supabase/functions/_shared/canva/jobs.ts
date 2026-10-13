@@ -6,7 +6,7 @@
 // and replace any option that did not finish).
 
 import { type Brief, optionStates, requestProgress, type JobState } from "./options.ts";
-import { CARD_SIZE, TIMING } from "../video/compose.ts";
+import { TIMING } from "../video/compose.ts";
 
 export const BUCKET = "generated-media";
 
@@ -83,44 +83,35 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
 }
 
 /**
- * A video option: its cover card and end card, designed like a carousel's
- * slides but at 9:16 (the end card waits for the cover and follows its look),
- * and a third job that generates the footage and joins the three.
+ * A video option: one job on the video worker. Its footage follows the
+ * client's own published videos (clients.video_references), with sound; its
+ * hook is drawn on a transparent layer and its words checked; the client's
+ * logo file goes on at its habitual spot (_shared/video/steps.ts).
  */
 async function startVideoOption(admin: any, req: DesignRequest, settings: Settings, brandName: string, brief: Brief, optionIndex: number, logo: [number, number]): Promise<void> {
-  const [cover, end] = brief.slides?.length === 2 ? brief.slides : [brief, brief];
-  const refs = brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3);
+  const { data: client } = await admin.from("clients").select("video_references").eq("id", req.client_id).maybeSingle();
+  const videoRefs = (Array.isArray(client?.video_references) ? client.video_references : [])
+    .map((r: { path?: unknown }) => String(r?.path ?? "")).filter(Boolean).slice(0, 3);
   const title = `${brandName} ${req.platform ?? ""} video ${optionIndex + 1}`.replace(/\s+/g, " ");
-  const card = (slide: { headline: string[]; picture: string }, i: 0 | 1) => ({
+  const { error } = await admin.from("canva_finish_jobs").insert({
     client_id: req.client_id,
     created_by: req.requested_by,
     design_request_id: req.id,
     option_index: optionIndex,
-    slide_index: i,
-    slide_count: 3,
-    step: "generate",
+    step: "footage",
     input: {
-      kind: "video_card",
+      kind: "video",
+      title,
+      brand_name: brandName,
+      copy: brief.headline,
+      text_style: brief.text_style ?? "bold white sans-serif with a soft shadow, centered in the lower third",
       logo_path: settings.logo_path,
       logo_size: logo,
-      copy: slide.headline,
       placement: settings.placement,
-      title: `${title} ${i === 0 ? "cover" : "end card"}`,
-      layout: brief.layout ?? null,
-      generate: { brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: settings.background, refs, size: CARD_SIZE, video_card: i === 0 ? "cover" : "end" },
+      video_refs: videoRefs,
+      video: { prompt: brief.footage ?? brief.picture, seconds: brief.seconds ?? TIMING.footage },
     },
   });
-  const rows = [card(cover, 0), card(end, 1), {
-    client_id: req.client_id,
-    created_by: req.requested_by,
-    design_request_id: req.id,
-    option_index: optionIndex,
-    slide_index: 2,
-    slide_count: 3,
-    step: "footage",
-    input: { kind: "video", title, video: { prompt: brief.footage ?? brief.picture, seconds: TIMING.footage } },
-  }];
-  const { error } = await admin.from("canva_finish_jobs").insert(rows);
   if (error) throw new Error(`Could not start the video: ${error.message}`);
 }
 

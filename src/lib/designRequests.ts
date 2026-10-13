@@ -95,7 +95,7 @@ export function elapsedLabel(fromIso: string, now = Date.now()): string {
   return m > 0 ? `${m}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`;
 }
 
-export async function createDesigns(args: { clientId: string; reportId?: string; post: { _calendarPostKey?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown } }): Promise<{ request?: DesignRequest; notSetUp?: boolean }> {
+export async function createDesigns(args: { clientId: string; reportId?: string; post: { _calendarPostKey?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown } }): Promise<{ request?: DesignRequest; notSetUp?: boolean; needsFilming?: string }> {
   const { data, error } = await supabase.functions.invoke("design-request", {
     body: {
       action: "create",
@@ -105,9 +105,12 @@ export async function createDesigns(args: { clientId: string; reportId?: string;
       platform: args.post.platform ?? null,
       format: args.post.format ?? null,
       post_copy: postCopyOf(args.post as any),
+      visual_direction: (args.post as any).visual_direction ?? (args.post as any)["Visual Direction"] ?? null,
     },
   });
   if (data?.code === "not_set_up") return { notSetUp: true };
+  // A video that needs a real person on camera is filmed, not generated.
+  if (data?.code === "needs_filming") return { needsFilming: String(data.who || "a real person") };
   if (error || data?.error) throw new Error(await describeInvokeError(error, data));
   return { request: data.request as DesignRequest };
 }
