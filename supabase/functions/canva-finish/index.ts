@@ -384,7 +384,10 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       return "held";
     }
     case "upload": {
-      s.design_asset = await uploadAsset(token, await download(admin, s.design_path ?? job.input.design_path), `${job.id}-design.png`);
+      const design = await download(admin, s.design_path ?? job.input.design_path);
+      // Magic Layers keeps the image's size, so the design's page is this size.
+      s.size = pngSize(design);
+      s.design_asset = await uploadAsset(token, design, `${job.id}-design.png`);
       s.logo_asset = await uploadAsset(token, await download(admin, job.input.logo_path), `${job.id}-logo.png`);
       job.step = "layers"; return "next";
     }
@@ -401,15 +404,10 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
     case "export_before":
     case "export_nologo":
     case "export_final": {
-      if (!s.page) {
-        s.page = await oneEditAtATime(async () => {
-          const mcp = await editingSession(token);
-          const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
-          await mcp.call("cancel-editing-transaction", { transaction_id: tx.transaction.transaction_id, user_intent: INTENT }).catch(() => {});
-          return { id: tx.pages[0].page_id, width: tx.pages[0].dimension.width, height: tx.pages[0].dimension.height };
-        });
-      }
-      s.export_job = await startExport(token, s.design_id, s.page.width, s.page.height);
+      // The page size comes from the design file itself. Reading it from Canva
+      // took an editing session per slide, and those run one at a time.
+      if (!s.size) s.size = s.page ? [s.page.width, s.page.height] : pngSize(await download(admin, s.design_path ?? job.input.design_path));
+      s.export_job = await startExport(token, s.design_id, s.size[0], s.size[1]);
       job.step = `${job.step}_wait`; return "next";
     }
     case "export_before_wait":
@@ -427,8 +425,11 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       job.step = which === "before" ? "edit" : which === "nologo" ? "place_logo" : "finished";
       return which === "final" ? "done" : "next";
     }
-    case "edit": return await oneEditAtATime(() => editLayers(token, job));
-    case "place_logo": return await oneEditAtATime(() => placeLogo(admin, token, job));
+    // Edits queue behind each other. One whose turn comes after the pass's
+    // budget is spent waits for the next pass, so a pass ends on time instead
+    // of working through the whole queue.
+    case "edit": return await oneEditAtATime(() => Date.now() < deadline ? editLayers(token, job) : Promise.resolve<StepResult>("wait"));
+    case "place_logo": return await oneEditAtATime(() => Date.now() < deadline ? placeLogo(admin, token, job) : Promise.resolve<StepResult>("wait"));
   }
   throw new Error(`FINAL: Unknown step '${job.step}'`);
 }
@@ -440,6 +441,7 @@ async function editLayers(token: string, job: Job): Promise<StepResult> {
       const mcp = await editingSession(token);
       const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
       const tid = tx.transaction.transaction_id;
+      s.page = { id: tx.pages[0].page_id, width: tx.pages[0].dimension.width, height: tx.pages[0].dimension.height };
       const texts: Layer[] = (tx.richtexts ?? []).map((r: any) => ({ id: r.element_id, box: elementBox(r), text: (r.regions ?? []).map((g: any) => g.text ?? "").join("") }));
       const fills: Layer[] = (tx.fills ?? []).map((f: any) => ({ id: f.element_id, box: elementBox(f) }));
       const [lw, lh] = job.input.logo_size;
