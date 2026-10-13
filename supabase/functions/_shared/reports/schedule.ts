@@ -55,10 +55,10 @@ export async function closeAbandonedRuns(supabase: SupabaseClient, now: Date, dr
     try {
       const { data: stale } = await supabase
         .from(table)
-        .select("id")
+        .select(table === "competitive_reports" ? "id, set_id" : "id")
         .eq("status", "running")
         .lt("created_at", cutoff);
-      for (const row of (stale || []) as Array<{ id: string }>) {
+      for (const row of (stale || []) as unknown as Array<{ id: string; set_id?: string | null }>) {
         out.push({ table, id: row.id });
         if (dryRun) continue;
         await supabase
@@ -73,6 +73,21 @@ export async function closeAbandonedRuns(supabase: SupabaseClient, now: Date, dr
           })
           .eq("id", row.id)
           .eq("status", "running");
+        // The set followed the run into 'analyzing', and only the workflow's
+        // callback ever moved it out. Left there, the set could not be
+        // reopened or connected to tracking until another run completed.
+        // Released only when no other run on the set is still going.
+        if (row.set_id) {
+          const { data: others } = await supabase
+            .from("competitive_reports")
+            .select("id")
+            .eq("set_id", row.set_id)
+            .eq("status", "running")
+            .limit(1);
+          if (!(others || []).length) {
+            await supabase.from("competitor_sets").update({ status: "failed" }).eq("id", row.set_id).eq("status", "analyzing");
+          }
+        }
       }
     } catch (e) {
       console.warn(`[abandoned] ${table}:`, e);

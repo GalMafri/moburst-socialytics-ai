@@ -15,6 +15,7 @@ import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { buildCompetitivePayload, buildSocialPayload } from "../_shared/reports/payloads.ts";
 import { closeAbandonedRuns } from "../_shared/reports/schedule.ts";
 import { refreshCompetitorFeed } from "../_shared/competitive/refreshFeed.ts";
+import { checkClientLandscape, RIVALIQ_UNAVAILABLE } from "../_shared/competitive/landscapeCheck.ts";
 import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
 import { runFeedJob } from "./feed.ts";
 import { LEASE_SECONDS, summarize, workerTick } from "./worker.ts";
@@ -40,6 +41,7 @@ Deno.serve(async (req) => {
     const jobs = makeJobStore(db);
     const store = makeDispatchStore(db);
     const post = makePoster(secret);
+    const rivaliqKey = Deno.env.get("RIVALIQ_API_KEY");
     // A dry run may preview a later tick; nothing else ever moves the clock.
     const at = mode === "dry_run" && typeof body.at === "string" && !Number.isNaN(Date.parse(body.at)) ? new Date(body.at) : null;
     const dispatchDeps = (job: ScheduledJob, dryRun: boolean): DispatchDeps => ({
@@ -50,11 +52,15 @@ Deno.serve(async (req) => {
       buildSocialPayload: (a) => buildSocialPayload({ supabase: db, ...a } as any),
       // deno-lint-ignore no-explicit-any
       buildCompetitivePayload: (a) => buildCompetitivePayload({ supabase: db, ...a } as any),
+      // The check run-report makes before a manual run; a dry run reads RivalIQ too.
+      checkLandscape: (client, set) => rivaliqKey
+        ? checkClientLandscape(rivaliqKey, { name: client.name, website_url: (client.website_url as string | null | undefined) ?? null }, set.rivaliq_landscape_id)
+        : Promise.resolve({ ok: false as const, code: RIVALIQ_UNAVAILABLE, status: null, message: "RIVALIQ_API_KEY is not configured." }),
       saveJob: (patch) => (dryRun ? Promise.resolve() : jobs.saveJob(job.id, patch)),
       dryRun,
     });
     const refreshFeed = (clientId: string) => refreshCompetitorFeed(db, clientId, {
-      rivaliqKey: Deno.env.get("RIVALIQ_API_KEY"),
+      rivaliqKey,
       anthropicKey: Deno.env.get("ANTHROPIC_API_KEY"),
       secret,
     });

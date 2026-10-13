@@ -1,11 +1,15 @@
 // One scheduled report dispatch: one schedule occurrence, one n8n run.
 //
-// The rules are the ones trigger-scheduled-reports applied inside its single
-// request (competitive needs a set in an accepted status; social waits for a
-// due paired competitive analysis and then for the competitive report it is
-// pinned to; the range comes from that report). What changed is that each
-// dispatch is its own job with recorded phases, so an interruption is
-// resumed or closed instead of left as a claim someone has to review:
+// The rules: competitive needs a set in an accepted status and a RivalIQ
+// landscape that tracks the client (the same check run-report makes, from
+// _shared/competitive/landscapeCheck.ts), and creates no report and sends
+// nothing until both hold. Social waits for a paired competitive analysis
+// only while that analysis is about to start or is running, and then takes
+// its range from that report. A competitive analysis that was never created,
+// or that failed, never holds the social report: it goes out with the latest
+// complete analysis instead. Each dispatch is its own job with recorded
+// phases, so an interruption is resumed or closed instead of left as a claim
+// someone has to review:
 //
 //   prepared  the report row exists and its id is on the job. A resumed job
 //             reuses it.
@@ -14,7 +18,16 @@
 //             the report is closed as unconfirmed (the Retry control's path).
 
 import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/schedule.ts";
+import { isTrackingProblem, LANDSCAPE_MISSING, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
 import type { JobOutcome, ScheduledJob } from "./types.ts";
+import { RETRY_MINUTES } from "./worker.ts";
+
+/**
+ * How a competitive schedule records that RivalIQ does not track the client
+ * (or no longer does). It is the schedule's last_result, shown on the client
+ * setup page, so the prefix is the contract the page reads.
+ */
+export const NEEDS_TRACKING = "needs tracking";
 
 export interface ScheduleRow {
   id: string;
@@ -59,7 +72,16 @@ export interface DispatchStore {
   competitiveReport(id: string, clientId: string): Promise<{ status: string; date_range_start: string | null; date_range_end: string | null } | null>;
   /** A report row's status, to tell whether a prepared report is still open. */
   reportStatus(table: "reports" | "competitive_reports", id: string): Promise<string | null>;
-  pairedCompetitiveDue(clientId: string, now: Date): Promise<boolean>;
+  /**
+   * True while the client's due competitive analysis is about to start: an
+   * active competitive schedule is due and its dispatch job for that
+   * occurrence is queued, running, or not created yet. A competitive job
+   * that is waiting, blocked or finished will not produce a report now, so
+   * the social report does not wait for it.
+   */
+  pairedCompetitivePending(clientId: string, now: Date): Promise<boolean>;
+  /** Put the client's waiting, unpinned social dispatches back in the queue. */
+  releaseHeldSocial(clientId: string): Promise<void>;
   webhooks(): Promise<{ social: string | null; competitive: string | null }>;
   insertCompetitiveReport(row: NewReportRow & { created_at: string; set_id: string }): Promise<string>;
   insertSocialReport(row: NewReportRow): Promise<string>;
@@ -83,6 +105,8 @@ export interface DispatchDeps {
   post(url: string, body: unknown): Promise<{ ok: boolean; status: number }>;
   buildSocialPayload(args: { client: ClientRow; reportId: string; range: ReportRange; scheduled: true; staggerSeconds: number; competitiveReportId?: string }): Promise<Record<string, unknown>>;
   buildCompetitivePayload(args: { client: ClientRow; reportId: string; set: CompetitorSetRow; range: ReportRange; attemptStartedAt: string; scheduled: true; staggerSeconds: number }): Promise<Record<string, unknown>>;
+  /** The shared RivalIQ landscape check (landscapeCheck.ts), bound to the project's key. One provider read. */
+  checkLandscape(client: ClientRow, set: CompetitorSetRow): Promise<LandscapeCheck>;
   /** Persist the job's phase before the step that depends on it. */
   saveJob(patch: Partial<Pick<ScheduledJob, "phase" | "report_id" | "result">>): Promise<void>;
   /** Read and build everything, write nothing, send nothing. */
@@ -163,9 +187,40 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       if (!hooks.competitive) throw new Error("competitive webhook URL not configured");
       const set = await d.store.competitorSet(client.id);
       if (!set) {
-        const reason = "Waiting for a confirmed competitor set; paired social report is held.";
-        if (!d.dryRun) await d.store.note(schedule.id, reason);
+        const reason = "Waiting for a confirmed competitor set. The paired social report goes ahead without it.";
+        if (!d.dryRun) {
+          await d.store.note(schedule.id, reason);
+          await d.store.releaseHeldSocial(client.id);
+        }
         return { status: "waiting", reason };
+      }
+      if (!reportId) {
+        // Before any report row exists or anything is sent: does RivalIQ
+        // track this client? A resumed job already passed this check.
+        const tracking = await d.checkLandscape(client, set);
+        if (isTrackingProblem(tracking)) {
+          // Not set up: wait, rechecked daily, so the report runs once
+          // tracking is connected. A linked landscape that disappeared:
+          // blocked, which the daily status check alerts on.
+          const reason = `${NEEDS_TRACKING}: ${tracking.message}`;
+          if (!d.dryRun) {
+            await d.store.note(schedule.id, reason);
+            await d.store.releaseHeldSocial(client.id);
+          }
+          return { status: tracking.code === LANDSCAPE_MISSING ? "blocked" : "waiting", reason, result: { code: tracking.code, set_id: set.id } };
+        }
+        if (!tracking.ok) {
+          // RivalIQ could not be asked. Try again shortly; once the attempts
+          // are used up a person looks, and the social report goes ahead.
+          if (job.attempts < job.max_attempts) {
+            return { status: "queued", reason: tracking.message, available_at: new Date(now.getTime() + RETRY_MINUTES * 60000).toISOString() };
+          }
+          if (!d.dryRun) {
+            await d.store.note(schedule.id, `error: ${tracking.message}`);
+            await d.store.releaseHeldSocial(client.id);
+          }
+          return { status: "blocked", reason: tracking.message, result: { code: tracking.code } };
+        }
       }
       const range = resumed.range ?? rangeForSchedule(schedule.range_mode, now);
       const attemptStartedAt = resumed.attempt_started_at ?? now.toISOString();
@@ -196,25 +251,33 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     // Social.
     if (!hooks.social) throw new Error("n8n webhook URL not configured");
     let range = resumed.range ?? rangeForSchedule(schedule.range_mode, now);
-    let wait: { reason: string; blocked: boolean } | null = null;
+    let wait: string | null = null;
+    /** The competitive report this social report is built on, when it is the pinned one. */
+    let competitiveReportId: string | undefined;
+    /** A pinned competitive report that will not arrive, and what became of it. */
+    let without: string | null = null;
     const dependencyId = schedule.pending_competitive_report_id || undefined;
     if (dependencyId) {
       const dependency = await d.store.competitiveReport(dependencyId, client.id);
-      if (dependency?.status !== "complete") {
-        wait = {
-          reason: `Waiting for competitive report ${dependencyId} (${dependency?.status || "unavailable"}). Retry that report if it failed.`,
-          blocked: dependency?.status === "failed" || !dependency,
-        };
-      } else {
+      if (dependency?.status === "complete") {
         if (!dependency.date_range_start || !dependency.date_range_end) throw new Error("The required competitive report has no reporting period.");
         range = { start: dependency.date_range_start, end: dependency.date_range_end };
+        competitiveReportId = dependencyId;
+      } else if (dependency?.status === "running") {
+        // Released by release_ready_dispatches when it finishes either way;
+        // a run that never reports back is closed by the abandoned-run sweep.
+        wait = `Waiting for competitive report ${dependencyId} to finish.`;
+      } else {
+        // Failed, or gone. The social report does not wait for a competitive
+        // report that is not coming: it uses the latest complete analysis.
+        without = `competitive report ${dependencyId} ${dependency ? `(${dependency.status})` : "(no longer available)"}`;
       }
-    } else if (await d.store.pairedCompetitiveDue(client.id, now)) {
-      wait = { reason: "Waiting for the due competitive analysis to start.", blocked: false };
+    } else if (await d.store.pairedCompetitivePending(client.id, now)) {
+      wait = "Waiting for the due competitive analysis to start.";
     }
     if (wait && !d.dryRun) {
-      await d.store.note(schedule.id, wait.reason);
-      return { status: wait.blocked ? "blocked" : "waiting", reason: wait.reason };
+      await d.store.note(schedule.id, wait);
+      return { status: "waiting", reason: wait };
     }
 
     const result = { range };
@@ -226,18 +289,21 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         await d.saveJob({ phase: "prepared", report_id: reportId, result });
       }
     }
-    const payload = await d.buildSocialPayload({ client, reportId, range, scheduled: true, staggerSeconds: job.stagger_seconds, competitiveReportId: wait ? undefined : dependencyId });
+    const payload = await d.buildSocialPayload({ client, reportId, range, scheduled: true, staggerSeconds: job.stagger_seconds, competitiveReportId: wait ? undefined : competitiveReportId });
     if (d.dryRun) {
       const preview = { ...result, payload_keys: Object.keys(payload) };
       return wait
-        ? { status: wait.blocked ? "blocked" : "waiting", reason: `dry run: ${wait.reason}`, result: preview }
+        ? { status: "waiting", reason: `dry run: ${wait}`, result: preview }
         : { status: "done", reason: "dry run: would post", result: preview };
     }
     await d.saveJob({ phase: "posting" });
     const r = await d.post(hooks.social, payload);
     if (!r.ok) throw new Error(`social webhook ${r.status}`);
-    await d.store.advance(schedule, now, `triggered social report ${reportId}`);
-    return { status: "done", result: { ...result, report_id: reportId, competitive_report_id: dependencyId ?? null } };
+    await d.store.advance(schedule, now, `triggered social report ${reportId}${without ? ` without ${without}` : ""}`);
+    return {
+      status: "done",
+      result: { ...result, report_id: reportId, competitive_report_id: competitiveReportId ?? null, ...(without ? { competitive_report_skipped: dependencyId } : {}) },
+    };
   } catch (err) {
     const msg = message(err);
     if (d.dryRun) return { status: "failed", reason: `dry run: ${msg}` };
