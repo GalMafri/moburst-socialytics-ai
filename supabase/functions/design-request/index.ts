@@ -273,10 +273,11 @@ async function prepareUpcoming(admin: any, opts: { dryRun?: boolean; clientId?: 
     const { data: posts } = await admin.from("calendar_posts").select("*").eq("client_id", settings.client_id).gte("post_date", today).lte("post_date", until).order("post_date");
     const candidates = (posts ?? []).filter((p: any) => !VIDEO_POST.test(`${p.format ?? ""} ${p.platform === "TikTok" ? "tiktok" : ""}`));
     if (!candidates.length) continue;
-    const keys = candidates.map((p: any) => p.post_key);
+    // Matched in code: a report post's key is JSON text (quotes, commas),
+    // which an in() filter on the key does not survive.
     const [{ data: designed }, { data: requested }] = await Promise.all([
-      admin.from("post_iterations").select("calendar_post_key").eq("client_id", settings.client_id).in("calendar_post_key", keys).like("variant_angle", "Design option %"),
-      admin.from("design_requests").select("calendar_post_key").eq("client_id", settings.client_id).in("calendar_post_key", keys),
+      admin.from("post_iterations").select("calendar_post_key").eq("client_id", settings.client_id).not("calendar_post_key", "is", null).like("variant_angle", "Design option %").limit(10000),
+      admin.from("design_requests").select("calendar_post_key").eq("client_id", settings.client_id).limit(10000),
     ]);
     const has = new Set([...(designed ?? []), ...(requested ?? [])].map((r: any) => r.calendar_post_key));
     for (const post of candidates) if (!has.has(post.post_key)) due.push({ settings, post });

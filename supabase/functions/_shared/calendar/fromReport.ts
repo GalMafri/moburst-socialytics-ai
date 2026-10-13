@@ -155,11 +155,13 @@ export async function importReportPosts(admin: any, reportId: string): Promise<{
   const stale = (existing ?? []).filter((p: { post_key: string }) => !keys.has(p.post_key));
   if (stale.length) {
     const staleKeys = stale.map((p: { post_key: string }) => p.post_key);
+    // Matched in code: the keys are JSON text, which an in() filter does not survive.
     const [{ data: worked }, { data: requested }] = await Promise.all([
-      admin.from("post_iterations").select("calendar_post_key").eq("client_id", report.client_id).in("calendar_post_key", staleKeys),
-      admin.from("design_requests").select("calendar_post_key").eq("client_id", report.client_id).in("calendar_post_key", staleKeys),
+      admin.from("post_iterations").select("calendar_post_key").eq("client_id", report.client_id).eq("report_id", report.id).not("calendar_post_key", "is", null).limit(10000),
+      admin.from("design_requests").select("calendar_post_key").eq("client_id", report.client_id).limit(10000),
     ]);
-    const keep = new Set([...(worked ?? []), ...(requested ?? [])].map((r: { calendar_post_key: string }) => r.calendar_post_key));
+    const staleSet = new Set(staleKeys);
+    const keep = new Set([...(worked ?? []), ...(requested ?? [])].map((r: { calendar_post_key: string }) => r.calendar_post_key).filter((k) => staleSet.has(k)));
     const drop = stale.filter((p: { post_key: string }) => !keep.has(p.post_key)).map((p: { id: string }) => p.id);
     if (drop.length) {
       await admin.from("calendar_posts").delete().in("id", drop);

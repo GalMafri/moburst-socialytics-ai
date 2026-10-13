@@ -16,24 +16,29 @@ export type ClientPost = CalendarPostRow & { client_name: string };
 
 export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: string }) {
   const navigate = useNavigate();
-  const keys = useMemo(() => posts.map((p) => p.post_key), [posts]);
-  // The design shown on each card: the one in use, else the newest.
+  const keys = useMemo(() => new Set(posts.map((p) => p.post_key)), [posts]);
+  const clientIds = useMemo(() => [...new Set(posts.map((p) => p.client_id))], [posts]);
+  // The design shown on each card: the one in use, else the newest. Matched
+  // by key in code: a report post's key is JSON text, which an in() filter
+  // on the key does not survive.
   const { data: designs = {} } = useQuery({
-    queryKey: ["calendar-week-designs", week, keys.length, keys[0]],
-    enabled: keys.length > 0,
+    queryKey: ["calendar-week-designs", week, keys.size, clientIds.join(",")],
+    enabled: keys.size > 0,
     queryFn: async () => {
       const { data, error } = await supabase.from("post_iterations")
         .select("calendar_post_key, media_urls, is_selected, created_at")
-        .in("calendar_post_key", keys)
+        .in("client_id", clientIds)
+        .not("calendar_post_key", "is", null)
         .not("media_urls", "is", null)
         .is("rejected_at", null)
         .is("archived_at", null)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(5000);
       if (error) throw error;
       const out: Record<string, string> = {};
       for (const r of data || []) {
         const url = (r.media_urls || []).find((u: string) => !/\.(mp4|webm|mov)/i.test(u));
-        if (!url || !r.calendar_post_key) continue;
+        if (!url || !r.calendar_post_key || !keys.has(r.calendar_post_key)) continue;
         if (r.is_selected || !out[r.calendar_post_key]) out[r.calendar_post_key] = url;
       }
       return out;
