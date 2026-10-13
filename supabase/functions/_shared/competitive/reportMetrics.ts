@@ -62,8 +62,14 @@ export function competitiveCompanyMetrics(c: {rivaliq_metrics?: any; linkedin_me
 function applyOwnedMetrics(base:any,owned:any) {
   if(owned?.coverage!=='complete') return base;
   if(owned.period?.start!==base.period?.start||owned.period?.end!==base.period?.end) throw new Error('Owned client source period does not match the competitive report');
-  const by_network={...base.by_network,...Object.fromEntries(Object.entries(owned.by_network).map(([network,value]:[string,any])=>{
+  const by_network={...base.by_network,...Object.fromEntries(Object.entries(owned.by_network).map(([network,raw]:[string,any])=>{
     const snapshot=owned.audience_snapshot?.by_network?.[network];
+    // YouTube reports views, not impressions. Views are YouTube's impressions in
+    // this report, as RivalIQ counts them for every company; a report collected
+    // before the owned source did the same takes the client's views from RivalIQ.
+    const views=base.by_network?.[network]?.views;
+    const value=!valid(raw.impressions?.current)&&network==='youtube'&&valid(views?.current)
+      ? {...raw,impressions:{current:views.current,previous:valid(views.previous)?views.previous:null},impressions_kind:'views'}:raw;
     return [network,!valid(value.followers?.current)&&valid(snapshot?.followers)&&snapshot?.as_of
       ? {...value,followers:{current:snapshot.followers,previous:null},audience_as_of:snapshot.as_of}:value];
   }))};
@@ -85,7 +91,7 @@ function applyOwnedMetrics(base:any,owned:any) {
   // Client impressions are summed over the connected networks that report
   // them, and those networks are named; one network without impressions
   // (YouTube, through Sprout) must not hide the others' measured totals.
-  const ownedEntries=Object.entries(owned.by_network) as [string,any][];
+  const ownedEntries=Object.keys(owned.by_network).map((network)=>[network,by_network[network]]) as [string,any][];
   const impressionNets=ownedEntries.filter(([,n])=>valid(n.impressions?.current));
   const actual_impressions=impressionNets.length?{
     current:combined('impressions','current',impressionNets.map(([,n])=>n)),

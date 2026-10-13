@@ -1,4 +1,5 @@
 import { useNavigate, useParams } from "react-router-dom";
+import { reportNotices } from "@/lib/reportNotices";
 import { canRetry, retryLabel } from "@/lib/reportRun";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { StatCard } from "@/components/ui/stat-card";
@@ -160,6 +161,7 @@ export default function ReportView() {
 
   // Build the full client context once, pass down via props.
   const clientRow = (report as any).clients || {};
+  const notices = reportNotices(rd?.warnings, { briefText: clientRow.brief_text });
   const clientContext: ClientContext = {
     client_id: clientRow.id || id || "",
     client_name: clientRow.name || "Client",
@@ -405,9 +407,10 @@ export default function ReportView() {
           </div>
         </div>
 
-        {Array.isArray(rd?.warnings) && rd.warnings.length > 0 && (
-          <div role="status" className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm space-y-1">
-            {rd.warnings.filter((warning: unknown) => typeof warning === "string").map((warning: string, index: number) => <p key={index}>{warning}</p>)}
+        {/* Setup notes from the run are for the team, and only while still true. */}
+        {isMoburstStaff && notices.length > 0 && (
+          <div role="status" data-print="hide" className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm space-y-1">
+            {notices.map((warning, index) => <p key={index}>{warning}</p>)}
           </div>
         )}
 

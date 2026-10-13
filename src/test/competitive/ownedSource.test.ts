@@ -66,6 +66,15 @@ describe('owned competitive sources',()=>{
   expect(out.aggregates.companies[0].comparison_metrics.actual_impressions.current).toBe(200);
   expect(out.aggregates.companies[0].comparison_metrics.owned_profile_scope[0].network).toBe('instagram');
  });
+ it('counts YouTube views as the client\'s YouTube impressions, as RivalIQ does for every company',()=>{
+  const owned=normalize([post(1,'2026-08-02')]);
+  owned.metrics.by_network.youtube={posts:{current:2,previous:1},engagement:{current:5,previous:1},followers:{current:10,previous:9},rate:{current:null,previous:null},impressions:{current:null,previous:null},source:'sprout',profiles:[{id:'9',name:'Brand'}]};
+  const r={period,posts:{current:0,previous:0},engagement:{current:0,previous:0},audience:{current:1000,previous:1000},by_network:{youtube:{views:{current:900,previous:300}}}};
+  const result=competitiveCompanyMetrics({rivaliq_metrics:r,owned_metrics:owned.metrics});
+  expect(result.by_network.youtube.impressions).toEqual({current:900,previous:300});
+  expect(result.actual_impressions_missing).toEqual([]);
+  expect(result.actual_impressions.current).toBe(1000);
+ });
  it('blocks delivery when observed posts do not reconcile with owned totals',()=>{
   const owned=normalize([post(1,'2026-08-02'),post(2,'2026-08-03')]);
   const quality=competitiveReportQuality({period,aggregates:{metric_semantics_version:4,companies:[{name:'Brand',owned_metrics:owned.metrics,by_channel:{instagram:{observed_post_count:1}},rivaliq_metrics:{period,posts:{current:1}}}]}});

@@ -192,10 +192,13 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   briefs = withRefs(briefs, library, recentList);
 
   const planned: DesignRequest = { ...request, briefs };
-  await admin.from("design_requests").update({ briefs, stage: "designing", updated_at: new Date().toISOString() }).eq("id", request.id);
+  // The jobs exist before the request leaves planning. The worker settles
+  // every request past planning, and one it found with no jobs yet started a
+  // second copy of the first option (13 Oct: two of one design; for a video,
+  // two clips paid for).
   const first = Math.min(request.options_wanted, briefs.length);
   for (let i = 0; i < first; i++) await startOption(admin, planned, settings, brand, i, i);
-  await admin.from("design_requests").update({ candidates_started: first, updated_at: new Date().toISOString() }).eq("id", request.id);
+  await admin.from("design_requests").update({ briefs, stage: "designing", candidates_started: first, updated_at: new Date().toISOString() }).eq("id", request.id);
   await wakeWorker();
 }
 

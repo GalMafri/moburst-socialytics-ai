@@ -67,7 +67,8 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
       image:media?.thumbnail_url || (String(media?.media_type||'').toLowerCase().includes('video')?null:media?.media_url) || null,
       engagementTotal:engagement,applause,conversation,amplification,
       engagementRate:audience?.followers>0?engagement/audience.followers:null,presenceReach:audience?.followers??null,
-      ownedImpressions:metric(row,'lifetime.impressions'),views:metric(row,'lifetime.video_views'),
+      // YouTube reports views, not impressions; views are YouTube's impressions here, as RivalIQ counts them for every company.
+      ownedImpressions:metric(row,'lifetime.impressions') ?? (network==='youtube' ? metric(row,'lifetime.video_views') : null),views:metric(row,'lifetime.video_views'),
       type:category==='album'||category==='document'?'carousel':category==='photo'?'image':category||'unknown',authorship:'company'});
   }
   const networks=[...new Set(profiles.map(p=>ownedNetwork(p.network_type)))];
