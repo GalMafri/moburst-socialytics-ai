@@ -131,11 +131,13 @@ export function findLogo(image: ArrayLike<number>, iw: number, ih: number, logo:
 }
 
 /**
- * The logo sizes searched, as shares of the client's usual logo width: from
- * a little under half of it (the small end of the client's own posts) to a
- * little over it.
+ * The logo sizes searched, as shares of the usual logo width set in the
+ * client's design settings. Clients' own posts run from about 0.55 of it
+ * (Moburst's carousels: 18% of the frame against 32.3% set) to about 1.2 of
+ * it (LegaBot's corner logo: 24% against 20.5% set), measured 14 Oct; a logo
+ * drawn twice the size, over a headline, is outside.
  */
-export const LOGO_SCALES: [number, number] = [0.45, 1.15];
+export const LOGO_SCALES: [number, number] = [0.45, 1.35];
 
 /**
  * The lowest match score that counts as the logo. A drawn logo matched its
