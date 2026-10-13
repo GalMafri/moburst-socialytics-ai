@@ -5,24 +5,28 @@
 //      on a canvas that carries the client's logo file, with the client's own
 //      posts as its visual language (brief.ts). It is drawn at twice the
 //      page's size so the post stays sharp.
-//   2. unlogo:   the same picture redrawn whole with every logo and brand
+//   2. locate:   where the model drew the logo, at the client's usual spot and
+//                at a size the client uses (logoMatch.ts). A design without
+//                one there is designed again.
+//   3. unlogo:   the same picture redrawn whole with every logo and brand
 //                mark taken out (a whole redraw: patching boxes left blocks
 //                and stray letters on 13 Oct).
-//   3. finish:   the client's logo file laid at the client's habitual spot
-//                and size, then brought down to the delivered size.
-//   4. verify:   the words on the finished post are read back and must be the
+//   4. finish:   the client's logo file laid exactly where and at the size the
+//                model drew it, so the design keeps the room it made for it,
+//                then brought down to the delivered size.
+//   5. verify:   the words on the finished post are read back and must be the
 //                headline's words exactly; otherwise the post is designed again.
 //
 // Free of Deno and network imports so it can be tested.
 
-/** The instruction for step 2. */
+/** The instruction for step 3. */
 export function removePrompt(brand: string): string {
   return `Remove every logo and brand mark of ${brand} from this image: its wordmark and symbol, and any copy of the symbol anywhere else, including on objects, signs, clothing or screens. ` +
     "Where each was, continue exactly what is behind it or the surface it was on. " +
     "Keep everything else exactly as it is: every word of the text with its spelling, font, size, color and position, the picture, the layout, the colors, the light and the sharpness. Add nothing.";
 }
 
-/** The instruction for step 4. */
+/** The instruction for step 5. */
 export function readPrompt(brand: string): string {
   return `Transcribe every piece of text in this image exactly as written, in reading order, keeping spelling, capitalization and punctuation. Leave out the ${brand} logo. Reply with JSON only: {"lines":["..."]}`;
 }

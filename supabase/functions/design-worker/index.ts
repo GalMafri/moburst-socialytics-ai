@@ -2,7 +2,7 @@
 //
 // Makes the designs that design-request plans, without Canva (Lital, 13 Oct:
 // "drop canva"). The steps are in _shared/design/pipeline.ts: generate,
-// unlogo, finish, verify. Each design is a row in canva_finish_jobs (the table
+// locate, unlogo, finish, verify. Each design is a row in canva_finish_jobs (the table
 // keeps its old name); a video's footage and join stay with video-worker.
 //
 //   POST {action:"tick"}              one pass over the due jobs (operational secret)
@@ -21,6 +21,7 @@ import { settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
 import { copyMatches, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
+import { LOGO_SCALES, findLogo, logoFound } from "../_shared/design/logoMatch.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -33,13 +34,13 @@ const LEASE_MS = 120_000;
 /** The image model can take minutes; its call is held under a longer lease. */
 const MODEL_LEASE_MS = 420_000;
 const MAX_ATTEMPTS = 4;
-/** Designs made for one option before it fails (a design whose words are wrong is made again). */
+/** Designs made for one option before it fails (a design with wrong words, or without the logo in its place, is made again). */
 const MAX_GENERATIONS = 3;
 const MAX_UNLOGO = 3;
 const DEFAULT_PAGE = { width: 1088, height: 1360 };
 const IMAGE_MODEL = "gpt-image-2.5-flare";
 const READ_MODEL = "claude-opus-5-5";
-const STEPS = new Set(["generate", "unlogo", "finish", "verify"]);
+const STEPS = new Set(["generate", "locate", "unlogo", "finish", "verify"]);
 /** A job is only ever moved on while it is active: a cancelled design stays cancelled. */
 const ACTIVE = ["queued", "running"];
 
@@ -191,12 +192,31 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         s.cover_path = cover.state.design_path;
       }
       s.generations = (s.generations ?? 0) + 1;
-      if (s.generations > MAX_GENERATIONS) throw new Error("FINAL: The design could not be made with the headline's exact words.");
+      if (s.generations > MAX_GENERATIONS) throw new Error("FINAL: The design could not be made with the headline's exact words and the logo in its place.");
       return hold(admin, job, async () => {
         s.design_path = await generateDesign(admin, job, `${base}/design-${s.generations}.png`);
-        for (const k of ["nologo_path", "unlogos", "final_path", "read"]) delete s[k];
-        job.step = "unlogo";
+        for (const k of ["logo_rect", "logo_frame", "logo_score", "nologo_path", "unlogos", "final_path", "read"]) delete s[k];
+        job.step = "locate";
       });
+    }
+    case "locate": {
+      const design = await Image.decode(await download(admin, s.design_path));
+      const logo = await Image.decode(await download(admin, job.input.logo_path));
+      const W = design.width, H = design.height;
+      const usual = canvasLogoRect(job.input.placement, logo.width, logo.height, W, H);
+      const g: GenerateInput = job.input.generate;
+      const found = findLogo(design.bitmap, W, H, logo.bitmap, logo.width, logo.height, usual, hexRgb(g.background), { scales: LOGO_SCALES });
+      s.logo_score = Math.round(found.score * 1000) / 1000;
+      if (!logoFound(found, usual.width)) {
+        // No logo at the client's usual spot, or one at a size the client never uses: designed again.
+        console.warn(`[design-worker] job ${job.id}: logo match ${s.logo_score} at ${(found.width / usual.width).toFixed(2)} of the usual width; designing again.`);
+        job.step = "generate";
+        return "next";
+      }
+      s.logo_rect = { x: found.x, y: found.y, width: found.width, height: found.height };
+      s.logo_frame = [W, H];
+      job.step = s.nologo_path ? "finish" : "unlogo";
+      return "next";
     }
     case "unlogo": {
       s.unlogos = (s.unlogos ?? 0) + 1;
@@ -213,14 +233,15 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       });
     }
     case "finish": {
+      // A design from before the locate step is located first.
+      if (!s.logo_rect) { job.step = "locate"; return "next"; }
       const pic = await Image.decode(await download(admin, s.nologo_path));
       const logo = await Image.decode(await download(admin, job.input.logo_path));
       const W = pic.width, H = pic.height;
-      // The logo file at the client's habitual spot and size, the spot the
-      // canvas gave the model. The model's own drawing of the logo is gone
-      // (unlogo), so the file never follows where the model drifted to (one
-      // slide of a carousel drew it twice the size, over the headline panel).
-      const r = canvasLogoRect(job.input.placement, logo.width, logo.height, W, H);
+      // The logo file exactly where and at the size the model drew it, in the
+      // room the design left for it. The model's own drawing is gone (unlogo).
+      const k = W / s.logo_frame[0];
+      const r = { x: Math.round(s.logo_rect.x * k), y: Math.round(s.logo_rect.y * k), width: Math.round(s.logo_rect.width * k), height: Math.round(s.logo_rect.height * k) };
       // The logo file blended in place, inside its own rectangle only (a
       // full-size layer per design ran the worker out of memory on 13 Oct).
       const lp = resampleRGBA(logo.bitmap, logo.width, logo.height, r.width, r.height);
