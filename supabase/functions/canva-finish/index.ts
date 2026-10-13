@@ -29,7 +29,7 @@ import { getExport, getImageToDesign, startExport, startImageToDesign, uploadAss
 import { CanvaMcp } from "../_shared/canva/mcp.ts";
 import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
-import { type Box, type Layer, type Placement, copyOperations, elementBox, inkBox, logoRect, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
+import { type Box, type Layer, type Placement, CLEAN_PROMPT, cleanMask, cleanRegions, copyOperations, elementBox, inkBox, logoRect, pasteRegions, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
@@ -48,6 +48,7 @@ const INTENT = "Socialytics finishing: replace the drawn logo with the client's 
 /** The image model can take minutes; its run is held under a longer lease. */
 const GENERATE_LEASE_MS = 420_000;
 const MAX_GENERATIONS = 3;
+const MAX_CLEANS = 2;
 const PAGE = { width: 1088, height: 1360 };
 
 const db = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -399,7 +400,23 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       const r = await settle(() => getImageToDesign(token, s.layers_job), deadline);
       if (r.status === "in_progress") return "wait";
       if (r.status !== "success" || !r.designId) throw new Error(`FINAL: Magic Layers did not finish: ${r.error ?? r.status}`);
-      s.design_id = r.designId; job.step = "export_before"; return "next";
+      s.design_id = r.designId; job.step = "clean_read"; return "next";
+    }
+    // Where the drawn text and logo are, from the layers Magic Layers made.
+    case "clean_read": return await oneEditAtATime(() => Date.now() < deadline ? readCleanRegions(token, job) : Promise.resolve<StepResult>("wait"));
+    // Redraw those areas from their surroundings, in the background (minutes).
+    case "clean": {
+      s.cleans = (s.cleans ?? 0) + 1;
+      if (s.cleans > MAX_CLEANS) throw new Error("FINAL: The background behind the text could not be cleaned.");
+      await admin.from("canva_finish_jobs").update({ lease_until: new Date(Date.now() + GENERATE_LEASE_MS).toISOString(), state: s }).eq("id", job.id);
+      const work = cleanBackground(admin, job).catch(async (e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[canva-finish] job ${job.id} clean:`, msg);
+        await admin.from("canva_finish_jobs").update({ error: msg, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+      });
+      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(work);
+      else await work;
+      return "held";
     }
     case "export_before":
     case "export_nologo":
@@ -453,7 +470,9 @@ async function editLayers(token: string, job: Job): Promise<StepResult> {
         await mcp.call("cancel-editing-transaction", { transaction_id: tid, user_intent: INTENT }).catch(() => {});
         throw new Error(`FINAL: ${copy.error}`);
       }
-      const ops = [...logo.map((l) => ({ type: "delete_element", element_id: l.id })), ...copy.ops];
+      const ops: Array<Record<string, unknown>> = [...logo.map((l) => ({ type: "delete_element", element_id: l.id })), ...copy.ops];
+      // The page background without the drawn text, so no trace of it shows around the exact copy.
+      if (s.clean_asset) ops.push({ type: "update_fill", element_id: s.page.id, asset_type: "image", asset_id: s.clean_asset, alt_text: "Background" });
       // A retried step can find the logo already gone (the previous attempt
       // committed before it could record it); the client's logo region then
       // bounds the search for where it was.
@@ -561,6 +580,70 @@ async function generateDesign(admin: any, job: Job): Promise<void> {
 
   const state = { ...job.state, design_path: path };
   await admin.from("canva_finish_jobs").update({ step: "upload", state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+}
+
+/** Where the drawn text and logo sit, read from the design's layers (one Canva session, nothing changed). */
+async function readCleanRegions(token: string, job: Job): Promise<StepResult> {
+  const s = job.state;
+  const mcp = await editingSession(token);
+  const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
+  await mcp.call("cancel-editing-transaction", { transaction_id: tx.transaction.transaction_id, user_intent: INTENT }).catch(() => {});
+  s.page = { id: tx.pages[0].page_id, width: tx.pages[0].dimension.width, height: tx.pages[0].dimension.height };
+  const texts: Layer[] = (tx.richtexts ?? []).map((r: any) => ({ id: r.element_id, box: elementBox(r), text: (r.regions ?? []).map((g: any) => g.text ?? "").join("") }));
+  const fills: Layer[] = (tx.fills ?? []).map((f: any) => ({ id: f.element_id, box: elementBox(f) }));
+  const [lw, lh] = job.input.logo_size;
+  const region = placementRegion(job.input.placement, lw, lh, s.page.width, s.page.height);
+  const logo = pickLogoLayers([...texts, ...fills], region, job.input.copy);
+  const boxes = [...texts, ...logo].map((l) => l.box).filter(Boolean) as Box[];
+  s.clean_regions = cleanRegions(boxes, s.page.width, s.page.height);
+  job.step = s.clean_regions.length ? "clean" : "export_before";
+  return "next";
+}
+
+/**
+ * Redraw the drawn text and logo areas from their surroundings, paste only
+ * those areas back onto the design (every other pixel unchanged), and hand
+ * the result to Canva as the page background.
+ */
+async function cleanBackground(admin: any, job: Job): Promise<void> {
+  const s = job.state;
+  const regions = s.clean_regions as Box[];
+  const original = await Image.decode(await download(admin, s.design_path));
+  const w = original.width, h = original.height;
+  const mask = new Image(w, h);
+  mask.bitmap.set(cleanMask(w, h, regions));
+
+  const form = new FormData();
+  form.append("model", "gpt-image-2.5-flare");
+  form.append("size", `${w}x${h}`);
+  form.append("quality", "high");
+  form.append("n", "1");
+  form.append("image[]", new Blob([(await original.encode()) as unknown as BlobPart], { type: "image/png" }), "design.png");
+  form.append("mask", new Blob([(await mask.encode()) as unknown as BlobPart], { type: "image/png" }), "mask.png");
+  form.append("prompt", CLEAN_PROMPT);
+  const resp = await fetch("https://api.openai.com/v1/images/edits", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${await openaiKey(admin)}` },
+    body: form,
+    signal: AbortSignal.timeout(360_000),
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(`Image model ${resp.status}: ${text.slice(0, 300)}`);
+  const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
+  if (!b64) throw new Error("The image model returned no image.");
+  let redrawn = await Image.decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+  if (redrawn.width !== w || redrawn.height !== h) redrawn = redrawn.resize(w, h);
+
+  const clean = new Image(w, h);
+  clean.bitmap.set(pasteRegions(original.bitmap, redrawn.bitmap, w, h, regions));
+  const bytes = await clean.encode();
+  const path = `${job.client_id}/canva-finish/${job.id}/clean.png`;
+  const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "image/png", upsert: true });
+  if (error) throw new Error(`Could not store the clean background: ${error.message}`);
+  const asset = await uploadAsset(await accessTokenFor(admin), bytes, `${job.id}-clean.png`);
+
+  const state = { ...s, clean_path: path, clean_asset: asset };
+  await admin.from("canva_finish_jobs").update({ step: "export_before", state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
 }
 
 async function openaiKey(admin: any): Promise<string> {

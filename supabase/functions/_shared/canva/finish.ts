@@ -151,3 +151,69 @@ export function logoRect(ink: Box, logoW: number, logoH: number): { left: number
   const cy = (ink[1] + ink[3]) / 2;
   return { left: ink[0], top: Math.round((cy - height / 2) * 10) / 10, width, height: Math.round(height * 10) / 10 };
 }
+
+// ── A clean background under the live text ─────────────────────────────────
+//
+// Magic Layers turns the drawn lettering into live text layers and fills in
+// the background behind it, but traces of the drawn letters stay in that
+// background, and the exact copy set in Canva's matched font does not always
+// cover them (ghosted letters, 13 Oct). The areas the drawn text and logo
+// occupied are redrawn from their surroundings, pasted back onto the original
+// image so nothing else changes, and that image becomes the page background.
+
+/** Margin around drawn text and logo that is redrawn, for glows and shadows around the letters. */
+export const CLEAN_PAD = 16;
+
+/** The areas to redraw: every text layer's box and the drawn logo's, padded and kept on the page. */
+export function cleanRegions(boxes: Box[], pageW: number, pageH: number, pad = CLEAN_PAD): Box[] {
+  return boxes.map(([x0, y0, x1, y1]) => [
+    Math.max(0, Math.floor(x0 - pad)),
+    Math.max(0, Math.floor(y0 - pad)),
+    Math.min(pageW, Math.ceil(x1 + pad)),
+    Math.min(pageH, Math.ceil(y1 + pad)),
+  ] as Box).filter(([x0, y0, x1, y1]) => x1 > x0 && y1 > y0);
+}
+
+/** How far into a region a pixel is, 0 outside; regions fade in over `feather` pixels at their edges. */
+function weightAt(x: number, y: number, regions: Box[], feather: number): number {
+  let w = 0;
+  for (const [x0, y0, x1, y1] of regions) {
+    if (x < x0 || y < y0 || x >= x1 || y >= y1) continue;
+    const d = Math.min(x - x0, y - y0, x1 - 1 - x, y1 - 1 - y);
+    w = Math.max(w, feather > 0 ? Math.min(1, (d + 1) / feather) : 1);
+    if (w >= 1) break;
+  }
+  return w;
+}
+
+/**
+ * The original image with only the regions taken from the redrawn one
+ * (feathered at their edges), so every pixel outside them is unchanged.
+ */
+export function pasteRegions(original: ArrayLike<number>, redrawn: ArrayLike<number>, width: number, height: number, regions: Box[], feather = 6): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(original as ArrayLike<number>);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const w = weightAt(x, y, regions, feather);
+      if (w <= 0) continue;
+      const i = (y * width + x) * 4;
+      for (let c = 0; c < 3; c++) out[i + c] = Math.round(original[i + c] * (1 - w) + redrawn[i + c] * w);
+      out[i + 3] = 255;
+    }
+  }
+  return out;
+}
+
+/** OpenAI's mask: transparent where the image is redrawn, opaque where it is kept. */
+export function cleanMask(width: number, height: number, regions: Box[]): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(width * height * 4).fill(255);
+  for (const [x0, y0, x1, y1] of regions) {
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) out[(y * width + x) * 4 + 3] = 0;
+  }
+  return out;
+}
+
+export const CLEAN_PROMPT =
+  "Remove every letter, word, number and logo inside the transparent areas, with their glows and shadows. " +
+  "Fill those areas with exactly what continues around them: the same background, light, texture and objects. " +
+  "Keep everything else exactly as it is. Add no text.";
