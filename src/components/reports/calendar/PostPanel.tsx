@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { useDesignRequestForPost, useDesignRequests } from "./DesignRequestsContext";
 import { PostDesign } from "./PostDesign";
+import { CalendarPostActions } from "@/components/calendar/CalendarPostActions";
 import { createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback } from "@/lib/designRequests";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -205,6 +206,11 @@ export function PostPanel({
               {post.posting_time && (
                 <span className="text-sm font-normal text-muted-foreground tracking-[-0.5px]">
                   {post.posting_time}
+                </span>
+              )}
+              {isMoburstStaff && post._calendarPostId && (
+                <span className="ml-auto mr-6">
+                  <CalendarPostActions postId={post._calendarPostId} clientId={clientId} date={String(post.date_label || "")} onDone={() => onOpenChange(false)} />
                 </span>
               )}
             </SheetTitle>
