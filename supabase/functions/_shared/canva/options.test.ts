@@ -92,3 +92,28 @@ describe("the client's library", () => {
     expect(recentLines([], library)).toBe("");
   });
 });
+
+import { leastRecentPosts, withRefs } from "./options";
+
+describe("leastRecentPosts", () => {
+  const library = ["a.jpg", "b.jpg", "c.jpg", "d.jpg"];
+  it("takes never-used posts first, then the ones used longest ago", () => {
+    const recent = [
+      { refs: ["a.jpg"], layout: null, picture: "newest" },
+      { refs: ["c.jpg"], layout: null, picture: "older" },
+    ];
+    expect(leastRecentPosts(library, recent)).toEqual(["b.jpg", "d.jpg"]);
+    expect(leastRecentPosts(library, [...recent, { refs: ["b.jpg", "d.jpg"], layout: null, picture: "oldest" }])).toEqual(["b.jpg", "d.jpg"]);
+    expect(leastRecentPosts(["a.jpg", "c.jpg"], recent)).toEqual(["c.jpg", "a.jpg"]);
+  });
+  it("gives each brief without chosen posts different posts, and keeps the planner's choices", () => {
+    const briefs = withRefs([
+      { headline: ["one"], picture: "p1" },
+      { headline: ["two"], picture: "p2", refs: ["a.jpg"] },
+      { headline: ["three"], picture: "p3" },
+    ], library, []);
+    expect(briefs[0].refs).toEqual(["a.jpg", "b.jpg"]);
+    expect(briefs[1].refs).toEqual(["a.jpg"]);
+    expect(briefs[2].refs).toEqual(["c.jpg", "d.jpg"]);
+  });
+});

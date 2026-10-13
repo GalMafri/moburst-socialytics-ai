@@ -59,6 +59,30 @@ export function chosenPosts(raw: unknown, library: string[]): string[] {
   return out;
 }
 
+/**
+ * The library posts used longest ago (or never) by the client's recent
+ * designs, for a brief whose planner named none. Taking the first posts of the
+ * library instead made every such design build on the same three (13 Oct).
+ */
+export function leastRecentPosts(library: string[], recent: RecentDesign[], count = MAX_POSTS_PER_DESIGN): string[] {
+  const lastUse = new Map<string, number>();
+  recent.forEach((r, age) => r.refs.forEach((p) => { if (!lastUse.has(p)) lastUse.set(p, age); }));
+  // Never used first, then the ones used longest ago; library order breaks ties.
+  const rank = (p: string) => (lastUse.has(p) ? recent.length - lastUse.get(p)! : -1);
+  return [...library].map((p, i) => ({ p, i })).sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i).slice(0, count).map((x) => x.p);
+}
+
+/** Every brief builds on posts the planner chose, or else on the least recently used ones. */
+export function withRefs(briefs: Brief[], library: string[], recent: RecentDesign[]): Brief[] {
+  const used: RecentDesign[] = [...recent];
+  return briefs.map((b) => {
+    if (b.refs?.length) return b;
+    const refs = leastRecentPosts(library, used);
+    used.unshift({ refs, layout: null, picture: "" });
+    return { ...b, refs };
+  });
+}
+
 function withChoice(brief: Brief, o: unknown, library: string[]): Brief {
   const refs = chosenPosts((o as { posts?: unknown })?.posts, library);
   const layout = String((o as { layout?: unknown })?.layout ?? "").replace(/\s+/g, " ").trim().slice(0, 80);

@@ -22,7 +22,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
-import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, plannerPrompt, recentLines } from "../_shared/canva/options.ts";
+import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, plannerPrompt, recentLines, withRefs } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
@@ -165,7 +165,8 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
     content.push({ type: "image", source: { type: "base64", media_type: mediaType, data: btoa(bin) } });
   }
   if (!library.length) throw new Error("None of the client's reference posts could be read.");
-  const recent = recentLines(await recentDesigns(admin, request.client_id), library);
+  const recentList = await recentDesigns(admin, request.client_id);
+  const recent = recentLines(recentList, library);
   // What people who turned down this client's earlier designs asked for.
   const guidance = learningLines(await loadDesignLearnings(admin, request.client_id));
 
@@ -187,6 +188,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
     briefs = carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES, library) : parseBriefs(result.text, library);
   }
   if (!briefs.length) throw new Error("The options could not be planned.");
+  briefs = withRefs(briefs, library, recentList);
 
   const planned: DesignRequest = { ...request, briefs };
   await admin.from("design_requests").update({ briefs, stage: "designing", updated_at: new Date().toISOString() }).eq("id", request.id);

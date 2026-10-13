@@ -362,9 +362,11 @@ export function PostPanel({
                   <p className="t-secondary">
                     {videoTiles.length > 0
                       ? "Click any video to preview at full size."
-                      : clientContext?.design_style_synthesis?.reference_pipeline_version === 1
-                        ? "Create a 12-second film with three moving scenes, guided by this client’s real social references."
-                        : "Create short video drafts, then preview and choose a favorite."}
+                      : !isMoburstStaff
+                        ? "Your account team adds the video for this post."
+                        : clientContext?.design_style_synthesis?.reference_pipeline_version === 1
+                          ? "Create a 12-second film with three moving scenes, guided by this client’s real social references."
+                          : "Create short video drafts, then preview and choose a favorite."}
                   </p>
                 </div>
                 {isMoburstStaff && <CreatePostVideoButton
