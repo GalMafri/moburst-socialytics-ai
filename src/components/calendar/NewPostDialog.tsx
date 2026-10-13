@@ -4,7 +4,7 @@
  * the idea, lands on its date, and gets its design like every other post.
  */
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -16,6 +16,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { mondayOf } from "@/lib/calendarPosts";
+
+const weekOf = (date: string) => mondayOf(date);
 
 const FORMATS = [
   { value: "auto", label: "Best fit for the idea" },
@@ -25,21 +28,30 @@ const FORMATS = [
   { value: "Story", label: "Story" },
 ];
 
-export function NewPostDialog({ clientId, platforms, defaultDate, onCreated }: {
+/** Why a post is planned: an insight from a report, or (by default) the idea someone typed. */
+export interface PostReason { type: "performance" | "trend" | "competitor" | "seasonal" | "idea"; label: string; report_id?: string }
+
+export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, initialIdea, reason, reportId, trigger }: {
   clientId: string;
   platforms: string[];
   defaultDate: string;
   onCreated?: (postDate: string) => void;
+  /** Planning a post from a report insight: the insight, as the idea to start from. */
+  initialIdea?: string;
+  reason?: PostReason;
+  reportId?: string;
+  /** The button that opens the dialog; "New post" by default. */
+  trigger?: ReactNode;
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(defaultDate);
   const [platform, setPlatform] = useState("");
   const [format, setFormat] = useState("auto");
-  const [idea, setIdea] = useState("");
+  const [idea, setIdea] = useState(initialIdea ?? "");
   const [busy, setBusy] = useState(false);
 
-  const reset = () => { setDate(defaultDate); setPlatform(""); setFormat("auto"); setIdea(""); };
+  const reset = () => { setDate(defaultDate); setPlatform(""); setFormat("auto"); setIdea(initialIdea ?? ""); };
 
   const create = async () => {
     if (!date || !platform || !idea.trim()) {
@@ -68,14 +80,15 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated }: {
         cta: p.CTA || null,
         visual_direction: p.visual_direction || null,
         rationale: p.concept || null,
-        reasons: [{ type: "idea", label: idea.trim() }],
-        source: "ad_hoc",
+        reasons: [reason ?? { type: "idea", label: idea.trim() }],
+        source: reason ? "insight" : "ad_hoc",
+        report_id: reportId ?? null,
         raw: p,
         created_by: auth?.user?.id ?? null,
       });
       if (insertError) throw insertError;
       await qc.invalidateQueries({ queryKey: ["calendar-posts", clientId] });
-      toast.success("Post added to the calendar");
+      toast.success("Post added to the calendar", { action: { label: "Open", onClick: () => window.location.assign(`/clients/${clientId}/calendar?week=${weekOf(date)}`) } });
       setOpen(false);
       reset();
       onCreated?.(date);
@@ -89,12 +102,12 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated }: {
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); else setDate(defaultDate); }}>
       <DialogTrigger asChild>
-        <Button size="sm"><Plus className="h-3.5 w-3.5 mr-1.5" />New post</Button>
+        {trigger ?? <Button size="sm"><Plus className="h-3.5 w-3.5 mr-1.5" />New post</Button>}
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="t-h3">New post</DialogTitle>
-          <DialogDescription>Describe the idea. The post is written in the client's voice and added to the calendar on its date.</DialogDescription>
+          <DialogTitle className="t-h3">{reason ? "Plan a post from this" : "New post"}</DialogTitle>
+          <DialogDescription>{reason ? "The post is written in the client's voice from this insight and added to the calendar on its date, with the insight as its reason." : "Describe the idea. The post is written in the client's voice and added to the calendar on its date."}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">

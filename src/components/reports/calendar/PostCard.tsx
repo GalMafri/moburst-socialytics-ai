@@ -8,6 +8,7 @@ import { postCopyOf } from "@/lib/postCopy";
 import { useAuth } from "@/hooks/useAuth";
 import { useDesignRequestForPost } from "./DesignRequestsContext";
 import { isPreparing, stageLine } from "@/lib/designRequests";
+import { isOpenTrendSlot } from "@/lib/calendarPosts";
 
 interface Iteration {
   id?: string;
@@ -185,6 +186,10 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
             </span>
           ))}
         </div>
+      )}
+
+      {isOpenTrendSlot(post as never) && (
+        <p className="t-secondary flex-1">Trend post. Written shortly before its date from what's trending then.</p>
       )}
 
       {/* Copy */}

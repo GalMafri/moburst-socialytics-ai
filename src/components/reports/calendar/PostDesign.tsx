@@ -32,9 +32,11 @@ interface Props {
   usingId: string | null;
   /** Turn a design down with a reason the client's next designs learn from (and start a new one), or delete it. */
   onFeedback: (iterationId: string, verdict: "rejected" | "deleted", reason?: string, note?: string, makeNew?: boolean) => Promise<void>;
+  /** The post has no copy yet (a trend post not yet written), so there is nothing to design. */
+  waitingForCopy?: boolean;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback }: Props) {
+export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy }: Props) {
   const design = currentDesign(versions);
   const earlier = versions.filter((v) => v !== design);
   const [showEarlier, setShowEarlier] = useState(false);
@@ -51,11 +53,17 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
         ) : (
           <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-3">
             <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" aria-hidden />
-            <p className="t-secondary">No design for this post yet.</p>
-            <Button size="sm" onClick={onCreate} disabled={creating}>
-              {creating ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
-              Create design
-            </Button>
+            {waitingForCopy ? (
+              <p className="t-secondary">This post is written shortly before its date from what's trending then. Its design follows once it's written.</p>
+            ) : (
+              <>
+                <p className="t-secondary">No design for this post yet.</p>
+                <Button size="sm" onClick={onCreate} disabled={creating}>
+                  {creating ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                  Create design
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>

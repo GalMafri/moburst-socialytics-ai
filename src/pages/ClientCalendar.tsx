@@ -19,6 +19,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
+import { PlanWeekButton } from "@/components/calendar/PlanWeekButton";
 import { CLIENT_CONTEXT_COLUMNS, buildClientContext } from "@/lib/clientContext";
 import { addDays, mondayOf, shortDate, todayIn, weekBoard, type CalendarPostRow } from "@/lib/calendarPosts";
 
@@ -96,8 +97,13 @@ export default function ClientCalendar() {
               title="No posts planned for this week"
               description={nextPlanned
                 ? "The next planned posts are in a later week."
-                : isMoburstStaff ? "Posts appear here when a monthly report plans them, or add one with New post." : "Posts appear here once they are planned."}
-              action={nextPlanned ? (
+                : isMoburstStaff ? "Plan this week from the client's latest report, or add a post with New post." : "Posts appear here once they are planned."}
+              action={isMoburstStaff && id && all.length > 0 ? (
+                <div className="flex items-center gap-2 flex-wrap justify-center">
+                  <PlanWeekButton clientId={id} week={week} onPlanned={() => void posts.refetch()} />
+                  {nextPlanned && <Button size="sm" variant="outline" onClick={() => goTo(mondayOf(nextPlanned.post_date))}>Go to the week of {shortDate(mondayOf(nextPlanned.post_date))}</Button>}
+                </div>
+              ) : nextPlanned ? (
                 <Button size="sm" variant="outline" onClick={() => goTo(mondayOf(nextPlanned.post_date))}>
                   Go to the week of {shortDate(mondayOf(nextPlanned.post_date))}
                 </Button>

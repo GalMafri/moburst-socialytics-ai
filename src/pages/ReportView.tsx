@@ -32,6 +32,7 @@ import {
   ArrowRight,
   Rss,
   ChevronDown,
+  CalendarPlus,
 } from "lucide-react";
 import {
   PlatformBadge,
@@ -49,6 +50,7 @@ import { useTrackView } from "@/hooks/useTrackView";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ExportPdfButton } from "@/components/reports/ExportPdfButton";
 import { ReportCalendarLink } from "@/components/calendar/ReportCalendarLink";
+import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
 import { PostVisual, usePostPreviews, type PostPreview } from "@/components/competitive/PostVisual";
@@ -69,7 +71,7 @@ export default function ReportView() {
   const navigate = useNavigate();
   const reportContentRef = useRef<HTMLDivElement>(null);
   useRealtimeReports(id);
-  const { isClient } = useAuth();
+  const { isClient, isMoburstStaff } = useAuth();
   const [tab, setTab] = useState("overview");
   const { verdictFor } = useInsightFeedback(id);
 
@@ -454,7 +456,24 @@ export default function ReportView() {
             {actions.length > 0 && (
               <Section id="actions" index={3} title="Where to act next" description={`${actions.length} recommendations from this report${(() => { const c: Record<string, number> = {}; for (const a of actions) c[a.source] = (c[a.source] || 0) + 1; const parts = Object.entries(c).map(([k, n]) => `${n} from ${k === "Competitors" ? "the competitive analysis" : k === "Trends" ? "the trends" : "performance"}`); return parts.length ? `: ${parts.join(", ")}` : ""; })()}. Each one opens its evidence.`}>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {actions.map((a, i) => <ActionCard key={i} action={a} onOpen={() => openAction(a)} />)}
+                  {actions.map((a, i) => (
+                    <ActionCard
+                      key={i}
+                      action={a}
+                      onOpen={() => openAction(a)}
+                      extra={isMoburstStaff && id ? (
+                        <NewPostDialog
+                          clientId={id}
+                          platforms={availablePlatforms.length ? availablePlatforms : ["Instagram", "LinkedIn", "TikTok", "Facebook", "X"]}
+                          defaultDate={new Date().toISOString().slice(0, 10)}
+                          initialIdea={[a.title, a.detail].filter(Boolean).join(". ")}
+                          reason={{ type: a.source === "Competitors" ? "competitor" : a.source === "Trends" ? "trend" : "performance", label: a.title, report_id: reportId }}
+                          reportId={reportId}
+                          trigger={<Button size="sm" variant="ghost" className="self-start h-8 px-2"><CalendarPlus className="h-3.5 w-3.5 mr-1.5" />Plan a post from this</Button>}
+                        />
+                      ) : undefined}
+                    />
+                  ))}
                 </div>
               </Section>
             )}
@@ -595,15 +614,18 @@ export default function ReportView() {
 
 /* ─── Layout primitives: one type scale for the whole report ─── */
 
-function ActionCard({ action, onOpen }: { action: { source: string; title: string; detail?: string; href?: string }; onOpen: () => void }) {
+function ActionCard({ action, onOpen, extra }: { action: { source: string; title: string; detail?: string; href?: string }; onOpen: () => void; extra?: React.ReactNode }) {
   const icon = action.source === "Competitors" ? <Crosshair className="h-3.5 w-3.5" /> : action.source === "Trends" ? <TrendingUp className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />;
   return (
-    <button type="button" onClick={onOpen} className="text-left glass-inner p-4 pl-5 space-y-2.5 group border-l-2 border-l-[#b9e045] flex flex-col">
-      <span className="inline-flex items-center gap-1.5 t-subhead">{icon} Recommendation · {action.source}</span>
-      <p className="t-h3 leading-snug">{action.title}</p>
-      {action.detail && <p className="t-body">{action.detail}</p>}
-      <span className="mt-auto inline-flex items-center gap-1 t-label !text-white rounded-full border border-[rgba(255,255,255,0.16)] px-3 py-1 group-hover:bg-[rgba(255,255,255,0.08)]">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open Trends" : "Open Competitive"} <ArrowRight className="h-3.5 w-3.5" /></span>
-    </button>
+    <div className="glass-inner p-4 pl-5 space-y-2.5 border-l-2 border-l-[#b9e045] flex flex-col">
+      <button type="button" onClick={onOpen} className="text-left space-y-2.5 group flex flex-col flex-1">
+        <span className="inline-flex items-center gap-1.5 t-subhead">{icon} Recommendation · {action.source}</span>
+        <p className="t-h3 leading-snug">{action.title}</p>
+        {action.detail && <p className="t-body">{action.detail}</p>}
+        <span className="mt-auto inline-flex items-center gap-1 t-label !text-white rounded-full border border-[rgba(255,255,255,0.16)] px-3 py-1 group-hover:bg-[rgba(255,255,255,0.08)] self-start">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open Trends" : "Open Competitive"} <ArrowRight className="h-3.5 w-3.5" /></span>
+      </button>
+      {extra}
+    </div>
   );
 }
 

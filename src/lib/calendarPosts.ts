@@ -70,6 +70,11 @@ export function weekLabel(monday: string): string {
   return `${shortDate(monday)} – ${end}, ${b.getUTCFullYear()}`;
 }
 
+/** A trend slot nobody has written yet: it is written shortly before its date from what is trending then. */
+export function isOpenTrendSlot(post: { _source?: unknown; copy?: unknown } | null | undefined): boolean {
+  return post?._source === "trend_slot" && !String(post?.copy ?? "").trim();
+}
+
 /** A calendar row as the board's post: the same shape a report's post has, plus its key, date and reasons. */
 export function boardPost(row: CalendarPostRow): CalendarPost {
   return {
@@ -90,6 +95,7 @@ export function boardPost(row: CalendarPostRow): CalendarPost {
     _calendarPostId: row.id,
     _reportId: row.report_id ?? undefined,
     _reasons: row.reasons ?? [],
+    _source: row.source,
   };
 }
 

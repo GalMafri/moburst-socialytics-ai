@@ -35,6 +35,7 @@ import type { CalendarPost } from "@/lib/calendarRevision";
 import { tileAspectFor } from "@/lib/tileAspect";
 import { tilesFromIterations, type Iteration, type MediaTile } from "@/lib/postMediaTiles";
 import { supabase } from "@/integrations/supabase/client";
+import { postCopyOf } from "@/lib/postCopy";
 import { finishIterations, type ProductionPlan } from "@/lib/creativeProduction";
 
 interface Props {
@@ -258,6 +259,7 @@ export function PostPanel({
                     onUse={applyDesign}
                     usingId={usingId}
                     onFeedback={designFeedback}
+                    waitingForCopy={!postCopyOf(post).trim()}
                   />
                   {!isClient && otherTiles.length > 0 && (
                     <div className="space-y-2 pt-2">
