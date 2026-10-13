@@ -51,6 +51,7 @@ const INTENT = "Socialytics finishing: replace the drawn logo with the client's 
 const GENERATE_LEASE_MS = 420_000;
 const MAX_GENERATIONS = 3;
 const MAX_CLEANS = 2;
+const MAX_LAYER_TRIES = 4;
 const DEFAULT_PAGE = { width: 1088, height: 1360 };
 
 const db = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -463,7 +464,14 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
     case "layers_wait": {
       const r = await settle(() => getImageToDesign(token, s.layers_job), deadline);
       if (r.status === "in_progress") return "wait";
-      if (r.status !== "success" || !r.designId) throw new Error(`FINAL: Magic Layers did not finish: ${r.error ?? r.status}`);
+      if (r.status !== "success" || !r.designId) {
+        // Magic Layers fails now and then on Canva's side ("internal_error:
+        // Something went wrong", six slides in one minute on 13 Oct); it is
+        // started again on a later pass, a few times, before the design fails.
+        s.layer_tries = (s.layer_tries ?? 0) + 1;
+        if (s.layer_tries < MAX_LAYER_TRIES) { delete s.layers_job; job.step = "layers"; return "wait"; }
+        throw new Error(`FINAL: Magic Layers did not finish: ${r.error ?? r.status}`);
+      }
       s.design_id = r.designId; job.step = "clean"; return "next";
     }
     // A job recorded before 13 Oct's change was about to read where its text was; the picture is now redrawn whole.
