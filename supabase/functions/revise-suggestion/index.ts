@@ -16,6 +16,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import { clipText } from "../_shared/text/clip.ts";
 import { normalizedCompetitiveMetrics } from "../_shared/competitive/reportMetrics.ts";
 import { withCompetitiveEvidenceLimits } from "../_shared/competitive/reportEvidence.ts";
 import { type CompetitiveLearning, learningLines, parseLearnings, parseRevision, SUGGESTION_LIMITS } from "../_shared/competitive/suggestionEdits.ts";
@@ -31,7 +32,8 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-const text = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+// Shortened by characters, never mid-emoji: a split character makes the row unsavable.
+const text = (v: unknown, max: number) => (typeof v === "string" ? clipText(v.replace(/\s+/g, " ").trim(), max) : "");
 const round = (n: unknown, digits = 1) => (typeof n === "number" && Number.isFinite(n) ? Math.round(n * 10 ** digits) / 10 ** digits : null);
 
 Deno.serve(async (req) => {

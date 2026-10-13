@@ -18,11 +18,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/ui/load-error";
 import { toast as sonnerToast } from "sonner";
 import { mondayOf } from "@/lib/calendarPosts";
+import { clipText } from "@/lib/clipText";
+import { displayCompanyName } from "@/lib/companyName";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
 import { describeInvokeError } from "@/lib/invokeError";
 import { ChangeCards } from "@/components/competitive/ChangeCards";
-import { aggregatePosts, pickComparableFeed, diffCompanies } from "@/lib/competitiveChanges";
+import { aggregatePosts, pickComparableFeed, diffCompanies, sameCompany } from "@/lib/competitiveChanges";
 import { ArrowLeft, RefreshCw, Rss, Sparkles, TrendingUp, X, Loader2, ExternalLink, History } from "lucide-react";
 
 type FeedPost = {
@@ -56,7 +58,8 @@ export default function CompetitiveFeed() {
   // A refresh spends a RivalIQ request and an AI pass, so it is asked first.
   const [confirmRefresh, setConfirmRefresh] = useState(false);
   // So does drafting a post: the draft waits here until it is confirmed.
-  const [pendingDraft, setPendingDraft] = useState<{ topic: string; platform: string; alertId?: string; about: string } | null>(null);
+  /** topic: what the writer is asked to respond to. reason: the plain label the calendar shows for the post. */
+  const [pendingDraft, setPendingDraft] = useState<{ topic: string; reason: string; platform: string; alertId?: string; about: string } | null>(null);
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -128,7 +131,7 @@ export default function CompetitiveFeed() {
   });
 
   const draft = useMutation({
-    mutationFn: async ({ topic, platform, alertId }: { topic: string; platform: string; alertId?: string }) => {
+    mutationFn: async ({ topic, reason, platform, alertId }: { topic: string; reason: string; platform: string; alertId?: string }) => {
       const { data, error } = await supabase.functions.invoke("generate-ad-hoc-post", { body: { client_id: id, platform, topic } });
       if (error) throw new Error(await describeInvokeError(error));
       const post = (data as any)?.post;
@@ -148,7 +151,7 @@ export default function CompetitiveFeed() {
         cta: post.CTA || null,
         visual_direction: post.visual_direction || null,
         rationale: post.concept || null,
-        reasons: [{ type: "competitor", label: String(topic).slice(0, 200) }],
+        reasons: [{ type: "competitor", label: clipText(reason, 200) }],
         source: "insight",
         raw: post,
       }).select("id, post_date").single();
@@ -206,7 +209,10 @@ export default function CompetitiveFeed() {
   const byUrl = useMemo(() => new Map(posts.filter((p) => p.postLink).map((p) => [p.postLink as string, p])), [posts]);
 
   const clientName = client?.name || "Client";
-  const topicFor = (p: FeedPost) => `Our own take on this competitor post by ${p.companyName || "a competitor"} (${platformLabel(p.channel)}): "${String(p.message || "").slice(0, 240)}". Do not copy it; use the angle that works and make it ours.`;
+  const topicFor = (p: FeedPost) => `Our own take on this competitor post by ${p.companyName || "a competitor"} (${platformLabel(p.channel)}): "${clipText(p.message, 240)}". Do not copy it; use the angle that works and make it ours.`;
+  // The client's own posts are in the feed for comparison; a "take" on them makes no sense.
+  const isOwnPost = (p: FeedPost) => (p as { source?: string }).source === "sprout" || (!!client?.name && sameCompany(String(p.companyName || ""), client.name.toLowerCase().trim()));
+  const reasonFor = (p: FeedPost) => `Our take on ${displayCompanyName(p.companyName || "a competitor")}'s ${platformLabel(p.channel)} post`;
 
   return (
     <AppLayout
@@ -275,7 +281,7 @@ export default function CompetitiveFeed() {
                           </div>
                         )}
                         {canRunAnalysis && (
-                          <Button size="sm" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: `${a.topic}. ${a.summary || ""} Competitors ${(a.companies || []).join(", ")} are posting about this now; give ${clientName} its own angle.`, platform: (a.platforms || [])[0] ? platformLabel((a.platforms || [])[0]) : "Instagram", alertId: a.id, about: `the shared topic "${a.topic}"` })}>
+                          <Button size="sm" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: `${a.topic}. ${a.summary || ""} Competitors ${(a.companies || []).join(", ")} are posting about this now; give ${clientName} its own angle.`, reason: `Competitors are posting about ${a.topic}`, platform: (a.platforms || [])[0] ? platformLabel((a.platforms || [])[0]) : "Instagram", alertId: a.id, about: `the shared topic "${a.topic}"` })}>
                             {draft.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1.5" />} Draft our take
                           </Button>
                         )}
@@ -339,8 +345,8 @@ export default function CompetitiveFeed() {
                       {p.postLink ? (
                         <a href={p.postLink} target="_blank" rel="noreferrer" className="t-label text-primary hover:underline inline-flex items-center gap-1">Open <ExternalLink className="h-3 w-3" /></a>
                       ) : <span />}
-                      {canRunAnalysis && (
-                        <Button size="sm" variant="outline" className="min-h-10 h-auto t-label whitespace-normal" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: topicFor(p), platform: platformLabel(p.channel), about: `this post by ${p.companyName || "a competitor"}` })}>
+                      {canRunAnalysis && !isOwnPost(p) && (
+                        <Button size="sm" variant="outline" className="min-h-10 h-auto t-label whitespace-normal" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: topicFor(p), reason: reasonFor(p), platform: platformLabel(p.channel), about: `this post by ${p.companyName || "a competitor"}` })}>
                           <Sparkles className="h-3 w-3 mr-1" /> Draft our take
                         </Button>
                       )}
@@ -396,7 +402,7 @@ export default function CompetitiveFeed() {
         confirmLabel="Draft the post"
         destructive={false}
         onConfirm={() => {
-          if (pendingDraft) draft.mutate({ topic: pendingDraft.topic, platform: pendingDraft.platform, alertId: pendingDraft.alertId });
+          if (pendingDraft) draft.mutate({ topic: pendingDraft.topic, reason: pendingDraft.reason, platform: pendingDraft.platform, alertId: pendingDraft.alertId });
           setPendingDraft(null);
         }}
       />

@@ -22,6 +22,7 @@ import { requireMember } from "../_shared/auth/requireMember.ts";
 import { importReportPosts } from "../_shared/calendar/fromReport.ts";
 import { type PlanContext, WEEKDAYS, parseWeek, trendSlotPrompt, weekDates, weekPrompt } from "../_shared/calendar/planner.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
+import { clipText } from "../_shared/text/clip.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 const PLANNER_MODEL = "claude-opus-5-5";
@@ -258,7 +259,7 @@ async function fillTrendSlots(admin: any): Promise<{ filled: number; waiting: nu
       hashtags: Array.isArray(out.hashtags) ? out.hashtags.map(String).slice(0, 12) : [],
       cta: out.cta ? String(out.cta) : null,
       visual_direction: out.visual_direction ? String(out.visual_direction) : null,
-      reasons: [{ type: "trend", label: String(out.trend || "A current trend").slice(0, 200) }],
+      reasons: [{ type: "trend", label: clipText(out.trend || "A current trend", 200) }],
     }).eq("id", slot.id).eq("copy", "");
     filled++;
   }
