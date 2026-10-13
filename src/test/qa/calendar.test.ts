@@ -44,6 +44,10 @@ describe("Persistent calendar copy", () => {
     const post = { ...posts[0], copy: "Newest", _copyVersion: 2 };
     expect(applyCopyRevisions(post, [revision]).copy).toBe("Newest");
   });
+  it("keeps an edit when a design made from the older copy finishes after it", () => {
+    const design = { calendar_post_key: posts[0]._calendarPostKey, post_copy: "Original", media_urls: ["https://x/final.png"], created_at: "2026-09-17T11:00:00Z" };
+    expect(calendarWithRevisions(calendar, "report-a", [revision, design])[0].posts[0].copy).toBe("Reviewed");
+  });
 });
 
 it.each([

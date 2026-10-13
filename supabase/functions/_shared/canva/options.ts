@@ -3,16 +3,18 @@
 // The rules for a post's design options, free of Deno and network imports so
 // they can be tested.
 //
-// A request wants three options. Each option is one job (design, then finish
-// in Canva). An option that does not finish is replaced by a new one from the
-// next planned brief, so the person who asked sees options, never a failure.
-// Only when the replacements run out with nothing finished does the request
-// go to Moburst staff; the person who asked still sees it being prepared.
+// A request makes one design (Lital, 13 Oct: "one amazing option per design,
+// not 3", for every design type). The planner writes a few briefs, strongest
+// first; the first is made, and the others are kept so a design that does not
+// finish is replaced from the next brief. The person who asked sees a design,
+// never a failure. Only when the replacements run out with nothing finished
+// does the request go to Moburst staff; the person who asked still sees it
+// being prepared.
 
-export const OPTIONS_WANTED = 3;
+export const OPTIONS_WANTED = 1;
 /** How many options a request may start in all, replacements included. */
-export const MAX_CANDIDATES = 6;
-export const BRIEFS_PLANNED = 5;
+export const MAX_CANDIDATES = 3;
+export const BRIEFS_PLANNED = 3;
 
 export interface Slide {
   /** The words set on the slide: one line, optionally a shorter second line. */
@@ -143,7 +145,7 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
     "For each slide give:",
     `- headline: the words set on that slide, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
     "- picture: one sentence describing the picture behind the words, using only the kinds of subjects, materials, light and composition these posts use. Describe what is in the picture. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand. The slides of one option share one setting and look, so they read as a series.",
-    "The options differ from each other in setting and in wording.",
+    "The options differ from each other in setting and in wording. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
     `Reply with JSON only: {"options":[{"slides":[{"headline":["line one","optional line two"],"picture":"..."}]}]}`,
   ].filter(Boolean).join("\n");
 }
@@ -158,7 +160,7 @@ export function plannerPrompt(args: { brand: string; platform: string; copy: str
     "For each option give:",
     `- headline: the words that will be set on the design, written in ${args.brand}'s voice from the post's message, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
     "- picture: one sentence describing the picture behind the words, using only the kinds of subjects, materials, light and composition these posts use. Describe what is in the picture. It holds no lettering, numbers, signs, screens with writing, logos or brand marks, and names no brand.",
-    "Each option has a different picture and a different headline.",
+    "Each option has a different picture and a different headline. Put the strongest first: it is the one that will be made, so it should be the one you would publish.",
     'Reply with JSON only: {"options":[{"headline":["line one","optional line two"],"picture":"..."}]}',
   ].filter(Boolean).join("\n");
 }

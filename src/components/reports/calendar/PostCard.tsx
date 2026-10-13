@@ -106,12 +106,19 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
           </div>
         )}
 
-        {/* Designs being prepared on the server — shown wherever the card is */}
-        {designing && designRequest && (
+        {/* A design being prepared on the server. When the post already has
+            one (a regeneration), it stays visible with a corner pill. */}
+        {designing && designRequest && !thumb && (
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center gap-2 text-white">
             <Loader2 className="h-4 w-4 animate-spin text-[#b9e045]" />
-            <span className="text-sm font-semibold tracking-[-0.2px]">Preparing designs</span>
+            <span className="text-sm font-semibold tracking-[-0.2px]">{designRequest.kind === "carousel" ? "Preparing carousel" : "Preparing design"}</span>
           </div>
+        )}
+        {designing && designRequest && thumb && (
+          <span className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/75 text-white t-badge">
+            <Loader2 className="h-3 w-3 animate-spin text-[#b9e045]" aria-hidden />
+            New version
+          </span>
         )}
 
         {/* Just-completed pulse — quick visual cue */}

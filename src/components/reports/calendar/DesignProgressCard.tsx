@@ -1,34 +1,39 @@
 /**
- * Progress for a post's designs, inside its Design tab: three named steps,
- * how long it has been running against the usual time, and a reminder that
- * closing the panel does not stop anything.
+ * Progress for a post's design, inside its Design tab: three named steps,
+ * how long it has been running against how long it usually takes, and a
+ * reminder that closing the panel does not stop anything.
  */
 
 import { useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { DESIGN_STEPS, elapsedLabel, progressPercent, stageIndex, typicalMinutes, type DesignRequest } from "@/lib/designRequests";
+import { useDesignRequests } from "./DesignRequestsContext";
 
-export function DesignProgressCard({ request, isStaff }: { request: DesignRequest; isStaff: boolean }) {
+export function DesignProgressCard({ request, isStaff, replacing = false }: { request: DesignRequest; isStaff: boolean; replacing?: boolean }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+  const history = useDesignRequests()?.requests ?? [];
   const current = stageIndex(request);
   const pct = progressPercent(request);
   const staffAttention = isStaff && request.status === "needs_staff";
+  const noun = request.kind === "carousel" ? "carousel" : "design";
+  const usual = typicalMinutes(request, history);
+  const over = now - new Date(request.created_at).getTime() > usual * 60_000;
 
   return (
     <div role="status" aria-live="polite" className="glass-inner p-4 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-white tracking-[-0.2px]">
-            {staffAttention ? "These designs need a look" : "Preparing your designs"}
+            {staffAttention ? `This ${noun} needs a look` : replacing ? `Making a new ${noun}` : `Preparing your ${noun}`}
           </p>
           <p className="t-secondary mt-0.5">
             {staffAttention
-              ? request.error || "No option finished. The client still sees the designs as being prepared."
-              : `Usually about ${typicalMinutes(request)} minutes. You can close this panel; your designs keep being prepared.`}
+              ? request.error || "It did not finish. The client still sees it as being prepared."
+              : `${over ? "Taking a little longer than usual" : `Usually about ${usual} minutes`}. ${replacing ? `The current ${noun} stays until the new one is ready. ` : ""}You can close this panel; it keeps going.`}
           </p>
         </div>
         <span className="t-label shrink-0 tabular-nums">{elapsedLabel(request.created_at, now)}</span>
@@ -49,12 +54,6 @@ export function DesignProgressCard({ request, isStaff }: { request: DesignReques
           );
         })}
       </ol>
-
-      {request.options_ready > 0 && (
-        <p className="t-secondary">
-          {request.options_ready} of {request.options_wanted} {request.kind === "carousel" ? "carousels" : "designs"} ready. They appear below as they finish.
-        </p>
-      )}
       <span className="sr-only">{pct}% done</span>
     </div>
   );

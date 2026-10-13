@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
       const { data: created, error } = await admin.from("design_requests").insert({
         client_id: clientId, report_id: body.report_id || null, calendar_post_key: postKey,
         platform: body.platform || null, format: body.format || null, post_copy: copy, requested_by: userId,
-        kind: /carousel/i.test(String(body.format || "")) ? "carousel" : "single",
+        kind: /carousel/i.test(String(body.format || "")) ? "carousel" : "single", options_wanted: OPTIONS_WANTED,
       }).select("*").single();
       if (error) {
         // Two clicks at once: the unique index let one through; answer with it.

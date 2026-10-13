@@ -20,18 +20,22 @@ describe("requestProgress", () => {
   it("starts the first options while nothing is running", () => {
     expect(requestProgress([])).toMatchObject({ status: "preparing", start_brief: 0 });
   });
-  it("is ready once three options are done", () => {
-    expect(requestProgress([done, done, done])).toMatchObject({ status: "ready", stage: "ready", options_ready: 3, start_brief: null });
+  it("is ready once its one design is done", () => {
+    expect(requestProgress([done])).toMatchObject({ status: "ready", stage: "ready", options_ready: 1, start_brief: null });
   });
-  it("replaces an option that did not finish, from the next brief", () => {
-    expect(requestProgress([done, failed, finishing])).toMatchObject({ status: "preparing", stage: "finishing", start_brief: 3 });
+  it("replaces a design that did not finish, from the next brief", () => {
+    expect(requestProgress([failed])).toMatchObject({ status: "preparing", start_brief: 1 });
+    expect(requestProgress([failed, finishing])).toMatchObject({ status: "preparing", stage: "finishing", start_brief: null });
   });
-  it("reports designing while any option is still being drawn", () => {
-    expect(requestProgress([designing, finishing, finishing])).toMatchObject({ stage: "designing", start_brief: null });
+  it("reports designing while the design is still being drawn", () => {
+    expect(requestProgress([designing])).toMatchObject({ stage: "designing", start_brief: null });
   });
-  it("offers what finished when the replacements run out", () => {
-    const jobs = [done, ...Array(MAX_CANDIDATES - 1).fill(failed)];
+  it("is ready when a replacement finished", () => {
+    const jobs = [...Array(MAX_CANDIDATES - 1).fill(failed), done];
     expect(requestProgress(jobs)).toMatchObject({ status: "ready", options_ready: 1 });
+  });
+  it("still honors a request that asked for more than one", () => {
+    expect(requestProgress([done, failed, finishing], 3, 5)).toMatchObject({ status: "preparing", stage: "finishing", start_brief: null });
   });
   it("goes to staff, never to the person who asked, when nothing finished", () => {
     expect(requestProgress(Array(MAX_CANDIDATES).fill(failed))).toMatchObject({ status: "needs_staff", options_ready: 0 });

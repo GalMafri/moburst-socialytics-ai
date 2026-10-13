@@ -15,8 +15,8 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { useDesignRequestForPost, useDesignRequests } from "./DesignRequestsContext";
-import { DesignProgressCard } from "./DesignProgressCard";
-import { createDesigns, isPreparing, putDesignInUse } from "@/lib/designRequests";
+import { PostDesign } from "./PostDesign";
+import { createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse } from "@/lib/designRequests";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -121,7 +121,7 @@ export function PostPanel({
     try {
       await putDesignInUse(iterationId);
       refreshMedia();
-      toast.success("Design in use for this post");
+      toast.success("In use for this post");
     } catch (e) {
       toast.error("Could not use this design", { description: e instanceof Error ? e.message : "Try again." });
     } finally {
@@ -163,6 +163,10 @@ export function PostPanel({
 
   const imageTiles = tilesFromIterations(postIterations, (u) => !isVideoUrl(u));
   const videoTiles = tilesFromIterations(postIterations, isVideoUrl);
+  // One design per post; earlier ones stay on the post to switch back to.
+  const versions = designVersions(postIterations, (u) => !isVideoUrl(u));
+  const otherTiles = imageTiles.filter((t) => !isDesignOption({ variant_angle: t.variantAngle }));
+  const isCarouselPost = /carousel/i.test(String(post.format || "")) || (versions[0]?.urls.length ?? 0) > 1;
 
   const openPreview = (url: string, video: boolean) => {
     setPreviewUrl(url);
@@ -227,92 +231,103 @@ export function PostPanel({
                   </Button>
                 </div>
               )}
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">
-                    {preparingDesigns
-                      ? "Preparing designs"
-                      : imageTiles.length > 0
-                        ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
-                        : designRun?.status === "running"
-                          ? `Generating designs · ${designRun.completed}/${designRun.total} done`
-                          : "No designs yet"}
-                  </p>
-                  <p className="t-secondary">
-                    {imageTiles.length > 0
-                      ? "Click a design to see it at full size, then choose Use this design."
-                      : designsReady
-                        ? "Designs are made in your brand's style, with your logo and the post's words."
-                        : designRun?.status === "running"
-                          ? "The run continues while this panel is closed. Open Design to follow it."
-                          : isMoburstStaff ? "Generate brand-aligned variants to get started." : "Designs for this post will appear here."}
-                  </p>
-                </div>
-                {designsReady && !preparingDesigns && (
-                  <Button size="sm" variant={imageTiles.length > 0 ? "outline" : "default"} className="shrink-0" onClick={startDesigns} disabled={startingDesigns}>
-                    {startingDesigns ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
-                    {imageTiles.length > 0 ? "Create more designs" : "Create designs"}
-                  </Button>
-                )}
-                {!designsReady && !designSettingsLoading && isMoburstStaff && <CreatePostDesignButton
-                  post={post}
-                  clientContext={clientContext}
-                  clientId={clientId}
-                  onImagesGenerated={refreshMedia}
-                />}
-              </div>
-
-              {!designSettings?.confirmed_at && !designSettingsLoading && isMoburstStaff && clientId && (
-                <div className="glass-inner p-3 flex items-center justify-between gap-3 flex-wrap">
-                  <p className="t-secondary min-w-0">Confirm this client's design settings once to offer designs here, for your team and the client.</p>
-                  <Button asChild size="sm" variant="outline" className="shrink-0">
-                    <Link to={`/clients/${clientId}/setup?tab=designs`}><Settings2 className="h-3.5 w-3.5 mr-1.5" />Design settings</Link>
-                  </Button>
-                </div>
-              )}
-
-              {preparingDesigns && designRequest && <DesignProgressCard request={designRequest} isStaff={isMoburstStaff} />}
-
-              {imageTiles.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {groupCarouselOptions(imageTiles).map((group, i) => group.slides ? (
-                    <CarouselOptionCard
-                      key={`carousel:${group.slides[0].iterationId}`}
-                      slides={group.slides}
-                      index={i}
-                      tileAspect={tileAspectFor(post)}
-                      onPreview={(url) => openPreview(url, false)}
-                      onUse={() => applyDesign(group.slides![0].iterationId!)}
-                      using={usingId === group.slides[0].iterationId}
-                    />
-                  ) : ((tile) => (
-                    <MediaTileCard
-                      key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
-                      tile={tile}
-                      index={i}
-                      isVideo={false}
-                      tileAspect={tileAspectFor(post)}
-                      filenameStub={`design-${post.platform || "post"}`}
-                      onPreview={() => openPreview(tile.url, false)}
-                      onToggleSelected={isClient || /^Design option \d+$/.test(tile.variantAngle || "") ? undefined : onToggleSelected}
-                      onFeedback={isClient ? undefined : onFeedback}
-                      onUse={/^Design option \d+$/.test(tile.variantAngle || "") ? () => applyDesign(tile.iterationId!) : undefined}
-                      using={usingId === tile.iterationId}
-                    />
-                  ))(group.tile!))}
-                </div>
-              ) : !preparingDesigns && (
-                <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
-                  <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
-                  <p className="t-secondary">
-                    No designs for this post yet.
-                  </p>
-                  {designsReady && (
-                    <p className="t-secondary/70">
-                      Choose Create designs to see options for this post.
-                    </p>
+              {designsReady ? (
+                <>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">{isCarouselPost ? "Carousel" : "Design"}</p>
+                    <p className="t-secondary">Made in your brand's style, with your logo and the post's words.</p>
+                  </div>
+                  <PostDesign
+                    versions={versions}
+                    preparing={preparingDesigns ? designRequest : null}
+                    isStaff={isMoburstStaff}
+                    aspect={tileAspectFor(post) || "aspect-[4/5]"}
+                    filenameStub={`design-${post.platform || "post"}`}
+                    onCreate={startDesigns}
+                    creating={startingDesigns}
+                    onUse={applyDesign}
+                    usingId={usingId}
+                  />
+                  {!isClient && otherTiles.length > 0 && (
+                    <div className="space-y-2 pt-2">
+                      <p className="t-label">Other media for this post</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {otherTiles.map((tile, i) => (
+                          <MediaTileCard
+                            key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
+                            tile={tile}
+                            index={i}
+                            isVideo={false}
+                            tileAspect={tileAspectFor(post)}
+                            filenameStub={`design-${post.platform || "post"}`}
+                            onPreview={() => openPreview(tile.url, false)}
+                            onToggleSelected={onToggleSelected}
+                            onFeedback={onFeedback}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   )}
-                </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">
+                        {imageTiles.length > 0
+                          ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
+                          : designRun?.status === "running"
+                            ? `Generating designs · ${designRun.completed}/${designRun.total} done`
+                            : "No designs yet"}
+                      </p>
+                      <p className="t-secondary">
+                        {imageTiles.length > 0
+                          ? "Click a design to see it at full size."
+                          : designRun?.status === "running"
+                            ? "The run continues while this panel is closed. Open Design to follow it."
+                            : isMoburstStaff ? "Generate brand-aligned variants to get started." : "The design for this post will appear here."}
+                      </p>
+                    </div>
+                    {!designSettingsLoading && isMoburstStaff && <CreatePostDesignButton
+                      post={post}
+                      clientContext={clientContext}
+                      clientId={clientId}
+                      onImagesGenerated={refreshMedia}
+                    />}
+                  </div>
+
+                  {!designSettingsLoading && isMoburstStaff && clientId && (
+                    <div className="glass-inner p-3 flex items-center justify-between gap-3 flex-wrap">
+                      <p className="t-secondary min-w-0">Confirm this client's design settings once to offer designs here, for your team and the client.</p>
+                      <Button asChild size="sm" variant="outline" className="shrink-0">
+                        <Link to={`/clients/${clientId}/setup?tab=designs`}><Settings2 className="h-3.5 w-3.5 mr-1.5" />Design settings</Link>
+                      </Button>
+                    </div>
+                  )}
+
+                  {imageTiles.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {imageTiles.map((tile, i) => (
+                        <MediaTileCard
+                          key={`${tile.iterationId || "media"}:${tile.url}:${i}`}
+                          tile={tile}
+                          index={i}
+                          isVideo={false}
+                          tileAspect={tileAspectFor(post)}
+                          filenameStub={`design-${post.platform || "post"}`}
+                          onPreview={() => openPreview(tile.url, false)}
+                          onToggleSelected={isClient ? undefined : onToggleSelected}
+                          onFeedback={isClient ? undefined : onFeedback}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-2">
+                      <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" />
+                      <p className="t-secondary">No designs for this post yet.</p>
+                    </div>
+                  )}
+                </>
               )}
             </TabsContent>
 
@@ -426,73 +441,6 @@ export function PostPanel({
         </DialogContent>
       </Dialog>
     </>
-  );
-}
-
-/**
- * Design options made as carousels arrive as one row with several images.
- * They are shown, and put in use, as one option; everything else stays a tile.
- */
-function groupCarouselOptions(tiles: MediaTile[]): Array<{ tile?: MediaTile; slides?: MediaTile[] }> {
-  const out: Array<{ tile?: MediaTile; slides?: MediaTile[] }> = [];
-  const seen = new Map<string, MediaTile[]>();
-  for (const t of tiles) {
-    const isOption = /^Design option \d+$/.test(t.variantAngle || "");
-    if (!isOption || !t.iterationId) { out.push({ tile: t }); continue; }
-    const existing = seen.get(t.iterationId);
-    if (existing) { existing.push(t); continue; }
-    const group = [t];
-    seen.set(t.iterationId, group);
-    out.push({ slides: group });
-  }
-  return out.map((g) => (g.slides && g.slides.length === 1 ? { tile: g.slides[0] } : g));
-}
-
-function CarouselOptionCard({ slides, index, tileAspect, onPreview, onUse, using }: {
-  slides: MediaTile[];
-  index: number;
-  tileAspect?: string;
-  onPreview: (url: string) => void;
-  onUse: () => void;
-  using?: boolean;
-}) {
-  const inUse = slides[0].isSelected;
-  return (
-    <div className={`glass-inner overflow-hidden border sm:col-span-2 ${inUse ? "border-primary/60 ring-1 ring-primary/40" : "border-white/5"}`}>
-      <div className="flex gap-2 overflow-x-auto p-2 bg-black" role="list" aria-label={`Carousel ${index + 1}, ${slides.length} slides`}>
-        {slides.map((s, i) => (
-          <button
-            key={`${s.url}:${i}`}
-            type="button"
-            role="listitem"
-            onClick={() => onPreview(s.url)}
-            className={`relative shrink-0 w-[42%] sm:w-[30%] ${tileAspect || "aspect-[4/5]"} rounded-[8px] overflow-hidden group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
-            aria-label={`Slide ${i + 1} at full size`}
-          >
-            <img src={s.url} alt={`Slide ${i + 1}`} className="w-full h-full object-contain bg-black" />
-            <span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/70 px-1.5 py-0.5 t-badge text-white">{i + 1}</span>
-            <span className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-              <Expand className="h-4 w-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-            </span>
-          </button>
-        ))}
-      </div>
-      <div className="px-2 pt-2 bg-[rgba(0,0,0,0.4)]">
-        {inUse ? (
-          <span className="w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-[10px] bg-[rgba(185,224,69,0.10)] text-[#b9e045] text-sm font-medium">
-            <Check className="h-3.5 w-3.5" /> In use
-          </span>
-        ) : (
-          <Button size="sm" className="w-full h-9" onClick={onUse} disabled={using}>
-            {using ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
-            Use this carousel
-          </Button>
-        )}
-      </div>
-      <div className="flex items-center justify-between px-2 py-1.5 bg-[rgba(0,0,0,0.4)]">
-        <span className="t-secondary uppercase tracking-wide">#{index + 1} · {slides.length} slides</span>
-      </div>
-    </div>
   );
 }
 

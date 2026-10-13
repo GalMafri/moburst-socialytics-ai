@@ -77,9 +77,28 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
   if (error) throw new Error(`Could not start a design option: ${error.message}`);
 }
 
+/** Designs made by design requests, as opposed to media from older generators or uploads. */
+export const DESIGN_ANGLE = /^Design option \d+$/;
+
+/**
+ * Whether a finished design becomes the post's design. It does, replacing the
+ * post's earlier designs, unless someone put other media in use for the post
+ * (an upload, or an older generator's image); that choice is theirs to change.
+ * Earlier designs stay on the post, so any of them can be put back in use.
+ */
+async function takeOverPost(admin: any, req: DesignRequest): Promise<boolean> {
+  const { data: selected } = await admin.from("post_iterations").select("id, variant_angle")
+    .eq("client_id", req.client_id).eq("calendar_post_key", req.calendar_post_key).eq("is_selected", true);
+  if ((selected ?? []).some((r: { variant_angle: string | null }) => !DESIGN_ANGLE.test(r.variant_angle ?? ""))) return false;
+  const ids = (selected ?? []).map((r: { id: string }) => r.id);
+  if (ids.length) await admin.from("post_iterations").update({ is_selected: false }).in("id", ids);
+  return true;
+}
+
 /**
  * Bring a request up to date with its jobs: hand every finished option to the
- * post (a post_iterations row in the request's group, not yet in use), start a
+ * post (a post_iterations row in the request's group, in use unless someone
+ * chose other media for the post), start a
  * replacement for any option that did not finish, and record the stage.
  */
 export async function settleRequest(admin: any, requestId: string): Promise<void> {
@@ -101,6 +120,7 @@ export async function settleRequest(admin: any, requestId: string): Promise<void
     if (ordered.length < expected || !ordered.every((j) => j.status === "done" && j.output_path)) continue;
     const urls = ordered.map((j) => admin.storage.from(BUCKET).getPublicUrl(j.output_path).data.publicUrl);
     const job = { ...lead, option_index: optionIndex };
+    const inUse = await takeOverPost(admin, req);
     const { data: row, error } = await admin.from("post_iterations").insert({
       client_id: req.client_id,
       report_id: req.report_id,
@@ -113,7 +133,7 @@ export async function settleRequest(admin: any, requestId: string): Promise<void
       variant_group_id: req.id,
       variant_angle: `Design option ${job.option_index + 1}`,
       concept: job.input?.generate?.concept ?? null,
-      is_selected: false,
+      is_selected: inUse,
       created_by: req.requested_by,
     }).select("id").single();
     if (error) throw new Error(`Could not add the finished design to the post: ${error.message}`);

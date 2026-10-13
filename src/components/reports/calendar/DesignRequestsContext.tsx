@@ -7,7 +7,7 @@
  * soon as a request finishes another option.
  */
 
-import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { DesignRequest } from "@/lib/designRequests";
@@ -18,6 +18,8 @@ interface Ctx {
   byPost: Map<string, DesignRequest>;
   /** Open a post's panel on its Design tab. */
   openDesigns: (calendarPostKey: string) => void;
+  /** The signed-in user's id, to tell their own requests from designs prepared without anyone asking. */
+  myId: string | null;
   refresh: () => void;
 }
 
@@ -27,12 +29,18 @@ const POLL_MS = 6000;
 
 export function DesignRequestsProvider({ clientId, onOpenPost, children }: { clientId?: string; onOpenPost: (calendarPostKey: string) => void; children: ReactNode }) {
   const qc = useQueryClient();
+  const [myId, setMyId] = useState<string | null>(null);
+  useEffect(() => {
+    const auth = supabase.auth as Partial<typeof supabase.auth> | undefined;
+    if (typeof auth?.getSession !== "function") return;
+    void auth.getSession().then(({ data }) => setMyId(data.session?.user?.id ?? null));
+  }, []);
   const { data: requests = [] } = useQuery({
     queryKey: ["design-requests", clientId],
     enabled: !!clientId,
     queryFn: async () => {
       const { data, error } = await (supabase.from("design_requests" as any) as any)
-        .select("id, client_id, report_id, calendar_post_key, platform, post_copy, status, stage, kind, options_wanted, options_ready, error, created_at, updated_at")
+        .select("id, client_id, report_id, calendar_post_key, platform, post_copy, status, stage, kind, options_wanted, options_ready, requested_by, error, created_at, updated_at")
         .eq("client_id", clientId)
         .order("created_at", { ascending: false })
         .limit(200);
@@ -62,9 +70,10 @@ export function DesignRequestsProvider({ clientId, onOpenPost, children }: { cli
       requests,
       byPost,
       openDesigns: onOpenPost,
+      myId,
       refresh: () => { void qc.invalidateQueries({ queryKey: ["design-requests", clientId] }); },
     };
-  }, [requests, onOpenPost, qc, clientId]);
+  }, [requests, onOpenPost, qc, clientId, myId]);
 
   return <DesignRequestsCtx.Provider value={value}>{children}</DesignRequestsCtx.Provider>;
 }

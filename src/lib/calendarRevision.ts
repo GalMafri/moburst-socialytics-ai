@@ -11,11 +11,14 @@ export interface CopyRevision {
   id?: string; report_id?: string | null; calendar_post_key?: string | null;
   post_copy?: string | null; platform?: string | null; hashtags?: string[] | null;
   cta?: string | null; version?: number; created_at?: string | null;
+  media_urls?: string[] | null;
 }
 
 export function applyCopyRevisions(post: CalendarPost, revisions: CopyRevision[]): CalendarPost {
   if (!post._calendarPostKey) return post;
-  const matching = revisions.filter((r) => r.calendar_post_key === post._calendarPostKey)
+  // Only copy edits count. Design and media rows also record the copy they
+  // were made from; counting them put that older copy back over a later edit.
+  const matching = revisions.filter((r) => r.calendar_post_key === post._calendarPostKey && !(r.media_urls && r.media_urls.length))
     .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "") || (b.version || 0) - (a.version || 0));
   const latest = matching[0];
   if (latest && (latest.version || 0) < (post._copyVersion || 0)) return post;
