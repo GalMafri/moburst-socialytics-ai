@@ -471,8 +471,17 @@ async function editLayers(token: string, job: Job): Promise<StepResult> {
         throw new Error(`FINAL: ${copy.error}`);
       }
       const ops: Array<Record<string, unknown>> = [...logo.map((l) => ({ type: "delete_element", element_id: l.id })), ...copy.ops];
-      // The page background without the drawn text, so no trace of it shows around the exact copy.
-      if (s.clean_asset) ops.push({ type: "update_fill", element_id: s.page.id, asset_type: "image", asset_id: s.clean_asset, alt_text: "Background" });
+      if (s.clean_asset) {
+        // The clean image is the whole picture (objects, panels, light) without
+        // the drawn text and logo, so it becomes the page background and the
+        // picture layers Magic Layers cut from the design go: traces of the
+        // drawn letters were also left inside those layers (a panel behind the
+        // headline, 13 Oct). What remains is the picture, the exact copy and,
+        // next, the logo file.
+        const pictureLayers = fills.filter((f) => f.id !== s.page.id && !logo.includes(f));
+        ops.push(...pictureLayers.map((f) => ({ type: "delete_element", element_id: f.id })));
+        ops.push({ type: "update_fill", element_id: s.page.id, asset_type: "image", asset_id: s.clean_asset, alt_text: "Background" });
+      }
       // A retried step can find the logo already gone (the previous attempt
       // committed before it could record it); the client's logo region then
       // bounds the search for where it was.
