@@ -1,7 +1,7 @@
 // supabase/functions/design-worker/index.ts
 //
 // Makes the designs that design-request plans, without Canva (Lital, 13 Oct:
-// "drop canva"). The steps are in _shared/design/pipeline.ts: generate, locate,
+// "drop canva"). The steps are in _shared/design/pipeline.ts: generate,
 // unlogo, finish, verify. Each design is a row in canva_finish_jobs (the table
 // keeps its old name); a video's footage and join stay with video-worker.
 //
@@ -20,7 +20,6 @@ import { anthropicMessages } from "../_shared/anthropic.ts";
 import { settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
-import { findLogo } from "../_shared/design/logoMatch.ts";
 import { copyMatches, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
 import { VIDEO_STEPS_FILTER } from "../_shared/video/steps.ts";
 
@@ -41,7 +40,7 @@ const MAX_UNLOGO = 3;
 const DEFAULT_PAGE = { width: 1088, height: 1360 };
 const IMAGE_MODEL = "gpt-image-2.5-flare";
 const READ_MODEL = "claude-opus-5-5";
-const STEPS = new Set(["generate", "locate", "unlogo", "finish", "verify"]);
+const STEPS = new Set(["generate", "unlogo", "finish", "verify"]);
 /** A job is only ever moved on while it is active: a cancelled design stays cancelled. */
 const ACTIVE = ["queued", "running"];
 
@@ -180,7 +179,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
   const s = job.state ?? (job.state = {});
   const base = `${job.client_id}/canva-finish/${job.id}`;
   // A job left at a step of the Canva method (before 13 Oct) goes on from the design it has.
-  if (!STEPS.has(job.step)) job.step = s.design_path ? "locate" : "generate";
+  if (!STEPS.has(job.step)) job.step = s.design_path ? "unlogo" : "generate";
 
   switch (job.step) {
     case "generate": {
@@ -195,23 +194,9 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       if (s.generations > MAX_GENERATIONS) throw new Error("FINAL: The design could not be made with the headline's exact words.");
       return hold(admin, job, async () => {
         s.design_path = await generateDesign(admin, job, `${base}/design-${s.generations}.png`);
-        for (const k of ["logo_rect", "logo_score", "nologo_path", "unlogos", "final_path", "read"]) delete s[k];
-        job.step = "locate";
+        for (const k of ["nologo_path", "unlogos", "final_path", "read"]) delete s[k];
+        job.step = "unlogo";
       });
-    }
-    case "locate": {
-      const design = await Image.decode(await download(admin, s.design_path));
-      const logo = await Image.decode(await download(admin, job.input.logo_path));
-      const page = pageOf(job);
-      const [W, H] = pictureSize([page.width, page.height]);
-      if (design.width !== W || design.height !== H) throw new Error(`FINAL: The design is ${design.width}x${design.height}; ${W}x${H} was asked for.`);
-      const exp = canvasLogoRect(job.input.placement, logo.width, logo.height, W, H);
-      const g: GenerateInput = job.input.generate;
-      const found = findLogo(design.bitmap, W, H, logo.bitmap, logo.width, logo.height, { x: exp.x, y: exp.y, width: exp.width, height: exp.height }, hexRgb(g.background));
-      s.logo_rect = { x: found.x, y: found.y, width: found.width, height: found.height };
-      s.logo_score = Math.round(found.score * 1000) / 1000;
-      job.step = "unlogo";
-      return "next";
     }
     case "unlogo": {
       s.unlogos = (s.unlogos ?? 0) + 1;
@@ -230,8 +215,12 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
     case "finish": {
       const pic = await Image.decode(await download(admin, s.nologo_path));
       const logo = await Image.decode(await download(admin, job.input.logo_path));
-      const r = s.logo_rect;
       const W = pic.width, H = pic.height;
+      // The logo file at the client's habitual spot and size, the spot the
+      // canvas gave the model. The model's own drawing of the logo is gone
+      // (unlogo), so the file never follows where the model drifted to (one
+      // slide of a carousel drew it twice the size, over the headline panel).
+      const r = canvasLogoRect(job.input.placement, logo.width, logo.height, W, H);
       // The logo file blended in place, inside its own rectangle only (a
       // full-size layer per design ran the worker out of memory on 13 Oct).
       const lp = resampleRGBA(logo.bitmap, logo.width, logo.height, r.width, r.height);
