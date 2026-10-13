@@ -70,7 +70,10 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
       copy: slide.headline,
       placement: settings.placement,
       title: `${brandName} ${req.platform ?? ""} option ${optionIndex + 1}${carousel ? ` slide ${i + 1}` : ""}`.replace(/\s+/g, " "),
-      generate: { brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: settings.background, refs: settings.reference_paths },
+      layout: brief.layout ?? null,
+      // The posts this design builds on, as the planner chose them for this
+      // post; a brief from before that choice existed uses the first three.
+      generate: { brand_name: brandName, platform: req.platform ?? "social", concept: slide.picture, background: settings.background, refs: brief.refs?.length ? brief.refs : settings.reference_paths.slice(0, 3) },
     },
   }));
   const { error } = await admin.from("canva_finish_jobs").insert(rows);

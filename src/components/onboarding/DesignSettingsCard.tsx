@@ -32,7 +32,8 @@ const SPOTS: Array<{ value: Spot; label: string }> = [
   { value: "bottom-right", label: "Bottom right" },
 ];
 const FRAME = { w: 1088, h: 1360 };
-const MAX_REFS = 3;
+/** Most of the client's posts designs are built from (the planner is shown them all). */
+const MAX_REFS = 16;
 const HEX = /^#[0-9a-f]{6}$/i;
 
 /** A placement from the spot, size and edge distance chosen here. */
@@ -97,7 +98,7 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
     if (!s) return;
     setLogoPath(s.logo_path);
     setBackground(s.background);
-    setRefs(s.reference_paths || []);
+    setRefs(s.reference_paths?.length ? s.reference_paths : []);
     setAutoDesigns(!!s.auto_designs);
     const img = new Image();
     img.onload = () => {
@@ -108,6 +109,11 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
     };
     img.src = supabase.storage.from("generated-media").getPublicUrl(s.logo_path).data.publicUrl;
   }, [data?.settings]);
+
+  // A client set up for the first time starts with every post it has.
+  useEffect(() => {
+    if (data && !data.settings && data.paths.length) setRefs(data.paths.slice(0, MAX_REFS));
+  }, [data]);
 
   const uploadLogo = async (file: File) => {
     if (file.type !== "image/png") { toast.error("Use a PNG logo with a transparent background."); return; }
@@ -242,8 +248,13 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
           </div>
 
           <div className="space-y-2">
-            <Label>The client's posts to follow · {refs.length} of {MAX_REFS}</Label>
-            <p className="t-label">Pick posts that show the look you want, without the client's logo printed on objects in the picture.</p>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <Label>The client's posts designs are built from · {refs.length} of {Math.min(MAX_REFS, data?.paths.length ?? 0)}</Label>
+              {data && data.paths.length > 0 && refs.length < Math.min(MAX_REFS, data.paths.length) && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => setRefs(data.paths.slice(0, MAX_REFS))}>Use all</Button>
+              )}
+            </div>
+            <p className="t-label">Each design builds on the one or two of these whose layout suits what its post says, and on different ones than the designs before it, so keep every layout the client uses. Leave out posts that are off brand or have the client's logo printed on objects in the picture.</p>
             {data?.paths.length ? (
               <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                 {data.paths.map((p) => {

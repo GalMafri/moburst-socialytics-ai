@@ -19,7 +19,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { bearerToken } from "../_shared/auth/authz.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
-import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, plannerPrompt } from "../_shared/canva/options.ts";
+import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, plannerPrompt, recentLines } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
 
@@ -28,6 +28,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-socialytics-secret, x-socialytics-user",
 };
 const PLANNER_MODEL = "claude-opus-5-5";
+/** Most of the client's posts the planner is shown. */
+const MAX_LIBRARY = 16;
+/** How many of the client's recent designs the planner is told about. */
+const RECENT_DESIGNS = 10;
 
 const service = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 
@@ -107,24 +111,29 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
   const brand = client?.name ?? "the brand";
   const voice = client?.brand_identity?.tone_of_voice ?? null;
 
-  const images = [];
-  for (const path of settings.reference_paths) {
+  // The client's whole confirmed library, shown as numbered posts so each
+  // brief can name the posts its layout builds on.
+  const library: string[] = [];
+  const content: unknown[] = [];
+  for (const path of settings.reference_paths.slice(0, MAX_LIBRARY)) {
     const { data } = await admin.storage.from("design-references").download(path);
     if (!data) continue;
     const bytes = new Uint8Array(await data.arrayBuffer());
     let bin = "";
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     const mediaType = /\.png$/i.test(path) ? "image/png" : /\.webp$/i.test(path) ? "image/webp" : "image/jpeg";
-    images.push({ type: "image", source: { type: "base64", media_type: mediaType, data: btoa(bin) } });
+    library.push(path);
+    content.push({ type: "text", text: `Post ${library.length}:` });
+    content.push({ type: "image", source: { type: "base64", media_type: mediaType, data: btoa(bin) } });
   }
-  if (!images.length) throw new Error("None of the client's reference posts could be read.");
+  if (!library.length) throw new Error("None of the client's reference posts could be read.");
+  const recent = recentLines(await recentDesigns(admin, request.client_id), library);
 
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const carousel = request.kind === "carousel";
-  const instruction = carousel
-    ? carouselPlannerPrompt({ brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, slides: CAROUSEL_SLIDES })
-    : plannerPrompt({ brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED });
+  const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent };
+  const instruction = carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
@@ -132,10 +141,10 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
       body: {
         model: PLANNER_MODEL,
         max_tokens: carousel ? 6000 : 2000,
-        messages: [{ role: "user", content: [...images, { type: "text", text: instruction }] }],
+        messages: [{ role: "user", content: [...content, { type: "text", text: instruction }] }],
       },
     });
-    briefs = carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES) : parseBriefs(result.text);
+    briefs = carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES, library) : parseBriefs(result.text, library);
   }
   if (!briefs.length) throw new Error("The options could not be planned.");
 
@@ -145,6 +154,22 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
   for (let i = 0; i < first; i++) await startOption(admin, planned, settings, brand, i, i);
   await admin.from("design_requests").update({ candidates_started: first, updated_at: new Date().toISOString() }).eq("id", request.id);
   await wakeWorker();
+}
+
+/** The client's most recent designs: the posts each was built on and what it showed (a carousel by its cover). */
+async function recentDesigns(admin: any, clientId: string): Promise<RecentDesign[]> {
+  const { data } = await admin.from("canva_finish_jobs").select("input, slide_index, created_at")
+    .eq("client_id", clientId).not("design_request_id", "is", null)
+    .order("created_at", { ascending: false }).limit(RECENT_DESIGNS * 6);
+  const out: RecentDesign[] = [];
+  for (const j of data ?? []) {
+    if (j.slide_index && j.slide_index > 0) continue;
+    const g = j.input?.generate;
+    if (!g?.concept) continue;
+    out.push({ refs: Array.isArray(g.refs) ? g.refs : [], layout: j.input?.layout ?? null, picture: String(g.concept) });
+    if (out.length >= RECENT_DESIGNS) break;
+  }
+  return out;
 }
 
 /** Start a design request for a post, or answer with the one already being prepared. Planning runs in the background. */

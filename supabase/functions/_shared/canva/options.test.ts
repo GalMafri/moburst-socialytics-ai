@@ -71,3 +71,24 @@ describe("optionStates", () => {
     expect(optionStates([{ option_index: 0, slide_count: null, status: "done", step: "finished" }] as never)).toEqual([{ status: "done", step: "finished" }]);
   });
 });
+
+import { chosenPosts, parseBriefs as parseWithLibrary, recentLines } from "./options";
+
+describe("the client's library", () => {
+  const library = ["a.jpg", "b.jpg", "c.jpg", "d.jpg"];
+  it("reads the posts a brief builds on, by their numbers, keeping at most two", () => {
+    expect(chosenPosts([3, 1, 2], library)).toEqual(["c.jpg", "a.jpg"]);
+    expect(chosenPosts([9, "2", 2], library)).toEqual(["b.jpg"]);
+    expect(chosenPosts("3", library)).toEqual([]);
+  });
+  it("keeps each brief's chosen posts and layout", () => {
+    const text = JSON.stringify({ options: [{ posts: [4], layout: "quote card with portrait", headline: ["Trust is earned"], picture: "a founder at a glass desk" }] });
+    expect(parseWithLibrary(text, library)).toEqual([{ headline: ["Trust is earned"], picture: "a founder at a glass desk", refs: ["d.jpg"], layout: "quote card with portrait" }]);
+  });
+  it("tells the planner what recent designs were built on, by the same numbers", () => {
+    const text = recentLines([{ refs: ["c.jpg"], layout: "space cover", picture: "a satellite dish" }, { refs: ["gone.jpg"], layout: null, picture: "a rocket" }], library);
+    expect(text).toContain("- built on Post 3, space cover: a satellite dish");
+    expect(text).toContain("- built on posts no longer in this set: a rocket");
+    expect(recentLines([], library)).toBe("");
+  });
+});
