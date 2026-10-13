@@ -67,8 +67,10 @@ export async function getImageToDesign(token: string, jobId: string): Promise<{ 
   return { status: job.status, designId: job.result?.design?.id, error: job.error ? `${job.error.code}: ${job.error.message}` : undefined };
 }
 
-export async function startExport(token: string, designId: string, width: number, height: number): Promise<string> {
-  return (await call(token, "POST", "/exports", { design_id: designId, format: { type: "png", width, height } })).job.id;
+/** A PNG export of the design's page at this size; `transparent` leaves the page background out. */
+export async function startExport(token: string, designId: string, width: number, height: number, opts: { transparent?: boolean } = {}): Promise<string> {
+  const format = { type: "png", width, height, ...(opts.transparent ? { transparent_background: true } : {}) };
+  return (await call(token, "POST", "/exports", { design_id: designId, format })).job.id;
 }
 
 export async function getExport(token: string, jobId: string): Promise<{ status: string; url?: string; error?: string }> {

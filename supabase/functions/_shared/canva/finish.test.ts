@@ -135,54 +135,17 @@ describe("designPrompt for carousel slides", () => {
   });
 });
 
-import { cleanMask, cleanRegions, pasteRegions } from "./finish";
+import { composeOver } from "./finish";
 
-describe("a clean background under the live text", () => {
-  it("pads each drawn area and keeps it on the page", () => {
-    expect(cleanRegions([[10, 10, 50, 30], [1080, 1350, 1090, 1365]], 1088, 1360, 16)).toEqual([[0, 0, 66, 46], [1064, 1334, 1088, 1360]]);
+describe("composeOver", () => {
+  it("keeps the picture where the copy layer is empty and is opaque everywhere", () => {
+    const pic = new Uint8ClampedArray([10, 20, 30, 255, 40, 50, 60, 255]);
+    const layer = new Uint8ClampedArray([255, 255, 255, 0, 0, 0, 0, 0]);
+    expect(Array.from(composeOver(pic, layer, 2, 1))).toEqual([10, 20, 30, 255, 40, 50, 60, 255]);
   });
-  it("changes no pixel outside the redrawn areas", () => {
-    const w = 8, h = 8;
-    const orig = new Uint8ClampedArray(w * h * 4).fill(10);
-    const redrawn = new Uint8ClampedArray(w * h * 4).fill(200);
-    const out = pasteRegions(orig, redrawn, w, h, [[2, 2, 6, 6]], 0);
-    expect(out[(0 * w + 0) * 4]).toBe(10);
-    expect(out[(7 * w + 7) * 4]).toBe(10);
-    expect(out[(3 * w + 3) * 4]).toBe(200);
-  });
-  it("fades into the redrawn areas at their edges", () => {
-    const w = 10, h = 10;
-    const out = pasteRegions(new Uint8ClampedArray(w * h * 4).fill(0), new Uint8ClampedArray(w * h * 4).fill(100), w, h, [[0, 0, 10, 10]], 4);
-    expect(out[(0 * w + 0) * 4]).toBe(25);
-    expect(out[(5 * w + 5) * 4]).toBe(100);
-  });
-  it("makes the mask transparent only where the image is redrawn", () => {
-    const m = cleanMask(4, 4, [[1, 1, 3, 3]]);
-    expect(m[(0 * 4 + 0) * 4 + 3]).toBe(255);
-    expect(m[(1 * 4 + 1) * 4 + 3]).toBe(0);
-  });
-});
-
-describe("pasteRegions visits only the regions", () => {
-  it("gives the same image as blending every pixel, with overlapping regions", () => {
-    const w = 40, h = 30;
-    const orig = new Uint8ClampedArray(w * h * 4).map((_, i) => (i * 7) % 256);
-    const redrawn = new Uint8ClampedArray(w * h * 4).map((_, i) => (i * 13) % 256);
-    const regions: [number, number, number, number][] = [[2, 3, 20, 15], [10, 8, 35, 28]];
-    // The reference: every pixel weighed against every region.
-    const ref = new Uint8ClampedArray(orig);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      let wt = 0;
-      for (const [x0, y0, x1, y1] of regions) {
-        if (x < x0 || y < y0 || x >= x1 || y >= y1) continue;
-        const d = Math.min(x - x0, y - y0, x1 - 1 - x, y1 - 1 - y);
-        wt = Math.max(wt, Math.min(1, (d + 1) / 6));
-      }
-      if (wt <= 0) continue;
-      const i = (y * w + x) * 4;
-      for (let c = 0; c < 3; c++) ref[i + c] = Math.round(orig[i + c] * (1 - wt) + redrawn[i + c] * wt);
-      ref[i + 3] = 255;
-    }
-    expect(Array.from(pasteRegions(orig, redrawn, w, h, regions, 6))).toEqual(Array.from(ref));
+  it("takes the layer where it is solid and blends its anti-aliased edges", () => {
+    const pic = new Uint8ClampedArray([0, 0, 0, 255, 0, 0, 0, 255]);
+    const layer = new Uint8ClampedArray([255, 255, 255, 255, 255, 255, 255, 51]);
+    expect(Array.from(composeOver(pic, layer, 2, 1))).toEqual([255, 255, 255, 255, 51, 51, 51, 255]);
   });
 });

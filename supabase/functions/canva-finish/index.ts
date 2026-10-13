@@ -30,7 +30,7 @@ import { CanvaMcp } from "../_shared/canva/mcp.ts";
 import { CanvaBusy, databasePace } from "../_shared/canva/pace.ts";
 import { settleRequest } from "../_shared/canva/jobs.ts";
 import { wakeWorker } from "../_shared/canva/worker.ts";
-import { type Box, type Layer, type Placement, CLEAN_PROMPT, cleanMask, cleanRegions, copyOperations, elementBox, inkBox, logoRect, pasteRegions, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
+import { type Box, type Layer, type Placement, CLEAN_PROMPT, composeOver, copyOperations, elementBox, inkBox, logoRect, pickLogoLayers, placementRegion } from "../_shared/canva/finish.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 import { VIDEO_STEPS_FILTER } from "../_shared/video/steps.ts";
 
@@ -453,6 +453,7 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       s.size = pngSize(design);
       s.design_asset = await uploadAsset(token, design, `${job.id}-design.png`);
       s.logo_asset = await uploadAsset(token, await download(admin, job.input.logo_path), `${job.id}-logo.png`);
+      s.blank_asset = await uploadAsset(token, await blankPng(), `${job.id}-blank.png`);
       job.step = "layers"; return "next";
     }
     case "layers": {
@@ -463,14 +464,14 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       const r = await settle(() => getImageToDesign(token, s.layers_job), deadline);
       if (r.status === "in_progress") return "wait";
       if (r.status !== "success" || !r.designId) throw new Error(`FINAL: Magic Layers did not finish: ${r.error ?? r.status}`);
-      s.design_id = r.designId; job.step = "clean_read"; return "next";
+      s.design_id = r.designId; job.step = "clean"; return "next";
     }
-    // Where the drawn text and logo are, from the layers Magic Layers made.
-    case "clean_read": return await editStep(deadline, () => readCleanRegions(admin, token, job));
-    // Redraw those areas from their surroundings, in the background (minutes).
+    // A job recorded before 13 Oct's change was about to read where its text was; the picture is now redrawn whole.
+    case "clean_read": job.step = "clean"; return "next";
+    // The design's picture redrawn without any lettering, in the background (under a minute).
     case "clean": {
       s.cleans = (s.cleans ?? 0) + 1;
-      if (s.cleans > MAX_CLEANS) throw new Error("FINAL: The background behind the text could not be cleaned.");
+      if (s.cleans > MAX_CLEANS) throw new Error("FINAL: The picture behind the text could not be redrawn.");
       await admin.from("canva_finish_jobs").update({ lease_until: new Date(Date.now() + GENERATE_LEASE_MS).toISOString(), state: s }).eq("id", job.id);
       const work = cleanBackground(admin, job).catch(async (e) => {
         const msg = e instanceof Error ? e.message : String(e);
@@ -487,7 +488,8 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       // The page size comes from the design file itself, without an extra
       // Canva read per slide.
       if (!s.size) s.size = s.page ? [s.page.width, s.page.height] : pngSize(await download(admin, s.design_path ?? job.input.design_path));
-      s.export_job = await startExport(token, s.design_id, s.size[0], s.size[1]);
+      // The last export is the copy and the logo alone, on a transparent page.
+      s.export_job = await startExport(token, s.design_id, s.size[0], s.size[1], { transparent: job.step === "export_final" });
       job.step = `${job.step}_wait`; return "next";
     }
     case "export_before_wait":
@@ -496,14 +498,29 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       const r = await settle(() => getExport(token, s.export_job), deadline);
       if (r.status === "in_progress") return "wait";
       if (r.status !== "success" || !r.url) throw new Error(`Export did not finish: ${r.error ?? r.status}`);
-      const which = job.step.replace(/^export_/, "").replace(/_wait$/, "");
+      const which = ({ before: "before", nologo: "nologo", final: "foreground" } as Record<string, string>)[job.step.replace(/^export_/, "").replace(/_wait$/, "")];
       const bytes = new Uint8Array(await (await fetch(r.url)).arrayBuffer());
       const path = `${base}/${which}.png`;
       const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "image/png", upsert: true });
       if (error) throw new Error(`Could not store the ${which} export: ${error.message}`);
       s[`${which}_path`] = path;
-      job.step = which === "before" ? "edit" : which === "nologo" ? "place_logo" : "finished";
-      return which === "final" ? "done" : "next";
+      job.step = which === "before" ? "edit" : which === "nologo" ? "place_logo" : "compose";
+      // The join decodes two full images, so it runs in a request of its own.
+      return which === "foreground" ? "wait" : "next";
+    }
+    // The copy and logo laid over the redrawn picture, at the picture's own resolution.
+    case "compose": {
+      const picture = await Image.decode(await download(admin, s.clean_path));
+      const layer = await Image.decode(await download(admin, s.foreground_path));
+      if (picture.width !== layer.width || picture.height !== layer.height) {
+        throw new Error(`FINAL: The copy layer is ${layer.width}x${layer.height}; the picture is ${picture.width}x${picture.height}.`);
+      }
+      picture.bitmap.set(composeOver(picture.bitmap, layer.bitmap, picture.width, picture.height));
+      const path = `${base}/final.png`;
+      const { error } = await admin.storage.from(BUCKET).upload(path, await picture.encode(), { contentType: "image/png", upsert: true });
+      if (error) throw new Error(`Could not store the finished design: ${error.message}`);
+      s.final_path = path;
+      job.step = "finished"; return "done";
     }
     // An edit that would start after the pass's budget is spent waits for the
     // next pass, so a pass ends on time.
@@ -532,18 +549,9 @@ async function editLayers(admin: any, token: string, job: Job): Promise<StepResu
         await mcp.call("cancel-editing-transaction", { transaction_id: tid, user_intent: INTENT }).catch(() => {});
         throw new Error(`FINAL: ${copy.error}`);
       }
+      // Only the drawn logo goes here and the copy is set; the picture stays,
+      // so the next export differs from the first only by the logo's ink.
       const ops: Array<Record<string, unknown>> = [...logo.map((l) => ({ type: "delete_element", element_id: l.id })), ...copy.ops];
-      if (s.clean_asset) {
-        // The clean image is the whole picture (objects, panels, light) without
-        // the drawn text and logo, so it becomes the page background and the
-        // picture layers Magic Layers cut from the design go: traces of the
-        // drawn letters were also left inside those layers (a panel behind the
-        // headline, 13 Oct). What remains is the picture, the exact copy and,
-        // next, the logo file.
-        const pictureLayers = fills.filter((f) => f.id !== s.page.id && !logo.includes(f));
-        ops.push(...pictureLayers.map((f) => ({ type: "delete_element", element_id: f.id })));
-        ops.push({ type: "update_fill", element_id: s.page.id, asset_type: "image", asset_id: s.clean_asset, alt_text: "Background" });
-      }
       // A retried step can find the logo already gone (the previous attempt
       // committed before it could record it); the client's logo region then
       // bounds the search for where it was.
@@ -578,9 +586,18 @@ async function placeLogo(admin: any, token: string, job: Job): Promise<StepResul
         await mcp.call("cancel-editing-transaction", { transaction_id: tx.transaction.transaction_id, user_intent: INTENT }).catch(() => {});
         job.step = "export_final"; return "next";
       }
+      // The picture is laid under the copy outside Canva (compose), so the
+      // page keeps only the copy and the logo file: Magic Layers' picture
+      // layers go and the page background becomes a transparent image.
+      if (!s.blank_asset) s.blank_asset = await uploadAsset(token, await blankPng(), `${job.id}-blank.png`);
+      const pictures = (tx.fills ?? []).filter((f: any) => f.element_id !== s.page.id);
       await mcp.call("perform-editing-operations", {
         transaction_id: tx.transaction.transaction_id, page_index: 1, pages: tx.pages, user_intent: INTENT,
-        operations: [{ type: "insert_fill", page_id: s.page.id, asset_type: "image", asset_id: s.logo_asset, alt_text: "Logo", ...rect }],
+        operations: [
+          ...pictures.map((f: any) => ({ type: "delete_element", element_id: f.element_id })),
+          { type: "update_fill", element_id: s.page.id, asset_type: "image", asset_id: s.blank_asset, alt_text: "Background" },
+          { type: "insert_fill", page_id: s.page.id, asset_type: "image", asset_id: s.logo_asset, alt_text: "Logo", ...rect },
+        ],
       });
       await mcp.call("commit-editing-transaction", { transaction_id: tx.transaction.transaction_id, user_intent: INTENT });
       job.step = "export_final"; return "next";
@@ -655,47 +672,22 @@ async function generateDesign(admin: any, job: Job): Promise<void> {
   await admin.from("canva_finish_jobs").update({ step: "upload", state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
 }
 
-/** Where the drawn text and logo sit, read from the design's layers (one Canva session, nothing changed). */
-async function readCleanRegions(admin: any, token: string, job: Job): Promise<StepResult> {
-  const s = job.state;
-  const mcp = await editingSession(admin, token, job.id);
-  const tx = await mcp.call("start-editing-transaction", { design_id: s.design_id, user_intent: INTENT });
-  await mcp.call("cancel-editing-transaction", { transaction_id: tx.transaction.transaction_id, user_intent: INTENT }).catch(() => {});
-  s.page = { id: tx.pages[0].page_id, width: tx.pages[0].dimension.width, height: tx.pages[0].dimension.height };
-  const texts: Layer[] = (tx.richtexts ?? []).map((r: any) => ({ id: r.element_id, box: elementBox(r), text: (r.regions ?? []).map((g: any) => g.text ?? "").join("") }));
-  const fills: Layer[] = (tx.fills ?? []).map((f: any) => ({ id: f.element_id, box: elementBox(f) }));
-  const [lw, lh] = job.input.logo_size;
-  const region = placementRegion(job.input.placement, lw, lh, s.page.width, s.page.height);
-  const logo = pickLogoLayers([...texts, ...fills], region, job.input.copy);
-  const boxes = [...texts, ...logo].map((l) => l.box).filter(Boolean) as Box[];
-  s.clean_regions = cleanRegions(boxes, s.page.width, s.page.height);
-  job.step = s.clean_regions.length ? "clean" : "export_before";
-  return "next";
-}
-
 /**
- * Redraw the drawn text and logo areas from their surroundings, paste only
- * those areas back onto the design (every other pixel unchanged), and hand
- * the result to Canva as the page background.
+ * The design's picture redrawn whole without any lettering or logo (rules in
+ * _shared/canva/finish.ts). It is stored as the picture the finished post is
+ * laid on; it never goes to Canva.
  */
 async function cleanBackground(admin: any, job: Job): Promise<void> {
   const s = job.state;
-  const regions = s.clean_regions as Box[];
-  // The design's own file goes to the image model as it is; it is decoded once,
-  // for pasting the redrawn regions back.
-  const originalBytes = await download(admin, s.design_path);
-  const original = await Image.decode(originalBytes);
-  const w = original.width, h = original.height;
-  const mask = new Image(w, h);
-  mask.bitmap.set(cleanMask(w, h, regions));
+  const designBytes = await download(admin, s.design_path);
+  const [w, h] = pngSize(designBytes, "The design");
 
   const form = new FormData();
   form.append("model", "gpt-image-2.5-flare");
   form.append("size", `${w}x${h}`);
   form.append("quality", "high");
   form.append("n", "1");
-  form.append("image[]", new Blob([originalBytes as unknown as BlobPart], { type: "image/png" }), "design.png");
-  form.append("mask", new Blob([(await mask.encode()) as unknown as BlobPart], { type: "image/png" }), "mask.png");
+  form.append("image[]", new Blob([designBytes as unknown as BlobPart], { type: "image/png" }), "design.png");
   form.append("prompt", CLEAN_PROMPT);
   const resp = await fetch("https://api.openai.com/v1/images/edits", {
     method: "POST",
@@ -707,19 +699,21 @@ async function cleanBackground(admin: any, job: Job): Promise<void> {
   if (!resp.ok) throw new Error(`Image model ${resp.status}: ${text.slice(0, 300)}`);
   const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
   if (!b64) throw new Error("The image model returned no image.");
-  let redrawn = await Image.decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
-  if (redrawn.width !== w || redrawn.height !== h) redrawn = redrawn.resize(w, h);
+  let bytes: Uint8Array = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  // The model answers at the size asked; anything else is brought to the design's size.
+  const [rw, rh] = pngSize(bytes, "The redrawn picture");
+  if (rw !== w || rh !== h) bytes = await (await Image.decode(bytes)).resize(w, h).encode();
 
-  const clean = new Image(w, h);
-  clean.bitmap.set(pasteRegions(original.bitmap, redrawn.bitmap, w, h, regions));
-  const bytes = await clean.encode();
   const path = `${job.client_id}/canva-finish/${job.id}/clean.png`;
   const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "image/png", upsert: true });
-  if (error) throw new Error(`Could not store the clean background: ${error.message}`);
-  const asset = await uploadAsset(await accessTokenFor(admin), bytes, `${job.id}-clean.png`);
-
-  const state = { ...s, clean_path: path, clean_asset: asset };
+  if (error) throw new Error(`Could not store the redrawn picture: ${error.message}`);
+  const state = { ...s, clean_path: path };
   await admin.from("canva_finish_jobs").update({ step: "export_before", state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+}
+
+/** A small fully transparent PNG; as the page background it leaves only the copy and the logo in the export. */
+async function blankPng(): Promise<Uint8Array> {
+  return await new Image(32, 32).encode();
 }
 
 async function openaiKey(admin: any): Promise<string> {
@@ -757,9 +751,9 @@ async function download(admin: any, path: string): Promise<Uint8Array> {
 }
 
 /** A PNG's pixel size from its header. */
-function pngSize(bytes: Uint8Array): [number, number] {
+function pngSize(bytes: Uint8Array, what = "The logo"): [number, number] {
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (bytes.length < 24 || v.getUint32(0) !== 0x89504e47) throw new Error("The logo must be a PNG file.");
+  if (bytes.length < 24 || v.getUint32(0) !== 0x89504e47) throw new Error(`${what} must be a PNG file.`);
   return [v.getUint32(16), v.getUint32(20)];
 }
 
