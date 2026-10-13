@@ -96,7 +96,8 @@ describe("designPrompt", () => {
     expect(designPrompt({ brand_name: "Moburst", platform: "Facebook", concept: "a glowing crystal brain on a glass pedestal" }, ["AI answers are changing how brands get discovered."], 3)).toBe(
       "The first image is the canvas for a new Moburst Facebook post (4:5). Its logo is final: keep it exactly as it is, where it is. " +
       "Design the whole post around it in the visual language of the other three images, which are Moburst's own posts. The picture shows a glowing crystal brain on a glass pedestal. " +
-      "Headline, spelled exactly: \"AI answers are changing how brands get discovered.\" Add no other text and no other logo.",
+      "Headline, spelled exactly: \"AI answers are changing how brands get discovered.\" Add no other text and no other logo. " +
+      "Every part of the picture is in sharp focus, with no blurred or out-of-focus objects.",
     );
   });
   it("adds a second line when the copy has one", () => {

@@ -50,12 +50,12 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
     return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} vertical video (9:16). Its logo is final: keep it exactly as it is, where it is. ` +
       cover +
       `Design the card around the logo in the visual language of ${refs} ${g.brand_name}'s own posts, filling the tall frame. The picture shows ${g.concept}. ` +
-      `${lines} Add no other text and no other logo.`;
+      `${lines} Add no other text and no other logo. ${SHARP}`;
   }
   if (!slide) {
     return `The first image is the canvas for a new ${g.brand_name} ${g.platform} post (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
       `Design the whole post around it in the visual language of ${refsWord} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ` +
-      `${lines} Add no other text and no other logo.`;
+      `${lines} Add no other text and no other logo. ${SHARP}`;
   }
   const which = slide.index === 0 ? `the cover, slide 1 of ${slide.count}` : `slide ${slide.index + 1} of ${slide.count}`;
   const cover = slide.withCover
@@ -67,8 +67,15 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
   return `The first image is the canvas for ${which} of a new ${g.brand_name} ${g.platform} carousel (4:5). Its logo is final: keep it exactly as it is, where it is. ` +
     cover +
     `Design the slide around the logo in the visual language of ${refs} ${g.brand_name}'s own posts. The picture shows ${g.concept}. ` +
-    `${lines} Add no other text, no slide numbers and no other logo.`;
+    `${lines} Add no other text, no slide numbers and no other logo. ${SHARP}`;
 }
+
+/**
+ * Every part of the picture in focus. Out-of-focus foreground objects, copied
+ * from the depth of field in a client's photos, read as blur on a phone
+ * (Lital, 13 Oct: "no blurry images").
+ */
+const SHARP = "Every part of the picture is in sharp focus, with no blurred or out-of-focus objects.";
 
 function numberWord(n: number): string {
   return ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight"][n] ?? String(n);
