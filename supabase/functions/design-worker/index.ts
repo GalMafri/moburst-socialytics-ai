@@ -14,11 +14,12 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
+import { decode as base64Decode, encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
-import { composeOver, outputSize, pictureSize } from "../_shared/canva/finish.ts";
+import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
 import { findLogo } from "../_shared/design/logoMatch.ts";
 import { copyMatches, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
 import { VIDEO_STEPS_FILTER } from "../_shared/video/steps.ts";
@@ -231,19 +232,25 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       const logo = await Image.decode(await download(admin, job.input.logo_path));
       const r = s.logo_rect;
       const W = pic.width, H = pic.height;
-      const layer = new Uint8ClampedArray(W * H * 4);
+      // The logo file blended in place, inside its own rectangle only (a
+      // full-size layer per design ran the worker out of memory on 13 Oct).
       const lp = resampleRGBA(logo.bitmap, logo.width, logo.height, r.width, r.height);
+      const px = pic.bitmap;
       for (let y = 0; y < r.height; y++) {
         const ty = r.y + y;
         if (ty < 0 || ty >= H) continue;
         for (let x = 0; x < r.width; x++) {
           const tx = r.x + x;
           if (tx < 0 || tx >= W) continue;
-          const k = (y * r.width + x) * 4;
-          layer.set(lp.subarray(k, k + 4), (ty * W + tx) * 4);
+          const k = (y * r.width + x) * 4, a = lp[k + 3];
+          if (a === 0) continue;
+          const i = (ty * W + tx) * 4, f = a / 255;
+          px[i] = Math.round(lp[k] * f + px[i] * (1 - f));
+          px[i + 1] = Math.round(lp[k + 1] * f + px[i + 1] * (1 - f));
+          px[i + 2] = Math.round(lp[k + 2] * f + px[i + 2] * (1 - f));
+          px[i + 3] = 255;
         }
       }
-      pic.bitmap.set(composeOver(pic.bitmap, layer, W, H));
       const page = pageOf(job);
       const [ow, oh] = outputSize([page.width, page.height]);
       const out = new Image(ow, oh);
@@ -271,7 +278,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
           model: READ_MODEL,
           max_tokens: 600,
           messages: [{ role: "user", content: [
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: toBase64(jpeg) } },
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode(jpeg as unknown as ArrayBuffer) } },
             { type: "text", text: readPrompt(g.brand_name) },
           ] }],
         },
@@ -302,7 +309,11 @@ function pageOf(job: Job): { width: number; height: number } {
 async function generateDesign(admin: any, job: Job, path: string): Promise<string> {
   const g: GenerateInput = job.input.generate;
   const page = pageOf(job);
-  const [W, H] = pictureSize([page.width, page.height]);
+  // The canvas and its mask are at the page's size; the model draws at twice
+  // it. (2x canvases and masks, three designs at once, ran the worker out of
+  // memory on 13 Oct.)
+  const size = pictureSize([page.width, page.height]);
+  const W = page.width, H = page.height;
   const file = await Image.decode(await download(admin, job.input.logo_path));
   const rect = canvasLogoRect(job.input.placement, file.width, file.height, W, H);
   const logo = new Image(rect.width, rect.height);
@@ -331,7 +342,7 @@ async function generateDesign(admin: any, job: Job, path: string): Promise<strin
     if (error || !data) throw new Error(`Could not read the client post ${p}: ${error?.message ?? "missing"}`);
     images.push({ bytes: new Uint8Array(await data.arrayBuffer()), name: `ref${i}${p.slice(p.lastIndexOf("."))}` });
   }
-  const bytes = await imageEdit(images, designPrompt(g, job.input.copy, g.refs.length, slide), [W, H], await mask.encode());
+  const bytes = await imageEdit(images, designPrompt(g, job.input.copy, g.refs.length, slide), size, await mask.encode());
   await upload(admin, path, bytes, "image/png");
   return path;
 }
@@ -364,7 +375,7 @@ async function imageEdit(images: { bytes: Uint8Array; name: string }[], prompt: 
   if (!resp.ok) throw new Error(`Image model ${resp.status}: ${text.slice(0, 300)}`);
   const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
   if (!b64) throw new Error("The image model returned no image.");
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const bytes = base64Decode(b64);
   const [w, h] = pngSize(bytes);
   if (w !== size[0] || h !== size[1]) throw new Error(`The image model answered at ${w}x${h}; ${size[0]}x${size[1]} was asked for.`);
   return bytes;
@@ -398,12 +409,6 @@ function pngSize(bytes: Uint8Array): [number, number] {
 function hexRgb(hex: string): [number, number, number] {
   const n = parseInt(String(hex || "#000000").replace("#", "").slice(0, 6), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function toBase64(bytes: Uint8Array): string {
-  let s = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(s);
 }
 
 function json(body: unknown, status = 200) {
