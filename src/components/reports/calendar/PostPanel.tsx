@@ -178,7 +178,7 @@ export function PostPanel({
   // One design per post; earlier ones stay on the post to switch back to.
   const versions = designVersions(postIterations, (u) => !isVideoUrl(u));
   const otherTiles = imageTiles.filter((t) => !isDesignOption({ variant_angle: t.variantAngle }));
-  const isCarouselPost = /carousel/i.test(String(post.format || "")) || (versions[0]?.urls.length ?? 0) > 1;
+  const isCarouselPost = /carousel|document|pdf/i.test(String(post.format || "")) || (versions[0]?.urls.length ?? 0) > 1;
 
   const openPreview = (url: string, video: boolean) => {
     setPreviewUrl(url);

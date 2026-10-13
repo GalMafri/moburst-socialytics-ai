@@ -220,7 +220,8 @@ async function startRequest(admin: any, settings: Settings, p: { clientId: strin
   const { data: created, error } = await admin.from("design_requests").insert({
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
     platform: p.platform, format: p.format, post_copy: p.copy, requested_by: p.requestedBy,
-    kind: /carousel/i.test(String(p.format || "")) ? "carousel" : "single", options_wanted: OPTIONS_WANTED,
+    // A LinkedIn document is a deck of slides: it is made like a carousel.
+    kind: /carousel|document|pdf/i.test(String(p.format || "")) ? "carousel" : "single", options_wanted: OPTIONS_WANTED,
   }).select("*").single();
   if (error) {
     // Two starts at once: the unique index let one through; answer with it.
