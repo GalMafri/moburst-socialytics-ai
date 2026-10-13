@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, competitiveRecovery, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
+import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, competitiveRecovery, stateLine, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
 
 const set = (o: Partial<SetRow> & { id: string; status: string; created_at: string }): SetRow => o as SetRow;
 
@@ -134,4 +134,12 @@ it('distinguishes pending collection from a completed collection with no returne
  expect(competitiveRecovery({...empty,provider_status:1}).title).toBe('No posts available for this period');
  expect(competitiveRecovery(empty).detail).toContain('does not establish');
  expect(competitiveRecovery({quality_check:{reasons:['Different provider totals']}}).title).toBe('Report awaiting review');
+});
+
+describe("stateLine", () => {
+  it("ends the headline as a sentence before the detail", () => {
+    expect(stateLine({ headline: "Tracking not set up", detail: "Confirm a selection first.", ready: false })).toBe("Tracking not set up. Confirm a selection first.");
+    expect(stateLine({ headline: "Done.", ready: true })).toBe("Done.");
+    expect(stateLine({ headline: "", detail: "Only detail.", ready: true })).toBe("Only detail.");
+  });
 });

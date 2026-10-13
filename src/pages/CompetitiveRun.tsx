@@ -18,7 +18,7 @@ import { competitiveStatusBadge } from "@/lib/competitiveStatus";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { describeInvokeError } from "@/lib/invokeError";
-import { describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
+import { describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, stateLine, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
 
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -362,8 +362,7 @@ export default function CompetitiveRun() {
             ) : null}
             {trackingState.headline && (
               <p className="t-secondary pt-1">
-                <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
-                {trackingState.detail ? ` ${trackingState.detail}` : ""}
+                <span className="font-medium">RivalIQ tracking:</span> {stateLine(trackingState)}
               </p>
             )}
             <p className="t-secondary">

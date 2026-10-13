@@ -134,6 +134,13 @@ export function describeTracking(set: SetRow | null): FlowState {
 /** Whether the tracking step lets a report start (see FlowState.runnable). */
 export const trackingAllowsRun = (state: FlowState) => state.runnable ?? state.ready;
 
+/** A state as one line of prose: the headline as a sentence, then the detail. */
+export function stateLine(state: FlowState): string {
+  if (!state.headline) return state.detail || "";
+  const headline = /[.!?]$/.test(state.headline) ? state.headline : `${state.headline}.`;
+  return state.detail ? `${headline} ${state.detail}` : headline;
+}
+
 /** Step 4: the outcome of the last run, kept apart from the two steps above. */
 export function describeReport(report: ReportRow | null): FlowState {
   if (!report) return { headline: "No report run yet", ready: false };

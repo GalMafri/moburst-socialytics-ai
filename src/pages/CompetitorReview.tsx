@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RivalIqSetup } from "@/components/competitive/RivalIqSetup";
 import { CompetitiveSteps } from "@/components/competitive/CompetitiveSteps";
-import { describeSelection, describeTracking, pickRunSelection, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
+import { describeSelection, describeTracking, pickRunSelection, stateLine, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
 
 import { classifyProfileUrl, isProfileUrlInput } from "@/lib/profileUrl";
 import { isReviewReadyHandle } from "../../supabase/functions/_shared/competitive/extractSocialHandles";
@@ -784,8 +784,7 @@ export default function CompetitorReview() {
                   <Crosshair className="h-4 w-4" /> Step 1 · The three competitors
                 </CardTitle>
                 <CardDescription className="mt-1">
-                  {selectionState.headline}
-                  {selectionState.detail ? ` ${selectionState.detail}` : ""}
+                  {stateLine(selectionState)}
                 </CardDescription>
               </div>
               <div className="flex gap-2 flex-wrap">
@@ -824,8 +823,7 @@ export default function CompetitorReview() {
               </p>
             ) : trackingState.headline && (
               <p className="t-secondary">
-                <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
-                {trackingState.detail ? ` ${trackingState.detail}` : ""}
+                <span className="font-medium">RivalIQ tracking:</span> {stateLine(trackingState)}
               </p>
             )}
             {client.competitor_seed_notes ? (
