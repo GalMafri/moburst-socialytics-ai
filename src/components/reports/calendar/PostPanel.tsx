@@ -99,7 +99,10 @@ export function PostPanel({
       return data as { confirmed_at: string | null } | null;
     },
   });
-  const designsReady = !!designSettings?.confirmed_at;
+  // Options are single images today. A carousel post keeps its current tools
+  // until carousels are made as a set of slides, so it never gets the wrong format.
+  const singleImagePost = !/carousel/i.test(String(post?.format || ""));
+  const designsReady = !!designSettings?.confirmed_at && singleImagePost;
   const startDesigns = async () => {
     if (!clientId || !post) return;
     setStartingDesigns(true);
@@ -262,7 +265,7 @@ export function PostPanel({
                 />}
               </div>
 
-              {!designsReady && !designSettingsLoading && isMoburstStaff && clientId && (
+              {!designSettings?.confirmed_at && !designSettingsLoading && isMoburstStaff && clientId && (
                 <div className="glass-inner p-3 flex items-center justify-between gap-3 flex-wrap">
                   <p className="t-secondary min-w-0">Confirm this client's design settings once to offer designs here, for your team and the client.</p>
                   <Button asChild size="sm" variant="outline" className="shrink-0">
