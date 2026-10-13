@@ -476,7 +476,9 @@ async function runStep(admin: any, token: string, job: Job, deadline: number): P
       const work = cleanBackground(admin, job).catch(async (e) => {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`[canva-finish] job ${job.id} clean:`, msg);
-        await admin.from("canva_finish_jobs").update({ error: msg, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+        // The image model at its rate limit is waited out; only a real failure counts as a try.
+        const state = e instanceof ModelBusy ? { ...s, cleans: s.cleans - 1 } : s;
+        await admin.from("canva_finish_jobs").update({ state, error: msg, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
       });
       if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(work);
       else await work;
@@ -700,6 +702,7 @@ async function cleanBackground(admin: any, job: Job): Promise<void> {
     signal: AbortSignal.timeout(360_000),
   });
   const text = await resp.text();
+  if (resp.status === 429 || resp.status >= 500) throw new ModelBusy(`Image model ${resp.status}: ${text.slice(0, 300)}`);
   if (!resp.ok) throw new Error(`Image model ${resp.status}: ${text.slice(0, 300)}`);
   const b64 = JSON.parse(text)?.data?.[0]?.b64_json;
   if (!b64) throw new Error("The image model returned no image.");
@@ -714,6 +717,9 @@ async function cleanBackground(admin: any, job: Job): Promise<void> {
   const state = { ...s, clean_path: path };
   await admin.from("canva_finish_jobs").update({ step: "export_before", state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
 }
+
+/** The image model is at its rate limit or briefly down; the step is tried again on a later pass. */
+class ModelBusy extends Error {}
 
 /** A small fully transparent PNG; as the page background it leaves only the copy and the logo in the export. */
 async function blankPng(): Promise<Uint8Array> {
