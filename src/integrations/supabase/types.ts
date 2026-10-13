@@ -1737,6 +1737,21 @@ export type Database = {
         }
         Relationships: []
       }
+      rate_calls: {
+        Row: {
+          at: string
+          key: string
+        }
+        Insert: {
+          at?: string
+          key: string
+        }
+        Update: {
+          at?: string
+          key?: string
+        }
+        Relationships: []
+      }
       report_schedules: {
         Row: {
           analysis_date_range_days: number | null
@@ -2321,6 +2336,10 @@ export type Database = {
       can_access_client: { Args: { _client_id: string }; Returns: boolean }
       can_manage_roster: { Args: never; Returns: boolean }
       can_write_client: { Args: { _client_id: string }; Returns: boolean }
+      claim_rate_slot: {
+        Args: { p_key: string; p_limit: number; p_window_ms?: number }
+        Returns: number
+      }
       claim_rivaliq_request: { Args: { request_token: string }; Returns: Json }
       claim_worker_lease: {
         Args: { p_holder: string; p_name: string; p_seconds: number }
