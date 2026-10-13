@@ -1029,7 +1029,7 @@ export default function CompetitiveReportView() {
             title={<><Lightbulb className="h-5 w-5" /> Suggested tests for {clientName}</>}
             description={
               <span data-print={isMoburstStaff ? "hide" : undefined}>
-                {isMoburstStaff ? "Proposed experiments; targets are goals to test. Thumbs up sends a suggestion into the next monthly report and content calendar. Thumbs down hides it and stops it being proposed again." : "Proposed experiments based on observed posts. Targets are goals to test."}
+                {isMoburstStaff ? "Proposed experiments; targets are goals to test. Implement sends a suggestion into the next monthly report and content calendar. Not for us hides it and stops it being proposed again. Edit changes it by hand or from your feedback, and what you change is remembered for this client's future suggestions." : "Proposed experiments based on observed posts. Targets are goals to test."}
               </span>
             }
             action={
