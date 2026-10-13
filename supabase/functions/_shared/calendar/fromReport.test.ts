@@ -21,8 +21,13 @@ describe("weekStart", () => {
     expect(weekStart("Week of July 13, 2026", "2026-07-09T00:00:00Z")).toBe("2026-07-13");
     expect(weekStart("Week of Oct 12", "2026-10-07T00:00:00Z")).toBe("2026-10-12");
   });
+  it("starts the week on its Monday when the label names another day", () => {
+    expect(weekStart("Week of Oct 13, 2026", "2026-10-13T00:00:00Z")).toBe("2026-10-12");
+    expect(weekStart("Week of 2026-10-13", "2026-10-13T00:00:00Z")).toBe("2026-10-12");
+  });
   it("puts a yearless January label after a December report", () => {
     expect(weekStart("Week of Jan 4", "2026-12-28T00:00:00Z")).toBe("2027-01-04");
+    expect(weekStart("Week of Jan 6", "2026-12-28T00:00:00Z")).toBe("2027-01-04");
   });
   it("returns null for a label without a date", () => {
     expect(weekStart("This week", "2026-10-07T00:00:00Z")).toBeNull();

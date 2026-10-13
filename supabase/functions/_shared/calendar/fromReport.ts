@@ -37,12 +37,21 @@ function iso(d: Date): string {
 }
 
 /**
- * The Monday a "Week of …" label names. Reports write it as "Week of Oct 12,
+ * The Monday of the week a "Week of …" label names. Reports write it as "Week of Oct 12,
  * 2026", "Week of 2026-10-12", "Week of July 13, 2026" or "Week of Oct 12"
  * (no year: the year that puts it nearest the report's date). Null when the
  * label names no date.
  */
 export function weekStart(label: string | undefined, reportCreatedAt: string): string | null {
+  const named = namedDate(label, reportCreatedAt);
+  if (!named) return null;
+  // Some reports name a week by a day that is not its Monday ("Week of Oct
+  // 13, 2026" is a Tuesday) while still listing Monday to Sunday.
+  const d = new Date(`${named}T00:00:00Z`);
+  return iso(new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86400000));
+}
+
+function namedDate(label: string | undefined, reportCreatedAt: string): string | null {
   const text = String(label ?? "").replace(/^\s*week of\s*/i, "").trim();
   const isoMatch = text.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
