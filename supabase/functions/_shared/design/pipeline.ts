@@ -51,8 +51,8 @@ export function parseRead(text: string): string[] | null {
 /** The instruction for the logo part of step 5: the image is the area around the logo, at full size. */
 export function logoCheckPrompt(brand: string): string {
   return `This is the area around the ${brand} logo on a social post, at full size; the logo is in the middle. ` +
-    "Does any line, rule, border, shape, text, picture or object touch the logo, cross it, run through it or pass behind it? " +
-    "Plain background, soft light or empty space around it is fine. " +
+    "Does a line, rule, border, frame, piece of text or distinct object touch or cross the logo's letters or symbol? " +
+    "A background behind the logo is fine: photography, texture, gradients, light and soft shapes. " +
     'Reply with JSON only: {"clear": true or false, "touching": "what touches or crosses the logo, or empty"}';
 }
 

@@ -66,7 +66,8 @@ describe("findLogo", () => {
 
 describe("logo check", () => {
   it("asks about anything touching or crossing the logo, and reads a yes or no", () => {
-    expect(logoCheckPrompt("Bader Law")).toMatch(/line, rule, border.*touch the logo, cross it/);
+    expect(logoCheckPrompt("Bader Law")).toMatch(/line, rule, border, frame.*touch or cross the logo/);
+    expect(logoCheckPrompt("Bader Law")).toMatch(/background behind the logo is fine: photography/);
     expect(parseLogoCheck('{"clear": false, "touching": "a white frame line runs through it"}')).toEqual({ clear: false, touching: "a white frame line runs through it" });
     expect(parseLogoCheck('Sure: {"clear": true, "touching": ""}')).toEqual({ clear: true, touching: "" });
     expect(parseLogoCheck("it looks fine")).toBeNull();
