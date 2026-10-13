@@ -16,7 +16,7 @@ import { competitiveRangeError } from "../_shared/reports/competitiveRange.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { buildCompetitivePayload, buildSocialPayload, isStuckRun, STUCK_AFTER_MINUTES, type ReportRange } from "../_shared/reports/payloads.ts";
-import { checkClientLandscape, isAppCreatedLandscape, LANDSCAPE_MISSING, RIVALIQ_BUSY, RIVALIQ_UNAVAILABLE } from "../_shared/competitive/landscapeCheck.ts";
+import { checkClientLandscape, isAppCreatedLandscape, LANDSCAPE_MISSING, recordTrackingCheck, RIVALIQ_BUSY, RIVALIQ_UNAVAILABLE } from "../_shared/competitive/landscapeCheck.ts";
 import { rivalIqFetch } from "../_shared/competitive/rivaliqFetch.ts";
 import { isReviewReadyHandle } from "../_shared/competitive/extractSocialHandles.ts";
 import { missingProfileRepairs } from "../_shared/competitive/profileRepairs.ts";
@@ -247,6 +247,8 @@ Deno.serve(async (req) => {
       if (!rivaliqKey) return json({ error: "RivalIQ is not configured. No report was started." }, 503);
       const redact = (text: string) => text.replaceAll(rivaliqKey, "[redacted]").replaceAll(encodeURIComponent(rivaliqKey), "[redacted]");
       const tracking = await checkClientLandscape(rivaliqKey, client, set.rivaliq_landscape_id);
+      // The Competitors screen shows this instead of assuming a linked set is tracked.
+      await recordTrackingCheck(admin, set.id, set.rivaliq_landscape_id, tracking);
       if (!tracking.ok) {
         if (tracking.code === RIVALIQ_BUSY) {
           return json({ error: "RivalIQ cannot accept a new request yet. No report was started; please wait before trying again.", code: RIVALIQ_BUSY }, 429);

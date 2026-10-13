@@ -34,7 +34,7 @@ export function CompetitiveSteps({ steps, current }: { steps: CompetitiveStep[];
               {state === "done" ? <Check className="h-3.5 w-3.5 text-success" aria-hidden /> : state === "current" ? <Dot className="h-3.5 w-3.5" aria-hidden /> : <Circle className="h-3 w-3 text-muted-foreground" aria-hidden />}
               {i + 1}. {step.title}
             </p>
-            <p className="t-body">{step.headline}</p>
+            {step.headline && <p className="t-body">{step.headline}</p>}
             {step.detail && <p className="t-secondary">{step.detail}</p>}
             {step.href && (
               <Link to={step.href} className="t-label underline underline-offset-2">

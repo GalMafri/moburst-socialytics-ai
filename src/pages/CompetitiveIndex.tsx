@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { LoadError } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
-import { describeReport, describeSelection, describeTracking, pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
+import { describeReport, describeSelection, describeTracking, pickRunSelection, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
 import { Crosshair, FileText, History, Play, Rss } from "lucide-react";
 
 export default function CompetitiveIndex() {
@@ -28,7 +28,9 @@ export default function CompetitiveIndex() {
     queryFn: async () => {
       const [clientsRes, setsRes, reportsRes] = await Promise.all([
         supabase.from("clients").select("id, name, logo_url").is("archived_at", null).order("name"),
-        supabase.from("competitor_sets").select("id, client_id, status, created_at, confirmed_at, rivaliq_landscape_id").order("created_at", { ascending: false }),
+        // "*" so the recorded tracking check (competitor_sets.tracking_check) is
+        // read where the column exists, without failing where it does not yet.
+        supabase.from("competitor_sets").select("*").order("created_at", { ascending: false }),
         supabase.from("competitive_reports").select("id, client_id, status, created_at").order("created_at", { ascending: false }),
       ]);
       if (clientsRes.error) throw clientsRes.error;
@@ -88,10 +90,12 @@ export default function CompetitiveIndex() {
                       <dd className="t-body">{c.selection.headline}</dd>
                       {c.selection.detail && <dd className="t-secondary">{c.selection.detail}</dd>}
                     </div>
-                    <div>
-                      <dt className="t-label">RivalIQ tracking</dt>
-                      <dd className="t-body">{c.tracking.headline}</dd>
-                    </div>
+                    {c.tracking.headline && (
+                      <div>
+                        <dt className="t-label">RivalIQ tracking</dt>
+                        <dd className="t-body">{c.tracking.headline}</dd>
+                      </div>
+                    )}
                     <div>
                       <dt className="t-label">Last report</dt>
                       <dd className="t-body">{c.outcome.headline}</dd>
@@ -103,8 +107,8 @@ export default function CompetitiveIndex() {
                       size="sm"
                       variant="outline"
                       onClick={() => navigate(`/clients/${c.id}/competitive/run`)}
-                      disabled={!c.runnable || (!c.tracking.ready && c.report?.status !== 'running')}
-                      title={!c.runnable ? "Confirm three competitors before running a report" : !c.tracking.ready ? "Connect tracking from Edit competitors first" : undefined}
+                      disabled={!c.runnable || (!trackingAllowsRun(c.tracking) && c.report?.status !== 'running')}
+                      title={!c.runnable ? "Confirm three competitors before running a report" : !trackingAllowsRun(c.tracking) ? "Connect tracking from Edit competitors first" : undefined}
                     >
                       <Play className="h-3.5 w-3.5 mr-1" /> {c.report?.status === "running" ? "View running report" : "Run competitive report"}
                     </Button>

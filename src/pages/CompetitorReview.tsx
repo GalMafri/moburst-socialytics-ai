@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RivalIqSetup } from "@/components/competitive/RivalIqSetup";
 import { CompetitiveSteps } from "@/components/competitive/CompetitiveSteps";
-import { describeSelection, describeTracking, pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
+import { describeSelection, describeTracking, pickRunSelection, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
 
 import { classifyProfileUrl, isProfileUrlInput } from "@/lib/profileUrl";
 import { isReviewReadyHandle } from "../../supabase/functions/_shared/competitive/extractSocialHandles";
@@ -161,6 +161,9 @@ export default function CompetitorReview() {
   const [importingId, setImportingId] = useState<string | null>(null);
   // Proposing competitors spends AI and web lookups, so it is asked first.
   const [confirmIdentify, setConfirmIdentify] = useState(false);
+  // Listing and importing landscapes each spend a RivalIQ request, so both are asked first.
+  const [confirmList, setConfirmList] = useState(false);
+  const [pendingImport, setPendingImport] = useState<{ id: string; name: string } | null>(null);
 
   const { data: client, isLoading: clientLoading, isError: clientFailed, error: clientError, refetch: refetchClient } = useQuery({
     queryKey: ["client", clientId],
@@ -688,7 +691,7 @@ export default function CompetitorReview() {
                         {landscapeMatches.length === 1 ? "" : "s"} in RivalIQ
                       </p>
                       {landscapeMatches.map((l: any) => (
-                        <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
+                        <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={() => setPendingImport(l)} />
                       ))}
                     </>
                   ) : (
@@ -732,7 +735,7 @@ export default function CompetitorReview() {
                               </span>
                             </p>
                             {(sets as any[]).map((l: any) => (
-                              <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={importLandscape} />
+                              <LandscapeRow key={l.id} landscape={l} importingId={importingId} onImport={() => setPendingImport(l)} />
                             ))}
                           </div>
                         ))}
@@ -782,7 +785,7 @@ export default function CompetitorReview() {
                 </CardDescription>
               </div>
               <div className="flex gap-2 flex-wrap">
-                <Button variant="outline" size="sm" onClick={openImport} disabled={identifying || detecting}>
+                <Button variant="outline" size="sm" onClick={() => setConfirmList(true)} disabled={identifying || detecting}>
                   <Download className="h-3.5 w-3.5 mr-1" /> Import from RivalIQ
                 </Button>
                 {currentSet && ["confirmed", "complete", "failed"].includes(currentSet.status) && (
@@ -809,10 +812,12 @@ export default function CompetitorReview() {
           <CardContent className="pt-0 space-y-2">
             {/* Tracking is its own fact: a confirmed selection is not a
                 connected one, and neither says anything about a report. */}
-            <p className="t-secondary">
-              <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
-              {trackingState.detail ? ` ${trackingState.detail}` : ""}
-            </p>
+            {trackingState.headline && (
+              <p className="t-secondary">
+                <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
+                {trackingState.detail ? ` ${trackingState.detail}` : ""}
+              </p>
+            )}
             {client.competitor_seed_notes ? (
               <p className="t-secondary">
                 <span className="font-medium">Account team notes fed to the AI:</span> {client.competitor_seed_notes}
@@ -870,7 +875,7 @@ export default function CompetitorReview() {
                     <Button
                       className="gap-2"
                       onClick={() => navigate(`/clients/${clientId}/competitive/run`)}
-                      disabled={runNeedsProfileReview || !trackingState.ready || currentSet?.id !== runnableSet?.id}
+                      disabled={runNeedsProfileReview || !trackingAllowsRun(trackingState) || currentSet?.id !== runnableSet?.id}
                     >
                       <Play className="h-4 w-4" /> Run deep analysis
                     </Button>
@@ -1116,6 +1121,44 @@ export default function CompetitorReview() {
           </Card>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmList}
+        onOpenChange={setConfirmList}
+        title="Read the RivalIQ landscapes?"
+        description={
+          <p>
+            This reads the agency's RivalIQ landscapes, which uses one request from the account's hourly allowance, and
+            lists the ones that track {client.name}. Nothing is imported until you choose one.
+          </p>
+        }
+        confirmLabel="Show landscapes"
+        destructive={false}
+        onConfirm={() => {
+          setConfirmList(false);
+          void openImport();
+        }}
+      />
+      <ConfirmDialog
+        open={!!pendingImport}
+        onOpenChange={(o) => !o && setPendingImport(null)}
+        title={`Import ${pendingImport?.name || "this landscape"}?`}
+        description={
+          <>
+            <p>
+              This reads RivalIQ once more (one request) and creates a new draft for {client.name} with the landscape's
+              competitors and their tracked profiles, with the top three pre-selected for you to adjust.
+            </p>
+            <p>Nothing is changed in RivalIQ. The confirmed selection, its tracking and past reports stay as they are.</p>
+          </>
+        }
+        confirmLabel="Import as a draft"
+        destructive={false}
+        onConfirm={() => {
+          const id = pendingImport?.id;
+          setPendingImport(null);
+          if (id) void importLandscape(id);
+        }}
+      />
       <ConfirmDialog
         open={confirmIdentify}
         onOpenChange={setConfirmIdentify}

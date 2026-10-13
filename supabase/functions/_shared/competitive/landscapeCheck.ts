@@ -142,3 +142,38 @@ export function isAppCreatedLandscape(landscape: { id: string | number; name?: s
   return (setupJobs || []).some((job) =>
     job.landscape_id != null && String(job.landscape_id) === String(landscape.id) && job.plan?.name === name);
 }
+
+/** What competitor_sets.tracking_check holds: the last answer about the set's landscape. */
+export interface TrackingCheckRecord {
+  code: "ok" | typeof CLIENT_NOT_TRACKED | typeof LANDSCAPE_MISSING;
+  landscape_id: string | null;
+  message: string | null;
+  checked_at: string;
+}
+
+/** The record for a check, or null when the provider could not be asked (that says nothing about the landscape). */
+export function trackingCheckRecord(check: LandscapeCheck, linkedLandscapeId: unknown, now = new Date()): TrackingCheckRecord | null {
+  const landscape_id = linkedIdOf(linkedLandscapeId);
+  if (check.ok) return { code: "ok", landscape_id, message: null, checked_at: now.toISOString() };
+  if (isTrackingProblem(check)) return { code: check.code, landscape_id, message: check.message, checked_at: now.toISOString() };
+  return null;
+}
+
+// deno-lint-ignore no-explicit-any
+type Db = { from(table: string): any };
+
+/**
+ * Keep the check's outcome on the set it was made for, so the Competitors
+ * screen can show the real state without asking RivalIQ itself. Best effort:
+ * a failed write (or a database without the column yet) never stops a run.
+ */
+export async function recordTrackingCheck(db: Db, setId: string | null | undefined, linkedLandscapeId: unknown, check: LandscapeCheck): Promise<void> {
+  const record = trackingCheckRecord(check, linkedLandscapeId);
+  if (!setId || !record) return;
+  try {
+    const { error } = await db.from("competitor_sets").update({ tracking_check: record }).eq("id", setId);
+    if (error) console.warn("[landscapeCheck] could not record the tracking check:", error.message);
+  } catch (e) {
+    console.warn("[landscapeCheck] could not record the tracking check:", e instanceof Error ? e.message : String(e));
+  }
+}

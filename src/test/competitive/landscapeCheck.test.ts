@@ -6,6 +6,8 @@ import {
   isAppCreatedLandscape,
   isTrackingProblem,
   LANDSCAPE_MISSING,
+  recordTrackingCheck,
+  trackingCheckRecord,
   resolveClientLandscape,
   RIVALIQ_BUSY,
   RIVALIQ_UNAVAILABLE,
@@ -111,5 +113,38 @@ describe("isAppCreatedLandscape", () => {
     expect(isAppCreatedLandscape({ ...own, name: "Socialytics - Fixture - renamed" }, [job])).toBe(false);
     expect(isAppCreatedLandscape(own, [{ ...job, landscape_id: "77" }])).toBe(false);
     expect(isAppCreatedLandscape(own, [{ landscape_id: null, plan: job.plan }])).toBe(false);
+  });
+});
+
+describe("tracking check record", () => {
+  const now = new Date("2026-10-14T08:00:00Z");
+
+  it("keeps what the check found, for the set it was made for", () => {
+    expect(trackingCheckRecord(resolveClientLandscape([own], client, "10"), "10", now)).toEqual({ code: "ok", landscape_id: "10", message: null, checked_at: now.toISOString() });
+    const missing = trackingCheckRecord(resolveClientLandscape([], client, 99), 99, now);
+    expect(missing).toMatchObject({ code: LANDSCAPE_MISSING, landscape_id: "99" });
+    expect(missing?.message).toMatch(/no longer exists/);
+    expect(trackingCheckRecord(resolveClientLandscape([], client, null), null, now)).toMatchObject({ code: CLIENT_NOT_TRACKED, landscape_id: null });
+  });
+
+  it("records nothing when RivalIQ could not be asked", () => {
+    expect(trackingCheckRecord({ ok: false, code: RIVALIQ_BUSY, status: 429, message: "busy" }, "10", now)).toBeNull();
+    expect(trackingCheckRecord({ ok: false, code: RIVALIQ_UNAVAILABLE, status: null, message: "down" }, "10", now)).toBeNull();
+  });
+
+  it("writes to the set, and never lets a failed write stop the caller", async () => {
+    const writes: Array<{ table: string; patch: any; id: string }> = [];
+    const db = { from: (table: string) => ({ update: (patch: any) => ({ eq: async (_k: string, id: string) => { writes.push({ table, patch, id }); return { error: null }; } }) }) };
+    await recordTrackingCheck(db, "set-1", "10", resolveClientLandscape([own], client, "10"));
+    expect(writes).toEqual([{ table: "competitor_sets", id: "set-1", patch: { tracking_check: expect.objectContaining({ code: "ok", landscape_id: "10" }) } }]);
+    const missingColumn = { from: () => ({ update: () => ({ eq: async () => ({ error: { message: 'column "tracking_check" does not exist' } }) }) }) };
+    const thrown = { from: () => { throw new Error("db down"); } };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(recordTrackingCheck(missingColumn, "set-1", "10", resolveClientLandscape([own], client, "10"))).resolves.toBeUndefined();
+    await expect(recordTrackingCheck(thrown, "set-1", "10", resolveClientLandscape([own], client, "10"))).resolves.toBeUndefined();
+    warn.mockRestore();
+    // No set, nothing to record.
+    await recordTrackingCheck(db, null, null, resolveClientLandscape([], client, null));
+    expect(writes).toHaveLength(1);
   });
 });

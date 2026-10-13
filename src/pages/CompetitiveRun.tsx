@@ -18,7 +18,7 @@ import { competitiveStatusBadge } from "@/lib/competitiveStatus";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { describeInvokeError } from "@/lib/invokeError";
-import { describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, type SetRow } from "@/lib/competitiveFlow";
+import { describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
 
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -219,7 +219,7 @@ export default function CompetitiveRun() {
   }, [activeRun.data, running, reportId, pollForCompletion]);
 
   const runAnalysis = async () => {
-    if (submitting.current || running || activeRun.data || !activeRun.isSuccess || activeRun.isFetching || !trackingState.ready || !profilesReady || setsFailed) return;
+    if (submitting.current || running || activeRun.data || !activeRun.isSuccess || activeRun.isFetching || !trackingAllowsRun(trackingState) || !profilesReady || setsFailed) return;
     if (!rangeOk) {
       toast({ title: "Pick a valid period", description: rangeError || "Choose a valid period.", variant: "destructive" });
       return;
@@ -360,10 +360,12 @@ export default function CompetitiveRun() {
                 <p className="t-secondary">Open this selection below to review or replace the affected profiles.</p>
               </div>
             ) : null}
-            <p className="t-secondary pt-1">
-              <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
-              {trackingState.detail ? ` ${trackingState.detail}` : ""}
-            </p>
+            {trackingState.headline && (
+              <p className="t-secondary pt-1">
+                <span className="font-medium">RivalIQ tracking:</span> {trackingState.headline}
+                {trackingState.detail ? ` ${trackingState.detail}` : ""}
+              </p>
+            )}
             <p className="t-secondary">
               Confirmed {confirmedSet.confirmed_at ? new Date(confirmedSet.confirmed_at).toLocaleDateString() : ""}
               {" · "}
@@ -422,7 +424,7 @@ export default function CompetitiveRun() {
           <CardContent className="pt-5 text-center space-y-6">
             {!running && !error && currentStep < 0 && (
               <>
-                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!trackingState.ready || !profilesReady || !rangeOk || !activeRun.isSuccess || activeRun.isFetching || !!activeRun.data}>
+                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!trackingAllowsRun(trackingState) || !profilesReady || !rangeOk || !activeRun.isSuccess || activeRun.isFetching || !!activeRun.data}>
                   <Play className="h-5 w-5" /> Run competitive analysis
                 </Button>
                 <p className="t-secondary">
@@ -432,6 +434,9 @@ export default function CompetitiveRun() {
             )}
 
             {activeRun.isError && <p className="t-secondary">Could not check for an existing run. Reconnect or refresh before starting an analysis.</p>}
+            {activeRun.watchStopped && !running && (
+              <p className="t-secondary" role="status">This page stopped checking for runs started elsewhere after {WATCH_LIMIT_MINUTES} minutes. Refresh it before starting an analysis.</p>
+            )}
             {running && <ReportRunStatus reportId={reportId} startedAt={startedAt} kind="competitive" onStarted={() => { setStartedAt(new Date().toISOString()); watchedSince.current = new Date().toISOString(); if (reportId) pollForCompletion(reportId); activeRun.refetch(); refetchRuns(); }} />}
             {running && watchStopped && (
               <div className="space-y-3" role="status">
