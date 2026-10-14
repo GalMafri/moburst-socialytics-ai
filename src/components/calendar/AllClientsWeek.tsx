@@ -96,9 +96,10 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
               >
                 {designs[p.post_key] ? (
                   <div className="aspect-[4/5] rounded-[8px] overflow-hidden bg-black/60">
+                    {/* The whole design, fitted inside the card (smaller when its shape differs), never cropped. */}
                     {isVideoMedia(designs[p.post_key])
-                      ? <video src={designs[p.post_key]} muted playsInline preload="metadata" className="w-full h-full object-cover" />
-                      : <img src={designs[p.post_key]} alt="" className="w-full h-full object-cover" loading="lazy" />}
+                      ? <video src={designs[p.post_key]} muted playsInline preload="metadata" className="w-full h-full object-contain" />
+                      : <img src={designs[p.post_key]} alt="" className="w-full h-full object-contain" loading="lazy" />}
                   </div>
                 ) : isTextOnlyFormat(p.format) ? (
                   <p className="t-label">Text post</p>

@@ -91,10 +91,11 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
       <div className={`relative w-full rounded-[10px] overflow-hidden ${thumb && !isGenerating ? "aspect-[16/10]" : "h-16"}`}>
         {thumb && !isGenerating ? (
           <div className="w-full h-full bg-black">
+            {/* The whole design, fitted inside the card (smaller when its shape differs), never cropped. */}
             {isVideo ? (
-              <video src={thumb} className="w-full h-full object-cover" muted preload="metadata" />
+              <video src={thumb} className="w-full h-full object-contain" muted preload="metadata" />
             ) : (
-              <img src={thumb} alt="" className="w-full h-full object-cover" />
+              <img src={thumb} alt="" className="w-full h-full object-contain" />
             )}
           </div>
         ) : (
