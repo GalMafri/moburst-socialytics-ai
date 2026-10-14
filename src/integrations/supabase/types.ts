@@ -1356,6 +1356,48 @@ export type Database = {
           },
         ]
       }
+      design_shot_briefs: {
+        Row: {
+          brief: Json
+          calendar_post_key: string
+          client_id: string
+          created_at: string
+          request_id: string
+          updated_at: string
+        }
+        Insert: {
+          brief: Json
+          calendar_post_key: string
+          client_id: string
+          created_at?: string
+          request_id: string
+          updated_at?: string
+        }
+        Update: {
+          brief?: Json
+          calendar_post_key?: string
+          client_id?: string
+          created_at?: string
+          request_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_shot_briefs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "design_shot_briefs_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: true
+            referencedRelation: "design_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       design_states: {
         Row: {
           canvas_json: Json
