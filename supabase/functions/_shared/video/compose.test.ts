@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { REFERENCE_SECONDS, cleanFootagePrompt, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
+import { REFERENCE_SECONDS, VIDEO_SIZE, cleanFootagePrompt, clipScript, composeScript, footageTextPrompt, hookPlacement, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
 import { parseVideoBriefs, videoPlannerPrompt, VIDEO_SECONDS } from "../canva/options";
 import { hookPrompt } from "./hook";
 
@@ -124,6 +124,29 @@ describe("filmed clips", () => {
     const briefs = parseVideoBriefs(JSON.stringify({ options: [{ posts: [1], headline: ["Insurance called already?"], text: "bold white caps with a soft shadow, lower third" }] }), ["a.jpg"], { filmed: true });
     expect(briefs).toHaveLength(1);
     expect(parseVideoBriefs(JSON.stringify({ options: [{ posts: [1], headline: ["Insurance called already?"], text: "bold white caps with a soft shadow, lower third" }] }), ["a.jpg"])).toHaveLength(0);
+  });
+});
+
+describe("hook placement", () => {
+  const layer = { width: 1088, height: 1936 };
+  const box = { x: 100, y: 900, width: 888, height: 200 };
+  it("puts a lower-third hook above the platform's bottom fifth, centered, wherever the model drew it", () => {
+    const at = hookPlacement(box, layer, "bold white caps with a soft shadow, lower third", 200);
+    expect(at.y + at.height).toBe(Math.round(VIDEO_SIZE.height * 0.78));
+    expect(at.x).toBe(Math.round((VIDEO_SIZE.width - at.width) / 2));
+  });
+  it("puts a top hook below the logo, and a centered one in the middle", () => {
+    expect(hookPlacement(box, layer, "set at the top of the frame", 400).y).toBe(Math.round(400 + VIDEO_SIZE.height * 0.03));
+    const c = hookPlacement(box, layer, "centered over the footage", 200);
+    expect(c.y).toBe(Math.round((VIDEO_SIZE.height - c.height) / 2));
+  });
+  it("crops the lettering out of its layer and overlays it at its place", () => {
+    const script = composeScript({
+      footageUrl: "https://s/f.mp4", overlayUrl: "https://s/hook.png", logoUrl: "https://s/logo.png",
+      logo: { x: 1, y: 2, width: 3 }, uploadUrl: "https://s/up", hook: { crop: box, at: { x: 90, y: 1200, width: 880 } },
+    });
+    expect(script).toContain("crop=888:200:100:900,scale=880:-1");
+    expect(script).toContain("overlay=90:1200:shortest=1");
   });
 });
 

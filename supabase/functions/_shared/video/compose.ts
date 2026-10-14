@@ -24,10 +24,38 @@ export const TIMING = {
 
 export interface LogoBox { x: number; y: number; width: number }
 
+/** Where the hook's lettering sits on its transparent layer, in that layer's pixels. */
+export interface HookBox { x: number; y: number; width: number; height: number }
+
+/**
+ * Where the hook goes on the frame (VIDEO_SIZE pixels): the planned place,
+ * read from the plan's description of how the hook looks. The lettering is
+ * placed exactly, like the logo file, rather than wherever the image model
+ * drew it on its layer (it drew a "lower third" hook across a speaker's face).
+ * The bottom fifth of the frame is left to the platform's own captions and
+ * buttons; a hook at the top sits below the logo.
+ */
+export function hookPlacement(box: HookBox, layer: { width: number; height: number }, textStyle: string, logoBottom: number): { x: number; y: number; width: number; height: number } {
+  const k = VIDEO_SIZE.width / layer.width;
+  let width = Math.round(box.width * k), height = Math.round(box.height * k);
+  const maxWidth = Math.round(VIDEO_SIZE.width * 0.9);
+  if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
+  const x = Math.round((VIDEO_SIZE.width - width) / 2);
+  const style = textStyle.toLowerCase();
+  const y = /lower third|bottom|lower part|lower half/.test(style)
+    ? Math.round(VIDEO_SIZE.height * 0.78) - height
+    : /\btop\b|upper/.test(style)
+      ? Math.max(Math.round(logoBottom + VIDEO_SIZE.height * 0.03), Math.round(VIDEO_SIZE.height * 0.12))
+      : Math.round((VIDEO_SIZE.height - height) / 2);
+  return { x, y, width, height };
+}
+
 export interface ComposeInput {
   footageUrl: string;
   /** The hook on a transparent PNG, the size of the frame. */
   overlayUrl: string;
+  /** The hook's lettering on that layer, and where it goes on the frame; without them the layer covers the frame as drawn. */
+  hook?: { crop: HookBox; at: { x: number; y: number; width: number } };
   logoUrl: string;
   /** Where the logo file sits, in VIDEO_SIZE pixels. */
   logo: LogoBox;
@@ -55,9 +83,11 @@ export function composeScript(input: ComposeInput): string {
   const { x, y, width } = input.logo;
   const filter = [
     `[0:v]${FIT},format=yuv420p[base]`,
-    `[1:v]scale=${VIDEO_SIZE.width}:${VIDEO_SIZE.height},format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`,
+    input.hook
+      ? `[1:v]crop=${input.hook.crop.width}:${input.hook.crop.height}:${input.hook.crop.x}:${input.hook.crop.y},scale=${input.hook.at.width}:-1:flags=lanczos,format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`
+      : `[1:v]scale=${VIDEO_SIZE.width}:${VIDEO_SIZE.height},format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`,
     `[2:v]scale=${Math.round(width)}:-1:flags=lanczos,format=rgba[logo]`,
-    `[base][hook]overlay=0:0:shortest=1[v1]`,
+    `[base][hook]overlay=${input.hook ? `${input.hook.at.x}:${input.hook.at.y}` : "0:0"}:shortest=1[v1]`,
     `[v1][logo]overlay=${Math.round(x)}:${Math.round(y)}:shortest=1,format=yuv420p[v]`,
   ].join(";");
   return [

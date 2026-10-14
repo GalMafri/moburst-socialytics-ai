@@ -34,7 +34,7 @@ import { BUCKET } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
-import { CARD_SIZE, FOOTAGE_STILLS, TIMING, VIDEO_SIZE, cleanFootagePrompt, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
+import { CARD_SIZE, FOOTAGE_STILLS, TIMING, VIDEO_SIZE, cleanFootagePrompt, hookPlacement, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
 import { hookPrompt } from "./hook.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
 
@@ -165,6 +165,18 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const { data, error } = await admin.storage.from(BUCKET).download(s.hook_path);
       if (error || !data) throw new Error(`Could not read the title: ${error?.message ?? "missing"}`);
       const hook = await Image.decode(new Uint8Array(await data.arrayBuffer()));
+      // Where the lettering is on its layer (its visible pixels), so it can be placed exactly.
+      let x0 = hook.width, y0 = hook.height, x1 = -1, y1 = -1;
+      for (let y = 0; y < hook.height; y++) {
+        for (let x = 0; x < hook.width; x++) {
+          if (hook.bitmap[(y * hook.width + x) * 4 + 3] > 16) {
+            if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+          }
+        }
+      }
+      if (x1 < 0) throw new Error("The title came back empty.");
+      s.hook_box = { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
+      s.hook_layer = { width: hook.width, height: hook.height };
       const ground = new Image(hook.width, hook.height).fill(Image.rgbaToColor(70, 70, 76, 255));
       ground.composite(hook, 0, 0);
       const jpeg = await ground.resize(Math.round(hook.width / 2), Math.round(hook.height / 2)).encodeJPEG(92);
@@ -223,6 +235,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       if (error || !signed?.signedUrl) throw new Error(`Could not prepare the video's upload: ${error?.message ?? "no URL"}`);
       const [lw, lh] = input.logo_size;
       const rect = canvasLogoRect(input.placement, lw, lh, VIDEO_SIZE.width, VIDEO_SIZE.height);
+      const at = s.hook_box ? hookPlacement(s.hook_box, s.hook_layer ?? CARD_SIZE, input.text_style ?? "", rect.y + rect.height) : null;
       const stills: string[] = [];
       const frameUploads: string[] = [];
       // A filmed clip is used as it is: it is not read for writing or cleaned.
@@ -238,6 +251,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
         composeScript({
           footageUrl: input.footage_upload ? await signedUrl(admin, FOOTAGE_BUCKET, input.footage_upload) : publicUrl(admin, BUCKET, s.footage_path),
           overlayUrl: publicUrl(admin, BUCKET, s.hook_path),
+          hook: at && s.hook_box ? { crop: s.hook_box, at: { x: at.x, y: at.y, width: at.width } } : undefined,
           logoUrl: publicUrl(admin, BUCKET, input.logo_path),
           logo: { x: rect.x, y: rect.y, width: rect.width },
           uploadUrl: signed.signedUrl,

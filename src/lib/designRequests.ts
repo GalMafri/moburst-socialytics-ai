@@ -152,6 +152,9 @@ export const MAX_CLIP_BYTES = 500 * 1024 * 1024;
  */
 export async function uploadFilmedClip(args: { clientId: string; reportId?: string; post: { _calendarPostKey?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown }; file: File }): Promise<DesignRequest> {
   if (args.file.size > MAX_CLIP_BYTES) throw new Error("The clip is too large. Keep it under 500 MB.");
+  // The video is made at 9:16: a landscape clip would lose its sides.
+  const shape = await clipShape(args.file);
+  if (shape && shape.width > shape.height) throw new Error("Upload a vertical clip (9:16), filmed in portrait.");
   const mov = /quicktime/i.test(args.file.type) || /\.mov$/i.test(args.file.name);
   const path = `${args.clientId}/${crypto.randomUUID()}.${mov ? "mov" : "mp4"}`;
   const { error: upload } = await supabase.storage.from("post-footage").upload(path, args.file, { contentType: mov ? "video/quicktime" : "video/mp4", upsert: false });
@@ -172,6 +175,21 @@ export async function uploadFilmedClip(args: { clientId: string; reportId?: stri
   if (data?.code === "not_set_up") throw new Error("Design settings are not confirmed for this client yet.");
   if (error || data?.error) throw new Error(await describeInvokeError(error, data));
   return data.request as DesignRequest;
+}
+
+/** A video file's frame size, read in the browser; null when it cannot be read. */
+function clipShape(file: File): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined") return resolve(null);
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    const done = (v: { width: number; height: number } | null) => { URL.revokeObjectURL(url); resolve(v); };
+    video.preload = "metadata";
+    video.onloadedmetadata = () => done(video.videoWidth && video.videoHeight ? { width: video.videoWidth, height: video.videoHeight } : null);
+    video.onerror = () => done(null);
+    setTimeout(() => done(null), 8000);
+    video.src = url;
+  });
 }
 
 export async function putDesignInUse(iterationId: string): Promise<void> {
