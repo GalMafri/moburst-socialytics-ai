@@ -302,7 +302,7 @@ export interface VideoStyle {
   logo: "none" | "shown";
   /** When the logo shows: only at the close, or throughout at one spot of the frame. */
   logo_at?: LogoAt;
-  /** The logo's width as a share of the frame's width, as in the client's videos. */
+  /** The logo's width as a share of the frame's shorter side, as in the client's videos (they may be landscape). */
   logo_width?: number;
   sound: string;
   /** Other formats the videos use, such as filmed talks. */
@@ -319,7 +319,7 @@ export function videoStylePrompt(brand: string, videos: number, framesPer: numbe
     `Describe how ${brand}'s videos look and move, so that new videos can be made in the same style.`,
     "If the videos use more than one format, describe the one that can be made without filming real people (for example animation, 3D, or made-up characters), and name the others in other_formats.",
     "Reply with JSON only:",
-    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","logo_at":"end" when the logo shows only at the close, else where it sits throughout: "top-left", "top-center", "top-right", "bottom-left", "bottom-center" or "bottom-right","logo_width":the width of the logo as a share of the width of the frame, for example 0.18,"sound":"music, voice or effects","other_formats":"other formats, or empty"}',
+    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","logo_at":"end" when the logo shows only at the close, else where it sits throughout: "top-left", "top-center", "top-right", "bottom-left", "bottom-center" or "bottom-right","logo_width":the width of the logo as a share of the shorter side of the frame, for example 0.18,"sound":"music, voice or effects","other_formats":"other formats, or empty"}',
   ].join("\n");
 }
 

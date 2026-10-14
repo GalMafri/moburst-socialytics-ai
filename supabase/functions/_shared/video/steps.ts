@@ -244,8 +244,9 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       if (error || !signed?.signedUrl) throw new Error(`Could not prepare the video's upload: ${error?.message ?? "no URL"}`);
       const [lw, lh] = input.logo_size;
       // The logo where the client's own videos have it, else where its posts have it.
+      // A vertical frame's shorter side is its width. A closing logo is never smaller than the client's posts show it.
       const box = input.logo_at
-        ? videoLogoBox(input.logo_at, input.logo_width ?? input.placement.width, lw / lh)
+        ? videoLogoBox(input.logo_at, input.logo_at === "end" ? Math.max(input.logo_width ?? 0, input.placement.width) : input.logo_width ?? input.placement.width, lw / lh)
         : { ...canvasLogoRect(input.placement, lw, lh, VIDEO_SIZE.width, VIDEO_SIZE.height), end: false };
       const logoBottom = box.end || box.y > VIDEO_SIZE.height / 2 ? 0 : box.y + Math.round(box.width * lh / lw);
       const at = s.hook_box ? hookPlacement(s.hook_box, s.hook_layer ?? CARD_SIZE, input.text_style ?? "", logoBottom) : null;
