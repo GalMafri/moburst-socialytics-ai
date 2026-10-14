@@ -77,7 +77,8 @@ export async function discoverReferences(db: any, client: any, apiKey: string, f
     if (page >= Number(result.paging?.total_pages || 1)) break;
   }
   const selectionStarted = Date.now();
-  const candidates = sproutCandidates(posts, ids).slice(0, 24);
+  // Every candidate may be looked at; the time budget below bounds the work, not a fixed count.
+  const candidates = sproutCandidates(posts, ids);
   console.info('[brand-discovery] provider shape', JSON.stringify({ posts: posts.length, candidates: candidates.length,
     sample: posts.slice(0, 3).map(p => ({ keys: Object.keys(p), profile: p.customer_profile_id ?? p.dimensions?.customer_profile_id,
       category: p.content_category, media: p.visual_media?.slice?.(0, 1).map((m: any) => ({ type: m.media_type, keys: Object.keys(m), host: typeof m.media_url === 'string' ? new URL(m.media_url).hostname : null })) })) }));

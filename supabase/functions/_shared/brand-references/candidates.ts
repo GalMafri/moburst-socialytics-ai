@@ -17,6 +17,8 @@ export function sproutCandidates(rows: any[], profileIds: string[]): Candidate[]
   return rows.flatMap((p): Candidate[] => {
     const profile = String(p.customer_profile_id ?? p.dimensions?.customer_profile_id ?? "");
     if (!allowed.has(profile) || p.sent === false || !p.guid || !p.perma_link) return [];
+    // Stories are not feed designs, and their media has usually expired by the time it is read.
+    if (/^igst:/i.test(String(p.guid))) return [];
     if (!['PHOTO', 'ALBUM'].includes(String(p.content_category).toUpperCase())) return [];
     // One frame per post prevents one carousel from defining the entire brand.
     const media = (Array.isArray(p.visual_media) ? p.visual_media : []).find((m: any) =>
