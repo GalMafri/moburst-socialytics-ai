@@ -92,6 +92,28 @@ Deno.serve(async (req) => {
       return json({ request: updated });
     }
 
+    // A filmed clip for a video post with a real person on camera: the clip
+    // is the footage, and the post's hook and the client's logo file go over
+    // it, keeping its sound. Anyone who can work on the client's posts.
+    if (body?.action === "footage") {
+      const clientId = String(body.client_id || "");
+      const postKey = String(body.calendar_post_key || "");
+      const path = String(body.path || "");
+      const copy = String(body.post_copy || "").trim();
+      if (!clientId || !postKey || !copy || !path) return json({ error: "client_id, calendar_post_key, post_copy and path are required." }, 400);
+      const userId = await requireMember(req, clientId);
+      if (!path.startsWith(`${clientId}/`) || path.includes("..")) return json({ error: "That clip does not belong to this client." }, 400);
+      const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", clientId).maybeSingle();
+      if (!settings?.confirmed_at) return json({ code: "not_set_up" });
+      const { data: filmed } = await admin.from("design_requests").select("on_camera").eq("client_id", clientId).eq("calendar_post_key", postKey).eq("status", "needs_filming").order("updated_at", { ascending: false }).limit(1).maybeSingle();
+      const visual = typeof body.visual_direction === "string" ? body.visual_direction.trim().slice(0, 600) : "";
+      const request = await startRequest(admin, settings as Settings, {
+        clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || "Video", requestedBy: userId,
+        visual: visual || null, footagePath: path, onCamera: filmed?.on_camera ?? "the speaker",
+      });
+      return json({ request });
+    }
+
     // The client's own published videos, kept so its video posts follow its
     // own video style. Staff or the project's own calls.
     if (body?.action === "video_references") {
@@ -215,7 +237,8 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const carousel = request.kind === "carousel";
   const video = request.kind === "video";
   const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance };
-  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
+  const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
+  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
@@ -226,7 +249,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
         messages: [{ role: "user", content: [...content, { type: "text", text: instruction }] }],
       },
     });
-    briefs = video ? parseVideoBriefs(result.text, library) : carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES, library) : parseBriefs(result.text, library);
+    briefs = video ? parseVideoBriefs(result.text, library, { filmed: !!filmed }) : carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES, library) : parseBriefs(result.text, library);
   }
   if (!briefs.length) throw new Error("The options could not be planned.");
   briefs = withRefs(briefs, library, recentList);
@@ -320,13 +343,14 @@ export function needsNoDesign(format: string | null | undefined): boolean {
 }
 
 /** Start a design request for a post, or answer with the one already being prepared. Planning runs in the background. */
-async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null; visual?: string | null }): Promise<DesignRequest> {
+async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null; visual?: string | null; footagePath?: string | null; onCamera?: string | null }): Promise<DesignRequest> {
   const { data: open } = await admin.from("design_requests").select("*").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "preparing").maybeSingle();
   if (open) return open;
 
   const { data: created, error } = await admin.from("design_requests").insert({
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
     platform: p.platform, format: p.format, post_copy: p.copy, requested_by: p.requestedBy, visual_direction: p.visual ?? null,
+    footage_path: p.footagePath ?? null, on_camera: p.footagePath ? (p.onCamera ?? null) : null,
     // A LinkedIn document is a deck of slides: it is made like a carousel. A
     // Reel, short or any video post gets a video: footage in the client's own
     // video style with the hook and logo over it.

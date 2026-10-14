@@ -40,7 +40,7 @@ export function DesignRequestsProvider({ clientId, onOpenPost, children }: { cli
     enabled: !!clientId,
     queryFn: async () => {
       const { data, error } = await (supabase.from("design_requests" as any) as any)
-        .select("id, client_id, report_id, calendar_post_key, platform, post_copy, status, stage, kind, options_wanted, options_ready, requested_by, error, on_camera, created_at, updated_at")
+        .select("id, client_id, report_id, calendar_post_key, platform, post_copy, status, stage, kind, options_wanted, options_ready, requested_by, error, on_camera, footage_path, created_at, updated_at")
         .eq("client_id", clientId)
         .order("created_at", { ascending: false })
         .limit(200);

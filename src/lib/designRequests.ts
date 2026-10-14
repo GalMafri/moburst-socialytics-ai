@@ -23,6 +23,8 @@ export interface DesignRequest {
   status: "preparing" | "ready" | "needs_staff" | "canceled" | "needs_filming";
   /** For a video that is filmed rather than made here: who appears on camera. */
   on_camera?: string | null;
+  /** A filmed clip uploaded for the post, which the video is made from. */
+  footage_path?: string | null;
   stage: DesignStage;
   kind?: "single" | "carousel" | "video";
   options_wanted: number;
@@ -42,6 +44,13 @@ export const DESIGN_STEPS: Array<{ stage: Exclude<DesignStage, "ready">; label: 
   { stage: "finishing", label: "Adding your logo and copy" },
 ];
 
+/** A filmed clip's steps: its hook is drawn, then the hook and logo go on. */
+export const FILMED_STEPS: Array<{ stage: Exclude<DesignStage, "ready">; label: string }> = [
+  { stage: "planning", label: "Planning" },
+  { stage: "designing", label: "Drawing the hook" },
+  { stage: "finishing", label: "Adding the hook and your logo" },
+];
+
 /** A video's steps: its footage is made, then its hook and logo go on. */
 export const VIDEO_STEPS: Array<{ stage: Exclude<DesignStage, "ready">; label: string }> = [
   { stage: "planning", label: "Planning" },
@@ -49,8 +58,8 @@ export const VIDEO_STEPS: Array<{ stage: Exclude<DesignStage, "ready">; label: s
   { stage: "finishing", label: "Adding the hook and your logo" },
 ];
 
-export function stepsFor(r: Pick<DesignRequest, "kind">): typeof DESIGN_STEPS {
-  return r.kind === "video" ? VIDEO_STEPS : DESIGN_STEPS;
+export function stepsFor(r: Pick<DesignRequest, "kind" | "footage_path">): typeof DESIGN_STEPS {
+  return r.kind === "video" ? (r.footage_path ? FILMED_STEPS : VIDEO_STEPS) : DESIGN_STEPS;
 }
 
 /**
@@ -128,6 +137,38 @@ export async function createDesigns(args: { clientId: string; reportId?: string;
   if (data?.code === "needs_filming") return { request: data.request, needsFilming: String(data.who || "a real person") };
   if (error || data?.error) throw new Error(await describeInvokeError(error, data));
   return { request: data.request as DesignRequest };
+}
+
+/** The largest filmed clip accepted (the storage bucket's own limit). */
+export const MAX_CLIP_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Upload the filmed clip for a video post with a real person on camera, and
+ * start its video: the post's hook and the client's logo laid over the clip,
+ * keeping its sound.
+ */
+export async function uploadFilmedClip(args: { clientId: string; reportId?: string; post: { _calendarPostKey?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown }; file: File }): Promise<DesignRequest> {
+  if (args.file.size > MAX_CLIP_BYTES) throw new Error("The clip is too large. Keep it under 500 MB.");
+  const mov = /quicktime/i.test(args.file.type) || /\.mov$/i.test(args.file.name);
+  const path = `${args.clientId}/${crypto.randomUUID()}.${mov ? "mov" : "mp4"}`;
+  const { error: upload } = await supabase.storage.from("post-footage").upload(path, args.file, { contentType: mov ? "video/quicktime" : "video/mp4", upsert: false });
+  if (upload) throw new Error("The clip could not be uploaded. Check it is an MP4 or MOV file and try again.");
+  const { data, error } = await supabase.functions.invoke("design-request", {
+    body: {
+      action: "footage",
+      client_id: args.clientId,
+      report_id: args.reportId ?? null,
+      calendar_post_key: args.post._calendarPostKey,
+      platform: args.post.platform ?? null,
+      format: args.post.format ?? null,
+      post_copy: postCopyOf(args.post as any),
+      visual_direction: (args.post as any).visual_direction ?? (args.post as any)["Visual Direction"] ?? null,
+      path,
+    },
+  });
+  if (data?.code === "not_set_up") throw new Error("Design settings are not confirmed for this client yet.");
+  if (error || data?.error) throw new Error(await describeInvokeError(error, data));
+  return data.request as DesignRequest;
 }
 
 export async function putDesignInUse(iterationId: string): Promise<void> {

@@ -32,6 +32,10 @@ export interface DesignRequest {
   options_wanted: number;
   candidates_started: number;
   briefs: Brief[];
+  /** A filmed clip uploaded for the post (post-footage bucket): the video's footage. */
+  footage_path?: string | null;
+  /** Who is on camera in a filmed video. */
+  on_camera?: string | null;
 }
 
 /** A PNG's pixel size from its header. */
@@ -98,7 +102,8 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
     created_by: req.requested_by,
     design_request_id: req.id,
     option_index: optionIndex,
-    step: "references",
+    // A filmed clip is the footage: the hook is drawn and laid over it.
+    step: req.footage_path ? "hook" : "references",
     input: {
       kind: "video",
       title,
@@ -110,6 +115,7 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
       placement: settings.placement,
       video_refs: videoRefs,
       video: { prompt: brief.footage ?? brief.picture, seconds: brief.seconds ?? TIMING.footage },
+      footage_upload: req.footage_path ?? null,
     },
   });
   if (error) throw new Error(`Could not start the video: ${error.message}`);

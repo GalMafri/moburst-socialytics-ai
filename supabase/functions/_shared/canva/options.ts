@@ -140,7 +140,7 @@ export const VIDEO_SECONDS = { min: 6, max: 10, default: 8 } as const;
  * Video briefs from the planner's reply: the on-screen hook, how it looks,
  * and the footage under it. An option missing any of them is dropped.
  */
-export function parseVideoBriefs(text: string, library: string[] = []): Brief[] {
+export function parseVideoBriefs(text: string, library: string[] = [], opts: { filmed?: boolean } = {}): Brief[] {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) return [];
@@ -151,9 +151,10 @@ export function parseVideoBriefs(text: string, library: string[] = []): Brief[] 
   const out: Brief[] = [];
   for (const o of raw as Array<Record<string, unknown>>) {
     const footage = String(o?.footage ?? "").replace(/\s+/g, " ").trim();
-    const hook = cleanSlide({ headline: o?.headline, picture: footage });
+    const hook = cleanSlide({ headline: o?.headline, picture: footage || (opts.filmed ? "the filmed clip" : "") });
     const textStyle = String(o?.text ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
-    if (!hook || footage.length < 20 || textStyle.length < 10) continue;
+    // A filmed clip is the footage, so a filmed plan has no footage of its own.
+    if (!hook || (!opts.filmed && footage.length < 20) || textStyle.length < 10) continue;
     const n = Math.round(Number(o?.seconds));
     const seconds = Number.isFinite(n) ? Math.min(VIDEO_SECONDS.max, Math.max(VIDEO_SECONDS.min, n)) : VIDEO_SECONDS.default;
     out.push(withChoice({ ...hook, footage, text_style: textStyle, seconds }, o, library));
@@ -229,7 +230,9 @@ export function optionStates(jobs: Array<JobState & { option_index: number; slid
     if (slides.some((j) => j.status === "failed")) return { status: "failed", step: "failed" };
     if (slides.length >= expected && slides.every((j) => j.status === "done")) return { status: "done", step: "finished" };
     // A video counts as designing until its footage is ready; the join is its finishing.
-    return { status: "running", step: slides.some((j) => DESIGNING_STEPS.has(j.step)) ? "generate" : "finishing" };
+    // A filmed clip needs no footage made: its hook and logo are its finishing.
+    const filmed = slides.some((j) => (j as { input?: { footage_upload?: unknown } }).input?.footage_upload);
+    return { status: "running", step: !filmed && slides.some((j) => DESIGNING_STEPS.has(j.step)) ? "generate" : "finishing" };
   });
 }
 
@@ -278,7 +281,24 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
  * type of the client's posts, with the client's logo file (13 Oct: video must
  * follow the client's own videos, carry the exact copy and logo, and have sound).
  */
-export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string }): string {
+export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; filmed?: string | null }): string {
+  if (args.filmed) {
+    // The client's own clip is the footage, used as it is with its sound.
+    return [
+      `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
+      `Plan ${args.count} different hooks for a new ${args.platform} vertical video post (9:16) with this copy:`,
+      `"""${args.copy}"""`,
+      args.visual ? `The post's planned visual: ${args.visual}` : "",
+      args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+      `The footage is ${args.brand}'s own filmed clip of ${args.filmed} speaking to camera, used as it is with its sound. Over it the hook is set as on-screen text, with ${args.brand}'s logo.`,
+      "For each option give:",
+      CHOOSE_POSTS(args.brand),
+      `- headline: the hook set on screen, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
+      "- text: one sentence on how the hook looks on screen, taken from the type in the posts you chose (weight, case, color, glow or shadow), set at the top of the frame or in the lower third so the speaker's face stays clear.",
+      "The options differ in wording. Put the strongest first: it is the one that will be made.",
+      'Reply with JSON only: {"options":[{"posts":[2],"layout":"...","headline":["line one","optional line two"],"text":"..."}]}',
+    ].filter(Boolean).join("\n");
+  }
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     args.recent,

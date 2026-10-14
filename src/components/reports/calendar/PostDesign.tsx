@@ -6,8 +6,8 @@
  * designs can be put back in use.
  */
 
-import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, Expand, Loader2, RefreshCw, Sparkles, ThumbsDown, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, Expand, Loader2, RefreshCw, Sparkles, ThumbsDown, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -38,9 +38,13 @@ interface Props {
   onCamera?: string | null;
   /** A post of words alone: it has no design. */
   textOnly?: boolean;
+  /** Upload the filmed clip for a video with a real person on camera. */
+  onUploadClip?: (file: File) => void;
+  uploadingClip?: boolean;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly }: Props) {
+export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip }: Props) {
+  const clipInput = useRef<HTMLInputElement>(null);
   const design = currentDesign(versions);
   const earlier = versions.filter((v) => v !== design);
   const [showEarlier, setShowEarlier] = useState(false);
@@ -62,7 +66,29 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
             {waitingForCopy ? (
               <p className="t-secondary">This post is written shortly before its date from what's trending then. Its design follows once it's written.</p>
             ) : onCamera ? (
-              <p className="t-secondary">This video is filmed: it features {onCamera} on camera.</p>
+              <>
+                <p className="t-secondary">This video is filmed: it features {onCamera} on camera. Upload the clip and the post's hook and your logo go over it.</p>
+                {onUploadClip && (
+                  <>
+                    <input
+                      ref={clipInput}
+                      type="file"
+                      accept="video/mp4,video/quicktime"
+                      className="hidden"
+                      aria-label="Filmed clip"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (file) onUploadClip(file);
+                      }}
+                    />
+                    <Button size="sm" onClick={() => clipInput.current?.click()} disabled={uploadingClip}>
+                      {uploadingClip ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1.5" />}
+                      {uploadingClip ? "Uploading the clip" : "Upload the filmed clip"}
+                    </Button>
+                  </>
+                )}
+              </>
             ) : textOnly ? (
               <p className="t-secondary">This is a text post, so it has no design.</p>
             ) : (

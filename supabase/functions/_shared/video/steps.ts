@@ -51,6 +51,8 @@ const MAX_FOOTAGE = 2;
 const MAX_HOOKS = 3;
 const MAX_COMPOSE = 3;
 const MAX_CLIPS = 3;
+/** Where filmed clips are kept, privately. */
+const FOOTAGE_BUCKET = "post-footage";
 /** Cleanings of one footage before it is made again. */
 const MAX_CLEANS = 2;
 const REFERENCES = "design-references";
@@ -186,7 +188,8 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
         delete s.hook_path;
         job.step = "hook"; return "next";
       }
-      job.step = "footage_wait"; return "next";
+      // A filmed clip is already the footage.
+      job.step = input.footage_upload ? "compose" : "footage_wait"; return "next";
     }
     case "footage_wait": {
       if (recently(s.footage_checked_at)) return "wait";
@@ -222,7 +225,8 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const rect = canvasLogoRect(input.placement, lw, lh, VIDEO_SIZE.width, VIDEO_SIZE.height);
       const stills: string[] = [];
       const frameUploads: string[] = [];
-      for (let i = 0; i < FOOTAGE_STILLS; i++) {
+      // A filmed clip is used as it is: it is not read for writing or cleaned.
+      for (let i = 0; i < (input.footage_upload ? 0 : FOOTAGE_STILLS); i++) {
         const path = `${base}/still-${s.footage_tries}-${i}.jpg`;
         const { data: up, error: upError } = await admin.storage.from(BUCKET).createSignedUploadUrl(path, { upsert: true });
         if (upError || !up?.signedUrl) throw new Error(`Could not prepare a still's upload: ${upError?.message ?? "no URL"}`);
@@ -232,7 +236,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       s.still_paths = stills;
       s.compose_session = await startScript(
         composeScript({
-          footageUrl: publicUrl(admin, BUCKET, s.footage_path),
+          footageUrl: input.footage_upload ? await signedUrl(admin, FOOTAGE_BUCKET, input.footage_upload) : publicUrl(admin, BUCKET, s.footage_path),
           overlayUrl: publicUrl(admin, BUCKET, s.hook_path),
           logoUrl: publicUrl(admin, BUCKET, input.logo_path),
           logo: { x: rect.x, y: rect.y, width: rect.width },
@@ -256,6 +260,11 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       if (!made) {
         console.error(`[video-worker] job ${job.id} compose:`, r.state === "failed" ? r.reason : r.reply.slice(0, 300));
         job.step = "compose"; return "next";
+      }
+      if (input.footage_upload) {
+        s.video_seconds = made.seconds;
+        s.final_path = s.video_path;
+        job.step = "finished"; return "done";
       }
       // A video post is never silent: footage that came back without sound is made again.
       if (made.audio < 1) {
@@ -332,6 +341,13 @@ async function footageWriting(admin: any, paths: string[]): Promise<{ writing: b
   const seen = parseFootageText(result.text);
   if (!seen) throw new Error(`The footage's stills could not be read: ${result.text.slice(0, 200)}`);
   return seen;
+}
+
+/** A short-lived link to a private file, for the hosted sandbox to download. */
+async function signedUrl(admin: any, bucket: string, path: string): Promise<string> {
+  const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, 3600);
+  if (error || !data?.signedUrl) throw new Error(`Could not open the filmed clip: ${error?.message ?? "missing"}`);
+  return data.signedUrl;
 }
 
 /** Whether a file is in storage. */

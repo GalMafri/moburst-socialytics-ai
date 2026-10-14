@@ -17,7 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useDesignRequestForPost, useDesignRequests } from "./DesignRequestsContext";
 import { PostDesign } from "./PostDesign";
 import { CalendarPostActions } from "@/components/calendar/CalendarPostActions";
-import { createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback } from "@/lib/designRequests";
+import { createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback, uploadFilmedClip } from "@/lib/designRequests";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -123,6 +123,20 @@ export function PostPanel({
       toast.error("Could not start the designs", { description: e instanceof Error ? e.message : "Try again." });
     } finally {
       setStartingDesigns(false);
+    }
+  };
+  const [uploadingClip, setUploadingClip] = useState(false);
+  const uploadClip = async (file: File) => {
+    if (!clientId || !post) return;
+    setUploadingClip(true);
+    try {
+      await uploadFilmedClip({ clientId, reportId, post, file });
+      designRequests?.refresh();
+      toast.success("Clip uploaded", { description: "The hook and your logo are being added." });
+    } catch (e) {
+      toast.error("Could not use the clip", { description: e instanceof Error ? e.message : "Try again." });
+    } finally {
+      setUploadingClip(false);
     }
   };
   const applyDesign = async (iterationId: string) => {
@@ -277,6 +291,8 @@ export function PostPanel({
                     preparing={preparingDesigns ? designRequest : null}
                     onCamera={designRequest?.status === "needs_filming" ? designRequest.on_camera || "a real person" : null}
                     textOnly={isTextOnlyFormat(post.format)}
+                    onUploadClip={uploadClip}
+                    uploadingClip={uploadingClip}
                     isStaff={isMoburstStaff}
                     aspect={videoDesigns ? "aspect-[9/16]" : tileAspectFor(post) || "aspect-[4/5]"}
                     filenameStub={`design-${post.platform || "post"}`}

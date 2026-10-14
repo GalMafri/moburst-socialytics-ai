@@ -115,3 +115,15 @@ describe("cleaned footage", () => {
   });
 });
 
+describe("filmed clips", () => {
+  it("plans only the hook over a filmed clip, clear of the speaker's face", () => {
+    const p = videoPlannerPrompt({ brand: "Bader Law", platform: "Instagram", copy: "c", voice: null, count: 2, postCount: 13, recent: "", filmed: "Seth Bader" });
+    expect(p).toContain("own filmed clip of Seth Bader speaking to camera");
+    expect(p).toContain("speaker's face stays clear");
+    expect(p).not.toContain("- footage:");
+    const briefs = parseVideoBriefs(JSON.stringify({ options: [{ posts: [1], headline: ["Insurance called already?"], text: "bold white caps with a soft shadow, lower third" }] }), ["a.jpg"], { filmed: true });
+    expect(briefs).toHaveLength(1);
+    expect(parseVideoBriefs(JSON.stringify({ options: [{ posts: [1], headline: ["Insurance called already?"], text: "bold white caps with a soft shadow, lower third" }] }), ["a.jpg"])).toHaveLength(0);
+  });
+});
+
