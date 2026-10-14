@@ -192,6 +192,12 @@ export function PostPanel({
   // back the wrong asset with nothing to say so.
   const plannedVideo = isVideoFormat(post?.format, post?.platform);
   const [tab, setTab] = useState<string>("copy");
+  // A video post's one media tab becomes Video once its design settings load;
+  // a click on the older Video list during that moment moves over to it.
+  const videoDesignsReady = plannedVideo && designsReady;
+  useEffect(() => {
+    if (videoDesignsReady && tab === "video") setTab("design");
+  }, [videoDesignsReady, tab]);
   if (!post) return null;
 
   const imageTiles = tilesFromIterations(postIterations, (u) => !isVideoUrl(u));

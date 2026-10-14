@@ -55,7 +55,7 @@ export const FILMED_STEPS: Array<{ stage: Exclude<DesignStage, "ready">; label: 
 export const VIDEO_STEPS: Array<{ stage: Exclude<DesignStage, "ready">; label: string }> = [
   { stage: "planning", label: "Planning" },
   { stage: "designing", label: "Making the footage" },
-  { stage: "finishing", label: "Adding the hook and your logo" },
+  { stage: "finishing", label: "Putting the video together" },
 ];
 
 export function stepsFor(r: Pick<DesignRequest, "kind" | "footage_path">): typeof DESIGN_STEPS {
