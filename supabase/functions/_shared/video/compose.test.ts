@@ -310,9 +310,10 @@ describe("a filmed clip edited the way the client's filmed videos are", () => {
     expect(parseAudio("nothing")).toBeNull();
   });
   it("burns the captions in the client's font and ends on its own end card when that is vertical", () => {
-    const script = composeScript({ footageUrl: "https://s/f.mp4", uploadUrl: "https://s/up", captions: { assB64: "QQ==", font: "Montserrat", weight: 800 }, endCard: { url: "https://s/own.mp4", seconds: 3 } });
+    const script = composeScript({ footageUrl: "https://s/f.mp4", uploadUrl: "https://s/up", captions: { assB64: "QQ==", fontUrl: "https://s/fonts/montserrat-800.ttf" }, endCard: { url: "https://s/own.mp4", seconds: 3 } });
     expect(script).toContain("ass=captions.ass:fontsdir=fonts");
-    expect(script).toContain("family=Montserrat:wght@800");
+    expect(script).toContain("-o fonts/caption.ttf 'https://s/fonts/montserrat-800.ttf'");
+    expect(script).not.toContain("googleapis");
     expect(script).toContain("-sseof -3.0 -i endsrc.mp4");
     expect(script).toContain('if [ "$EC_H" -gt "$EC_W" ]');
     expect(script).toContain("concat=n=2:v=1:a=1[vout][aout]");

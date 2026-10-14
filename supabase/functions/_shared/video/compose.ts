@@ -86,7 +86,7 @@ export interface ComposeInput {
   /** The footage as first made, whose sound is kept when its picture was cleaned of writing. */
   audioUrl?: string;
   /** Captions of a filmed clip's speech, typeset in the client's caption font (an ASS file, base64). */
-  captions?: { assB64: string; font: string; weight: number };
+  captions?: { assB64: string; fontUrl: string };
   /** The client's own end card, cut from the end of one of its published videos and played after the clip. */
   endCard?: { url: string; seconds: number };
 }
@@ -143,11 +143,10 @@ export function composeScript(input: ComposeInput): string {
     ...(input.overlayUrl ? [`curl -fsSL --retry 3 -o hook.png ${shellQuote(input.overlayUrl)}`] : []),
     ...(logoIn >= 0 && input.logoUrl ? [`curl -fsSL --retry 3 -o logo.png ${shellQuote(input.logoUrl)}`] : []),
     ...(input.audioUrl ? [`curl -fsSL --retry 3 -o sound.mp4 ${shellQuote(input.audioUrl)}`] : []),
-    // The caption font from Google Fonts (TrueType, as libass needs), and the captions.
+    // The caption font (kept in the app's storage: the sandbox reaches nothing else), and the captions.
     ...(input.captions ? [
       "mkdir -p fonts",
-      `FONT_CSS=$(curl -fsSL -A 'Mozilla/4.0' ${shellQuote(`https://fonts.googleapis.com/css2?family=${encodeURIComponent(input.captions.font).replace(/%20/g, "+")}:wght@${input.captions.weight}`)} || curl -fsSL -A 'Mozilla/4.0' 'https://fonts.googleapis.com/css2?family=Montserrat:wght@${input.captions.weight}')`,
-      `curl -fsSL -o fonts/caption.ttf "$(printf '%s' "$FONT_CSS" | grep -o 'https://[^)]*' | head -1)"`,
+      `curl -fsSL --retry 3 -o fonts/caption.ttf ${shellQuote(input.captions.fontUrl)}`,
       `printf '%s' ${shellQuote(input.captions.assB64)} | base64 -d > captions.ass`,
     ] : []),
     // The end card: the last seconds of one of the client's own videos, used only when that video is vertical.

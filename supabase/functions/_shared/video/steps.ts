@@ -326,7 +326,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           frameUploads,
           audioUrl: s.footage_first_path && s.footage_first_path !== s.footage_path ? publicUrl(admin, BUCKET, s.footage_first_path) : undefined,
           captions: filmed && filmed.captions !== "none" && Array.isArray(s.words) && s.words.length
-            ? { assB64: base64Encode(new TextEncoder().encode(captionsAss(s.words, filmed)) as unknown as ArrayBuffer), font: filmed.caption_font, weight: captionWeight(filmed.caption_style) }
+            ? { assB64: base64Encode(new TextEncoder().encode(captionsAss(s.words, filmed)) as unknown as ArrayBuffer), fontUrl: await captionFontUrl(admin, filmed.caption_font, captionWeight(filmed.caption_style)) }
             : undefined,
           endCard: filmed && input.end_card?.url ? { url: input.end_card.url, seconds: input.end_card.seconds } : undefined,
         }),
@@ -529,6 +529,30 @@ async function stored(admin: any, bucket: string, path: string): Promise<boolean
   const { data, error } = await admin.storage.from(bucket).list(path.slice(0, at), { search: path.slice(at + 1), limit: 5 });
   if (error) throw new Error(`Could not look in storage: ${error.message}`);
   return (data ?? []).some((f: { name: string }) => f.name === path.slice(at + 1));
+}
+
+/**
+ * The caption font's TrueType file in the app's storage, fetched from Google
+ * Fonts the first time a family and weight is used. The video sandbox reaches
+ * only the app's storage, so it cannot fetch fonts itself. Falls back to
+ * Montserrat when the family is not on Google Fonts.
+ */
+async function captionFontUrl(admin: any, family: string, weight: number): Promise<string> {
+  for (const name of [family, "Montserrat"]) {
+    const path = `fonts/${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${weight}.ttf`;
+    if (await stored(admin, REFERENCES, path)) return publicUrl(admin, REFERENCES, path);
+    // An old browser's user agent gets TrueType files, which the caption renderer needs.
+    const css = await fetch(`https://fonts.googleapis.com/css2?family=${encodeURIComponent(name).replace(/%20/g, "+")}:wght@${weight}`, { headers: { "User-Agent": "Mozilla/4.0" }, signal: AbortSignal.timeout(15_000) });
+    if (!css.ok) continue;
+    const url = /url\((https:[^)]+)\)/.exec(await css.text())?.[1];
+    if (!url) continue;
+    const file = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!file.ok) continue;
+    const { error } = await admin.storage.from(REFERENCES).upload(path, new Uint8Array(await file.arrayBuffer()), { contentType: "font/ttf", upsert: true });
+    if (error) throw new Error(`Could not keep the caption font: ${error.message}`);
+    return publicUrl(admin, REFERENCES, path);
+  }
+  throw new Error("FINAL: The caption font could not be found.");
 }
 
 /** The clip's speech, word by word with timings (OpenAI transcription). An empty list when nothing is said. */
