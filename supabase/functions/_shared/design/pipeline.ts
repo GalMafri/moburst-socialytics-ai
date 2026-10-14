@@ -28,6 +28,7 @@
 export function removePrompt(brand: string): string {
   return `Remove every logo and brand mark of ${brand} from this image: its wordmark and symbol, and any copy of the symbol anywhere else, including on objects, signs, clothing or screens. ` +
     "Where each was, continue only the background or surface around it, so its place stays clear; a line, rule, border or frame that stopped at a mark still stops there, leaving the same gap. " +
+    "Also remove the logos, emblems, stripes and lettering of any other brand, on clothing, shoes, balls, equipment, signs or boards, continuing the plain surface beneath. " +
     "Keep everything else exactly as it is: every word of the text with its spelling, font, size, color and position, the picture, the layout, the colors, the light and the sharpness. Add nothing.";
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { REFERENCE_SECONDS, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
+import { REFERENCE_SECONDS, cleanFootagePrompt, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
 import { parseVideoBriefs, videoPlannerPrompt, VIDEO_SECONDS } from "../canva/options";
 import { hookPrompt } from "./hook";
 
@@ -96,6 +96,22 @@ describe("footage stills", () => {
     expect(parseFootageText('{"writing": true, "where": "labels on the "dashboard" panels"}')).toEqual({ writing: true, where: 'labels on the "dashboard" panels' });
     expect(parseFootageText('{"writing": false, "where": ""}')).toEqual({ writing: false, where: "" });
     expect(parseFootageText("no idea")).toBeNull();
+  });
+});
+
+describe("cleaned footage", () => {
+  it("keeps the first footage's sound when the picture was cleaned", () => {
+    const script = composeScript({
+      footageUrl: "https://s/clean.mp4", overlayUrl: "https://s/hook.png", logoUrl: "https://s/logo.png",
+      logo: { x: 1, y: 2, width: 3 }, uploadUrl: "https://s/up", audioUrl: "https://s/first.mp4",
+    });
+    expect(script).toContain("-o sound.mp4 'https://s/first.mp4'");
+    expect(script).toContain("-i sound.mp4");
+    expect(script).toContain('-map "3:a?"');
+  });
+  it("asks for every piece of writing and brand mark to go, keeping the rest", () => {
+    expect(cleanFootagePrompt()).toMatch(/stripes or emblems of real brands/);
+    expect(cleanFootagePrompt()).toMatch(/Keep everything else exactly as it is/);
   });
 });
 

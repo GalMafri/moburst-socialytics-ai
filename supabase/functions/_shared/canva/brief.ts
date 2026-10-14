@@ -59,7 +59,7 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
   }
   const which = slide.index === 0 ? `the cover, slide 1 of ${slide.count}` : `slide ${slide.index + 1} of ${slide.count}`;
   const cover = slide.withCover
-    ? `The second image is slide 1 of this same carousel: keep its background, palette, type and layout so the slides read as one series. `
+    ? `The second image is slide 1 of this same carousel: keep its background, palette, type and where the words sit so the slides read as one series. Its picture is not repeated: this slide has a picture of its own. `
     : "";
   const refs = slide.withCover
     ? (refCount === 1 ? "the last image, which is" : `the last ${numberWord(refCount)} images, which are`)

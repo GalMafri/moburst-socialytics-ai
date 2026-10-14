@@ -14,9 +14,14 @@
 //   compose      join footage, hook and the client's logo file in a hosted
 //                sandbox (sandbox.ts), keeping the footage's sound, and keep
 //                four stills of the footage alone;
-//   compose_wait store the finished MP4; footage with any writing in its
-//                stills (14 Oct: garbled words on dashboard screens) or with
-//                no sound is made again.
+//   compose_wait store the finished MP4; footage with no sound is made
+//                again, and footage with any writing in its stills (14 Oct:
+//                garbled words on dashboard screens, brand stripes on boots)
+//                is cleaned;
+//   clean        the video model removes the writing from the footage and
+//                keeps everything else (its first sound is kept);
+//   clean_wait   store the cleaned footage, then join and read it again.
+//                Footage still written on after two cleanings is made again.
 // (13 Oct: video follows the client's own videos, carries the exact copy and
 // the logo file, and is never silent.)
 
@@ -24,17 +29,17 @@ import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { decode as base64Decode, encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { MCP_URL, accessTokenFor } from "../higgsfield/oauth.ts";
 import { McpClient } from "../higgsfield/mcp.ts";
-import { VIDEO_MODEL, awaitJobs, creditBalance, importReferences, submitVideo } from "../higgsfield/generate.ts";
+import { VIDEO_MODEL, awaitJobs, creditBalance, editVideo, importReferences, submitVideo } from "../higgsfield/generate.ts";
 import { BUCKET } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
-import { CARD_SIZE, FOOTAGE_STILLS, TIMING, VIDEO_SIZE, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
+import { CARD_SIZE, FOOTAGE_STILLS, TIMING, VIDEO_SIZE, cleanFootagePrompt, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
 import { hookPrompt } from "./hook.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
 
 /** The steps a video job goes through. */
-export const VIDEO_STEPS = ["references", "references_wait", "footage", "hook", "hook_check", "footage_wait", "compose", "compose_wait"] as const;
+export const VIDEO_STEPS = ["references", "references_wait", "footage", "hook", "hook_check", "footage_wait", "compose", "compose_wait", "clean", "clean_wait"] as const;
 /** The same, as a PostgREST list for not.in / in filters. */
 export const VIDEO_STEPS_FILTER = `(${VIDEO_STEPS.join(",")})`;
 
@@ -46,6 +51,8 @@ const MAX_FOOTAGE = 2;
 const MAX_HOOKS = 3;
 const MAX_COMPOSE = 3;
 const MAX_CLIPS = 3;
+/** Cleanings of one footage before it is made again. */
+const MAX_CLEANS = 2;
 const REFERENCES = "design-references";
 const FOOTAGE_RULES = " One continuous shot, vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame, and no screens, dashboards, charts, documents or interfaces. No real or identifiable people.";
 
@@ -200,6 +207,8 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "video/mp4", upsert: true });
       if (error) throw new Error(`Could not store the footage: ${error.message}`);
       s.footage_path = path;
+      s.footage_first_path = path;
+      delete s.cleans;
       job.step = "compose"; return "next";
     }
     case "compose": {
@@ -229,6 +238,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           logo: { x: rect.x, y: rect.y, width: rect.width },
           uploadUrl: signed.signedUrl,
           frameUploads,
+          audioUrl: s.footage_first_path && s.footage_first_path !== s.footage_path ? publicUrl(admin, BUCKET, s.footage_first_path) : undefined,
         }),
         `Socialytics video ${job.id}`,
       );
@@ -257,13 +267,50 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const seen = await footageWriting(admin, s.still_paths ?? []);
       s.footage_writing = seen;
       if (seen.writing) {
-        console.warn(`[video-worker] job ${job.id}: the footage has writing (${seen.where}); making it again.`);
+        s.cleans = (s.cleans ?? 0) + 1;
+        if (s.cleans <= MAX_CLEANS) {
+          console.warn(`[video-worker] job ${job.id}: the footage has writing (${seen.where}); cleaning it.`);
+          job.step = "clean"; return "next";
+        }
+        console.warn(`[video-worker] job ${job.id}: the footage still has writing after cleaning (${seen.where}); making it again.`);
         delete s.footage_job;
         job.step = "footage"; return "next";
       }
       s.video_seconds = made.seconds;
       s.final_path = s.video_path;
       job.step = "finished"; return "done";
+    }
+    case "clean": {
+      const mcp = await higgsfield(admin);
+      const [id] = await importReferences(mcp, [publicUrl(admin, BUCKET, s.footage_path)], "video");
+      if (!id) throw new Error("Could not hand the footage to the video model.");
+      const [first] = await editVideo(mcp, { prompt: cleanFootagePrompt(), videoId: id });
+      if (!first?.job_id) throw new Error("Higgsfield did not start the cleaning.");
+      s.clean_job = first;
+      s.clean_checked_at = Date.now();
+      job.step = "clean_wait"; return "next";
+    }
+    case "clean_wait": {
+      if (recently(s.clean_checked_at)) return "wait";
+      s.clean_checked_at = Date.now();
+      const res = await awaitJobs(await higgsfield(admin), [s.clean_job], { budgetMs: 0 });
+      const o = res.outcomes[0];
+      const terminal = !!o && (o.status === "completed" || o.status === "failed" || o.status === "nsfw" || o.status === "canceled" || o.status === "timed_out" || !!o.error);
+      if (!terminal) return "wait";
+      if (o.status !== "completed" || !o.result_url) {
+        console.error(`[video-worker] job ${job.id} cleaning ${o.status}: ${o.error ?? ""}`);
+        // A cleaning that did not finish counts as one; the next is tried, then new footage.
+        job.step = (s.cleans ?? 0) < MAX_CLEANS ? "clean" : "footage";
+        if (job.step === "clean") s.cleans = (s.cleans ?? 0) + 1; else delete s.footage_job;
+        return "next";
+      }
+      const resp = await fetch(o.result_url, { signal: AbortSignal.timeout(90_000) });
+      if (!resp.ok) throw new Error(`Could not fetch the cleaned footage: ${resp.status}`);
+      const path = `${base}/footage-${s.footage_tries}-clean-${s.cleans}.mp4`;
+      const { error } = await admin.storage.from(BUCKET).upload(path, new Uint8Array(await resp.arrayBuffer()), { contentType: "video/mp4", upsert: true });
+      if (error) throw new Error(`Could not store the cleaned footage: ${error.message}`);
+      s.footage_path = path;
+      job.step = "compose"; return "next";
     }
   }
   throw new Error(`FINAL: Unknown video step '${job.step}'`);

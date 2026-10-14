@@ -35,6 +35,8 @@ export interface ComposeInput {
   uploadUrl: string;
   /** Signed upload URLs for stills of the footage alone, spread across it, read for stray writing. */
   frameUploads?: string[];
+  /** The footage as first made, whose sound is kept when its picture was cleaned of writing. */
+  audioUrl?: string;
 }
 
 /** Single-quote a value for bash. */
@@ -65,6 +67,7 @@ export function composeScript(input: ComposeInput): string {
     `curl -fsSL --retry 3 -o clip.mp4 ${shellQuote(input.footageUrl)}`,
     `curl -fsSL --retry 3 -o hook.png ${shellQuote(input.overlayUrl)}`,
     `curl -fsSL --retry 3 -o logo.png ${shellQuote(input.logoUrl)}`,
+    ...(input.audioUrl ? [`curl -fsSL --retry 3 -o sound.mp4 ${shellQuote(input.audioUrl)}`] : []),
     // Stills of the footage alone, before anything is laid over it.
     ...(input.frameUploads ?? []).flatMap((url, i, all) => [
       `T=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4 | awk '{ printf "%.2f", $1 * ${((i + 0.5) / all.length).toFixed(3)} }')`,
@@ -73,10 +76,10 @@ export function composeScript(input: ComposeInput): string {
     ]),
     [
       "ffmpeg -hide_banner -loglevel error -y",
-      "-i clip.mp4 -loop 1 -i hook.png -loop 1 -i logo.png",
+      `-i clip.mp4 -loop 1 -i hook.png -loop 1 -i logo.png${input.audioUrl ? " -i sound.mp4" : ""}`,
       `-filter_complex ${shellQuote(filter)}`,
       // The footage's own sound, when it has one.
-      `-map "[v]" -map "0:a?" -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k -shortest -movflags +faststart out.mp4`,
+      `-map "[v]" -map "${input.audioUrl ? "3" : "0"}:a?" -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k -shortest -movflags +faststart out.mp4`,
     ].join(" "),
     `curl -fsS --retry 3 -X PUT -H 'Content-Type: video/mp4' -H 'x-upsert: true' --data-binary @out.mp4 ${shellQuote(input.uploadUrl)} >/dev/null`,
     `echo "COMPOSED $(stat -c %s out.mp4) $(ffprobe -v error -show_entries format=duration -of csv=p=0 out.mp4) $(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 out.mp4 | wc -l)"`,
@@ -156,5 +159,11 @@ export function parseFootageText(text: string): { writing: boolean; where: strin
   if (!w) return null;
   const where = /"where"\s*:\s*"([\s\S]*?)"\s*}/.exec(text);
   return { writing: w[1].toLowerCase() === "true", where: where ? where[1] : "" };
+}
+
+/** The instruction for cleaning writing out of footage, keeping everything else. */
+export function cleanFootagePrompt(): string {
+  return "Remove every piece of writing from this video: letters, words, numbers, logos, brand marks, stripes or emblems of real brands, signs, boards, labels and printing, on any surface, including clothing, shoes, balls, walls, boards and screens. " +
+    "Where each was, continue the plain surface it was on. Keep everything else exactly as it is: the subjects, the motion, the camera, the light, the colors, the sharpness and the timing.";
 }
 
