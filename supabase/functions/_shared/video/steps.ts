@@ -60,8 +60,11 @@ const FOOTAGE_BUCKET = "post-footage";
 const MAX_CLEANS = 2;
 const REFERENCES = "design-references";
 /** What all footage keeps to; people as the client's own videos show them (made-up characters, or nobody). */
-function footageRules(people: string | undefined): string {
-  return " Vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame, and no screens, dashboards, charts, documents or interfaces. " +
+function footageRules(people: string | undefined, sceneWords: string[] = []): string {
+  const lettering = sceneWords.length
+    ? `Lettering only as these names, spelled exactly: ${sceneWords.map((w) => `"${w}"`).join(", ")}; no other text, captions, subtitles, signs, logos, watermarks or real brand marks anywhere in frame`
+    : "No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame";
+  return ` Vertical 9:16, every part in sharp focus. ${lettering}, and no screens, dashboards, charts, documents or interfaces. ` +
     (people === "fictional" ? "Any people are made-up characters, never real or famous people." : "No real or identifiable people.");
 }
 
@@ -131,7 +134,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
         s.video_ref_ids = refs.length ? await importReferences(mcp, refs, "video") : [];
       }
       const [first] = await submitVideo(mcp, {
-        prompt: `${input.video.prompt}${footageRules(input.people)}`,
+        prompt: `${input.video.prompt}${footageRules(input.people, input.scene_words ?? [])}`,
         aspect: "9:16",
         seconds: input.video.seconds ?? TIMING.footage,
         resolution: "1080p",
@@ -302,7 +305,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
         job.step = "footage"; return "next";
       }
       // The footage carries no writing of its own: the only words are the hook's.
-      const seen = await footageWriting(admin, s.still_paths ?? []);
+      const seen = await footageWriting(admin, s.still_paths ?? [], input.scene_words ?? []);
       s.footage_writing = seen;
       if (seen.writing) {
         s.cleans = (s.cleans ?? 0) + 1;
@@ -322,7 +325,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const mcp = await higgsfield(admin);
       const [id] = await importReferences(mcp, [publicUrl(admin, BUCKET, s.footage_path)], "video");
       if (!id) throw new Error("Could not hand the footage to the video model.");
-      const [first] = await editVideo(mcp, { prompt: cleanFootagePrompt(), videoId: id });
+      const [first] = await editVideo(mcp, { prompt: cleanFootagePrompt(input.scene_words ?? [], s.footage_writing?.where ?? ""), videoId: id });
       if (!first?.job_id) throw new Error("Higgsfield did not start the cleaning.");
       s.clean_job = first;
       s.clean_checked_at = Date.now();
@@ -355,7 +358,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
 }
 
 /** Whether the footage's stills show any writing, read by the vision model. */
-async function footageWriting(admin: any, paths: string[]): Promise<{ writing: boolean; where: string }> {
+async function footageWriting(admin: any, paths: string[], allowed: string[] = []): Promise<{ writing: boolean; where: string }> {
   if (!paths.length) throw new Error("The footage's stills are missing.");
   const content: unknown[] = [];
   for (const p of paths) {
@@ -363,7 +366,7 @@ async function footageWriting(admin: any, paths: string[]): Promise<{ writing: b
     if (error || !data) throw new Error(`Could not read a still of the footage: ${error?.message ?? "missing"}`);
     content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode(new Uint8Array(await data.arrayBuffer()) as unknown as ArrayBuffer) } });
   }
-  content.push({ type: "text", text: footageTextPrompt() });
+  content.push({ type: "text", text: footageTextPrompt(allowed) });
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
   const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });

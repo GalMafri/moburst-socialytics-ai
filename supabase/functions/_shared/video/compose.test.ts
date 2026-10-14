@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { REFERENCE_SECONDS, VIDEO_SIZE, cleanFootagePrompt, framesScript, parseFrames, videoLogoBox, clipScript, composeScript, footageTextPrompt, hookPlacement, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
-import { parseVideoBriefs, parseVideoStyle, videoPlannerPrompt, videoStylePrompt, VIDEO_SECONDS } from "../canva/options";
+import { parseVideoBriefs, parseVideoStyle, sceneLettering, videoPlannerPrompt, videoStylePrompt, VIDEO_SECONDS } from "../canva/options";
 import { hookPrompt } from "./hook";
 
 describe("video assembly", () => {
@@ -232,6 +232,31 @@ describe("the logo where and when the client's own videos show it", () => {
     const script = composeScript({ footageUrl: "https://s/f.mp4", uploadUrl: "https://s/up", logoUrl: "https://s/l.png", logo: { x: 65, y: 115, width: 162 } });
     expect(script).not.toContain("@END@");
     expect(script).not.toContain("END=");
+  });
+});
+
+describe("the names in the client's own scenes", () => {
+  const style = parseVideoStyle(JSON.stringify({ format: "hype reels of made-up clubs", people: "fictional", on_screen_text: "none", logo: "none",
+    scene_words: ["EAGLE VISION MEDIA", " ZENTHAR  EAGLES ", "10", "", "x".repeat(60)] }))!;
+  it("reads them spelled as shown, dropping empty and runaway entries", () => {
+    expect(style.scene_words).toEqual(["EAGLE VISION MEDIA", "ZENTHAR EAGLES", "10"]);
+    expect(parseVideoStyle(JSON.stringify({ format: "talks" }))).not.toHaveProperty("scene_words");
+  });
+  it("lets the planner put those names, and only those, on the things they are on in the client's videos", () => {
+    const p = videoPlannerPrompt({ brand: "LegaBot", platform: "Instagram", copy: "c", voice: null, count: 3, postCount: 16, recent: "", style });
+    expect(p).toContain('"EAGLE VISION MEDIA", "ZENTHAR EAGLES", "10"');
+    expect(p).toContain("no real brand appears");
+    expect(p).not.toContain("It holds no lettering");
+    expect(sceneLettering("Moburst", [])).toContain("It holds no lettering");
+  });
+  it("counts only writing that is not one of those names, and keeps them when cleaning", () => {
+    expect(footageTextPrompt(["CAIRO SUN"])).toContain('"CAIRO SUN"');
+    expect(footageTextPrompt(["CAIRO SUN"])).toContain("misspelled or garbled version");
+    expect(footageTextPrompt()).not.toContain("belong to the brand");
+    const clean = cleanFootagePrompt(["CAIRO SUN"], "three-stripe marks on both boots");
+    expect(clean).toContain("Remove these from this video: three-stripe marks on both boots");
+    expect(clean).toContain('Keep these names exactly where and as they are: "CAIRO SUN"');
+    expect(cleanFootagePrompt()).toContain("Remove every piece of writing");
   });
 });
 

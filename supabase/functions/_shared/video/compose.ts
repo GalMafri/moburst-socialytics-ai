@@ -253,10 +253,13 @@ export function parseClipped(reply: string, count: number): boolean {
 export const FOOTAGE_STILLS = 4;
 
 /** The instruction for reading the footage's stills. */
-export function footageTextPrompt(): string {
+export function footageTextPrompt(allowed: string[] = []): string {
+  const keep = allowed.length
+    ? `These names and numbers belong to the brand and may appear in the scenes, spelled exactly like this: ${allowed.map((w) => `"${w}"`).join(", ")}. They do not count, also where framing or folds hide part of them. Count everything else: any other writing, any misspelled or garbled version of those names, and any logo, stripe, swoosh or emblem of a real brand. `
+    : "";
   return "These are stills from the footage of a social video, before any title or logo is laid over it. " +
-    "Is there any writing anywhere in them: letters, words, numbers, labels on screens, dashboards or charts, signs, captions, logos or watermarks, however small or garbled? " +
-    'Reply with JSON only: {"writing": true or false, "where": "where it is, or empty"}';
+    "Is there any writing anywhere in them: letters, words, numbers, labels on screens, dashboards or charts, signs, captions, logos or watermarks, however small or garbled? " + keep +
+    'Reply with JSON only: {"writing": true or false, "where": "what must go and where it is, or empty"}';
 }
 
 /** The answer about the footage's stills, or null when it gives none. */
@@ -267,9 +270,13 @@ export function parseFootageText(text: string): { writing: boolean; where: strin
   return { writing: w[1].toLowerCase() === "true", where: where ? where[1] : "" };
 }
 
-/** The instruction for cleaning writing out of footage, keeping everything else. */
-export function cleanFootagePrompt(): string {
-  return "Remove every piece of writing from this video: letters, words, numbers, logos, brand marks, stripes or emblems of real brands, signs, boards, labels and printing, on any surface, including clothing, shoes, balls, walls, boards and screens. " +
-    "Where each was, continue the plain surface it was on. Keep everything else exactly as it is: the subjects, the motion, the camera, the light, the colors, the sharpness and the timing.";
+/** The instruction for cleaning writing out of footage, keeping everything else (and the brand's own scene names). */
+export function cleanFootagePrompt(allowed: string[] = [], found = ""): string {
+  const keep = "Where each was, continue the plain surface it was on. Keep everything else exactly as it is: the subjects, the motion, the camera, the light, the colors, the sharpness and the timing.";
+  if (allowed.length) {
+    return `Remove these from this video: ${found || "any writing that is misspelled or garbled"}. Remove any logo, stripe, swoosh or emblem of a real brand too, on clothing, shoes and balls. ` +
+      `Keep these names exactly where and as they are: ${allowed.map((w) => `"${w}"`).join(", ")}. ${keep}`;
+  }
+  return "Remove every piece of writing from this video: letters, words, numbers, logos, brand marks, stripes or emblems of real brands, signs, boards, labels and printing, on any surface, including clothing, shoes, balls, walls, boards and screens. " + keep;
 }
 

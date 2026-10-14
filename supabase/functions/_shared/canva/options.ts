@@ -304,6 +304,8 @@ export interface VideoStyle {
   logo_at?: LogoAt;
   /** The logo's width as a share of the frame's shorter side, as in the client's videos (they may be landscape). */
   logo_width?: number;
+  /** Names and numbers that are part of the scenes in the client's videos (on kits, products, signs), spelled as shown. */
+  scene_words?: string[];
   sound: string;
   /** Other formats the videos use, such as filmed talks. */
   other_formats: string;
@@ -319,7 +321,7 @@ export function videoStylePrompt(brand: string, videos: number, framesPer: numbe
     `Describe how ${brand}'s videos look and move, so that new videos can be made in the same style.`,
     "If the videos use more than one format, describe the one that can be made without filming real people (for example animation, 3D, or made-up characters), and name the others in other_formats.",
     "Reply with JSON only:",
-    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","logo_at":"end" when the logo shows only at the close, else where it sits throughout: "top-left", "top-center", "top-right", "bottom-left", "bottom-center" or "bottom-right","logo_width":the width of the logo as a share of the shorter side of the frame, for example 0.18,"sound":"music, voice or effects","other_formats":"other formats, or empty"}',
+    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","logo_at":"end" when the logo shows only at the close, else where it sits throughout: "top-left", "top-center", "top-right", "bottom-left", "bottom-center" or "bottom-right","logo_width":the width of the logo as a share of the shorter side of the frame, for example 0.18,"scene_words":["each name, word or number that is part of the scenes themselves, printed on clothing, products, signs or objects, spelled exactly as shown; none for text laid over the footage"],"sound":"music, voice or effects","other_formats":"other formats, or empty"}',
   ].join("\n");
 }
 
@@ -341,6 +343,7 @@ export function parseVideoStyle(text: string): VideoStyle | null {
     text_style: str("text_style"),
     logo: str("logo").toLowerCase() === "shown" ? "shown" : "none",
     ...logoTiming(o),
+    ...sceneWords(o),
     sound: str("sound"), other_formats: str("other_formats"),
   };
 }
@@ -356,6 +359,20 @@ function logoTiming(o: Record<string, unknown>): { logo_at?: LogoAt; logo_width?
   };
 }
 
+/** The names and numbers in the client's own scenes, cleaned up; none when the reply gives none. */
+function sceneWords(o: Record<string, unknown>): { scene_words?: string[] } {
+  if (!Array.isArray(o?.scene_words)) return {};
+  const words = [...new Set((o.scene_words as unknown[]).map((w) => String(w ?? "").replace(/\s+/g, " ").trim()).filter((w) => w.length > 0 && w.length <= 40))].slice(0, 40);
+  return words.length ? { scene_words: words } : {};
+}
+
+/** The rule for lettering in new footage: none, or only the names the client's own scenes carry. */
+export function sceneLettering(brand: string, words: string[] | undefined): string {
+  return words?.length
+    ? `The only lettering in it is ${brand}'s own scene names, on the same kinds of things they are on in ${brand}'s videos, spelled exactly: ${words.map((w) => `"${w}"`).join(", ")}. Nothing else carries letters, numbers, logos or brand marks, and no real brand appears.`
+    : "It holds no lettering, numbers, signs, logos or brand marks, and names no brand.";
+}
+
 /** The style in a few lines, for the planner. */
 export function styleLines(brand: string, s: VideoStyle): string {
   return [
@@ -367,6 +384,7 @@ export function styleLines(brand: string, s: VideoStyle): string {
     s.look ? `- look: ${s.look}` : "",
     `- text over the footage: ${s.on_screen_text === "none" ? "none" : `${s.on_screen_text}, ${s.text_style}`}`,
     s.sound ? `- sound: ${s.sound}` : "",
+    s.scene_words?.length ? `- names in the scenes: ${s.scene_words.join(", ")}` : "",
     s.logo === "none" ? "- logo: none over the footage" : s.logo_at === "end" ? "- logo: closes the video, laid over the last moments" : s.logo_at ? `- logo: ${s.logo_at.replace("-", " ")} throughout` : "",
   ].filter(Boolean).join("\n");
 }
@@ -396,7 +414,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
       args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
       `A video model makes the footage, with short clips of these videos as its reference, and with sound; it can cut between shots. The new video looks and moves like ${args.brand}'s own videos: the same kind of subjects, shots, cuts, camera, light and grade.`,
       "For each option give:",
-      `- footage: the video for the video model in three to five sentences, shot by shot (two to four shots, each with its seconds), in the style of ${args.brand}'s videos, all in sharp focus. It holds no lettering, numbers, signs, logos or brand marks, no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing), and names no brand. ${people} It is whole scenes: no band, panel or empty area kept for text.${s.logo === "shown" && s.logo_at === "end" ? ` ${args.brand}'s videos close on their logo, which is laid over the last moments afterwards: the last shot ends the way their videos end before the logo.` : ""}`,
+      `- footage: the video for the video model in three to five sentences, shot by shot (two to four shots, each with its seconds), in the style of ${args.brand}'s videos, all in sharp focus. ${sceneLettering(args.brand, s.scene_words)} It shows no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing). ${people} It is whole scenes: no band, panel or empty area kept for text.${s.logo === "shown" && s.logo_at === "end" ? ` ${args.brand}'s videos close on their logo, which is laid over the last moments afterwards: the last shot ends the way their videos end before the logo.` : ""}`,
       `- seconds: the length, from ${VIDEO_SECONDS.min} to ${VIDEO_SECONDS.max}.`,
       s.on_screen_text === "none"
         ? `${args.brand}'s videos carry no text over the footage, so this video carries none: the copy goes with the post.`
