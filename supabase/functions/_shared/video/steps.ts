@@ -58,6 +58,8 @@ const MAX_CLIPS = 3;
 const FOOTAGE_BUCKET = "post-footage";
 /** Cleanings of one footage before it is made again. */
 const MAX_CLEANS = 2;
+/** Footage still not back after this long is asked for again (Seedance usually takes 3 to 10 minutes). */
+export const FOOTAGE_WAIT_MS = 30 * 60_000;
 const REFERENCES = "design-references";
 /** What all footage keeps to; people as the client's own videos show them (made-up characters, or nobody). */
 function footageRules(people: string | undefined, sceneWords: string[] = []): string {
@@ -145,6 +147,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       if (!first?.job_id) throw new Error("Higgsfield did not start the footage.");
       s.footage_job = first;
       s.footage_checked_at = Date.now();
+      s.footage_started_at = Date.now();
       // The hook is drawn while the footage renders.
       // A client whose videos carry no text over the footage gets no hook.
       job.step = s.hook_path || !input.copy?.length ? "footage_wait" : "hook"; return "next";
@@ -221,7 +224,15 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const res = await awaitJobs(await higgsfield(admin), [s.footage_job], { budgetMs: 0 });
       const o = res.outcomes[0];
       const terminal = !!o && (o.status === "completed" || o.status === "failed" || o.status === "nsfw" || o.status === "canceled" || o.status === "timed_out" || !!o.error);
-      if (!terminal) return "wait";
+      if (!terminal) {
+        // A render left waiting in the video model's queue is asked for again, as one of the footage's tries.
+        if (typeof s.footage_started_at === "number" && Date.now() - s.footage_started_at > FOOTAGE_WAIT_MS) {
+          console.warn(`[video-worker] job ${job.id}: the footage has not come back in ${FOOTAGE_WAIT_MS / 60_000} minutes; asking again.`);
+          delete s.footage_job;
+          job.step = "footage"; return "next";
+        }
+        return "wait";
+      }
       if (o.status !== "completed" || !o.result_url) {
         // Generated again from the same shot; a second failure ends the option.
         console.error(`[video-worker] job ${job.id} footage ${o.status}: ${o.error ?? ""}`);
