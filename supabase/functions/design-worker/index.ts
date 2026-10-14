@@ -42,6 +42,12 @@ const MAX_MARK_CLEANS = 2;
 const DEFAULT_PAGE = { width: 1088, height: 1360 };
 const IMAGE_MODEL = "gpt-image-2.5-flare";
 const READ_MODEL = "claude-opus-5-5";
+/**
+ * Room for each check's answer. The model may think before it answers and
+ * that counts against the limit: at 300 to 600 tokens, answers came back cut
+ * off after a few characters ("{\"marks") and good designs failed.
+ */
+const CHECK_TOKENS = 2000;
 const STEPS = new Set(["generate", "locate", "unlogo", "marks", "finish", "verify"]);
 /** A job is only ever moved on while it is active: a cancelled design stays cancelled. */
 const ACTIVE = ["queued", "running"];
@@ -247,7 +253,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         apiKey,
         body: {
           model: READ_MODEL,
-          max_tokens: 400,
+          max_tokens: CHECK_TOKENS,
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode((await small.encodeJPEG(92)) as unknown as ArrayBuffer) } },
             { type: "text", text: marksPrompt(g.brand_name) },
@@ -326,7 +332,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         apiKey,
         body: {
           model: READ_MODEL,
-          max_tokens: 600,
+          max_tokens: CHECK_TOKENS,
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode(jpeg as unknown as ArrayBuffer) } },
             { type: "text", text: readPrompt(g.brand_name) },
@@ -354,7 +360,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
           apiKey,
           body: {
             model: READ_MODEL,
-            max_tokens: 300,
+            max_tokens: CHECK_TOKENS,
             messages: [{ role: "user", content: [
               { type: "image", source: { type: "base64", media_type: "image/png", data: base64Encode((await area.encode()) as unknown as ArrayBuffer) } },
               { type: "text", text: logoCheckPrompt(g.brand_name) },

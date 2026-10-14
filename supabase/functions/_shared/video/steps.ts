@@ -43,6 +43,8 @@ export const VIDEO_STEPS = ["references", "references_wait", "footage", "hook", 
 /** The same, as a PostgREST list for not.in / in filters. */
 export const VIDEO_STEPS_FILTER = `(${VIDEO_STEPS.join(",")})`;
 
+/** Room for each check's answer (the model may think first, and that counts against it). */
+const CHECK_TOKENS = 2000;
 /** Higgsfield credits the footage needs on the account before it is started (a 1080p clip with sound is about 100). */
 const FOOTAGE_CREDIT_FLOOR = 130;
 /** How often a running clip or join is asked about. */
@@ -185,7 +187,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const result = await anthropicMessages({
         apiKey,
         body: {
-          model: "claude-opus-5-5", max_tokens: 400,
+          model: "claude-opus-5-5", max_tokens: CHECK_TOKENS,
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode(jpeg as unknown as ArrayBuffer) } },
             { type: "text", text: readPrompt(input.brand_name) },
@@ -351,7 +353,7 @@ async function footageWriting(admin: any, paths: string[]): Promise<{ writing: b
   content.push({ type: "text", text: footageTextPrompt() });
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
-  const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: 300, messages: [{ role: "user", content }] } });
+  const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: CHECK_TOKENS, messages: [{ role: "user", content }] } });
   const seen = parseFootageText(result.text);
   if (!seen) throw new Error(`The footage's stills could not be read: ${result.text.slice(0, 200)}`);
   return seen;

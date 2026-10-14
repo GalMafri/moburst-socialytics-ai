@@ -299,7 +299,7 @@ async function personOnCamera(copy: string, visual: string): Promise<string | nu
     const result = await anthropicMessages({
       apiKey,
       body: {
-        model: PLANNER_MODEL, max_tokens: 200,
+        model: PLANNER_MODEL, max_tokens: 2000,
         messages: [{ role: "user", content: [{ type: "text", text:
           `A social video post is planned.\nCopy: """${copy.slice(0, 1500)}"""\nPlanned visual: """${visual || "(none given)"}"""\n` +
           "Does the video depend on a real person appearing on camera for the brand: its founder, an executive, a spokesperson, an expert or a team member speaking or presenting, named or not? " +
