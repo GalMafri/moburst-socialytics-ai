@@ -14,7 +14,7 @@ import { Archive, Check, Download, Expand, Loader2, Settings2, Sparkles, Star, T
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import { useDesignRequestForPost, useDesignRequests } from "./DesignRequestsContext";
+import { useDesignRequestForPost, useDesignRequests, useFilmedReasonForPost } from "./DesignRequestsContext";
 import { PostDesign } from "./PostDesign";
 import { CalendarPostActions } from "@/components/calendar/CalendarPostActions";
 import { createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback, uploadFilmedClip } from "@/lib/designRequests";
@@ -89,6 +89,8 @@ export function PostPanel({
   const post = editedPost && editedPost._calendarPostKey === sourcePost?._calendarPostKey ? editedPost : sourcePost;
   const designRun = useGenerationForPost(post);
   const designRequest = useDesignRequestForPost(post);
+  // Why this post's video is filmed; it stays known after a video from the posts was chosen instead.
+  const filmedReason = useFilmedReasonForPost(post);
   const designRequests = useDesignRequests();
   const preparingDesigns = isPreparing(designRequest, isMoburstStaff);
   const [startingDesigns, setStartingDesigns] = useState(false);
@@ -116,11 +118,13 @@ export function PostPanel({
       return (count ?? 0) > 0;
     },
   });
-  const startDesigns = async () => {
+  // A filmed post's video can instead be made in the look of the client's
+  // posts; once chosen, making it again follows the same route.
+  const startDesigns = async (route?: "posts") => {
     if (!clientId || !post) return;
     setStartingDesigns(true);
     try {
-      const result = await createDesigns({ clientId, reportId, post });
+      const result = await createDesigns({ clientId, reportId, post, route: route ?? (filmedReason ? "posts" : undefined) });
       if (result.notSetUp) {
         toast.error("Design settings are not confirmed for this client yet.");
         return;
@@ -303,9 +307,11 @@ export function PostPanel({
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">{videoDesigns ? "Video" : isCarouselPost ? "Carousel" : "Design"}</p>
                     {designRequest?.status !== "needs_filming" && (
-                      <p className="t-secondary">{videoDesigns
-                        ? "Made in the style of your brand's own videos, with sound. Text and logo appear the way your videos use them."
-                        : "Made in your brand's style, with your logo and the post's words."}</p>
+                      <p className="t-secondary">{!videoDesigns
+                        ? "Made in your brand's style, with your logo and the post's words."
+                        : filmedReason
+                          ? "Made in the look of your brand's posts, with the post's hook, your logo and sound."
+                          : "Made in the style of your brand's own videos, with sound. Text and logo appear the way your videos use them."}</p>
                     )}
                   </div>
                   <PostDesign
@@ -318,7 +324,9 @@ export function PostPanel({
                     isStaff={isMoburstStaff}
                     aspect={videoDesigns ? "aspect-[9/16]" : tileAspectFor(post) || "aspect-[4/5]"}
                     filenameStub={`design-${post.platform || "post"}`}
-                    onCreate={startDesigns}
+                    onCreate={() => void startDesigns()}
+                    onMakeFromPosts={() => void startDesigns("posts")}
+                    filmedReason={filmedReason}
                     creating={startingDesigns}
                     onUse={applyDesign}
                     usingId={usingId}

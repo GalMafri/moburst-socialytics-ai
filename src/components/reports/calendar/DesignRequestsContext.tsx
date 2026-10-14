@@ -16,6 +16,8 @@ interface Ctx {
   requests: DesignRequest[];
   /** Latest request per calendar post key. */
   byPost: Map<string, DesignRequest>;
+  /** Why a post's video is filmed, kept after a video from the client's posts was chosen instead. */
+  filmedByPost: Map<string, string>;
   /** Open a post's panel on its Design tab. */
   openDesigns: (calendarPostKey: string) => void;
   /** The signed-in user's id, to tell their own requests from designs prepared without anyone asking. */
@@ -40,7 +42,7 @@ export function DesignRequestsProvider({ clientId, onOpenPost, children }: { cli
     enabled: !!clientId,
     queryFn: async () => {
       const { data, error } = await (supabase.from("design_requests" as any) as any)
-        .select("id, client_id, report_id, calendar_post_key, platform, post_copy, status, stage, kind, options_wanted, options_ready, requested_by, error, on_camera, footage_path, created_at, updated_at")
+        .select("id, client_id, report_id, calendar_post_key, platform, post_copy, status, stage, kind, options_wanted, options_ready, requested_by, error, on_camera, footage_path, video_route, created_at, updated_at")
         .eq("client_id", clientId)
         .order("created_at", { ascending: false })
         .limit(200);
@@ -67,9 +69,14 @@ export function DesignRequestsProvider({ clientId, onOpenPost, children }: { cli
   const value = useMemo<Ctx>(() => {
     const byPost = new Map<string, DesignRequest>();
     for (const r of requests) if (!byPost.has(r.calendar_post_key)) byPost.set(r.calendar_post_key, r);
+    const filmedByPost = new Map<string, string>();
+    for (const r of requests) {
+      if (r.status === "needs_filming" && !filmedByPost.has(r.calendar_post_key)) filmedByPost.set(r.calendar_post_key, r.on_camera || "it needs footage filmed for it");
+    }
     return {
       requests,
       byPost,
+      filmedByPost,
       openDesigns: onOpenPost,
       myId,
       refresh: () => { void qc.invalidateQueries({ queryKey: ["design-requests", clientId] }); },
@@ -81,6 +88,13 @@ export function DesignRequestsProvider({ clientId, onOpenPost, children }: { cli
 
 export function useDesignRequests(): Ctx | null {
   return useContext(DesignRequestsCtx);
+}
+
+/** Why the post's video is filmed, or null when it can be generated from the client's own videos. */
+export function useFilmedReasonForPost(post: { _calendarPostKey?: string } | null | undefined): string | null {
+  const ctx = useContext(DesignRequestsCtx);
+  if (!ctx || !post?._calendarPostKey) return null;
+  return ctx.filmedByPost.get(post._calendarPostKey) ?? null;
 }
 
 export function useDesignRequestForPost(post: { _calendarPostKey?: string } | null | undefined): DesignRequest | null {

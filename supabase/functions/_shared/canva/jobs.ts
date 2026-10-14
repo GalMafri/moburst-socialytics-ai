@@ -36,6 +36,8 @@ export interface DesignRequest {
   footage_path?: string | null;
   /** Who is on camera in a filmed video. */
   on_camera?: string | null;
+  /** 'posts': a generated video in the look of the client's static posts, chosen instead of filming. */
+  video_route?: string | null;
 }
 
 /** A PNG's pixel size from its header. */
@@ -94,8 +96,10 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
  */
 async function startVideoOption(admin: any, req: DesignRequest, settings: Settings, brandName: string, brief: Brief, optionIndex: number, logo: [number, number]): Promise<void> {
   const { data: client } = await admin.from("clients").select("video_references, video_style").eq("id", req.client_id).maybeSingle();
-  const style = client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string; scene_words?: string[] } | undefined;
-  const videoRefs = (Array.isArray(client?.video_references) ? client.video_references : [])
+  // A video made from the client's posts follows their posts, not their videos.
+  const style = req.video_route === "posts" ? undefined : client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string; scene_words?: string[] } | undefined;
+  // A video from the client's posts takes nothing from their filmed videos, so no real person can carry over.
+  const videoRefs = (req.video_route !== "posts" && Array.isArray(client?.video_references) ? client.video_references : [])
     .map((r: { path?: unknown }) => String(r?.path ?? "")).filter(Boolean).slice(0, 3);
   const title = `${brandName} ${req.platform ?? ""} video ${optionIndex + 1}`.replace(/\s+/g, " ");
   const { error } = await admin.from("canva_finish_jobs").insert({

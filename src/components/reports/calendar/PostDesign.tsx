@@ -41,9 +41,13 @@ interface Props {
   /** Upload the filmed clip for a video with a real person on camera. */
   onUploadClip?: (file: File) => void;
   uploadingClip?: boolean;
+  /** Instead of filming: a generated video in the look of the client's posts. */
+  onMakeFromPosts?: () => void;
+  /** Why the post's video is filmed, kept after a video from the posts was made. */
+  filmedReason?: string | null;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip }: Props) {
+export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason }: Props) {
   const clipInput = useRef<HTMLInputElement>(null);
   const design = currentDesign(versions);
   const earlier = versions.filter((v) => v !== design);
@@ -66,29 +70,24 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
             {waitingForCopy ? (
               <p className="t-secondary">This post is written shortly before its date from what's trending then. Its design follows once it's written.</p>
             ) : onCamera ? (
-              <>
-                <p className="t-secondary">This video is filmed: {onCamera}. Upload the vertical clip and the post's hook and your logo go over it.</p>
-                {onUploadClip && (
-                  <>
-                    <input
-                      ref={clipInput}
-                      type="file"
-                      accept="video/mp4,video/quicktime"
-                      className="hidden"
-                      aria-label="Filmed clip"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        e.target.value = "";
-                        if (file) onUploadClip(file);
-                      }}
-                    />
-                    <Button size="sm" onClick={() => clipInput.current?.click()} disabled={uploadingClip}>
-                      {uploadingClip ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1.5" />}
-                      {uploadingClip ? "Uploading the clip" : "Upload the filmed clip"}
+              // Two ways to make this video, side by side: film it, or make it from the posts.
+              <div className="grid gap-3 sm:grid-cols-2 text-left">
+                <div className="glass-inner p-4 space-y-3 flex flex-col">
+                  <p className="text-sm font-semibold text-white">Film it</p>
+                  <p className="t-secondary flex-1">This video is filmed: {onCamera}. Upload the vertical clip and the post's hook and your logo go over it.</p>
+                  {onUploadClip && <ClipUpload input={clipInput} onUploadClip={onUploadClip} uploadingClip={uploadingClip} />}
+                </div>
+                {onMakeFromPosts && (
+                  <div className="glass-inner p-4 space-y-3 flex flex-col">
+                    <p className="text-sm font-semibold text-white">Make it from your posts</p>
+                    <p className="t-secondary flex-1">A generated video in the look of your static posts, with the post's hook, your logo and sound. Nobody needs to film.</p>
+                    <Button size="sm" variant="outline" onClick={onMakeFromPosts} disabled={creating}>
+                      {creating ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+                      Make this video
                     </Button>
-                  </>
+                  </div>
                 )}
-              </>
+              </div>
             ) : textOnly ? (
               <p className="t-secondary">This is a text post, so it has no design.</p>
             ) : (
@@ -137,6 +136,8 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
           Regenerate
         </Button>
         <DownloadButton urls={design.urls} filenameStub={filenameStub} />
+        {/* A filmed post keeps the way to film it after a video was made from the posts. */}
+        {filmedReason && onUploadClip && <ClipUpload input={clipInput} onUploadClip={onUploadClip} uploadingClip={uploadingClip} compact />}
         <div className="ml-auto flex items-center gap-1">
           <Button size="sm" variant="ghost" className="h-9" onClick={() => setRejecting(design.iterationId)} aria-label="Not right: tell us why">
             <ThumbsDown className="h-3.5 w-3.5 mr-1.5" />Not right
@@ -428,3 +429,28 @@ function dateLabel(iso: string): string {
   if (!iso) return "";
   return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
+
+/** The filmed clip's upload: a vertical MP4 or MOV, whose sound is kept. */
+function ClipUpload({ input, onUploadClip, uploadingClip, compact }: { input: React.RefObject<HTMLInputElement>; onUploadClip: (file: File) => void; uploadingClip?: boolean; compact?: boolean }) {
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept="video/mp4,video/quicktime"
+        className="hidden"
+        aria-label="Filmed clip"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) onUploadClip(file);
+        }}
+      />
+      <Button size="sm" variant={compact ? "outline" : "default"} className={compact ? "h-9" : undefined} onClick={() => input.current?.click()} disabled={uploadingClip}>
+        {uploadingClip ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1.5" />}
+        {uploadingClip ? "Uploading the clip" : compact ? "Upload a filmed clip" : "Upload the filmed clip"}
+      </Button>
+    </>
+  );
+}
+

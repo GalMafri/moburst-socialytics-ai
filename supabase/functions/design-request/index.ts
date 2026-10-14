@@ -63,7 +63,9 @@ Deno.serve(async (req) => {
       // A video whose idea is a real person on camera (the founder speaking,
       // say) is filmed, never generated: no real or identifiable person is
       // ever made up. The answer says so plainly instead of starting anything.
-      if (designKind(body.format, body.platform) === "video") {
+      // Chosen in the Video tab instead of filming: a video in the look of the client's posts.
+      const route = body.route === "posts" ? "posts" : null;
+      if (designKind(body.format, body.platform) === "video" && !route) {
         const filmed = await filmedReason(admin, clientId, copy, visual);
         if (filmed) {
           const request = await recordFilming(admin, { clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null }, filmed);
@@ -71,7 +73,7 @@ Deno.serve(async (req) => {
         }
       }
       const request = await startRequest(admin, settings as Settings, {
-        clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null,
+        clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null, route,
       });
       return json({ request });
     }
@@ -162,7 +164,7 @@ Deno.serve(async (req) => {
     if (body?.action === "feedback") {
       const verdict = body.verdict === "rejected" ? "rejected" : body.verdict === "deleted" ? "archived" : null;
       if (!verdict) return json({ error: "verdict must be rejected or deleted." }, 400);
-      const { data: it } = await admin.from("post_iterations").select("id, client_id, calendar_post_key, report_id, platform, format, post_copy, visual_direction, variant_angle, concept, is_selected").eq("id", String(body.iteration_id || "")).maybeSingle();
+      const { data: it } = await admin.from("post_iterations").select("id, client_id, calendar_post_key, report_id, platform, format, post_copy, visual_direction, variant_angle, concept, is_selected, variant_group_id").eq("id", String(body.iteration_id || "")).maybeSingle();
       if (!it || !DESIGN_ANGLE.test(it.variant_angle ?? "")) return json({ error: "That design is no longer available." }, 404);
       const userId = await requireMember(req, it.client_id);
       const learnings = await recordFeedback(admin, it, verdict, body.reason, body.note, userId);
@@ -173,8 +175,10 @@ Deno.serve(async (req) => {
         if (settings?.confirmed_at) {
           const copy = await currentCopy(admin, { client_id: it.client_id, post_key: it.calendar_post_key, copy: it.post_copy ?? "" });
           if (copy) {
+            // Made again the way the turned-down one was made (from the client's posts, say).
+            const { data: madeBy } = it.variant_group_id ? await admin.from("design_requests").select("video_route").eq("id", it.variant_group_id).maybeSingle() : { data: null };
             request = await startRequest(admin, settings as Settings, {
-              clientId: it.client_id, postKey: it.calendar_post_key, copy, reportId: it.report_id, platform: it.platform, format: it.format, requestedBy: userId,
+              clientId: it.client_id, postKey: it.calendar_post_key, copy, reportId: it.report_id, platform: it.platform, format: it.format, requestedBy: userId, route: madeBy?.video_route ?? null,
             });
           }
         }
@@ -234,7 +238,8 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   // A video is planned from the client's own videos (14 Oct: "make videos in a
   // similar style to their VIDEOS, not statics"). Until their style has been
   // read, the request waits; the video worker plans it when the style is in.
-  const generatedVideo = request.kind === "video" && !request.footage_path;
+  // A video chosen to follow the client's posts is planned from the posts, like a design.
+  const generatedVideo = request.kind === "video" && !request.footage_path && request.video_route !== "posts";
   const videoStyle = generatedVideo && Array.isArray(client?.video_style?.frames) && client.video_style.frames.length ? client.video_style : null;
   if (generatedVideo && !videoStyle && Array.isArray(client?.video_references) && client.video_references.length) {
     await ensureStyleJob(admin, request.client_id, client?.name ?? "the brand");
@@ -405,14 +410,14 @@ export function needsNoDesign(format: string | null | undefined): boolean {
 }
 
 /** Start a design request for a post, or answer with the one already being prepared. Planning runs in the background. */
-async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null; visual?: string | null; footagePath?: string | null; onCamera?: string | null }): Promise<DesignRequest> {
+async function startRequest(admin: any, settings: Settings, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null; visual?: string | null; footagePath?: string | null; onCamera?: string | null; route?: string | null }): Promise<DesignRequest> {
   const { data: open } = await admin.from("design_requests").select("*").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "preparing").maybeSingle();
   if (open) return open;
 
   const { data: created, error } = await admin.from("design_requests").insert({
     client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey,
     platform: p.platform, format: p.format, post_copy: p.copy, requested_by: p.requestedBy, visual_direction: p.visual ?? null,
-    footage_path: p.footagePath ?? null, on_camera: p.footagePath ? (p.onCamera ?? null) : null,
+    footage_path: p.footagePath ?? null, on_camera: p.footagePath ? (p.onCamera ?? null) : null, video_route: p.route ?? null,
     // A LinkedIn document is a deck of slides: it is made like a carousel. A
     // Reel, short or any video post gets a video: footage in the client's own
     // video style with the hook and logo over it.

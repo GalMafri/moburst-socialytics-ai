@@ -25,6 +25,8 @@ export interface DesignRequest {
   on_camera?: string | null;
   /** A filmed clip uploaded for the post, which the video is made from. */
   footage_path?: string | null;
+  /** 'posts': a generated video in the look of the client's static posts, chosen instead of filming. */
+  video_route?: string | null;
   stage: DesignStage;
   kind?: "single" | "carousel" | "video";
   options_wanted: number;
@@ -122,7 +124,7 @@ export function elapsedLabel(fromIso: string, now = Date.now()): string {
   return m > 0 ? `${m}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`;
 }
 
-export async function createDesigns(args: { clientId: string; reportId?: string; post: { _calendarPostKey?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown } }): Promise<{ request?: DesignRequest; notSetUp?: boolean; needsFilming?: string }> {
+export async function createDesigns(args: { clientId: string; reportId?: string; post: { _calendarPostKey?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown }; route?: "posts" }): Promise<{ request?: DesignRequest; notSetUp?: boolean; needsFilming?: string }> {
   const { data, error } = await supabase.functions.invoke("design-request", {
     body: {
       action: "create",
@@ -133,6 +135,7 @@ export async function createDesigns(args: { clientId: string; reportId?: string;
       format: args.post.format ?? null,
       post_copy: postCopyOf(args.post as any),
       visual_direction: (args.post as any).visual_direction ?? (args.post as any)["Visual Direction"] ?? null,
+      ...(args.route ? { route: args.route } : {}),
     },
   });
   if (data?.code === "not_set_up") return { notSetUp: true };
