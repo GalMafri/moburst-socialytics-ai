@@ -1268,6 +1268,7 @@ export type Database = {
           client_id: string
           created_at: string
           error: string | null
+          footage_path: string | null
           format: string | null
           id: string
           kind: string
@@ -1291,6 +1292,7 @@ export type Database = {
           client_id: string
           created_at?: string
           error?: string | null
+          footage_path?: string | null
           format?: string | null
           id?: string
           kind?: string
@@ -1314,6 +1316,7 @@ export type Database = {
           client_id?: string
           created_at?: string
           error?: string | null
+          footage_path?: string | null
           format?: string | null
           id?: string
           kind?: string
