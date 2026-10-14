@@ -178,6 +178,7 @@ describe("videos in the client's own video style", () => {
   });
   it("asks for the style from the stills, in order", () => {
     expect(videoStylePrompt("Moburst", 3, 8)).toContain("Video 2 is images 9 to 16");
+    expect(videoStylePrompt("Moburst", 3, 8)).toContain("leave out other companies' brands");
     expect(parseVideoStyle("nothing")).toBeNull();
   });
   it("takes stills spread across each video", () => {
