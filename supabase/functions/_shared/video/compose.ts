@@ -367,7 +367,7 @@ export function captionFontName(family: string, weight: number): { name: string;
   return weight === 700 ? { name: family, bold: true } : weight === 400 ? { name: family, bold: false } : { name: `${family} ${named[weight] ?? "Bold"}`, bold: false };
 }
 
-export function captionsAss(words: SpokenWord[], f: { captions: "none" | "words" | "lines"; caption_style: string; caption_font: string; caption_color: string; highlight_color: string; caption_position: string; caption_y?: number }): string {
+export function captionsAss(words: SpokenWord[], f: { captions: "none" | "words" | "lines"; caption_style: string; caption_font: string; caption_color: string; highlight_color: string; caption_position: string; caption_y?: number }, breaks: number[] = []): string {
   const style = f.caption_style.toLowerCase();
   const upper = /upper ?case|all caps|capitals/.test(style);
   const perChunk = f.captions === "lines" ? 6 : 3;
@@ -375,7 +375,9 @@ export function captionsAss(words: SpokenWord[], f: { captions: "none" | "words"
   let current: SpokenWord[] = [];
   for (const w of words.filter((x) => assText(x.word))) {
     const gap = current.length ? w.start - current[current.length - 1].end : 0;
-    if (current.length && (current.length >= perChunk || gap > 0.6 || /[.!?]$/.test(current[current.length - 1].word))) { chunks.push(current); current = []; }
+    // A caption never runs across a sentence: word timings carry no punctuation, so the transcript's own segments mark where sentences start.
+    const newSentence = breaks.some((b) => b > current[0]?.start + 0.01 && b <= w.start + 0.01);
+    if (current.length && (current.length >= perChunk || gap > 0.6 || newSentence || /[.!?]$/.test(current[current.length - 1].word))) { chunks.push(current); current = []; }
     current.push(w);
   }
   if (current.length) chunks.push(current);

@@ -319,7 +319,7 @@ export function PostPanel({
                 <>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">{videoDesigns ? "Video" : isCarouselPost ? "Carousel" : "Design"}</p>
-                    {designRequest?.status !== "needs_filming" && (
+                    {(!filmedReason || versions.length > 0) && (
                       <p className="t-secondary">{!videoDesigns
                         ? "Made in your brand's style, with your logo and the post's words."
                         : filmedReason
@@ -330,7 +330,8 @@ export function PostPanel({
                   <PostDesign
                     versions={versions}
                     preparing={preparingDesigns ? designRequest : null}
-                    onCamera={designRequest?.status === "needs_filming" ? designRequest.on_camera || "it needs footage filmed for it" : null}
+                    // A filmed post offers its two ways whenever it has no video yet, whatever was tried last.
+                    onCamera={filmedReason}
                     textOnly={isTextOnlyFormat(post.format)}
                     onUploadClip={uploadClip}
                     uploadingClip={uploadingClip}

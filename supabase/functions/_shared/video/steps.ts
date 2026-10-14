@@ -183,7 +183,9 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       s.clip_seconds = got.seconds;
       const { data, error } = await admin.storage.from(BUCKET).download(s.audio_path);
       if (error || !data) throw new Error(`Could not read the clip's sound: ${error?.message ?? "missing"}`);
-      s.words = await transcribeWords(await openaiKey(admin), data);
+      const said = await transcribeWords(await openaiKey(admin), data);
+      s.words = said.words;
+      s.sentence_starts = said.sentenceStarts;
       job.step = input.filmed.title === "none" ? "compose" : "hook"; return "next";
     }
     case "hook": {
@@ -326,7 +328,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           frameUploads,
           audioUrl: s.footage_first_path && s.footage_first_path !== s.footage_path ? publicUrl(admin, BUCKET, s.footage_first_path) : undefined,
           captions: filmed && filmed.captions !== "none" && Array.isArray(s.words) && s.words.length
-            ? { assB64: base64Encode(new TextEncoder().encode(captionsAss(s.words, filmed)) as unknown as ArrayBuffer), fontUrl: await captionFontUrl(admin, filmed.caption_font, captionWeight(filmed.caption_style)) }
+            ? { assB64: base64Encode(new TextEncoder().encode(captionsAss(s.words, filmed, s.sentence_starts ?? [])) as unknown as ArrayBuffer), fontUrl: await captionFontUrl(admin, filmed.caption_font, captionWeight(filmed.caption_style)) }
             : undefined,
           endCard: filmed && input.end_card?.url ? { url: input.end_card.url, seconds: input.end_card.seconds } : undefined,
         }),
@@ -556,19 +558,39 @@ async function captionFontUrl(admin: any, family: string, weight: number): Promi
 }
 
 /** The clip's speech, word by word with timings (OpenAI transcription). An empty list when nothing is said. */
-async function transcribeWords(apiKey: string, audio: Blob): Promise<Array<{ word: string; start: number; end: number }>> {
+async function transcribeWords(apiKey: string, audio: Blob): Promise<{ words: Array<{ word: string; start: number; end: number }>; sentenceStarts: number[] }> {
   const form = new FormData();
   form.append("file", new File([audio], "speech.mp3", { type: "audio/mpeg" }));
   form.append("model", "whisper-1");
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "word");
+  form.append("timestamp_granularities[]", "segment");
   const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal: AbortSignal.timeout(120_000) });
   const text = await resp.text();
   if (!resp.ok) throw new Error(`Transcription ${resp.status}: ${text.slice(0, 300)}`);
-  const words = JSON.parse(text)?.words;
-  return Array.isArray(words)
-    ? words.map((w: { word?: unknown; start?: unknown; end?: unknown }) => ({ word: String(w.word ?? "").trim(), start: Number(w.start) || 0, end: Number(w.end) || 0 })).filter((w: { word: string }) => w.word)
+  const body = JSON.parse(text);
+  const words = Array.isArray(body?.words)
+    ? body.words.map((w: { word?: unknown; start?: unknown; end?: unknown }) => ({ word: String(w.word ?? "").trim(), start: Number(w.start) || 0, end: Number(w.end) || 0 })).filter((w: { word: string }) => w.word)
     : [];
+  // Where each sentence of the transcript starts: a segment whose text follows a full stop, question or exclamation.
+  const segments: Array<{ start?: unknown; text?: unknown }> = Array.isArray(body?.segments) ? body.segments : [];
+  const sentenceStarts: number[] = [];
+  segments.forEach((seg, i) => { if (i > 0 && /[.!?]["']?\s*$/.test(String(segments[i - 1].text ?? ""))) sentenceStarts.push(Number(seg.start) || 0); });
+  // Inside a segment, a full stop in its text also starts a sentence: placed at the word that follows it.
+  return { words, sentenceStarts: [...sentenceStarts, ...sentenceBreaksInside(segments, words)] };
+}
+
+/** Sentence starts inside transcript segments, found by matching each segment's punctuated text to its timed words. */
+function sentenceBreaksInside(segments: Array<{ start?: unknown; end?: unknown; text?: unknown }>, words: Array<{ word: string; start: number; end: number }>): number[] {
+  const out: number[] = [];
+  for (const seg of segments) {
+    const start = Number(seg.start) || 0, end = Number(seg.end) || 0;
+    const inSeg = words.filter((w) => w.start >= start - 0.05 && w.start < end);
+    const tokens = String(seg.text ?? "").trim().split(/\s+/).filter(Boolean);
+    if (tokens.length !== inSeg.length) continue;
+    tokens.forEach((t, i) => { if (i + 1 < inSeg.length && /[.!?]["']?$/.test(t)) out.push(inSeg[i + 1].start); });
+  }
+  return out;
 }
 
 async function openaiKey(admin: any): Promise<string> {

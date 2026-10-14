@@ -304,6 +304,13 @@ describe("a filmed clip edited the way the client's filmed videos are", () => {
     const marginV = Math.round((1 - 0.76) * 1920 - 78 * 0.6);
     expect(ass).toContain(`,2,90,90,${marginV},1`);
   });
+  it("never runs a caption across a sentence", () => {
+    const words = [{ word: "simple", start: 1.0, end: 1.3 }, { word: "This", start: 1.4, end: 1.6 }, { word: "place", start: 1.6, end: 1.9 }];
+    const ass = captionsAss(words, { ...style.filmed!, highlight_color: "" }, [1.4]);
+    expect(ass).toContain(",Cap,,0,0,0,,simple");
+    expect(ass).toContain(",Cap,,0,0,0,,This place");
+    expect(ass).not.toContain("simple This");
+  });
   it("takes the clip's sound for transcription", () => {
     expect(audioScript({ clipUrl: "https://s/clip", uploadUrl: "https://s/up" })).toContain("-vn -ac 1 -ar 16000");
     expect(parseAudio("AUDIO 120000 21.5")).toEqual({ bytes: 120000, seconds: 21.5 });
