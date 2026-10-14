@@ -252,7 +252,8 @@ describe("the names in the client's own scenes", () => {
   });
   it("counts only writing that is not one of those names, and keeps them when cleaning", () => {
     expect(footageTextPrompt(["CAIRO SUN"])).toContain('"CAIRO SUN"');
-    expect(footageTextPrompt(["CAIRO SUN"])).toContain("misspelled or garbled version");
+    expect(footageTextPrompt(["CAIRO SUN"])).toContain("letters can be read and are wrong");
+    expect(footageTextPrompt(["CAIRO SUN"])).toContain("motion blur or distance");
     expect(footageTextPrompt()).not.toContain("belong to the brand");
     const clean = cleanFootagePrompt(["CAIRO SUN"], "three-stripe marks on both boots");
     expect(clean).toContain("Remove these from this video: three-stripe marks on both boots");

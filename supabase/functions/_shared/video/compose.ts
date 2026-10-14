@@ -255,7 +255,7 @@ export const FOOTAGE_STILLS = 4;
 /** The instruction for reading the footage's stills. */
 export function footageTextPrompt(allowed: string[] = []): string {
   const keep = allowed.length
-    ? `These names and numbers belong to the brand and may appear in the scenes, spelled exactly like this: ${allowed.map((w) => `"${w}"`).join(", ")}. They do not count, also where framing or folds hide part of them. Count everything else: any other writing, any misspelled or garbled version of those names, and any logo, stripe, swoosh or emblem of a real brand. `
+    ? `These names and numbers belong to the brand and may appear in the scenes, spelled exactly like this: ${allowed.map((w) => `"${w}"`).join(", ")}. They do not count, also where framing, folds, motion blur or distance soften or hide part of them. Count everything else: any other writing, a version of those names whose letters can be read and are wrong, and any logo, stripe, swoosh or emblem of a real brand. `
     : "";
   return "These are stills from the footage of a social video, before any title or logo is laid over it. " +
     "Is there any writing anywhere in them: letters, words, numbers, labels on screens, dashboards or charts, signs, captions, logos or watermarks, however small or garbled? " + keep +
