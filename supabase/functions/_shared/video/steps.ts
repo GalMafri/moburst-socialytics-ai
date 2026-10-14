@@ -35,7 +35,7 @@ import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
 import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
-import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, TIMING, VIDEO_SIZE, cleanFootagePrompt, framesScript, hookPlacement, parseFrames, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
+import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, TIMING, VIDEO_SIZE, cleanFootagePrompt, framesScript, hookPlacement, videoLogoBox, parseFrames, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
 import { hookPrompt } from "./hook.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
 
@@ -243,8 +243,12 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const { data: signed, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(out, { upsert: true });
       if (error || !signed?.signedUrl) throw new Error(`Could not prepare the video's upload: ${error?.message ?? "no URL"}`);
       const [lw, lh] = input.logo_size;
-      const rect = canvasLogoRect(input.placement, lw, lh, VIDEO_SIZE.width, VIDEO_SIZE.height);
-      const at = s.hook_box ? hookPlacement(s.hook_box, s.hook_layer ?? CARD_SIZE, input.text_style ?? "", rect.y + rect.height) : null;
+      // The logo where the client's own videos have it, else where its posts have it.
+      const box = input.logo_at
+        ? videoLogoBox(input.logo_at, input.logo_width ?? input.placement.width, lw / lh)
+        : { ...canvasLogoRect(input.placement, lw, lh, VIDEO_SIZE.width, VIDEO_SIZE.height), end: false };
+      const logoBottom = box.end || box.y > VIDEO_SIZE.height / 2 ? 0 : box.y + Math.round(box.width * lh / lw);
+      const at = s.hook_box ? hookPlacement(s.hook_box, s.hook_layer ?? CARD_SIZE, input.text_style ?? "", logoBottom) : null;
       const stills: string[] = [];
       const frameUploads: string[] = [];
       // A filmed clip is used as it is: it is not read for writing or cleaned.
@@ -263,7 +267,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           hook: at && s.hook_box ? { crop: s.hook_box, at: { x: at.x, y: at.y, width: at.width } } : undefined,
           // The logo goes over the footage only when the client's own videos show it.
           logoUrl: input.show_logo === false ? undefined : publicUrl(admin, BUCKET, input.logo_path),
-          logo: input.show_logo === false ? undefined : { x: rect.x, y: rect.y, width: rect.width },
+          logo: input.show_logo === false ? undefined : { x: box.x, y: box.y, width: box.width, end: box.end },
           uploadUrl: signed.signedUrl,
           frameUploads,
           audioUrl: s.footage_first_path && s.footage_first_path !== s.footage_path ? publicUrl(admin, BUCKET, s.footage_first_path) : undefined,

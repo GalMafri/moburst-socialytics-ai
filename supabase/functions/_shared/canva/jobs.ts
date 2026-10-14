@@ -94,7 +94,7 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
  */
 async function startVideoOption(admin: any, req: DesignRequest, settings: Settings, brandName: string, brief: Brief, optionIndex: number, logo: [number, number]): Promise<void> {
   const { data: client } = await admin.from("clients").select("video_references, video_style").eq("id", req.client_id).maybeSingle();
-  const style = client?.video_style?.profile as { logo?: string; people?: string } | undefined;
+  const style = client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string } | undefined;
   const videoRefs = (Array.isArray(client?.video_references) ? client.video_references : [])
     .map((r: { path?: unknown }) => String(r?.path ?? "")).filter(Boolean).slice(0, 3);
   const title = `${brandName} ${req.platform ?? ""} video ${optionIndex + 1}`.replace(/\s+/g, " ");
@@ -119,6 +119,9 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
       footage_upload: req.footage_path ?? null,
       // Logo and people as the client's own videos have them; a filmed clip keeps the logo.
       show_logo: req.footage_path ? true : style ? style.logo !== "none" : true,
+      // Where and when, as in the client's videos; a filmed clip keeps the spot its posts use.
+      logo_at: req.footage_path ? null : style?.logo_at ?? null,
+      logo_width: req.footage_path ? null : style?.logo_width ?? null,
       people: style?.people ?? "none",
     },
   });

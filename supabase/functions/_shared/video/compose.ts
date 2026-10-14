@@ -24,6 +24,25 @@ export const TIMING = {
 
 export interface LogoBox { x: number; y: number; width: number }
 
+/** The closing logo fades in over this long, this long before the end. */
+export const LOGO_END = { fade: 0.5, lead: 1.6 } as const;
+
+/**
+ * Where the logo file sits in a new video, as in the client's own videos: at
+ * one spot of the frame throughout, or centered over the close. Margins keep
+ * it clear of the platform's own buttons and captions.
+ */
+export function videoLogoBox(at: string, widthShare: number, logoAspect: number): LogoBox & { end: boolean } {
+  const W = VIDEO_SIZE.width, H = VIDEO_SIZE.height;
+  const width = Math.round(W * Math.min(0.6, Math.max(0.08, widthShare)));
+  const height = Math.round(width / Math.max(0.2, logoAspect));
+  if (at === "end") return { x: Math.round((W - width) / 2), y: Math.round((H - height) / 2), width, end: true };
+  const [v, h] = at.split("-");
+  const x = h === "left" ? Math.round(W * 0.06) : h === "right" ? W - width - Math.round(W * 0.06) : Math.round((W - width) / 2);
+  const y = v === "bottom" ? Math.round(H * 0.84) - height : Math.round(H * 0.06);
+  return { x, y, width, end: false };
+}
+
 /** Where the hook's lettering sits on its transparent layer, in that layer's pixels. */
 export interface HookBox { x: number; y: number; width: number; height: number }
 
@@ -58,8 +77,8 @@ export interface ComposeInput {
   hook?: { crop: HookBox; at: { x: number; y: number; width: number } };
   /** The client's logo file; none when the client's videos show no logo over the footage. */
   logoUrl?: string;
-  /** Where the logo file sits, in VIDEO_SIZE pixels. */
-  logo?: LogoBox;
+  /** Where the logo file sits, in VIDEO_SIZE pixels; with end, only over the close. */
+  logo?: LogoBox & { end?: boolean };
   /** A signed upload URL for the finished MP4 (Supabase Storage, PUT). */
   uploadUrl: string;
   /** Signed upload URLs for stills of the footage alone, spread across it, read for stray writing. */
@@ -96,12 +115,14 @@ export function composeScript(input: ComposeInput): string {
     filter.push(input.hook
       ? `[${hookIn}:v]crop=${input.hook.crop.width}:${input.hook.crop.height}:${input.hook.crop.x}:${input.hook.crop.y},scale=${input.hook.at.width}:-1:flags=lanczos,format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`
       : `[${hookIn}:v]scale=${VIDEO_SIZE.width}:${VIDEO_SIZE.height},format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`);
-    filter.push(`[${last}][hook]overlay=${input.hook ? `${input.hook.at.x}:${input.hook.at.y}` : "0:0"}:shortest=1[v1]`);
+    // The text leaves as a closing logo arrives.
+    filter.push(`[${last}][hook]overlay=${input.hook ? `${input.hook.at.x}:${input.hook.at.y}` : "0:0"}:shortest=1${input.logo?.end && input.logoUrl ? ":enable='lt(t,@END@)'" : ""}[v1]`);
     last = "v1";
   }
   if (logoIn >= 0 && input.logo) {
-    filter.push(`[${logoIn}:v]scale=${Math.round(input.logo.width)}:-1:flags=lanczos,format=rgba[logo]`);
-    filter.push(`[${last}][logo]overlay=${Math.round(input.logo.x)}:${Math.round(input.logo.y)}:shortest=1[v2]`);
+    const closing = input.logo.end ? `,fade=t=in:st=@END@:d=${LOGO_END.fade}:alpha=1` : "";
+    filter.push(`[${logoIn}:v]scale=${Math.round(input.logo.width)}:-1:flags=lanczos,format=rgba${closing}[logo]`);
+    filter.push(`[${last}][logo]overlay=${Math.round(input.logo.x)}:${Math.round(input.logo.y)}:shortest=1${input.logo.end ? ":enable='gte(t,@END@)'" : ""}[v2]`);
     last = "v2";
   }
   filter.push(`[${last}]format=yuv420p[v]`);
@@ -120,10 +141,14 @@ export function composeScript(input: ComposeInput): string {
       `ffmpeg -hide_banner -loglevel error -y -ss "$T" -i clip.mp4 -frames:v 1 -vf scale=720:-2 -q:v 3 still${i}.jpg`,
       `curl -fsS --retry 3 -X PUT -H 'Content-Type: image/jpeg' -H 'x-upsert: true' --data-binary @still${i}.jpg ${shellQuote(url)} >/dev/null`,
     ]),
+    // A closing logo starts a moment before the footage ends.
+    ...(input.logo?.end ? [`END=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4 | awk '{ s = $1 - ${LOGO_END.lead}; printf "%.2f", (s < 0 ? 0 : s) }')`] : []),
+    `FILTER=${shellQuote(filter.join(";"))}`,
+    ...(input.logo?.end ? ['FILTER="${FILTER//@END@/$END}"'] : []),
     [
       "ffmpeg -hide_banner -loglevel error -y",
       inputs.join(" "),
-      `-filter_complex ${shellQuote(filter.join(";"))}`,
+      `-filter_complex "$FILTER"`,
       // The footage's own sound, when it has one.
       `-map "[v]" -map "${soundIn >= 0 ? soundIn : 0}:a?" -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k -shortest -movflags +faststart out.mp4`,
     ].join(" "),

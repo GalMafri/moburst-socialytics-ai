@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { REFERENCE_SECONDS, VIDEO_SIZE, cleanFootagePrompt, framesScript, parseFrames, clipScript, composeScript, footageTextPrompt, hookPlacement, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
+import { REFERENCE_SECONDS, VIDEO_SIZE, cleanFootagePrompt, framesScript, parseFrames, videoLogoBox, clipScript, composeScript, footageTextPrompt, hookPlacement, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
 import { parseVideoBriefs, parseVideoStyle, videoPlannerPrompt, videoStylePrompt, VIDEO_SECONDS } from "../canva/options";
 import { hookPrompt } from "./hook";
 
@@ -192,6 +192,45 @@ describe("videos in the client's own video style", () => {
     expect(script).not.toContain("logo.png");
     expect(script).toContain("[base]format=yuv420p[v]");
     expect(script).toContain('-map "0:a?"');
+  });
+});
+
+describe("the logo where and when the client's own videos show it", () => {
+  it("reads where the logo sits and how big it is", () => {
+    const style = parseVideoStyle(JSON.stringify({ format: "3D explainer", logo: "shown", logo_at: "end", logo_width: 0.3 }))!;
+    expect(style.logo_at).toBe("end");
+    expect(style.logo_width).toBe(0.3);
+    expect(parseVideoStyle(JSON.stringify({ format: "talks", logo: "shown", logo_at: "somewhere", logo_width: 4 }))).not.toHaveProperty("logo_at");
+    expect(parseVideoStyle(JSON.stringify({ format: "reels", logo: "none", logo_at: "top-left" }))).not.toHaveProperty("logo_at");
+  });
+  it("tells the planner to end the footage the way the client's videos end before their logo", () => {
+    const style = parseVideoStyle(JSON.stringify({ format: "3D explainer", people: "none", on_screen_text: "captions", logo: "shown", logo_at: "end", logo_width: 0.3 }))!;
+    const p = videoPlannerPrompt({ brand: "Moburst", platform: "Instagram", copy: "c", voice: null, count: 3, postCount: 24, recent: "", style });
+    expect(p).toContain("close on their logo");
+    expect(p).toContain("- logo: closes the video");
+  });
+  it("puts a corner logo inside the frame's margins and a closing logo in the middle", () => {
+    const corner = videoLogoBox("top-left", 0.15, 3);
+    expect(corner).toMatchObject({ x: Math.round(VIDEO_SIZE.width * 0.06), y: Math.round(VIDEO_SIZE.height * 0.06), end: false });
+    const right = videoLogoBox("bottom-right", 0.15, 3);
+    expect(right.x + right.width).toBeLessThan(VIDEO_SIZE.width);
+    expect(right.y + right.width / 3).toBeLessThanOrEqual(VIDEO_SIZE.height * 0.84 + 1);
+    const end = videoLogoBox("end", 0.3, 3);
+    expect(end.end).toBe(true);
+    expect(end.x * 2 + end.width).toBe(VIDEO_SIZE.width);
+  });
+  it("fades a closing logo in over the last moments, and takes the text off as it arrives", () => {
+    const script = composeScript({ footageUrl: "https://s/f.mp4", uploadUrl: "https://s/up", overlayUrl: "https://s/h.png", logoUrl: "https://s/l.png", logo: { x: 378, y: 900, width: 324, end: true } });
+    expect(script).toContain("END=$(ffprobe");
+    expect(script).toContain('FILTER="${FILTER//@END@/$END}"');
+    expect(script).toContain("gte(t,@END@)");
+    expect(script).toContain("lt(t,@END@)");
+    expect(script).toContain('-filter_complex "$FILTER"');
+  });
+  it("keeps a corner logo on for the whole video", () => {
+    const script = composeScript({ footageUrl: "https://s/f.mp4", uploadUrl: "https://s/up", logoUrl: "https://s/l.png", logo: { x: 65, y: 115, width: 162 } });
+    expect(script).not.toContain("@END@");
+    expect(script).not.toContain("END=");
   });
 });
 

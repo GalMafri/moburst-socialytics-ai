@@ -300,10 +300,17 @@ export interface VideoStyle {
   text_style: string;
   /** Whether the brand's logo shows over the footage. */
   logo: "none" | "shown";
+  /** When the logo shows: only at the close, or throughout at one spot of the frame. */
+  logo_at?: LogoAt;
+  /** The logo's width as a share of the frame's width, as in the client's videos. */
+  logo_width?: number;
   sound: string;
   /** Other formats the videos use, such as filmed talks. */
   other_formats: string;
 }
+
+export const LOGO_SPOTS = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"] as const;
+export type LogoAt = "end" | typeof LOGO_SPOTS[number];
 
 /** The instruction for reading a client's videos from their stills. */
 export function videoStylePrompt(brand: string, videos: number, framesPer: number): string {
@@ -312,7 +319,7 @@ export function videoStylePrompt(brand: string, videos: number, framesPer: numbe
     `Describe how ${brand}'s videos look and move, so that new videos can be made in the same style.`,
     "If the videos use more than one format, describe the one that can be made without filming real people (for example animation, 3D, or made-up characters), and name the others in other_formats.",
     "Reply with JSON only:",
-    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","sound":"music, voice or effects","other_formats":"other formats, or empty"}',
+    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","logo_at":"end" when the logo shows only at the close, else where it sits throughout: "top-left", "top-center", "top-right", "bottom-left", "bottom-center" or "bottom-right","logo_width":the width of the logo as a share of the width of the frame, for example 0.18,"sound":"music, voice or effects","other_formats":"other formats, or empty"}',
   ].join("\n");
 }
 
@@ -333,7 +340,19 @@ export function parseVideoStyle(text: string): VideoStyle | null {
     on_screen_text: onScreen === "captions" ? "captions" : onScreen === "titles" ? "titles" : "none",
     text_style: str("text_style"),
     logo: str("logo").toLowerCase() === "shown" ? "shown" : "none",
+    ...logoTiming(o),
     sound: str("sound"), other_formats: str("other_formats"),
+  };
+}
+
+/** Where and how big the logo is in the client's videos, when the reply says so plainly. */
+function logoTiming(o: Record<string, unknown>): { logo_at?: LogoAt; logo_width?: number } {
+  if (String(o?.logo ?? "").toLowerCase() !== "shown") return {};
+  const at = String(o?.logo_at ?? "").toLowerCase().trim();
+  const width = Number(o?.logo_width);
+  return {
+    ...(at === "end" || (LOGO_SPOTS as readonly string[]).includes(at) ? { logo_at: at as LogoAt } : {}),
+    ...(Number.isFinite(width) && width >= 0.05 && width <= 0.8 ? { logo_width: Math.round(width * 1000) / 1000 } : {}),
   };
 }
 
@@ -348,6 +367,7 @@ export function styleLines(brand: string, s: VideoStyle): string {
     s.look ? `- look: ${s.look}` : "",
     `- text over the footage: ${s.on_screen_text === "none" ? "none" : `${s.on_screen_text}, ${s.text_style}`}`,
     s.sound ? `- sound: ${s.sound}` : "",
+    s.logo === "none" ? "- logo: none over the footage" : s.logo_at === "end" ? "- logo: closes the video, laid over the last moments" : s.logo_at ? `- logo: ${s.logo_at.replace("-", " ")} throughout` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -376,7 +396,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
       args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
       `A video model makes the footage, with short clips of these videos as its reference, and with sound; it can cut between shots. The new video looks and moves like ${args.brand}'s own videos: the same kind of subjects, shots, cuts, camera, light and grade.`,
       "For each option give:",
-      `- footage: the video for the video model in three to five sentences, shot by shot (two to four shots, each with its seconds), in the style of ${args.brand}'s videos, all in sharp focus. It holds no lettering, numbers, signs, logos or brand marks, no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing), and names no brand. ${people} It is whole scenes: no band, panel or empty area kept for text.`,
+      `- footage: the video for the video model in three to five sentences, shot by shot (two to four shots, each with its seconds), in the style of ${args.brand}'s videos, all in sharp focus. It holds no lettering, numbers, signs, logos or brand marks, no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing), and names no brand. ${people} It is whole scenes: no band, panel or empty area kept for text.${s.logo === "shown" && s.logo_at === "end" ? ` ${args.brand}'s videos close on their logo, which is laid over the last moments afterwards: the last shot ends the way their videos end before the logo.` : ""}`,
       `- seconds: the length, from ${VIDEO_SECONDS.min} to ${VIDEO_SECONDS.max}.`,
       s.on_screen_text === "none"
         ? `${args.brand}'s videos carry no text over the footage, so this video carries none: the copy goes with the post.`
