@@ -67,6 +67,8 @@ function footageRules(people: string | undefined, sceneWords: string[] = []): st
     ? `Lettering only as these names, spelled exactly: ${sceneWords.map((w) => `"${w}"`).join(", ")}; no other text, captions, subtitles, signs, logos, watermarks or real brand marks anywhere in frame`
     : "No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame";
   return ` Vertical 9:16, every part in sharp focus. ${lettering}, and no screens, dashboards, charts, documents or interfaces. ` +
+    // Sportswear marks are what the video model adds most often, and the hardest to clean off moving feet.
+    "Boots, shoes, socks, clothing and balls are plain, with no maker's marks: no swooshes, stripes, logos or emblems. " +
     (people === "fictional" ? "Any people are made-up characters, never real or famous people." : "No real or identifiable people.");
 }
 
