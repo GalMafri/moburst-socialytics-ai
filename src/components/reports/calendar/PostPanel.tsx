@@ -282,7 +282,7 @@ export function PostPanel({
                     <p className="text-sm font-semibold">{videoDesigns ? "Video" : isCarouselPost ? "Carousel" : "Design"}</p>
                     {designRequest?.status !== "needs_filming" && (
                       <p className="t-secondary">{videoDesigns
-                        ? "Made in your brand's video style, with the post's hook, your logo and sound."
+                        ? "Made in the style of your brand's own videos, with sound. Text and logo appear the way your videos use them."
                         : "Made in your brand's style, with your logo and the post's words."}</p>
                     )}
                   </div>
