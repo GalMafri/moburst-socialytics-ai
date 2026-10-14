@@ -173,6 +173,7 @@ describe("videos in the client's own video style", () => {
     const p = videoPlannerPrompt({ brand: "Moburst", platform: "Instagram", copy: "c", voice: null, count: 3, postCount: 24, recent: "", style: captioned });
     expect(p).toContain("- headline: the text over the footage");
     expect(p).toContain("white sentence-case captions near the bottom");
+    expect(p).toContain("no box, band, panel or overlay behind the text unless their videos have one");
     expect(p).toContain("no real or identifiable person");
   });
   it("asks for the style from the stills, in order", () => {

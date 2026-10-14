@@ -402,7 +402,7 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
         ? `${args.brand}'s videos carry no text over the footage, so this video carries none: the copy goes with the post.`
         : [
             `- headline: the text over the footage, written in ${args.brand}'s voice from the copy, in the copy's language, the way ${args.brand}'s videos put text on screen. One line of at most 8 words, optionally a second, shorter line.`,
-            `- text: one sentence on how it looks and where it sits, taken from the text in ${args.brand}'s videos (${s.text_style || s.on_screen_text}).`,
+            `- text: one sentence on how it looks and where it sits, taken from the text in ${args.brand}'s videos (${s.text_style || s.on_screen_text}). Keep their treatment as it is: no box, band, panel or overlay behind the text unless their videos have one.`,
           ].join("\n"),
       "The options differ from each other in footage. Put the strongest first: it is the one that will be made.",
       s.on_screen_text === "none"
