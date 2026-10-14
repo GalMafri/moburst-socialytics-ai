@@ -105,6 +105,17 @@ export function PostPanel({
     },
   });
   const designsReady = !!designSettings?.confirmed_at;
+  // Staff see when a client's social accounts are not connected: without them
+  // there are no posts or videos of its own for designs to learn from.
+  const { data: accountsConnected } = useQuery({
+    queryKey: ["client-accounts-connected", clientId],
+    enabled: !!clientId && open && isMoburstStaff,
+    queryFn: async () => {
+      const { count, error } = await supabase.from("sprout_profiles").select("id", { count: "exact", head: true }).eq("client_id", clientId).eq("is_active", true);
+      if (error) throw error;
+      return (count ?? 0) > 0;
+    },
+  });
   const startDesigns = async () => {
     if (!clientId || !post) return;
     setStartingDesigns(true);
@@ -272,6 +283,11 @@ export function PostPanel({
 
             {/* Design tab */}
             <TabsContent value="design" className="mt-4 space-y-4">
+              {isMoburstStaff && accountsConnected === false && (
+                <div className="glass-inner p-4 border border-[#f5b14c]/30">
+                  <p className="t-body">This client's social accounts aren't connected in Sprout, so its designs and videos have none of its own posts to learn from yet. Connect them in Client setup.</p>
+                </div>
+              )}
               {plannedVideo && !designsReady && (
                 <div className="glass-inner p-4 flex items-start justify-between gap-3 flex-wrap">
                   <p className="t-body min-w-0">

@@ -61,6 +61,18 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
     },
   });
 
+  // Clients whose social accounts are connected in Sprout; the others have no
+  // posts or videos of their own for designs to learn from.
+  const { data: connected } = useQuery({
+    queryKey: ["calendar-week-connected", clientIds.join(",")],
+    enabled: clientIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("sprout_profiles").select("client_id").in("client_id", clientIds).eq("is_active", true).limit(5000);
+      if (error) throw error;
+      return new Set<string>((data || []).map((r: { client_id: string }) => r.client_id));
+    },
+  });
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
       {DAYS.map((day, i) => {
@@ -92,6 +104,8 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                   <p className="t-label">Text post</p>
                 ) : filmed.has(p.post_key) ? (
                   <p className="t-label">Filmed video</p>
+                ) : connected && !connected.has(p.client_id) ? (
+                  <p className="t-label inline-flex items-center gap-1 !text-[#f5b14c]"><ImageOff className="h-3 w-3" aria-hidden />Accounts not connected</p>
                 ) : (
                   <p className="t-label inline-flex items-center gap-1"><ImageOff className="h-3 w-3" aria-hidden />No design yet</p>
                 )}
