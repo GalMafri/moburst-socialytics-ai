@@ -235,7 +235,9 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       if (error) throw new Error(`Could not store the footage: ${error.message}`);
       s.footage_path = path;
       s.footage_first_path = path;
+      // New footage starts its own count of cleans and assemblies.
       delete s.cleans;
+      delete s.composes;
       job.step = "compose"; return "next";
     }
     case "compose": {
