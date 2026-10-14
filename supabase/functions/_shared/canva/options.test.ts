@@ -67,6 +67,14 @@ describe("optionStates", () => {
     const jobs = [{ option_index: 1, slide_count: 2, status: "failed", step: "edit" }, { option_index: 1, slide_count: 2, status: "running", step: "generate" }];
     expect(optionStates(jobs as never)).toEqual([{ status: "failed", step: "failed" }]);
   });
+  it("counts a canceled option as ended, so its request starts another or settles", () => {
+    const jobs = [
+      { option_index: 0, slide_count: null, status: "failed", step: "compose_wait" },
+      { option_index: 1, slide_count: null, status: "canceled", step: "references" },
+    ];
+    expect(optionStates(jobs as never)).toEqual([{ status: "failed", step: "failed" }, { status: "failed", step: "failed" }]);
+    expect(requestProgress(optionStates(jobs as never), 1, 3)).toMatchObject({ status: "preparing", start_brief: 2 });
+  });
   it("treats a single design as an option of one", () => {
     expect(optionStates([{ option_index: 0, slide_count: null, status: "done", step: "finished" }] as never)).toEqual([{ status: "done", step: "finished" }]);
   });

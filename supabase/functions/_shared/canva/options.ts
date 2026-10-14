@@ -235,7 +235,8 @@ export function optionStates(jobs: Array<JobState & { option_index: number; slid
   return [...byOption.keys()].sort((a, b) => a - b).map((k) => {
     const slides = byOption.get(k)!;
     const expected = slides[0].slide_count ?? 1;
-    if (slides.some((j) => j.status === "failed")) return { status: "failed", step: "failed" };
+    // A canceled option has ended as surely as a failed one; counting it as running left its request waiting forever.
+    if (slides.some((j) => j.status === "failed" || j.status === "canceled")) return { status: "failed", step: "failed" };
     if (slides.length >= expected && slides.every((j) => j.status === "done")) return { status: "done", step: "finished" };
     // A video counts as designing until its footage is ready; the join is its finishing.
     // A filmed clip needs no footage made: its hook and logo are its finishing.
