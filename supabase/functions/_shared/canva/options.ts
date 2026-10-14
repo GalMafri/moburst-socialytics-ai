@@ -190,7 +190,7 @@ export function parseBriefs(text: string, library: string[] = []): Brief[] {
   return out;
 }
 
-export type JobState = { status: "queued" | "running" | "done" | "failed"; step: string };
+export type JobState = { status: "queued" | "running" | "done" | "failed" | "canceled"; step: string };
 
 export interface RequestProgress {
   status: "preparing" | "ready" | "needs_staff";
