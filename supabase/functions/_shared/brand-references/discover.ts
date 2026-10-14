@@ -1,3 +1,4 @@
+import { encode as base64Encode } from 'https://deno.land/std@0.168.0/encoding/base64.ts';
 import { fetchSocialImage } from './mediaFetch.ts';
 import { defaultSproutCustomerId } from '../sprout/customer.ts';
 import { sproutCandidates, usableClassification, referenceFingerprint } from './candidates.ts';
@@ -36,9 +37,7 @@ async function imageBytes(url: string) {
   const bytes = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return { bytes, mime, base64: btoa(binary) };
+  return { bytes, mime, base64: base64Encode(bytes as unknown as ArrayBuffer) };
 }
 
 export async function discoverReferences(db: any, client: any, apiKey: string, force = false) {
@@ -77,8 +76,8 @@ export async function discoverReferences(db: any, client: any, apiKey: string, f
     if (page >= Number(result.paging?.total_pages || 1)) break;
   }
   const selectionStarted = Date.now();
-  // Every candidate may be looked at; the time budget below bounds the work, not a fixed count.
-  const candidates = sproutCandidates(posts, ids);
+  // The most recent feed posts (Stories are left out), within one function's compute.
+  const candidates = sproutCandidates(posts, ids).slice(0, 24);
   console.info('[brand-discovery] provider shape', JSON.stringify({ posts: posts.length, candidates: candidates.length,
     sample: posts.slice(0, 3).map(p => ({ keys: Object.keys(p), profile: p.customer_profile_id ?? p.dimensions?.customer_profile_id,
       category: p.content_category, media: p.visual_media?.slice?.(0, 1).map((m: any) => ({ type: m.media_type, keys: Object.keys(m), host: typeof m.media_url === 'string' ? new URL(m.media_url).hostname : null })) })) }));
