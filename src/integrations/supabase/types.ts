@@ -557,6 +557,7 @@ export type Database = {
           trends_keywords: string | null
           updated_at: string | null
           video_references: Json
+          video_style: Json | null
           website_url: string | null
         }
         Insert: {
@@ -596,6 +597,7 @@ export type Database = {
           trends_keywords?: string | null
           updated_at?: string | null
           video_references?: Json
+          video_style?: Json | null
           website_url?: string | null
         }
         Update: {
@@ -635,6 +637,7 @@ export type Database = {
           trends_keywords?: string | null
           updated_at?: string | null
           video_references?: Json
+          video_style?: Json | null
           website_url?: string | null
         }
         Relationships: []
