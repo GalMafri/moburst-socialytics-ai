@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { REFERENCE_SECONDS, VIDEO_SIZE, cleanFootagePrompt, framesScript, parseFrames, videoLogoBox, clipScript, composeScript, footageTextPrompt, hookPlacement, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
-import { filmedNeed, parseVideoBriefs, parseVideoStyle, sceneLettering, videoPlannerPrompt, videoStylePrompt, VIDEO_SECONDS } from "../canva/options";
+import { REFERENCE_SECONDS, VIDEO_SIZE, audioScript, captionFontName, captionWeight, captionsAss, cleanFootagePrompt, framesScript, parseAudio, parseFrames, videoLogoBox, clipScript, composeScript, footageTextPrompt, hookPlacement, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
+import { filmedNeed, parseShotBrief, parseVideoBriefs, parseVideoStyle, sceneLettering, shotBriefPrompt, videoPlannerPrompt, videoStylePrompt, VIDEO_SECONDS } from "../canva/options";
 import { hookPrompt } from "./hook";
 
 describe("video assembly", () => {
@@ -14,7 +14,7 @@ describe("video assembly", () => {
     expect(script).toContain("-o logo.png 'https://s/logo.png'");
     expect(script).toContain("scale=1080:1920");
     expect(script).toContain("overlay=365:92");
-    expect(script).toContain('-map "0:a?"');
+    expect(script).toContain("MAPS='-map [v] -map 0:a?'");
     expect(script).toContain("--data-binary @out.mp4 'https://s/upload?token=a'\"'\"'b'");
     expect(script.split("\n").pop()).toMatch(/^echo "COMPOSED /);
   });
@@ -107,7 +107,7 @@ describe("cleaned footage", () => {
     });
     expect(script).toContain("-o sound.mp4 'https://s/first.mp4'");
     expect(script).toContain("-i sound.mp4");
-    expect(script).toContain('-map "3:a?"');
+    expect(script).toContain("MAPS='-map [v] -map 3:a?'");
   });
   it("asks for every piece of writing and brand mark to go, keeping the rest", () => {
     expect(cleanFootagePrompt()).toMatch(/stripes or emblems of real brands/);
@@ -193,7 +193,7 @@ describe("videos in the client's own video style", () => {
     expect(script).not.toContain("hook.png");
     expect(script).not.toContain("logo.png");
     expect(script).toContain("[base]format=yuv420p[v]");
-    expect(script).toContain('-map "0:a?"');
+    expect(script).toContain("MAPS='-map [v] -map 0:a?'");
   });
 });
 
@@ -277,6 +277,53 @@ describe("clients whose own videos a video model cannot make", () => {
   it("asks the style read the question", () => {
     expect(videoStylePrompt("NewDay USA", 3, 8)).toContain('"generatable"');
     expect(videoStylePrompt("NewDay USA", 3, 8)).toContain("recording real screens");
+  });
+});
+
+describe("a filmed clip edited the way the client's filmed videos are", () => {
+  const style = parseVideoStyle(JSON.stringify({
+    format: "selfie talking-head clips", generatable: false, needs: "your attorney on camera",
+    filmed: { what: "the attorney talking to camera in his office", captions: "words", caption_style: "bold white sentence-case, key words in red", caption_font: "Montserrat", caption_color: "#FFFFFF", highlight_color: "#E4002B", caption_position: "lower-middle", caption_y: 0.76, title: "none", logo_at: "none", end_card_video: 1, end_card_seconds: 3 },
+  }))!;
+  it("reads how the client edits its filmed videos", () => {
+    expect(style.filmed).toMatchObject({ captions: "words", caption_font: "Montserrat", caption_color: "#ffffff", highlight_color: "#e4002b", caption_y: 0.76, title: "none", end_card_video: 1, end_card_seconds: 3 });
+    expect(style.filmed).not.toHaveProperty("logo_at");
+    expect(parseVideoStyle(JSON.stringify({ format: "3D", filmed: null }))).not.toHaveProperty("filmed");
+  });
+  it("names the caption font exactly as its file does, so the type never falls back", () => {
+    expect(captionFontName("Montserrat", 800)).toEqual({ name: "Montserrat ExtraBold", bold: false });
+    expect(captionFontName("Montserrat", 700)).toEqual({ name: "Montserrat", bold: true });
+    expect(captionWeight("bold white")).toBe(800);
+  });
+  it("captions a few words at a time where the client's captions sit, lighting the spoken word", () => {
+    const words = [{ word: "Rent?", start: 0.2, end: 0.7 }, { word: "That", start: 0.9, end: 1.1 }, { word: "is", start: 1.1, end: 1.25 }, { word: "money", start: 1.25, end: 1.6 }];
+    const ass = captionsAss(words, style.filmed!);
+    expect(ass).toContain("Style: Cap,Montserrat ExtraBold,78,");
+    expect(ass).toContain("{\\c&H002B00E4&}money");
+    expect(ass).toContain("Dialogue: 0,0:00:00.20,0:00:00.70,Cap,,0,0,0,,{\\c&H002B00E4&}Rent?");
+    const marginV = Math.round((1 - 0.76) * 1920 - 78 * 0.6);
+    expect(ass).toContain(`,2,90,90,${marginV},1`);
+  });
+  it("takes the clip's sound for transcription", () => {
+    expect(audioScript({ clipUrl: "https://s/clip", uploadUrl: "https://s/up" })).toContain("-vn -ac 1 -ar 16000");
+    expect(parseAudio("AUDIO 120000 21.5")).toEqual({ bytes: 120000, seconds: 21.5 });
+    expect(parseAudio("nothing")).toBeNull();
+  });
+  it("burns the captions in the client's font and ends on its own end card when that is vertical", () => {
+    const script = composeScript({ footageUrl: "https://s/f.mp4", uploadUrl: "https://s/up", captions: { assB64: "QQ==", font: "Montserrat", weight: 800 }, endCard: { url: "https://s/own.mp4", seconds: 3 } });
+    expect(script).toContain("ass=captions.ass:fontsdir=fonts");
+    expect(script).toContain("family=Montserrat:wght@800");
+    expect(script).toContain("-sseof -3.0 -i endsrc.mp4");
+    expect(script).toContain('if [ "$EC_H" -gt "$EC_W" ]');
+    expect(script).toContain("concat=n=2:v=1:a=1[vout][aout]");
+  });
+  it("writes a shot brief from the post in the client's filmed format", () => {
+    const p = shotBriefPrompt({ brand: "Bader Law", platform: "Instagram", copy: "Insurance called?", reason: "it needs Seth Bader on camera", format: "the attorney talking to camera in his office" });
+    expect(p).toContain("filmed because it needs Seth Bader on camera");
+    expect(p).toContain("the attorney talking to camera in his office");
+    const brief = parseShotBrief(JSON.stringify({ who: "Seth", where: "his office", framing: "selfie, chest up", seconds: 20, shots: [{ seconds: 20, what: "Seth talks to camera" }], say: "Insurance called already?", notes: "" }));
+    expect(brief).toMatchObject({ who: "Seth", seconds: 20, say: "Insurance called already?" });
+    expect(parseShotBrief(JSON.stringify({ who: "Seth" }))).toBeNull();
   });
 });
 

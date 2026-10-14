@@ -145,6 +145,17 @@ export async function createDesigns(args: { clientId: string; reportId?: string;
   return { request: data.request as DesignRequest };
 }
 
+/** What to film for a filmed video post. Moburst staff and admins only. */
+export interface ShotBrief {
+  who: string;
+  where: string;
+  framing: string;
+  seconds: number;
+  shots: Array<{ seconds: number; what: string }>;
+  say: string;
+  notes: string;
+}
+
 /** The largest filmed clip accepted (the storage bucket's own limit). */
 export const MAX_CLIP_BYTES = 500 * 1024 * 1024;
 

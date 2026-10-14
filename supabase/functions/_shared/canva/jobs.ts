@@ -96,6 +96,10 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
  */
 async function startVideoOption(admin: any, req: DesignRequest, settings: Settings, brandName: string, brief: Brief, optionIndex: number, logo: [number, number]): Promise<void> {
   const { data: client } = await admin.from("clients").select("video_references, video_style").eq("id", req.client_id).maybeSingle();
+  // A filmed clip is edited the way the client's filmed videos are: captions, title, logo spot and their own end card.
+  const filmed = req.footage_path ? (client?.video_style?.profile?.filmed ?? null) : null;
+  const endSource = filmed?.end_card_video ? (Array.isArray(client?.video_references) ? client.video_references : [])[filmed.end_card_video - 1]?.path : null;
+  const endCard = endSource ? { url: admin.storage.from("design-references").getPublicUrl(endSource).data.publicUrl, seconds: filmed.end_card_seconds } : null;
   // A video made from the client's posts follows their posts, not their videos.
   const style = req.video_route === "posts" ? undefined : client?.video_style?.profile as { logo?: string; logo_at?: string; logo_width?: number; people?: string; scene_words?: string[] } | undefined;
   // A video from the client's posts takes nothing from their filmed videos, so no real person can carry over.
@@ -107,8 +111,8 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
     created_by: req.requested_by,
     design_request_id: req.id,
     option_index: optionIndex,
-    // A filmed clip is the footage: the hook is drawn and laid over it.
-    step: req.footage_path ? "hook" : "references",
+    // A filmed clip is the footage: its speech is captioned, then the hook is drawn and laid over it.
+    step: req.footage_path ? "transcribe" : "references",
     input: {
       kind: "video",
       title,
@@ -127,6 +131,8 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
       logo_at: req.footage_path ? null : style?.logo_at ?? null,
       logo_width: req.footage_path ? null : style?.logo_width ?? null,
       people: style?.people ?? "none",
+      filmed,
+      end_card: endCard,
       // Names the client's own scenes carry (made-up clubs, sponsors), kept when spelled exactly.
       scene_words: req.footage_path ? [] : style?.scene_words ?? [],
     },

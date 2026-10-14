@@ -22,7 +22,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
-import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, filmedNeed, parseBriefs, parseCarouselBriefs, parseVideoBriefs, plannerPrompt, recentLines, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
+import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, filmedNeed, parseBriefs, parseShotBrief, shotBriefPrompt, parseCarouselBriefs, parseVideoBriefs, plannerPrompt, recentLines, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
 import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
@@ -114,6 +114,15 @@ Deno.serve(async (req) => {
         visual: visual || null, footagePath: path, onCamera: filmed?.on_camera ?? "the speaker",
       });
       return json({ request });
+    }
+
+    // The shot brief for a filmed video post, written (again) on request. Moburst staff only.
+    if (body?.action === "shot_brief") {
+      const caller = await requireStaff(req);
+      const { data: request } = await admin.from("design_requests").select("id, client_id").eq("id", String(body.request_id || "")).maybeSingle();
+      if (!request) return json({ error: "That video post is not waiting to be filmed." }, 404);
+      void caller;
+      return json({ brief: await writeShotBrief(admin, request.id) });
     }
 
     // A video request that waited for the client's video style, planned now.
@@ -250,6 +259,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const filmedBy = generatedVideo ? filmedNeed(videoStyle?.profile) : null;
   if (filmedBy) {
     await admin.from("design_requests").update({ status: "needs_filming", stage: "ready", options_wanted: 0, on_camera: filmedBy, updated_at: new Date().toISOString() }).eq("id", request.id);
+    await writeShotBrief(admin, request.id).catch((e) => console.error("[design-request] shot brief:", e instanceof Error ? e.message : e));
     return;
   }
   const brand = client?.name ?? "the brand";
@@ -382,16 +392,48 @@ async function filmedReason(admin: any, clientId: string, copy: string, visual: 
 async function recordFilming(admin: any, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null; visual?: string | null }, reason: string): Promise<DesignRequest> {
   const fields = { post_copy: p.copy, platform: p.platform, format: p.format, visual_direction: p.visual ?? null, on_camera: reason, updated_at: new Date().toISOString() };
   const { data: known } = await admin.from("design_requests").select("id").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "needs_filming").limit(1).maybeSingle();
+  let row: DesignRequest;
   if (known) {
     const { data } = await admin.from("design_requests").update(fields).eq("id", known.id).select("*").single();
-    return data as DesignRequest;
+    row = data as DesignRequest;
+  } else {
+    const { data, error } = await admin.from("design_requests").insert({
+      ...fields, client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey, requested_by: p.requestedBy,
+      kind: "video", status: "needs_filming", stage: "ready", options_wanted: 0,
+    }).select("*").single();
+    if (error) throw new Error(error.message);
+    row = data as DesignRequest;
   }
-  const { data, error } = await admin.from("design_requests").insert({
-    ...fields, client_id: p.clientId, report_id: p.reportId, calendar_post_key: p.postKey, requested_by: p.requestedBy,
-    kind: "video", status: "needs_filming", stage: "ready", options_wanted: 0,
-  }).select("*").single();
-  if (error) throw new Error(error.message);
-  return data as DesignRequest;
+  // What to film, for Moburst staff, written while the answer goes back.
+  const work = writeShotBrief(admin, row.id).catch((e) => console.error("[design-request] shot brief:", e instanceof Error ? e.message : e));
+  // deno-lint-ignore no-explicit-any
+  const runtime = (globalThis as any).EdgeRuntime;
+  if (runtime?.waitUntil) runtime.waitUntil(work); else await work;
+  return row;
+}
+
+/**
+ * The shot brief for a filmed video post: who, where, framing, length, the
+ * shots and the lines to say, in the client's filmed format, written from the
+ * post's copy. Stored where only Moburst staff can read it.
+ */
+async function writeShotBrief(admin: any, requestId: string) {
+  const { data: request } = await admin.from("design_requests").select("id, client_id, calendar_post_key, platform, post_copy, visual_direction, on_camera").eq("id", requestId).maybeSingle();
+  if (!request) throw new Error("No such request.");
+  const { data: client } = await admin.from("clients").select("name, brand_identity, video_style").eq("id", request.client_id).maybeSingle();
+  const profile = client?.video_style?.profile;
+  const format = profile?.filmed?.what ?? (profile?.generatable === false ? profile?.format : undefined);
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
+  const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: 2000, messages: [{ role: "user", content: shotBriefPrompt({
+    brand: client?.name ?? "the brand", platform: request.platform ?? "social", copy: request.post_copy ?? "", visual: request.visual_direction,
+    reason: request.on_camera || "it needs footage filmed for it", format, voice: client?.brand_identity?.tone_of_voice ?? null,
+  }) }] } });
+  const brief = parseShotBrief(result.text);
+  if (!brief) throw new Error(`The shot brief came back unreadable: ${result.text.slice(0, 200)}`);
+  const { error } = await admin.from("design_shot_briefs").upsert({ request_id: request.id, client_id: request.client_id, calendar_post_key: request.calendar_post_key, brief, updated_at: new Date().toISOString() });
+  if (error) throw new Error(`Could not keep the shot brief: ${error.message}`);
+  return brief;
 }
 
 /** Read the client's video style from its own videos, unless that is already under way. */

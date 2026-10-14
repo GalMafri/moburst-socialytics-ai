@@ -311,9 +311,37 @@ export interface VideoStyle {
   generatable?: boolean;
   /** When it cannot: what a new video needs filmed or recorded, in a few words that follow "it needs". */
   needs?: string;
+  /** How the client's filmed or recorded videos (real people, screens) are edited, when it has any. */
+  filmed?: FilmedFormat;
   sound: string;
   /** Other formats the videos use, such as filmed talks. */
   other_formats: string;
+}
+
+/** How a client edits its filmed or recorded videos: what a filmed clip is made into. */
+export interface FilmedFormat {
+  /** What these videos are, e.g. "the attorney talking to camera in his office". */
+  what: string;
+  /** Captions of the speech: none, word by word, or a line at a time. */
+  captions: "none" | "words" | "lines";
+  /** How the captions look and where they sit. */
+  caption_style: string;
+  /** The Google Fonts family closest to the captions' type. */
+  caption_font: string;
+  caption_color: string;
+  /** The color the spoken word or key words light up in, or empty. */
+  highlight_color: string;
+  caption_position: "top" | "middle" | "lower-middle" | "bottom";
+  /** Where the captions' middle sits, as a share of the frame's height from the top, measured from the client's videos. */
+  caption_y?: number;
+  /** A title over the clip (the post's hook), and how it looks. */
+  title: "none" | "shown";
+  title_style: string;
+  logo_at?: LogoAt;
+  logo_width?: number;
+  /** Which of the client's videos (1-based) ends on an end card, and how many seconds it lasts; 0 when none does. */
+  end_card_video: number;
+  end_card_seconds: number;
 }
 
 export const LOGO_SPOTS = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"] as const;
@@ -326,7 +354,7 @@ export function videoStylePrompt(brand: string, videos: number, framesPer: numbe
     `Describe how ${brand}'s videos look and move, so that new videos can be made in the same style.`,
     "If the videos use more than one format, describe the one that can be made without filming real people (for example animation, 3D, or made-up characters), and name the others in other_formats.",
     "Reply with JSON only:",
-    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","logo_at":"end" when the logo shows only at the close, else where it sits throughout: "top-left", "top-center", "top-right", "bottom-left", "bottom-center" or "bottom-right","logo_width":the width of the logo as a share of the shorter side of the frame, for example 0.18,"scene_words":["each name, word or number that is part of the scenes themselves and belongs to the brand or its own world (its products, its made-up clubs and sponsors, its signs), spelled exactly as shown; leave out the brands and logos of other companies, and text laid over the footage"],"generatable":true when new videos in this style can be made entirely by a video model (animation, 3D, CGI, made-up people and places), false when the style rests on filming real people or real places, recording real screens, or showing the real products or packaging of the brand,"needs":"when generatable is false, what a new video needs filmed or recorded, in a few words that follow the words it needs, for example your team filmed in the office, or a screen recording of your app; empty otherwise","sound":"music, voice or effects","other_formats":"other formats, or empty"}',
+    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","logo_at":"end" when the logo shows only at the close, else where it sits throughout: "top-left", "top-center", "top-right", "bottom-left", "bottom-center" or "bottom-right","logo_width":the width of the logo as a share of the shorter side of the frame, for example 0.18,"scene_words":["each name, word or number that is part of the scenes themselves and belongs to the brand or its own world (its products, its made-up clubs and sponsors, its signs), spelled exactly as shown; leave out the brands and logos of other companies, and text laid over the footage"],"generatable":true when new videos in this style can be made entirely by a video model (animation, 3D, CGI, made-up people and places), false when the style rests on filming real people or real places, recording real screens, or showing the real products or packaging of the brand,"needs":"when generatable is false, what a new video needs filmed or recorded, in a few words that follow the words it needs, for example your team filmed in the office, or a screen recording of your app; empty otherwise","filmed":null when none of the videos are filmed or recorded (real people or screens), otherwise how those videos are edited: {"what":"what they are","captions":"none" or "words" or "lines","caption_style":"how the captions look and where they sit","caption_font":"the Google Fonts family closest to the caption type","caption_color":"#rrggbb","highlight_color":"#rrggbb of the word or key words that light up, or empty","caption_position":"top" or "middle" or "lower-middle" or "bottom","caption_y":where the middle of the captions sits as a share of the frame height from the top, for example 0.76,"title":"none" or "shown","title_style":"how a title over the clip looks and where it sits, or empty","logo_at":"end" or a spot such as "top-left", or "none","logo_width":share of the shorter side of the frame,"end_card_video":the number of the video that ends on a branded end card, or 0,"end_card_seconds":how many seconds that end card lasts},"sound":"music, voice or effects","other_formats":"other formats, or empty"}',
   ].join("\n");
 }
 
@@ -349,6 +377,7 @@ export function parseVideoStyle(text: string): VideoStyle | null {
     logo: str("logo").toLowerCase() === "shown" ? "shown" : "none",
     ...logoTiming(o),
     ...sceneWords(o),
+    ...filmedFormat(o?.filmed),
     ...(o?.generatable === false || String(o?.generatable).toLowerCase() === "false" ? { generatable: false, needs: str("needs") } : o?.generatable === true || String(o?.generatable).toLowerCase() === "true" ? { generatable: true } : {}),
     sound: str("sound"), other_formats: str("other_formats"),
   };
@@ -363,6 +392,77 @@ function logoTiming(o: Record<string, unknown>): { logo_at?: LogoAt; logo_width?
     ...(at === "end" || (LOGO_SPOTS as readonly string[]).includes(at) ? { logo_at: at as LogoAt } : {}),
     ...(Number.isFinite(width) && width >= 0.05 && width <= 0.8 ? { logo_width: Math.round(width * 1000) / 1000 } : {}),
   };
+}
+
+/** The client's filmed format read back, or nothing when the reply has none. */
+function filmedFormat(f: unknown): { filmed?: FilmedFormat } {
+  if (!f || typeof f !== "object") return {};
+  const o = f as Record<string, unknown>;
+  const str = (k: string, max = 300) => String(o[k] ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+  const hex = (k: string) => (/^#[0-9a-f]{6}$/i.test(str(k)) ? str(k).toLowerCase() : "");
+  const what = str("what");
+  if (!what) return {};
+  const captions = str("captions").toLowerCase();
+  const position = str("caption_position").toLowerCase();
+  const at = str("logo_at").toLowerCase();
+  const width = Number(o.logo_width);
+  const endVideo = Math.max(0, Math.min(6, Math.round(Number(o.end_card_video) || 0)));
+  const endSeconds = Number(o.end_card_seconds);
+  return {
+    filmed: {
+      what,
+      captions: captions === "words" ? "words" : captions === "lines" ? "lines" : "none",
+      caption_style: str("caption_style"),
+      caption_font: str("caption_font", 60).replace(/[^A-Za-z0-9 ]/g, "") || "Montserrat",
+      caption_color: hex("caption_color") || "#ffffff",
+      highlight_color: hex("highlight_color"),
+      caption_position: position === "top" || position === "middle" || position === "bottom" ? position : "lower-middle",
+      ...(Number.isFinite(Number(o.caption_y)) && Number(o.caption_y) >= 0.05 && Number(o.caption_y) <= 0.95 ? { caption_y: Math.round(Number(o.caption_y) * 1000) / 1000 } : {}),
+      title: str("title").toLowerCase() === "shown" ? "shown" : "none",
+      title_style: str("title_style"),
+      ...(at === "end" || (LOGO_SPOTS as readonly string[]).includes(at) ? { logo_at: at as LogoAt } : {}),
+      ...(Number.isFinite(width) && width >= 0.05 && width <= 0.8 ? { logo_width: Math.round(width * 1000) / 1000 } : {}),
+      end_card_video: endVideo,
+      end_card_seconds: endVideo && Number.isFinite(endSeconds) ? Math.max(0.5, Math.min(4, Math.round(endSeconds * 10) / 10)) : 0,
+    },
+  };
+}
+
+/** What to film or record for a post whose video is filmed, for Moburst staff. */
+export interface ShotBrief {
+  who: string;
+  where: string;
+  framing: string;
+  seconds: number;
+  shots: Array<{ seconds: number; what: string }>;
+  say: string;
+  notes: string;
+}
+
+/** The instruction for a post's shot brief, in the client's filmed format. */
+export function shotBriefPrompt(args: { brand: string; platform: string; copy: string; visual?: string | null; reason: string; format?: string; voice?: string | null }): string {
+  return [
+    `Write a shot brief for ${args.brand}'s team to film a new ${args.platform} vertical video (9:16) on a phone. It is filmed because ${args.reason}.`,
+    args.format ? `${args.brand}'s filmed videos are: ${args.format}. Match them.` : "",
+    `The post's copy:`,
+    `"""${args.copy}"""`,
+    args.visual ? `The post's planned visual: ${args.visual}` : "",
+    args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+    "Keep it short and practical: who is on camera, where, how it is framed, how long, the shots in order with their seconds, and the lines to say, written from the copy in the brand's voice, spoken naturally. Captions, title, logo and end card are added afterwards, so leave them out.",
+    'Reply with JSON only: {"who":"...","where":"...","framing":"...","seconds":20,"shots":[{"seconds":5,"what":"..."}],"say":"the lines to say","notes":"one or two tips, or empty"}',
+  ].filter(Boolean).join("\n");
+}
+
+/** The shot brief read back, or null when the reply is not the JSON asked for. */
+export function parseShotBrief(text: string): ShotBrief | null {
+  const start = text.indexOf("{"), end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  let o: Record<string, unknown>;
+  try { o = JSON.parse(text.slice(start, end + 1)); } catch { return null; }
+  const str = (k: string) => String(o?.[k] ?? "").trim().slice(0, 1200);
+  const shots = Array.isArray(o.shots) ? (o.shots as Array<Record<string, unknown>>).map((x) => ({ seconds: Math.max(1, Math.round(Number(x?.seconds) || 0)), what: String(x?.what ?? "").trim().slice(0, 400) })).filter((x) => x.what).slice(0, 8) : [];
+  if (!str("who") || !str("say") || !shots.length) return null;
+  return { who: str("who"), where: str("where"), framing: str("framing"), seconds: Math.max(5, Math.min(90, Math.round(Number(o.seconds) || 0) || shots.reduce((a, x) => a + x.seconds, 0))), shots, say: str("say"), notes: str("notes") };
 }
 
 /** The names and numbers in the client's own scenes, cleaned up; none when the reply gives none. */

@@ -85,6 +85,10 @@ export interface ComposeInput {
   frameUploads?: string[];
   /** The footage as first made, whose sound is kept when its picture was cleaned of writing. */
   audioUrl?: string;
+  /** Captions of a filmed clip's speech, typeset in the client's caption font (an ASS file, base64). */
+  captions?: { assB64: string; font: string; weight: number };
+  /** The client's own end card, cut from the end of one of its published videos and played after the clip. */
+  endCard?: { url: string; seconds: number };
 }
 
 /** Single-quote a value for bash. */
@@ -109,7 +113,7 @@ export function composeScript(input: ComposeInput): string {
   const soundIn = input.audioUrl ? next++ : -1;
   if (input.audioUrl) inputs.push("-i sound.mp4");
 
-  const filter = [`[0:v]${FIT},format=yuv420p[base]`];
+  const filter = [`[0:v]${FIT}${input.captions ? ",ass=captions.ass:fontsdir=fonts" : ""},format=yuv420p[base]`];
   let last = "base";
   if (hookIn >= 0) {
     filter.push(input.hook
@@ -126,6 +130,10 @@ export function composeScript(input: ComposeInput): string {
     last = "v2";
   }
   filter.push(`[${last}]format=yuv420p[v]`);
+  // The end card follows the clip, with its own sound (or silence); added by the script only when it is vertical.
+  const endFilter = input.endCard
+    ? `;[v]setsar=1[vm];[${soundIn >= 0 ? soundIn : 0}:a]aformat=sample_rates=48000:channel_layouts=stereo[am];[@EC@:v]${FIT},format=yuv420p[ecv];[@ECA@]aformat=sample_rates=48000:channel_layouts=stereo[eca];[vm][am][ecv][eca]concat=n=2:v=1:a=1[vout][aout]`
+    : "";
 
   return [
     "set -euo pipefail",
@@ -135,6 +143,20 @@ export function composeScript(input: ComposeInput): string {
     ...(input.overlayUrl ? [`curl -fsSL --retry 3 -o hook.png ${shellQuote(input.overlayUrl)}`] : []),
     ...(logoIn >= 0 && input.logoUrl ? [`curl -fsSL --retry 3 -o logo.png ${shellQuote(input.logoUrl)}`] : []),
     ...(input.audioUrl ? [`curl -fsSL --retry 3 -o sound.mp4 ${shellQuote(input.audioUrl)}`] : []),
+    // The caption font from Google Fonts (TrueType, as libass needs), and the captions.
+    ...(input.captions ? [
+      "mkdir -p fonts",
+      `FONT_CSS=$(curl -fsSL -A 'Mozilla/4.0' ${shellQuote(`https://fonts.googleapis.com/css2?family=${encodeURIComponent(input.captions.font).replace(/%20/g, "+")}:wght@${input.captions.weight}`)} || curl -fsSL -A 'Mozilla/4.0' 'https://fonts.googleapis.com/css2?family=Montserrat:wght@${input.captions.weight}')`,
+      `curl -fsSL -o fonts/caption.ttf "$(printf '%s' "$FONT_CSS" | grep -o 'https://[^)]*' | head -1)"`,
+      `printf '%s' ${shellQuote(input.captions.assB64)} | base64 -d > captions.ass`,
+    ] : []),
+    // The end card: the last seconds of one of the client's own videos, used only when that video is vertical.
+    ...(input.endCard ? [
+      `curl -fsSL --retry 3 -o endsrc.mp4 ${shellQuote(input.endCard.url)}`,
+      `EC_W=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 endsrc.mp4); EC_H=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 endsrc.mp4)`,
+      `if [ "$EC_H" -gt "$EC_W" ]; then ffmpeg -hide_banner -loglevel error -y -sseof -${input.endCard.seconds.toFixed(1)} -i endsrc.mp4 -t ${input.endCard.seconds.toFixed(1)} -c:v libx264 -preset veryfast -crf 16 -c:a aac endcard.mp4 && EC=1; else EC=0; fi`,
+      `if [ "\${EC:-0}" = 1 ] && [ "$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 endcard.mp4 | wc -l)" -lt 1 ]; then EC_SILENT=1; fi`,
+    ] : []),
     // Stills of the footage alone, before anything is laid over it.
     ...(input.frameUploads ?? []).flatMap((url, i, all) => [
       `T=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4 | awk '{ printf "%.2f", $1 * ${((i + 0.5) / all.length).toFixed(3)} }')`,
@@ -145,12 +167,19 @@ export function composeScript(input: ComposeInput): string {
     ...(input.logo?.end ? [`END=$(ffprobe -v error -show_entries format=duration -of csv=p=0 clip.mp4 | awk '{ s = $1 - ${LOGO_END.lead}; printf "%.2f", (s < 0 ? 0 : s) }')`] : []),
     `FILTER=${shellQuote(filter.join(";"))}`,
     ...(input.logo?.end ? ['FILTER="${FILTER//@END@/$END}"'] : []),
+    ...(input.endCard ? [
+      // With a vertical end card, the clip and the card are joined; otherwise the clip stands alone.
+      `if [ "\${EC:-0}" = 1 ]; then ECIN="-i endcard.mp4"; ECN=${inputs.length}; if [ "\${EC_SILENT:-0}" = 1 ]; then ECIN="$ECIN -f lavfi -t ${input.endCard.seconds.toFixed(1)} -i anullsrc=r=48000:cl=stereo"; ECA="$((ECN + 1)):a"; else ECA="$ECN:a"; fi; END_F=${shellQuote(endFilter)}; END_F="\${END_F//@EC@/$ECN}"; FILTER="$FILTER\${END_F//@ECA@/$ECA}"; MAPS='-map [vout] -map [aout]'; else ECIN=""; MAPS='-map [v] -map ${soundIn >= 0 ? soundIn : 0}:a?'; fi`,
+    ] : [`ECIN=""; MAPS='-map [v] -map ${soundIn >= 0 ? soundIn : 0}:a?'`]),
+    // The maps hold brackets; no file name may stand in for them.
+    "set -f",
     [
       "ffmpeg -hide_banner -loglevel error -y",
       inputs.join(" "),
+      "$ECIN",
       `-filter_complex "$FILTER"`,
       // The footage's own sound, when it has one.
-      `-map "[v]" -map "${soundIn >= 0 ? soundIn : 0}:a?" -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k -shortest -movflags +faststart out.mp4`,
+      `$MAPS -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k${input.endCard ? "" : " -shortest"} -movflags +faststart out.mp4`,
     ].join(" "),
     `curl -fsS --retry 3 -X PUT -H 'Content-Type: video/mp4' -H 'x-upsert: true' --data-binary @out.mp4 ${shellQuote(input.uploadUrl)} >/dev/null`,
     `echo "COMPOSED $(stat -c %s out.mp4) $(ffprobe -v error -show_entries format=duration -of csv=p=0 out.mp4) $(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 out.mp4 | wc -l)"`,
@@ -280,3 +309,118 @@ export function cleanFootagePrompt(allowed: string[] = [], found = ""): string {
   return "Remove every piece of writing from this video: letters, words, numbers, logos, brand marks, stripes or emblems of real brands, signs, boards, labels and printing, on any surface, including clothing, shoes, balls, walls, boards and screens. " + keep;
 }
 
+
+/** A spoken word and when it is said, in seconds from the clip's start. */
+export interface SpokenWord { word: string; start: number; end: number }
+
+/**
+ * The script that takes a filmed clip's sound for transcription: mono, 16 kHz,
+ * small enough to send on. Its last line is "AUDIO <bytes> <seconds>".
+ */
+export function audioScript(input: { clipUrl: string; uploadUrl: string }): string {
+  return [
+    "set -euo pipefail",
+    "command -v ffmpeg >/dev/null || (apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null)",
+    "W=$(mktemp -d) && cd \"$W\"",
+    `curl -fsSL --retry 3 -o clip ${shellQuote(input.clipUrl)}`,
+    "ffmpeg -hide_banner -loglevel error -y -i clip -vn -ac 1 -ar 16000 -b:a 48k audio.mp3",
+    `curl -fsS --retry 3 -X PUT -H 'Content-Type: audio/mpeg' -H 'x-upsert: true' --data-binary @audio.mp3 ${shellQuote(input.uploadUrl)} >/dev/null`,
+    `echo "AUDIO $(stat -c %s audio.mp3) $(ffprobe -v error -show_entries format=duration -of csv=p=0 clip)"`,
+  ].join("\n");
+}
+
+/** The audio script's answer: the stored sound and the clip's length, or null when it did not finish. */
+export function parseAudio(reply: string): { bytes: number; seconds: number } | null {
+  const m = /AUDIO (\d+) ([\d.]+)/.exec(reply);
+  return m ? { bytes: Number(m[1]), seconds: Number(m[2]) } : null;
+}
+
+/** "#rrggbb" as an ASS colour (&HAABBGGRR). */
+function assColor(hex: string, alpha = "00"): string {
+  const h = /^#([0-9a-f]{6})$/i.exec(hex)?.[1] ?? "ffffff";
+  return `&H${alpha}${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}`.toUpperCase();
+}
+
+/** Text safe inside an ASS line. */
+function assText(t: string): string {
+  return t.replace(/[{}\\]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** How heavy the caption type is, from how the client's captions look. */
+export function captionWeight(style: string): number {
+  const s = style.toLowerCase();
+  return /black|heavy|extra ?bold|ultra/.test(s) ? 900 : /semi ?bold|medium/.test(s) ? 600 : /bold|thick|chunky/.test(s) ? 800 : 700;
+}
+
+/**
+ * Captions of a filmed clip's speech, as an ASS file for a 1080x1920 frame,
+ * typeset the way the client's own videos caption speech: a few words at a
+ * time (or a line), in its caption colour, the spoken word lit in its
+ * highlight colour when its videos do that.
+ */
+/**
+ * The family name a Google Fonts file of this weight carries: regular and bold
+ * are styles of the family, every other weight is a family of its own
+ * ("Montserrat ExtraBold"). The captions must name it exactly or the type falls back.
+ */
+export function captionFontName(family: string, weight: number): { name: string; bold: boolean } {
+  const named: Record<number, string> = { 100: "Thin", 200: "ExtraLight", 300: "Light", 500: "Medium", 600: "SemiBold", 800: "ExtraBold", 900: "Black" };
+  return weight === 700 ? { name: family, bold: true } : weight === 400 ? { name: family, bold: false } : { name: `${family} ${named[weight] ?? "Bold"}`, bold: false };
+}
+
+export function captionsAss(words: SpokenWord[], f: { captions: "none" | "words" | "lines"; caption_style: string; caption_font: string; caption_color: string; highlight_color: string; caption_position: string; caption_y?: number }): string {
+  const style = f.caption_style.toLowerCase();
+  const upper = /upper ?case|all caps|capitals/.test(style);
+  const perChunk = f.captions === "lines" ? 6 : 3;
+  const chunks: SpokenWord[][] = [];
+  let current: SpokenWord[] = [];
+  for (const w of words.filter((x) => assText(x.word))) {
+    const gap = current.length ? w.start - current[current.length - 1].end : 0;
+    if (current.length && (current.length >= perChunk || gap > 0.6 || /[.!?]$/.test(current[current.length - 1].word))) { chunks.push(current); current = []; }
+    current.push(w);
+  }
+  if (current.length) chunks.push(current);
+  const size = f.captions === "lines" ? 62 : 78;
+  // Where the client's own captions sit, when measured; else from where they are said to sit.
+  const [alignment, marginV] = typeof f.caption_y === "number"
+    ? [2, Math.max(60, Math.round((1 - f.caption_y) * 1920 - size * 0.6))]
+    : f.caption_position === "top" ? [8, 300] : f.caption_position === "middle" ? [5, 0] : f.caption_position === "bottom" ? [2, 330] : [2, 420];
+  const font = captionFontName(f.caption_font, captionWeight(f.caption_style));
+  const t = (x: number) => {
+    const cs = Math.max(0, Math.round(x * 100));
+    const h = Math.floor(cs / 360000), m = Math.floor((cs % 360000) / 6000), sec = Math.floor((cs % 6000) / 100), c = cs % 100;
+    return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}.${String(c).padStart(2, "0")}`;
+  };
+  const say = (w: string) => (upper ? assText(w).toUpperCase() : assText(w));
+  const lines: string[] = [];
+  for (const chunk of chunks) {
+    if (f.highlight_color && f.captions === "words") {
+      // The chunk stays on screen; the word being said lights up.
+      chunk.forEach((w, i) => {
+        const end = i + 1 < chunk.length ? chunk[i + 1].start : w.end;
+        // An override colour closes with "&" ({\\c&HBBGGRR&}); without it the colour is ignored.
+        const text = chunk.map((x, j) => (j === i ? `{\\c${assColor(f.highlight_color)}&}${say(x.word)}{\\c${assColor(f.caption_color)}&}` : say(x.word))).join(" ");
+        lines.push(`Dialogue: 0,${t(w.start)},${t(Math.max(end, w.start + 0.05))},Cap,,0,0,0,,${text}`);
+      });
+    } else {
+      lines.push(`Dialogue: 0,${t(chunk[0].start)},${t(chunk[chunk.length - 1].end)},Cap,,0,0,0,,${chunk.map((x) => say(x.word)).join(" ")}`);
+    }
+  }
+  return [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    "PlayResX: 1080",
+    "PlayResY: 1920",
+    "WrapStyle: 0",
+    "ScaledBorderAndShadow: yes",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    `Style: Cap,${font.name},${size},${assColor(f.caption_color)},${assColor(f.caption_color)},&H00000000,&H78000000,${font.bold ? -1 : 0},0,0,0,100,100,0,0,1,${/no (outline|stroke|shadow)/.test(style) ? 0 : 4},${/shadow/.test(style) ? 3 : 1},${alignment},90,90,${marginV},1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ...lines,
+    "",
+  ].join("\n");
+}

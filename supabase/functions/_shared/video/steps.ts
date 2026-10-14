@@ -35,7 +35,7 @@ import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
 import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
-import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, TIMING, VIDEO_SIZE, cleanFootagePrompt, framesScript, hookPlacement, videoLogoBox, parseFrames, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
+import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, TIMING, VIDEO_SIZE, audioScript, captionWeight, captionsAss, cleanFootagePrompt, framesScript, hookPlacement, parseAudio, videoLogoBox, parseFrames, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
 import { hookPrompt } from "./hook.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
 
@@ -154,6 +154,38 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       // A client whose videos carry no text over the footage gets no hook.
       job.step = s.hook_path || !input.copy?.length ? "footage_wait" : "hook"; return "next";
     }
+    case "transcribe": {
+      // A filmed clip is captioned the way the client's filmed videos are: its speech is transcribed first.
+      if (!input.footage_upload || !input.filmed || input.filmed.captions === "none") {
+        job.step = input.filmed && input.filmed.title === "none" ? "compose" : "hook"; return "next";
+      }
+      s.audio_tries = (s.audio_tries ?? 0) + 1;
+      if (s.audio_tries > 3) throw new Error("FINAL: The clip's sound could not be taken for its captions.");
+      const audioPath = `${base}/speech.mp3`;
+      const { data: up, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(audioPath, { upsert: true });
+      if (error || !up?.signedUrl) throw new Error(`Could not prepare the sound's upload: ${error?.message ?? "no URL"}`);
+      s.audio_path = audioPath;
+      s.audio_session = await startScript(audioScript({ clipUrl: await signedUrl(admin, FOOTAGE_BUCKET, input.footage_upload), uploadUrl: up.signedUrl }), `Socialytics clip sound ${job.id}`);
+      s.audio_checked_at = Date.now();
+      job.step = "transcribe_wait"; return "next";
+    }
+    case "transcribe_wait": {
+      if (recently(s.audio_checked_at)) return "wait";
+      s.audio_checked_at = Date.now();
+      const r = await checkScript(s.audio_session);
+      if (r.state === "running") return "wait";
+      await endScript(s.audio_session);
+      const got = r.state === "finished" ? parseAudio(r.reply) : null;
+      if (!got) {
+        console.error(`[video-worker] job ${job.id} sound:`, r.state === "failed" ? r.reason : r.reply.slice(0, 300));
+        job.step = "transcribe"; return "next";
+      }
+      s.clip_seconds = got.seconds;
+      const { data, error } = await admin.storage.from(BUCKET).download(s.audio_path);
+      if (error || !data) throw new Error(`Could not read the clip's sound: ${error?.message ?? "missing"}`);
+      s.words = await transcribeWords(await openaiKey(admin), data);
+      job.step = input.filmed.title === "none" ? "compose" : "hook"; return "next";
+    }
     case "hook": {
       s.hooks = (s.hooks ?? 0) + 1;
       if (s.hooks > MAX_HOOKS) throw new Error("FINAL: The video's title could not be drawn with the exact words.");
@@ -261,6 +293,9 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const { data: signed, error } = await admin.storage.from(BUCKET).createSignedUploadUrl(out, { upsert: true });
       if (error || !signed?.signedUrl) throw new Error(`Could not prepare the video's upload: ${error?.message ?? "no URL"}`);
       const [lw, lh] = input.logo_size;
+      // A filmed clip follows the client's filmed videos: their logo spot, captions and end card.
+      const filmed = input.footage_upload ? input.filmed : null;
+      if (filmed?.logo_at) { input.logo_at = filmed.logo_at; input.logo_width = filmed.logo_width ?? null; }
       // The logo where the client's own videos have it, else where its posts have it.
       // A vertical frame's shorter side is its width. A closing logo is never smaller than the client's posts show it.
       const box = input.logo_at
@@ -290,6 +325,10 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
           uploadUrl: signed.signedUrl,
           frameUploads,
           audioUrl: s.footage_first_path && s.footage_first_path !== s.footage_path ? publicUrl(admin, BUCKET, s.footage_first_path) : undefined,
+          captions: filmed && filmed.captions !== "none" && Array.isArray(s.words) && s.words.length
+            ? { assB64: base64Encode(new TextEncoder().encode(captionsAss(s.words, filmed)) as unknown as ArrayBuffer), font: filmed.caption_font, weight: captionWeight(filmed.caption_style) }
+            : undefined,
+          endCard: filmed && input.end_card?.url ? { url: input.end_card.url, seconds: input.end_card.seconds } : undefined,
         }),
         `Socialytics video ${job.id}`,
       );
@@ -490,6 +529,22 @@ async function stored(admin: any, bucket: string, path: string): Promise<boolean
   const { data, error } = await admin.storage.from(bucket).list(path.slice(0, at), { search: path.slice(at + 1), limit: 5 });
   if (error) throw new Error(`Could not look in storage: ${error.message}`);
   return (data ?? []).some((f: { name: string }) => f.name === path.slice(at + 1));
+}
+
+/** The clip's speech, word by word with timings (OpenAI transcription). An empty list when nothing is said. */
+async function transcribeWords(apiKey: string, audio: Blob): Promise<Array<{ word: string; start: number; end: number }>> {
+  const form = new FormData();
+  form.append("file", new File([audio], "speech.mp3", { type: "audio/mpeg" }));
+  form.append("model", "whisper-1");
+  form.append("response_format", "verbose_json");
+  form.append("timestamp_granularities[]", "word");
+  const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal: AbortSignal.timeout(120_000) });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(`Transcription ${resp.status}: ${text.slice(0, 300)}`);
+  const words = JSON.parse(text)?.words;
+  return Array.isArray(words)
+    ? words.map((w: { word?: unknown; start?: unknown; end?: unknown }) => ({ word: String(w.word ?? "").trim(), start: Number(w.start) || 0, end: Number(w.end) || 0 })).filter((w: { word: string }) => w.word)
+    : [];
 }
 
 async function openaiKey(admin: any): Promise<string> {

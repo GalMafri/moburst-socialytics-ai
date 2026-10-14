@@ -16,7 +16,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { DesignProgressCard } from "./DesignProgressCard";
-import { DESIGN_FEEDBACK_REASONS, currentDesign, isVideoMedia, type DesignRequest, type DesignVersion } from "@/lib/designRequests";
+import { DESIGN_FEEDBACK_REASONS, currentDesign, isVideoMedia, type DesignRequest, type DesignVersion, type ShotBrief } from "@/lib/designRequests";
 
 interface Props {
   versions: DesignVersion[];
@@ -45,9 +45,11 @@ interface Props {
   onMakeFromPosts?: () => void;
   /** Why the post's video is filmed, kept after a video from the posts was made. */
   filmedReason?: string | null;
+  /** What to film, for Moburst staff and admins only (null for everyone else). */
+  shotBrief?: ShotBrief | null;
 }
 
-export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason }: Props) {
+export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub, onCreate, creating, onUse, usingId, onFeedback, waitingForCopy, onCamera, textOnly, onUploadClip, uploadingClip, onMakeFromPosts, filmedReason, shotBrief }: Props) {
   const clipInput = useRef<HTMLInputElement>(null);
   const design = currentDesign(versions);
   const earlier = versions.filter((v) => v !== design);
@@ -74,7 +76,8 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
               <div className="grid gap-3 sm:grid-cols-2 text-left">
                 <div className="glass-inner p-4 space-y-3 flex flex-col">
                   <p className="text-sm font-semibold text-white">Film it</p>
-                  <p className="t-secondary flex-1">This video is filmed: {onCamera}. Upload the vertical clip and the post's hook and your logo go over it.</p>
+                  <p className="t-secondary flex-1">This video is filmed: {onCamera}. Upload the vertical clip and it's edited the way your own videos are.</p>
+                  {isStaff && <ShotBriefCard brief={shotBrief ?? null} />}
                   {onUploadClip && <ClipUpload input={clipInput} onUploadClip={onUploadClip} uploadingClip={uploadingClip} />}
                 </div>
                 {onMakeFromPosts && (
@@ -451,6 +454,34 @@ function ClipUpload({ input, onUploadClip, uploadingClip, compact }: { input: Re
         {uploadingClip ? "Uploading the clip" : compact ? "Upload a filmed clip" : "Upload the filmed clip"}
       </Button>
     </>
+  );
+}
+
+/** What to film for this post, written in the client's filmed format. Shown to Moburst staff and admins only. */
+function ShotBriefCard({ brief }: { brief: ShotBrief | null }) {
+  const [open, setOpen] = useState(false);
+  if (!brief) return <p className="t-label inline-flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" aria-hidden />Writing the shot brief</p>;
+  return (
+    <div className="rounded-[10px] border border-white/10 p-3 space-y-2">
+      <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className="text-sm font-semibold text-white">Shot brief <span className="t-label font-normal">(Moburst only)</span></span>
+        <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
+      </button>
+      {open && (
+        <div className="space-y-2 t-secondary">
+          <p><span className="text-white">Who:</span> {brief.who}</p>
+          {brief.where && <p><span className="text-white">Where:</span> {brief.where}</p>}
+          {brief.framing && <p><span className="text-white">Framing:</span> {brief.framing}</p>}
+          <p><span className="text-white">Length:</span> about {brief.seconds} seconds</p>
+          <ol className="list-decimal pl-5 space-y-1">
+            {brief.shots.map((s, i) => <li key={i}>{s.what} <span className="t-label">({s.seconds}s)</span></li>)}
+          </ol>
+          <p className="text-white">What to say</p>
+          <p className="whitespace-pre-line">{brief.say}</p>
+          {brief.notes && <p className="t-label">{brief.notes}</p>}
+        </div>
+      )}
+    </div>
   );
 }
 

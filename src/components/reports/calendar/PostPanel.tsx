@@ -17,7 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useDesignRequestForPost, useDesignRequests, useFilmedReasonForPost } from "./DesignRequestsContext";
 import { PostDesign } from "./PostDesign";
 import { CalendarPostActions } from "@/components/calendar/CalendarPostActions";
-import { createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback, uploadFilmedClip } from "@/lib/designRequests";
+import { createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback, uploadFilmedClip, type ShotBrief } from "@/lib/designRequests";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -120,6 +120,19 @@ export function PostPanel({
   });
   // A filmed post's video can instead be made in the look of the client's
   // posts; once chosen, making it again follows the same route.
+  // The shot brief for a filmed post: only Moburst staff and admins can read it.
+  const { data: shotBrief } = useQuery({
+    queryKey: ["shot-brief", clientId, post?._calendarPostKey],
+    enabled: !!clientId && open && isMoburstStaff && !!filmedReason && !!post?._calendarPostKey,
+    queryFn: async () => {
+      const { data, error } = await (supabase.from("design_shot_briefs" as any) as any)
+        .select("brief").eq("client_id", clientId).eq("calendar_post_key", post!._calendarPostKey).order("updated_at", { ascending: false }).limit(1).maybeSingle();
+      if (error) throw error;
+      return (data?.brief ?? null) as ShotBrief | null;
+    },
+    // Written a few seconds after the post is marked as filmed.
+    refetchInterval: (query) => (query.state.data ? false : 5000),
+  });
   const startDesigns = async (route?: "posts") => {
     if (!clientId || !post) return;
     setStartingDesigns(true);
@@ -327,6 +340,7 @@ export function PostPanel({
                     onCreate={() => void startDesigns()}
                     onMakeFromPosts={() => void startDesigns("posts")}
                     filmedReason={filmedReason}
+                    shotBrief={isMoburstStaff ? shotBrief ?? null : null}
                     creating={startingDesigns}
                     onUse={applyDesign}
                     usingId={usingId}
