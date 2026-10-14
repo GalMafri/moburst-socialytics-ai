@@ -114,15 +114,38 @@ Deno.serve(async (req) => {
       return json({ request });
     }
 
+    // A video request that waited for the client's video style, planned now.
+    // The video worker's own call.
+    if (body?.action === "replan") {
+      const caller = await requireStaff(req);
+      if (!caller.viaSecret) return json({ error: "Not allowed." }, 403);
+      const { data: request } = await admin.from("design_requests").select("*").eq("id", String(body.request_id || "")).maybeSingle();
+      if (!request || request.status !== "preparing") return json({ skipped: true });
+      const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", request.client_id).maybeSingle();
+      if (!settings) return json({ error: "No design settings." }, 400);
+      const work = plan(admin, request as DesignRequest, settings as Settings).catch(async (e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("[design-request] planning failed:", msg);
+        await admin.from("design_requests").update({ status: "needs_staff", error: msg, updated_at: new Date().toISOString() }).eq("id", request.id);
+      });
+      // deno-lint-ignore no-explicit-any
+      const runtime = (globalThis as any).EdgeRuntime;
+      if (runtime?.waitUntil) runtime.waitUntil(work); else await work;
+      return json({ planning: true });
+    }
+
     // The client's own published videos, kept so its video posts follow its
     // own video style. Staff or the project's own calls.
     if (body?.action === "video_references") {
       await requireStaff(req);
       const clientId = String(body.client_id || "");
-      const { data: client } = await admin.from("clients").select("id, sprout_customer_id").eq("id", clientId).maybeSingle();
+      const { data: client } = await admin.from("clients").select("id, name, sprout_customer_id").eq("id", clientId).maybeSingle();
       if (!client) return json({ error: "No such client." }, 404);
       const found = await discoverVideoReferences(admin, client);
-      if (found.refs.length) await admin.from("clients").update({ video_references: found.refs }).eq("id", clientId);
+      if (found.refs.length) {
+        await admin.from("clients").update({ video_references: found.refs, video_style: null }).eq("id", clientId);
+        await ensureStyleJob(admin, clientId, client.name ?? "the brand");
+      }
       return json(found);
     }
 
@@ -207,7 +230,16 @@ async function plan(admin: any, request: DesignRequest, settings: Settings): Pro
 }
 
 async function planNow(admin: any, request: DesignRequest, settings: Settings): Promise<void> {
-  const { data: client } = await admin.from("clients").select("name, brand_identity").eq("id", request.client_id).maybeSingle();
+  const { data: client } = await admin.from("clients").select("name, brand_identity, video_references, video_style").eq("id", request.client_id).maybeSingle();
+  // A video is planned from the client's own videos (14 Oct: "make videos in a
+  // similar style to their VIDEOS, not statics"). Until their style has been
+  // read, the request waits; the video worker plans it when the style is in.
+  const generatedVideo = request.kind === "video" && !request.footage_path;
+  const videoStyle = generatedVideo && Array.isArray(client?.video_style?.frames) && client.video_style.frames.length ? client.video_style : null;
+  if (generatedVideo && !videoStyle && Array.isArray(client?.video_references) && client.video_references.length) {
+    await ensureStyleJob(admin, request.client_id, client?.name ?? "the brand");
+    return;
+  }
   const brand = client?.name ?? "the brand";
   const voice = client?.brand_identity?.tone_of_voice ?? null;
 
@@ -215,7 +247,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   // brief can name the posts its layout builds on.
   const library: string[] = [];
   const content: unknown[] = [];
-  for (const path of settings.reference_paths.slice(0, MAX_LIBRARY)) {
+  for (const path of videoStyle ? videoStyle.frames as string[] : settings.reference_paths.slice(0, MAX_LIBRARY)) {
     const { data } = await admin.storage.from("design-references").download(path);
     if (!data) continue;
     const bytes = new Uint8Array(await data.arrayBuffer());
@@ -223,7 +255,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     const mediaType = /\.png$/i.test(path) ? "image/png" : /\.webp$/i.test(path) ? "image/webp" : "image/jpeg";
     library.push(path);
-    content.push({ type: "text", text: `Post ${library.length}:` });
+    content.push({ type: "text", text: `${videoStyle ? "Still" : "Post"} ${library.length}:` });
     content.push({ type: "image", source: { type: "base64", media_type: mediaType, data: btoa(bin) } });
   }
   if (!library.length) throw new Error("None of the client's reference posts could be read.");
@@ -238,7 +270,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const video = request.kind === "video";
   const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance };
   const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
-  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
+  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
@@ -249,7 +281,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
         messages: [{ role: "user", content: [...content, { type: "text", text: instruction }] }],
       },
     });
-    briefs = video ? parseVideoBriefs(result.text, library, { filmed: !!filmed }) : carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES, library) : parseBriefs(result.text, library);
+    briefs = video ? parseVideoBriefs(result.text, videoStyle ? [] : library, { filmed: !!filmed, textless: !!videoStyle && videoStyle.profile?.on_screen_text === "none" }) : carousel ? parseCarouselBriefs(result.text, CAROUSEL_SLIDES, library) : parseBriefs(result.text, library);
   }
   if (!briefs.length) throw new Error("The options could not be planned.");
   briefs = withRefs(briefs, library, recentList);
@@ -303,7 +335,7 @@ async function personOnCamera(copy: string, visual: string): Promise<string | nu
         messages: [{ role: "user", content: [{ type: "text", text:
           `A social video post is planned.\nCopy: """${copy.slice(0, 1500)}"""\nPlanned visual: """${visual || "(none given)"}"""\n` +
           "Does the video depend on a real person appearing on camera for the brand: its founder, an executive, a spokesperson, an expert or a team member speaking or presenting, named or not? " +
-          "Anonymous hands, objects, places, abstract motion, or people who are only an unidentifiable part of a scene (a crowd, players in a match) do not count. " +
+          "Anonymous hands, objects, places, abstract motion, people who are only an unidentifiable part of a scene (a crowd, players in a match), and made-up characters (fictional players or models in a generated scene) do not count. " +
           'Reply with JSON only: {"person": true or false, "who": "the person, as the copy or visual names them (a name when one is given, otherwise a short description such as an executive), or empty"}' }] }],
       },
     });
@@ -335,6 +367,16 @@ async function recordFilming(admin: any, p: { clientId: string; postKey: string;
   }).select("*").single();
   if (error) throw new Error(error.message);
   return data as DesignRequest;
+}
+
+/** Read the client's video style from its own videos, unless that is already under way. */
+async function ensureStyleJob(admin: any, clientId: string, brand: string): Promise<void> {
+  const { data: running } = await admin.from("canva_finish_jobs").select("id").eq("client_id", clientId)
+    .eq("input->>purpose", "style").in("status", ["queued", "running"]).limit(1);
+  if (running?.length) return;
+  const { error } = await admin.from("canva_finish_jobs").insert({ client_id: clientId, step: "style_cut", input: { kind: "video", purpose: "style", brand_name: brand } });
+  if (error) throw new Error(`Could not start reading the client's videos: ${error.message}`);
+  await wakeVideoWorker();
 }
 
 /** A post with nothing to design: its format is words alone. */

@@ -52,13 +52,14 @@ export function hookPlacement(box: HookBox, layer: { width: number; height: numb
 
 export interface ComposeInput {
   footageUrl: string;
-  /** The hook on a transparent PNG, the size of the frame. */
-  overlayUrl: string;
+  /** The hook on a transparent PNG, the size of the frame; none when the client's videos carry no text over the footage. */
+  overlayUrl?: string;
   /** The hook's lettering on that layer, and where it goes on the frame; without them the layer covers the frame as drawn. */
   hook?: { crop: HookBox; at: { x: number; y: number; width: number } };
-  logoUrl: string;
+  /** The client's logo file; none when the client's videos show no logo over the footage. */
+  logoUrl?: string;
   /** Where the logo file sits, in VIDEO_SIZE pixels. */
-  logo: LogoBox;
+  logo?: LogoBox;
   /** A signed upload URL for the finished MP4 (Supabase Storage, PUT). */
   uploadUrl: string;
   /** Signed upload URLs for stills of the footage alone, spread across it, read for stray writing. */
@@ -80,23 +81,38 @@ const FIT = `scale=${VIDEO_SIZE.width}:${VIDEO_SIZE.height}:force_original_aspec
  * any failing command stops it (set -e) with a non-zero exit.
  */
 export function composeScript(input: ComposeInput): string {
-  const { x, y, width } = input.logo;
-  const filter = [
-    `[0:v]${FIT},format=yuv420p[base]`,
-    input.hook
-      ? `[1:v]crop=${input.hook.crop.width}:${input.hook.crop.height}:${input.hook.crop.x}:${input.hook.crop.y},scale=${input.hook.at.width}:-1:flags=lanczos,format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`
-      : `[1:v]scale=${VIDEO_SIZE.width}:${VIDEO_SIZE.height},format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`,
-    `[2:v]scale=${Math.round(width)}:-1:flags=lanczos,format=rgba[logo]`,
-    `[base][hook]overlay=${input.hook ? `${input.hook.at.x}:${input.hook.at.y}` : "0:0"}:shortest=1[v1]`,
-    `[v1][logo]overlay=${Math.round(x)}:${Math.round(y)}:shortest=1,format=yuv420p[v]`,
-  ].join(";");
+  const inputs = ["-i clip.mp4"];
+  let next = 1;
+  const hookIn = input.overlayUrl ? next++ : -1;
+  if (input.overlayUrl) inputs.push("-loop 1 -i hook.png");
+  const logoIn = input.logoUrl && input.logo ? next++ : -1;
+  if (logoIn >= 0) inputs.push("-loop 1 -i logo.png");
+  const soundIn = input.audioUrl ? next++ : -1;
+  if (input.audioUrl) inputs.push("-i sound.mp4");
+
+  const filter = [`[0:v]${FIT},format=yuv420p[base]`];
+  let last = "base";
+  if (hookIn >= 0) {
+    filter.push(input.hook
+      ? `[${hookIn}:v]crop=${input.hook.crop.width}:${input.hook.crop.height}:${input.hook.crop.x}:${input.hook.crop.y},scale=${input.hook.at.width}:-1:flags=lanczos,format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`
+      : `[${hookIn}:v]scale=${VIDEO_SIZE.width}:${VIDEO_SIZE.height},format=rgba,fade=t=in:st=0:d=${TIMING.fadeIn}:alpha=1[hook]`);
+    filter.push(`[${last}][hook]overlay=${input.hook ? `${input.hook.at.x}:${input.hook.at.y}` : "0:0"}:shortest=1[v1]`);
+    last = "v1";
+  }
+  if (logoIn >= 0 && input.logo) {
+    filter.push(`[${logoIn}:v]scale=${Math.round(input.logo.width)}:-1:flags=lanczos,format=rgba[logo]`);
+    filter.push(`[${last}][logo]overlay=${Math.round(input.logo.x)}:${Math.round(input.logo.y)}:shortest=1[v2]`);
+    last = "v2";
+  }
+  filter.push(`[${last}]format=yuv420p[v]`);
+
   return [
     "set -euo pipefail",
     "command -v ffmpeg >/dev/null || (apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null)",
     "W=$(mktemp -d) && cd \"$W\"",
     `curl -fsSL --retry 3 -o clip.mp4 ${shellQuote(input.footageUrl)}`,
-    `curl -fsSL --retry 3 -o hook.png ${shellQuote(input.overlayUrl)}`,
-    `curl -fsSL --retry 3 -o logo.png ${shellQuote(input.logoUrl)}`,
+    ...(input.overlayUrl ? [`curl -fsSL --retry 3 -o hook.png ${shellQuote(input.overlayUrl)}`] : []),
+    ...(logoIn >= 0 && input.logoUrl ? [`curl -fsSL --retry 3 -o logo.png ${shellQuote(input.logoUrl)}`] : []),
     ...(input.audioUrl ? [`curl -fsSL --retry 3 -o sound.mp4 ${shellQuote(input.audioUrl)}`] : []),
     // Stills of the footage alone, before anything is laid over it.
     ...(input.frameUploads ?? []).flatMap((url, i, all) => [
@@ -106,14 +122,49 @@ export function composeScript(input: ComposeInput): string {
     ]),
     [
       "ffmpeg -hide_banner -loglevel error -y",
-      `-i clip.mp4 -loop 1 -i hook.png -loop 1 -i logo.png${input.audioUrl ? " -i sound.mp4" : ""}`,
-      `-filter_complex ${shellQuote(filter)}`,
+      inputs.join(" "),
+      `-filter_complex ${shellQuote(filter.join(";"))}`,
       // The footage's own sound, when it has one.
-      `-map "[v]" -map "${input.audioUrl ? "3" : "0"}:a?" -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k -shortest -movflags +faststart out.mp4`,
+      `-map "[v]" -map "${soundIn >= 0 ? soundIn : 0}:a?" -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -r 30 -c:a aac -b:a 160k -shortest -movflags +faststart out.mp4`,
     ].join(" "),
     `curl -fsS --retry 3 -X PUT -H 'Content-Type: video/mp4' -H 'x-upsert: true' --data-binary @out.mp4 ${shellQuote(input.uploadUrl)} >/dev/null`,
     `echo "COMPOSED $(stat -c %s out.mp4) $(ffprobe -v error -show_entries format=duration -of csv=p=0 out.mp4) $(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 out.mp4 | wc -l)"`,
   ].join("\n");
+}
+
+/** Stills taken from each of a client's own videos, to learn how its videos look. */
+export const STYLE_FRAMES = 8;
+
+/**
+ * The bash script that takes STYLE_FRAMES stills, spread evenly, from each of
+ * the client's own videos and uploads each. Its last line is "FRAMES <count>".
+ */
+export function framesScript(videos: Array<{ sourceUrl: string; uploads: string[] }>): string {
+  const lines = [
+    "set -euo pipefail",
+    "command -v ffmpeg >/dev/null || (apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null)",
+    "W=$(mktemp -d) && cd \"$W\"",
+  ];
+  let count = 0;
+  videos.forEach((v, i) => {
+    lines.push(`curl -fsSL --retry 3 -o v${i}.mp4 ${shellQuote(v.sourceUrl)}`, `D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 v${i}.mp4)`);
+    v.uploads.forEach((url, j) => {
+      lines.push(
+        `T=$(awk -v d="$D" 'BEGIN { printf "%.2f", d * ${((j + 0.5) / v.uploads.length).toFixed(4)} }')`,
+        `ffmpeg -hide_banner -loglevel error -y -ss "$T" -i v${i}.mp4 -frames:v 1 -vf scale=540:-2 -q:v 4 f${i}_${j}.jpg`,
+        `curl -fsS --retry 3 -X PUT -H 'Content-Type: image/jpeg' -H 'x-upsert: true' --data-binary @f${i}_${j}.jpg ${shellQuote(url)} >/dev/null`,
+      );
+      count++;
+    });
+  });
+  lines.push(`echo "FRAMES ${count}"`);
+  return lines.join("\n");
+}
+
+/** Whether the sandbox's reply says every still was taken and uploaded. */
+export function parseFrames(reply: string, count: number): boolean {
+  const m = /FRAMES\s+(\d+)/.exec(reply);
+  return !!m && Number(m[1]) === count;
 }
 
 /** The sandbox's reply, read: the finished file's size, length and audio streams, or null when it did not finish. */

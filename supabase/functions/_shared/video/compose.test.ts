@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { REFERENCE_SECONDS, VIDEO_SIZE, cleanFootagePrompt, clipScript, composeScript, footageTextPrompt, hookPlacement, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
-import { parseVideoBriefs, videoPlannerPrompt, VIDEO_SECONDS } from "../canva/options";
+import { REFERENCE_SECONDS, VIDEO_SIZE, cleanFootagePrompt, framesScript, parseFrames, clipScript, composeScript, footageTextPrompt, hookPlacement, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
+import { parseVideoBriefs, parseVideoStyle, videoPlannerPrompt, videoStylePrompt, VIDEO_SECONDS } from "../canva/options";
 import { hookPrompt } from "./hook";
 
 describe("video assembly", () => {
@@ -147,6 +147,51 @@ describe("hook placement", () => {
     });
     expect(script).toContain("crop=888:200:100:900,scale=880:-1");
     expect(script).toContain("overlay=90:1200:shortest=1");
+  });
+});
+
+describe("videos in the client's own video style", () => {
+  const style = parseVideoStyle(JSON.stringify({
+    format: "cinematic reels of fictional footballers in club kits", subjects: "one or two players in a purple-lit tunnel",
+    shots: "slow close-ups, 2 to 3 s each, hard cuts", camera: "slow push-in", look: "deep purple, low key", people: "fictional",
+    on_screen_text: "none", text_style: "", logo: "none", sound: "low drone and crowd", other_formats: "",
+  }))!;
+  it("reads the style, and plans from stills of the client's videos with made-up players and no text", () => {
+    expect(style.people).toBe("fictional");
+    expect(style.on_screen_text).toBe("none");
+    const p = videoPlannerPrompt({ brand: "LegaBot", platform: "Instagram", copy: "c", voice: null, count: 3, postCount: 16, recent: "", style, videos: 2, framesPer: 8 });
+    expect(p).toContain("stills from LegaBot's own published videos");
+    expect(p).toContain("cinematic reels of fictional footballers");
+    expect(p).toContain("made-up characters like the ones in the videos");
+    expect(p).toContain("carry no text over the footage, so this video carries none");
+    expect(p).not.toContain("- headline:");
+    const briefs = parseVideoBriefs(JSON.stringify({ options: [{ footage: "Shot 1 (3s): a striker in a violet kit stares down the tunnel. Shot 2 (3s): close-up of laces.", seconds: 7 }] }), [], { textless: true });
+    expect(briefs).toEqual([expect.objectContaining({ headline: [], seconds: 7 })]);
+  });
+  it("asks for captions written the way the client's videos put text on screen", () => {
+    const captioned = { ...style, people: "none" as const, on_screen_text: "captions" as const, text_style: "white sentence-case captions near the bottom" };
+    const p = videoPlannerPrompt({ brand: "Moburst", platform: "Instagram", copy: "c", voice: null, count: 3, postCount: 24, recent: "", style: captioned });
+    expect(p).toContain("- headline: the text over the footage");
+    expect(p).toContain("white sentence-case captions near the bottom");
+    expect(p).toContain("no real or identifiable person");
+  });
+  it("asks for the style from the stills, in order", () => {
+    expect(videoStylePrompt("Moburst", 3, 8)).toContain("Video 2 is images 9 to 16");
+    expect(parseVideoStyle("nothing")).toBeNull();
+  });
+  it("takes stills spread across each video", () => {
+    const script = framesScript([{ sourceUrl: "https://s/a.mp4", uploads: ["https://s/u0", "https://s/u1"] }]);
+    expect(script).toContain("d * 0.2500");
+    expect(script).toContain("@f0_1.jpg 'https://s/u1'");
+    expect(parseFrames("FRAMES 2", 2)).toBe(true);
+    expect(parseFrames("FRAMES 1", 2)).toBe(false);
+  });
+  it("joins footage with no hook and no logo when the client's videos have none", () => {
+    const script = composeScript({ footageUrl: "https://s/f.mp4", uploadUrl: "https://s/up" });
+    expect(script).not.toContain("hook.png");
+    expect(script).not.toContain("logo.png");
+    expect(script).toContain("[base]format=yuv420p[v]");
+    expect(script).toContain('-map "0:a?"');
   });
 });
 

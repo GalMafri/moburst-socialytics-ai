@@ -93,7 +93,8 @@ export async function startOption(admin: any, req: DesignRequest, settings: Sett
  * logo file goes on at its habitual spot (_shared/video/steps.ts).
  */
 async function startVideoOption(admin: any, req: DesignRequest, settings: Settings, brandName: string, brief: Brief, optionIndex: number, logo: [number, number]): Promise<void> {
-  const { data: client } = await admin.from("clients").select("video_references").eq("id", req.client_id).maybeSingle();
+  const { data: client } = await admin.from("clients").select("video_references, video_style").eq("id", req.client_id).maybeSingle();
+  const style = client?.video_style?.profile as { logo?: string; people?: string } | undefined;
   const videoRefs = (Array.isArray(client?.video_references) ? client.video_references : [])
     .map((r: { path?: unknown }) => String(r?.path ?? "")).filter(Boolean).slice(0, 3);
   const title = `${brandName} ${req.platform ?? ""} video ${optionIndex + 1}`.replace(/\s+/g, " ");
@@ -116,6 +117,9 @@ async function startVideoOption(admin: any, req: DesignRequest, settings: Settin
       video_refs: videoRefs,
       video: { prompt: brief.footage ?? brief.picture, seconds: brief.seconds ?? TIMING.footage },
       footage_upload: req.footage_path ?? null,
+      // Logo and people as the client's own videos have them; a filmed clip keeps the logo.
+      show_logo: req.footage_path ? true : style ? style.logo !== "none" : true,
+      people: style?.people ?? "none",
     },
   });
   if (error) throw new Error(`Could not start the video: ${error.message}`);

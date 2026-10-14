@@ -34,7 +34,8 @@ import { BUCKET } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
 import { copyMatches, parseRead, readPrompt } from "../design/pipeline.ts";
-import { CARD_SIZE, FOOTAGE_STILLS, TIMING, VIDEO_SIZE, cleanFootagePrompt, hookPlacement, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
+import { parseVideoStyle, videoStylePrompt } from "../canva/options.ts";
+import { CARD_SIZE, FOOTAGE_STILLS, STYLE_FRAMES, TIMING, VIDEO_SIZE, cleanFootagePrompt, framesScript, hookPlacement, parseFrames, clipScript, composeScript, footageTextPrompt, parseClipped, parseComposed, parseFootageText, referenceClipPath } from "./compose.ts";
 import { hookPrompt } from "./hook.ts";
 import { checkScript, endScript, startScript } from "./sandbox.ts";
 
@@ -58,7 +59,11 @@ const FOOTAGE_BUCKET = "post-footage";
 /** Cleanings of one footage before it is made again. */
 const MAX_CLEANS = 2;
 const REFERENCES = "design-references";
-const FOOTAGE_RULES = " One continuous shot, vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame, and no screens, dashboards, charts, documents or interfaces. No real or identifiable people.";
+/** What all footage keeps to; people as the client's own videos show them (made-up characters, or nobody). */
+function footageRules(people: string | undefined): string {
+  return " Vertical 9:16, every part in sharp focus. No text, letters, numbers, captions, subtitles, signs, logos or watermarks anywhere in frame, and no screens, dashboards, charts, documents or interfaces. " +
+    (people === "fictional" ? "Any people are made-up characters, never real or famous people." : "No real or identifiable people.");
+}
 
 export type VideoJob = { id: string; client_id: string; step: string; state: any; input: any; design_request_id: string | null; option_index: number | null };
 /** next: run the following step now; wait: ask again on a later pass; done: the MP4 is stored (state.final_path). */
@@ -71,6 +76,7 @@ async function higgsfield(admin: any): Promise<McpClient> {
 const publicUrl = (admin: any, bucket: string, path: string) => admin.storage.from(bucket).getPublicUrl(path).data.publicUrl as string;
 
 export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStepResult> {
+  if (job.input?.purpose === "style") return runStyleStep(admin, job);
   const s = job.state ?? (job.state = {});
   const input = job.input;
   const base = `${job.client_id}/canva-finish/${job.id}`;
@@ -125,7 +131,7 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
         s.video_ref_ids = refs.length ? await importReferences(mcp, refs, "video") : [];
       }
       const [first] = await submitVideo(mcp, {
-        prompt: `${input.video.prompt}${FOOTAGE_RULES}`,
+        prompt: `${input.video.prompt}${footageRules(input.people)}`,
         aspect: "9:16",
         seconds: input.video.seconds ?? TIMING.footage,
         resolution: "1080p",
@@ -137,7 +143,8 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       s.footage_job = first;
       s.footage_checked_at = Date.now();
       // The hook is drawn while the footage renders.
-      job.step = s.hook_path ? "footage_wait" : "hook"; return "next";
+      // A client whose videos carry no text over the footage gets no hook.
+      job.step = s.hook_path || !input.copy?.length ? "footage_wait" : "hook"; return "next";
     }
     case "hook": {
       s.hooks = (s.hooks ?? 0) + 1;
@@ -252,10 +259,11 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       s.compose_session = await startScript(
         composeScript({
           footageUrl: input.footage_upload ? await signedUrl(admin, FOOTAGE_BUCKET, input.footage_upload) : publicUrl(admin, BUCKET, s.footage_path),
-          overlayUrl: publicUrl(admin, BUCKET, s.hook_path),
+          overlayUrl: s.hook_path ? publicUrl(admin, BUCKET, s.hook_path) : undefined,
           hook: at && s.hook_box ? { crop: s.hook_box, at: { x: at.x, y: at.y, width: at.width } } : undefined,
-          logoUrl: publicUrl(admin, BUCKET, input.logo_path),
-          logo: { x: rect.x, y: rect.y, width: rect.width },
+          // The logo goes over the footage only when the client's own videos show it.
+          logoUrl: input.show_logo === false ? undefined : publicUrl(admin, BUCKET, input.logo_path),
+          logo: input.show_logo === false ? undefined : { x: rect.x, y: rect.y, width: rect.width },
           uploadUrl: signed.signedUrl,
           frameUploads,
           audioUrl: s.footage_first_path && s.footage_first_path !== s.footage_path ? publicUrl(admin, BUCKET, s.footage_first_path) : undefined,
@@ -357,6 +365,89 @@ async function footageWriting(admin: any, paths: string[]): Promise<{ writing: b
   const seen = parseFootageText(result.text);
   if (!seen) throw new Error(`The footage's stills could not be read: ${result.text.slice(0, 200)}`);
   return seen;
+}
+
+/**
+ * A client's video style, read once from stills of its own published videos
+ * (14 Oct: videos follow the client's VIDEOS, not its statics):
+ *   style_cut   STYLE_FRAMES stills from each video, taken in the sandbox;
+ *   style_wait  until they are stored;
+ *   style_read  the vision model describes the style; it is kept on the client
+ *               (clients.video_style) with the stills, and video posts waiting
+ *               for it are planned.
+ */
+async function runStyleStep(admin: any, job: VideoJob): Promise<VideoStepResult> {
+  const s = job.state ?? (job.state = {});
+  const recently = (at: unknown) => typeof at === "number" && Date.now() - at < VIDEO_POLL_MS;
+  const { data: client } = await admin.from("clients").select("name, video_references").eq("id", job.client_id).maybeSingle();
+  const videos: string[] = (Array.isArray(client?.video_references) ? client.video_references : []).map((r: { path?: unknown }) => String(r?.path ?? "")).filter(Boolean).slice(0, 3);
+  if (!videos.length) throw new Error("FINAL: The client has no published videos to learn from.");
+  switch (job.step) {
+    case "style_cut": {
+      s.cuts = (s.cuts ?? 0) + 1;
+      if (s.cuts > MAX_CLIPS) throw new Error("FINAL: Stills could not be taken from the client's videos.");
+      const frames: string[] = [];
+      const parts = [];
+      for (let i = 0; i < videos.length; i++) {
+        const uploads: string[] = [];
+        for (let j = 0; j < STYLE_FRAMES; j++) {
+          const path = `${job.client_id}/style/v${i}-f${j}.jpg`;
+          const { data: up, error } = await admin.storage.from(REFERENCES).createSignedUploadUrl(path, { upsert: true });
+          if (error || !up?.signedUrl) throw new Error(`Could not prepare a still's upload: ${error?.message ?? "no URL"}`);
+          frames.push(path);
+          uploads.push(up.signedUrl);
+        }
+        parts.push({ sourceUrl: publicUrl(admin, REFERENCES, videos[i]), uploads });
+      }
+      s.frames = frames;
+      s.style_session = await startScript(framesScript(parts), `Socialytics video style ${job.client_id}`);
+      s.style_checked_at = Date.now();
+      job.step = "style_wait"; return "next";
+    }
+    case "style_wait": {
+      if (recently(s.style_checked_at)) return "wait";
+      s.style_checked_at = Date.now();
+      const r = await checkScript(s.style_session);
+      if (r.state === "running") return "wait";
+      await endScript(s.style_session);
+      if (!(r.state === "finished" && parseFrames(r.reply, s.frames.length))) {
+        console.error(`[video-worker] style ${job.id}:`, r.state === "failed" ? r.reason : r.reply.slice(0, 300));
+        job.step = "style_cut"; return "next";
+      }
+      job.step = "style_read"; return "next";
+    }
+    case "style_read": {
+      const content: unknown[] = [];
+      for (const p of s.frames as string[]) {
+        const { data, error } = await admin.storage.from(REFERENCES).download(p);
+        if (error || !data) throw new Error(`Could not read a still: ${error?.message ?? "missing"}`);
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode(new Uint8Array(await data.arrayBuffer()) as unknown as ArrayBuffer) } });
+      }
+      content.push({ type: "text", text: videoStylePrompt(client?.name ?? "the brand", videos.length, STYLE_FRAMES) });
+      const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+      if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
+      const result = await anthropicMessages({ apiKey, body: { model: "claude-opus-5-5", max_tokens: 4000, messages: [{ role: "user", content }] } });
+      const style = parseVideoStyle(result.text);
+      if (!style) throw new Error(`The client's videos could not be read: ${result.text.slice(0, 200)}`);
+      await admin.from("clients").update({ video_style: { profile: style, frames: s.frames, videos: videos.length, frames_per_video: STYLE_FRAMES, made_at: new Date().toISOString() } }).eq("id", job.client_id);
+      s.style = style;
+      // Video posts that waited for the style are planned now.
+      const { data: waiting } = await admin.from("design_requests").select("id, briefs")
+        .eq("client_id", job.client_id).eq("kind", "video").eq("status", "preparing").eq("stage", "planning");
+      for (const w of waiting ?? []) {
+        if (Array.isArray(w.briefs) && w.briefs.length) continue;
+        await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/design-request`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "" },
+          body: JSON.stringify({ action: "replan", request_id: w.id }),
+          signal: AbortSignal.timeout(15_000),
+        }).then((r) => r.body?.cancel()).catch((e) => console.error(`[video-worker] could not plan ${w.id}:`, e instanceof Error ? e.message : e));
+      }
+      s.final_path = null;
+      job.step = "finished"; return "done";
+    }
+  }
+  throw new Error(`FINAL: Unknown style step '${job.step}'`);
 }
 
 /** A short-lived link to a private file, for the hosted sandbox to download. */

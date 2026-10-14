@@ -140,7 +140,7 @@ export const VIDEO_SECONDS = { min: 6, max: 10, default: 8 } as const;
  * Video briefs from the planner's reply: the on-screen hook, how it looks,
  * and the footage under it. An option missing any of them is dropped.
  */
-export function parseVideoBriefs(text: string, library: string[] = [], opts: { filmed?: boolean } = {}): Brief[] {
+export function parseVideoBriefs(text: string, library: string[] = [], opts: { filmed?: boolean; textless?: boolean } = {}): Brief[] {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) return [];
@@ -151,6 +151,14 @@ export function parseVideoBriefs(text: string, library: string[] = [], opts: { f
   const out: Brief[] = [];
   for (const o of raw as Array<Record<string, unknown>>) {
     const footage = String(o?.footage ?? "").replace(/\s+/g, " ").trim();
+    // A client whose videos carry no text over the footage gets none: the video has no hook.
+    if (opts.textless) {
+      if (footage.length < 20) continue;
+      const n = Math.round(Number(o?.seconds));
+      const seconds = Number.isFinite(n) ? Math.min(VIDEO_SECONDS.max, Math.max(VIDEO_SECONDS.min, n)) : VIDEO_SECONDS.default;
+      out.push({ headline: [], picture: footage, footage, text_style: "", seconds });
+      continue;
+    }
     const hook = cleanSlide({ headline: o?.headline, picture: footage || (opts.filmed ? "the filmed clip" : "") });
     const textStyle = String(o?.text ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
     // A filmed clip is the footage, so a filmed plan has no footage of its own.
@@ -274,6 +282,75 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
   ].filter(Boolean).join("\n");
 }
 
+/** How a client's own published videos look and move, read from stills of them. */
+export interface VideoStyle {
+  /** What the videos are, e.g. "cinematic reels of fictional footballers in club kits". */
+  format: string;
+  subjects: string;
+  /** Shot types, how long shots last and how they cut. */
+  shots: string;
+  camera: string;
+  /** Light, grade and palette. */
+  look: string;
+  /** Who appears: real identifiable people (filmed), made-up characters, or nobody. */
+  people: "real" | "fictional" | "none";
+  /** Text over the footage: none, captions, or titles. */
+  on_screen_text: "none" | "captions" | "titles";
+  /** How that text looks and where it sits. */
+  text_style: string;
+  /** Whether the brand's logo shows over the footage. */
+  logo: "none" | "shown";
+  sound: string;
+  /** Other formats the videos use, such as filmed talks. */
+  other_formats: string;
+}
+
+/** The instruction for reading a client's videos from their stills. */
+export function videoStylePrompt(brand: string, videos: number, framesPer: number): string {
+  return [
+    `The images are stills from ${brand}'s own published social videos, ${framesPer} per video in time order: ${Array.from({ length: videos }, (_, i) => `Video ${i + 1} is images ${i * framesPer + 1} to ${(i + 1) * framesPer}`).join(", ")}.`,
+    `Describe how ${brand}'s videos look and move, so that new videos can be made in the same style.`,
+    "If the videos use more than one format, describe the one that can be made without filming real people (for example animation, 3D, or made-up characters), and name the others in other_formats.",
+    "Reply with JSON only:",
+    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","sound":"music, voice or effects","other_formats":"other formats, or empty"}',
+  ].join("\n");
+}
+
+/** The style read back, or null when the reply is not the JSON asked for. */
+export function parseVideoStyle(text: string): VideoStyle | null {
+  const start = text.indexOf("{"), end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  let o: Record<string, unknown>;
+  try { o = JSON.parse(text.slice(start, end + 1)); } catch { return null; }
+  const str = (k: string) => String(o?.[k] ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
+  const format = str("format");
+  if (!format) return null;
+  const people = str("people").toLowerCase();
+  const onScreen = str("on_screen_text").toLowerCase();
+  return {
+    format, subjects: str("subjects"), shots: str("shots"), camera: str("camera"), look: str("look"),
+    people: people === "real" ? "real" : people === "fictional" ? "fictional" : "none",
+    on_screen_text: onScreen === "captions" ? "captions" : onScreen === "titles" ? "titles" : "none",
+    text_style: str("text_style"),
+    logo: str("logo").toLowerCase() === "shown" ? "shown" : "none",
+    sound: str("sound"), other_formats: str("other_formats"),
+  };
+}
+
+/** The style in a few lines, for the planner. */
+export function styleLines(brand: string, s: VideoStyle): string {
+  return [
+    `How ${brand}'s own videos look and move:`,
+    `- format: ${s.format}`,
+    s.subjects ? `- on screen: ${s.subjects}` : "",
+    s.shots ? `- shots and cuts: ${s.shots}` : "",
+    s.camera ? `- camera: ${s.camera}` : "",
+    s.look ? `- look: ${s.look}` : "",
+    `- text over the footage: ${s.on_screen_text === "none" ? "none" : `${s.on_screen_text}, ${s.text_style}`}`,
+    s.sound ? `- sound: ${s.sound}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 /**
  * The planner's instruction for a video post. The footage is made by the
  * video model with the client's own published videos as its reference, so it
@@ -281,7 +358,38 @@ export function carouselPlannerPrompt(args: { brand: string; platform: string; c
  * type of the client's posts, with the client's logo file (13 Oct: video must
  * follow the client's own videos, carry the exact copy and logo, and have sound).
  */
-export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; filmed?: string | null }): string {
+export function videoPlannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; visual?: string | null; count: number; postCount: number; recent: string; guidance?: string; filmed?: string | null; style?: VideoStyle | null; videos?: number; framesPer?: number }): string {
+  if (args.style && !args.filmed) {
+    // Planned from the client's own videos (14 Oct: "make videos in a similar
+    // style to their VIDEOS, not statics"): the images are stills from them.
+    const s = args.style;
+    const people = s.people === "fictional"
+      ? "People in it are made-up characters like the ones in the videos, never real or famous people or the brand's staff."
+      : "It shows no real or identifiable person: use the kinds of subjects the videos show instead.";
+    return [
+      `The images are stills from ${args.brand}'s own published videos, ${args.framesPer ?? 8} per video in time order${args.videos ? ` (${args.videos} videos)` : ""}.`,
+      styleLines(args.brand, s),
+      args.guidance ?? "",
+      `Plan ${args.count} different options for a new ${args.platform} vertical video post (9:16) with this copy:`,
+      `"""${args.copy}"""`,
+      args.visual ? `The post's planned visual: ${args.visual}` : "",
+      args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+      `A video model makes the footage, with short clips of these videos as its reference, and with sound; it can cut between shots. The new video looks and moves like ${args.brand}'s own videos: the same kind of subjects, shots, cuts, camera, light and grade.`,
+      "For each option give:",
+      `- footage: the video for the video model in three to five sentences, shot by shot (two to four shots, each with its seconds), in the style of ${args.brand}'s videos, all in sharp focus. It holds no lettering, numbers, signs, logos or brand marks, no screens, dashboards, charts, documents or interfaces (the video model fills those with garbled writing), and names no brand. ${people} It is whole scenes: no band, panel or empty area kept for text.`,
+      `- seconds: the length, from ${VIDEO_SECONDS.min} to ${VIDEO_SECONDS.max}.`,
+      s.on_screen_text === "none"
+        ? `${args.brand}'s videos carry no text over the footage, so this video carries none: the copy goes with the post.`
+        : [
+            `- headline: the text over the footage, written in ${args.brand}'s voice from the copy, in the copy's language, the way ${args.brand}'s videos put text on screen. One line of at most 8 words, optionally a second, shorter line.`,
+            `- text: one sentence on how it looks and where it sits, taken from the text in ${args.brand}'s videos (${s.text_style || s.on_screen_text}).`,
+          ].join("\n"),
+      "The options differ from each other in footage. Put the strongest first: it is the one that will be made.",
+      s.on_screen_text === "none"
+        ? 'Reply with JSON only: {"options":[{"footage":"...","seconds":8}]}'
+        : 'Reply with JSON only: {"options":[{"footage":"...","seconds":8,"headline":["line one","optional line two"],"text":"..."}]}',
+    ].filter(Boolean).join("\n");
+  }
   if (args.filmed) {
     // The client's own clip is the footage, used as it is with its sound.
     return [
