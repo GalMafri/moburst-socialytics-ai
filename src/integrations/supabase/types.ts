@@ -1286,6 +1286,7 @@ export type Database = {
           started_at: string
           status: string
           updated_at: string
+          video_route: string | null
           visual_direction: string | null
         }
         Insert: {
@@ -1310,6 +1311,7 @@ export type Database = {
           started_at?: string
           status?: string
           updated_at?: string
+          video_route?: string | null
           visual_direction?: string | null
         }
         Update: {
@@ -1334,6 +1336,7 @@ export type Database = {
           started_at?: string
           status?: string
           updated_at?: string
+          video_route?: string | null
           visual_direction?: string | null
         }
         Relationships: [
