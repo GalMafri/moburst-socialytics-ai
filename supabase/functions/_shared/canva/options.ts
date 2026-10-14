@@ -307,6 +307,10 @@ export interface VideoStyle {
   logo_width?: number;
   /** Names and numbers that are part of the scenes in the client's videos (on kits, products, signs), spelled as shown. */
   scene_words?: string[];
+  /** Whether a video model can make new videos in this style; false when it rests on real people, places, screens or products. */
+  generatable?: boolean;
+  /** When it cannot: what a new video needs filmed or recorded, in a few words that follow "it needs". */
+  needs?: string;
   sound: string;
   /** Other formats the videos use, such as filmed talks. */
   other_formats: string;
@@ -322,7 +326,7 @@ export function videoStylePrompt(brand: string, videos: number, framesPer: numbe
     `Describe how ${brand}'s videos look and move, so that new videos can be made in the same style.`,
     "If the videos use more than one format, describe the one that can be made without filming real people (for example animation, 3D, or made-up characters), and name the others in other_formats.",
     "Reply with JSON only:",
-    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","logo_at":"end" when the logo shows only at the close, else where it sits throughout: "top-left", "top-center", "top-right", "bottom-left", "bottom-center" or "bottom-right","logo_width":the width of the logo as a share of the shorter side of the frame, for example 0.18,"scene_words":["each name, word or number that is part of the scenes themselves and belongs to the brand or its own world (its products, its made-up clubs and sponsors, its signs), spelled exactly as shown; leave out the brands and logos of other companies, and text laid over the footage"],"sound":"music, voice or effects","other_formats":"other formats, or empty"}',
+    '{"format":"what these videos are","subjects":"what is on screen","shots":"shot types, shot lengths and how they cut","camera":"how the camera moves","look":"light, grade and palette","people":"real" or "fictional" or "none","on_screen_text":"none" or "captions" or "titles","text_style":"how any text over the footage looks and where it sits, or empty","logo":"none" or "shown","logo_at":"end" when the logo shows only at the close, else where it sits throughout: "top-left", "top-center", "top-right", "bottom-left", "bottom-center" or "bottom-right","logo_width":the width of the logo as a share of the shorter side of the frame, for example 0.18,"scene_words":["each name, word or number that is part of the scenes themselves and belongs to the brand or its own world (its products, its made-up clubs and sponsors, its signs), spelled exactly as shown; leave out the brands and logos of other companies, and text laid over the footage"],"generatable":true when new videos in this style can be made entirely by a video model (animation, 3D, CGI, made-up people and places), false when the style rests on filming real people or real places, recording real screens, or showing the real products or packaging of the brand,"needs":"when generatable is false, what a new video needs filmed or recorded, in a few words that follow the words it needs, for example your team filmed in the office, or a screen recording of your app; empty otherwise","sound":"music, voice or effects","other_formats":"other formats, or empty"}',
   ].join("\n");
 }
 
@@ -345,6 +349,7 @@ export function parseVideoStyle(text: string): VideoStyle | null {
     logo: str("logo").toLowerCase() === "shown" ? "shown" : "none",
     ...logoTiming(o),
     ...sceneWords(o),
+    ...(o?.generatable === false || String(o?.generatable).toLowerCase() === "false" ? { generatable: false, needs: str("needs") } : o?.generatable === true || String(o?.generatable).toLowerCase() === "true" ? { generatable: true } : {}),
     sound: str("sound"), other_formats: str("other_formats"),
   };
 }
@@ -365,6 +370,16 @@ function sceneWords(o: Record<string, unknown>): { scene_words?: string[] } {
   if (!Array.isArray(o?.scene_words)) return {};
   const words = [...new Set((o.scene_words as unknown[]).map((w) => String(w ?? "").replace(/\s+/g, " ").trim()).filter((w) => w.length > 0 && w.length <= 40))].slice(0, 40);
   return words.length ? { scene_words: words } : {};
+}
+
+/**
+ * When a client's videos cannot be made by a video model (they rest on real
+ * people, places, screens or products), the line a video post shows instead of
+ * a generated video: what it needs filmed or recorded. Null when it can be made.
+ */
+export function filmedNeed(style: Pick<VideoStyle, "generatable" | "needs"> | null | undefined): string | null {
+  if (!style || style.generatable !== false) return null;
+  return `it needs ${style.needs?.trim() || "footage filmed for it"}`;
 }
 
 /** The rule for lettering in new footage: none, or only the names the client's own scenes carry. */
@@ -437,11 +452,11 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
       `"""${args.copy}"""`,
       args.visual ? `The post's planned visual: ${args.visual}` : "",
       args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
-      `The footage is ${args.brand}'s own filmed clip of ${args.filmed} speaking to camera, used as it is with its sound. Over it the hook is set as on-screen text, with ${args.brand}'s logo.`,
+      `The footage is ${args.brand}'s own filmed clip (this post was filmed because ${args.filmed}), used as it is with its sound. Over it the hook is set as on-screen text, with ${args.brand}'s logo.`,
       "For each option give:",
       CHOOSE_POSTS(args.brand),
       `- headline: the hook set on screen, written in ${args.brand}'s voice from the copy, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,
-      "- text: one sentence on how the hook looks on screen, taken from the type in the posts you chose (weight, case, color, glow or shadow), set at the top of the frame or in the lower third so the speaker's face stays clear.",
+      "- text: one sentence on how the hook looks on screen, taken from the type in the posts you chose (weight, case, color, glow or shadow), set at the top of the frame or in the lower third so faces and the main subject stay clear.",
       "The options differ in wording. Put the strongest first: it is the one that will be made.",
       'Reply with JSON only: {"options":[{"posts":[2],"layout":"...","headline":["line one","optional line two"],"text":"..."}]}',
     ].filter(Boolean).join("\n");

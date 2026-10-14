@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { REFERENCE_SECONDS, VIDEO_SIZE, cleanFootagePrompt, framesScript, parseFrames, videoLogoBox, clipScript, composeScript, footageTextPrompt, hookPlacement, parseClipped, parseComposed, parseFootageText, referenceClipPath, shellQuote } from "./compose";
-import { parseVideoBriefs, parseVideoStyle, sceneLettering, videoPlannerPrompt, videoStylePrompt, VIDEO_SECONDS } from "../canva/options";
+import { filmedNeed, parseVideoBriefs, parseVideoStyle, sceneLettering, videoPlannerPrompt, videoStylePrompt, VIDEO_SECONDS } from "../canva/options";
 import { hookPrompt } from "./hook";
 
 describe("video assembly", () => {
@@ -117,9 +117,9 @@ describe("cleaned footage", () => {
 
 describe("filmed clips", () => {
   it("plans only the hook over a filmed clip, clear of the speaker's face", () => {
-    const p = videoPlannerPrompt({ brand: "Bader Law", platform: "Instagram", copy: "c", voice: null, count: 2, postCount: 13, recent: "", filmed: "Seth Bader" });
-    expect(p).toContain("own filmed clip of Seth Bader speaking to camera");
-    expect(p).toContain("speaker's face stays clear");
+    const p = videoPlannerPrompt({ brand: "Bader Law", platform: "Instagram", copy: "c", voice: null, count: 2, postCount: 13, recent: "", filmed: "it needs Seth Bader on camera" });
+    expect(p).toContain("this post was filmed because it needs Seth Bader on camera");
+    expect(p).toContain("faces and the main subject stay clear");
     expect(p).not.toContain("- footage:");
     const briefs = parseVideoBriefs(JSON.stringify({ options: [{ posts: [1], headline: ["Insurance called already?"], text: "bold white caps with a soft shadow, lower third" }] }), ["a.jpg"], { filmed: true });
     expect(briefs).toHaveLength(1);
@@ -259,6 +259,24 @@ describe("the names in the client's own scenes", () => {
     expect(clean).toContain("Remove these from this video: three-stripe marks on both boots");
     expect(clean).toContain('Keep these names exactly where and as they are: "CAIRO SUN"');
     expect(cleanFootagePrompt()).toContain("Remove every piece of writing");
+  });
+});
+
+describe("clients whose own videos a video model cannot make", () => {
+  it("reads that the style rests on real people, places, screens or products, and what it needs", () => {
+    const filmed = parseVideoStyle(JSON.stringify({ format: "office skits with real employees", people: "real", generatable: false, needs: "your team filmed in the office" }))!;
+    expect(filmed.generatable).toBe(false);
+    expect(filmedNeed(filmed)).toBe("it needs your team filmed in the office");
+    expect(filmedNeed(parseVideoStyle(JSON.stringify({ format: "app screen recordings", generatable: "false", needs: "" })))).toBe("it needs footage filmed for it");
+  });
+  it("leaves a style a video model can make, or one read before this was asked, to be generated", () => {
+    expect(filmedNeed(parseVideoStyle(JSON.stringify({ format: "3D motion graphics", generatable: true })))).toBeNull();
+    expect(filmedNeed(parseVideoStyle(JSON.stringify({ format: "3D motion graphics" })))).toBeNull();
+    expect(filmedNeed(null)).toBeNull();
+  });
+  it("asks the style read the question", () => {
+    expect(videoStylePrompt("NewDay USA", 3, 8)).toContain('"generatable"');
+    expect(videoStylePrompt("NewDay USA", 3, 8)).toContain("recording real screens");
   });
 });
 

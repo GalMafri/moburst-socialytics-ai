@@ -67,7 +67,7 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
               <p className="t-secondary">This post is written shortly before its date from what's trending then. Its design follows once it's written.</p>
             ) : onCamera ? (
               <>
-                <p className="t-secondary">This video is filmed: it features {onCamera} on camera. Upload the vertical clip and the post's hook and your logo go over it.</p>
+                <p className="t-secondary">This video is filmed: {onCamera}. Upload the vertical clip and the post's hook and your logo go over it.</p>
                 {onUploadClip && (
                   <>
                     <input

@@ -22,7 +22,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
-import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, parseBriefs, parseCarouselBriefs, parseVideoBriefs, plannerPrompt, recentLines, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
+import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, filmedNeed, parseBriefs, parseCarouselBriefs, parseVideoBriefs, plannerPrompt, recentLines, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
 import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
 import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
@@ -64,10 +64,10 @@ Deno.serve(async (req) => {
       // say) is filmed, never generated: no real or identifiable person is
       // ever made up. The answer says so plainly instead of starting anything.
       if (designKind(body.format, body.platform) === "video") {
-        const person = await personOnCamera(copy, visual);
-        if (person) {
-          const request = await recordFilming(admin, { clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null }, person);
-          return json({ code: "needs_filming", who: person, request });
+        const filmed = await filmedReason(admin, clientId, copy, visual);
+        if (filmed) {
+          const request = await recordFilming(admin, { clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || null, requestedBy: userId, visual: visual || null }, filmed);
+          return json({ code: "needs_filming", who: filmed, request });
         }
       }
       const request = await startRequest(admin, settings as Settings, {
@@ -240,6 +240,13 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
     await ensureStyleJob(admin, request.client_id, client?.name ?? "the brand");
     return;
   }
+  // A client whose own videos rest on real people, places, screens or products
+  // gets the filming path, never a generated video in some other style.
+  const filmedBy = generatedVideo ? filmedNeed(videoStyle?.profile) : null;
+  if (filmedBy) {
+    await admin.from("design_requests").update({ status: "needs_filming", stage: "ready", options_wanted: 0, on_camera: filmedBy, updated_at: new Date().toISOString() }).eq("id", request.id);
+    return;
+  }
   const brand = client?.name ?? "the brand";
   const voice = client?.brand_identity?.tone_of_voice ?? null;
 
@@ -354,8 +361,21 @@ async function personOnCamera(copy: string, visual: string): Promise<string | nu
  * asked again, so the post's panel says so whenever it is opened and the
  * automatic designs leave the post alone.
  */
-async function recordFilming(admin: any, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null; visual?: string | null }, who: string): Promise<DesignRequest> {
-  const fields = { post_copy: p.copy, platform: p.platform, format: p.format, visual_direction: p.visual ?? null, on_camera: who, updated_at: new Date().toISOString() };
+/**
+ * Why a video post is filmed rather than generated, as a clause that follows
+ * "This video is filmed:": the client's videos cannot be made by a video
+ * model, or this post features a real person. Null when it can be generated.
+ */
+async function filmedReason(admin: any, clientId: string, copy: string, visual: string): Promise<string | null> {
+  const { data: client } = await admin.from("clients").select("video_style").eq("id", clientId).maybeSingle();
+  const byStyle = filmedNeed(client?.video_style?.profile);
+  if (byStyle) return byStyle;
+  const person = await personOnCamera(copy, visual);
+  return person ? `it needs ${person} on camera` : null;
+}
+
+async function recordFilming(admin: any, p: { clientId: string; postKey: string; copy: string; reportId: string | null; platform: string | null; format: string | null; requestedBy: string | null; visual?: string | null }, reason: string): Promise<DesignRequest> {
+  const fields = { post_copy: p.copy, platform: p.platform, format: p.format, visual_direction: p.visual ?? null, on_camera: reason, updated_at: new Date().toISOString() };
   const { data: known } = await admin.from("design_requests").select("id").eq("client_id", p.clientId).eq("calendar_post_key", p.postKey).eq("status", "needs_filming").limit(1).maybeSingle();
   if (known) {
     const { data } = await admin.from("design_requests").update(fields).eq("id", known.id).select("*").single();
@@ -482,8 +502,8 @@ async function prepareUpcoming(admin: any, opts: { dryRun?: boolean; clientId?: 
     const p = { clientId: post.client_id, postKey: post.post_key, copy, reportId: post.report_id, platform: post.platform, format: post.format, requestedBy: null, visual: post.visual_direction || null };
     // The same rule as a person asking: a video of a real person on camera is filmed.
     if (designKind(post.format, post.platform) === "video") {
-      const person = await personOnCamera(copy, post.visual_direction || "");
-      if (person) { await recordFilming(admin, p, person); continue; }
+      const filmed = await filmedReason(admin, post.client_id ?? p.clientId, copy, post.visual_direction || "");
+      if (filmed) { await recordFilming(admin, p, filmed); continue; }
     }
     const request = await startRequest(admin, settings, p);
     started.push(request.id);

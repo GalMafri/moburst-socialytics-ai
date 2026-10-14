@@ -137,7 +137,7 @@ export async function createDesigns(args: { clientId: string; reportId?: string;
   });
   if (data?.code === "not_set_up") return { notSetUp: true };
   // A video with a real person on camera is filmed; the post keeps that answer.
-  if (data?.code === "needs_filming") return { request: data.request, needsFilming: String(data.who || "a real person") };
+  if (data?.code === "needs_filming") return { request: data.request, needsFilming: String(data.who || "it needs footage filmed for it") };
   if (error || data?.error) throw new Error(await describeInvokeError(error, data));
   return { request: data.request as DesignRequest };
 }

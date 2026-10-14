@@ -295,7 +295,7 @@ export function PostPanel({
                   <PostDesign
                     versions={versions}
                     preparing={preparingDesigns ? designRequest : null}
-                    onCamera={designRequest?.status === "needs_filming" ? designRequest.on_camera || "a real person" : null}
+                    onCamera={designRequest?.status === "needs_filming" ? designRequest.on_camera || "it needs footage filmed for it" : null}
                     textOnly={isTextOnlyFormat(post.format)}
                     onUploadClip={uploadClip}
                     uploadingClip={uploadingClip}
