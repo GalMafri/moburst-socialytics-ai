@@ -69,22 +69,25 @@ export function stepsFor(r: Pick<DesignRequest, "kind" | "footage_path">): typeo
  */
 export const TYPICAL_MINUTES = 7;
 export const TYPICAL_MINUTES_CAROUSEL = 12;
-/** A video: two cards like a short carousel, plus footage that takes several minutes to generate. */
+/** A video: footage that takes several minutes to generate, then its hook and logo. */
 export const TYPICAL_MINUTES_VIDEO = 18;
+/** A filmed clip: only its hook is drawn and laid over it with the logo. */
+export const TYPICAL_MINUTES_FILMED = 4;
 
 /**
  * How long this kind of request usually takes: the median of the client's
  * finished one-design requests of the same kind, or the defaults above.
  */
-export function typicalMinutes(r: Pick<DesignRequest, "kind">, history: DesignRequest[] = []): number {
+export function typicalMinutes(r: Pick<DesignRequest, "kind" | "footage_path">, history: DesignRequest[] = []): number {
   const kind = r.kind ?? "single";
+  const filmed = !!r.footage_path;
   const took = history
-    .filter((h) => h.status === "ready" && (h.kind ?? "single") === kind && h.options_wanted === 1)
+    .filter((h) => h.status === "ready" && (h.kind ?? "single") === kind && !!h.footage_path === filmed && h.options_wanted === 1)
     .map((h) => (new Date(h.updated_at).getTime() - new Date(h.started_at ?? h.created_at).getTime()) / 60000)
     .filter((m) => m > 0 && m < 180)
     .sort((a, b) => a - b);
   if (took.length >= 3) return Math.max(1, Math.round(took[Math.floor(took.length / 2)]));
-  return kind === "carousel" ? TYPICAL_MINUTES_CAROUSEL : kind === "video" ? TYPICAL_MINUTES_VIDEO : TYPICAL_MINUTES;
+  return kind === "carousel" ? TYPICAL_MINUTES_CAROUSEL : kind === "video" ? (filmed ? TYPICAL_MINUTES_FILMED : TYPICAL_MINUTES_VIDEO) : TYPICAL_MINUTES;
 }
 
 export function isPreparing(r: DesignRequest | null | undefined, isStaff: boolean): boolean {
