@@ -436,16 +436,20 @@ async function runStyleStep(admin: any, job: VideoJob): Promise<VideoStepResult>
       await admin.from("clients").update({ video_style: { profile: style, frames: s.frames, videos: videos.length, frames_per_video: STYLE_FRAMES, made_at: new Date().toISOString() } }).eq("id", job.client_id);
       s.style = style;
       // Video posts that waited for the style are planned now.
-      const { data: waiting } = await admin.from("design_requests").select("id, briefs")
+      const { data: waiting } = await admin.from("design_requests").select("id, briefs, requested_by")
         .eq("client_id", job.client_id).eq("kind", "video").eq("status", "preparing").eq("stage", "planning");
       for (const w of waiting ?? []) {
         if (Array.isArray(w.briefs) && w.briefs.length) continue;
         await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/design-request`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "" },
+          // A server call names the person it acts for: the one who asked for the video.
+          headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "", "X-Socialytics-User": String(w.requested_by ?? "") },
           body: JSON.stringify({ action: "replan", request_id: w.id }),
           signal: AbortSignal.timeout(15_000),
-        }).then((r) => r.body?.cancel()).catch((e) => console.error(`[video-worker] could not plan ${w.id}:`, e instanceof Error ? e.message : e));
+        }).then(async (r) => {
+          const text = await r.text();
+          if (!r.ok) throw new Error(`replan answered ${r.status}: ${text.slice(0, 200)}`);
+        }).catch((e) => console.error(`[video-worker] could not plan ${w.id}:`, e instanceof Error ? e.message : e));
       }
       s.final_path = null;
       job.step = "finished"; return "done";
