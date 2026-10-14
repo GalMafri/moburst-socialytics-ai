@@ -9,7 +9,10 @@
 //                at a size the client uses (logoMatch.ts). A design without
 //                one there is designed again.
 //   3. unlogo:   the same picture redrawn whole with every logo and brand
-//                mark taken out (a whole redraw: patching boxes left blocks
+//                mark taken out, then read for any other brand's marks
+//                (marks); marks found are named in the next removal, twice at
+//                most, before the post is designed again. The redraw is
+//                whole (patching boxes left blocks
 //                and stray letters on 13 Oct). The logo's place stays clear:
 //                a frame line broken around the logo in the brand's style
 //                stays broken (closing it put the line through Bader's logo).
@@ -25,11 +28,32 @@
 // Free of Deno and network imports so it can be tested.
 
 /** The instruction for step 3. */
-export function removePrompt(brand: string): string {
+export function removePrompt(brand: string, alsoRemove?: string | null): string {
   return `Remove every logo and brand mark of ${brand} from this image: its wordmark and symbol, and any copy of the symbol anywhere else, including on objects, signs, clothing or screens. ` +
     "Where each was, continue only the background or surface around it, so its place stays clear; a line, rule, border or frame that stopped at a mark still stops there, leaving the same gap. " +
     "Also remove the logos, emblems, stripes and lettering of any other brand, on clothing, shoes, balls, equipment, signs or boards, continuing the plain surface beneath. " +
+    (alsoRemove ? `In particular remove this, leaving the surface plain: ${alsoRemove}. ` : "") +
     "Keep everything else exactly as it is: every word of the text with its spelling, font, size, color and position, the picture, the layout, the colors, the light and the sharpness. Add nothing.";
+}
+
+/**
+ * The instruction for reading the logo-free picture for any other brand's
+ * marks (14 Oct: three stripes and a swoosh-like stripe on football boots
+ * stayed after the general removal).
+ */
+export function marksPrompt(brand: string): string {
+  return `This social post for ${brand} should carry no other brand's marks. ` +
+    "Does any clothing, shoe, ball, equipment, sign or object in it show a real brand's logo, name, emblem or signature pattern, such as stripes, a swoosh, a formstrip, a crest or a monogram? " +
+    "The post's own headline and words are fine. " +
+    'Reply with JSON only: {"marks": true or false, "where": "each mark and where it is, or empty"}';
+}
+
+/** The marks check's answer, or null when it gives none. */
+export function parseMarks(text: string): { marks: boolean; where: string } | null {
+  const m = /"marks"\s*:\s*"?(true|false)"?/i.exec(text);
+  if (!m) return null;
+  const where = /"where"\s*:\s*"([\s\S]*?)"\s*}/.exec(text);
+  return { marks: m[1].toLowerCase() === "true", where: where ? where[1] : "" };
 }
 
 /** The instruction for step 5. */

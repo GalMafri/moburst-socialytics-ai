@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { copyMatches, logoCheckPrompt, parseLogoCheck, parseRead, readable } from "./pipeline";
+import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readable, removePrompt } from "./pipeline";
 import { findLogo, logoFound } from "./logoMatch";
 
 describe("copyMatches", () => {
@@ -72,6 +72,19 @@ describe("logo check", () => {
     expect(parseLogoCheck('Sure: {"clear": true, "touching": ""}')).toEqual({ clear: true, touching: "" });
     expect(parseLogoCheck("it looks fine")).toBeNull();
     expect(parseLogoCheck('{"clear": false, "touching": "a glow behind the "L" of the wordmark"}')).toEqual({ clear: false, touching: 'a glow behind the "L" of the wordmark' });
+  });
+});
+
+describe("other brands' marks", () => {
+  it("asks about real brands' marks on gear, and reads the answer even with quotes inside", () => {
+    expect(marksPrompt("LegaBot")).toMatch(/stripes, a swoosh, a formstrip/);
+    expect(parseMarks('{"marks": true, "where": "three white "stripes" on the green boot"}')).toEqual({ marks: true, where: 'three white "stripes" on the green boot' });
+    expect(parseMarks('{"marks": false, "where": ""}')).toEqual({ marks: false, where: "" });
+    expect(parseMarks("no")).toBeNull();
+  });
+  it("names the marks found in the next removal", () => {
+    expect(removePrompt("LegaBot", "three white stripes on the green boot")).toContain("In particular remove this, leaving the surface plain: three white stripes on the green boot.");
+    expect(removePrompt("LegaBot")).not.toContain("In particular");
   });
 });
 

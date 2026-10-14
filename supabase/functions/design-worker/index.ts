@@ -20,7 +20,7 @@ import { anthropicMessages } from "../_shared/anthropic.ts";
 import { settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
-import { copyMatches, logoCheckPrompt, parseLogoCheck, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
+import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
 import { LOGO_SCALES, findLogo, logoFound } from "../_shared/design/logoMatch.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
@@ -36,11 +36,13 @@ const MODEL_LEASE_MS = 420_000;
 const MAX_ATTEMPTS = 4;
 /** Designs made for one option before it fails (a design with wrong words, or without the logo in its place, is made again). */
 const MAX_GENERATIONS = 3;
-const MAX_UNLOGO = 3;
+const MAX_UNLOGO = 4;
+/** Removals that name another brand's marks before the design is made again. */
+const MAX_MARK_CLEANS = 2;
 const DEFAULT_PAGE = { width: 1088, height: 1360 };
 const IMAGE_MODEL = "gpt-image-2.5-flare";
 const READ_MODEL = "claude-opus-5-5";
-const STEPS = new Set(["generate", "locate", "unlogo", "finish", "verify"]);
+const STEPS = new Set(["generate", "locate", "unlogo", "marks", "finish", "verify"]);
 /** A job is only ever moved on while it is active: a cancelled design stays cancelled. */
 const ACTIVE = ["queued", "running"];
 
@@ -195,7 +197,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       if (s.generations > MAX_GENERATIONS) throw new Error("FINAL: The design could not be made with the headline's exact words and the logo in its place.");
       return hold(admin, job, async () => {
         s.design_path = await generateDesign(admin, job, `${base}/design-${s.generations}.png`);
-        for (const k of ["logo_rect", "logo_frame", "logo_score", "nologo_path", "unlogos", "final_path", "read"]) delete s[k];
+        for (const k of ["logo_rect", "logo_frame", "logo_score", "nologo_path", "unlogos", "final_path", "read", "marks_check", "marks_where", "mark_cleans"]) delete s[k];
         job.step = "locate";
       });
     }
@@ -225,12 +227,50 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         const g: GenerateInput = job.input.generate;
         const page = pageOf(job);
         const size = pictureSize([page.width, page.height]);
-        const bytes = await imageEdit([{ bytes: await download(admin, s.design_path), name: "design.png" }], removePrompt(g.brand_name), size);
-        const path = `${base}/nologo-${s.generations}.png`;
+        const bytes = await imageEdit([{ bytes: await download(admin, s.design_path), name: "design.png" }], removePrompt(g.brand_name, s.marks_where), size);
+        const path = `${base}/nologo-${s.generations}-${s.unlogos}.png`;
         await upload(admin, path, bytes, "image/png");
         s.nologo_path = path;
-        job.step = "finish";
+        job.step = "marks";
       });
+    }
+    case "marks": {
+      // No other brand's marks: read on the logo-free picture, at the page size.
+      const pic = await Image.decode(await download(admin, s.nologo_path));
+      const page = pageOf(job);
+      const small = new Image(page.width, page.height);
+      small.bitmap.set(resampleRGBA(pic.bitmap, pic.width, pic.height, page.width, page.height));
+      const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+      if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
+      const g: GenerateInput = job.input.generate;
+      const result = await anthropicMessages({
+        apiKey,
+        body: {
+          model: READ_MODEL,
+          max_tokens: 400,
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode((await small.encodeJPEG(92)) as unknown as ArrayBuffer) } },
+            { type: "text", text: marksPrompt(g.brand_name) },
+          ] }],
+        },
+      });
+      const seen = parseMarks(result.text);
+      if (!seen) throw new Error(`The picture could not be read for other brands' marks: ${result.text.slice(0, 200)}`);
+      s.marks_check = seen;
+      if (!seen.marks) {
+        delete s.marks_where;
+        job.step = "finish";
+        return "next";
+      }
+      s.mark_cleans = (s.mark_cleans ?? 0) + 1;
+      if (s.mark_cleans <= MAX_MARK_CLEANS) {
+        console.warn(`[design-worker] job ${job.id}: other brands' marks (${seen.where}); removing them.`);
+        s.marks_where = seen.where || "every brand mark on clothing, shoes, balls and equipment";
+        job.step = "unlogo";
+        return "next";
+      }
+      await designAgain(admin, job, `other brands' marks: ${seen.where}`);
+      return "next";
     }
     case "finish": {
       // A design from before the locate step is located first.
@@ -344,7 +384,7 @@ async function designAgain(admin: any, job: Job, reason: string): Promise<void> 
   const s = job.state;
   // Why each earlier design was made again, kept for review.
   s.redesigns = [...(Array.isArray(s.redesigns) ? s.redesigns : []), reason].slice(-5);
-  for (const k of ["design_path", "logo_rect", "logo_frame", "logo_score", "logo_check", "nologo_path", "unlogos", "final_path", "read"]) delete s[k];
+  for (const k of ["design_path", "logo_rect", "logo_frame", "logo_score", "logo_check", "nologo_path", "unlogos", "final_path", "read", "marks_check", "marks_where", "mark_cleans"]) delete s[k];
   job.step = "generate";
   if ((job.slide_count ?? 1) > 1 && (job.slide_index ?? 0) === 0 && job.design_request_id) {
     // The cover's old design is gone from its record before any slide can look for it.
