@@ -35,6 +35,12 @@ export function makeFakeDemoDb(t: FakeTables): DemoDb {
     async updateSet(sid, patch) { Object.assign(t.sets.find((s) => s.id === sid)!, patch); },
     async insertCompetitors(list) { return list.map((row) => { const c = { website_url: null, rationale: null, similarity_score: null, source: null, is_selected: false, selected_rank: null, profile_detection: null, ...row, id: id("comp"), created_at: now() } as CompetitorRow; t.competitors.push(c); return c; }); },
     async updateCompetitor(cid, patch) { Object.assign(t.competitors.find((c) => c.id === cid)!, patch); },
+    async confirmSet(sid, _by, notes) {
+      const s = t.sets.find((x) => x.id === sid)!;
+      if (s.status !== "draft") throw new Error(`Set is '${s.status}', only a draft can be confirmed.`);
+      if (t.competitors.filter((c) => c.set_id === sid && c.is_selected).length !== 3) throw new Error("Exactly 3 competitors must be selected.");
+      Object.assign(s, { status: "confirmed", confirmed_at: now(), notes });
+    },
     async reportsOf(cid) { return newest(t.reports.filter((r) => r.client_id === cid)); },
     async competitiveReportsOf(cid) { return newest(t.competitiveReports.filter((r) => r.client_id === cid)); },
     async getReports(ids) { return t.reports.filter((r) => ids.includes(r.id)); },

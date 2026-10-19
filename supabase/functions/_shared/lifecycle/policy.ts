@@ -68,8 +68,12 @@ export function decide(row: StepRow | null, inputsKey: string | null, policy: St
 export type StepOutcome =
   /** `doneAt`: when the result was really produced, if earlier (a stored result reused). */
   | { status: "done"; result: Record<string, unknown>; doneAt?: string | null }
-  /** Waiting for data: `recheck` days, or until the inputs change when absent. */
-  | { status: "waiting"; reason: string; recheckDays?: number; result?: Record<string, unknown> }
+  /**
+   * Waiting: for data (`recheckDays`), for work under way elsewhere to move
+   * on (`recheckMinutes`, such as RivalIQ adding companies), or, with neither,
+   * until the inputs change.
+   */
+  | { status: "waiting"; reason: string; recheckDays?: number; recheckMinutes?: number; result?: Record<string, unknown> }
   /** A passing failure: tried again later with backoff. `soon` retries in minutes. */
   | { status: "failed"; error: string; soonMinutes?: number };
 
@@ -83,7 +87,8 @@ export function rowAfter(prev: StepRow | null, base: { client_id: string; step: 
   if (outcome.status === "waiting") {
     return {
       ...base, status: "waiting", attempts: 0, attempted_at: at, done_at: sameInputs ? prev?.done_at ?? null : null,
-      next_attempt_at: outcome.recheckDays ? new Date(now.getTime() + outcome.recheckDays * DAY).toISOString() : null,
+      next_attempt_at: outcome.recheckMinutes ? new Date(now.getTime() + outcome.recheckMinutes * 60_000).toISOString()
+        : outcome.recheckDays ? new Date(now.getTime() + outcome.recheckDays * DAY).toISOString() : null,
       result: { ...(sameInputs ? prev?.result ?? {} : {}), ...(outcome.result ?? {}), waiting_for: outcome.reason }, error: null,
     };
   }

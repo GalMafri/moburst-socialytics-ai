@@ -13,7 +13,8 @@ import type { DiscardResult } from "./routes-demo.ts";
 
 export interface WorkerDeps<C> {
   lease(): Promise<JobRecord[]>;
-  save(job: JobRecord): Promise<void>;
+  /** False when the job was cancelled or finished meanwhile (the engine then stops). */
+  save(job: JobRecord): Promise<boolean | void>;
   release(id: string): Promise<void>;
   ctx: C;
   steps: StepDef<C>[];
@@ -54,7 +55,7 @@ const LEASE_SECONDS = 180;
 const TICK_BUDGET_MS = 110_000;
 const JOBS_PER_TICK = 3;
 
-export function workerRoute<C>(deps: { jobs: { lease(limit: number, seconds: number): Promise<JobRecord[]>; save(job: JobRecord): Promise<void>; release(id: string): Promise<void> }; ctx: C; steps: StepDef<C>[] }): Route {
+export function workerRoute<C>(deps: { jobs: { lease(limit: number, seconds: number): Promise<JobRecord[]>; save(job: JobRecord): Promise<boolean | void>; release(id: string): Promise<void> }; ctx: C; steps: StepDef<C>[] }): Route {
   return {
     method: "POST", path: "/internal/worker", auth: "internal", doc: { summary: "Advance due demo jobs", tag: "Internal", response: "Empty" },
     handler: async () => {

@@ -5,23 +5,30 @@
  * gap it can record instead. Everything external comes in through DemoCtx;
  * the project's own functions are driven as the project itself, acting for
  * the user the job resolved.
+ *
+ * Onboarding is the client lifecycle's (_shared/lifecycle): the brand read,
+ * the brief and pillars, the design references and the competitor set come
+ * from the same steps every client goes through, run now for the demo's
+ * copy of the brand (ctx.lifecycle). There is one onboarding path.
  */
 import { CALLBACK_DELAYS_S, CALLBACK_MAX_ATTEMPTS, deliverOnce } from "../../_shared/api/callback.ts";
 import { finalStatus, type Gap, type JobRecord, type StepDef, type StepResult } from "../../_shared/api/jobs.ts";
 import { demoSlug, resolveScope } from "../../_shared/api/keys.ts";
 import type { ClientScope } from "../../_shared/api/router.ts";
-import { isReviewReadyHandle } from "../../_shared/competitive/extractSocialHandles.ts";
 import { callEnvFromDeno, callFunction, type CallEnv, type CallResult } from "../../_shared/invoke.ts";
+import { runStepNow, type StepView } from "../../_shared/lifecycle/run.ts";
+import { slugify } from "../../_shared/lifecycle/names.ts";
 import { clientHost } from "../../_shared/net/clientHost.ts";
 import { analyticsOut, CONFIRMED_SET, pillarsOut, type BrandIdentity, type ClientRow, type CompetitiveReportRow, type ReportRow, type SetWithCompetitors } from "../serializers.ts";
 import { buildOutputs, type Unplaced } from "./collect.ts";
-import { cleanSiteText } from "./site-text.ts";
 import { makeDemoDb, type DemoDb } from "./db.ts";
 
 export interface DemoCtx {
   db: DemoDb;
   /** A project function, called as the project itself acting for `actAs`. */
   call(name: string, body: unknown, actAs: string | null): Promise<CallResult>;
+  /** Bring a client lifecycle step of the client up to date now: run it when it is due, else read what it stored. */
+  lifecycle(step: string, clientId: string): Promise<StepView>;
   keyHashFor(keyId: string | null): Promise<string | null>;
   deliverOnce(url: string, payload: unknown, keyHash: string | null): Promise<{ status: number | null; error: string | null }>;
   now(): Date;
@@ -33,11 +40,13 @@ const REPORT_TIMEOUT_MIN = 100;
 const CHECK_IN_S = 120;
 const MIN_REFERENCES = 3;
 const DEFAULT_PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn"];
-/** What a demo cannot show for a prospect: the parts of the product that need the brand's own connections. */
+/** How long a demo step waits before looking at a lifecycle step that is still working. */
+const LIFECYCLE_CHECK_IN_S = 30;
+/** What a demo does not show for a prospect: the parts of the product built on the brand's own connections. */
 const CONNECTED_ONLY = {
-  tracking: "Competitor tracking and the competitive report start when the brand connects; the demo shows them on the connected showcase workspace.",
-  competitive: "The competitive report needs tracked competitors; the demo shows it on the connected showcase workspace.",
-  analytics: "Performance analytics need the brand's Sprout connection; the demo shows them on the connected showcase workspace.",
+  tracking: "A demo takes no competitor tracking slots; the connected showcase workspace shows tracking and the competitive report.",
+  competitive: "The competitive report is built on tracked competitors; the connected showcase workspace shows one.",
+  analytics: "Performance analytics come from the brand's own Sprout connection; the connected showcase workspace shows them.",
 };
 
 type Input = { client_name: string; website: string; competitors?: Array<{ name: string; website?: string }>; force_run?: boolean };
@@ -62,9 +71,8 @@ async function jobScope(job: JobRecord, ctx: DemoCtx): Promise<ClientScope> {
   return resolveScope(reach, await ctx.db.clientSlugs());
 }
 
-export function slugify(name: string): string {
-  return name.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "client";
-}
+/** The portal's slug rule, shared with the client lifecycle's access step. */
+export { slugify };
 
 async function clientOf(job: JobRecord, ctx: DemoCtx): Promise<ClientRow> {
   const c = job.client_id ? await ctx.db.getClient(job.client_id) : null;
@@ -75,6 +83,9 @@ async function clientOf(job: JobRecord, ctx: DemoCtx): Promise<ClientRow> {
 const actorOf = (job: JobRecord, client: ClientRow): string | null => str(stepData(job, "resolve_client").acted_as) ?? client.created_by ?? null;
 const referenceCount = (c: ClientRow) => (Array.isArray(c.harvested_design_references) ? c.harvested_design_references.length : 0) + (Array.isArray(c.design_references) ? c.design_references.length : 0);
 const newestSet = (sets: SetWithCompetitors[]) => [...sets].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0] ?? null;
+/** A lifecycle step still at work: the demo step looks again shortly. */
+const working = (v: StepView) => v.status === "running" || (v.status === "waiting" && v.waiting_for === "in_progress");
+const stillWorking = (step: string): StepResult => ({ status: "waiting", check_in_s: LIFECYCLE_CHECK_IN_S, data: { lifecycle: step } });
 
 
 /** Start a report through run-report, unless the job already did or a fresh one exists. */
@@ -88,7 +99,7 @@ async function startReport(job: JobRecord, ctx: DemoCtx, kind: "social" | "compe
   if (!inputOf(job).force_run) {
     const cutoff = ctx.now().getTime() - FRESH_REPORT_DAYS * 86_400_000;
     const fresh = existing.find((r) => (r.status === "completed" || r.status === "complete") && new Date(r.created_at).getTime() > cutoff);
-    if (fresh) return { status: "skipped", reason: "fresh_report_exists", message: `A ${kind} report completed in the last ${FRESH_REPORT_DAYS} days; send force_run to run again.`, data: { report_id: fresh.id }, patch: { run_ids: withRun([fresh.id]) } };
+    if (fresh) return { status: "skipped", reason: "fresh_report_exists", message: `A ${kind} report completed in the last ${FRESH_REPORT_DAYS} days, so the demo uses it (force_run starts a new one).`, data: { report_id: fresh.id }, patch: { run_ids: withRun([fresh.id]) } };
   }
   const r = await ctx.call("run-report", { client_id: client.id, kind, ...(range ? { date_range_start: range.start, date_range_end: range.end } : {}) }, actorOf(job, client));
   const d = obj(r.data) as { report_id?: string; resumed?: boolean; retried?: boolean; range?: unknown };
@@ -136,56 +147,49 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
     name: "brand_identity",
     async run(job, ctx) {
       const client = await clientOf(job, ctx);
-      if (client.brand_identity && Object.keys(client.brand_identity).length) return { status: "skipped", reason: "brand_exists", data: { fields: Object.keys(client.brand_identity).length } };
-      const r = await ctx.call("research-brand-identity", { website_url: client.website_url ?? `https://${inputOf(job).website}`, client_name: client.name }, actorOf(job, client));
-      const d = obj(r.data) as { brand_identity?: BrandIdentity; logo_url?: string };
-      if (!r.ok || !d.brand_identity || typeof d.brand_identity !== "object") {
-        const message = errorOf(r, "The website could not be read");
-        return { status: "failed", reason: r.ok ? "no_identity" : "research_failed", message, gaps: [gap("brand_identity", "brand_identity_missing", `No brand identity could be read from ${client.name}'s website: ${message}`)] };
+      const v = await ctx.lifecycle("brand_read", client.id);
+      if (working(v)) return stillWorking("brand_read");
+      const fresh = (await ctx.db.getClient(client.id)) ?? client;
+      const b = fresh.brand_identity;
+      if (!b || !Object.keys(b).length) {
+        const message = v.error ?? "The website could not be read.";
+        return { status: "failed", reason: v.status === "failed" ? "research_failed" : "no_identity", message, gaps: [gap("brand_identity", "brand_identity_missing", `No brand identity was read from ${client.name}'s website: ${message}`)] };
       }
-      const patch: Record<string, unknown> = { brand_identity: d.brand_identity };
-      const logo = str(d.brand_identity.logo_url) ?? str(d.logo_url);
-      if (logo && !client.logo_url) patch.logo_url = logo;
-      await ctx.db.updateClient(client.id, patch);
-      const b = d.brand_identity;
-      return { status: "done", outcome: "researched", data: { colors: [b.primary_color, b.secondary_color, b.accent_color].filter(Boolean), font: b.font_family ?? null, tone: b.tone_of_voice ?? null, logo: !!patch.logo_url } };
+      const r = v.result ?? {};
+      const data = { colors: [b.primary_color, b.secondary_color, b.accent_color].filter(Boolean), font: b.font_family ?? null, tone: b.tone_of_voice ?? null, logo: !!fresh.logo_url, timezone: fresh.timezone ?? null, timezone_source: str(r.timezone_source) };
+      return v.ran ? { status: "done", outcome: "researched", data } : { status: "skipped", reason: "brand_exists", data };
     },
   },
   {
     name: "site_brief",
     async run(job, ctx) {
       const client = await clientOf(job, ctx);
-      if ((client.brief_text ?? "").trim().length >= 80) return { status: "skipped", reason: "brief_exists", data: { chars: (client.brief_text ?? "").length } };
-      const url = client.website_url ?? `https://${inputOf(job).website}`;
-      const r = await ctx.call("firecrawl-scrape", { url, options: { formats: ["markdown"], onlyMainContent: true } }, actorOf(job, client));
-      const d = obj(r.data) as { success?: boolean; data?: { markdown?: string; metadata?: { title?: string; description?: string } } };
-      const markdown = cleanSiteText(d.data?.markdown ?? "");
-      if (!r.ok || !d.success || markdown.length < 80) {
-        const message = r.ok && d.success ? "The page carried almost no readable text." : errorOf(r, "The website could not be read");
-        return { status: "failed", reason: r.ok ? "site_unreadable" : "scrape_failed", message, gaps: [gap("site_brief", "brief_missing", `No brief could be drafted for ${client.name}: ${message}`)] };
-      }
-      await ctx.db.updateClient(client.id, { brief_text: `Drafted from the website on ${day(ctx.now())}:\n\n${markdown.slice(0, 2500)}` });
-      return { status: "done", outcome: "drafted", data: { chars: markdown.length, title: d.data?.metadata?.title ?? null, excerpt: markdown.slice(0, 1200) } };
+      const v = await ctx.lifecycle("brief_pillars", client.id);
+      if (working(v)) return stillWorking("brief_pillars");
+      const fresh = (await ctx.db.getClient(client.id)) ?? client;
+      const brief = fresh.brief_text ?? "";
+      const made = v.result?.brief;
+      if ((made === "drafted" || made === "from_doc") && v.ran) return { status: "done", outcome: made === "drafted" ? "drafted" : "from_strategy_doc", data: { chars: brief.length, excerpt: brief.slice(0, 1200) } };
+      if (brief.trim().length >= 80) return { status: "skipped", reason: "brief_exists", data: { chars: brief.length } };
+      const message = v.error ?? "The website carried almost no readable text.";
+      return { status: "failed", reason: "site_unreadable", message, gaps: [gap("site_brief", "brief_missing", `No brief was drafted for ${client.name}: ${message}`)] };
     },
   },
   {
     name: "pillars",
     async run(job, ctx) {
       const client = await clientOf(job, ctx);
-      const havePillars = pillarsOut(client.content_pillars).length > 0;
-      const haveKeywords = strs(client.social_keywords).length > 0;
-      if (havePillars && haveKeywords) return { status: "skipped", reason: "pillars_exist", data: { pillars: pillarsOut(client.content_pillars).length, keywords: strs(client.social_keywords).length } };
-      const r = await ctx.call("derive-content-pillars", { client_id: client.id }, actorOf(job, client));
-      const d = obj(r.data) as { pillars?: unknown[]; keywords?: string[]; source?: string; derived_at?: string };
-      if (!r.ok || !Array.isArray(d.pillars) || !d.pillars.length) {
-        const message = errorOf(r, "The pillars could not be derived");
-        return { status: "failed", reason: r.status === 422 ? "no_evidence" : "derive_failed", message, gaps: [gap("pillars", "pillars_missing", `No content pillars could be derived for ${client.name}: ${message}`)] };
-      }
-      const patch: Record<string, unknown> = {};
-      if (!havePillars) Object.assign(patch, { content_pillars: d.pillars, pillars_source: d.source ?? "website", pillars_derived_at: d.derived_at ?? ctx.now().toISOString() });
-      if (!haveKeywords && d.keywords?.length) patch.social_keywords = d.keywords;
-      if (Object.keys(patch).length) await ctx.db.updateClient(client.id, patch);
-      return { status: "done", outcome: "derived", data: { pillars: pillarsOut(d.pillars).map((p) => p.name), keywords: d.keywords?.length ?? 0, source: d.source ?? null, fields: Object.keys(patch) } };
+      // The brief_pillars step ran with the brief above; this reads what it stored.
+      const v = await ctx.lifecycle("brief_pillars", client.id);
+      if (working(v)) return stillWorking("brief_pillars");
+      const fresh = (await ctx.db.getClient(client.id)) ?? client;
+      const r = v.result ?? {};
+      const pillars = pillarsOut(fresh.content_pillars);
+      const keywords = strs(fresh.social_keywords);
+      if (r.pillars === "derived") return { status: "done", outcome: "derived", data: { pillars: pillars.map((p) => p.name), keywords: keywords.length, source: str(r.source), fields: Array.isArray(r.written) ? r.written : [] } };
+      if (pillars.length && keywords.length) return { status: "skipped", reason: "pillars_exist", data: { pillars: pillars.length, keywords: keywords.length } };
+      const message = v.error ?? `There was nothing to read for ${client.name} yet.`;
+      return { status: "failed", reason: v.status === "failed" ? "derive_failed" : "no_evidence", message, gaps: [gap("pillars", "pillars_missing", `No content pillars were derived for ${client.name}: ${message}`)] };
     },
   },
   {
@@ -197,14 +201,16 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       const approved = systems.find((s) => s.status === "approved");
       if (approved) return { status: "skipped", reason: "design_exists", data: { system_id: approved.id, version: approved.version } };
       // Approving a design system is a team decision; the demo takes it only for a client it created.
-      if (client.demo_job_id !== job.id) return { status: "skipped", reason: "existing_client", message: "This client existed before the demo; its design system is approved in Client Setup by the team.", data: { drafts: systems.length }, gaps: [gap("design", "design_system_missing", "No approved design system yet; the team approves one in Client Setup. Generated posts use the brand colours and fonts only.")] };
+      if (client.demo_job_id !== job.id) return { status: "skipped", reason: "existing_client", message: "This client existed before the demo, so the demo does not approve a design system for it.", data: { drafts: systems.length }, gaps: [gap("design", "design_system_missing", "No approved design system yet. Generated posts use the brand colors and fonts.")] };
       const profiles = (await ctx.db.sproutProfilesOf(client.id)).filter((p) => p.is_active !== false);
-      const noRefs = (): StepResult => ({ status: "skipped", reason: "no_references", message: "No brand references: designs use the brand colours and fonts only.", data: { references: referenceCount(client), sprout_profiles: profiles.length }, gaps: [gap("design", "design_system_missing", "No brand references: designs use the brand colours and fonts only.")] });
+      const noRefs = (): StepResult => ({ status: "skipped", reason: "no_references", message: "No brand references yet. Generated posts use the brand colors and fonts.", data: { references: referenceCount(client), sprout_profiles: profiles.length }, gaps: [gap("design", "design_system_missing", "No brand references yet. Generated posts use the brand colors and fonts.")] });
       if (!profiles.length && referenceCount(client) < MIN_REFERENCES) return noRefs();
       if (referenceCount(client) < MIN_REFERENCES) {
-        const s = await ctx.call("synthesize-design-language", { client_id: client.id, discover: true }, actor);
-        if (!s.ok) {
-          const message = errorOf(s, "The brand's social posts could not be read");
+        // The brand's designed posts and the style learned from them: the lifecycle's design_refs step.
+        const v = await ctx.lifecycle("design_refs", client.id);
+        if (working(v)) return stillWorking("design_refs");
+        if (v.status === "failed") {
+          const message = v.error ?? "The brand's social posts could not be read.";
           return { status: "failed", reason: "synthesis_failed", message, gaps: [gap("design", "design_system_missing", `No design system: ${message}`)] };
         }
         client = (await ctx.db.getClient(client.id)) ?? client;
@@ -243,50 +249,65 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       const selectedNames = (s: SetWithCompetitors) => s.competitors.filter((c) => c.is_selected).sort((a, b) => (a.selected_rank ?? 99) - (b.selected_rank ?? 99)).map((c) => c.name);
       if (!mine && other) return { status: "skipped", reason: "set_exists", message: `${client.name} already has a confirmed competitor set.`, data: { set_id: other.id, status: other.status, selected: selectedNames(other), tracked: !!other.rivaliq_landscape_id, source: "existing" } };
       if (mine && CONFIRMED_SET.includes(mine.status)) return { status: "done", outcome: "already_confirmed", data: { set_id: mine.id, selected: selectedNames(mine), source: mine.source ?? "ai" } };
-      let setId = mine?.id ?? null;
-      const source = requested?.length ? "request" : "identified";
-      if (!setId) {
-        if (requested?.length) {
+      /** One rule for every client: the three closest proposals that have a website (RivalIQ tracks by website). */
+      const outcome = (set: SetWithCompetitors, source: string): StepResult => {
+        const chosen = selectedNames(set);
+        const unplaced: Unplaced[] = set.competitors.filter((c) => !c.is_selected).map((c) => ({ name: c.name, reason: c.website_url ? "not_among_closest" : "no_website" }));
+        const gaps = unplaced.map((u) => gap("competitors", "competitor_unplaced", `${u.name} was proposed but not selected: ${u.reason === "no_website" ? "no website" : "three closer competitors were selected"}.`));
+        return { status: "done", outcome: "3_selected", data: { set_id: set.id, source, selected: chosen, unplaced, candidates: set.competitors.length }, gaps };
+      };
+      const draftOnly = (set: SetWithCompetitors | null, source: string, placeable: string[]): StepResult => ({
+        status: "done", outcome: "draft_only", message: `Only ${placeable.length} of ${set?.competitors.length ?? 0} proposed competitors have a website.`,
+        data: { set_id: set?.id ?? null, source, candidates: set?.competitors.length ?? 0, placeable, unplaced: (set?.competitors ?? []).filter((c) => !c.website_url).map((c) => ({ name: c.name, reason: "no_website" })) },
+        gaps: [gap("competitors", "competitors_unconfirmed", `Only ${placeable.length} of ${set?.competitors.length ?? 0} proposed competitors have a website; the set stays a draft and the competitive report is skipped.`)],
+      });
+      const reload = async (id: string) => (await ctx.db.setsOf(client.id)).find((s) => s.id === id) ?? null;
+
+      if (requested?.length) {
+        // The competitors the request named, in its order.
+        let setId = mine?.id ?? null;
+        if (!setId) {
           const set = await ctx.db.insertSet({ client_id: client.id, status: "draft", source: "manual", generated_by: actor, demo_job_id: job.id });
           await ctx.db.insertCompetitors(requested.map((c, i) => ({ set_id: set.id, client_id: client.id, name: c.name, website_url: c.website ? `https://${c.website}` : null, rationale: "Named in the demo request.", similarity_score: Math.round((1 - i * 0.01) * 100) / 100, source: "manual" })));
           setId = set.id;
-        } else {
-          const r = await ctx.call("identify-competitors", { client_id: client.id }, actor);
-          const d = obj(r.data) as { set_id?: string; competitors?: unknown[] };
-          if (!r.ok || !d.set_id) {
-            const message = errorOf(r, "No competitors could be proposed");
-            return { status: "failed", reason: "no_competitors_found", message, gaps: [gap("competitors", "no_competitors", `${client.name} has no competitors to compare with: ${message}`)] };
-          }
-          await ctx.db.updateSet(d.set_id, { demo_job_id: job.id });
-          setId = d.set_id;
         }
+        let set = await reload(setId);
+        if (!set) return { status: "failed", reason: "set_missing", message: "The competitor set could not be read back.", gaps: [gap("competitors", "no_competitors", `${client.name} has no competitors to compare with.`)] };
+        if (set.competitors.some((c) => !c.handles.length)) {
+          // Their profiles, for the outputs; the selection does not need them.
+          await ctx.call("detect-competitor-handles", { set_id: setId }, actor);
+          set = (await reload(setId)) ?? set;
+        }
+        const placeable = set.competitors.filter((c) => c.website_url).sort((a, b) => (b.similarity_score ?? 0) - (a.similarity_score ?? 0));
+        if (placeable.length < 3) return draftOnly(set, "request", placeable.map((c) => c.name));
+        const chosen = placeable.slice(0, 3);
+        for (const c of set.competitors) {
+          const rank = chosen.indexOf(c);
+          const want = rank >= 0 ? { is_selected: true, selected_rank: rank + 1 } : { is_selected: false, selected_rank: null };
+          if (!!c.is_selected !== want.is_selected || (c.selected_rank ?? null) !== want.selected_rank) await ctx.db.updateCompetitor(c.id, want);
+        }
+        await ctx.db.confirmSet(setId, actor, "Selected by the demo onboarding: the first three named competitors with a website.");
+        set = (await reload(setId)) ?? set;
+        return outcome(set, "request");
       }
-      const reload = async () => (await ctx.db.setsOf(client.id)).find((s) => s.id === setId) ?? null;
-      let set = await reload();
+
+      // Identified: the lifecycle's competitors step, the same one every client goes through.
+      const v = await ctx.lifecycle("competitors", client.id);
+      if (working(v)) return stillWorking("competitors");
+      const r = v.result ?? {};
+      const setId = str(r.set_id) ?? str(r.draft_set_id);
+      if (v.status === "failed" || !setId) {
+        if (v.status === "waiting") return draftOnly(null, "identified", []);
+        const message = v.error ?? "No competitors could be proposed.";
+        return { status: "failed", reason: "no_competitors_found", message, gaps: [gap("competitors", "no_competitors", `${client.name} has no competitors to compare with: ${message}`)] };
+      }
+      const set = await reload(setId);
       if (!set) return { status: "failed", reason: "set_missing", message: "The competitor set could not be read back.", gaps: [gap("competitors", "no_competitors", `${client.name} has no competitors to compare with.`)] };
-      if (set.competitors.some((c) => !c.handles.length)) {
-        const h = await ctx.call("detect-competitor-handles", { set_id: setId }, actor);
-        if (!h.ok) return { status: "failed", reason: "detection_failed", message: errorOf(h, "Social profiles could not be looked up"), data: { set_id: setId }, gaps: [gap("competitors", "competitors_unconfirmed", `The competitors' social profiles could not be looked up: ${errorOf(h, "the lookup failed")}`)] };
-        set = (await reload()) ?? set;
-      }
-      const placeable = set.competitors.filter((c) => c.website_url && c.handles.some((x) => isReviewReadyHandle(x))).sort((a, b) => (b.similarity_score ?? 0) - (a.similarity_score ?? 0));
-      const unplaced: Unplaced[] = set.competitors.filter((c) => !placeable.includes(c)).map((c) => ({ name: c.name, reason: !c.website_url ? "no_website" : c.handles.length ? "no_verified_profile" : "no_profile_found" }));
-      if (placeable.length < 3) {
-        return { status: "done", outcome: "draft_only", message: `Only ${placeable.length} of ${set.competitors.length} proposed competitors have a verified social profile and a website.`, data: { set_id: setId, source, candidates: set.competitors.length, placeable: placeable.map((c) => c.name), unplaced }, gaps: [gap("competitors", "competitors_unconfirmed", `Only ${placeable.length} of ${set.competitors.length} proposed competitors have a verified social profile and a website; the set stays a draft and the competitive report is skipped.`)] };
-      }
-      const chosen = placeable.slice(0, 3);
-      for (const c of set.competitors) {
-        const rank = chosen.indexOf(c);
-        const want = rank >= 0 ? { is_selected: true, selected_rank: rank + 1 } : { is_selected: false, selected_rank: null };
-        if (!!c.is_selected !== want.is_selected || (c.selected_rank ?? null) !== want.selected_rank) await ctx.db.updateCompetitor(c.id, want);
-      }
-      const k = await ctx.call("confirm-competitor-set", { set_id: setId, notes: "Selected by the demo onboarding: the three closest competitors with a verified social profile." }, actor);
-      if (!k.ok) {
-        const message = errorOf(k, "The competitor set could not be confirmed");
-        return { status: "failed", reason: "confirm_refused", message, data: { set_id: setId, selected: chosen.map((c) => c.name), unplaced }, gaps: [gap("competitors", "competitors_unconfirmed", `The competitor set could not be confirmed: ${message}`)] };
-      }
-      const gaps = unplaced.map((u) => gap("competitors", "competitor_unplaced", `${u.name} was proposed but not selected: ${u.reason === "no_website" ? "no website" : "no verified social profile"}.`));
-      return { status: "done", outcome: "3_selected", data: { set_id: setId, source, selected: chosen.map((c) => c.name), unplaced, candidates: set.competitors.length }, gaps };
+      // A set the lifecycle made during this job goes with the job when it is discarded.
+      if (!set.demo_job_id && r.created === true) await ctx.db.updateSet(set.id, { demo_job_id: job.id });
+      if (r.source === "existing" && set.demo_job_id && set.demo_job_id !== job.id) return { status: "skipped", reason: "set_exists", message: `${client.name} already has a confirmed competitor set.`, data: { set_id: set.id, status: set.status, selected: selectedNames(set), tracked: !!set.rivaliq_landscape_id, source: "existing" } };
+      if (!CONFIRMED_SET.includes(set.status)) return draftOnly(set, "identified", set.competitors.filter((c) => c.website_url).map((c) => c.name));
+      return outcome(set, "identified");
     },
   },
   {
@@ -457,6 +478,7 @@ export function makeDemoCtx(db: Parameters<typeof makeDemoDb>[0], env: CallEnv =
   return {
     db: makeDemoDb(db),
     call: (name, body, actAs) => callFunction(name, body, { ...env, actAs }),
+    lifecycle: (step, clientId) => runStepNow(db, clientId, step),
     async keyHashFor(keyId) {
       if (!keyId) return null;
       const { data } = await db.from("api_keys").select("key_hash").eq("id", keyId).maybeSingle();

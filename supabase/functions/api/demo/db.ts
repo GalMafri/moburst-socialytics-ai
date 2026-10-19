@@ -6,6 +6,7 @@
  */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { clientHost } from "../../_shared/net/clientHost.ts";
+import { confirmDraftSet } from "../../_shared/competitive/confirmSet.ts";
 import type { ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, PostRow, ReportRow, SetWithCompetitors, SproutProfileRow } from "../serializers.ts";
 import { CLIENT_COLUMNS, COMPETITIVE_COLUMNS, COMPETITOR_COLUMNS, DESIGN_SYSTEM_COLUMNS, POST_COLUMNS, REPORT_COLUMNS, SET_COLUMNS, SPROUT_PROFILE_COLUMNS, setsWithCompetitors } from "../store.ts";
 
@@ -31,6 +32,8 @@ export interface DemoDb {
   updateSet(id: string, patch: Record<string, unknown>): Promise<void>;
   insertCompetitors(rows: Record<string, unknown>[]): Promise<CompetitorRow[]>;
   updateCompetitor(id: string, patch: Record<string, unknown>): Promise<void>;
+  /** Confirm a draft set with its three ranked competitors (the confirmation every client's set goes through). */
+  confirmSet(setId: string, confirmedBy: string | null, notes: string): Promise<void>;
   reportsOf(clientId: string): Promise<ReportRow[]>;
   competitiveReportsOf(clientId: string): Promise<CompetitiveReportRow[]>;
   getReports(ids: string[]): Promise<ReportRow[]>;
@@ -98,6 +101,9 @@ export function makeDemoDb(db: SupabaseClient): DemoDb {
     updateSet: (id, patch) => run(db.from("competitor_sets").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id)),
     insertCompetitors: (list) => rows<CompetitorRow>(db.from("competitors").insert(list).select(COMPETITOR_COLUMNS)),
     updateCompetitor: (id, patch) => run(db.from("competitors").update(patch).eq("id", id)),
+    async confirmSet(setId, confirmedBy, notes) {
+      await confirmDraftSet(db, setId, { confirmedBy, notes });
+    },
     reportsOf: (clientId) => rows<ReportRow>(db.from("reports").select(REPORT_COLUMNS).eq("client_id", clientId).order("created_at", { ascending: false }).limit(20)),
     competitiveReportsOf: (clientId) => rows<CompetitiveReportRow>(db.from("competitive_reports").select(COMPETITIVE_COLUMNS).eq("client_id", clientId).order("created_at", { ascending: false }).limit(20)),
     getReports: (ids) => (ids.length ? rows<ReportRow>(db.from("reports").select(REPORT_COLUMNS).in("id", ids)) : Promise.resolve([])),
