@@ -33,7 +33,7 @@ it('starts profile detection automatically after identifying competitors and sho
  expect(screen.getAllByText('Searching company pages…')).toHaveLength(2);expect(screen.queryByText('No handles found')).toBeNull();finish();await waitFor(()=>expect(screen.getByRole('button',{name:'Re-identify (new draft)'})).toBeEnabled());
 });
 it('does not remove a profile until the explicit confirmation',async()=>{
- mount();fireEvent.click(await screen.findByRole('button',{name:'Remove the instagram handle @company_a'}));
+ mount();fireEvent.click(await screen.findByRole('button',{name:'Remove the Instagram profile @company_a'}));
  expect(f.writes).toHaveLength(0);expect(screen.getByRole('alertdialog')).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Remove profile'}));await waitFor(()=>expect(f.writes).toHaveLength(1));expect(f.writes[0]).toMatchObject({is_active:false,source:'rejected'});
 });
 it('keeps completed empty results across visits without repeating lookups or offering detection buttons',async()=>{

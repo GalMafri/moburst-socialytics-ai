@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatDate } from "@/lib/display";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -85,7 +86,7 @@ export function HiggsfieldConnection() {
             </p>
             <p className="t-secondary">This is the saved account link. If generation reports an expired session, sign in again below.</p>
             {data?.linked_at && (
-              <p className="t-secondary">Signed in on {new Date(data.linked_at).toLocaleDateString()}.</p>
+              <p className="t-secondary">Signed in on {formatDate(data.linked_at)}.</p>
             )}
             {wrongAccount && (
               <p className="t-secondary flex items-start gap-2 text-[rgb(248,113,113)]">

@@ -20,10 +20,13 @@ function runCompetitive(overrides={}){
  nodes['Merge Owned Posts']=input;
  return vm.runInNewContext('(function(){'+metricsCode+'\n'+read('competitive-aggregate')+'})()',{$input:{first:()=>({json:input})},$:name=>({first:()=>({json:nodes[name]||{}})})})[0].json;
 }
-check('follower counts never become reach and provider rates override differently weighted post means',()=>{
- const r=runCompetitive({input:{socialPosts:[{companyId:1,postId:'1',publishedAt:'2026-08-01',channel:'instagram',presenceReach:1000,engagementRate:0.05,engagementTotal:10},{companyId:1,postId:'2',publishedAt:'2026-08-31',channel:'instagram',presenceReach:1000,engagementRate:0.01,engagementTotal:20}]},'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelAverageEngagementRatePerPost:0.002,crossChannelSocialEngagement:30,instagramAverageEngagementRatePerPost:0.004,instagramPostsEngagementTotal:30}]}});
+check('follower counts never become reach and the rate is engagements per impression from provider totals',()=>{
+ const r=runCompetitive({input:{socialPosts:[{companyId:1,postId:'1',publishedAt:'2026-08-01',channel:'instagram',presenceReach:1000,engagementRate:0.05,engagementTotal:10,estimatedImpressions:400},{companyId:1,postId:'2',publishedAt:'2026-08-31',channel:'instagram',presenceReach:1000,engagementRate:0.01,engagementTotal:20}]},'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelAverageEngagementRatePerPost:0.002,crossChannelSocialEngagement:30,crossChannelEstimatedImpressions:1500,instagramAverageEngagementRatePerPost:0.004,instagramPostsEngagementTotal:30,instagramEstimatedImpressions:1000}]}});
  const c=r.companies[0];assert.equal(c.reach_total,undefined);assert.equal(c.top_posts[0].reach,undefined);assert.equal(c.top_posts[0].followers_at_publication,1000);
- assert.equal(c.engagement_rate_avg,0.002);assert.equal(c.by_channel.instagram.engagement_rate_avg,0.004);assert.equal(c.engagement_avg,15);assert.equal(r.metric_semantics_version,4);
+ assert.equal(c.engagement_rate_avg,30/1500);assert.equal(c.by_channel.instagram.engagement_rate_avg,30/1000);assert.equal(c.engagement_avg,15);assert.equal(r.metric_semantics_version,4);
+ // Ranked by engagement; a post's rate is per impression when it has one, else none, never per follower.
+ assert.equal(c.top_posts[0].engagement,20);assert.equal(c.top_posts[0].engagement_rate,null);assert.equal(c.top_posts[1].engagement_rate,10/400);
+ assert.equal(c.comparison_metrics.engagement_rate_per_post,undefined);assert.equal(c.rivaliq_metrics.engagement_rate_per_post,undefined);
 });
 check('RivalIQ period counts drive totals and averages independently of content samples',()=>{
  const r=runCompetitive({input:{socialPosts:[{companyId:1,postId:'a',publishedAt:'2026-08-10',channel:'instagram'}]},'Landscape Metrics Summary':{metrics:[{companyId:1,mainPeriodStart:'2026-08-01',mainPeriodEnd:'2026-08-31',crossChannelSocialActivity:52,crossChannelSocialEngagement:6950,instagramPosts:47,instagramPostsEngagementTotal:6610,tikTokPosts:5}]}});

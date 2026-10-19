@@ -15,7 +15,9 @@ export function sourceCompetitiveSummary(report: Record<string, any>): string | 
   const rate = (n: number) => `${(n * 100).toFixed(2)}%`;
   const lines: string[] = [];
   if (valid(m.posts?.current)) lines.push(`Publishing: ${fmt(m.posts.current)} tracked posts from ${client.name} in this period${valid(m.posts.previous) ? `, compared with ${fmt(m.posts.previous)} in the previous equal-length period` : ""}.`);
-  if (valid(m.engagement_rate_per_post?.current)) lines.push(`Engagement: ${rate(m.engagement_rate_per_post.current)} is ${client.name}'s average engagement rate per post on tracked networks (excluding LinkedIn)${valid(m.engagement_rate_per_post.previous) ? `, versus ${rate(m.engagement_rate_per_post.previous)} previously` : ""}.`);
+  // The one rate definition: engagements divided by impressions (views on
+  // video networks), from the same totals for every company.
+  if (valid(m.engagement_rate?.current)) lines.push(`Engagement: ${client.name}'s engagement rate was ${rate(m.engagement_rate.current)}, engagements divided by impressions on tracked networks (excluding LinkedIn)${valid(m.engagement_rate.previous) ? `, against ${rate(m.engagement_rate.previous)} in the previous period` : ""}.`);
   if (valid(m.audience?.current)) lines.push(`Audience: ${fmt(m.audience.current)} followers across tracked networks (excluding LinkedIn)${m.audience_as_of ? ` as of ${m.audience_as_of}` : ''}${valid(m.audience.previous) ? `, ${m.audience.current >= m.audience.previous ? "up" : "down"} ${fmt(Math.abs(m.audience.current - m.audience.previous))} from the previous period` : ""}.`);
   const rivals = companies.filter((c: any) => !c.is_client && valid(metricsOf(c)?.posts?.current));
   const leader = [...rivals].sort((a: any, b: any) => metricsOf(b).posts.current - metricsOf(a).posts.current)[0];

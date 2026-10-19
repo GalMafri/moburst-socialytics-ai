@@ -23,48 +23,10 @@ const PLATFORM_COLORS_DARK: Record<string, string> = {
   threads: "#FFFFFF",
 };
 
-/**
- * Maps any raw or display network name to a canonical platform key.
- * Handles Sprout display names ("Twitter/X", "LinkedIn"), raw network types
- * ("fb_instagram_account", "linkedin_company"), and uppercased values
- * ("INSTAGRAM") so icons/colors resolve consistently everywhere.
- */
-export function normalizePlatformKey(input?: string | null): string {
-  if (!input) return "";
-  const s = String(input).toLowerCase().trim();
-  if (PLATFORM_COLORS[s]) return s; // already canonical
-  if (s.includes("instagram") || s === "ig") return "instagram";
-  if (s.includes("linkedin")) return "linkedin";
-  if (s.includes("tiktok") || s === "tik tok") return "tiktok";
-  if (s.includes("youtube") || s === "yt") return "youtube";
-  // Sprout names a Facebook page "fb_page" and an Instagram business account
-  // "fb_instagram_account" — the instagram test above catches the latter, so
-  // any remaining fb_* is Facebook.
-  if (s.includes("facebook") || s === "fb" || s.startsWith("fb_") || s === "fb page") return "facebook";
-  if (s.includes("pinterest")) return "pinterest";
-  if (s.includes("threads")) return "threads";
-  if (s.includes("snapchat")) return "snapchat";
-  if (s.includes("twitter") || s === "x" || s === "twitter/x") return "x";
-  return s;
-}
-
-/** Human-friendly display name for a network (canonicalised). */
-export function prettyPlatformName(input?: string | null): string {
-  const key = normalizePlatformKey(input);
-  const map: Record<string, string> = {
-    instagram: "Instagram",
-    linkedin: "LinkedIn",
-    tiktok: "TikTok",
-    youtube: "YouTube",
-    facebook: "Facebook",
-    pinterest: "Pinterest",
-    threads: "Threads",
-    snapchat: "Snapchat",
-    x: "Twitter/X",
-    twitter: "Twitter/X",
-  };
-  return map[key] || (input ? String(input) : "");
-}
+// One implementation of platform keys and names: src/lib/display.ts. The
+// names below stay for existing imports.
+export { platformKey as normalizePlatformKey, platformName as prettyPlatformName } from "./display";
+import { platformKey as normalizePlatformKey, platformName as prettyPlatformName } from "./display";
 
 export function getPlatformColor(platform: string, isDark = true): string {
   const key = normalizePlatformKey(platform);

@@ -8,6 +8,8 @@ import { ClientPicker } from "@/components/clients/ClientPicker";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchActiveClients } from "@/lib/activeClients";
+import { formatDateTime } from "@/lib/display";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,7 +29,7 @@ export default function CompetitiveIndex() {
     queryKey: ["competitive-index"],
     queryFn: async () => {
       const [clientsRes, setsRes, reportsRes] = await Promise.all([
-        supabase.from("clients").select("id, name, logo_url").is("archived_at", null).order("name"),
+        fetchActiveClients<{ id: string; name: string; logo_url: string | null }>("id, name, logo_url").then((data) => ({ data, error: null })),
         // "*" so the recorded tracking check (competitor_sets.tracking_check) is
         // read where the column exists, without failing where it does not yet.
         supabase.from("competitor_sets").select("*").order("created_at", { ascending: false }),
@@ -74,7 +76,7 @@ export default function CompetitiveIndex() {
           // fact about the account rather than a connection problem.
           <LoadError title="Could not load the competitive overview" error={error} onRetry={() => refetch()} />
         ) : !data?.length ? (
-          <EmptyState icon={Crosshair} title="No clients yet" description="Add a client to start competitive analysis." />
+          <EmptyState icon={Crosshair} title="No clients yet" />
         ) : (
           <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
             <ClientPicker clients={visibleClients} selectedId={selectedClient?.id} onSelect={chooseClient} search={search} onSearch={setSearch} />
@@ -122,7 +124,7 @@ export default function CompetitiveIndex() {
                       <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${c.id}/competitive/feed`)}><Rss className="h-3.5 w-3.5 mr-1" /> Feed</Button>
                     )}
                   </div>
-                  {c.report && <p className="t-secondary">Last run {new Date(c.report.created_at).toLocaleString()}</p>}
+                  {c.report && <p className="t-secondary">Last run {formatDateTime(c.report.created_at)}</p>}
                 </CardContent>
               </Card>
             ))}

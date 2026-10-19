@@ -178,7 +178,8 @@ export function TrendInsightsSection({ reports }: Props) {
   const tiktokTrends = useMemo(() => aggregateTrends(reports, "tiktok_trends_analysis"), [reports]);
   const igTrends = useMemo(() => aggregateTrends(reports, "instagram_trends_analysis"), [reports]);
 
-  if (!tiktokTrends && !igTrends) return null;
+  // One plain line when the selected dates hold no trend posts, never a blank tab.
+  if (!tiktokTrends && !igTrends) return <p className="t-body">There are no trend posts in the selected dates.</p>;
 
   return (
     <div className="space-y-4">

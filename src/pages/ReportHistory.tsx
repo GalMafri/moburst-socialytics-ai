@@ -1,5 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { canRetry, retryLabel } from "@/lib/reportRun";
+import { canRetry } from "@/lib/reportRun";
+import { firstRunSentence, formatDate, formatRange, listedRuns } from "@/lib/display";
+import { useNextRun } from "@/lib/nextRun";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,7 +22,8 @@ export default function ReportHistory() {
   const { id } = useParams();
   useRealtimeReports(id);
   const navigate = useNavigate();
-  const { canRunAnalysis, isClient } = useAuth();
+  const { isClient, isMoburstStaff } = useAuth();
+  const nextRun = useNextRun(id, "monthly");
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -62,7 +65,7 @@ export default function ReportHistory() {
               // their work does not exist, on the strength of a request that
               // never answered.
               <LoadError title="Could not load the reports" error={error} onRetry={() => refetch()} />
-            ) : reports && reports.length > 0 ? (
+            ) : listedRuns("monthly", reports, { isStaff: isMoburstStaff }).length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -75,28 +78,22 @@ export default function ReportHistory() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {reports.map((r: any) => {
-                    const rd = r.report_data as any;
-                    const isRunning = r.status === "running";
+                  {listedRuns("monthly", reports, { isStaff: isMoburstStaff }).map((r: any) => {
+                    const isRunning = r.display.state === "running";
                     return (
                       <TableRow key={r.id} className={isRunning ? "animate-pulse" : ""}>
-                        <TableCell className="t-body">{new Date(r.created_at).toLocaleDateString()}</TableCell>
+                        <TableCell className="t-body">{formatDate(r.created_at)}</TableCell>
                         <TableCell>
-                          <Badge
-                            variant={r.status === "completed" ? "default" : r.status === "running" ? "secondary" : "destructive"}
-                            className="gap-1"
-                          >
+                          <Badge variant={r.display.variant} className="gap-1">
                             {isRunning && <Loader2 className="h-3 w-3 animate-spin" />}
-                            {r.status}
+                            {r.display.label}
                           </Badge>
                         </TableCell>
                         <TableCell className="t-secondary">
-                          {r.date_range_start && r.date_range_end
-                            ? `${r.date_range_start} — ${r.date_range_end}`
-                            : "—"}
+                          {formatRange({ start: r.date_range_start, end: r.date_range_end })}
                         </TableCell>
                         <TableCell className="t-secondary">
-                          {r.duration_minutes ? `${r.duration_minutes}m` : "—"}
+                          {r.duration_minutes ? `${r.duration_minutes} min` : ""}
                         </TableCell>
                         {!isClient && (
                           <TableCell>
@@ -104,18 +101,16 @@ export default function ReportHistory() {
                               <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
                                 <ExternalLink className="h-3.5 w-3.5" /> View
                               </Button>
-                            ) : (
-                              <span className="t-secondary/70">—</span>
-                            )}
+                            ) : null}
                           </TableCell>
                         )}
                         <TableCell className="text-right flex items-center justify-end gap-1">
-                          {r.status === "completed" && (
+                          {r.display.state === "ready" && (
                             <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}>
                               <Eye className="h-4 w-4 mr-1" /> View
                             </Button>
                           )}
-                          {canRetry(r) && <RetryReportButton reportId={r.id} kind="monthly" label={retryLabel(r)} />}
+                          {r.display.state === "scheduled" && canRetry(r) && <RetryReportButton reportId={r.id} kind="monthly" label="Run now" />}
                           <ReportActions report={r} />
                         </TableCell>
                       </TableRow>
@@ -124,17 +119,7 @@ export default function ReportHistory() {
                 </TableBody>
               </Table>
             ) : (
-              <EmptyState
-                title="No reports yet"
-                description="Reports for this client will appear here once an analysis has been run."
-                action={
-                  canRunAnalysis ? (
-                    <Button onClick={() => navigate(`/clients/${id}/analyze`)}>
-                      Run your first analysis
-                    </Button>
-                  ) : undefined
-                }
-              />
+              <EmptyState title="No reports yet" description={firstRunSentence("monthly", nextRun.data) || undefined} />
             )}
           </CardContent>
         </Card>

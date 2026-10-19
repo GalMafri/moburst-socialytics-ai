@@ -9,7 +9,9 @@
  * and their media. Every line is a fact from those rows; nothing is invented.
  */
 
-import { addDays, mondayOf } from "@/lib/calendarPosts";
+import { inWeek, type WeekWindow } from "@/lib/weekWindow";
+
+const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
 export interface HeadlineMetric { key: string; label: string; current: number; percent: number | null }
 
@@ -61,22 +63,23 @@ export interface WeekPost { id: string; post_key: string; post_date: string; pla
 export interface PostMedia { calendar_post_key: string | null; is_selected: boolean | null; is_approved: boolean | null; media_urls: string[] | null }
 
 export interface ContentWeek {
+  /** Posts this week, Monday to Sunday: the number the calendar shows as "N posts this week". */
   planned: number;
   designed: number;
   approved: number;
-  /** Posts in the next seven days with no chosen design, soonest first. */
+  /** Posts from today to Sunday with copy and no chosen design, soonest first. */
   withoutDesign: WeekPost[];
   /** Posts in the next three days that nobody has approved. */
   unapprovedSoon: WeekPost[];
 }
 
-/** The coming seven days of the calendar (today included), matched to their media by post key in code. */
-export function contentWeek(posts: WeekPost[], media: PostMedia[], today: string): ContentWeek {
-  const end = addDays(today, 6);
-  const soon = addDays(today, 2);
+/** This week of the calendar (Monday to Sunday in the client's time zone), matched to its media by post key in code. */
+export function contentWeek(posts: WeekPost[], media: PostMedia[], week: WeekWindow): ContentWeek {
+  const soon = addDays(week.today, 2);
+  const sorted = [...posts].sort((a, b) => a.post_date.localeCompare(b.post_date));
+  const thisWeek = sorted.filter((p) => inWeek(p.post_date, week));
   // A post with no copy yet isn't ready to design or approve.
-  const week = posts.filter((p) => p.post_date >= today && p.post_date <= end && p.copy.trim())
-    .sort((a, b) => a.post_date.localeCompare(b.post_date));
+  const upcoming = sorted.filter((p) => p.post_date >= week.today && p.copy.trim());
   const byKey = new Map<string, PostMedia[]>();
   for (const m of media) {
     if (!m.calendar_post_key) continue;
@@ -85,34 +88,33 @@ export function contentWeek(posts: WeekPost[], media: PostMedia[], today: string
   const designed = (p: WeekPost) => (byKey.get(p.post_key) || []).some((m) => m.is_selected && (m.media_urls?.length ?? 0) > 0);
   const approved = (p: WeekPost) => (byKey.get(p.post_key) || []).some((m) => m.is_approved);
   return {
-    planned: week.length,
-    designed: week.filter(designed).length,
-    approved: week.filter(approved).length,
-    withoutDesign: week.filter((p) => !designed(p)),
-    unapprovedSoon: week.filter((p) => p.post_date <= soon && !approved(p)),
+    planned: thisWeek.length,
+    designed: thisWeek.filter(designed).length,
+    approved: thisWeek.filter(approved).length,
+    withoutDesign: upcoming.filter((p) => p.post_date <= week.end && !designed(p)),
+    unapprovedSoon: upcoming.filter((p) => p.post_date <= soon && !approved(p)),
   };
 }
 
 export interface ActionItem { key: string; text: string; href: string; tone: "attention" | "info" }
 
 /**
- * What needs doing, most urgent first. Staff see the setup and run items;
- * a client sees only what concerns their own content.
+ * What a person can act on, most urgent first: posts to approve or design,
+ * and for staff the competitor topics and endorsed tests. Work the product
+ * runs on its own (reports, tracking, the first analysis) is never an item:
+ * it runs without anyone, so there is nothing to ask. A scheduled report that
+ * does not finish runs again on its own (run-scheduled-jobs/dispatch.ts).
  */
 export function actionItems(args: {
   clientId: string;
   isStaff: boolean;
-  today: string;
+  week: WeekWindow;
   content: ContentWeek;
-  lastRun: { status: string; created_at: string } | null;
-  hasReport: boolean;
-  tracking: { headline: string; ready: boolean } | null;
-  hasCompetitiveReport: boolean;
   openTopics: number;
   endorsedTests: number;
 }): ActionItem[] {
   const { clientId, isStaff, content } = args;
-  const week = `/clients/${clientId}/calendar?week=${mondayOf(args.today)}`;
+  const week = `/clients/${clientId}/calendar?week=${args.week.start}`;
   const items: ActionItem[] = [];
   if (content.unapprovedSoon.length) {
     const n = content.unapprovedSoon.length;
@@ -121,17 +123,6 @@ export function actionItems(args: {
   if (content.withoutDesign.length) {
     const n = content.withoutDesign.length;
     items.push({ key: "design", tone: "attention", href: week, text: `${n} post${n === 1 ? "" : "s"} this week ${n === 1 ? "has" : "have"} no design chosen yet.` });
-  }
-  // A scheduled report that does not finish runs again on its own
-  // (run-scheduled-jobs/dispatch.ts), so a run that stopped is never an item.
-  if (isStaff && !args.hasReport && args.lastRun?.status !== "running") {
-    items.push({ key: "no-report", tone: "info", href: `/clients/${clientId}/analyze`, text: "No monthly report yet. Run the first one." });
-  }
-  if (isStaff && args.tracking && !args.tracking.ready && args.tracking.headline) {
-    items.push({ key: "tracking", tone: "attention", href: `/clients/${clientId}/competitive`, text: `Competitor tracking: ${args.tracking.headline.toLowerCase()}.` });
-  }
-  if (isStaff && !args.hasCompetitiveReport) {
-    items.push({ key: "no-competitive", tone: "info", href: `/clients/${clientId}/competitive`, text: "No competitive analysis yet. Set up competitors and run one." });
   }
   if (isStaff && args.openTopics > 0) {
     const n = args.openTopics;

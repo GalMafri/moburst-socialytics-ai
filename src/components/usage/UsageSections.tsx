@@ -7,6 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { eventName } from "@/lib/display";
 
 /**
  * Presentation for the behavioural sections of the usage page. Kept apart from
@@ -102,12 +103,12 @@ export function MetricsCard({
   );
 }
 
-/** Every event the product emits, ranked by use. This is the adoption map. */
+/** Every recorded action in the window, ranked by use: the same rows as the tiles and the chart (usage_actions). */
 export function FeatureTable({ rows }: { rows: FeatureRow[] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="t-h3">Feature adoption</CardTitle>
+        <CardTitle className="t-h3">Actions in the last 90 days</CardTitle>
       </CardHeader>
       <CardContent className="px-0 pb-0">
         <div className="overflow-x-auto">
@@ -117,7 +118,7 @@ export function FeatureTable({ rows }: { rows: FeatureRow[] }) {
                 <TableHead>Action</TableHead>
                 <TableHead className="text-right">People</TableHead>
                 <TableHead className="text-right">Times</TableHead>
-                <TableHead className="text-right">Failures</TableHead>
+                <TableHead className="text-right">Did not finish</TableHead>
                 <TableHead className="text-right">Median</TableHead>
               </TableRow>
             </TableHeader>
@@ -131,7 +132,7 @@ export function FeatureTable({ rows }: { rows: FeatureRow[] }) {
               )}
               {rows.map((r) => (
                 <TableRow key={r.event}>
-                  <TableCell className="font-mono t-label">{r.event}</TableCell>
+                  <TableCell className="t-body">{eventName(r.event)}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.users}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.uses}</TableCell>
                   <TableCell className="text-right tabular-nums">

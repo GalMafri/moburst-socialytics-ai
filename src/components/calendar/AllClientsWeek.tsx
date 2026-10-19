@@ -7,6 +7,7 @@
 import { useMemo } from "react";
 import { isVideoMedia } from "@/lib/designRequests";
 import { isTextOnlyFormat } from "@/lib/platform";
+import { platformName } from "@/lib/display";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Clock, ImageOff } from "lucide-react";
@@ -92,7 +93,7 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                 type="button"
                 onClick={() => navigate(`/clients/${p.client_id}/calendar?week=${week}&post=${encodeURIComponent(p.id)}`)}
                 className="w-full text-left glass-inner p-2 space-y-2 border border-white/5 hover:border-white/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                aria-label={`Open ${p.client_name}'s ${p.platform} post`}
+                aria-label={`Open ${p.client_name}'s ${platformName(p.platform)} post`}
               >
                 {designs[p.post_key] ? (
                   <div className="aspect-[4/5] rounded-[8px] overflow-hidden bg-black/60">

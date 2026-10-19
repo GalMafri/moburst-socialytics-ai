@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getHubToken } from "@/utils/hubAuth";
+import { fetchActiveClients } from "@/lib/activeClients";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,12 +36,8 @@ export function HubCompanySync() {
   const { data: clients, isLoading: clientsLoading } = useQuery({
     queryKey: ["clients-hub-sync"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("clients")
-        .select("id, name, hub_company_name")
-        .order("name");
-      if (error) throw error;
-      return data as Array<{ id: string; name: string; hub_company_name: string | null }>;
+      // Active clients only, the one shared definition.
+      return fetchActiveClients<{ id: string; name: string; hub_company_name: string | null }>("id, name, hub_company_name");
     },
   });
 
@@ -53,11 +50,14 @@ export function HubCompanySync() {
     queryKey: ["hub-companies"],
     queryFn: async () => {
       const token = getHubToken();
-      if (!token) throw new Error("No Hub token in session (open from Hub, not directly)");
+      if (!token) throw new Error("Open Socialytics from the Moburst portal to see the portal's company list.");
       const res = await fetch(`${HUB_BACKEND_URL}/api/companies`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error(`Hub /api/companies returned ${res.status} (admin required)`);
+      if (!res.ok) {
+        console.error("[hub companies]", res.status);
+        throw new Error(res.status === 401 || res.status === 403 ? "The portal's company list is open to portal admins only." : "The portal's company list did not load. Reload the page to try again.");
+      }
       return (await res.json()) as HubCompany[];
     },
     retry: false,
@@ -77,7 +77,8 @@ export function HubCompanySync() {
       toast({ title: "Hub company name updated" });
     },
     onError: (err: Error) => {
-      toast({ title: "Update failed", description: err.message, variant: "destructive" });
+      console.error("[hub company name]", err);
+      toast({ title: "The company name was not saved", description: "Nothing changed. Try again in a minute.", variant: "destructive" });
     },
   });
 
@@ -246,7 +247,7 @@ export function HubCompanySync() {
                               c.hub_company_name ? "text-white" : "italic text-[#b1b7c1]"
                             } truncate`}
                           >
-                            {c.hub_company_name || "— not set —"}
+                            {c.hub_company_name || "Not set"}
                           </span>
                           <Button
                             size="icon"

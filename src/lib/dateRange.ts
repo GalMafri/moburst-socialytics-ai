@@ -51,13 +51,8 @@ export function isValidRange(range: Partial<DateRange> | null | undefined): rang
   return !isNaN(s) && !isNaN(e) && s <= e;
 }
 
-export function formatRange(range: Partial<DateRange> | null | undefined): string {
-  if (!range?.start || !range?.end) return "";
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" };
-  const s = new Date(range.start + "T00:00:00Z").toLocaleDateString("en-US", opts);
-  const e = new Date(range.end + "T00:00:00Z").toLocaleDateString("en-US", opts);
-  return `${s} to ${e}`;
-}
+/** Date ranges are worded by the one display layer. */
+export { formatRange } from "./display";
 
 /**
  * The period a report describes. Uses the stored range when present and

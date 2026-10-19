@@ -80,7 +80,8 @@ Deno.serve(async (req) => {
       role: c.is_client ? "client" : "competitor",
       tracked_posts: c.post_count ?? null,
       posts_per_week: round(c.cadence_per_week),
-      engagement_rate_pct: c.engagement_rate_avg == null ? null : round(c.engagement_rate_avg * 100, 2),
+      // Engagements divided by impressions (views on video networks); null when there is no impressions figure.
+      engagement_rate_per_impression_pct: c.engagement_rate_avg == null ? null : round(c.engagement_rate_avg * 100, 2),
       engagements_per_post: round(c.engagement_avg),
       channels: (c.channel_mix || []).map((m: { key: string; count: number }) => `${m.key} ${m.count}`).join(", "),
       formats: (c.media_type_mix || []).map((m: { key: string; count: number }) => `${m.key} ${m.count}`).join(", "),

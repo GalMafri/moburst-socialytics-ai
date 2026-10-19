@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, competitiveRecovery, stateLine, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
+import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, competitiveRecovery, stateLine, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
 
 const set = (o: Partial<SetRow> & { id: string; status: string; created_at: string }): SetRow => o as SetRow;
 
@@ -83,7 +83,9 @@ describe("describeReport", () => {
     expect(describeReport(null).headline).toMatch(/No report run yet/i);
     expect(describeReport({ id: "r", status: "running", created_at: "x" }).ready).toBe(false);
     expect(describeReport({ id: "r", status: "complete", created_at: "x" }).ready).toBe(true);
-    expect(describeReport({ id: "r", status: "failed", created_at: "x" }).headline).toMatch(/did not finish/i);
+    // A run that did not finish runs again; it is never shown as a failure.
+    expect(describeReport({ id: "r", status: "failed", created_at: "x" }).headline).toMatch(/scheduled to run again/i);
+    expect(describeReport({ id: "r", status: "failed", created_at: "x" }).headline).not.toMatch(/fail|did not finish/i);
   });
 });
 
@@ -115,25 +117,18 @@ describe("plainCompetitiveError", () => {
   });
 });
 
-describe("saved competitive failures", () => {
-  it("explains a withheld report without claiming no data or reason was saved", () => {
-    const message = competitiveFailureMessage({quality_check:{state:"needs_review",reasons:["49 vs 47"]}});
-    expect(message).toMatch(/analysis was saved/i);
-    expect(message).toMatch(/withheld/i);
-    expect(message).not.toMatch(/49|47|nothing was saved|try again/i);
-  });
-  it("retains provider errors and avoids unsupported claims for unknown failures", () => {
-    expect(competitiveFailureMessage({error:"HTTP 429"})).toBe(plainCompetitiveError("HTTP 429"));
-    expect(competitiveFailureMessage(null)).not.toMatch(/nothing was saved|no reason|try again/i);
-  });
-});
-
 it('distinguishes pending collection from a completed collection with no returned posts', () => {
  const empty={aggregates:{companies:[{name:'Client',post_count:0,observed_post_count:0}]}};
  expect(competitiveRecovery({...empty,provider_status:2}).title).toBe('Source data was still loading');
  expect(competitiveRecovery({...empty,provider_status:1}).title).toBe('No posts available for this period');
  expect(competitiveRecovery(empty).detail).toContain('does not establish');
- expect(competitiveRecovery({quality_check:{reasons:['Different provider totals']}}).title).toBe('Report awaiting review');
+ expect(competitiveRecovery({quality_check:{reasons:['Different provider totals']}}).title).toBe('Held back');
+ // Facts only: nothing asks anyone to retry or review, and the checks' own reasons stay out.
+ for (const data of [{...empty,provider_status:2},empty,{quality_check:{reasons:['Different provider totals']}}]) for (const staff of [true,false]) {
+   const r=competitiveRecovery(data,staff);
+   expect(r.detail).not.toMatch(/retry|review|choose another|Different provider totals/i);
+ }
+ expect(competitiveRecovery({...empty,provider_status:2},false).detail).not.toMatch(/RivalIQ/);
 });
 
 describe("stateLine", () => {

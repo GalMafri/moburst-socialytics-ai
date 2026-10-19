@@ -28,11 +28,18 @@ it("corrects historical numeric views without mutating stored input or replacing
   expect(original.aggregates.companies[0].cadence_per_week).toBe(18.7);
 });
 
-it("matches the provider aggregation for account and network rates without recomputing weights",()=>{
- const input={aggregates:{companies:[{post_count:31,engagement_rate_avg:0.0136,by_channel:{instagram:{post_count:8,engagement_rate_avg:0.5}},rivaliq_metrics:{engagement_rate_per_post:{current:0.001548879},engagement:{current:207},by_network:{instagram:{rate:{current:0.002}}}}}]}};
+it("rates every company and network as engagements per impression from RivalIQ's totals, never a stored rate",()=>{
+ const input={aggregates:{companies:[{post_count:31,engagement_rate_avg:0.0136,by_channel:{instagram:{post_count:8,engagement_rate_avg:0.5},linkedin:{post_count:3,engagement_rate_avg:0.4}},rivaliq_metrics:{engagement_rate_per_post:{current:0.001548879},engagement:{current:207},estimated_impressions:{current:16280},by_network:{instagram:{rate:{current:0.002},engagement:{current:137},impressions:{current:7081}}}}}]}};
  const result=normalizedCompetitiveMetrics(input).aggregates.companies[0];
- expect(result.engagement_rate_avg).toBe(0.001548879);
+ expect(result.engagement_rate_avg).toBe(207/16280);
  expect((result as { engagement_avg?: number }).engagement_avg).toBe(207/31);
- expect(result.by_channel.instagram.engagement_rate_avg).toBe(0.002);
+ expect(result.by_channel.instagram.engagement_rate_avg).toBe(137/7081);
+ // No impressions figure for LinkedIn: no rate, never the stored 40%.
+ expect(result.by_channel.linkedin.engagement_rate_avg).toBeNull();
  expect(input.aggregates.companies[0].engagement_rate_avg).toBe(0.0136);
+});
+it("never passes a stored rate through when a report has no provider totals",()=>{
+ const result=normalizedCompetitiveMetrics({aggregates:{companies:[{post_count:4,engagement_rate_avg:3.04,by_channel:{facebook:{post_count:4,engagement_rate_avg:3.04}}}]}}).aggregates.companies[0];
+ expect(result.engagement_rate_avg).toBeNull();
+ expect(result.by_channel.facebook.engagement_rate_avg).toBeNull();
 });

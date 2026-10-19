@@ -23,8 +23,8 @@ export function ReportRunStatus({ reportId, startedAt, kind, onStarted }: {
     <p className="t-secondary mx-auto">{RUN_ESTIMATE}</p>
     {startedAt && <p className="t-secondary mx-auto">Elapsed: {Math.floor(minutesRunning(report, now))} minutes. This page updates when the report is ready.</p>}
     {reportId && canRetry(report, now) ? <>
-      <p className="t-secondary mx-auto">This run has exceeded 90 minutes. It may still be working. Check its status before starting it again.</p>
-      <RetryReportButton reportId={reportId} kind={kind} label="Review retry" onStarted={onStarted} />
-    </> : <p className="t-secondary mx-auto">Retry is unavailable for the first 90 minutes to prevent duplicate analyses.</p>}
+      <p className="t-secondary mx-auto">This run is taking longer than usual and may still finish.</p>
+      <RetryReportButton reportId={reportId} kind={kind} label="Run now" onStarted={onStarted} />
+    </> : null}
   </div>;
 }

@@ -1,13 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { describeInvokeError } from "@/lib/invokeError";
+import { describe, expect, it, vi } from "vitest";
+import { describeInvokeError, safeToResend, withQuietRetry } from "@/lib/invokeError";
 import { insightKey as browserInsightKey } from "@/hooks/useInsightFeedback";
 import { insightKey as edgeInsightKey } from "../../../supabase/functions/_shared/reports/payloads";
 import { bytesToBase64 } from "../../../supabase/functions/_shared/higgsfield/renderImage";
 
 /**
- * describeInvokeError is how every failure from an edge function reaches a
- * person. It matters more since 18 functions were gated: without it, a signed
- * -out staff member sees "Edge Function returned a non-2xx status code".
+ * describeInvokeError is how a failed request of a person's own reaches the
+ * screen. It returns one plain sentence by error code or HTTP status; the
+ * server's own text ("DB update failed", "could not parse JSON from Claude
+ * output") goes to the console only.
  */
 describe("describeInvokeError", () => {
   const withContext = (status: number, body?: unknown) => ({
@@ -17,41 +18,62 @@ describe("describeInvokeError", () => {
       clone: () => ({ json: async () => { if (body === undefined) throw new Error("not json"); return body; } }),
     },
   });
+  const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
 
-  it("prefers the error the function actually sent", async () => {
-    expect(await describeInvokeError(withContext(403), { error: "Moburst staff only." })).toBe("Moburst staff only.");
+  it("never shows the server's own text", async () => {
+    quiet();
+    for (const raw of ["DB update failed", "could not parse JSON from Claude output", "Moburst staff only."]) {
+      expect(await describeInvokeError(withContext(500, { error: raw }))).not.toContain(raw);
+      expect(await describeInvokeError(withContext(400), { error: raw })).not.toContain(raw);
+    }
   });
 
-  it("reads the body off the response when data carries nothing", async () => {
-    expect(await describeInvokeError(withContext(400, { error: "prompt is required" }))).toBe("prompt is required");
+  it("keeps the real text in the console", async () => {
+    const log = quiet();
+    await describeInvokeError(withContext(500, { error: "DB update failed" }));
+    expect(JSON.stringify(log.mock.calls)).toContain("DB update failed");
   });
 
-  it("falls back to message when the body has no error key", async () => {
-    expect(await describeInvokeError(withContext(400, { message: "bad request" }))).toBe("bad request");
+  it("chooses a plain sentence by status", async () => {
+    quiet();
+    expect(await describeInvokeError(withContext(401))).toMatch(/session has ended/i);
+    expect(await describeInvokeError(withContext(403))).toMatch(/does not have access/i);
+    expect(await describeInvokeError(withContext(504))).toMatch(/longer than the server allows/i);
+    expect(await describeInvokeError(withContext(500))).toMatch(/did not go through/i);
+    expect(await describeInvokeError(withContext(502))).toMatch(/did not go through/i);
   });
 
-  it("explains the three statuses a person can act on", async () => {
-    expect(await describeInvokeError(withContext(401))).toMatch(/session has expired/i);
-    expect(await describeInvokeError(withContext(403))).toMatch(/do not have access/i);
-    expect(await describeInvokeError(withContext(504))).toMatch(/took too long/i);
+  it("chooses a plain sentence by code when the function sent one", async () => {
+    quiet();
+    expect(await describeInvokeError(withContext(422, { error: "RIVALIQ_CLIENT_NOT_TRACKED: x", code: "RIVALIQ_CLIENT_NOT_TRACKED" }))).toMatch(/tracking for this client is still starting/i);
   });
 
-  it("names any other status rather than hiding it", async () => {
-    expect(await describeInvokeError(withContext(500))).toBe("Server error 500");
+  it("says the request was not sent when there was no response at all", async () => {
+    quiet();
+    expect(await describeInvokeError({ name: "FunctionsFetchError", message: "Failed to send a request to the Edge Function" })).toMatch(/could not be sent/i);
+    expect(await describeInvokeError(null)).toMatch(/did not go through/i);
   });
 
-  it("never returns the generic supabase message when it can do better", async () => {
-    const out = await describeInvokeError(withContext(401));
-    expect(out).not.toMatch(/non-2xx/);
+  it("never returns the generic supabase message", async () => {
+    quiet();
+    expect(await describeInvokeError(withContext(401))).not.toMatch(/non-2xx/);
+  });
+});
+
+describe("withQuietRetry", () => {
+  it("sends again quietly when the request never reached the work", async () => {
+    let calls = 0;
+    const result = await withQuietRetry(async () => (++calls < 3 ? { error: { name: "FunctionsFetchError", message: "Failed to fetch" } } : { error: null }), { waitMs: 0 });
+    expect(calls).toBe(3);
+    expect(result.error).toBeNull();
   });
 
-  it("degrades to the raw message when there is no context at all", async () => {
-    expect(await describeInvokeError({ message: "network down" })).toBe("network down");
-    expect(await describeInvokeError(null)).toBe("Request failed");
-  });
-
-  it("survives a body that is not JSON", async () => {
-    expect(await describeInvokeError(withContext(502))).toBe("Server error 502");
+  it("does not resend work that may have started", async () => {
+    let calls = 0;
+    await withQuietRetry(async () => { calls++; return { error: { context: { status: 500 } } }; }, { waitMs: 0 });
+    expect(calls).toBe(1);
+    expect(safeToResend({ context: { status: 504 } })).toBe(false);
+    expect(safeToResend({ context: { status: 503 } })).toBe(true);
   });
 });
 

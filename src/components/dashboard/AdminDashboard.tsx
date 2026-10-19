@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Plus, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Trash2, Crosshair, Users, Settings, FileText } from "lucide-react";
 import { PlatformBadge } from "@/lib/platform-config";
+import { isActiveClient } from "@/lib/activeClients";
+import { formatDate } from "@/lib/display";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
@@ -59,7 +61,7 @@ export function AdminDashboard() {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       toast.success("Client archived");
     },
-    onError: (err: any) => toast.error("Failed to archive: " + err.message),
+    onError: (err: any) => { console.error("[archive client]", err); toast.error("The client was not archived. Try again in a minute."); },
   });
 
   const restoreMutation = useMutation({
@@ -74,7 +76,7 @@ export function AdminDashboard() {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       toast.success("Client restored");
     },
-    onError: (err: any) => toast.error("Failed to restore: " + err.message),
+    onError: (err: any) => { console.error("[restore client]", err); toast.error("The client was not restored. Try again in a minute."); },
   });
 
   const deleteMutation = useMutation({
@@ -89,7 +91,7 @@ export function AdminDashboard() {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       toast.success("Client permanently deleted");
     },
-    onError: (err: any) => toast.error("Failed to delete: " + err.message),
+    onError: (err: any) => { console.error("[delete client]", err); toast.error("The client was not deleted. Try again in a minute."); },
   });
 
   // Realtime: listen for any report changes to refresh dashboard
@@ -117,16 +119,17 @@ export function AdminDashboard() {
     },
   });
 
+  // The dashboard is the one screen that shows the archive, on request. The
+  // active list uses the shared definition every other client list uses.
   const filtered = clients?.filter((c: any) => {
     const matchesSearch = c.name.toLowerCase().includes(search.trim().toLowerCase());
-    const isArchived = !!(c as any).archived_at;
-    return matchesSearch && (showArchived ? isArchived : !isArchived);
+    return matchesSearch && (showArchived ? !isActiveClient(c) : isActiveClient(c));
   });
 
   const selectedClient = filtered?.find(c => c.id === params.get("client")) || filtered?.[0];
   const chooseClient = (id: string) => setParams(prev => { prev.set("client", id); return prev; }, { replace: true });
 
-  const active = (clients ?? []).filter((c: any) => !c.archived_at);
+  const active = (clients ?? []).filter(isActiveClient);
   const allReports = (clients ?? []).flatMap((c: any) => c.reports ?? []);
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const reportsThisMonth = allReports.filter((r: any) => new Date(r.created_at) >= monthStart).length;
@@ -282,7 +285,7 @@ export function AdminDashboard() {
                   <div className="flex items-center gap-2 t-secondary">
                     <Calendar className="h-3.5 w-3.5" />
                     {lastReport
-                      ? `Last report: ${new Date(lastReport.created_at).toLocaleDateString()}`
+                      ? `Last report: ${formatDate(lastReport.created_at)}`
                       : "No reports yet"}
                   </div>
                   <div className="flex items-center gap-2 t-secondary">

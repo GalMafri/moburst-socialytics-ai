@@ -32,6 +32,15 @@ describe("platform helpers still behave", () => {
     expect(normalizePlatform("Instagram")).toBe("instagram");
     expect(platformLabel("tiktok")).toBe("TikTok");
   });
+  it("is one implementation under every name", async () => {
+    const config = await import("@/lib/platform-config");
+    const display = await import("@/lib/display");
+    for (const raw of ["fb_instagram_account", "linkedin_company", "FACEBOOK", "TWITTER", "Twitter/X", "youtube", "tiktok"]) {
+      expect(config.prettyPlatformName(raw)).toBe(display.platformName(raw));
+      expect(platformLabel(raw)).toBe(display.platformName(raw));
+      expect(config.normalizePlatformKey(raw)).toBe(normalizePlatform(raw));
+    }
+  });
 });
 
 describe("prettyPlatformName on Sprout's raw network types", () => {
@@ -40,7 +49,7 @@ describe("prettyPlatformName on Sprout's raw network types", () => {
     expect(prettyPlatformName("fb_instagram_account")).toBe("Instagram");
     expect(prettyPlatformName("linkedin_company")).toBe("LinkedIn");
     expect(prettyPlatformName("fb_page")).toBe("Facebook");
-    expect(prettyPlatformName("twitter_profile")).toBe("Twitter/X");
+    expect(prettyPlatformName("twitter_profile")).toBe("X");
   });
   it("leaves a name that is already readable alone", async () => {
     const { prettyPlatformName } = await import("@/lib/platform-config");

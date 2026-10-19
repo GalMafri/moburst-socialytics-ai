@@ -1,4 +1,7 @@
-import { DateRange, formatRange, isValidRange, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate } from "@/lib/dateRange";
+import { DateRange, isValidRange, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate } from "@/lib/dateRange";
+import { cleanText, countryNames, firstRunSentence, formatDate, formatDateTime, formatRange, languageNames } from "@/lib/display";
+import { useNextRun } from "@/lib/nextRun";
+import { sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { Section, SectionNav } from "@/components/ui/section";
 import { PostVisual, usePostPreviews } from "@/components/competitive/PostVisual";
@@ -57,6 +60,7 @@ export default function Analytics() {
     enabled: !!id,
   });
 
+  const nextMonthly = useNextRun(id, "monthly");
   const { data: reports, isLoading, isError: reportsFailed, error: reportsError, refetch: refetchReports } = useQuery({
     queryKey: ["analytics-reports", id],
     queryFn: async () => {
@@ -175,13 +179,12 @@ export default function Analytics() {
       const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
       const sp = rd?.sprout_performance || {};
       const totals = extractTotals(sp);
-      const totalEngagements = totals.reactions + totals.link_clicks + totals.comments + totals.shares;
-      const engRate = totals.impressions > 0 ? (totalEngagements / totals.impressions) * 100 : 0;
+      // The one definition: engagements divided by impressions (reportFigures.ts).
+      const raw = sp?.overall_totals || sp?.totals || sp?.summary || sp?.month_comparison?.current_month || {};
+      const totalEngagements = sproutEngagements(raw) ?? 0;
+      const engRate = (sproutEngagementRate(raw) ?? 0) * 100;
       return {
-        date: new Date(r.created_at).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-        }),
+        date: formatDate(r.created_at, { year: false }),
         fullDate: r.created_at,
         impressions: totals.impressions,
         reactions: totals.reactions,
@@ -366,8 +369,8 @@ export default function Analytics() {
       meta={
         client && (client.geo || client.language) ? (
           <>
-            {client.geo && <Badge variant="outline">Market: {client.geo}</Badge>}
-            {client.language && <Badge variant="outline">Language: {client.language}</Badge>}
+            {countryNames(client.geo) && <Badge variant="outline">Market: {countryNames(client.geo)}</Badge>}
+            {languageNames(client.language) && <Badge variant="outline">Language: {languageNames(client.language)}</Badge>}
           </>
         ) : undefined
       }
@@ -386,18 +389,15 @@ export default function Analytics() {
             onRetry={() => refetchReports()}
           />
         ) : filtered.length === 0 && !viewWindow ? (
-          <Card className="p-12 text-center">
-            <div className="space-y-3">
-              <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto" />
-              <h3 className="font-semibold">No completed reports yet</h3>
-              <p className="t-secondary">
-                Run your first analysis to start tracking performance trends.
-              </p>
-              <Button onClick={() => navigate(`/clients/${id}/analyze`)} className="gap-2">
-                <Play className="h-4 w-4" /> Run first analysis
-              </Button>
-            </div>
-          </Card>
+          // What exists: when the first report runs, if one is scheduled. Never a setup step.
+          firstRunSentence("monthly", nextMonthly.data, client?.timezone || undefined) ? (
+            <Card className="p-12 text-center">
+              <div className="space-y-3">
+                <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto" />
+                <p className="t-body">{firstRunSentence("monthly", nextMonthly.data, client?.timezone || undefined)}</p>
+              </div>
+            </Card>
+          ) : null
         ) : (
           <>
             {/* View segmentation */}
@@ -500,7 +500,7 @@ export default function Analytics() {
                         </div>
                         <div className="space-y-1">
                           <p className="t-body font-semibold text-white">Takeaway from the latest monthly report</p>
-                          <p className="t-label">Report period: {latestReport?.date_range_start || "Not recorded"} to {latestReport?.date_range_end || "Not recorded"}. This commentary describes that report, not the live Sprout window above.</p>
+                          {latestReport && <p className="t-label">Report period: {formatRange(reportPeriod(latestReport as any))}. This commentary describes that report, not the live Sprout window above.</p>}
                           <p className="t-secondary leading-relaxed">
                             {formatNumbersInText(latestAISummary)}
                           </p>
@@ -512,30 +512,6 @@ export default function Analytics() {
                           )}
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Single report CTA — encourage running more analyses */}
-                {(reports?.length ?? 0) === 1 && (
-                  <Card className="border-dashed">
-                    <CardContent className="pt-5 pb-4 px-5 text-center space-y-2">
-                      <div className="flex items-center justify-center gap-2 text-muted-foreground">
-                        <TrendingUp className="h-4 w-4" />
-                        <span className="t-body font-medium">Want to see trends over time?</span>
-                      </div>
-                      <p className="t-secondary">
-                        You have 1 report. Run more analyses to see trend charts, engagement rate tracking and
-                        richer insights.
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => navigate(`/clients/${id}/analyze`)}
-                        className="gap-2 mt-1"
-                      >
-                        <Play className="h-3.5 w-3.5" /> Run another analysis
-                      </Button>
                     </CardContent>
                   </Card>
                 )}
@@ -587,7 +563,7 @@ export default function Analytics() {
 
                 {/* Performance over time — Per-metric line charts */}
                 {chartData.length >= 1 && chartData.some((d) => d.impressions > 0 || d.reactions > 0) && (
-                  <Section id="over-time" title={<>Performance over time <span className="font-normal text-muted-foreground t-body ml-2"> ({filtered.length} report{filtered.length !== 1 ? "s" : ""}) </span></>} description={<>{chartData.length === 1 ? "Showing your latest snapshot. Run more analyses to see trend lines." : "Each data point represents one analysis run. Hover over points for exact values."}</>}>
+                  <Section id="over-time" title={<>Performance over time <span className="font-normal text-muted-foreground t-body ml-2"> ({filtered.length} report{filtered.length !== 1 ? "s" : ""}) </span></>} description={<>{chartData.length === 1 ? "The latest snapshot. Trend lines appear once there are two or more reports." : "Each data point represents one analysis run. Hover over points for exact values."}</>}>
                   <Card>
                     <CardContent className="pt-5 space-y-6">
                       {/* Impressions chart (separate — it dominates if combined) */}
@@ -749,7 +725,7 @@ export default function Analytics() {
 
                 {/* Engagement rate trend */}
                 {chartData.length > 1 && chartData.some((d) => d.engagement_rate > 0) && (
-                  <Section id="engagement-rate" title={<>Engagement rate trend</>} description={<>(Reactions + Clicks + Comments + Shares) / Impressions. Higher is better.</>}>
+                  <Section id="engagement-rate" title={<>Engagement rate trend</>} description={<>Engagements divided by impressions, the same definition the competitive view uses.</>}>
                   <Card>
                     <CardContent className="pt-5">
                       <div className="h-56">
@@ -830,18 +806,17 @@ export default function Analytics() {
                     const sp = rd?.sprout_performance;
                     const totals = extractTotals(sp);
                     const hasMetrics = totals.impressions > 0 || totals.reactions > 0;
-                    const totalEng = totals.reactions + totals.link_clicks + totals.comments + totals.shares;
+                    const totalEng = sproutEngagements(sp?.overall_totals || sp?.totals || sp?.summary || sp?.month_comparison?.current_month) ?? 0;
                     return (
                       <button
                         key={r.id}
                         type="button"
                         className="glass-inner w-full text-left flex items-center justify-between p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                         onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}
-                        aria-label={`Open report from ${new Date(r.created_at).toLocaleString()}`}
+                        aria-label={`Open report from ${formatDateTime(r.created_at)}`}
                       >
                         <div className="flex items-center gap-3">
-                          <Badge variant="default">{r.status}</Badge>
-                          <span className="t-body">{new Date(r.created_at).toLocaleString()}</span>
+                          <span className="t-body">{formatDateTime(r.created_at)}</span>
                           {hasMetrics && (
                             <span className="t-secondary">
                               {fmtVal(totals.impressions)} impr · {fmtVal(totalEng)} eng
@@ -966,7 +941,7 @@ function LiveSproutSection({
     return (
       <Card>
         <CardContent className="pt-5 t-secondary">
-          Live Sprout data is not available for this window: {error.message}
+          Live Sprout figures for this window did not load. The report figures below are unaffected.
         </CardContent>
       </Card>
     );
@@ -1030,9 +1005,9 @@ function LiveSproutSection({
                   <div className="flex-1 min-w-0 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       {p.network_type ? <PlatformBadge platform={p.network_type} size="sm" /> : <span />}
-                      <span className="t-secondary">{p.posted_at ? new Date(p.posted_at).toLocaleDateString() : ""}</span>
+                      <span className="t-secondary">{formatDate(p.posted_at)}</span>
                     </div>
-                    <p className="t-body line-clamp-3">{p.text || "(no caption)"}</p>
+                    <p className="t-body line-clamp-3 whitespace-pre-line">{p.text ? cleanText(p.text) : "No caption."}</p>
                     <div className="flex items-center gap-4 t-secondary">
                       <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{fmtVal(p.impressions || 0)}</span>
                       <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{fmtVal(p.reactions || 0)}</span>

@@ -1,12 +1,12 @@
-import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
 // Every competitive analysis run for one client, newest first. Unguarded in
 // the router like the social report history: RLS shows clients only their
 // completed reports and staff everything.
 
 import { useNavigate, useParams } from "react-router-dom";
-import { canRetry, retryLabel } from "@/lib/reportRun";
-import { competitiveFailureMessage } from "@/lib/competitiveFlow";
-import { competitiveStatusBadge, landscapeLabel } from "@/lib/competitiveStatus";
+import { canRetry } from "@/lib/reportRun";
+import { landscapeLabel } from "@/lib/competitiveStatus";
+import { firstRunSentence, formatDateTime, formatRange, listedRuns } from "@/lib/display";
+import { useNextRun } from "@/lib/nextRun";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,7 +19,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/ui/load-error";
-import { formatRange } from "@/lib/dateRange";
 import { watchExpired } from "@/lib/runWatch";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ArrowLeft, Crosshair, Eye, Loader2, Play, Rss } from "lucide-react";
@@ -28,6 +27,7 @@ export default function CompetitiveReportHistory() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isMoburstStaff } = useAuth();
+  const nextRun = useNextRun(id, "competitive");
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -84,50 +84,43 @@ export default function CompetitiveReportHistory() {
               // something about the data on the strength of a request that
               // never answered, and the runs are almost certainly still there.
               <LoadError title="Could not load the run history" error={error} onRetry={() => refetch()} />
-            ) : reports && reports.length > 0 ? (
+            ) : listedRuns("competitive", reports, { isStaff: isMoburstStaff }).length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Run</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Period analyzed</TableHead>
-                    {isMoburstStaff && <TableHead>Landscape</TableHead>}
+                    {isMoburstStaff && <TableHead>Tracking</TableHead>}
                     <TableHead>Duration</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {reports.map((r: any) => {
+                  {listedRuns("competitive", reports, { isStaff: isMoburstStaff }).map((r: any) => {
                     const rd = (r.report_data || {}) as any;
-                    const running = r.status === "running";
-                    const held = !running && !competitiveReportQuality(rd).ready;
-                    const period = rd.period?.start ? formatRange(rd.period) : r.date_range_start ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "–";
-                    const badge = competitiveStatusBadge(r.status, { held });
+                    const running = r.display.state === "running";
+                    const period = formatRange(rd.period) || formatRange({ start: r.date_range_start, end: r.date_range_end });
                     return (
                       <TableRow key={r.id} className={running ? "animate-pulse" : ""}>
-                        <TableCell className="t-body">{new Date(r.created_at).toLocaleString()}</TableCell>
+                        <TableCell className="t-body">{formatDateTime(r.created_at)}</TableCell>
                         <TableCell>
-                          <Badge variant={badge.variant} className="gap-1">
+                          <Badge variant={r.display.variant} className="gap-1">
                             {running && <Loader2 className="h-3 w-3 animate-spin" />}
-                            {badge.label}
+                            {r.display.label}
                           </Badge>
                         </TableCell>
-                        <TableCell className="t-secondary">
-                          {period}
-                          {!held && r.status === "failed" && rd.error && (
-                            <span className="block t-label text-destructive break-words">{competitiveFailureMessage(rd)}</span>
-                          )}
-                        </TableCell>
-                        {isMoburstStaff && <TableCell className="t-secondary">{rd.landscape?.name ? landscapeLabel(rd.landscape.name) : "–"}</TableCell>}
-                        <TableCell className="t-secondary">{!running && r.duration_minutes ? `${r.duration_minutes}m` : "–"}</TableCell>
+                        <TableCell className="t-secondary">{period}</TableCell>
+                        {isMoburstStaff && <TableCell className="t-secondary">{rd.landscape?.name ? landscapeLabel(rd.landscape.name) : ""}</TableCell>}
+                        <TableCell className="t-secondary">{r.display.state === "ready" && r.duration_minutes ? `${r.duration_minutes} min` : ""}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
-                            {!running && (
+                            {(r.display.state === "ready" || r.display.state === "held") && (
                               <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${id}/competitive/reports/${r.id}`)}>
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             )}
-                            {canRetry(r, Date.now(), "competitive") && <RetryReportButton reportId={r.id} kind="competitive" label={retryLabel(r)} />}
+                            {r.display.state === "scheduled" && canRetry(r, Date.now(), "competitive") && <RetryReportButton reportId={r.id} kind="competitive" label="Run now" />}
                             <ReportActions report={r} kind="competitive" />
                           </div>
                         </TableCell>
@@ -137,12 +130,7 @@ export default function CompetitiveReportHistory() {
                 </TableBody>
               </Table>
             ) : (
-              <EmptyState
-                icon={Crosshair}
-                title="No competitive analyses yet"
-                description={isMoburstStaff ? "Confirm a competitor set, then run the first analysis." : "Your account team has not run a competitive analysis yet."}
-                action={isMoburstStaff ? <Button onClick={() => navigate(`/clients/${id}/competitive`)}>Set up competitors</Button> : undefined}
-              />
+              <EmptyState icon={Crosshair} title="No competitive analyses yet" description={firstRunSentence("competitive", nextRun.data) || undefined} />
             )}
           </CardContent>
         </Card>

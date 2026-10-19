@@ -39,7 +39,7 @@ export interface FeedRefreshEnv {
 const RIVALIQ = "https://api.rivaliq.com/v3";
 const DAY = 86400000;
 const iso = (d: Date) => d.toISOString().slice(0, 10);
-const slug = (s: string) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "topic";
+export const slug = (s: string) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "topic";
 
 async function rivaliq(path: string, key: string) {
   const sep = path.includes("?") ? "&" : "?";
@@ -48,12 +48,77 @@ async function rivaliq(path: string, key: string) {
   return await r.json();
 }
 
-type Topic = { topic: string; summary: string; companies: string[]; platforms: string[]; post_urls: string[]; confidence: number };
+type Topic = { topic: string; summary: string; companies: string[]; platforms: string[]; post_urls: string[]; confidence: number; key?: string };
+
+/** A topic found in an earlier window, offered to the model so a theme keeps one identity. */
+export type KnownTopic = { topic_key: string; topic: string; window_start: string; status?: string | null };
+
+/** How many earlier feed windows the model sees when it names this week's topics. */
+export const KNOWN_TOPIC_WINDOWS = 4;
+
+/**
+ * The topics of the four newest earlier windows, and of this window when it
+ * was pulled before, one row per key with its newest wording.
+ */
+export function knownTopics(rows: KnownTopic[], currentWindowStart: string): KnownTopic[] {
+  const windows = [...new Set(rows.map((r) => String(r.window_start)).filter((w) => w < currentWindowStart))].sort().reverse().slice(0, KNOWN_TOPIC_WINDOWS);
+  const keep = new Set([...windows, currentWindowStart]);
+  const byKey = new Map<string, KnownTopic>();
+  for (const r of [...rows].sort((a, b) => String(b.window_start).localeCompare(String(a.window_start)))) {
+    if (!keep.has(String(r.window_start)) || !r.topic_key || byKey.has(r.topic_key)) continue;
+    byKey.set(r.topic_key, r);
+  }
+  return [...byKey.values()];
+}
+
+type CompactPost = { company: string; is_client: boolean; channel: unknown; date: string; text: string; engagement: number; url: string | null };
+
+/** The model prompt for one window's shared topics, with the earlier topics and their keys. */
+export function topicPrompt(clientName: string, posts: CompactPost[], start: string, end: string, known: KnownTopic[]): string {
+  const earlier = known.length
+    ? `
+
+TOPICS FROM THE PREVIOUS WEEKS (key: topic):
+${known.map((k) => `${k.topic_key}: ${k.topic}`).join("\n")}
+
+A topic keeps one identity from week to week. When a topic you find is the same theme as one of these (the same subject or campaign, even in other words or with a narrower or broader name), set "key" to that exact key. When it is a new theme, set "key" to "". Never invent a key that is not in this list.`
+    : "";
+  return `You monitor a social media competitive landscape for the client "${clientName}". Below are the posts every company in the landscape published between ${start} and ${end}.
+
+Find TOPICS (themes, formats, news hooks, campaigns, moments) that at least TWO DIFFERENT companies posted about inside this window. For each, give a short topic name, a one-sentence summary of how the companies approached it, the list of companies, the platforms involved, the post URLs that prove it (only URLs from the data), and a confidence between 0 and 1 that this is a real shared trend rather than a coincidence (more companies, more posts, closer dates and clearer wording mean higher confidence). Ignore generic always-on themes such as "posts about the company" unless the framing is clearly shared. Return at most 8 topics, best first.${earlier}
+
+Return ONLY JSON in this shape:
+{"topics":[{"key":"","topic":"...","summary":"...","companies":["..."],"platforms":["instagram"],"post_urls":["https://..."],"confidence":0.8}]}
+
+POSTS:
+${JSON.stringify(posts)}`;
+}
+
+/**
+ * Each topic's stored identity. A key the model reused from the earlier
+ * topics is kept; any other topic is keyed by its own wording. Two topics
+ * that land on one key in the same window are one topic: the first (the
+ * model lists them best first) is kept. A key somebody dismissed stays
+ * dismissed.
+ */
+export function topicRows<T extends { topic: string; key?: string }>(topics: T[], known: KnownTopic[], dismissedKeys: Set<string>): Array<T & { topic_key: string; dismissed: boolean }> {
+  const knownKeys = new Set(known.map((k) => k.topic_key));
+  const seen = new Set<string>();
+  const out: Array<T & { topic_key: string; dismissed: boolean }> = [];
+  for (const t of topics) {
+    const reused = typeof t.key === "string" ? t.key.trim() : "";
+    const topicKey = reused && knownKeys.has(reused) ? reused : slug(t.topic);
+    if (seen.has(topicKey)) continue;
+    seen.add(topicKey);
+    out.push({ ...t, topic_key: topicKey, dismissed: dismissedKeys.has(topicKey) });
+  }
+  return out;
+}
 
 /** Topics that two or more companies posted about in the window, with confidence. */
-async function detectTopics(clientName: string, posts: any[], start: string, end: string, key: string | undefined): Promise<Topic[]> {
+async function detectTopics(clientName: string, posts: any[], start: string, end: string, key: string | undefined, known: KnownTopic[]): Promise<Topic[]> {
   if (!key || posts.length < 2) return [];
-  const compact = posts
+  const compact: CompactPost[] = posts
     .slice()
     .sort((a, b) => (Number(b.engagementTotal) || 0) - (Number(a.engagementTotal) || 0))
     .slice(0, 120)
@@ -66,15 +131,7 @@ async function detectTopics(clientName: string, posts: any[], start: string, end
       engagement: Number(p.engagementTotal) || 0,
       url: p.postLink || null,
     }));
-  const prompt = `You monitor a social media competitive landscape for the client "${clientName}". Below are the posts every company in the landscape published between ${start} and ${end}.
-
-Find TOPICS (themes, formats, news hooks, campaigns, moments) that at least TWO DIFFERENT companies posted about inside this window. For each, give a short topic name, a one-sentence summary of how the companies approached it, the list of companies, the platforms involved, the post URLs that prove it (only URLs from the data), and a confidence between 0 and 1 that this is a real shared trend rather than a coincidence (more companies, more posts, closer dates and clearer wording mean higher confidence). Ignore generic always-on themes such as "posts about the company" unless the framing is clearly shared. Return at most 8 topics, best first.
-
-Return ONLY JSON in this shape:
-{"topics":[{"topic":"...","summary":"...","companies":["..."],"platforms":["instagram"],"post_urls":["https://..."],"confidence":0.8}]}
-
-POSTS:
-${JSON.stringify(compact)}`;
+  const prompt = topicPrompt(clientName, compact, start, end, known);
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
@@ -89,15 +146,16 @@ ${JSON.stringify(compact)}`;
   try {
     const parsed = JSON.parse(raw);
     const topics: Topic[] = Array.isArray(parsed?.topics) ? parsed.topics : [];
-    const known = new Set(compact.map((p) => p.url).filter(Boolean));
+    const urls = new Set(compact.map((p) => p.url).filter(Boolean));
     return topics
       .filter((t) => t && t.topic && Array.isArray(t.companies) && t.companies.length >= 2)
       .map((t) => ({
+        key: typeof t.key === "string" ? t.key : "",
         topic: String(t.topic).slice(0, 120),
         summary: String(t.summary || "").slice(0, 600),
         companies: [...new Set(t.companies.map(String))],
         platforms: [...new Set((t.platforms || []).map((p: string) => String(p).toLowerCase()))],
-        post_urls: [...new Set((t.post_urls || []).filter((u: string) => known.has(u)))],
+        post_urls: [...new Set((t.post_urls || []).filter((u: string) => urls.has(u)))],
         confidence: Math.max(0, Math.min(1, Number(t.confidence) || 0.5)),
       }));
   } catch {
@@ -231,7 +289,7 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   }
   // A provider that could not be asked stays an ordinary error, so the
   // scheduled refresh retries it and the page says what happened.
-  if (!check.ok) throw new Error(`RivalIQ /landscapes failed [${check.status ?? "network"}]: ${check.message}`);
+  if (check.ok === false) throw new Error(`RivalIQ /landscapes failed [${check.status ?? "network"}]: ${check.message}`);
   const match = check.summary;
   const landscapeId = match.id;
 
@@ -271,28 +329,26 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   // RivalIQ call, so the newest of them become references too.
   const harvest = await harvestOwnCreative(admin, clientId, match.client_company_id, socialPosts, client.name);
 
-  const topics = await detectTopics(client.name, socialPosts, window.start, window.end, env.anthropicKey);
+  // The earlier windows' topics, dismissed ones included: the model is asked
+  // to reuse a key when the theme is the same, so a theme is counted once
+  // and a dismissed theme stays dismissed. The alert's identity includes the
+  // window it was found in, so without a shared key every week made a new
+  // row and a dismissal only ever applied to the week it was made in.
+  const { data: prior } = await admin
+    .from("competitive_alerts")
+    .select("topic, topic_key, window_start, status")
+    .eq("client_id", clientId)
+    .lte("window_start", window.start)
+    .gte("window_start", iso(new Date(Date.now() - 90 * DAY)))
+    .order("window_start", { ascending: false })
+    .limit(200);
+  const known = knownTopics((prior || []) as KnownTopic[], window.start);
+  const dismissedKeys = new Set<string>((prior || []).filter((r: any) => r.status === "dismissed" && r.topic_key).map((r: any) => String(r.topic_key)));
 
-  // A topic somebody dismissed stays dismissed. The alert's identity
-  // includes the window it was found in, so the same recurring topic gets a
-  // new row every week and a dismissal only ever applied to the week it was
-  // made in: the card people had already waved away came straight back on
-  // the next pull, indefinitely.
-  const dismissedKeys = new Set<string>();
-  {
-    const since = iso(new Date(Date.now() - 90 * DAY));
-    const { data: prior } = await admin
-      .from("competitive_alerts")
-      .select("topic_key")
-      .eq("client_id", clientId)
-      .eq("status", "dismissed")
-      .gte("window_start", since);
-    for (const r of prior || []) if (r.topic_key) dismissedKeys.add(String(r.topic_key));
-  }
+  const topics = topicRows(await detectTopics(client.name, socialPosts, window.start, window.end, env.anthropicKey, known), known, dismissedKeys);
 
   let saved = 0;
   for (const t of topics) {
-    const topicKey = slug(t.topic);
     const { error } = await admin.from("competitive_alerts").upsert(
       {
         client_id: clientId,
@@ -300,9 +356,9 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
         window_end: window.end,
         // Carried forward rather than re-raised. The row is still written,
         // so the topic stays in the record and a person can bring it back.
-        ...(dismissedKeys.has(topicKey) ? { status: "dismissed" } : {}),
+        ...(t.dismissed ? { status: "dismissed" } : {}),
         topic: t.topic,
-        topic_key: topicKey,
+        topic_key: t.topic_key,
         summary: t.summary,
         companies: t.companies,
         platforms: t.platforms,
@@ -316,7 +372,7 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
     // SUCCESSFUL write of a carried-forward dismissal into the error branch,
     // where error is null, and the whole refresh died on the dereference.
     if (error) console.error("[refresh-competitor-feed] alert upsert failed", error.message);
-    else if (!dismissedKeys.has(topicKey)) saved += 1;
+    else if (!t.dismissed) saved += 1;
   }
 
   return { client_id: clientId, landscape_id: landscapeId, window, posts: socialPosts.length, truncated: socialPosts.length >= PAGE_LIMIT, alerts: saved, design_refs: harvest };

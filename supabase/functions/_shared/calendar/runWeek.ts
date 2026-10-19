@@ -206,10 +206,14 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   }
   const competitors = newestStart ? scoreCompetitorPosts([...byId.values()], newestStart, recent.length) : [];
 
-  const { data: alerts } = newestStart
-    ? await admin.from("competitive_alerts").select("topic, summary, companies, post_urls, confidence")
-      .eq("client_id", client.id).neq("status", "dismissed").gte("window_start", newestStart).order("confidence", { ascending: false }).limit(8)
-    : { data: [] };
+  // The one definition of open topics, shared with the dashboard and the feed
+  // page: the newest feed window's topics that nobody dismissed, best first
+  // (open_competitor_topics, migration 20261019210000_shared_layers.sql).
+  const { data: openTopics, error: topicsError } = await admin.rpc("open_competitor_topics", { p_client_id: client.id });
+  if (topicsError) throw new Error(`Could not read the competitor topics: ${topicsError.message}`);
+  const alerts = (Array.isArray(openTopics) ? openTopics : []).slice(0, 8)
+    // deno-lint-ignore no-explicit-any
+    .map((t: any) => ({ topic: t.topic, summary: t.summary, companies: t.companies, post_urls: t.post_urls, confidence: t.confidence }));
 
   const { data: report, error: reportError } = await admin.from("reports").select("id, created_at, report_data").eq("client_id", client.id).eq("status", "completed")
     .order("created_at", { ascending: false }).limit(1).maybeSingle();

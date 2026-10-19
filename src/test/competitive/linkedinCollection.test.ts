@@ -48,7 +48,7 @@ it('combines period totals without relabeling or changing RivalIQ evidence', () 
   const raw={period,posts:{current:0,previous:2},engagement:{current:0,previous:10},audience:{current:9000},engagement_rate_per_post:{current:.2},by_network:{facebook:{posts:{current:0}}}};
   const input={period,aggregates:{metric_semantics_version:4,metrics_available:true,companies:[{name:'Medisafe',company_id:'42',post_count:0,observed_post_count:5,linkedin_metrics:linkedin,rivaliq_metrics:raw,by_channel:{linkedin:{post_count:5}}}]}};
   const result=normalizedCompetitiveMetrics(input),c=result.aggregates.companies[0];
-  expect(c.post_count).toBe(5);expect(c.comparison_metrics.engagement.current).toBe(16);expect(c.comparison_metrics.audience.current).toBe(9000);expect(c.comparison_metrics.engagement_rate_per_post.current).toBeNull();expect(c.rivaliq_metrics).toEqual(raw);expect(c.rivaliq_metrics.posts.current).toBe(0);
+  expect(c.post_count).toBe(5);expect(c.comparison_metrics.engagement.current).toBe(16);expect(c.comparison_metrics.audience.current).toBe(9000);expect(c.comparison_metrics.engagement_rate.current).toBeNull();expect(c.comparison_metrics.engagement_rate_per_post).toBeUndefined();expect((c.by_channel.linkedin as { engagement_rate_avg?: number | null }).engagement_rate_avg).toBeNull();expect(c.rivaliq_metrics).toEqual(raw);expect(c.rivaliq_metrics.posts.current).toBe(0);
   expect(normalizedCompetitiveMetrics(result)).toEqual(result);expect(competitiveReportQuality(result).ready).toBe(true);
   const stale=structuredClone(result);stale.aggregates.companies[0].linkedin_metrics.period.start='2026-07-01';expect(competitiveReportQuality(stale).ready).toBe(false);
 });

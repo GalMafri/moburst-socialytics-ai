@@ -34,6 +34,7 @@ import { LoadError } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { PlatformBadge, prettyPlatformName } from "@/lib/platform-config";
+import { profileName } from "@/lib/display";
 import { describeInvokeError } from "@/lib/invokeError";
 import { displayCompanyName } from "@/lib/companyName";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -84,6 +85,8 @@ type HandleRow = {
   is_active: boolean;
   source?: string;
   detection_confidence?: number | null;
+  /** The profile's own name (a channel or page title), when known. */
+  display_name?: string | null;
 };
 
 /**
@@ -983,9 +986,9 @@ export default function CompetitorReview() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 mt-3">
                           {compHandles.map((h) => (
                             <div key={h.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2">
-                              <a href={h.profile_url || undefined} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-start gap-2" title={`${prettyPlatformName(h.platform)} @${h.handle}`}>
+                              <a href={h.profile_url || undefined} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-start gap-2" title={`${prettyPlatformName(h.platform)}: ${profileName(h, c.name)}`}>
                                 <PlatformBadge platform={h.platform} size="sm" />
-                                <span className="min-w-0 break-all text-sm leading-5">@{h.handle}</span>
+                                <span className="min-w-0 break-words text-sm leading-5">{profileName(h, c.name)}</span>
                               </a>
                               {h.source === "auto" && Number(h.detection_confidence ?? 0) < 0.8 && (
                                 <span className="text-xs text-amber-400 shrink-0" title="Automatically detected with limited evidence. Open the profile and verify it belongs to this company.">Verify</span>
@@ -993,8 +996,8 @@ export default function CompetitorReview() {
                               {isDraft && (
                                 <button
                                   type="button"
-                                  aria-label={`Remove the ${h.platform} handle @${h.handle}`}
-                                  title={`Remove @${h.handle}`}
+                                  aria-label={`Remove the ${prettyPlatformName(h.platform)} profile ${profileName(h, c.name)}`}
+                                  title={`Remove ${profileName(h, c.name)}`}
                                   onClick={() => setRemovingHandle(h)}
                                   className="shrink-0 rounded p-2 text-muted-foreground hover:text-destructive hover:bg-white/5"
                                 >
@@ -1195,7 +1198,7 @@ export default function CompetitorReview() {
       <ConfirmDialog
         open={!!removingHandle}
         onOpenChange={open => !open && setRemovingHandle(null)}
-        title={`Remove @${removingHandle?.handle || "profile"}?`}
+        title={removingHandle ? `Remove this ${prettyPlatformName(removingHandle.platform)} profile?` : "Remove this profile?"}
         description={<p>This profile will stop being used for this competitor. Automatic detection will not add it back.</p>}
         confirmLabel="Remove profile"
         onConfirm={() => { if (removingHandle) removeHandle.mutate(removingHandle.id); setRemovingHandle(null); }}

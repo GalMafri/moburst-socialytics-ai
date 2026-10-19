@@ -5,7 +5,7 @@ import { ReportRunStatus } from "@/components/reports/ReportRunStatus";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { RUN_ESTIMATE, canRetry } from "@/lib/reportRun";
 import { watchExpired, WATCH_LIMIT_MINUTES } from "@/lib/runWatch";
-import { competitiveStatusBadge } from "@/lib/competitiveStatus";
+import { formatDate, formatDateTime, listedRuns } from "@/lib/display";
 // Step 2: the competitive-analysis "go" button, with the same visible-status
 // contract as the social report (RunAnalysis.tsx): insert a row in status
 // 'running', fire the n8n webhook, watch the row via realtime + poll, land on
@@ -17,8 +17,8 @@ import { competitiveStatusBadge } from "@/lib/competitiveStatus";
 // "not configured" message instead of failing silently.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { describeInvokeError } from "@/lib/invokeError";
-import { describeTracking, pickRunSelection, plainCompetitiveError, competitiveFailureMessage, stateLine, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
+import { describeInvokeError, withQuietRetry } from "@/lib/invokeError";
+import { describeTracking, pickRunSelection, stateLine, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
 
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -35,7 +35,7 @@ import { LoadError } from "@/components/ui/load-error";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { PRESET_LABELS, presetRange, rangeDays, formatRange, type RangePreset, type DateRange } from "@/lib/dateRange";
-import { CheckCircle2, Clock, Crosshair, History, Loader2, Play, RefreshCw, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Crosshair, History, Loader2, Play, RefreshCw } from "lucide-react";
 
 const STEPS = [
   "Pulling competitor metrics from Rival IQ...",
@@ -49,7 +49,7 @@ const STEPS = [
 export default function CompetitiveRun() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { canRunAnalysis } = useAuth();
+  const { canRunAnalysis, isMoburstStaff } = useAuth();
   const { toast } = useToast();
   const [running, setRunning] = useState(false);
   const activeRun = useActiveReportRun(id, "competitive");
@@ -191,9 +191,9 @@ export default function CompetitiveRun() {
               client_id: id, entity_id: rId, stage: "server", ok: false, error_code: "server_failed",
               duration_ms: runStartedAt.current ? performance.now() - runStartedAt.current : null,
             });
-            // The workflow records why it stopped; showing it beats sending
-            // someone to the execution log for a reason we already hold.
-            setError(competitiveFailureMessage(data.report_data));
+            // The product runs it again; the page says so, with no failure
+            // and no technical reason (that stays in the run's record).
+            setError("This analysis did not finish on this attempt and is scheduled to run again. It appears in report history when it is ready.");
 
             refetchRuns();
           }
@@ -236,15 +236,15 @@ export default function CompetitiveRun() {
       // One place builds what n8n receives: the same function serves this
       // page, the scheduler and a retry, so a rerun can never send something
       // different from the original attempt.
-      const { data: started, error: runErr } = await supabase.functions.invoke("run-report", {
+      const { data: started, error: runErr } = await withQuietRetry(() => supabase.functions.invoke("run-report", {
         body: {
           client_id: id,
           kind: "competitive",
           date_range_start: range.start,
           date_range_end: range.end,
         },
-      });
-      if (runErr || started?.error) throw new Error(plainCompetitiveError(await describeInvokeError(runErr, started)));
+      }));
+      if (runErr || started?.error) throw new Error(await describeInvokeError(runErr, started));
       const reportRowId: string = started.report_id;
       setReportId(reportRowId);
       setStartedAt(started.created_at || new Date().toISOString());
@@ -366,7 +366,7 @@ export default function CompetitiveRun() {
               </p>
             )}
             <p className="t-secondary">
-              Confirmed {confirmedSet.confirmed_at ? new Date(confirmedSet.confirmed_at).toLocaleDateString() : ""}
+              Confirmed {formatDate(confirmedSet.confirmed_at)}
               {" · "}
               <button className="underline underline-offset-2" onClick={() => navigate(`/clients/${id}/competitive?set=${confirmedSet.id}`)}>
                 Review this selection and tracking
@@ -473,15 +473,14 @@ export default function CompetitiveRun() {
 
             {error && (
               <div className="space-y-4">
-                <div className="flex items-center gap-2 justify-center text-destructive">
-                  <XCircle className="h-6 w-6" />
-                  <span className="font-medium">Analysis issue</span>
+                <div className="flex items-center gap-2 justify-center">
+                  <Clock className="h-6 w-6" />
+                  <span className="font-medium">{reportId ? "Scheduled to run again" : "The analysis did not start"}</span>
                 </div>
                 <p className="t-secondary mx-auto">{error}</p>
                 {reportId ? (
                   canRetry({ status: "failed", created_at: startedAt }, Date.now(), "competitive") ?
-                    <RetryReportButton reportId={reportId} kind="competitive" variant="outline" onStarted={() => { setError(null); setRunning(true); setCurrentStep(0); setStartedAt(new Date().toISOString()); watchedSince.current = new Date().toISOString(); pollForCompletion(reportId); }} /> :
-                    <p className="t-secondary">Retry becomes available 90 minutes after this run started. You can return later from report history.</p>
+                    <RetryReportButton reportId={reportId} kind="competitive" variant="outline" label="Run now" onStarted={() => { setError(null); setRunning(true); setCurrentStep(0); setStartedAt(new Date().toISOString()); watchedSince.current = new Date().toISOString(); pollForCompletion(reportId); }} /> : null
                 ) : (
                 <Button
                   variant="outline"
@@ -496,7 +495,7 @@ export default function CompetitiveRun() {
         </Card>
 
         {/* Past runs */}
-        {pastRuns && pastRuns.length > 0 && (
+        {listedRuns("competitive", pastRuns, { isStaff: isMoburstStaff }).length > 0 && (
           <Card>
             <CardHeader className="flex-row items-center justify-between space-y-0">
               <CardTitle className="t-h3">Recent runs</CardTitle>
@@ -506,31 +505,32 @@ export default function CompetitiveRun() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {pastRuns.map((r: any) => (
+                {listedRuns("competitive", pastRuns, { isStaff: isMoburstStaff }).map((r) => {
+                  const opens = r.display.state === "ready" || r.display.state === "held";
+                  return (
                   <div
                     key={r.id}
-                    className={`glass-inner flex items-center justify-between p-3 ${r.status !== "running" ? "cursor-pointer" : ""}`}
-                    onClick={() => r.status !== "running" && navigate(`/clients/${id}/competitive/reports/${r.id}`)}
+                    className={`glass-inner flex items-center justify-between p-3 ${opens ? "cursor-pointer" : ""}`}
+                    onClick={() => opens && navigate(`/clients/${id}/competitive/reports/${r.id}`)}
                   >
                     <div className="flex items-center gap-3">
-                      <Badge variant={competitiveStatusBadge(r.status).variant}>
-                        {competitiveStatusBadge(r.status).label}
-                      </Badge>
-                      <span className="t-body">{new Date(r.created_at).toLocaleString()}</span>
+                      <Badge variant={r.display.variant}>{r.display.label}</Badge>
+                      <span className="t-body">{formatDateTime(r.created_at)}</span>
                       {r.date_range_start && (
                         <span className="t-secondary hidden sm:inline">{formatRange({ start: r.date_range_start, end: r.date_range_end })}</span>
                       )}
                     </div>
                     <div className="flex items-center gap-3">
-                      {r.duration_minutes ? (
-                        <span className="t-secondary">{r.duration_minutes}m</span>
+                      {r.display.state === "ready" && r.duration_minutes ? (
+                        <span className="t-secondary">{r.duration_minutes} min</span>
                       ) : null}
-                      {r.status !== "running" && (
+                      {opens && (
                         <span className="t-body underline underline-offset-2">View report</span>
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>

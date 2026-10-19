@@ -36,7 +36,8 @@ it.each(['complete', 'failed'])('refreshes a running report into %s without a pa
   expect(screen.queryByRole('button', { name: 'Export PDF' })).toBeNull();
   fixture.status = status; await tick(5100);
   expect(screen.queryByText(/Competitive analysis in progress/)).toBeNull();
-  if (status === 'failed') expect(screen.getByText('Observed provider failure')).toBeInTheDocument();
+  // A run that did not finish is scheduled to run again; the stored error never reaches the page.
+  if (status === 'failed') { expect(screen.getByText('Scheduled to run again')).toBeInTheDocument(); expect(screen.queryByText('Observed provider failure')).toBeNull(); }
   else expect(screen.getByRole('heading', { name: 'QA client vs. the field' })).toBeInTheDocument();
   const reads = fixture.reads; await tick(15000); expect(fixture.reads).toBe(reads);
 });
@@ -44,7 +45,7 @@ it.each(['complete', 'failed'])('refreshes a running report into %s without a pa
 it('holds mismatched completed reports without exposing narrative, export or diagnostic paragraphs',async()=>{
  fixture.status='complete';fixture.data={schema_note:'RivalIQ returned no in-period posts for Phiture.',aggregates:{companies:[{name:'SplitMetrics',post_count:16,rivaliq_metrics:{posts:{current:21}}}]},ai_analysis:{executive_summary:'Unverified summary'}};
  mount();await tick(20);
- expect(screen.getByText('We need to verify the source data before this report can be released.')).toBeInTheDocument();
+ expect(screen.getByText('Its source figures did not pass the checks, so it is not shared. The next run replaces it.')).toBeInTheDocument();
  expect(screen.queryByRole('button',{name:'Export PDF'})).toBeNull();
  expect(screen.queryByText('Unverified summary')).toBeNull();
  expect(screen.queryByText('RivalIQ returned no in-period posts for Phiture.')).toBeNull();
@@ -63,19 +64,20 @@ it('company cards link to their supporting posts and expose platform filters as 
  expect(screen.queryByText('top 3')).toBeNull();
 });
 
-it('allows an isolated retry immediately after a failed competitive attempt', async () => {
+it('offers staff a run now immediately after a competitive attempt that did not finish, with no failure shown', async () => {
  fixture.status='failed'; fixture.createdAt=new Date(Date.now()-89*60000).toISOString();
  fixture.data={provider_status:2,quality_check:{state:'needs_review',reasons:['RivalIQ is still collecting source data.']}};
  mount(); await tick(20);
- expect(screen.getByText(/RivalIQ had not finished collecting/)).toBeInTheDocument();
- expect(screen.getByRole('button',{name:'Review tracked profiles'})).toBeInTheDocument();
- expect(screen.getByRole('button',{name:'Retry'})).toBeInTheDocument();
+ expect(screen.getByText('Scheduled to run again')).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Run now'})).toBeInTheDocument();
+ expect(screen.queryByText(/still collecting|failed|did not pass/i)).toBeNull();
  expect(screen.queryByRole('status')).toBeNull();
 });
 it('keeps a withheld analysis out of the analytics summary and monthly-report context', async () => {
  fixture.status='complete'; fixture.data={quality_check:{state:'needs_review',reasons:['Verify source period']},ai_analysis:{executive_summary:'Unsupported summary',gaps_for_client:[{gap:'Unsupported gap'}]}};
  render(<QueryClientProvider client={client}><MemoryRouter><CompetitiveSnapshot clientId='client' takeaways={['Unsupported takeaway']} /></MemoryRouter></QueryClientProvider>);
  await tick(20);
- expect(screen.getByRole('button',{name:'View report status'})).toBeInTheDocument();
+ // No ready analysis and nothing scheduled: the snapshot shows nothing, never a setup step.
  for (const text of ['Unsupported summary','Unsupported gap','Unsupported takeaway']) expect(screen.queryByText(text)).toBeNull();
+ expect(screen.queryByText(/set up|confirm a competitor|run the/i)).toBeNull();
 });

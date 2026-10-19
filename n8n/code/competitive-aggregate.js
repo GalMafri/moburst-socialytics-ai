@@ -3,6 +3,8 @@ const landscape = $("Resolve Landscape").first().json;
 const companiesResp = $("Landscape Companies").first().json;
 const postsResp = $("Merge Owned Posts").first().json;
 // RivalIQ's own period metrics: this period, the previous period of equal length, and the daily series.
+// Its per-follower rates are not collected: the product's one engagement rate is
+// engagements divided by impressions (views on video networks), see engagementRate().
 // Provider period metrics are authoritative; the callback withholds missing metrics.
 const safeJson = (name) => { try { const j = $(name).first().json; return j && typeof j === "object" ? j : {}; } catch (e) { return {}; } };
 const metricsResp = safeJson("Landscape Metrics Summary");
@@ -28,11 +30,11 @@ const mPrev = byCompanyId(mPrevRows);
 // A missing provider observation is unknown, not a measured zero.
 const pick = (r, k) => { if (!r || r[k] == null || r[k] === '') return null; const n = Number(r[k]); return isFinite(n) ? n : null; };
 const NETS = {
-  instagram: { followers: "instagramFollowedBy", posts: "instagramPosts", engagement: "instagramPostsEngagementTotal", impressions: "instagramEstimatedImpressions", rate: "instagramAverageEngagementRatePerPost" },
-  tiktok: { followers: "tikTokFollowers", posts: "tikTokPosts", engagement: "tikTokPostsEngagementTotal", impressions: "tikTokEstimatedImpressions", views: "tikTokViews", rate: "tikTokEngagementRateByFollower" },
-  facebook: { followers: "facebookPageLikes", posts: "facebookPosts", engagement: "facebookPostEngagementTotal", impressions: "facebookEstimatedImpressions", rate: "facebookAverageEngagementRatePerPost", likely_boosted: "facebookLikelyBoostedPosts" },
-  youtube: { followers: "youTubeSubscribers", posts: "youTubePosts", engagement: "youTubePostsEngagementTotal", impressions: "youTubeEstimatedImpressions", views: "youTubePostViews", rate: "youTubeAverageEngagementRatePerPost" },
-  twitter: { posts: "twitterTweets", engagement: "twitterTweetEngagementTotal", impressions: "twitterEstimatedImpressions", rate: "twitterAverageEngagementRatePerTweet" }
+  instagram: { followers: "instagramFollowedBy", posts: "instagramPosts", engagement: "instagramPostsEngagementTotal", impressions: "instagramEstimatedImpressions" },
+  tiktok: { followers: "tikTokFollowers", posts: "tikTokPosts", engagement: "tikTokPostsEngagementTotal", impressions: "tikTokEstimatedImpressions", views: "tikTokViews" },
+  facebook: { followers: "facebookPageLikes", posts: "facebookPosts", engagement: "facebookPostEngagementTotal", impressions: "facebookEstimatedImpressions", likely_boosted: "facebookLikelyBoostedPosts" },
+  youtube: { followers: "youTubeSubscribers", posts: "youTubePosts", engagement: "youTubePostsEngagementTotal", impressions: "youTubeEstimatedImpressions", views: "youTubePostViews" },
+  twitter: { posts: "twitterTweets", engagement: "twitterTweetEngagementTotal", impressions: "twitterEstimatedImpressions" }
 };
 const metricsFor = (id) => {
   const cur = mCur[id];
@@ -53,7 +55,6 @@ const metricsFor = (id) => {
     engagement: both("crossChannelSocialEngagement"),
     estimated_impressions: both("crossChannelEstimatedImpressions"),
     posts: both("crossChannelSocialActivity"),
-    engagement_rate_per_post: both("crossChannelAverageEngagementRatePerPost"),
     likely_boosted_facebook_posts: both("facebookLikelyBoostedPosts"),
     by_network,
     daily
@@ -106,7 +107,7 @@ const clean = (s) => String(s || "").replace(/[\u0000-\u001f]+/g, " ").replace(/
 const num = (v) => (typeof v === "number" && isFinite(v) ? v : (typeof v === "string" && v.trim() !== "" && isFinite(Number(v)) ? Number(v) : 0));
 // RivalIQ's paid signal on Facebook posts is a string: "Likely Boosted", "Not Likely Boosted" or "No Prediction".
 const isBoosted = (v) => (typeof v === "string" ? v.trim().toLowerCase() === "likely boosted" : v === true);
-const bucket = () => ({ post_count: 0, likely_boosted_posts: 0, engagement_sum: 0, engagement_rate_sum: 0, views_total: 0, views_observed: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, hashtags: {}, media_types: {}, top_posts: [] });
+const bucket = () => ({ post_count: 0, likely_boosted_posts: 0, engagement_sum: 0, views_total: 0, views_observed: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, hashtags: {}, media_types: {}, top_posts: [] });
 const blank = (key, name, url) => ({ company_id: key, name, url: url || null, is_client: false, in_confirmed_top3: false, ...bucket(), channels: {}, by_channel: {} });
 const byCompany = {};
 for (const c of companies) {
@@ -123,12 +124,11 @@ const addPost = (agg, p) => {
   const boosted = isBoosted(p.facebookLikelyBoosted);
   if (boosted) agg.likely_boosted_posts += 1;
   const engagement = num(p.engagementTotal) || num(p.engagement_total) || (num(p.applause) + num(p.conversation) + num(p.amplification));
-  const rate = pick(p, "engagementRate");
   const views = pick(p, "views") ?? pick(p, "youtubeViews") ?? pick(p, "tiktokViews") ?? pick(p, "facebookPostViews");
   const impressions = pick(p, "estimatedImpressions");
   // RivalIQ presenceReach is follower count near publication, not post reach.
   const followers_at_publication = pick(p, "presenceReach");
-  agg.engagement_sum += engagement; agg.engagement_rate_sum += rate; agg.views_total += views || 0; if (views != null) agg.views_observed += 1; agg.impressions_total += impressions;
+  agg.engagement_sum += engagement; agg.views_total += views || 0; if (views != null) agg.views_observed += 1; agg.impressions_total += impressions;
   const created = p.publishedAt || p.published_at || p.created || p.created_at || p.date;
   if (created) { const d = new Date(created); if (!isNaN(d)) { const wd = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getUTCDay()]; agg.by_weekday[wd] = (agg.by_weekday[wd] || 0) + 1; const hr = String(d.getUTCHours()); agg.by_hour[hr] = (agg.by_hour[hr] || 0) + 1; } }
   const text = clean(p.message || p.text || p.caption || p.content || "");
@@ -137,7 +137,9 @@ const addPost = (agg, p) => {
   agg.media_types[mtype] = (agg.media_types[mtype] || 0) + 1;
   const channel = p.channel || p.network || p.platform || "unknown";
   if (agg.channels) agg.channels[channel] = (agg.channels[channel] || 0) + 1;
-  agg.top_posts.push({ source:p.source || "rivaliq", source_profile_name:p.source_profile_name || null, actual_impressions:pick(p,"ownedImpressions"), authorship: p.authorship || null, engagement, engagement_rate: rate, est_impressions: impressions, followers_at_publication, views, applause: pick(p, "applause"), conversation: pick(p, "conversation"), amplification: pick(p, "amplification"), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null });
+  // One rate definition (reportMetrics.ts engagementRate): per impression, or per view on video, else none.
+  const post = { source:p.source || "rivaliq", source_profile_name:p.source_profile_name || null, actual_impressions:pick(p,"ownedImpressions"), authorship: p.authorship || null, engagement, est_impressions: impressions, followers_at_publication, views, applause: pick(p, "applause"), conversation: pick(p, "conversation"), amplification: pick(p, "amplification"), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null };
+  agg.top_posts.push({ ...post, engagement_rate: postEngagementRate(post) });
   return channel;
 };
 for (const p of posts) {
@@ -154,13 +156,14 @@ const finalize = (b) => {
   if (!b.views_observed) b.views_total = null;
   delete b.views_observed;
   b.engagement_avg = b.post_count ? Math.round((b.engagement_sum / b.post_count) * 10) / 10 : 0;
-  b.engagement_rate_avg = b.post_count ? Math.round((b.engagement_rate_sum / b.post_count) * 10000) / 10000 : 0;
+  // Rates come from RivalIQ's period totals below; a post sample has no rate of its own.
+  b.engagement_rate_avg = null;
   b.impressions_avg = b.post_count ? Math.round(b.impressions_total / b.post_count) : 0;
   b.cadence_per_week = Math.round(((b.post_count / days) * 7) * 10) / 10;
   b.top_hashtags = topN(b.hashtags, 10);
   b.media_type_mix = topN(b.media_types, 8);
   b.top_posts = b.top_posts.sort((x, y) => y.engagement - x.engagement).slice(0, 5);
-  delete b.hashtags; delete b.media_types; delete b.engagement_sum; delete b.engagement_rate_sum;
+  delete b.hashtags; delete b.media_types; delete b.engagement_sum;
   return b;
 };
 const companiesOut = Object.values(byCompany).map((c) => {
@@ -179,24 +182,26 @@ const companiesOut = Object.values(byCompany).map((c) => {
   c.linkedin_metrics = postsResp.additional_metrics?.[String(c.company_id)] || null;
   c.owned_metrics = postsResp.owned_metrics?.[String(c.company_id)] || null;
   // Use the provider's aggregation, not a differently weighted mean of posts.
-  const applyProvider = (b, metrics) => {
+  // The rate is engagements divided by impressions (views on video networks).
+  const applyProvider = (b, metrics, network) => {
     b.observed_post_count = b.post_count;
     if (!metrics) return;
     const value = key => metrics[key]?.current;
     if (value('posts') != null) b.post_count = value('posts');
     b.cadence_per_week = Math.round(b.post_count / days * 70) / 10;
-    b.engagement_rate_avg = value('rate') ?? null;
+    const reach = isVideoNetwork(network) && value('views') != null ? value('views') : value('impressions');
+    b.engagement_rate_avg = value('posts') === 0 ? null : engagementRate(value('engagement'), reach);
     b.engagement_avg = value('engagement') != null && b.post_count ? value('engagement') / b.post_count : null;
     b.impressions_total = value('impressions') ?? null;
     b.impressions_avg = value('impressions') != null && b.post_count ? value('impressions') / b.post_count : null;
   };
   if (c.rivaliq_metrics) {
-    applyProvider(c, { ...c.rivaliq_metrics, rate: c.rivaliq_metrics.engagement_rate_per_post, impressions: c.rivaliq_metrics.estimated_impressions });
+    applyProvider(c, { ...c.rivaliq_metrics, impressions: c.rivaliq_metrics.estimated_impressions }, null);
     for (const network of Object.keys(c.rivaliq_metrics.by_network)) {
       const key = network === 'twitter' && c.by_channel.x ? 'x' : network;
       if (!c.by_channel[key]) c.by_channel[key] = finalize(bucket());
     }
-    for (const [channel, b] of Object.entries(c.by_channel)) applyProvider(b, c.rivaliq_metrics.by_network[channel === 'x' ? 'twitter' : channel]);
+    for (const [channel, b] of Object.entries(c.by_channel)) applyProvider(b, c.rivaliq_metrics.by_network[channel === 'x' ? 'twitter' : channel], channel);
   }
   return c;
 });

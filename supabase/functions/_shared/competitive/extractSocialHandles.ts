@@ -178,13 +178,18 @@ export function classifyUrl(url: string): { platform: string; handle: string; yo
   return { platform, handle, youtubeKind };
 }
 
-function canonicalProfileUrl(platform: string, handle: string, youtubeKind?: string): string {
+/** A YouTube channel id, as opposed to an @handle. */
+export const YOUTUBE_CHANNEL_ID = /^UC[A-Za-z0-9_-]{22}$/;
+
+export function canonicalProfileUrl(platform: string, handle: string, youtubeKind?: string): string {
   switch (platform) {
     case "instagram": return `https://www.instagram.com/${handle}/`;
     case "tiktok": return `https://www.tiktok.com/@${handle}`;
     case "facebook": return `https://www.facebook.com/${handle}`;
     case "linkedin": return `https://www.linkedin.com/company/${handle}/`;
-    case "youtube": return `https://www.youtube.com/${youtubeKind === "legacy" ? "" : youtubeKind === "@" || !youtubeKind ? "@" : youtubeKind}${handle}`;
+    // A channel id (UC and 22 more characters) lives under /channel/; as an
+    // @handle its link is a 404. 11 stored links had that shape (19 Oct 2026).
+    case "youtube": return YOUTUBE_CHANNEL_ID.test(handle) ? `https://www.youtube.com/channel/${handle}` : `https://www.youtube.com/${youtubeKind === "legacy" ? "" : youtubeKind === "@" || !youtubeKind ? "@" : youtubeKind}${handle}`;
     default: return `https://x.com/${handle}`;
   }
 }
