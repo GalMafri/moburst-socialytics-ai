@@ -1,7 +1,6 @@
 /**
  * Move a calendar post to another date, or delete it (staff). Its copy edits
- * and designs stay attached to it when it moves, and a moved post counts as
- * worked on, so a newer plan never takes it off the calendar.
+ * and designs stay attached to it when it moves.
  */
 
 import { useState } from "react";
@@ -29,7 +28,7 @@ export function CalendarPostActions({ postId, clientId, date, onDone }: { postId
     try {
       // calendar_posts is not in the generated types yet.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (supabase.from("calendar_posts" as never) as any).update({ post_date: moveTo, touched_at: new Date().toISOString() }).eq("id", postId);
+      const { error } = await (supabase.from("calendar_posts" as never) as any).update({ post_date: moveTo }).eq("id", postId);
       if (error) throw error;
       refresh();
       toast.success("Post moved");

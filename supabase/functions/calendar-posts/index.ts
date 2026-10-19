@@ -20,7 +20,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { importReportPosts } from "../_shared/calendar/fromReport.ts";
-import { addDays, claimWeeks, mondayOf, slotOf, weeksToPlan } from "../_shared/calendar/plans.ts";
 import { type PlanContext, WEEKDAYS, parseWeek, trendSlotPrompt, weekDates, weekPrompt } from "../_shared/calendar/planner.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { clipText } from "../_shared/text/clip.ts";
@@ -46,7 +45,7 @@ Deno.serve(async (req) => {
       if (!report) return json({ error: "No such report." }, 404);
       await requireStaff(req, { writeClientId: report.client_id });
       if (report.status !== "completed") return json({ error: "The report has not finished yet." }, 409);
-      return json(await importReportPosts(admin, report.id, { dryRun: body.dry_run === true }));
+      return json(await importReportPosts(admin, report.id));
     }
 
     if (body?.action === "import_latest") {
@@ -78,7 +77,7 @@ Deno.serve(async (req) => {
       });
       if (error) throw new Error(`Could not save the copy: ${error.message}`);
       // The calendar post holds the current copy too, for every view that reads it directly.
-      await admin.from("calendar_posts").update({ copy, touched_at: new Date().toISOString(), ...(hashtags ? { hashtags } : {}), ...(body.cta ? { cta: String(body.cta) } : {}) })
+      await admin.from("calendar_posts").update({ copy, ...(hashtags ? { hashtags } : {}), ...(body.cta ? { cta: String(body.cta) } : {}) })
         .eq("client_id", clientId).eq("post_key", key);
       return json({ ok: true });
     }
@@ -102,11 +101,7 @@ Deno.serve(async (req) => {
       const { data: own } = await admin.from("calendar_posts").select("post_date").eq("report_id", report.id).order("post_date").limit(1);
       const first = own?.[0]?.post_date;
       if (!first) return json({ planned: 0, note: "The report planned no posts." });
-      // Planned until the next scheduled report has taken over (plans.ts).
-      const { data: next } = await admin.from("report_schedules").select("next_run_at")
-        .eq("client_id", report.client_id).eq("report_kind", "social").eq("is_active", true).order("next_run_at").limit(1).maybeSingle();
-      const start = addDays(mondayOf(first), 7);
-      const work = planWeeks(admin, report.client_id, start, weeksToPlan(start, next?.next_run_at), report.id);
+      const work = planWeeks(admin, report.client_id, addDays(mondayOf(first), 7), 3, report.id);
       if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) { EdgeRuntime.waitUntil(work.catch((e) => console.error("[calendar-posts] plan:", e))); return json({ accepted: true }, 202); }
       return json(await work);
     }
@@ -128,6 +123,13 @@ Deno.serve(async (req) => {
 
 // ── Planning ────────────────────────────────────────────────────────────────
 
+function addDays(day: string, n: number): string {
+  return new Date(new Date(`${day}T00:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10);
+}
+function mondayOf(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  return addDays(day, -((d.getUTCDay() + 6) % 7));
+}
 const strings = (x: unknown): string[] => (Array.isArray(x) ? x.map((v) => (typeof v === "string" ? v : v && typeof v === "object" ? Object.values(v as Record<string, unknown>).filter((t) => typeof t === "string").join(": ") : "")).filter(Boolean) : []);
 
 /** Everything a week's plan is written from: the client, its latest report's findings, its posting pattern and nearby posts. */
@@ -177,44 +179,25 @@ async function planContext(admin: any, clientId: string, monday: string, reportI
   };
 }
 
-/**
- * Plan one week from a report's findings, then start the next week's plan.
- * The week is claimed from any older plan first (plans.ts); a week a newer
- * plan holds, or one this plan already placed, is left as it is, and the
- * slots kept by worked-on posts are left to them.
- */
+/** Plan one week (unless it already has planned posts), then start the next week's plan. */
 async function planWeeks(admin: any, clientId: string, monday: string, count: number, reportId: string | null): Promise<{ planned: number; week: string }> {
   let planned = 0;
-  const { data: report } = await (reportId
-    ? admin.from("reports").select("id, created_at").eq("id", reportId).maybeSingle()
-    : admin.from("reports").select("id, created_at").eq("client_id", clientId).eq("status", "completed").order("created_at", { ascending: false }).limit(1).maybeSingle());
-  let place = true;
-  let held = new Set<string>();
-  if (report) {
-    const claim = (await claimWeeks(admin, clientId, report, [monday])).get(monday)!;
-    place = !claim.yielded;
-    held = claim.held;
-  }
-  if (place) {
-    let own = admin.from("calendar_posts").select("id", { count: "exact", head: true })
-      .eq("client_id", clientId).gte("post_date", monday).lte("post_date", addDays(monday, 6)).in("source", ["report", "trend_slot"]);
-    if (report) own = own.eq("report_id", report.id);
-    const { count: existing } = await own;
-    if (!existing) {
-      const built = await planContext(admin, clientId, monday, report?.id ?? null);
-      const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-      if (built && apiKey) {
-        let posts = [] as ReturnType<typeof parseWeek>;
-        for (let attempt = 0; attempt < 2 && !posts.length; attempt++) {
-          const result = await anthropicMessages({ apiKey, body: { model: PLANNER_MODEL, max_tokens: 12000, messages: [{ role: "user", content: weekPrompt(built.ctx, monday) }] } });
-          posts = parseWeek(result.text, monday, built.reportId);
-        }
-        const rows = posts.filter((p) => !held.has(slotOf(p.post_date, p.platform))).map((p) => ({ ...p, client_id: clientId, report_id: built.reportId }));
-        if (rows.length) {
-          const { error } = await admin.from("calendar_posts").insert(rows);
-          if (error) throw new Error(`Could not add the week's posts: ${error.message}`);
-          planned = rows.length;
-        }
+  const { count: existing } = await admin.from("calendar_posts").select("id", { count: "exact", head: true })
+    .eq("client_id", clientId).gte("post_date", monday).lte("post_date", addDays(monday, 6)).neq("source", "ad_hoc");
+  if (!existing) {
+    const built = await planContext(admin, clientId, monday, reportId);
+    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+    if (built && apiKey) {
+      let posts = [] as ReturnType<typeof parseWeek>;
+      for (let attempt = 0; attempt < 2 && !posts.length; attempt++) {
+        const result = await anthropicMessages({ apiKey, body: { model: PLANNER_MODEL, max_tokens: 12000, messages: [{ role: "user", content: weekPrompt(built.ctx, monday) }] } });
+        posts = parseWeek(result.text, monday, built.reportId);
+      }
+      if (posts.length) {
+        const rows = posts.map((p) => ({ ...p, client_id: clientId, report_id: built.reportId }));
+        const { error } = await admin.from("calendar_posts").insert(rows);
+        if (error) throw new Error(`Could not add the week's posts: ${error.message}`);
+        planned = rows.length;
       }
     }
   }
