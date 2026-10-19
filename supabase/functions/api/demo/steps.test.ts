@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { advanceJob, initialSteps, type JobRecord } from "../../_shared/api/jobs";
 import type { CallResult } from "../../_shared/invoke";
+import type { StepView } from "../../_shared/lifecycle/run";
+import { cleanSiteText } from "./site-text";
 import { CLIENT, COMPETITIVE_REPORT, DESIGN_SYSTEM, REPORT, SPROUT_PROFILE } from "../fixtures";
 import { emptyTables, makeFakeDemoDb, type FakeTables } from "./fake-db";
 import { DEMO_STEPS, refreshOutputs, slugify, type DemoCtx } from "./steps";
@@ -10,14 +12,36 @@ const fail = (status: number, data: unknown): CallResult => ({ ok: false, status
 const BRAND = { primary_color: "#112233", secondary_color: "#ffffff", accent_color: "#ffcc00", font_family: "Inter", visual_style: "clean", tone_of_voice: "warm", logo_description: "wordmark" };
 const MARKDOWN = "[My Wishlist](https://x.com/#w) 0\n\n# Brooklinen bedding made well\n\n" + "The internet's favorite sheets, made in family-owned mills and backed by a warranty.\n\n".repeat(3);
 
-interface Harness { t: FakeTables; ctx: DemoCtx; calls: Array<{ name: string; body: Record<string, unknown>; actAs: string | null }>; callbacks: unknown[]; job: JobRecord; clock: Date }
+interface Harness { t: FakeTables; ctx: DemoCtx; calls: Array<{ name: string; body: Record<string, unknown>; actAs: string | null }>; lifecycleCalls: string[]; lifecycleRows: Map<string, StepView>; callbacks: unknown[]; job: JobRecord; clock: Date }
+type LifecycleFake = (step: string, clientId: string, h: Harness) => StepView | Promise<StepView> | undefined;
 
-function harness(over: { input?: Record<string, unknown>; tables?: Partial<FakeTables>; call?: (name: string, body: Record<string, unknown>, h: Harness) => CallResult | Promise<CallResult> | undefined; callbackUrl?: string | null; keyId?: string | null } = {}): Harness {
+function harness(over: { input?: Record<string, unknown>; tables?: Partial<FakeTables>; call?: (name: string, body: Record<string, unknown>, h: Harness) => CallResult | Promise<CallResult> | undefined; lifecycle?: LifecycleFake; callbackUrl?: string | null; keyId?: string | null } = {}): Harness {
   const t = emptyTables(over.tables);
   const calls: Harness["calls"] = [];
   const callbacks: unknown[] = [];
   const clock = new Date("2026-10-01T12:00:00.000Z");
-  const h: Harness = { t, calls, callbacks, clock, ctx: null as never, job: null as never };
+  const h: Harness = { t, calls, lifecycleCalls: [], lifecycleRows: new Map(), callbacks, clock, ctx: null as never, job: null as never };
+  const done = (result: Record<string, unknown>): StepView => ({ status: "done", result, error: null, waiting_for: null, ran: true });
+  /** The client lifecycle's steps, as they write the client's rows (the real steps have their own tests). */
+  const defaultLifecycle = (step: string, clientId: string): StepView => {
+    const c = t.clients.find((x) => x.id === clientId)!;
+    if (step === "brand_read") { c.brand_identity = BRAND as never; return done({ timezone_source: null }); }
+    if (step === "brief_pillars") {
+      c.brief_text = `Drafted from the website on ${clock.toISOString().slice(0, 10)}:\n\n${cleanSiteText(MARKDOWN)}`;
+      Object.assign(c, { content_pillars: [{ name: "Sleep better", description: "d" }, { name: "Home comfort", description: "d" }], social_keywords: ["bedding", "sheets"], pillars_source: "brief" });
+      return done({ brief: "drafted", pillars: "derived", source: "brief", written: ["brief_text", "content_pillars", "social_keywords"] });
+    }
+    if (step === "design_refs") { c.harvested_design_references = [{ path: "a" }, { path: "b" }, { path: "c" }]; return done({ references: 3 }); }
+    if (step === "competitors") {
+      const set = { id: "set-ai", client_id: clientId, status: "draft", notes: null, source: "ai", rivaliq_landscape_id: null, confirmed_at: null, created_at: clock.toISOString(), demo_job_id: null };
+      t.sets.push(set);
+      const names = ["Parachute", "Boll & Branch", "Casper", "Buffy", "NoSite"];
+      for (const [i, n] of names.entries()) t.competitors.push({ id: `comp-${n}`, set_id: set.id, client_id: clientId, name: n, website_url: n === "NoSite" ? null : `https://${n.toLowerCase().replace(/[^a-z]/g, "")}.com`, rationale: "r", similarity_score: 0.9 - i * 0.1, source: "ai", is_selected: i < 3, selected_rank: i < 3 ? i + 1 : null, profile_detection: null, created_at: clock.toISOString() });
+      Object.assign(set, { status: "confirmed", confirmed_at: clock.toISOString() });
+      return done({ set_id: set.id, selected: names.slice(0, 3), created: true });
+    }
+    return { status: "no_input", result: null, error: null, waiting_for: null, ran: false };
+  };
   const defaultCall = (name: string, body: Record<string, unknown>): CallResult => {
     if (name === "research-brand-identity") return ok({ brand_identity: BRAND });
     if (name === "firecrawl-scrape") return ok({ success: true, data: { markdown: MARKDOWN, metadata: { title: "Brooklinen" } } });
@@ -60,6 +84,16 @@ function harness(over: { input?: Record<string, unknown>; tables?: Partial<FakeT
   h.ctx = {
     db: makeFakeDemoDb(t),
     call: async (name, body, actAs) => { const b = body as Record<string, unknown>; calls.push({ name, body: b, actAs }); return (over.call && (await over.call(name, b, h))) ?? defaultCall(name, b); },
+    lifecycle: async (step, clientId) => {
+      const key = `${clientId}:${step}`;
+      // A step already current answers from what it stored, as runStepNow does.
+      const stored = h.lifecycleRows.get(key);
+      if (stored) return { ...stored, ran: false };
+      h.lifecycleCalls.push(step);
+      const v = (over.lifecycle && (await over.lifecycle(step, clientId, h))) ?? defaultLifecycle(step, clientId);
+      if (v.status === "done" || v.status === "waiting" || v.status === "failed") h.lifecycleRows.set(key, v);
+      return v;
+    },
     keyHashFor: async () => "hash",
     deliverOnce: async (url, payload) => { callbacks.push({ url, payload }); return { status: 200, error: null }; },
     now: () => clock, tool: "socialytics",
@@ -141,7 +175,7 @@ describe("resolve_client", () => {
 });
 
 describe("brand, brief and pillars", () => {
-  it("research, scrape and derive as the acted-for user, writing only where empty", async () => {
+  it("come from the client lifecycle's steps, the same ones every client goes through", async () => {
     const h = harness({ tables: { profiles: [{ user_id: "u-lital", email: "lital@moburst.com" }] } });
     await upTo(h, "design");
     const c = h.t.clients[0];
@@ -151,24 +185,32 @@ describe("brand, brief and pillars", () => {
     expect(c.content_pillars).toHaveLength(2);
     expect(c.social_keywords).toEqual(["bedding", "sheets"]);
     expect(c.pillars_source).toBe("brief");
-    expect(h.calls.every((x) => x.actAs === "u-lital")).toBe(true);
-    expect(h.calls.map((x) => x.name)).toEqual(["research-brand-identity", "firecrawl-scrape", "derive-content-pillars"]);
-    expect(h.calls[0].body).toEqual({ website_url: "https://brooklinen.com", client_name: "Brooklinen" });
+    // The brief and pillars step runs once; the pillars demo step reads what it stored.
+    expect(h.lifecycleCalls).toEqual(["brand_read", "brief_pillars"]);
+    expect(h.calls).toHaveLength(0);
+    expect(h.job.steps.slice(1, 4).map((s) => `${s.name}:${s.status}`)).toEqual(["brand_identity:done", "site_brief:done", "pillars:done"]);
   });
-  it("skips what the client already has", async () => {
+  it("reports what the client already has when the lifecycle steps are current", async () => {
     const h = harness({ tables: { clients: [bader({ brand_identity: BRAND, brief_text: "B".repeat(100), content_pillars: [{ name: "x" }], social_keywords: ["k"], website_url: "https://brooklinen.com" })] } });
     await runStep(h, "resolve_client");
+    for (const step of ["brand_read", "brief_pillars"]) h.lifecycleRows.set(`c-bader:${step}`, { status: "done", result: { brief: "kept", pillars: "kept" }, error: null, waiting_for: null, ran: false });
     expect((await runStep(h, "brand_identity")).reason).toBe("brand_exists");
     expect((await runStep(h, "site_brief")).reason).toBe("brief_exists");
     expect((await runStep(h, "pillars")).reason).toBe("pillars_exist");
+    expect(h.lifecycleCalls).toHaveLength(0);
     expect(h.calls).toHaveLength(0);
   });
-  it("records gaps when the site is unreadable or the pillars have no evidence", async () => {
-    const h = harness({ call: (name) => (name === "firecrawl-scrape" ? fail(500, { success: false, error: "Firecrawl timeout" }) : name === "derive-content-pillars" ? fail(422, { error: "Nothing to read for Brooklinen." }) : undefined) });
+  it("waits while a lifecycle step is still at work", async () => {
+    const h = harness({ lifecycle: (step) => (step === "brand_read" ? { status: "running", result: null, error: null, waiting_for: null, ran: false } : undefined) });
+    await runStep(h, "resolve_client");
+    expect(await DEMO_STEPS.find((s) => s.name === "brand_identity")!.run(h.job, h.ctx)).toMatchObject({ status: "waiting", check_in_s: 30 });
+  });
+  it("records gaps as facts when the site is unreadable or there is nothing to derive pillars from", async () => {
+    const h = harness({ lifecycle: (step) => (step === "brief_pillars" ? { status: "waiting", result: { brief: "none", waiting_for: "evidence" }, error: null, waiting_for: "evidence", ran: true } : undefined) });
     await runStep(h, "resolve_client");
     await runStep(h, "brand_identity");
-    expect(await runStep(h, "site_brief")).toMatchObject({ status: "failed", reason: "scrape_failed", gaps: [{ code: "brief_missing" }] });
-    expect(await runStep(h, "pillars")).toMatchObject({ status: "failed", reason: "no_evidence", message: "Nothing to read for Brooklinen.", gaps: [{ code: "pillars_missing" }] });
+    expect(await runStep(h, "site_brief")).toMatchObject({ status: "failed", reason: "site_unreadable", gaps: [{ code: "brief_missing", message: "No brief was drafted for Brooklinen: The website carried almost no readable text." }] });
+    expect(await runStep(h, "pillars")).toMatchObject({ status: "failed", reason: "no_evidence", message: "There was nothing to read for Brooklinen yet.", gaps: [{ code: "pillars_missing" }] });
     expect(h.t.clients[0].brief_text).toBeNull();
   });
 });
@@ -190,7 +232,9 @@ describe("design", () => {
     const h = harness({ tables: { clients: [bader({ website_url: "https://brooklinen.com", demo_job_id: "job-1" })], sproutProfiles: [{ ...SPROUT_PROFILE, client_id: "c-bader" }] } });
     await runStep(h, "resolve_client");
     expect(await runStep(h, "design")).toMatchObject({ status: "done", outcome: "approved", data: { system_id: "ds-new", version: 1, references: 3 } });
-    expect(h.calls.map((c) => [c.name, c.body.action ?? c.body.discover])).toEqual([["synthesize-design-language", true], ["build-design-system", "build"], ["build-design-system", "approve"]]);
+    // The brand's designed posts come from the lifecycle's design_refs step.
+    expect(h.lifecycleCalls).toEqual(["design_refs"]);
+    expect(h.calls.map((c) => [c.name, c.body.action])).toEqual([["build-design-system", "build"], ["build-design-system", "approve"]]);
     expect(h.t.designSystems[0].status).toBe("approved");
   });
   it("skips when an approved system exists and records a gap when the build fails", async () => {
@@ -204,34 +248,27 @@ describe("design", () => {
 });
 
 describe("competitors and tracking", () => {
-  it("keeps the set a draft when fewer than three proposals have a website and a verified profile", async () => {
-    const h = harness();
+  it("keeps no set when fewer than three proposals have a website", async () => {
+    const h = harness({ lifecycle: (step) => (step === "competitors" ? { status: "waiting", result: { draft_set_id: null, waiting_for: "competitors" }, error: null, waiting_for: "competitors", ran: true } : undefined) });
     await upTo(h, "competitors");
-    // Casper's handle is low confidence, Buffy has none, NoSite has no website: only Parachute and Boll & Branch qualify.
     const r = await runStep(h, "competitors");
-    expect(r).toMatchObject({ status: "done", outcome: "draft_only", data: { source: "identified", candidates: 5, placeable: ["Parachute", "Boll & Branch"] }, gaps: [{ code: "competitors_unconfirmed" }] });
-    expect((r.data?.unplaced as Array<{ name: string; reason: string }>).map((u) => `${u.name}:${u.reason}`).sort()).toEqual(["Buffy:no_profile_found", "Casper:no_verified_profile", "NoSite:no_website"]);
-    expect(h.t.sets[0].status).toBe("draft");
-    expect(h.t.sets[0].demo_job_id).toBe("job-1");
-    expect(h.calls.filter((c) => c.name === "confirm-competitor-set")).toHaveLength(0);
+    expect(r).toMatchObject({ status: "done", outcome: "draft_only", data: { source: "identified", placeable: [] }, gaps: [{ code: "competitors_unconfirmed" }] });
     h.job.steps.find((s) => s.name === "competitors")!.data = r.data;
     expect(await runStep(h, "tracking")).toMatchObject({ status: "skipped", reason: "connected_only" });
     expect(await runStep(h, "run_competitive")).toMatchObject({ status: "skipped", reason: "connected_only" });
   });
-  it("selects the three closest verified competitors, confirms the set, and leaves tracking to the connected product", async () => {
-    const h = harness({ call: (name, body, hh) => {
-      if (name !== "detect-competitor-handles") return undefined;
-      for (const c of hh.t.competitors.filter((c) => c.set_id === body.set_id)) hh.t.handles.push({ id: `h-${c.id}`, competitor_id: c.id, client_id: c.client_id, platform: "instagram", handle: c.name.toLowerCase(), profile_url: null, is_active: true, followers: null, detection_confidence: 0.95, source: "auto", detected_at: hh.clock.toISOString() });
-      return ok({ results: [] });
-    } });
+  it("takes the lifecycle's confirmed set (the three closest with a website), flags it with the job, and leaves tracking to the connected product", async () => {
+    const h = harness();
     await upTo(h, "competitors");
     const r = await runStep(h, "competitors");
-    expect(r).toMatchObject({ status: "done", outcome: "3_selected", data: { selected: ["Parachute", "Boll & Branch", "Casper"], unplaced: [{ name: "NoSite", reason: "no_website" }] } });
-    expect(r.gaps).toEqual([{ step: "competitors", code: "competitor_unplaced", message: "NoSite was proposed but not selected: no website." }]);
-    expect(h.t.competitors.filter((c) => c.is_selected).map((c) => [c.name, c.selected_rank])).toEqual([["Parachute", 1], ["Boll & Branch", 2], ["Casper", 3]]);
-    expect(h.t.sets[0].status).toBe("confirmed");
+    expect(r).toMatchObject({ status: "done", outcome: "3_selected", data: { source: "identified", selected: ["Parachute", "Boll & Branch", "Casper"], unplaced: [{ name: "Buffy", reason: "not_among_closest" }, { name: "NoSite", reason: "no_website" }] } });
+    expect(r.gaps).toEqual([
+      { step: "competitors", code: "competitor_unplaced", message: "Buffy was proposed but not selected: three closer competitors were selected." },
+      { step: "competitors", code: "competitor_unplaced", message: "NoSite was proposed but not selected: no website." },
+    ]);
+    expect(h.t.sets[0]).toMatchObject({ status: "confirmed", demo_job_id: "job-1" });
+    expect(h.lifecycleCalls).toContain("competitors");
     h.job.steps.find((s) => s.name === "competitors")!.data = r.data;
-    // Tracking and the competitive report need a RivalIQ seat; a demo shows them on the connected showcase workspace instead.
     const t = await runStep(h, "tracking");
     expect(t).toMatchObject({ status: "skipped", reason: "connected_only", gaps: [{ step: "tracking", code: "connected_only" }] });
     expect((t.gaps as Array<{ message: string }>)[0].message).toMatch(/connected showcase workspace/);
@@ -250,6 +287,7 @@ describe("competitors and tracking", () => {
     const r = await runStep(h, "competitors");
     expect(r).toMatchObject({ status: "done", outcome: "3_selected", data: { source: "request", selected: ["Parachute", "Buffy", "Quince"] } });
     expect(h.calls.some((c) => c.name === "identify-competitors")).toBe(false);
+    expect(h.lifecycleCalls).not.toContain("competitors");
     expect(h.t.sets[0]).toMatchObject({ source: "manual", demo_job_id: "job-1", status: "confirmed" });
     expect(await runStep(h, "competitors")).toMatchObject({ status: "done", outcome: "already_confirmed" });
   });
@@ -349,7 +387,6 @@ describe("the whole job", () => {
   it("runs end to end for a brand with no Sprout profile, collects the outputs and delivers the callback", async () => {
     const h = harness({ call: (name, body, hh) => {
       if (name === "run-report") { const id = body.kind === "competitive" ? "crep-new" : "rep-new"; const row = body.kind === "competitive" ? { ...COMPETITIVE_REPORT, id, client_id: body.client_id as string, status: "complete", created_at: hh.clock.toISOString(), demo_job_id: null } : { ...REPORT, id, client_id: body.client_id as string, status: "completed", created_at: hh.clock.toISOString(), demo_job_id: null }; (body.kind === "competitive" ? hh.t.competitiveReports : hh.t.reports).push(row as never); return ok({ report_id: id, kind: body.kind }); }
-      if (name === "detect-competitor-handles") { for (const c of hh.t.competitors.filter((c) => c.set_id === body.set_id)) hh.t.handles.push({ id: `h-${c.id}`, competitor_id: c.id, client_id: c.client_id, platform: "instagram", handle: c.name, profile_url: null, is_active: true, followers: null, detection_confidence: 0.95, source: "auto", detected_at: hh.clock.toISOString() }); return ok({ results: [] }); }
       return undefined;
     } });
     const r = await advance(h);
@@ -368,7 +405,7 @@ describe("the whole job", () => {
     expect(out.post).toMatchObject({ copy: "Know your rights after a crash.", source: "calendar", media_urls: [expect.stringContaining("demo.png")] });
     expect(out.design).toEqual({ status: "none", version: null, previews: [] });
     expect(out.analytics).toBeNull();
-    expect(h.job.gaps.map((g) => g.code).sort()).toEqual(["analytics_unavailable", "competitor_unplaced", "connected_only", "design_system_missing", "performance_data_unavailable"]);
+    expect(h.job.gaps.map((g) => g.code).sort()).toEqual(["analytics_unavailable", "competitor_unplaced", "competitor_unplaced", "connected_only", "design_system_missing", "performance_data_unavailable"]);
     expect(h.callbacks).toHaveLength(1);
     expect((h.callbacks[0] as { payload: { status: string; job_id: string } }).payload).toMatchObject({ job_id: "job-1", status: "completed" });
     expect(JSON.stringify(out)).not.toMatch(/L9|123456/);

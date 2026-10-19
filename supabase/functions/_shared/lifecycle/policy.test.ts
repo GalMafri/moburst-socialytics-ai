@@ -65,3 +65,13 @@ describe("rowAfter", () => {
     expect(rowAfter(null, base, { status: "done", result: {}, doneAt: "2027-01-01T00:00:00Z" }, NOW).done_at).toBe(NOW.toISOString());
   });
 });
+
+describe("rechecks in minutes", () => {
+  it("looks again in minutes at work under way elsewhere, and keeps what the run stored so far", () => {
+    const base = { client_id: "c", step: "competitors", inputs_key: "k1" };
+    const w = rowAfter(null, base, { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { draft_set_id: "d1" } }, NOW);
+    expect(Date.parse(w.next_attempt_at!) - NOW.getTime()).toBe(60_000);
+    expect(w.result).toEqual({ draft_set_id: "d1", waiting_for: "in_progress" });
+    expect(decide(w, "k1", { }, new Date(NOW.getTime() + 61_000))).toMatchObject({ due: true, why: "recheck" });
+  });
+});

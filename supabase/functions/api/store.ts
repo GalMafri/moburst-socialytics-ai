@@ -62,17 +62,19 @@ export function pageFrom(limit: number, cursor: string | null): Page {
   return { limit, cursor: decodeCursor(cursor) };
 }
 
-interface KeysetQuery {
+interface KeysetQuery extends PromiseLike<{ data: unknown; error: { message: string } | null }> {
   in(column: string, values: string[]): KeysetQuery;
   or(filters: string): KeysetQuery;
   order(column: string, opts: { ascending: boolean }): KeysetQuery;
   limit(n: number): KeysetQuery;
 }
-function keyset<Q extends KeysetQuery>(q: Q, page: Page, clientColumn = "client_id", scope?: ClientScope): Q {
+// Not generic over the query's own type: inferring supabase-js's builder type here ran the checker past its depth limit.
+// deno-lint-ignore no-explicit-any
+function keyset(q: any, page: Page, clientColumn = "client_id", scope?: ClientScope): KeysetQuery {
   let x: KeysetQuery = q;
   if (scope && !scope.all) x = x.in(clientColumn, [...scope.ids]);
   if (page.cursor) x = x.or(`created_at.lt.${page.cursor.c},and(created_at.eq.${page.cursor.c},id.lt.${page.cursor.i})`);
-  return x.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(page.limit + 1) as Q;
+  return x.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(page.limit + 1);
 }
 async function rows<T>(p: PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T[]> {
   const { data, error } = await p;

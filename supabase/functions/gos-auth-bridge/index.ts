@@ -25,6 +25,7 @@
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { findAuthUserByEmail } from "../_shared/auth/findUser.ts";
+import { linkPortalCompanies } from "../_shared/lifecycle/portal.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -251,6 +252,12 @@ Deno.serve(async (req) => {
 
     const result = await provisionAndSignIn(supabase, serviceRoleKey, gosUser, toolRole);
     if (!result.ok) return json({ error: result.error, debug: { tool_id: TOOL_ID } });
+
+    // A portal company that matches no client yet is linked to its client by
+    // exact name, and the client takes the portal's organization name as its
+    // hub company name when it has none (_shared/lifecycle/portal.ts). This
+    // never stops a sign-in.
+    await linkPortalCompanies(supabase, slugs, gosUser.organization ?? null);
 
     return json({
       access_token: result.access_token,
