@@ -310,15 +310,17 @@ export function rhythmFromPosts(posts: OwnPost[], now: Date, timeZone: string): 
 export const RATE_EPOCH = "2026-01-05";
 
 /**
- * Posts a platform gets in the week that starts on a Monday. A rate of one a
- * week or more is rounded (at most 7). A rate under one is spread by a fixed
- * rule with no state: week w, counted in whole weeks from RATE_EPOCH, gets
+ * Posts a platform gets in the week that starts on a Monday. A weekly habit
+ * (WEEKLY_RATE or more, such as Moburst's Instagram at 0.88) is rounded, at
+ * least 1 and at most 7. A lower rate is spread by a fixed rule with no
+ * state: week w, counted in whole weeks from RATE_EPOCH, gets
  * floor(rate*(w+1)) - floor(rate*w) posts, so 0.5 a week posts every other
  * week and 0.25 every fourth.
  */
+export const WEEKLY_RATE = 0.75;
 export function postsInWeek(rate: number, monday: string): number {
   if (!(rate > 0)) return 0;
-  if (rate >= 1) return Math.min(7, Math.round(rate));
+  if (rate >= WEEKLY_RATE) return Math.max(1, Math.min(7, Math.round(rate)));
   const w = Math.floor((Date.parse(`${monday}T00:00:00Z`) - Date.parse(`${RATE_EPOCH}T00:00:00Z`)) / (7 * DAY_MS));
   // The small margin keeps float error (0.29 * 100 = 28.999…) from moving a post a week.
   const floor = (x: number) => Math.floor(x + 1e-9);
@@ -550,6 +552,18 @@ export interface ResolvedRhythm {
  *   * usual days and hour from the client's own posts, else its competitors';
  *   * staff's setting overrides per platform (0 removes one).
  */
+/**
+ * The platforms with posts this week. A week where every platform's spread
+ * comes to 0 still gets one post, on the platform it posts on most: a planned
+ * week is never empty. A platform staff set to 0 stays out.
+ */
+function atLeastOne(lines: RhythmLine[]): RhythmLine[] {
+  const posting = lines.filter((l) => l.perWeek > 0);
+  if (posting.length || !lines.length) return posting;
+  const top = [...lines].sort((a, b) => b.average - a.average || a.platform.localeCompare(b.platform))[0];
+  return [{ ...top, perWeek: 1 }];
+}
+
 export function resolveRhythm(input: RhythmInput): ResolvedRhythm {
   const tz = input.timeZone;
   const today = zoned(input.now.toISOString(), tz).date || input.now.toISOString().slice(0, 10);
@@ -570,10 +584,14 @@ export function resolveRhythm(input: RhythmInput): ResolvedRhythm {
   const unrated: string[] = [];
   let needsAllTracked = false;
   for (const platform of platforms) {
-    const n8 = own8.get(platform)?.posts ?? 0;
-    const n90 = own90.get(platform)?.posts ?? 0;
-    if (n8 > 0) learned.push(line(platform, round2(n8 / RHYTHM_WEEKS), "published_8w", own8.get(platform)));
-    else if (n90 > 0) learned.push(line(platform, round2((n90 * 7) / OWN_DAYS), "published_90d", own90.get(platform)));
+    // The client's own pace: its last 8 weeks when that is a weekly habit;
+    // otherwise the faster of its 8-week and 90-day pace, so a quiet month
+    // (Pay The Pyper: 0.25 a week lately, 0.78 over 90 days) does not shrink
+    // its calendar below what it has kept up over the quarter.
+    const r8 = round2((own8.get(platform)?.posts ?? 0) / RHYTHM_WEEKS);
+    const r90 = round2(((own90.get(platform)?.posts ?? 0) * 7) / OWN_DAYS);
+    if (r8 >= WEEKLY_RATE || (r8 > 0 && r8 >= r90)) learned.push(line(platform, r8, "published_8w", own8.get(platform)));
+    else if (r90 > 0) learned.push(line(platform, r90, "published_90d", own90.get(platform)));
     else if ((competitorRates[platform] ?? 0) > 0) learned.push(line(platform, competitorRates[platform], "competitors", competitorTiming.get(platform)));
     else if (input.allTracked === null) needsAllTracked = true;
     else if ((input.allTracked[platform] ?? 0) > 0) learned.push(line(platform, input.allTracked[platform], "all_tracked", timingOf(platform)));
@@ -591,7 +609,7 @@ export function resolveRhythm(input: RhythmInput): ResolvedRhythm {
   sortLines(learned);
   return {
     learned,
-    applied: applyRhythmSetting(learned, input.setting, timingOf).filter((l) => l.perWeek > 0),
+    applied: atLeastOne(applyRhythmSetting(learned, input.setting, timingOf)),
     needsAllTracked,
     sources: {
       platforms: from,

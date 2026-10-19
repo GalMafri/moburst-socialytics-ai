@@ -222,16 +222,38 @@ describe("resolveRhythm", () => {
     }
   });
 
-  it("keeps Moburst's LinkedIn 3 and Instagram 1, and posts its Facebook (0.25 a week) every fourth week", () => {
-    const posts = [...spread("LinkedIn", 24), ...spread("Instagram", 8), ...spread("Facebook", 2)];
+  it("keeps Moburst's LinkedIn 3 and Instagram 1 (0.88 a week is a weekly habit), and posts its Facebook (0.25 a week) every fourth week", () => {
+    const posts = [...spread("LinkedIn", 21), ...spread("Instagram", 7), ...spread("Facebook", 2)];
     const weeks = ["2026-10-26", "2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23", "2026-11-30", "2026-12-07", "2026-12-14"]
       .map((monday) => resolveRhythm(input({ own: posts, monday })));
     for (const r of weeks) expect(perWeek(r.applied)).toMatchObject({ LinkedIn: 3, Instagram: 1 });
     expect(weeks.map((r) => perWeek(r.applied).Facebook ?? 0)).toEqual([0, 1, 0, 0, 0, 1, 0, 0]);
     expect(weeks[0].learned.find((l) => l.platform === "Facebook")).toMatchObject({ average: 0.25, perWeek: 0, source: "published_8w" });
+    expect(weeks[0].learned.find((l) => l.platform === "Instagram")).toMatchObject({ average: 0.88, perWeek: 1 });
   });
 
-  it("takes the 90-day rate for a platform with no posts in the last 8 weeks (Pay The Pyper's Facebook)", () => {
+  it("keeps a quiet month from shrinking the calendar: the faster of the 8-week and 90-day pace (Pay The Pyper)", () => {
+    // 2 posts each in the last 8 weeks (0.25 a week), 10 and 8 over 90 days (0.78 and 0.62).
+    const own = [...spread("Facebook", 8, "2026-07-25", 50), ...spread("Facebook", 2), ...spread("Instagram", 6, "2026-07-25", 50), ...spread("Instagram", 2)];
+    const weeks = ["2026-10-26", "2026-11-02", "2026-11-09", "2026-11-16"].map((monday) => resolveRhythm(input({ own, monday })));
+    expect(weeks[0].learned.find((l) => l.platform === "Facebook")).toMatchObject({ source: "published_90d", average: 0.78 });
+    expect(weeks[0].learned.find((l) => l.platform === "Instagram")).toMatchObject({ source: "published_90d", average: 0.62 });
+    for (const r of weeks) expect(perWeek(r.applied).Facebook).toBe(1);
+  });
+
+  it("never plans an empty week: when every platform's spread comes to 0, its most used platform gets one post", () => {
+    const own = [...spread("Facebook", 2), ...spread("Instagram", 1)];
+    for (const monday of ["2026-10-26", "2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23"]) {
+      const r = resolveRhythm(input({ own, monday }));
+      expect(r.applied.length).toBeGreaterThan(0);
+      expect(r.applied.every((l) => l.perWeek >= 1)).toBe(true);
+    }
+    // A platform staff set to 0 stays out even then.
+    const r = resolveRhythm(input({ own: spread("Facebook", 2), setting: { facebook: 0 } }));
+    expect(r.applied).toEqual([]);
+  });
+
+  it("takes the 90-day rate for a platform with no posts in the last 8 weeks", () => {
     const r = resolveRhythm(input({ own: [...spread("Facebook", 3, "2026-07-25", 25), ...spread("Instagram", 2)] }));
     expect(r.learned.find((l) => l.platform === "Facebook")).toMatchObject({ source: "published_90d", average: 0.23 });
     expect(r.learned.find((l) => l.platform === "Instagram")).toMatchObject({ source: "published_8w", average: 0.25 });

@@ -73,14 +73,15 @@ describe("runWeekPlan", () => {
     expect(ready?.rhythm).toEqual(expect.objectContaining({ applied: expect.any(Array), learned: expect.any(Array), sources: expect.any(Object) }));
   });
 
-  it("finishes a week with nothing to post (a rate under one a week) without a model call", async () => {
-    // Two Facebook posts in the last 8 weeks: 0.25 a week, and the week of 26 Oct is not one of its weeks.
+  it("never plans an empty week: a client posting less than weekly still gets one post on its main platform", async () => {
+    // Two Facebook posts in the last 8 weeks: 0.25 a week, and the week of 26 Oct is not one of its spread weeks.
     const posts = ["2026-09-01T14:00:00Z", "2026-09-29T14:00:00Z"].map((publishedAt, i) => ({ postId: `p${i}`, channel: "facebook", type: "photo", publishedAt, message: "A post", engagementTotal: 3 }));
     m.owned.mockResolvedValue({ coverage: "complete", profiles: [{ network: "facebook" }], posts });
+    m.anthropic.mockRejectedValue(new Error("stop after the prompt"));
     const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT] });
-    const out = await runWeekPlan(db, job(), NOW);
-    expect(out).toMatchObject({ status: "done", result: { posts: 0, quiet_week: true } });
-    expect(m.anthropic).not.toHaveBeenCalled();
+    await runWeekPlan(db, job(), NOW);
+    expect(m.anthropic).toHaveBeenCalled();
+    expect(JSON.stringify(m.anthropic.mock.calls[0])).toContain("Facebook");
   });
 
   it("closes a week that is over quietly, never as a failure", async () => {
