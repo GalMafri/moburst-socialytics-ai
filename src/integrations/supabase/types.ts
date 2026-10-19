@@ -1114,6 +1114,7 @@ export type Database = {
           competitor_id: string
           detected_at: string
           detection_confidence: number | null
+          display_name: string | null
           followers: number | null
           handle: string
           id: string
@@ -1127,6 +1128,7 @@ export type Database = {
           competitor_id: string
           detected_at?: string
           detection_confidence?: number | null
+          display_name?: string | null
           followers?: number | null
           handle: string
           id?: string
@@ -1140,6 +1142,7 @@ export type Database = {
           competitor_id?: string
           detected_at?: string
           detection_confidence?: number | null
+          display_name?: string | null
           followers?: number | null
           handle?: string
           id?: string
@@ -2838,6 +2841,7 @@ export type Database = {
           actions: number
           active_users: number
           day: string
+          failures: number
         }[]
       }
       get_user_analytics: {
@@ -2903,6 +2907,31 @@ export type Database = {
         Args: { p_client: string; p_step: string }
         Returns: undefined
       }
+      open_competitor_topics: {
+        Args: { p_client_id: string }
+        Returns: {
+          client_id: string
+          companies: string[]
+          confidence: number
+          created_at: string
+          id: string
+          platforms: string[]
+          post_count: number
+          post_urls: string[]
+          status: string
+          summary: string | null
+          topic: string
+          topic_key: string
+          window_end: string
+          window_start: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "competitive_alerts"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       purge_raw_events: {
         Args: { p_keep_months?: number }
         Returns: {
@@ -2965,6 +2994,17 @@ export type Database = {
           next_run_at: string
           report_kind: string
           schedule_id: string
+        }[]
+      }
+      usage_actions: {
+        Args: { p_since?: string }
+        Returns: {
+          action: string
+          at: string
+          client_id: string
+          outcome: string
+          seconds: number
+          user_id: string
         }[]
       }
       verify_quarter: {
