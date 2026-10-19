@@ -168,7 +168,8 @@ export const DEMO_STEPS: StepDef<DemoCtx>[] = [
       if (working(v)) return stillWorking("brief_pillars");
       const fresh = (await ctx.db.getClient(client.id)) ?? client;
       const brief = fresh.brief_text ?? "";
-      if (v.result?.brief === "drafted" && v.ran) return { status: "done", outcome: "drafted", data: { chars: brief.length, excerpt: brief.slice(0, 1200) } };
+      const made = v.result?.brief;
+      if ((made === "drafted" || made === "from_doc") && v.ran) return { status: "done", outcome: made === "drafted" ? "drafted" : "from_strategy_doc", data: { chars: brief.length, excerpt: brief.slice(0, 1200) } };
       if (brief.trim().length >= 80) return { status: "skipped", reason: "brief_exists", data: { chars: brief.length } };
       const message = v.error ?? "The website carried almost no readable text.";
       return { status: "failed", reason: "site_unreadable", message, gaps: [gap("site_brief", "brief_missing", `No brief was drafted for ${client.name}: ${message}`)] };

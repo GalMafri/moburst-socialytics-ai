@@ -144,6 +144,62 @@ describe("brief_pillars", () => {
   });
 });
 
+describe("brief_pillars always leaves a brief (the reports send only brief_text)", () => {
+  // Pay The Pyper on 19 Oct: no brief text, a Google Doc brief file the server cannot open, a strategy PDF in app storage,
+  // and pillars and keywords a person set.
+  const ptp = () => client({ name: "Pay The Pyper", website_url: "https://paythepyper.com/", brief_text: "", brief_file_id: "1AbCdEfGhIjKlMnOpQrStUvWxYz", strategy_doc_file_path: "Pay-The-Pyper/strategy-new-1791888334819.pdf",
+    content_pillars: [{ name: "Captain Confessions" }], social_keywords: ["beer league"], field_sources: person("brand_identity", "logo_url", "timezone", "content_pillars", "social_keywords") });
+  const read = rowsOf(row("brand_read"));
+  it("writes the brief from the strategy document's own words, as the lifecycle's, and calls nothing else", async () => {
+    const c = ptp();
+    const db = dbWith({ clients: [c] });
+    const docs: string[] = [];
+    deps.now = () => new Date(T);
+    deps.anthropicKey = async () => "key";
+    deps.briefFromStrategyDoc = (async (_db: unknown, path: string) => { docs.push(path); return { text: "Pay The Pyper is built around the Captain's biggest headaches: attendance, payments, open spots and subs.", via: "pdf" as const }; }) as never;
+    deps.scrapeMarkdown = fail("the scrape");
+    deps.derivePillars = fail("the derivation");
+    const out = await STEPS.brief_pillars.run(db, c, ctx({ rows: read }));
+    expect(out).toMatchObject({ status: "done", result: { brief: "from_doc", brief_doc: "Pay-The-Pyper/strategy-new-1791888334819.pdf", pillars: "kept", written: ["brief_text"] } });
+    expect(docs).toEqual(["Pay-The-Pyper/strategy-new-1791888334819.pdf"]);
+    expect(c.brief_text).toBe("From the strategy document, read on 2026-10-19:\n\nPay The Pyper is built around the Captain's biggest headaches: attendance, payments, open spots and subs.");
+    expect(c.field_sources.brief_text).toMatchObject({ by: "lifecycle" });
+    // Run again on the same document: the brief it copied is kept, and the document is not read again.
+    const again = await STEPS.brief_pillars.run(db, c, ctx({ rows: rowsOf(row("brand_read"), row("brief_pillars", { result: (out as { result: Record<string, unknown> }).result })) }));
+    expect(again).toMatchObject({ status: "done", result: { brief: "from_doc" } });
+    expect(docs).toHaveLength(1);
+  });
+  it("never replaces a brief a person wrote, whatever documents exist", async () => {
+    const c = { ...ptp(), brief_text: "Our brief, written by the account team.", field_sources: person("brief_text", "content_pillars", "social_keywords") };
+    deps.briefFromStrategyDoc = fail("the document read");
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: read }))).toEqual({ status: "done", result: { brief: "kept", pillars: "kept" } });
+    expect(c.brief_text).toBe("Our brief, written by the account team.");
+  });
+  it("drafts from the site when the document cannot be read here, a brief file id being no brief", async () => {
+    const c = { ...ptp(), strategy_doc_file_path: "Pay-The-Pyper/strategy.docx" };
+    deps.now = () => new Date(T);
+    deps.anthropicKey = async () => "key";
+    deps.briefFromStrategyDoc = async () => null;
+    deps.scrapeMarkdown = async () => ({ markdown: "Pay The Pyper keeps rec league captains from chasing payments and texts every week.", title: null });
+    const out = await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: read }));
+    expect(out).toMatchObject({ status: "done", result: { brief: "drafted" } });
+    expect(c.brief_text).toMatch(/^Drafted from the website on 2026-10-19:\n\nPay The Pyper keeps rec league captains/);
+  });
+  it("tries again quietly when the document's read does not finish, and holds the first report until it has", async () => {
+    const { PillarsError } = await import("../brand/pillars");
+    const c = ptp();
+    deps.anthropicKey = async () => "key";
+    deps.briefFromStrategyDoc = async () => { throw new PillarsError("model", "The strategy document came back with almost no text."); };
+    expect(await STEPS.brief_pillars.run(dbWith({ clients: [c] }), c, ctx({ rows: read }))).toEqual({ status: "failed", error: "The strategy document came back with almost no text." });
+    const db = dbWith({ calendar_plans: [], reports: [], report_schedules: [] });
+    const failing = rowsOf(row("brief_pillars", { status: "failed", attempts: 1, done_at: null }), row("accounts"));
+    expect(await STEPS.first_output.inputs(db, c, failing)).toBeNull();
+    const wrote = rowsOf(row("brief_pillars"), row("accounts"));
+    expect(await STEPS.first_output.inputs(db, c, wrote)).toMatch(/^week:/);
+    expect(await STEPS.first_output.inputs(db, { ...c, brief_text: "A brief" }, failing)).toMatch(/^week:/);
+  });
+});
+
 describe("accounts", () => {
   const sprout = [
     { id: "5719052", name: "Moburst - Growth Done Right", native_name: "moburst", network_type: "linkedin_company", native_link: "", status: "active" },

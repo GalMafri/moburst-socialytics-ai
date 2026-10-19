@@ -47,7 +47,9 @@ export function fakeDb(tables: Record<string, Row[]> = {}, rpcs: Record<string, 
           getPublicUrl(path: string) { return { data: { publicUrl: `https://project.test/storage/v1/object/public/${bucket}/${path}` } }; },
           async download(path: string) {
             const b = db.uploads.get(`${bucket}/${path}`);
-            return b ? { data: new Blob([b as BlobPart]), error: null } : { data: null, error: { message: "missing" } };
+            if (b === undefined) return { data: null, error: { message: "missing" } };
+            const bytes = typeof b === "string" ? new TextEncoder().encode(b) : b;
+            return { data: { arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) }, error: null };
           },
         };
       },

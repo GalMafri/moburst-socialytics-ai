@@ -10,14 +10,14 @@
 //
 // In the order a new client goes through them:
 //   brand_read      the website: brand identity, logo, location and timezone, country, language
-//   brief_pillars   a brief drafted from the site when there is none, then pillars and keywords
+//   brief_pillars   a brief from the strategy document or the site when there is none, then pillars and keywords
 //   accounts        Sprout profiles matched by Sprout's brand name and by the site's profile links
 //   access          the company slug, by the portal's slug rule
 //   design_refs     the client's designed posts and the visual style learned from them
 //   competitors     identify, pick the three closest with a website, confirm as the system
 //   tracking        RivalIQ tracking for the confirmed set (decision 1), then handles from RivalIQ
 //   design_settings logo file, placement and background derived from data (decision 2)
-//   first_output    schedules, this week and next planned, and the first monthly report
+//   first_output    this week and next planned, and the first monthly report
 // A demo copy (a client the API demo made) runs only the steps its demo job asks for (run.ts).
 
 import { referenceFingerprint } from "../brand-references/candidates.ts";
@@ -26,7 +26,7 @@ import { learnBrandStyle } from "../brand-references/learnStyle.ts";
 import { defaultSproutCustomerId } from "../sprout/customer.ts";
 import { listCustomerProfiles } from "../sprout/profiles.ts";
 import { fetchSiteHtml, logoOnPage, normalizeWebsite, openaiKeyFor, ResearchError, researchBrand } from "../brand/research.ts";
-import { anthropicKey, derivePillars, isGenericPillars, PillarsError, type PillarClient } from "../brand/pillars.ts";
+import { anthropicKey, briefFromStrategyDoc, derivePillars, isGenericPillars, PillarsError, type PillarClient } from "../brand/pillars.ts";
 import { fetchSiteText, identifyCompetitors, IdentifyError } from "../competitive/identify.ts";
 import { detectCompetitorHandles } from "../competitive/detectHandles.ts";
 import { confirmDraftSet } from "../competitive/confirmSet.ts";
@@ -84,6 +84,7 @@ export const deps = {
   rivaliqKey: () => env("RIVALIQ_API_KEY") ?? null,
   projectUrl: () => env("SUPABASE_URL") ?? "",
   derivePillars,
+  briefFromStrategyDoc,
   scrapeMarkdown,
   fetchSiteText,
   listCustomerProfiles,
@@ -112,6 +113,12 @@ export function siteKey(website: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/** A step has produced a result: done, or waiting for data that is not there (a failure that is being retried has not). */
+export function produced(rows: Map<string, StepRow>, step: string): boolean {
+  const r = rows.get(step);
+  return !!r && (r.status === "done" || r.status === "waiting" || !!r.done_at);
 }
 
 /** A step has produced something or tried at least once, so the steps after it may go ahead. */
@@ -227,11 +234,15 @@ export const STEPS: Record<string, StepDef> = {
     },
   },
 
-  // A brief and the client's content pillars. With no brief and no strategy
-  // document, the brief is drafted from the website; pillars and keywords are
-  // then derived from the evidence. The five generic default pillars count as
-  // none. Runs again when the brief, the brief file, the strategy document or
-  // the website changes, or when a person hands a field back.
+  // A brief and the client's content pillars. The reports send only
+  // brief_text to the workflow, so a client always gets one: when nobody
+  // wrote a brief, it is taken from the strategy document in its own words,
+  // else drafted from the website. A brief file id alone is not a brief (the
+  // server cannot open a Google Doc), and a brief a person wrote is never
+  // replaced. Pillars and keywords are then derived from the evidence; the
+  // five generic default pillars count as none. Runs again when the brief,
+  // the strategy document or the website changes, or when a person hands a
+  // field back.
   brief_pillars: {
     policy: {},
     async inputs(_db, client, rows) {
@@ -239,33 +250,55 @@ export const STEPS: Record<string, StepDef> = {
       if (!site && !str(client.brief_text) && !client.strategy_doc_file_path) return null;
       if (site && !settled(rows, "brand_read")) return null;
       const fs = client.field_sources;
-      // A brief the lifecycle drafted is not an input (the step wrote it), so drafting never re-runs the step.
+      // A brief the lifecycle wrote is not an input (the step wrote it), so writing it never re-runs the step.
       const brief = !str(client.brief_text) || setBy(fs, "brief_text") === "lifecycle" ? "site" : textHash(client.brief_text);
       const own = ["brief_text", "content_pillars", "social_keywords"].map((f) => (lifecycleMayWrite(fs, f) ? "p" : "x")).join("");
-      return `brief:${brief}|file:${str(client.brief_file_id)}|doc:${str(client.strategy_doc_file_path)}|site:${site ?? ""}|own:${own}`;
+      return `brief:${brief}|doc:${str(client.strategy_doc_file_path)}|site:${site ?? ""}|own:${own}`;
     },
-    async run(db, client) {
+    async run(db, client, { rows }) {
       const fs = client.field_sources;
       const may = (f: string) => lifecycleMayWrite(fs, f);
       const personBrief = str(client.brief_text) && setBy(fs, "brief_text") !== "lifecycle" ? String(client.brief_text) : "";
+      // Empty, or the lifecycle's own: the lifecycle keeps it filled.
       const wantBrief = may("brief_text") && !personBrief;
       const wantPillars = may("content_pillars") && (isGenericPillars(client.content_pillars) || setBy(fs, "content_pillars") === "lifecycle");
       const keywords = Array.isArray(client.social_keywords) ? client.social_keywords : [];
       const wantKeywords = may("social_keywords") && (keywords.length === 0 || setBy(fs, "social_keywords") === "lifecycle");
       if (!wantBrief && !wantPillars && !wantKeywords) return { status: "done", result: { brief: "kept", pillars: "kept" } };
 
-      // The site's text, for a client with no brief and no strategy document of its own.
-      const needSite = !personBrief && !client.strategy_doc_file_path && !!client.website_url;
+      const fields: Record<string, unknown> = {};
+      let brief: "from_doc" | "drafted" | "kept" | "none" = personBrief ? "kept" : "none";
+      const docPath = str(client.strategy_doc_file_path) || null;
+      let briefDoc: string | null = null;
+      // 1. The strategy document's own words. One already copied from this document is not read again.
+      if (wantBrief && docPath) {
+        const before = rows.get("brief_pillars")?.result as Record<string, unknown> | null | undefined;
+        if (before?.brief_doc === docPath && str(client.brief_text)) {
+          brief = "from_doc";
+          briefDoc = docPath;
+        } else {
+          try {
+            const fromDoc = await deps.briefFromStrategyDoc(db, docPath, await deps.anthropicKey(db));
+            if (fromDoc) {
+              fields.brief_text = `From the strategy document, read on ${day(deps.now())}:\n\n${fromDoc.text}`;
+              brief = "from_doc";
+              briefDoc = docPath;
+            }
+          } catch (e) {
+            if (e instanceof PillarsError) return { status: "failed", error: e.message };
+            throw e;
+          }
+        }
+      }
+      // 2. The site's text: the brief when there is no document to take it from, and evidence for the pillars.
+      const needSite = !personBrief && brief !== "from_doc" && !!client.website_url;
       let siteText = "";
       if (needSite) {
         const scraped = await deps.scrapeMarkdown(String(client.website_url));
         siteText = cleanSiteText(scraped?.markdown ?? "");
         if (siteText.length < 80) siteText = await deps.fetchSiteText(String(client.website_url));
       }
-      const fields: Record<string, unknown> = {};
-      let brief: "drafted" | "kept" | "none" = personBrief ? "kept" : "none";
-      // A brief file the server cannot open is the person's brief all the same: the site text then feeds the pillars only.
-      if (wantBrief && !client.brief_file_id && !client.strategy_doc_file_path && siteText.length >= 80) {
+      if (wantBrief && brief !== "from_doc" && siteText.length >= 80) {
         const body = siteText.slice(0, 2500);
         const current = str(client.brief_text);
         if (!current.endsWith(body)) fields.brief_text = `Drafted from the website on ${day(deps.now())}:\n\n${body}`;
@@ -278,9 +311,10 @@ export const STEPS: Record<string, StepDef> = {
       if (wantPillars || wantKeywords) {
         const key = await deps.anthropicKey(db);
         if (!key) return { status: "failed", error: "The AI connection is not configured." };
-        const evidence = { ...client, brief_text: (fields.brief_text as string | undefined) ?? personBrief };
+        // The derivation reads the strategy document itself, so a brief copied from it is not given twice.
+        const evidence = { ...client, brief_text: brief === "drafted" ? (fields.brief_text as string | undefined) ?? str(client.brief_text) : personBrief };
         try {
-          const d = await deps.derivePillars(db, evidence as PillarClient, key, { siteText: fields.brief_text ? null : siteText || null, language: str(client.language) || null });
+          const d = await deps.derivePillars(db, evidence as PillarClient, key, { siteText: brief === "drafted" ? null : siteText || null, language: str(client.language) || null });
           if (wantPillars && d.pillars.length) {
             Object.assign(fields, { content_pillars: d.pillars, pillars_source: d.source, pillars_derived_at: d.derived_at });
             pillars = "derived";
@@ -295,13 +329,15 @@ export const STEPS: Record<string, StepDef> = {
           if (!(e instanceof PillarsError)) throw e;
           if (e.code === "no_evidence") {
             await writeClientFields(db, client.id, fields);
-            return { status: "waiting", reason: "evidence", recheckDays: 7, result: { brief } };
+            return { status: "waiting", reason: "evidence", recheckDays: 7, result: { brief, brief_doc: briefDoc } };
           }
+          // The brief is kept even when the pillars must be tried again.
+          await writeClientFields(db, client.id, fields);
           return { status: "failed", error: e.message };
         }
       }
       const written = await writeClientFields(db, client.id, fields);
-      return { status: "done", result: { brief, pillars, pillar_names: derivedNames, keywords: derivedKeywords, source, site_chars: siteText.length, written: written.written, kept: written.skipped } };
+      return { status: "done", result: { brief, brief_doc: briefDoc, pillars, pillar_names: derivedNames, keywords: derivedKeywords, source, site_chars: siteText.length, written: written.written, kept: written.skipped } };
     },
   },
 
@@ -565,17 +601,20 @@ export const STEPS: Record<string, StepDef> = {
     },
   },
 
-  // The first output for a client that has none: monthly report schedules
-  // when it has none at all, this week's remaining days and next week
-  // planned, and the first monthly report for the last full month through
-  // the scheduled dispatch path (never a second run). The voice profile is
-  // built before the first plan (calendar_request_week queues it). The
-  // competitive report runs on its schedule once tracking has data.
+  // The first output for a client that has none: this week's remaining days
+  // and next week planned, and the first monthly report for the last full
+  // month through the scheduled dispatch path (never a second run), once
+  // the client has a brief. The voice profile is built before the first plan
+  // (calendar_request_week queues it). The competitive report runs on its
+  // schedule once tracking has data.
   first_output: {
     policy: {},
     async inputs(db, client, rows) {
       if (client.exclude_from_reporting) return null;
+      // The first report goes out with a brief: brief_pillars has run, and when there was no brief it has written one
+      // (or found nothing to write one from). A brief_pillars run that failed and is being retried holds this step.
       if (!settled(rows, "brief_pillars") || !settled(rows, "accounts")) return null;
+      if (!str(client.brief_text) && !produced(rows, "brief_pillars")) return null;
       const w = weeksFor(client.timezone, deps.now());
       const [{ data: plans, error: pe }, { data: reports, error: re }, { data: schedules, error: se }] = await Promise.all([
         db.from("calendar_plans").select("week_start").eq("client_id", client.id).in("week_start", [w.monday, w.next]),
