@@ -293,6 +293,7 @@ export type Database = {
           reasons: Json
           report_id: string | null
           source: string
+          touched_at: string | null
           updated_at: string
           visual_direction: string | null
         }
@@ -316,6 +317,7 @@ export type Database = {
           reasons?: Json
           report_id?: string | null
           source?: string
+          touched_at?: string | null
           updated_at?: string
           visual_direction?: string | null
         }
@@ -339,6 +341,7 @@ export type Database = {
           reasons?: Json
           report_id?: string | null
           source?: string
+          touched_at?: string | null
           updated_at?: string
           visual_direction?: string | null
         }
@@ -2394,6 +2397,12 @@ export type Database = {
           check_name: string
           detail: string
           failing: number
+        }[]
+      }
+      calendar_posts_worked_on: {
+        Args: { p_ids: string[] }
+        Returns: {
+          id: string
         }[]
       }
       can_access_client: { Args: { _client_id: string }; Returns: boolean }
