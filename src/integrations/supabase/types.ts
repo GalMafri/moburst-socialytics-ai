@@ -776,11 +776,13 @@ export type Database = {
           design_refs_harvested_at: string | null
           design_style_synthesis: Json | null
           exclude_from_reporting: boolean
+          field_sources: Json
           geo: string | null
           harvested_design_references: Json
           hub_company_name: string | null
           id: string
           language: string | null
+          location: Json | null
           logo_url: string | null
           media_backend: string
           name: string
@@ -818,11 +820,13 @@ export type Database = {
           design_refs_harvested_at?: string | null
           design_style_synthesis?: Json | null
           exclude_from_reporting?: boolean
+          field_sources?: Json
           geo?: string | null
           harvested_design_references?: Json
           hub_company_name?: string | null
           id?: string
           language?: string | null
+          location?: Json | null
           logo_url?: string | null
           media_backend?: string
           name: string
@@ -860,11 +864,13 @@ export type Database = {
           design_refs_harvested_at?: string | null
           design_style_synthesis?: Json | null
           exclude_from_reporting?: boolean
+          field_sources?: Json
           geo?: string | null
           harvested_design_references?: Json
           hub_company_name?: string | null
           id?: string
           language?: string | null
+          location?: Json | null
           logo_url?: string | null
           media_backend?: string
           name?: string
@@ -1421,9 +1427,11 @@ export type Database = {
           client_id: string
           confirmed_at: string | null
           confirmed_by: string | null
+          derived: Json | null
           logo_path: string
           placement: Json
           reference_paths: string[]
+          source: string
           updated_at: string
         }
         Insert: {
@@ -1432,9 +1440,11 @@ export type Database = {
           client_id: string
           confirmed_at?: string | null
           confirmed_by?: string | null
+          derived?: Json | null
           logo_path: string
           placement: Json
           reference_paths: string[]
+          source?: string
           updated_at?: string
         }
         Update: {
@@ -1443,9 +1453,11 @@ export type Database = {
           client_id?: string
           confirmed_at?: string | null
           confirmed_by?: string | null
+          derived?: Json | null
           logo_path?: string
           placement?: Json
           reference_paths?: string[]
+          source?: string
           updated_at?: string
         }
         Relationships: [
@@ -2499,6 +2511,35 @@ export type Database = {
           },
         ]
       }
+      sprout_profile_removals: {
+        Row: {
+          client_id: string
+          removed_at: string
+          removed_by: string | null
+          sprout_profile_id: number
+        }
+        Insert: {
+          client_id: string
+          removed_at?: string
+          removed_by?: string | null
+          sprout_profile_id: number
+        }
+        Update: {
+          client_id?: string
+          removed_at?: string
+          removed_by?: string | null
+          sprout_profile_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sprout_profile_removals_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sprout_profiles: {
         Row: {
           assigned_at: string | null
@@ -2747,6 +2788,10 @@ export type Database = {
         Args: { p_holder: string; p_name: string; p_seconds: number }
         Returns: boolean
       }
+      client_value_is_set: {
+        Args: { p_field: string; p_value: Json }
+        Returns: boolean
+      }
       demo_jobs_lease: {
         Args: { p_lease_seconds?: number; p_limit?: number }
         Returns: {
@@ -2903,9 +2948,29 @@ export type Database = {
         Args: { p_client: string; p_priority?: number }
         Returns: undefined
       }
+      lifecycle_first_output: {
+        Args: { p_client: string; p_now?: string }
+        Returns: Json
+      }
       lifecycle_request: {
         Args: { p_client: string; p_step: string }
         Returns: undefined
+      }
+      lifecycle_tracked_fields: { Args: never; Returns: string[] }
+      lifecycle_write_client: {
+        Args: { p_by?: string; p_client: string; p_fields: Json }
+        Returns: Json
+      }
+      lifecycle_write_design_settings: {
+        Args: {
+          p_background: string
+          p_client: string
+          p_derived: Json
+          p_logo_path: string
+          p_placement: Json
+          p_reference_paths: string[]
+        }
+        Returns: boolean
       }
       open_competitor_topics: {
         Args: { p_client_id: string }
