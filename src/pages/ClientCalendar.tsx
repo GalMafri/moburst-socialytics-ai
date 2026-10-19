@@ -21,7 +21,7 @@ import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
 import { PlanWeekButton } from "@/components/calendar/PlanWeekButton";
 import { CLIENT_CONTEXT_COLUMNS, buildClientContext } from "@/lib/clientContext";
-import { addDays, mondayOf, shortDate, todayIn, weekBoard, type CalendarPostRow } from "@/lib/calendarPosts";
+import { CALENDAR_VIEW, addDays, mondayOf, shortDate, todayIn, weekBoard, type CalendarPostRow } from "@/lib/calendarPosts";
 
 const DEFAULT_PLATFORMS = ["Instagram", "LinkedIn", "TikTok", "Facebook", "X"];
 
@@ -43,9 +43,9 @@ export default function ClientCalendar() {
     queryKey: ["calendar-posts", id],
     enabled: !!id,
     queryFn: async () => {
-      // calendar_posts is not in the generated types yet.
+      // The calendar shows each week's plan in force, never the raw posts table.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase.from("calendar_posts" as never) as any)
+      const { data, error } = await (supabase.from(CALENDAR_VIEW as never) as any)
         .select("*")
         .eq("client_id", id)
         .order("post_date")

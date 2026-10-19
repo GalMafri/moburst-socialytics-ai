@@ -3,6 +3,13 @@
 
 import type { CalendarPost } from "@/lib/calendarRevision";
 
+/**
+ * What the calendar shows: each week's plan in force, worked-on posts of
+ * earlier plans, and posts people added (supabase/functions/_shared/calendar/plans.ts).
+ * Screens read this view; only the code that writes posts reads the table.
+ */
+export const CALENDAR_VIEW = "calendar_posts_current";
+
 export interface CalendarPostRow {
   id: string;
   client_id: string;

@@ -15,7 +15,7 @@ import { compactNumber } from "@/components/ui/bars";
 import { formatPercentChange } from "@/components/ui/stat-card";
 import { formatRange } from "@/lib/dateRange";
 import { displayCompanyName } from "@/lib/companyName";
-import { todayIn } from "@/lib/calendarPosts";
+import { CALENDAR_VIEW, todayIn } from "@/lib/calendarPosts";
 import { describeTracking, pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
 import { buildCompetitiveContext } from "@/components/competitive/CompetitiveSnapshot";
 import { competitiveReportQuality } from "../../../supabase/functions/_shared/competitive/reportEvidence";
@@ -37,9 +37,9 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
         supabase.from("competitive_reports").select("id, created_at, report_data").eq("client_id", clientId).eq("status", "complete").order("created_at", { ascending: false }).limit(1).maybeSingle(),
         supabase.from("competitive_insight_feedback").select("insight_key, verdict, gap_text, edited").eq("client_id", clientId),
         isStaff ? supabase.from("competitor_sets").select("id, status, created_at, confirmed_at, rivaliq_landscape_id, tracking_check").eq("client_id", clientId) : Promise.resolve({ data: [] as SetRow[] }),
-        // calendar_posts is not in the generated types yet.
+        // The calendar shows each week's plan in force, never the raw posts table.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (supabase.from("calendar_posts" as never) as any).select("id, post_key, post_date, platform, source, copy").eq("client_id", clientId).gte("post_date", today).order("post_date").limit(200),
+        (supabase.from(CALENDAR_VIEW as never) as any).select("id, post_key, post_date, platform, source, copy").eq("client_id", clientId).gte("post_date", today).order("post_date").limit(200),
         supabase.from("post_iterations").select("calendar_post_key, is_selected, is_approved, media_urls").eq("client_id", clientId).is("rejected_at", null).is("archived_at", null).not("calendar_post_key", "is", null),
         isStaff ? supabase.from("competitive_alerts").select("id", { count: "exact", head: true }).eq("client_id", clientId).eq("status", "new").gte("created_at", since) : Promise.resolve({ count: 0 }),
       ]);

@@ -11,15 +11,15 @@ import { ArrowRight, CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { PlatformBadge } from "@/lib/platform-config";
-import { mondayOf, shortDate, type CalendarPostRow } from "@/lib/calendarPosts";
+import { CALENDAR_VIEW, mondayOf, shortDate, type CalendarPostRow } from "@/lib/calendarPosts";
 
 export function ReportCalendarLink({ clientId, reportId, children }: { clientId: string; reportId: string; children: ReactNode }) {
   const { data: posts, isLoading } = useQuery({
     queryKey: ["report-calendar-posts", reportId],
     queryFn: async () => {
-      // calendar_posts is not in the generated types yet.
+      // The report's posts the calendar shows (a newer plan may have taken some weeks).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase.from("calendar_posts" as never) as any)
+      const { data, error } = await (supabase.from(CALENDAR_VIEW as never) as any)
         .select("id, post_date, posting_time, platform, format, copy")
         .eq("report_id", reportId)
         .order("post_date");

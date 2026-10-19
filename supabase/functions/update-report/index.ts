@@ -87,18 +87,17 @@ Deno.serve(async (req) => {
     if (data[0].status === "completed") {
       try {
         const result = await importReportPosts(supabase, report_id);
-        console.log(`[update-report] calendar: +${result.added}, -${result.removed} for report ${report_id}`);
-        // The report plans its own week; the three weeks after it are planned
-        // from its findings, one week per call, in the background.
-        if (result.added > 0) {
-          const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/calendar-posts`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret!, "X-Socialytics-User": Deno.env.get("SOCIALYTICS_SYSTEM_USER_ID") || "04b86c53-de62-4d3d-a661-c714f337c8fc" },
-            body: JSON.stringify({ action: "plan_after_report", report_id }),
-            signal: AbortSignal.timeout(15_000),
-          }).catch((e) => { console.error("[update-report] could not start planning the next weeks:", e instanceof Error ? e.message : e); return null; });
-          await res?.body?.cancel();
-        }
+        console.log(`[update-report] calendar: +${result.added}, -${result.removed}, plan in force for ${result.weeks.join(", ") || "no weeks"} (report ${report_id})`);
+        // The client's next weeks are planned from this report in the
+        // background: weeks no plan holds, and an older plan's weeks from next
+        // week on (calendar-posts keep_planned).
+        const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/calendar-posts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret!, "X-Socialytics-User": Deno.env.get("SOCIALYTICS_SYSTEM_USER_ID") || "04b86c53-de62-4d3d-a661-c714f337c8fc" },
+          body: JSON.stringify({ action: "keep_planned", client_id: data[0].client_id }),
+          signal: AbortSignal.timeout(15_000),
+        }).catch((e) => { console.error("[update-report] could not start planning the next weeks:", e instanceof Error ? e.message : e); return null; });
+        await res?.body?.cancel();
       } catch (e) {
         console.error("[update-report] calendar import failed:", e instanceof Error ? e.message : e);
       }

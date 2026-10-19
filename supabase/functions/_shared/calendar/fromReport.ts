@@ -8,6 +8,8 @@
 // That key must match src/lib/calendarRevision.ts exactly; a test holds the
 // two together.
 
+import { assignWeek, mondayOf } from "./plans.ts";
+
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 const LEAKED_FIELDS = ["language", "platform", "format", "pillar", "posting_time", "hashtags", "visual_direction", "ai_visual_prompt", "rationale"];
@@ -139,38 +141,40 @@ export function postsFromReport(report: { id: string; client_id: string; created
 }
 
 /**
- * Copy a report's planned posts into the calendar. Safe to run again: posts
- * already there are left as they are. When a report is re-run, the posts of
- * its earlier run that nobody has worked on (no copy edit, design or request
- * attached) are removed, so the calendar does not show both runs.
+ * Copy a report's planned posts into the calendar and put the report's plan in
+ * force for its weeks (plans.ts). Safe to run again: posts already there are
+ * left as they are. When a report is re-run, the posts of its earlier run that
+ * nobody has worked on are removed, so the calendar does not show both runs.
  */
-export async function importReportPosts(admin: any, reportId: string): Promise<{ added: number; removed: number }> {
+export async function importReportPosts(admin: any, reportId: string): Promise<{ added: number; removed: number; weeks: string[] }> {
   const { data: report, error } = await admin.from("reports").select("id, client_id, created_at, report_data").eq("id", reportId).maybeSingle();
   if (error || !report) throw new Error(`Could not read the report: ${error?.message ?? "not found"}`);
   const rows = postsFromReport(report);
   const keys = new Set(rows.map((r) => r.post_key));
 
+  // The report's own calendar from an earlier run (keyed as its board keys
+  // posts); the weeks planned from its findings are not part of it.
   let removed = 0;
-  const { data: existing } = await admin.from("calendar_posts").select("id, post_key").eq("report_id", reportId);
+  const { data: existing } = await admin.from("calendar_posts").select("id, post_key, platform, copy, touched_at").eq("report_id", reportId).like("post_key", "[%");
   const stale = (existing ?? []).filter((p: { post_key: string }) => !keys.has(p.post_key));
-  if (stale.length) {
-    const staleKeys = stale.map((p: { post_key: string }) => p.post_key);
-    // Matched in code: the keys are JSON text, which an in() filter does not survive.
-    const [{ data: worked }, { data: requested }] = await Promise.all([
-      admin.from("post_iterations").select("calendar_post_key").eq("client_id", report.client_id).eq("report_id", report.id).not("calendar_post_key", "is", null).limit(10000),
-      admin.from("design_requests").select("calendar_post_key").eq("client_id", report.client_id).limit(10000),
-    ]);
-    const staleSet = new Set(staleKeys);
-    const keep = new Set([...(worked ?? []), ...(requested ?? [])].map((r: { calendar_post_key: string }) => r.calendar_post_key).filter((k) => staleSet.has(k)));
-    const drop = stale.filter((p: { post_key: string }) => !keep.has(p.post_key)).map((p: { id: string }) => p.id);
-    if (drop.length) {
-      await admin.from("calendar_posts").delete().in("id", drop);
-      removed = drop.length;
-    }
+  const drop: string[] = [];
+  for (const p of stale) {
+    const { data: worked, error: workedError } = await admin.rpc("calendar_post_worked", { p_client: report.client_id, p_key: p.post_key, p_platform: p.platform, p_copy: p.copy, p_touched: p.touched_at });
+    if (workedError) throw new Error(`Could not tell whether a post was worked on: ${workedError.message}`);
+    if (worked !== true) drop.push(p.id);
+  }
+  if (drop.length) {
+    await admin.from("calendar_posts").delete().in("id", drop);
+    removed = drop.length;
   }
 
-  if (!rows.length) return { added: 0, removed };
+  if (!rows.length) return { added: 0, removed, weeks: [] };
   const { data, error: insertError } = await admin.from("calendar_posts").upsert(rows, { onConflict: "client_id,post_key", ignoreDuplicates: true }).select("id");
   if (insertError) throw new Error(`Could not add the report's posts to the calendar: ${insertError.message}`);
-  return { added: (data ?? []).length, removed };
+  // The posts are in place before the plan takes their weeks, so a week is never shown empty.
+  const weeks: string[] = [];
+  for (const week of [...new Set(rows.map((r) => mondayOf(r.post_date)))].sort()) {
+    if (await assignWeek(admin, report.client_id, week, report.id)) weeks.push(week);
+  }
+  return { added: (data ?? []).length, removed, weeks };
 }
