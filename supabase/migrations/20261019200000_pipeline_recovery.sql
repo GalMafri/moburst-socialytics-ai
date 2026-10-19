@@ -132,9 +132,11 @@ alter table public.design_requests drop constraint if exists design_requests_end
 alter table public.design_requests add constraint design_requests_end_reason_check
   check (end_reason is null or end_reason in ('no_design', 'no_progress', 'no_footage', 'filmed', 'post_passed', 'post_removed'));
 
--- Every planned post gets a design automatically (Lital's decision 3, 19 Oct).
-alter table public.design_brand_settings alter column auto_designs set default true;
-update public.design_brand_settings set auto_designs = true where not auto_designs;
+-- Automatic designs stay off (Lital, 19 Oct 16:40): her decision 3 (a design
+-- for every planned post) waits until the Higgsfield workspace's spend since
+-- 14 Oct is explained. With the switch off nothing here spends Higgsfield
+-- credits: closing filming requests makes nothing, and only clients with the
+-- switch on get designs made (design-request prepareUpcoming).
 
 -- The automatic designs run as the system: the operational secret alone, no
 -- person named (it used to name Lital). They also run while a filming request

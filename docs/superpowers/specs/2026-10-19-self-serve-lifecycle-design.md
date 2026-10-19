@@ -168,7 +168,7 @@ The readiness gate, "Your calendar is being set up", the staff note linking to s
 
 1. **RivalIQ tracking connects automatically** when a client's competitor set is confirmed, using paid company slots for the client and its three competitors.
 2. **Design settings are derived automatically** (logo from the site, placement measured from the client's own posts, brand colors). Staff can change them. This replaces the 12 Oct one-time staff confirmation.
-3. **Every planned post gets a design automatically.** Automatic designs are on by default for every client.
+3. **Every planned post gets a design automatically.** On hold (Lital, 19 Oct 16:40): automatic designs stay off for every client until the Higgsfield workspace's spend since 14 Oct is explained (Socialytics made no Higgsfield call since 14 Oct 11:51 Israel time).
 4. **Staff keep scheduling each post to Sprout.** Publishing stays a staff action; the product prepares everything up to it.
 
 ## Proof before building
