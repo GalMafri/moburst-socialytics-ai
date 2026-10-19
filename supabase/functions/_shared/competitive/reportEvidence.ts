@@ -96,6 +96,13 @@ export function withCompetitiveEvidenceLimits<T>(input: T): T {
   return { ...report, schema_note: cleanNote, ai_analysis: ai } as T;
 }
 
+/**
+ * How many times the product makes a held analysis again (once a day,
+ * through the competitive dispatch, run-scheduled-jobs/dispatch.ts) before
+ * the period is left to the next scheduled run.
+ */
+export const HELD_REDOS = 3;
+
 /** An incomplete analysis must not be delivered, exported or reused as context. */
 export function competitiveReportQuality(input: unknown): { ready: boolean; reasons: string[] } {
   const report = input as Record<string, any> | null;

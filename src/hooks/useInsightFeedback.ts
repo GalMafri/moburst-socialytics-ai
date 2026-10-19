@@ -9,6 +9,7 @@
 import { useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import type { CompetitiveLearning, SuggestionEdit } from "../../supabase/functions/_shared/competitive/suggestionEdits";
 
 export type Verdict = "up" | "down";
@@ -77,18 +78,20 @@ export function useInsightFeedback(clientId: string | undefined) {
       if (!clientId) return;
       const key = insightKey(args.gapText);
       const existing = byKey.get(key);
+      // Every write here repeats safely, so each is sent again quietly; the page then shows what is stored.
+      try {
       if (existing && existing.verdict === args.verdict) {
         // An edited suggestion keeps its edit when the verdict is taken back.
         const { error } = existing.edited
-          ? await supabase.from("competitive_insight_feedback").update({ verdict: null }).eq("id", existing.id)
-          : await supabase.from("competitive_insight_feedback").delete().eq("id", existing.id);
+          ? await sendQuietly(() => supabase.from("competitive_insight_feedback").update({ verdict: null }).eq("id", existing.id), { again: writeResendable })
+          : await sendQuietly(() => supabase.from("competitive_insight_feedback").delete().eq("id", existing.id), { again: writeResendable });
         if (error) throw error;
       } else {
         // The column default (auth.uid()) fills user_id on INSERT only, so a
         // flipped verdict used to keep the first voter's name and timestamp.
         // Written explicitly from the session so the row says who decided.
         const { data: auth } = await supabase.auth.getUser();
-        const { error } = await supabase.from("competitive_insight_feedback").upsert(
+        const { error } = await sendQuietly(() => supabase.from("competitive_insight_feedback").upsert(
           {
             client_id: clientId,
             insight_key: key,
@@ -99,10 +102,12 @@ export function useInsightFeedback(clientId: string | undefined) {
             ...(auth?.user?.id ? { user_id: auth.user.id, created_at: new Date().toISOString() } : {}),
           },
           { onConflict: "client_id,insight_key" },
-        );
+        ), { again: writeResendable });
         if (error) throw error;
       }
-      await qc.invalidateQueries({ queryKey: ["insight-feedback", clientId] });
+      } finally {
+        await qc.invalidateQueries({ queryKey: ["insight-feedback", clientId] });
+      }
     },
     [byKey, clientId, qc],
   );
@@ -184,9 +189,9 @@ export function useCompetitiveLearnings(clientId: string | undefined, enabled = 
     enabled: !!clientId && enabled,
   });
   const remove = useCallback(async (id: string) => {
+    // Sent again quietly; the list then shows what is stored either way.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase.from("competitive_learnings" as never) as any).delete().eq("id", id);
-    if (error) throw error;
+    await sendQuietly(() => (supabase.from("competitive_learnings" as never) as any).delete().eq("id", id), { again: writeResendable });
     await qc.invalidateQueries({ queryKey: ["competitive-learnings", clientId] });
   }, [clientId, qc]);
   return { learnings: query.data || [], remove };

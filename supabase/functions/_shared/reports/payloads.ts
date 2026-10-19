@@ -162,18 +162,19 @@ export async function buildSocialPayload(args: {
     .select("*")
     .eq("client_id", client.id)
     .neq("is_active", false);
-  let competitiveQuery = supabase
-    .from("competitive_reports")
-    .select("id, created_at, report_data")
-    .eq("client_id", client.id)
-    .eq("status", "complete");
-  if (args.competitiveReportId) competitiveQuery = competitiveQuery.eq("id", args.competitiveReportId);
-  const { data: latestCompetitive, error: competitiveError } = await competitiveQuery
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (competitiveError) throw competitiveError;
-  if (args.competitiveReportId && !latestCompetitive) throw new Error("The required competitive report is not complete for this client.");
+  // The newest finished analysis that passed its checks. A held one is never
+  // context (clients never see it), so the report reads the previous good one.
+  const completeRuns = async (id?: string): Promise<Array<{ id: string; created_at: string; report_data: unknown }>> => {
+    let q = supabase.from("competitive_reports").select("id, created_at, report_data").eq("client_id", client.id).eq("status", "complete");
+    if (id) q = q.eq("id", id);
+    const { data, error } = await q.order("created_at", { ascending: false }).limit(id ? 1 : 12);
+    if (error) throw error;
+    return data || [];
+  };
+  const passed = (r: { report_data: unknown }) => competitiveReportQuality(r.report_data).ready;
+  const pinned = args.competitiveReportId ? await completeRuns(args.competitiveReportId) : null;
+  if (pinned && !pinned.length) throw new Error("The required competitive report is not complete for this client.");
+  const latestCompetitive = (pinned ?? []).find(passed) ?? (await completeRuns()).find(passed) ?? null;
   const { data: feedback } = await supabase
     .from("competitive_insight_feedback")
     .select("insight_key, verdict, gap_text, edited")

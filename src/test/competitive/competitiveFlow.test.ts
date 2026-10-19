@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeReport, describeSelection, describeTracking, pickRunSelection, plainCompetitiveError, competitiveRecovery, stateLine, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
+import { CHOSEN_AUTOMATICALLY, describeReport, describeSelection, describeTracking, pickRunSelection, competitiveRecovery, stateLine, type SetRow } from "@/lib/competitiveFlow";
 
 const set = (o: Partial<SetRow> & { id: string; status: string; created_at: string }): SetRow => o as SetRow;
 
@@ -20,13 +20,19 @@ describe("pickRunSelection", () => {
     expect(latest?.id).toBe("draft");
     expect(runnable?.id).toBe("old");
     expect(newerDraft?.id).toBe("draft");
-    expect(describeSelection(sets).headline).toMatch(/older confirmed selection/i);
+    expect(describeSelection(sets).detail).toMatch(/newer draft is open/i);
   });
 
   it("reports no draft conflict when the newest set is the confirmed one", () => {
-    const sets = [set({ id: "a", status: "confirmed", created_at: "2026-09-10", confirmed_at: "2026-09-10" })];
+    const sets = [set({ id: "a", status: "confirmed", created_at: "2026-09-10", confirmed_at: "2026-09-10", confirmed_by: "user-1" })];
     expect(pickRunSelection(sets).newerDraft).toBeNull();
-    expect(describeSelection(sets).ready).toBe(true);
+    expect(describeSelection(sets)).toMatchObject({ ready: true, headline: "Three competitors confirmed" });
+  });
+
+  it("says a set the lifecycle confirmed was chosen automatically", () => {
+    const sets = [set({ id: "a", status: "confirmed", created_at: "2026-10-19", confirmed_at: "2026-10-19", confirmed_by: null })];
+    expect(describeSelection(sets).headline).toBe(CHOSEN_AUTOMATICALLY);
+    expect(CHOSEN_AUTOMATICALLY).toBe("Chosen automatically: the three closest competitors with a website.");
   });
 
   it("treats a failed set as still confirmed, and a draft-only client as not ready", () => {
@@ -39,41 +45,27 @@ describe("pickRunSelection", () => {
 });
 
 describe("describeTracking", () => {
-  it("separates a confirmed selection from connected tracking", () => {
-    const unconnected = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01" }));
-    expect(unconnected.ready).toBe(false);
-    expect(unconnected.headline).toMatch(/not connected/i);
-    const connected = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909",
-      tracking_check: { code: "ok", landscape_id: "612909", message: null, checked_at: "2026-10-01T07:00:00Z" } }));
-    expect(connected.ready).toBe(true);
-    expect(connected.headline).toBe("Tracking connected");
-    // A created landscape must never be presented as historical data.
-    expect(connected.detail).toMatch(/little history/i);
-    expect(connected.detail).not.toMatch(/history is available/i);
+  it("states tracking as a fact: since when, or nothing while the lifecycle connects it", () => {
+    expect(describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01" }))).toEqual({ headline: "", ready: false });
+    const since = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909", tracked_since: "2026-09-23T12:44:47Z" }));
+    expect(since).toEqual({ headline: "Tracked since Sep 23, 2026", ready: true });
+    expect(describeTracking(set({ id: "a", status: "complete", created_at: "2026-09-01", rivaliq_landscape_id: "612909" })).headline).toBe("Tracked in RivalIQ");
   });
 
-  it("never claims a connection no check has confirmed", () => {
-    const linked = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909" }));
-    expect(linked.headline).toBe("");
-    expect(linked.detail).toBeUndefined();
+  it("says nothing about a landscape that has gone; the lifecycle sets it up again", () => {
+    const gone = describeTracking(set({ id: "a", status: "complete", created_at: "2026-09-01", rivaliq_landscape_id: "612909",
+      tracking_check: { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "612909", message: "gone", checked_at: "2026-10-01T07:00:00Z" } }));
+    expect(gone).toEqual({ headline: "", ready: false });
     // A check about an earlier landscape says nothing about this one.
     const stale = describeTracking(set({ id: "a", status: "confirmed", created_at: "2026-09-01", rivaliq_landscape_id: "612909",
-      tracking_check: { code: "ok", landscape_id: "500", message: null, checked_at: "2026-10-01T07:00:00Z" } }));
-    expect(stale.headline).toBe("");
+      tracking_check: { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "500", message: null, checked_at: "2026-10-01T07:00:00Z" } }));
+    expect(stale.ready).toBe(true);
   });
 
-  it("shows a linked landscape that has gone, without locking the run that re-checks it", () => {
-    const gone = describeTracking(set({ id: "a", status: "complete", created_at: "2026-09-01", rivaliq_landscape_id: "612909",
-      tracking_check: { code: "RIVALIQ_LANDSCAPE_MISSING", landscape_id: "612909", message: "The RivalIQ landscape linked to Fixture's competitor set (612909) no longer exists.", checked_at: "2026-10-01T07:00:00Z" } }));
-    expect(gone.headline).toBe("Tracking needs reconnecting");
-    expect(gone.detail).toMatch(/no longer exists/);
-    expect(gone.ready).toBe(false);
-    expect(trackingAllowsRun(gone)).toBe(true);
-    expect(trackingAllowsRun(describeTracking(set({ id: "b", status: "confirmed", created_at: "2026-09-01" })))).toBe(false);
-  });
-
-  it("does not offer tracking for a draft-only client", () => {
-    expect(describeTracking(set({ id: "d", status: "draft", created_at: "2026-09-01" })).ready).toBe(false);
+  it("never asks anyone to connect or confirm anything", () => {
+    const states = [describeTracking(null), describeTracking(set({ id: "d", status: "draft", created_at: "2026-09-01" })),
+      describeSelection([]), describeSelection([set({ id: "d", status: "draft", created_at: "2026-09-01" })])];
+    for (const st of states) expect(stateLine(st)).not.toMatch(/connect|confirm a|set up|first/i);
     expect(describeTracking(null).ready).toBe(false);
   });
 });
@@ -83,46 +75,17 @@ describe("describeReport", () => {
     expect(describeReport(null).headline).toMatch(/No report run yet/i);
     expect(describeReport({ id: "r", status: "running", created_at: "x" }).ready).toBe(false);
     expect(describeReport({ id: "r", status: "complete", created_at: "x" }).ready).toBe(true);
-    // A run that did not finish runs again; it is never shown as a failure.
-    expect(describeReport({ id: "r", status: "failed", created_at: "x" }).headline).toMatch(/scheduled to run again/i);
+    // A run that did not finish is made again and never shown.
     expect(describeReport({ id: "r", status: "failed", created_at: "x" }).headline).not.toMatch(/fail|did not finish/i);
   });
 });
 
-describe("plainCompetitiveError", () => {
-  it("explains the RivalIQ rate limit that failed one of two simultaneous runs", () => {
-    const msg = plainCompetitiveError("List RivalIQ Landscapes: HTTP 429");
-    expect(msg).toMatch(/one request at a time/i);
-    expect(msg).toMatch(/100 an hour/i);
-    expect(msg).toMatch(/90-minute/i);
-    expect(msg).not.toMatch(/nothing was saved|few minutes|usually means/i);
-    expect(plainCompetitiveError("List RivalIQ Landscapes failed. Try spacing your requests out using the batching settings under 'Options'")).toBe(msg);
-    expect(msg).not.toMatch(/429/);
-  });
-
-  it("points a missing-tracking failure at the setup step", () => {
-    expect(plainCompetitiveError("RIVALIQ_CLIENT_NOT_TRACKED")).toMatch(/Connect tracking/i);
-  });
-  it("does not mistake a provider or website 401 for an expired portal session", () => {
-    expect(plainCompetitiveError("Website returned HTTP 401")).toBe("Website returned HTTP 401");
-    expect(plainCompetitiveError("Provider returned HTTP 403")).toBe("Provider returned HTTP 403");
-    expect(plainCompetitiveError("Request timeout")).toMatch(/may still be processing/);
-  });
-
-  it("rewrites timeouts and expired sessions, and keeps an already-plain message", () => {
-    expect(plainCompetitiveError("The server took too long (over the 150s limit)")).toMatch(/took too long/i);
-    expect(plainCompetitiveError("Your session has expired.")).toMatch(/portal/i);
-    expect(plainCompetitiveError("Only two competitors have reviewed profiles.")).toBe("Only two competitors have reviewed profiles.");
-    expect(plainCompetitiveError("")).toMatch(/did not complete/i);
-  });
-});
-
-it('distinguishes pending collection from a completed collection with no returned posts', () => {
+it('distinguishes pending collection from a completed collection with no returned posts, and says it is being redone', () => {
  const empty={aggregates:{companies:[{name:'Client',post_count:0,observed_post_count:0}]}};
- expect(competitiveRecovery({...empty,provider_status:2}).title).toBe('Source data was still loading');
- expect(competitiveRecovery({...empty,provider_status:1}).title).toBe('No posts available for this period');
+ expect(competitiveRecovery({...empty,provider_status:2}).detail).toMatch(/not finished collecting/);
+ expect(competitiveRecovery({...empty,provider_status:1}).detail).toMatch(/no posts/);
  expect(competitiveRecovery(empty).detail).toContain('does not establish');
- expect(competitiveRecovery({quality_check:{reasons:['Different provider totals']}}).title).toBe('Held back');
+ for (const data of [{...empty,provider_status:2},empty,{quality_check:{reasons:['Different provider totals']}}]) expect(competitiveRecovery(data).title).toBe('Being redone');
  // Facts only: nothing asks anyone to retry or review, and the checks' own reasons stay out.
  for (const data of [{...empty,provider_status:2},empty,{quality_check:{reasons:['Different provider totals']}}]) for (const staff of [true,false]) {
    const r=competitiveRecovery(data,staff);
@@ -133,7 +96,7 @@ it('distinguishes pending collection from a completed collection with no returne
 
 describe("stateLine", () => {
   it("ends the headline as a sentence before the detail", () => {
-    expect(stateLine({ headline: "Tracking not set up", detail: "Confirm a selection first.", ready: false })).toBe("Tracking not set up. Confirm a selection first.");
+    expect(stateLine({ headline: "Tracked since Sep 23, 2026", detail: "Reports use this selection.", ready: true })).toBe("Tracked since Sep 23, 2026. Reports use this selection.");
     expect(stateLine({ headline: "Done.", ready: true })).toBe("Done.");
     expect(stateLine({ headline: "", detail: "Only detail.", ready: true })).toBe("Only detail.");
   });

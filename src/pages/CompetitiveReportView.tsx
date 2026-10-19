@@ -9,9 +9,7 @@ import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../s
 // by_channel data, so the filter only appears when it can do something.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { canRetry } from "@/lib/reportRun";
 import { competitiveRecovery } from "@/lib/competitiveFlow";
-import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { cleanText, competitiveRunStatus, formatDate, formatDateTime } from "@/lib/display";
 import { StatCard, formatPercentChange } from "@/components/ui/stat-card";
 import { useParams, useNavigate } from "react-router-dom";
@@ -289,7 +287,6 @@ export default function CompetitiveReportView() {
     const timer = setInterval(() => setNow(Date.now()), 15000);
     return () => clearInterval(timer);
   }, [report?.status]);
-  const retryReady = report ? canRetry(report, now, "competitive") : false;
   const recovery = competitiveRecovery(report?.report_data, isMoburstStaff);
   // Data sources are named to staff only; a client reads what the figure is, not who supplied it.
   const vendor = (staffText: string, clientText: string) => (isMoburstStaff ? staffText : clientText);
@@ -363,7 +360,7 @@ export default function CompetitiveReportView() {
   if (runStatus.state === "held") {
     // The checks' own reasons are for the logs, never the page.
     console.info("[competitive report held]", competitiveReportQuality(report.report_data).reasons);
-    return <AppLayout title={recovery.title} description="This analysis is not shared.">
+    return <AppLayout title={recovery.title} description="This analysis is not shared with the client.">
       <Card><CardContent className="pt-6 space-y-4">
         <p className="t-body">{recovery.detail}</p>
         {report.date_range_start && report.date_range_end && <p className="t-secondary">Period: {formatRange({start: report.date_range_start, end: report.date_range_end})}</p>}
@@ -372,10 +369,9 @@ export default function CompetitiveReportView() {
     </AppLayout>;
   }
   if (runStatus.state === "scheduled") return <AppLayout>
-    <EmptyState icon={Crosshair} title="Scheduled to run again" description="This analysis did not finish on its first attempt and runs again on its own. It appears here when it is ready." />
+    <EmptyState icon={Crosshair} title="Report not available" description="It appears here when it is ready." />
     <div className="flex gap-2 mt-4">
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
-      {retryReady && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" label="Run now" />}
     </div>
   </AppLayout>;
   const me = companies.find((c) => c.is_client) || null;
@@ -516,8 +512,8 @@ export default function CompetitiveReportView() {
         toast({ title: "Marked to implement", description: "The next monthly report and the weekly calendar plans will address this gap." });
       }
     } catch (e: any) {
-      console.error("[suggestion feedback]", e);
-      toast({ title: "Your feedback was not saved", description: "Nothing changed. Try again in a minute.", variant: "destructive" });
+      // Sent again quietly already; the suggestion shows the verdict that is stored.
+      console.warn("[suggestion feedback] not saved yet", e);
     }
   };
 
@@ -1090,7 +1086,7 @@ export default function CompetitiveReportView() {
                   {learnings.map((l) => (
                     <li key={l.id} className="flex items-start justify-between gap-3 t-body">
                       <span><span className="font-semibold">{l.kind === "avoid" ? "Avoid: " : "Prefer: "}</span>{l.text}</span>
-                      <Button size="sm" variant="ghost" className="shrink-0" onClick={() => removeLearning(l.id).catch(() => sonnerToast.error("Could not remove it. Try again."))}>Remove</Button>
+                      <Button size="sm" variant="ghost" className="shrink-0" onClick={() => void removeLearning(l.id)}>Remove</Button>
                     </li>
                   ))}
                 </ul>

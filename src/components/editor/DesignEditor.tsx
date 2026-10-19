@@ -18,7 +18,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Type, Trash2, Download, Save, Plus, GripVertical } from "lucide-react";
-import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
 export interface DesignEditorProps {
@@ -83,6 +82,8 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
   const [selectedOverlay, setSelectedOverlay] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  /** The export did not come out (the image would not load); the text stays as placed. */
+  const [notSaved, setNotSaved] = useState(false);
 
   const brandColors = [
     brandIdentity?.primary_color,
@@ -144,6 +145,17 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
   // Export: draw image + overlays to a temporary canvas, get data URL
   const handleSave = async () => {
     setIsSaving(true);
+    setNotSaved(false);
+    // A loading hiccup is tried again quietly before anything changes on screen.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 1500 * attempt));
+      if (await exportOnce()) { setIsSaving(false); return; }
+    }
+    setIsSaving(false);
+    setNotSaved(true);
+  };
+
+  const exportOnce = async (): Promise<boolean> => {
     try {
       // Load the original image
       const img = new Image();
@@ -187,12 +199,10 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
       } else {
         onSave(dataUrl);
       }
-    } catch (err: any) {
-      console.error("DesignEditor save error:", err);
-      toast.error("Failed to export design: " + err.message);
-      onSave(imageUrl); // fallback to original
-    } finally {
-      setIsSaving(false);
+      return true;
+    } catch (err) {
+      console.warn("[design editor] export did not come out", err);
+      return false;
     }
   };
 
@@ -323,6 +333,7 @@ export function DesignEditor({ imageUrl, brandIdentity, clientId, onSave, onClos
           </div>
         </div>
 
+        {notSaved && <p role="status" className="t-secondary">Not saved yet. The text stays as placed.</p>}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" size="sm" onClick={handleDownload}>
             <Download className="h-4 w-4 mr-1" /> Download Original

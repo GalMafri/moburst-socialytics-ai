@@ -1,12 +1,15 @@
+import { formatDate } from "@/lib/display";
+
 /**
  * Plain language for the competitive flow.
  *
  * Three different things used to be shown as one raw word each ("set: failed",
  * "report: failed", a RivalIQ phase name), and people read them as the same
  * fact. They are not: a saved selection, provider tracking and a report run
- * each succeed or fail on their own. Everything a competitive screen says
- * about those three states is written here, once, in words that name the next
- * action.
+ * each have their own state. Everything a competitive screen says about
+ * those three is written here, once, as facts: the product runs each of them
+ * on its own (self-serve design, 19 Oct 2026), so nothing here asks anyone to
+ * act.
  */
 
 /** A set keeps its confirmation through later runs; only a draft cannot run. */
@@ -17,7 +20,11 @@ export type SetRow = {
   status: string;
   created_at: string;
   confirmed_at?: string | null;
+  /** Who confirmed the set; null when the client lifecycle chose it as the system. */
+  confirmed_by?: string | null;
   rivaliq_landscape_id?: string | null;
+  /** When the set was linked to the landscape it has now (20261019230000_setup_view.sql). */
+  tracked_since?: string | null;
   /** The last RivalIQ landscape check recorded on the set (landscapeCheck.ts). Absent until one has run. */
   tracking_check?: unknown;
 };
@@ -51,33 +58,25 @@ export function pickRunSelection(sets: SetRow[]): {
 }
 
 export type FlowState = {
-  /** One short sentence, safe to show to anyone. */
+  /** One short sentence, safe to show to anyone. Empty says nothing. */
   headline: string;
-  /** What to do about it, when there is something to do. */
+  /** A second fact, when there is one. */
   detail?: string;
   /** Whether this step is satisfied. */
   ready: boolean;
-  /**
-   * Whether a report may still be started although the step is not
-   * satisfied. A run makes the tracking check again, so a stale "needs
-   * reconnecting" never locks the button that would clear it.
-   */
-  runnable?: boolean;
 };
 
-/** Step 1: are three competitors saved, and is the saved one the newest? */
+/** What the lifecycle writes on a set it confirmed as the system (steps.ts, competitors). */
+export const CHOSEN_AUTOMATICALLY = "Chosen automatically: the three closest competitors with a website.";
+
+/** Step 1, as facts: which competitors reports use, and how they were chosen. */
 export function describeSelection(sets: SetRow[]): FlowState {
   const { latest, runnable, newerDraft } = pickRunSelection(sets);
-  if (!latest) return { headline: "No competitors chosen yet", detail: "Propose or import three competitors to start.", ready: false };
-  if (!runnable) return { headline: "Selection awaiting review", detail: "Choose three competitors, review their profiles, and confirm the selection.", ready: false };
-  if (newerDraft) {
-    return {
-      headline: "A report would use the older confirmed selection",
-      detail: "A newer draft is waiting for review. Confirm it if you want the report to use it.",
-      ready: true,
-    };
-  }
-  return { headline: "Three competitors confirmed", ready: true };
+  if (!latest) return { headline: "No competitors chosen yet", ready: false };
+  if (!runnable) return { headline: "A draft selection is open", ready: false };
+  const chosen = runnable.confirmed_by == null ? CHOSEN_AUTOMATICALLY : "Three competitors confirmed";
+  if (newerDraft) return { headline: chosen, detail: "Reports use this selection. A newer draft is open beside it.", ready: true };
+  return { headline: chosen, ready: true };
 }
 
 /** The set's recorded landscape check, when it is about the landscape the set links to now. */
@@ -89,50 +88,22 @@ export function currentTrackingCheck(set: SetRow | null): { code: string; messag
 }
 
 /**
- * Step 2: is the selection connected to RivalIQ tracking?
+ * Step 2, as a fact: tracking for the confirmed selection.
  *
- * A stored landscape id says the set was linked, not that the landscape still
- * exists. The real state is the last check a run, the scheduler or the feed
- * made (competitor_sets.tracking_check); the page never asks RivalIQ itself.
- * With no check recorded yet the headline is empty: saying nothing beats
- * claiming a connection nobody has verified.
- *
- * A connected landscape means the companies are being tracked from now on. It
- * does not mean RivalIQ holds their past posts, so this never promises history.
+ * The client lifecycle connects RivalIQ tracking on its own once a set is
+ * confirmed, and sets it up again when a landscape disappears (Lital's
+ * decision 1, 19 Oct 2026). So this says when the set has been tracked, or
+ * nothing while tracking is being connected. It never asks anyone to act.
+ * Tracking a company from now on does not give RivalIQ its past posts, so
+ * this never promises history.
  */
 export function describeTracking(set: SetRow | null): FlowState {
-  if (!set || !RUNNABLE_SET_STATUSES.includes(set.status)) {
-    return { headline: "Tracking not set up", detail: "Confirm a selection first, then connect tracking.", ready: false };
-  }
-  if (!set.rivaliq_landscape_id) {
-    return {
-      headline: "Tracking not connected",
-      detail: "Connect these three companies to RivalIQ before running a report.",
-      ready: false,
-    };
-  }
+  if (!set || !RUNNABLE_SET_STATUSES.includes(set.status) || !set.rivaliq_landscape_id) return { headline: "", ready: false };
   const check = currentTrackingCheck(set);
-  if (check && check.code !== "ok") {
-    return {
-      headline: "Tracking needs reconnecting",
-      detail: check.message || "The linked RivalIQ landscape no longer tracks this client. Import a landscape that does, or set up tracking for a new selection.",
-      ready: false,
-      runnable: true,
-    };
-  }
-  if (check) {
-    const when = new Date(check.checked_at);
-    return {
-      headline: "Tracking connected",
-      detail: `${Number.isFinite(when.getTime()) ? `Last checked ${when.toLocaleDateString()}. ` : ""}Companies added recently may have little history before they were tracked.`,
-      ready: true,
-    };
-  }
-  return { headline: "", ready: true };
+  if (check && check.code !== "ok") return { headline: "", ready: false };
+  const since = formatDate(set.tracked_since);
+  return { headline: since ? `Tracked since ${since}` : "Tracked in RivalIQ", ready: true };
 }
-
-/** Whether the tracking step lets a report start (see FlowState.runnable). */
-export const trackingAllowsRun = (state: FlowState) => state.runnable ?? state.ready;
 
 /** A state as one line of prose: the headline as a sentence, then the detail. */
 export function stateLine(state: FlowState): string {
@@ -146,56 +117,26 @@ export function describeReport(report: ReportRow | null): FlowState {
   if (!report) return { headline: "No report run yet", ready: false };
   if (report.status === "complete") return { headline: "Last report is ready to open", ready: true };
   if (report.status === "running") return { headline: "A report is running now", detail: "It finishes on its own; you can leave this page.", ready: false };
-  // A run that did not finish runs again on its own; it is never shown as a failure.
-  return { headline: "The last report is scheduled to run again", ready: false };
+  // A run that did not finish is made again by the product and never listed.
+  return { headline: "No report run yet", ready: false };
 }
 
 /**
- * A server or provider message, rewritten as something to act on.
- *
- * RivalIQ allows one request at a time per account and 100 calls in a UTC
- * hour. Two clients analysed at once therefore fails one of them with a bare
- * "HTTP 429" from the landscape-listing step, which reads like a broken app.
- */
-export function plainCompetitiveError(raw: string | null | undefined): string {
-  const message = String(raw || "").trim();
-  if (!message) return "The request did not complete. Try again.";
-  const low = message.toLowerCase();
-  if (/\b429\b/.test(low) || low.includes("rate limit") || low.includes("too many requests") || low.includes("spacing your requests")) {
-    return "RivalIQ temporarily limited this request. The account allows one request at a time and 100 an hour. The report could not finish. Use the report's Retry control when its 90-minute wait has ended; an hourly limit may also need time to reset.";
-  }
-  if (low.includes("not tracked") || low.includes("rivaliq_client_not_tracked")) {
-    return "This client is not tracked in RivalIQ yet. Connect tracking for the confirmed selection, then run the report.";
-  }
-  if (low.includes("timed out") || low.includes("timeout") || /\b504\b/.test(low)) {
-    return "The request timed out, but the report may still be processing. Check its status before starting another run. Retry remains locked until 90 minutes after the run started.";
-  }
-  if (low.includes("session has expired")) {
-    return "Your session has expired. Re-open the tool from the portal and try again.";
-  }
-  if (/\b5\d\d\b/.test(low) && low.includes("server error")) {
-    return "The report service returned an error. Check the saved report status; its Retry control becomes available 90 minutes after the run started.";
-  }
-  return message;
-}
-
-/**
- * Why an analysis is held back, as facts. Nothing here asks anyone to act:
- * the next run for the period replaces a held one. Staff read the source's
- * name; a client (staff = false) reads the same fact with no vendor named.
+ * Why an analysis is being made again, as facts. Nothing here asks anyone
+ * to act: the product makes a held analysis again once a day (HELD_REDOS
+ * times, run-scheduled-jobs/dispatch.ts). Staff read the source's name; a
+ * client (staff = false) reads the same fact with no vendor named.
  */
 export function competitiveRecovery(data: any, staff = true): { title: string; detail: string } {
+  const title = "Being redone";
   const reasons = (data?.quality_check?.reasons || []).join(' ');
+  const again = "The product makes it again once a day, and it is shared when its figures pass.";
   if (data?.provider_status === 2 || /still collecting/i.test(reasons + ' ' + (data?.error || ''))) {
-    return { title: 'Source data was still loading', detail: staff
-      ? 'RivalIQ had not finished collecting these profiles when this analysis ran, so its figures are incomplete and it is not shared. The next run replaces it.'
-      : 'The tracked profiles were still being collected when this analysis ran, so its figures are incomplete. The next run replaces it.' };
+    return { title, detail: `${staff ? "RivalIQ had" : "The source had"} not finished collecting these profiles when this analysis ran, so its figures are incomplete and it is not shared. ${again}` };
   }
   const companies = data?.aggregates?.companies;
-  if (Array.isArray(companies) && companies.length && companies.every(c => c.post_count === 0 && (c.observed_post_count ?? c.post_count) === 0)) {
-    return { title: 'No posts available for this period', detail: staff
-      ? 'RivalIQ returned no posts for the client or the selected competitors in this date range. This does not establish that these companies did not publish.'
-      : 'No posts were found for the client or the selected competitors in this date range. This does not establish that these companies did not publish.' };
+  if (Array.isArray(companies) && companies.length && companies.every((c: any) => c.post_count === 0 && (c.observed_post_count ?? c.post_count) === 0)) {
+    return { title, detail: `${staff ? "RivalIQ returned" : "The source returned"} no posts for the client or the selected competitors in this date range. This does not establish that these companies did not publish. ${again}` };
   }
-  return { title: 'Held back', detail: 'Its source figures did not pass the checks, so it is not shared. The next run replaces it.' };
+  return { title, detail: `Its source figures did not pass the checks, so it is not shared. ${again}` };
 }

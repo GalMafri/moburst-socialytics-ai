@@ -126,7 +126,7 @@ Deno.serve(async (req) => {
       // The rows carry the client's name and the schedule's kind (embedded by statusRows) so the answer reads plainly.
       type Named = ScheduledJob & { clients?: { name?: string } | null; report_schedules?: { report_kind?: string } | null };
       const brief = (rows: ScheduledJob[]) => (rows as Named[]).map((r) => ({
-        id: r.id, client: r.clients?.name ?? r.client_id, job: JOB_LABELS[r.kind] ?? (r.kind === "dispatch" ? `${r.report_schedules?.report_kind ?? "report"} dispatch` : r.kind),
+        id: r.id, client: r.clients?.name ?? r.client_id, job: JOB_LABELS[r.kind] ?? (r.kind === "dispatch" ? (r.report_schedules?.report_kind ? `${r.report_schedules.report_kind} dispatch` : `manual ${String(r.payload?.kind ?? "report")} run`) : r.kind),
         status: r.status, reason: r.reason, attempts: r.attempts,
       }));
       return json({

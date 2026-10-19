@@ -16,7 +16,7 @@ it('uploads a PNG to the public bucket and hands back its public URL', async () 
   const file = new File([new Uint8Array([137, 80, 78, 71])], 'logo.png', { type: 'image/png' });
   fireEvent.change(screen.getByTestId('logo-file-input'), { target: { files: [file] } });
   await waitFor(() => expect(onChange).toHaveBeenCalledWith('https://x.supabase.co/storage/v1/object/public/generated-media/client-1/logo-1.png'));
-  expect(f.upload.mock.calls[0][0]).toMatch(/^client-1\/logo-\d+\.png$/);
+  expect(f.upload.mock.calls[0][0]).toMatch(/^client-1\/logo-\d+-\d+\.png$/);
 });
 
 it('rejects a file that is not an image and keeps the current logo', async () => {

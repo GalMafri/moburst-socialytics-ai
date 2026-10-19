@@ -71,22 +71,27 @@ describe('QA-02 actual copy and scheduling components',()=>{
   mount(<CopyEditor post={original} clientId="fixture-client" reportId="fixture-report"/>);await edit();
   expect(screen.getByText('Reviewed fixture copy')).toBeInTheDocument();expect(f.rows.map(x=>x.post_copy)).toEqual(['Reviewed fixture copy']);
  });
- it('shows failure and never success when persistence returns an error',async()=>{
-  f.insertError={message:'fixture write rejected'};mount(<CopyEditor post={original} clientId="fixture-client" reportId="fixture-report"/>);await edit('Reviewed fixture copy',false);
-  expect(f.rows).toHaveLength(0);expect(f.success).not.toHaveBeenCalled();expect(f.error).toHaveBeenCalledWith(expect.stringContaining('did not go through'));expect(f.error).not.toHaveBeenCalledWith(expect.stringContaining('fixture write rejected'));
+ it('keeps the edit and says it is not saved yet when persistence returns an error, never a failure',async()=>{
+  f.insertError={message:'fixture write rejected'};mount(<CopyEditor post={original} clientId="fixture-client" reportId="fixture-report"/>);
+  fireEvent.click(screen.getByRole('button',{name:'Edit'}));
+  fireEvent.change(screen.getByPlaceholderText('Edit post copy...'),{target:{value:'Reviewed fixture copy'}});
+  fireEvent.click(screen.getByRole('button',{name:'Save'}));
+  expect(await screen.findByText('Not saved yet. Your text is kept here.')).toBeInTheDocument();
+  expect(screen.getByPlaceholderText('Edit post copy...')).toHaveValue('Reviewed fixture copy');
+  expect(f.rows).toHaveLength(0);expect(f.success).not.toHaveBeenCalled();expect(f.error).not.toHaveBeenCalled();expect(screen.queryByText(/fixture write rejected|failed/i)).toBeNull();
  });
  it('restores the persisted revision after remount',async()=>{
   const first=mount(<CopyEditor post={original} clientId="fixture-client" reportId="fixture-report"/>);await edit();first.unmount();mount(<CopyEditor post={applyCopyRevisions(original,f.rows)} clientId="fixture-client"/>);
   expect(f.rows.at(-1).post_copy).toBe('Reviewed fixture copy');expect(screen.getByText('Reviewed fixture copy')).toBeInTheDocument();expect(screen.queryByText('Original fixture copy')).toBeNull();
  });
  it('uses the edited copy in the actual scheduler',async()=>{
-  mount(panels());await edit();fireEvent.click(screen.getByRole('tab',{name:'Schedule'}));fireEvent.click(screen.getByRole('button',{name:'Open scheduler'}));
+  mount(panels());await edit();fireEvent.click(screen.getByRole('tab',{name:'Schedule'}));fireEvent.click(screen.getByRole('button',{name:/Open scheduler|Schedule to Sprout/}));
   await waitFor(()=>expect(screen.getByLabelText('Post copy (includes hashtags)')).toHaveValue('Reviewed fixture copy'));
   expect(f.rows.at(-1).post_copy).toBe('Reviewed fixture copy');
  });
  it('uses regenerated copy in the actual scheduler',async()=>{
   mount(panels());fireEvent.click(screen.getByRole('button',{name:'Regenerate'}));await waitFor(()=>expect(screen.getByText('Regenerated fixture copy')).toBeInTheDocument());
-  fireEvent.click(screen.getByRole('tab',{name:'Schedule'}));fireEvent.click(screen.getByRole('button',{name:'Open scheduler'}));expect(screen.getByLabelText('Post copy (includes hashtags)')).toHaveValue('Regenerated fixture copy');
+  fireEvent.click(screen.getByRole('tab',{name:'Schedule'}));fireEvent.click(screen.getByRole('button',{name:/Open scheduler|Schedule to Sprout/}));expect(screen.getByLabelText('Post copy (includes hashtags)')).toHaveValue('Regenerated fixture copy');
  });
 });
 
@@ -115,15 +120,25 @@ describe('QA-06 actual schedule form',()=>{
 
  it('submits the client timezone independently of the browser zone',async()=>{
   mount(<SchedulePostModal open onOpenChange={()=>{}} post={original} clientId="fixture-client" reportId="fixture-report" clientTimezone="UTC" generatedMediaUrls={[]}/>);
+  fireEvent.change(screen.getByLabelText('Date'),{target:{value:'2030-09-21'}});fireEvent.change(screen.getByLabelText('Time (UTC)'),{target:{value:'15:00'}});
   await waitFor(()=>expect(screen.getByRole('button',{name:'Schedule Post'})).toBeEnabled());
-  fireEvent.change(screen.getByLabelText('Date'),{target:{value:'2030-09-21'}});fireEvent.change(screen.getByLabelText('Time (UTC)'),{target:{value:'15:00'}});fireEvent.click(screen.getByRole('button',{name:'Schedule Post'}));
+  fireEvent.click(screen.getByRole('button',{name:'Schedule Post'}));
   await waitFor(()=>expect(f.invokes.some(x=>x.name==='schedule-sprout-post')).toBe(true));
   expect(f.invokes.find(x=>x.name==='schedule-sprout-post').args.body.scheduled_time).toBe('2030-09-21T15:00:00.000Z');
  });
- it('control: failed assigned-profile read prevents scheduling',async()=>{
+ it('control: an assigned-profile read that has not answered keeps scheduling closed, quietly',async()=>{
   f.assignedError={message:'fixture read rejected'};
   mount(<SchedulePostModal open onOpenChange={()=>{}} post={original} clientId="fixture-client" reportId="fixture-report" generatedMediaUrls={[]}/>);
-  expect(await screen.findByRole('alert')).toHaveTextContent("assigned profiles could not be loaded");expect(screen.getByRole('button',{name:'Schedule Post'})).toBeDisabled();
+  expect(await screen.findByText('Loading profiles…')).toBeInTheDocument();expect(screen.getByRole('button',{name:'Schedule Post'})).toBeDisabled();
+  expect(screen.queryByRole('alert')).toBeNull();expect(screen.queryByText(/could not|failed|fixture read rejected/i)).toBeNull();
+ });
+
+ it('says what a post still needs for its network, and the button waits for it',async()=>{
+  mount(<SchedulePostModal open onOpenChange={()=>{}} post={{...original,platform:'Instagram'}} clientId="fixture-client" reportId="fixture-report" clientTimezone="UTC" generatedMediaUrls={[]}/>);
+  fireEvent.change(screen.getByLabelText('Date'),{target:{value:'2030-09-21'}});fireEvent.change(screen.getByLabelText('Time (UTC)'),{target:{value:'15:00'}});
+  // No Instagram account is assigned in the fixture, so nothing is offered to send to.
+  expect(await screen.findByText('This client has no Instagram account in Sprout.')).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Schedule Post'})).toBeDisabled();
  });
 });
 
@@ -173,6 +188,6 @@ it('report calendar schedules in the current client timezone when historical rep
  fireEvent.mouseDown(await screen.findByRole('tab',{name:'Content ideas'}),{button:0,ctrlKey:false});
  fireEvent.click(await screen.findByRole('button',{name:'Open post: Calendar timezone test'}));
  fireEvent.mouseDown(screen.getByRole('tab',{name:'Schedule'}),{button:0,ctrlKey:false});
- fireEvent.click(await screen.findByRole('button',{name:'Open scheduler'}));
- expect(await screen.findByText(/America\/New_York/)).toBeInTheDocument();
+ fireEvent.click(await screen.findByRole('button',{name:/Open scheduler|Schedule to Sprout/}));
+ expect(await screen.findByText(/Eastern Time \(New York\)/)).toBeInTheDocument();
 });

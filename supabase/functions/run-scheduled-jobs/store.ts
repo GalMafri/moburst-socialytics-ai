@@ -6,6 +6,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { ClientRow, CompetitorSetRow, DispatchStore, ReportRun, ScheduleRow } from "./dispatch.ts";
 import { TERMINAL, type JobOutcome, type ScheduledJob } from "./types.ts";
 import type { ScheduleGap } from "./worker.ts";
+import { competitiveReportQuality } from "../_shared/competitive/reportEvidence.ts";
 
 const SCHEDULE_COLUMNS = "id, client_id, report_kind, is_active, next_run_at, run_day_of_month, frequency, range_mode, created_by, pending_competitive_report_id";
 const SET_STATUSES = ["confirmed", "analyzing", "complete", "failed"];
@@ -107,7 +108,9 @@ export function makeDispatchStore(db: SupabaseClient): DispatchStore {
         { status: string; created_at: string | null; report_data: { error?: unknown } | null } | null;
       if (!r) return null;
       const error = typeof r.report_data?.error === "string" ? r.report_data.error : null;
-      return { status: r.status, created_at: r.created_at, error } satisfies ReportRun;
+      // A finished analysis whose figures did not pass the checks is held, read by the one quality rule.
+      const held = table === "competitive_reports" && r.status === "complete" && !competitiveReportQuality(r.report_data).ready;
+      return { status: r.status, created_at: r.created_at, error, held } satisfies ReportRun;
     },
     async pairedCompetitivePending(clientId, now) {
       const due = (await must(db.from("report_schedules").select("id, next_run_at").eq("client_id", clientId).eq("report_kind", "competitive")

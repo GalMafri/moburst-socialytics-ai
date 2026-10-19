@@ -1,7 +1,8 @@
 // @vitest-environment node
 // Node, like the Deno runtime, has AbortSignal.timeout; jsdom does not.
 import { describe, it, expect } from "vitest";
-import { LAST_RUN_LEAD_MINUTES, makePoster, NEEDS_TRACKING, nextRunOfOccurrence, retryWaitMinutes, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
+import { HELD_REDO_MINUTES, LAST_RUN_LEAD_MINUTES, makePoster, MANUAL_RUN_DAYS, manualRun, NEEDS_TRACKING, nextRunOfOccurrence, retryWaitMinutes, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
+import { HELD_REDOS } from "../_shared/competitive/reportEvidence";
 import { RETRY_MINUTES } from "./worker";
 import type { JobOutcome, ScheduledJob } from "./types";
 import type { LandscapeCheck } from "../_shared/competitive/landscapeCheck";
@@ -17,7 +18,7 @@ const DUE = "2026-10-07T07:00:00.000Z";
 const NEXT = "2026-11-07T07:15:00.000Z";
 const at = (minutes: number) => new Date(NOW.getTime() + minutes * 60000);
 
-type Row = { id: string; client_id: string; status: string; date_range_start: string | null; date_range_end: string | null; set_id?: string; created_at?: string; error?: string };
+type Row = { id: string; client_id: string; status: string; date_range_start: string | null; date_range_end: string | null; set_id?: string; created_at?: string; error?: string; held?: boolean; created_by?: string | null };
 
 function world(opts: { kinds?: Array<"competitive" | "social">; set?: boolean } = {}) {
   const kinds = opts.kinds ?? ["competitive", "social"];
@@ -53,7 +54,7 @@ function world(opts: { kinds?: Array<"competitive" | "social">; set?: boolean } 
     async competitiveReport(id, clientId) { return tables.competitive.find((r) => r.id === id && r.client_id === clientId) ?? null; },
     async reportRun(table, id) {
       const r = rows(table).find((x) => x.id === id);
-      return r ? { status: r.status, created_at: r.created_at ?? null, error: r.error ?? null } : null;
+      return r ? { status: r.status, created_at: r.created_at ?? null, error: r.error ?? null, held: !!r.held } : null;
     },
     async pairedCompetitivePending(clientId, now) {
       return tables.schedules.some((s) => s.client_id === clientId && s.report_kind === "competitive" && s.is_active && new Date(s.next_run_at) <= now
@@ -71,13 +72,13 @@ function world(opts: { kinds?: Array<"competitive" | "social">; set?: boolean } 
     async webhooks() { return tables.webhooks; },
     async insertCompetitiveReport(row) {
       const id = `comp-${made.competitive++}`;
-      tables.competitive.push({ id, client_id: row.client_id, status: "running", date_range_start: row.date_range_start, date_range_end: row.date_range_end, set_id: row.set_id, created_at: row.created_at });
+      tables.competitive.push({ id, client_id: row.client_id, status: "running", date_range_start: row.date_range_start, date_range_end: row.date_range_end, set_id: row.set_id, created_at: row.created_at, created_by: row.created_by });
       writes.push(`insert competitive ${id}`);
       return id;
     },
     async insertSocialReport(row) {
       const id = `social-${made.social++}`;
-      tables.reports.push({ id, client_id: row.client_id, status: "running", date_range_start: row.date_range_start, date_range_end: row.date_range_end, created_at: tables.clock.toISOString() });
+      tables.reports.push({ id, client_id: row.client_id, status: "running", date_range_start: row.date_range_start, date_range_end: row.date_range_end, created_at: tables.clock.toISOString(), created_by: row.created_by });
       writes.push(`insert social ${id}`);
       return id;
     },
@@ -586,5 +587,111 @@ describe("makePoster", () => {
     expect(r).toEqual({ ok: true, status: 200 });
     expect(seen[0].headers["X-Socialytics-Secret"]).toBe("the-secret");
     expect(JSON.parse(seen[0].body)).toEqual({ a: 1 });
+  });
+});
+
+/** A run a person asked for: a dispatch job with no schedule, its kind and period on the payload (run-report). */
+function manualJob(kind: "competitive" | "social", over: Partial<ScheduledJob> = {}): ScheduledJob {
+  return jobFor(kind, {
+    id: `manual-${kind}`, schedule_id: null, occurrence: null, priority: 15, created_at: NOW.toISOString(),
+    payload: { run: "manual", kind, range: { start: "2026-08-01", end: "2026-08-31" }, requested_by: "person-1", requested_at: NOW.toISOString(), ...(kind === "social" ? { skip_trends: true } : {}) },
+    result: { range: { start: "2026-08-01", end: "2026-08-31" } },
+    ...over,
+  });
+}
+
+describe("a manual run follows the scheduled path", () => {
+  it("reads only a well-formed manual payload", () => {
+    expect(manualRun(manualJob("social"))).toMatchObject({ kind: "social", range: { start: "2026-08-01", end: "2026-08-31" }, requested_by: "person-1" });
+    expect(manualRun(jobFor("social"))).toBeNull();
+    expect(manualRun({ schedule_id: null, created_at: DUE, payload: { run: "manual", kind: "other", range: { start: "a", end: "b" } } })).toBeNull();
+  });
+
+  it("makes the person's report for their period and touches no schedule", async () => {
+    const w = world();
+    const h = harness(w);
+    const job = manualJob("social");
+    expect((await h.run(job)).status).toBe("waiting");
+    const report = w.tables.reports[0];
+    expect(report).toMatchObject({ date_range_start: "2026-08-01", date_range_end: "2026-08-31", created_by: "person-1" });
+    expect(h.posts[0].body).toMatchObject({ report_id: report.id, date_range_start: "2026-08-01" });
+    report.status = "completed";
+    expect((await h.run(job)).status).toBe("done");
+    // No schedule moved, was noted or was held for it.
+    expect(w.tables.schedules.map((s) => s.next_run_at)).toEqual([DUE, DUE]);
+    expect(w.tables.notes).toEqual([]);
+    expect(w.writes.filter((x) => /advance|close|note|hold/.test(x))).toEqual([]);
+  });
+
+  it("runs again on its own when it does not finish, as a schedule's run does", async () => {
+    const w = world({ kinds: ["social"] });
+    const h = harness(w);
+    const job = manualJob("social");
+    await h.run(job);
+    w.tables.reports[0].status = "failed";
+    const again = await h.run(job);
+    expect(again).toMatchObject({ status: "queued", deferred: true, available_at: at(30).toISOString() });
+    expect(w.tables.reports).toHaveLength(0);
+    w.tables.clock = at(31);
+    expect((await h.run(job)).status).toBe("waiting");
+    expect(w.tables.reports).toHaveLength(1);
+  });
+
+  it("waits for tracking without noting a schedule, and ends quietly when its window has passed", async () => {
+    const w = world({ kinds: ["competitive"] });
+    const h = harness(w, "accept", { tracking: NOT_TRACKED });
+    const job = manualJob("competitive");
+    const waiting = await h.run(job);
+    expect(waiting.status).toBe("waiting");
+    expect(w.tables.competitive.map((r) => r.id)).toEqual(["old-complete"]);
+    expect(w.tables.notes).toEqual([]);
+    w.tables.clock = new Date(NOW.getTime() + MANUAL_RUN_DAYS * 86_400_000);
+    expect((await h.run(job)).status).toBe("skipped");
+  });
+
+  it("does not hold the due social report for a manual competitive analysis", async () => {
+    const w = world();
+    const h = harness(w);
+    expect((await h.run(manualJob("competitive"))).status).toBe("waiting");
+    expect(w.tables.schedules.find((s) => s.report_kind === "social")!.pending_competitive_report_id).toBeNull();
+  });
+});
+
+describe("a held competitive analysis", () => {
+  it(`is made again once a day, ${HELD_REDOS} times, and then the schedule moves on`, async () => {
+    const w = world({ kinds: ["competitive"] });
+    const h = harness(w);
+    const job = jobFor("competitive");
+    for (let redo = 1; redo <= HELD_REDOS; redo++) {
+      expect((await h.run(job)).status).toBe("waiting");
+      const run = w.tables.competitive.at(-1)!;
+      Object.assign(run, { status: "complete", held: true });
+      const again = await h.run(job);
+      // Kept for staff; the schedule waits on the occurrence; the next run is a day later.
+      expect(again).toMatchObject({ status: "queued", deferred: true, available_at: new Date(w.tables.clock.getTime() + HELD_REDO_MINUTES * 60000).toISOString() });
+      expect(w.tables.competitive.some((r) => r.id === run.id)).toBe(true);
+      expect(w.tables.schedules[0].next_run_at).toBe(DUE);
+      expect(job.report_id).toBeNull();
+      w.tables.clock = new Date(w.tables.clock.getTime() + HELD_REDO_MINUTES * 60000);
+    }
+    expect((await h.run(job)).status).toBe("waiting");
+    Object.assign(w.tables.competitive.at(-1)!, { status: "complete", held: true });
+    expect((await h.run(job)).status).toBe("done");
+    expect(w.tables.schedules[0].next_run_at).toBe(NEXT);
+    expect((job.result as { runs: Array<{ outcome: string }> }).runs.map((r) => r.outcome)).toEqual(new Array(HELD_REDOS + 1).fill("held"));
+  });
+
+  it("ends the redos as soon as a run passes its checks", async () => {
+    const w = world({ kinds: ["competitive"] });
+    const h = harness(w);
+    const job = jobFor("competitive");
+    await h.run(job);
+    Object.assign(w.tables.competitive.at(-1)!, { status: "complete", held: true });
+    expect((await h.run(job)).status).toBe("queued");
+    w.tables.clock = new Date(w.tables.clock.getTime() + HELD_REDO_MINUTES * 60000);
+    await h.run(job);
+    w.tables.competitive.at(-1)!.status = "complete";
+    expect((await h.run(job)).status).toBe("done");
+    expect((job.result as { runs: Array<{ outcome: string }> }).runs.map((r) => r.outcome)).toEqual(["held", "ran"]);
   });
 });

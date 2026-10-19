@@ -1,19 +1,24 @@
 // Competitor identification + review (project steps 3-6).
 //
-// Staff-only workspace for one client's competitor set:
-//   - "Identify competitors" runs the AI proposal, then handle detection.
+// Staff-only workspace for one client's competitor set. The client lifecycle
+// picks and confirms a set on its own (the three closest competitors with a
+// website) and connects RivalIQ tracking for it; a person may change it at
+// any time:
+//   - "Re-identify" runs the AI proposal into a new draft, then profile lookup.
 //   - The draft list supports deselect/select, manual add, remove, and
 //     ranking the top 3.
-//   - "Confirm top 3" runs the server-side gate (confirm-competitor-set),
-//     after which the set is what the deep analysis consumes.
+//   - "Confirm top 3" confirms three ranked competitors (confirm-competitor-set,
+//     the same rule the lifecycle confirms by), and tracking follows on its own.
 //
-// The page always works on the client's NEWEST set. Re-running identification
-// creates a fresh draft set and leaves history behind (sets are cheap rows).
+// Every change a person makes is sent again quietly when it does not get
+// through (src/lib/quietSend.ts); the page then shows what the database has,
+// never a failure. The page works on the client's NEWEST set; re-running
+// identification creates a fresh draft and leaves history behind.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RivalIqSetup } from "@/components/competitive/RivalIqSetup";
 import { CompetitiveSteps } from "@/components/competitive/CompetitiveSteps";
-import { describeSelection, describeTracking, pickRunSelection, stateLine, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
+import { describeSelection, describeTracking, pickRunSelection, stateLine, type SetRow } from "@/lib/competitiveFlow";
+import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
 
 import { classifyProfileUrl, isProfileUrlInput } from "@/lib/profileUrl";
 import { isReviewReadyHandle } from "../../supabase/functions/_shared/competitive/extractSocialHandles";
@@ -35,7 +40,6 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { PlatformBadge, prettyPlatformName } from "@/lib/platform-config";
 import { profileName } from "@/lib/display";
-import { describeInvokeError } from "@/lib/invokeError";
 import { displayCompanyName } from "@/lib/companyName";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -74,6 +78,17 @@ function readProfileCheck(value: unknown): CompetitorRow["profile_detection"] {
     discovery_version: typeof record.discovery_version === "number" ? record.discovery_version : undefined,
     detail: typeof record.detail === "string" ? record.detail : undefined,
     checked_at: typeof record.checked_at === "string" ? record.checked_at : undefined };
+}
+
+/** A typed handle or a pasted profile address, read; null when it is not a profile (a post, a page, another site). */
+function readTypedHandle(raw: string, platform: string) {
+  const text = raw.trim();
+  if (!text) return null;
+  // A pasted profile URL is read for its handle; anything else is taken as the handle itself.
+  const fromUrl = classifyProfileUrl(text);
+  if (isProfileUrlInput(text) && !fromUrl) return null;
+  const handle = (fromUrl?.handle || text).replace(/^@/, "").trim();
+  return handle ? { platform: fromUrl?.platform || platform, handle, fromUrl } : null;
 }
 
 type HandleRow = {
@@ -116,8 +131,8 @@ function LandscapeRow({
           {empty ? "No competitors in this set" : rivals.map((c: any) => displayCompanyName(c.name)).join(", ")}
         </p>
         {!empty && rivals.length < 3 && (
-          <p className="t-secondary text-amber-400 mt-1">
-            This imports an incomplete draft. Add {3 - rivals.length} more competitor{rivals.length === 1 ? "s" : ""} before you can confirm it and run a report.
+          <p className="t-secondary mt-1">
+            {rivals.length} of the three competitors a selection holds.
           </p>
         )}
       </div>
@@ -159,7 +174,9 @@ export default function CompetitorReview() {
   // RivalIQ import: the agency's landscapes are the curated competitor sets.
   const [importOpen, setImportOpen] = useState(false);
   const [landscapes, setLandscapes] = useState<any[] | null>(null);
-  const [landscapesError, setLandscapesError] = useState<string | null>(null);
+  const [landscapesUnavailable, setLandscapesUnavailable] = useState(false);
+  /** A person's change that has not reached the database yet; the page keeps their input. */
+  const [notSaved, setNotSaved] = useState<string | null>(null);
   const [showOtherLandscapes, setShowOtherLandscapes] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
   // Proposing competitors spends AI and web lookups, so it is asked first.
@@ -252,25 +269,6 @@ export default function CompetitorReview() {
     [competitors],
   );
 
-  /** Selected competitors the server will refuse, because they carry no handle. */
-  const withoutHandles = useMemo(
-    () =>
-      selected
-        .filter((c) => (handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active !== false).length === 0)
-        .map((c) => displayCompanyName(c.name)),
-    [selected, handlesByCompetitor],
-  );
-  const withoutReviewedHandles = useMemo(
-    () =>
-      selected
-        .filter((c) => {
-          const active = (handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active !== false);
-          return active.length > 0 && !active.some(isReviewReadyHandle);
-        })
-        .map((c) => displayCompanyName(c.name)),
-    [selected, handlesByCompetitor],
-  );
-  const runNeedsProfileReview = withoutHandles.length > 0 || withoutReviewedHandles.length > 0;
 
   const isDraft = currentSet?.status === "draft";
   const refreshAll = () => {
@@ -284,12 +282,13 @@ export default function CompetitorReview() {
   const openImport = async () => {
     setImportOpen(true);
     setLandscapes(null);
-    setLandscapesError(null);
-    const { data, error } = await supabase.functions.invoke("import-rivaliq-landscape", {
+    setLandscapesUnavailable(false);
+    // A read: sent again quietly whenever it did not come back.
+    const { data, error } = await sendQuietly(() => supabase.functions.invoke("import-rivaliq-landscape", {
       body: { client_id: clientId, mode: "list" },
-    });
+    }), { again: (e) => invokeResendable(e, { idempotent: true }) });
     if (error || data?.error) {
-      setLandscapesError(await describeInvokeError(error, data));
+      setLandscapesUnavailable(true);
       return;
     }
     setLandscapes(data?.landscapes || []);
@@ -318,42 +317,43 @@ export default function CompetitorReview() {
   const importLandscape = async (landscapeId: string) => {
     setImportingId(landscapeId);
     track("competitive_landscape_import_started", { client_id: clientId, landscape_id: landscapeId });
-    try {
-      const { data, error } = await supabase.functions.invoke("import-rivaliq-landscape", {
-        body: { client_id: clientId, mode: "import", landscape_id: landscapeId },
-      });
-      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
-      toast({
-        title: "Landscape imported as a new draft",
-        description: data.competitors < 3
-          ? `${data.competitors} competitors imported. Add ${3 - data.competitors} more before confirming; a report cannot run with this incomplete selection.`
-          : `${data.competitors} competitors, ${data.handles} handles from RivalIQ. Top ${data.preselected} pre-selected; adjust and confirm.`,
-      });
-      setImportOpen(false);
-      refreshAll();
-    } catch (err: any) {
-      toast({ title: "Import failed", description: err.message, variant: "destructive" });
-    } finally {
-      setImportingId(null);
+    setNotSaved(null);
+    // Each import makes a new draft, so it is sent again only when it never reached the server.
+    const { data, error } = await sendQuietly(() => supabase.functions.invoke("import-rivaliq-landscape", {
+      body: { client_id: clientId, mode: "import", landscape_id: landscapeId },
+    }));
+    setImportingId(null);
+    refreshAll();
+    if (error || data?.error) {
+      setNotSaved("That landscape has not been imported yet.");
+      return;
     }
+    toast({
+      title: "Imported as a new draft",
+      description: `${data.competitors} competitors and ${data.handles} profiles from RivalIQ, with the top ${data.preselected} selected.`,
+    });
+    setImportOpen(false);
   };
 
   const identify = async () => {
     setIdentifying(true);
     track("competitor_identification_started", { client_id: clientId });
+    setNotSaved(null);
     try {
-      const { data, error } = await supabase.functions.invoke("identify-competitors", {
+      // Each run makes a new draft, so it is sent again only when it never reached the server.
+      const { data, error } = await sendQuietly(() => supabase.functions.invoke("identify-competitors", {
         body: { client_id: clientId },
-      });
-      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
+      }));
+      if (error || data?.error) {
+        track("competitor_identification_failed", { client_id: clientId, ok: false, error_code: "not_taken" });
+        setNotSaved("No new proposal yet.");
+        return;
+      }
       track("competitor_identification_completed", {
         client_id: clientId, entity_id: data.set_id, ok: true,
         props: { proposed: data.competitors?.length },
       });
       refreshAll();
-      toast({ title: "Competitors identified", description: data.rejected?.length
-        ? `${data.rejected.length} suggestions were excluded because their websites could not be validated or were duplicates. Finding profiles for the remaining companies…`
-        : "Finding social profiles automatically…" });
 
       // Detect handles ONE COMPETITOR PER CALL. A whole-set call scrapes up
       // to 12 third-party sites serially inside one edge request, and the
@@ -361,21 +361,7 @@ export default function CompetitorReview() {
       // Driving the loop from here keeps every call small, and handles
       // appear row by row as they land.
       setDetecting(true);
-      const { empty, failures } = await detectForAll(data.competitors || []);
-      if (empty.length > 0) {
-        toast({
-          title: `${empty.length} of ${(data.competitors || []).length} still have no handles`,
-          description: failures.length
-            ? `Detection failed: ${failures[0]}`
-            : "No profiles found on the checked company pages. Add a verified profile if one is available.",
-          variant: failures.length ? "destructive" : undefined,
-        });
-      }
-    } catch (err: any) {
-      track("competitor_identification_failed", {
-        client_id: clientId, ok: false, error_code: String(err?.message || "unknown").slice(0, 120),
-      });
-      toast({ title: "Identification failed", description: err.message, variant: "destructive" });
+      await detectForAll(data.competitors || []);
     } finally {
       setIdentifying(false);
       setDetecting(false);
@@ -390,17 +376,16 @@ export default function CompetitorReview() {
     }
     setProfileChecks(prev => ({ ...prev, [id]: { state: "searching" } }));
     try {
-      const { data, error } = await supabase.functions.invoke("detect-competitor-handles", {
+      const { data, error } = await sendQuietly(() => supabase.functions.invoke("detect-competitor-handles", {
         body: { competitor_id: id, refresh },
-      });
+      }), { again: (e) => invokeResendable(e, { idempotent: true }) });
       if ((error as { context?: { status?: number } } | null)?.context?.status === 401) {
         profileSessionExpired.current = true;
         setNeedsPortalSession(true);
         setProfileChecks(prev => ({ ...prev, [id]: { state: "session_required" } }));
         return { id, found: 0, failed: "Reopen Socialytics from your portal to resume profile discovery." };
       }
-      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
-      if (data?.write_errors?.length) throw new Error("Profiles were found but could not be saved. Please try again.");
+      if (error || data?.error || data?.write_errors?.length) throw new Error("The profile lookup did not finish.");
       const result = data?.results?.[0];
       const found = result?.detected?.length || 0;
       const state = result?.status || (found ? "found" : "not_found");
@@ -434,19 +419,20 @@ export default function CompetitorReview() {
 
   const addManual = useMutation({
     mutationFn: async () => {
-      if (!manualName.trim()) throw new Error("Name is required");
+      if (!manualName.trim()) return;
+      setNotSaved(null);
       let setId = currentSet?.id;
       // Adding a competitor with no set yet creates a draft set to hold it.
       if (!setId) {
-        const { data: newSet, error: setErr } = await supabase
+        const { data: newSet, error: setErr } = await sendQuietly(() => supabase
           .from("competitor_sets")
           .insert({ client_id: clientId! })
           .select("id")
-          .single();
+          .single(), { again: writeResendable });
         if (setErr) throw setErr;
         setId = newSet.id;
       }
-      const { data: comp, error } = await supabase
+      const { data: comp, error } = await sendQuietly(() => supabase
         .from("competitors")
         .insert({
           set_id: setId,
@@ -456,7 +442,7 @@ export default function CompetitorReview() {
           source: "manual",
         })
         .select("id")
-        .single();
+        .single(), { again: writeResendable });
       if (error) throw error;
       // Detect handles for the new row (best-effort).
       if (manualUrl.trim()) {
@@ -469,7 +455,8 @@ export default function CompetitorReview() {
       setManualUrl("");
       refreshAll();
     },
-    onError: (err: any) => toast({ title: "Could not add competitor", description: err.message, variant: "destructive" }),
+    // The name and website stay in the form.
+    onError: () => { refreshAll(); setNotSaved("Not added yet."); },
   });
 
   /**
@@ -481,16 +468,11 @@ export default function CompetitorReview() {
    */
   const addHandle = useMutation({
     mutationFn: async ({ competitorId }: { competitorId: string }) => {
-      const raw = newHandle.trim();
-      if (!raw) throw new Error("Enter a handle or a profile URL");
-      // A pasted profile URL is read for its handle; anything else is taken
-      // as the handle itself.
-      const fromUrl = classifyProfileUrl(raw);
-      if (isProfileUrlInput(raw) && !fromUrl) throw new Error("Enter a social profile URL, not a post, discovery page or unrelated website.");
-      const platform = fromUrl?.platform || newHandlePlatform;
-      const handle = (fromUrl?.handle || raw).replace(/^@/, "").trim();
-      if (!handle) throw new Error("That does not look like a handle");
-      const { error } = await supabase.from("competitor_handles").upsert(
+      const typed = readTypedHandle(newHandle, newHandlePlatform);
+      if (!typed) return;
+      const { platform, handle, fromUrl } = typed;
+      setNotSaved(null);
+      const { error } = await sendQuietly(() => supabase.from("competitor_handles").upsert(
         {
           competitor_id: competitorId,
           client_id: clientId!,
@@ -502,16 +484,17 @@ export default function CompetitorReview() {
           source: "manual",
         } as any,
         { onConflict: "competitor_id,platform" },
-      );
+      ), { again: writeResendable });
       if (error) throw error;
     },
     onSuccess: () => {
       setNewHandle("");
       setAddingHandleFor(null);
       refreshAll();
-      toast({ title: "Handle saved", description: "A re-detect will leave it alone." });
+      toast({ title: "Profile saved", description: "Automatic lookups leave it as it is." });
     },
-    onError: (e: any) => toast({ title: "Could not save the handle", description: e.message, variant: "destructive" }),
+    // What was typed stays in the field.
+    onError: () => setNotSaved("That profile is not saved yet."),
   });
 
   const removeHandle = useMutation({
@@ -520,23 +503,22 @@ export default function CompetitorReview() {
     // it again and put it straight back; correcting a wrong handle only ever
     // lasted until the next refresh.
     mutationFn: async (handleId: string) => {
-      const { error } = await supabase
+      const { error } = await sendQuietly(() => supabase
         .from("competitor_handles")
         .update({ is_active: false, source: "rejected" })
-        .eq("id", handleId);
+        .eq("id", handleId), { again: writeResendable });
       if (error) throw error;
     },
-    onSuccess: () => refreshAll(),
-    onError: (e: any) => toast({ title: "Could not remove the handle", description: e.message, variant: "destructive" }),
+    // Either way the list shows what the database has.
+    onSettled: () => refreshAll(),
   });
 
   const removeCompetitor = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("competitors").delete().eq("id", id);
+      const { error } = await sendQuietly(() => supabase.from("competitors").delete().eq("id", id), { again: writeResendable });
       if (error) throw error;
     },
-    onSuccess: refreshAll,
-    onError: (err: any) => toast({ title: "Remove failed", description: err.message, variant: "destructive" }),
+    onSettled: refreshAll,
   });
 
   /**
@@ -546,44 +528,45 @@ export default function CompetitorReview() {
   const toggleSelect = useMutation({
     mutationFn: async (row: CompetitorRow) => {
       if (row.is_selected) {
-        const { error } = await supabase
+        const { error } = await sendQuietly(() => supabase
           .from("competitors")
           .update({ is_selected: false, selected_rank: null })
-          .eq("id", row.id);
+          .eq("id", row.id), { again: writeResendable });
         if (error) throw error;
       } else {
         const used = new Set(selected.map((s) => s.selected_rank));
         const free = [1, 2, 3].find((r) => !used.has(r));
-        if (!free) throw new Error("Three competitors are already selected. Deselect one first.");
-        const { error } = await supabase
+        // Select is not offered with three selected.
+        if (!free) return;
+        const { error } = await sendQuietly(() => supabase
           .from("competitors")
           .update({ is_selected: true, selected_rank: free })
-          .eq("id", row.id);
+          .eq("id", row.id), { again: writeResendable });
         if (error) throw error;
       }
     },
-    onSuccess: refreshAll,
-    onError: (err: any) => toast({ title: "Selection", description: err.message, variant: "destructive" }),
+    onSettled: refreshAll,
   });
 
   const confirmSet = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("confirm-competitor-set", {
+      // Confirming a draft twice confirms it once (it is guarded on 'draft').
+      const { data, error } = await sendQuietly(() => supabase.functions.invoke("confirm-competitor-set", {
         body: { set_id: currentSet!.id },
-      });
-      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
+      }), { again: (e) => invokeResendable(e, { idempotent: true }) });
+      if (error || data?.error) throw new Error("not confirmed");
     },
     onSuccess: () => {
       track("competitor_set_confirmed", { client_id: clientId, entity_id: currentSet?.id, ok: true });
-      refreshAll();
-      toast({ title: "Competitor set confirmed", description: "Top 3 saved. Connect RivalIQ tracking before running analysis." });
+      toast({ title: "Competitors confirmed", description: "Tracking for these three is connected automatically." });
     },
-    onError: (err: any) => toast({ title: "Confirm failed", description: err.message, variant: "destructive" }),
+    // The page shows the set as the database has it: still a draft, or confirmed.
+    onSettled: refreshAll,
   });
 
   const reopenSet = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase
+      const { error } = await sendQuietly(() => supabase
         .from("competitor_sets")
         .update({ status: "draft", confirmed_by: null, confirmed_at: null })
         .eq("id", currentSet!.id)
@@ -591,15 +574,10 @@ export default function CompetitorReview() {
         // idea of the status can be minutes old, and it has no realtime
         // subscription, so the guard belongs on the write.
         .neq("status", "analyzing")
-        .select("id");
+        .select("id"), { again: writeResendable });
       if (error) throw error;
-      if (!data || data.length === 0) {
-        throw new Error("That set is mid-analysis. Wait for the run to finish or fail, then reopen it.");
-      }
     },
-    onSuccess: refreshAll,
-    onError: (err: any) =>
-      toast({ title: "Could not reopen the set", description: err.message, variant: "destructive" }),
+    onSettled: refreshAll,
   });
 
   useEffect(() => {
@@ -677,8 +655,8 @@ export default function CompetitorReview() {
                 for you to adjust.
               </DialogDescription>
             </DialogHeader>
-            {landscapesError ? (
-              <p className="t-body text-destructive">{landscapesError}</p>
+            {landscapesUnavailable ? (
+              <p className="t-secondary">The RivalIQ landscapes are not available right now.</p>
             ) : landscapes === null ? (
               <Loading label="Reading RivalIQ landscapes" />
             ) : landscapes.length === 0 ? (
@@ -703,11 +681,10 @@ export default function CompetitorReview() {
                   ) : (
                     <div className="glass-inner p-4 space-y-3">
                       <p className="t-body text-white">
-                        No RivalIQ landscape uniquely identifies {client?.name || "this client"} as a tracked company.
+                        No RivalIQ landscape tracks {client?.name || "this client"} as its own company.
                       </p>
                       <p className="t-secondary">
-                        Propose and confirm three competitors, then use Set up RivalIQ tracking on this page.
-                        Confirming a selection alone does not add companies to RivalIQ.
+                        Tracking for the confirmed competitors is connected automatically.
                       </p>
                       <Button
                         size="sm"
@@ -757,18 +734,13 @@ export default function CompetitorReview() {
         <CompetitiveSteps
           current={selectionState.ready ? 1 : 0}
           steps={[
-            { title: "Review competitors", ...selectionState },
-            // A linked set nobody has checked yet says only what is known: it is linked.
-            { title: "Connect tracking", ...trackingState, ...(!trackingState.headline && runnableSet?.rivaliq_landscape_id ? { headline: "Linked to a RivalIQ landscape", detail: "The next report run checks that it still tracks these companies." } : {}) },
+            { title: "Competitors", ...selectionState },
+            // Connected by the lifecycle on its own; says when, or nothing while it is being connected.
+            { title: "Tracking", ...trackingState },
             {
               title: "Choose period and run",
-              // A run checks tracking again before it starts, so a stale
-              // "needs reconnecting" still lets one through; say what it does.
-              ...(!selectionState.ready || !trackingAllowsRun(trackingState)
-                ? { headline: "Not ready yet", detail: "Finish the two steps on the left first." }
-                : trackingState.ready
-                  ? { headline: "Ready to run" }
-                  : { headline: "A run checks tracking first", detail: "If tracking is still missing, the run stops before a report starts." }),
+              // A run waits for tracking on its own while the lifecycle connects it.
+              headline: selectionState.ready ? "Ready to run" : "",
               ready: false,
               href: selectionState.ready ? `/clients/${clientId}/competitive/run` : undefined,
               linkLabel: "Open the run page",
@@ -799,14 +771,6 @@ export default function CompetitorReview() {
                 <Button variant="outline" size="sm" onClick={() => setConfirmList(true)} disabled={identifying || detecting}>
                   <Download className="h-3.5 w-3.5 mr-1" /> Import from RivalIQ
                 </Button>
-                {currentSet && ["confirmed", "complete", "failed"].includes(currentSet.status) && (
-                  <RivalIqSetup
-                    key={currentSet.id}
-                    setId={currentSet.id}
-                    connected={!!currentSet.rivaliq_landscape_id}
-                    onComplete={refreshAll}
-                  />
-                )}
                 {detecting && detectProgress && (
                   <p role="status" className="t-secondary flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -826,14 +790,15 @@ export default function CompetitorReview() {
             {viewingDraftBesideRun ? (
               <p className="t-secondary">
                 <span className="font-medium">RivalIQ tracking:</span> Reports use the confirmed selection
-                {trackingState.headline ? ` (${trackingState.headline.toLowerCase()})` : runnableSet?.rivaliq_landscape_id ? ", which is linked" : ""}.
-                {" "}This draft gets its own tracking after it is confirmed.
+                {trackingState.headline ? ` (${trackingState.headline.toLowerCase()})` : ""}.
+                {" "}This draft is tracked once it is confirmed.
               </p>
             ) : trackingState.headline && (
               <p className="t-secondary">
                 <span className="font-medium">RivalIQ tracking:</span> {stateLine(trackingState)}
               </p>
             )}
+            {notSaved && <p role="status" className="t-secondary">{notSaved}</p>}
             {client.competitor_seed_notes ? (
               <p className="t-secondary">
                 <span className="font-medium">Account team notes fed to the AI:</span> {client.competitor_seed_notes}
@@ -844,9 +809,8 @@ export default function CompetitorReview() {
 
 
         {needsPortalSession && (
-          <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
-            <p className="font-medium">Your portal session has expired</p>
-            <p className="t-secondary">Reopen Socialytics from the portal to resume automatic profile discovery. This is a sign-in issue, not a missing company profile.</p>
+          <div role="status" className="glass-inner p-4 space-y-2">
+            <p className="t-secondary">Profile lookups continue once you are signed in again from the Moburst portal.</p>
             <a className="inline-flex underline text-sm" href={isGosSession ? "https://moburst.ai" : "https://tools.moburst.com/dashboard"}>Open Moburst portal</a>
           </div>
         )}
@@ -875,11 +839,8 @@ export default function CompetitorReview() {
                 {isDraft && (
                   <Button
                     onClick={() => confirmSet.mutate()}
-                    // confirm-competitor-set refuses a selection where any
-                    // competitor has no active handle. The button used to be
-                    // enabled anyway, so the only way to learn was to press it
-                    // and read a 422.
-                    disabled={selected.length !== 3 || withoutHandles.length > 0 || withoutReviewedHandles.length > 0 || confirmSet.isPending}
+                    // Three ranked competitors are the whole rule (the lifecycle's own); RivalIQ tracks them by website.
+                    disabled={selected.length !== 3 || confirmSet.isPending}
                     className="gap-2"
                   >
                     <ShieldCheck className="h-4 w-4" />
@@ -891,7 +852,7 @@ export default function CompetitorReview() {
                     <Button
                       className="gap-2"
                       onClick={() => navigate(`/clients/${clientId}/competitive/run`)}
-                      disabled={runNeedsProfileReview || !trackingAllowsRun(trackingState) || currentSet?.id !== runnableSet?.id}
+                      disabled={currentSet?.id !== runnableSet?.id}
                     >
                       <Play className="h-4 w-4" /> Run deep analysis
                     </Button>
@@ -902,38 +863,17 @@ export default function CompetitorReview() {
                         back: every edit control is gated on draft and this
                         was the only door. Two clients were already stranded
                         that way. */}
-                    <Button variant="outline" onClick={() => reopenSet.mutate()} disabled={reopenSet.isPending}>
+                    <Button variant="outline" onClick={() => reopenSet.mutate()} disabled={reopenSet.isPending || currentSet?.status === "analyzing"}>
                       Reopen for edits
                     </Button>
                   </>
                 )}
               </div>
               {isDraft && selected.length < 3 && (
-                <p className="t-secondary text-amber-400/90">
-                  Select {3 - selected.length} more competitor{selected.length === 1 ? "s" : ""} to enable confirmation.
-                  {competitors.length < 3 ? " Add the missing company below, verify its social profiles, then select it. Tracking must include that company before the report can run." : " Choose from the candidates below."}
-                </p>
+                <p className="t-secondary">{selected.length} of 3 selected.</p>
               )}
-              {isDraft && selected.length === 3 && withoutHandles.length > 0 && (
-                <p className="t-secondary">
-                  {withoutHandles.join(" and ")} {withoutHandles.length === 1 ? "has" : "have"} no social handle yet.
-                  Add one on the row below, or swap in another competitor, before confirming.
-                </p>
-              )}
-              {isDraft && selected.length === 3 && withoutReviewedHandles.length > 0 && (
-                <p className="t-secondary text-amber-400/90">
-                  {withoutReviewedHandles.join(" and ")} only {withoutReviewedHandles.length === 1 ? "has" : "have"} low-confidence automatic profiles.
-                  Open and verify one, then remove the guess and add the verified profile manually before confirming.
-                </p>
-              )}
-              {!isDraft && runNeedsProfileReview && (
-                <p className="t-secondary text-amber-400/90">
-                  Deep analysis is paused because {[
-                    ...withoutHandles.map((name) => `${name} has no active profile`),
-                    ...withoutReviewedHandles.map((name) => `${name} only has low-confidence automatic profiles`),
-                  ].join("; ")}.
-                  Reopen the set, verify or replace those profiles, and confirm it again before running a report.
-                </p>
+              {currentSet?.status === "analyzing" && (
+                <p className="t-secondary">A report is running on this selection.</p>
               )}
             </CardContent>
           </Card>
@@ -945,7 +885,7 @@ export default function CompetitorReview() {
             <CardHeader className="pb-3">
               <CardTitle className="t-h3">Candidates</CardTitle>
               <CardDescription>
-                {competitors!.length} proposed · click Select on the three you want analysed
+                {competitors!.length} proposed
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -967,7 +907,7 @@ export default function CompetitorReview() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium t-body" title={c.name}>{displayCompanyName(c.name)}</span>
-                          {c.source === "manual" && <Badge variant="outline">manual</Badge>}
+                          {c.source === "manual" && <Badge variant="outline">Added by hand</Badge>}
                           {isUnverified(c) ? <Badge variant="outline">Unverified suggestion</Badge> : typeof c.similarity_score === "number" && (
                             <Badge variant="secondary">{Math.round(c.similarity_score * 100)}% match</Badge>
                           )}
@@ -990,9 +930,6 @@ export default function CompetitorReview() {
                                 <PlatformBadge platform={h.platform} size="sm" />
                                 <span className="min-w-0 break-words text-sm leading-5">{profileName(h, c.name)}</span>
                               </a>
-                              {h.source === "auto" && Number(h.detection_confidence ?? 0) < 0.8 && (
-                                <span className="text-xs text-amber-400 shrink-0" title="Automatically detected with limited evidence. Open the profile and verify it belongs to this company.">Verify</span>
-                              )}
                               {isDraft && (
                                 <button
                                   type="button"
@@ -1007,17 +944,15 @@ export default function CompetitorReview() {
                             </div>
                           ))}
                           {compHandles.length === 0 && (
-                            <span className="t-label text-amber-500/80 inline-flex items-center gap-1.5">
+                            <span className="t-label text-muted-foreground inline-flex items-center gap-1.5">
                               {profileCheck?.state === "searching" || handlesLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
-                              {handlesLoading ? "Loading saved profiles…" : handlesFailed ? "Could not load saved profiles" :
+                              {handlesLoading || handlesFailed ? "Loading saved profiles…" :
                                 profileCheck?.state === "session_required" ? "Waiting for portal sign-in" :
                                 profileCheck?.state === "queued" ? "Profile search queued" :
                                 profileCheck?.state === "searching" ? "Searching company pages…" :
-                                profileCheck?.state === "stalled" ? "Profile search stopped. Reload the page to search again." :
-                                profileCheck?.state === "failed" ? "Profile lookup failed" :
+                                ["stalled", "failed", "partial"].includes(profileCheck?.state || "") ? "Profiles are looked up again later" :
                                 profileCheck?.state === "unverified" ? "Company could not be verified" :
-                                profileCheck?.state === "partial" ? "Profile lookup incomplete" :
-                                profileCheck?.state === "missing_website" ? "Company website needed" :
+                                profileCheck?.state === "missing_website" ? "No website on file for this company" :
                                 profileCheck?.state === "not_found" ? "No profiles found on checked pages" : "Profile lookup will start automatically"}
                             </span>
                           )}
@@ -1029,9 +964,6 @@ export default function CompetitorReview() {
                             >
                               <Plus className="h-3 w-3" /> Add profile
                             </button>
-                          )}
-                          {compHandles.length === 0 && profileCheck?.detail && (
-                            <p className="text-xs text-muted-foreground sm:col-span-2 xl:col-span-3">{profileCheck.detail}</p>
                           )}
                         </div>
                         {addingHandleFor === c.id && isDraft && (
@@ -1059,9 +991,12 @@ export default function CompetitorReview() {
                                 }
                               }}
                             />
-                            <Button size="sm" onClick={() => addHandle.mutate({ competitorId: c.id })} disabled={addHandle.isPending || !newHandle.trim()}>
-                              Save handle
+                            <Button size="sm" onClick={() => addHandle.mutate({ competitorId: c.id })} disabled={addHandle.isPending || !readTypedHandle(newHandle, newHandlePlatform)}>
+                              Save profile
                             </Button>
+                            {newHandle.trim() && !readTypedHandle(newHandle, newHandlePlatform) && (
+                              <p className="t-secondary w-full">That address is a post or a page, not a profile.</p>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1071,7 +1006,7 @@ export default function CompetitorReview() {
                             size="sm"
                             variant={c.is_selected ? "default" : "outline"}
                             onClick={() => toggleSelect.mutate(c)}
-                            disabled={toggleSelect.isPending || (!c.is_selected && profileCheck?.state === "unverified" && !compHandles.some(isReviewReadyHandle))}
+                            disabled={toggleSelect.isPending || (!c.is_selected && (selected.length >= 3 || (profileCheck?.state === "unverified" && !compHandles.some(isReviewReadyHandle))))}
                           >
                             {c.is_selected ? `#${c.selected_rank}` : "Select"}
                           </Button>
@@ -1102,8 +1037,8 @@ export default function CompetitorReview() {
           !identifying && (
             <EmptyState
               icon={Crosshair}
-              title="No competitor set yet"
-              description="Run AI identification to draft 8-12 likely competitors from the client profile, or add competitors manually below."
+              title="No competitors yet"
+              description="They are chosen automatically from the client's website."
             />
           )
         )}

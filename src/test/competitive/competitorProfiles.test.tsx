@@ -17,10 +17,10 @@ let client:QueryClient;
 beforeEach(()=>{f.auto=true;f.calls=[];f.writes=[];f.detect=null;f.toast.mockClear();client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false}}});});
 afterEach(()=>{cleanup();client.clear();});
 function mount(){render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/clients/client/competitive']}><Routes><Route path="/clients/:id/competitive" element={<CompetitorReview/>}/></Routes></MemoryRouter></QueryClientProvider>);}
-it('searches all missing profiles once, preserves tracked profiles, and shows failures truthfully',async()=>{
+it('searches all missing profiles once, preserves tracked profiles, and shows no failure or raw detail',async()=>{
  f.detect=async id=>({data:{results:[{status:id==='b'?'failed':'not_found',detected:[],warnings:id==='b'?['Website returned HTTP 403.']:[]}]},error:null});
  mount();expect(screen.queryByRole('button',{name:'Find missing profiles'})).toBeNull();
- await screen.findByText('Profile lookup failed');expect(screen.getByText('Website returned HTTP 403.')).toBeInTheDocument();expect(screen.getByText('No profiles found on checked pages')).toBeInTheDocument();
+ await screen.findByText('Profiles are looked up again later');expect(screen.queryByText('Website returned HTTP 403.')).toBeNull();expect(screen.queryByText(/failed/i)).toBeNull();expect(screen.getByText('No profiles found on checked pages')).toBeInTheDocument();
  expect(f.calls.map(c=>c.competitor_id).sort()).toEqual(['b','c']);expect(screen.queryByText('No handles found')).toBeNull();expect(screen.getByRole('link',{name:/company_a/})).toBeInTheDocument();
 });
 it('starts profile detection automatically after identifying competitors and shows in-progress rows',async()=>{
@@ -42,7 +42,7 @@ it('keeps completed empty results across visits without repeating lookups or off
 
 it('shows an expired session once instead of blaming missing competitor profiles',async()=>{
  f.detect=async()=>({data:null,error:{context:new Response(JSON.stringify({error:'Invalid or expired session.'}),{status:401})}});
- mount();await screen.findByText('Your portal session has expired');expect(screen.queryByText('Profile lookup failed')).toBeNull();expect(screen.getByRole('link',{name:'Open Moburst portal'})).toHaveAttribute('href','https://tools.moburst.com/dashboard');expect(screen.getAllByText('Waiting for portal sign-in')).toHaveLength(2);
+ mount();await screen.findByText('Profile lookups continue once you are signed in again from the Moburst portal.');expect(screen.queryByText(/failed/i)).toBeNull();expect(screen.queryByRole('alert')).toBeNull();expect(screen.getByRole('link',{name:'Open Moburst portal'})).toHaveAttribute('href','https://tools.moburst.com/dashboard');expect(screen.getAllByText('Waiting for portal sign-in')).toHaveLength(2);
 });
 
 it('separates unverified suggestions and prevents selecting them without a verified profile',async()=>{

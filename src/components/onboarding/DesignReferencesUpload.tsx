@@ -5,6 +5,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, X, Image } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { fileKey } from "@/hooks/useQuietUpload";
+import { uploadQuietly } from "@/lib/quietSend";
+
+const TYPES = ["image/png", "image/jpeg", "image/jpg"];
 
 interface DesignReferencesUploadProps {
   clientId?: string;
@@ -13,6 +17,11 @@ interface DesignReferencesUploadProps {
   onDesignReferencesChange: (refs: string[]) => void;
 }
 
+/**
+ * Optional design references a person adds beside the ones the lifecycle
+ * finds in the client's own posts. Each file is sent again quietly when it
+ * does not go up, and a file that still has not stays selected.
+ */
 export function DesignReferencesUpload({
   clientId,
   clientName,
@@ -20,78 +29,62 @@ export function DesignReferencesUpload({
   onDesignReferencesChange,
 }: DesignReferencesUploadProps) {
   const [uploading, setUploading] = useState(false);
+  const [pending, setPending] = useState<File[]>([]);
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const folder = clientName.replace(/[^a-zA-Z0-9]/g, "-");
+  const pathFor = (file: File) => `${folder}/${clientId || "new"}-${fileKey(file)}`;
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-
-    const allowedTypes = ["image/png", "image/jpeg", "image/jpg"];
-    const validFiles = files.filter((f) => allowedTypes.includes(f.type));
-    if (validFiles.length !== files.length) {
-      toast.error("Only PNG and JPG files are allowed");
-    }
-    if (validFiles.length === 0) return;
-
+  const send = async (files: File[]) => {
+    if (!files.length) return;
     setUploading(true);
-    try {
-      const newPaths: string[] = [];
-      const folder = clientName.replace(/[^a-zA-Z0-9]/g, "-");
-
-      for (const file of validFiles) {
-        const fileExt = file.name.split(".").pop();
-        const fileName = `${clientId || "new"}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${fileExt}`;
-        const filePath = `${folder}/${fileName}`;
-
-        const { error } = await supabase.storage
-          .from("design-references")
-          .upload(filePath, file);
-
-        if (error) throw error;
-        newPaths.push(filePath);
-      }
-
-      onDesignReferencesChange([...designReferences, ...newPaths]);
-      toast.success(`${newPaths.length} design reference(s) uploaded`);
-    } catch (err: any) {
-      toast.error("Upload failed: " + err.message);
-    } finally {
-      setUploading(false);
-      e.target.value = "";
+    const done: string[] = [];
+    const left: File[] = [];
+    for (const file of files) {
+      const { error } = await uploadQuietly(() => supabase.storage.from("design-references").upload(pathFor(file), file, { upsert: true }));
+      if (error) left.push(file);
+      else done.push(pathFor(file));
+    }
+    setUploading(false);
+    setPending(left);
+    if (done.length) {
+      onDesignReferencesChange([...designReferences, ...done.filter((p) => !designReferences.includes(p))]);
+      toast.success(`${done.length} design reference${done.length === 1 ? "" : "s"} uploaded`);
     }
   };
 
-  const handleRemove = async (path: string) => {
-    await supabase.storage.from("design-references").remove([path]);
+  const choose = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    setSkipped(files.filter((f) => !TYPES.includes(f.type)).map((f) => f.name));
+    void send(files.filter((f) => TYPES.includes(f.type)));
+  };
+
+  const handleRemove = (path: string) => {
+    // The stored file stays until the form is saved without it.
     onDesignReferencesChange(designReferences.filter((r) => r !== path));
   };
 
-  const getPublicUrl = (path: string) => {
-    const { data } = supabase.storage.from("design-references").getPublicUrl(path);
-    return data.publicUrl;
-  };
+  const getPublicUrl = (path: string) => supabase.storage.from("design-references").getPublicUrl(path).data.publicUrl;
 
   return (
     <Card>
       <CardContent className="pt-5 space-y-4">
         <Label className="t-body font-semibold">Design references</Label>
         <p className="t-secondary">
-          Upload example social posts, ads, or designs. These will be used as visual style references when generating new designs.
+          Example social posts, ads or designs (PNG or JPG), used as visual style references beside the client's own posts.
         </p>
 
         {designReferences.length > 0 && (
           <div className="grid grid-cols-3 gap-2">
             {designReferences.map((path) => (
               <div key={path} className="relative group aspect-square rounded-md overflow-hidden border">
-                <img
-                  src={getPublicUrl(path)}
-                  alt="Design reference"
-                  className="w-full h-full object-cover"
-                />
+                <img src={getPublicUrl(path)} alt="Design reference" className="w-full h-full object-cover" />
                 <Button
-                  variant="destructive"
+                  variant="secondary"
                   size="sm"
                   className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
                   onClick={() => handleRemove(path)}
+                  aria-label="Remove this reference"
                 >
                   <X className="h-3 w-3" />
                 </Button>
@@ -102,24 +95,18 @@ export function DesignReferencesUpload({
 
         <label className="block">
           <div className="flex items-center gap-2 p-3 border-2 border-dashed rounded-md cursor-pointer hover:border-primary/50 transition-colors">
-            {uploading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Image className="h-4 w-4 text-muted-foreground" />
-            )}
-            <span className="t-secondary">
-              {uploading ? "Uploading..." : "Upload design references (PNG, JPG)"}
-            </span>
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Image className="h-4 w-4 text-muted-foreground" />}
+            <span className="t-secondary">{uploading ? "Uploading..." : "Upload design references (PNG, JPG)"}</span>
           </div>
-          <input
-            type="file"
-            className="hidden"
-            accept=".png,.jpg,.jpeg"
-            multiple
-            onChange={handleFileUpload}
-            disabled={uploading}
-          />
+          <input type="file" className="hidden" accept=".png,.jpg,.jpeg" multiple onChange={choose} disabled={uploading} />
         </label>
+        {skipped.length > 0 && <p className="t-secondary" role="status">{skipped.join(", ")} {skipped.length === 1 ? "is not a PNG or JPG file" : "are not PNG or JPG files"}, so {skipped.length === 1 ? "it was" : "they were"} left out.</p>}
+        {pending.length > 0 && !uploading && (
+          <div className="flex items-center gap-2" role="status">
+            <span className="t-secondary truncate">{pending.length === 1 ? `${pending[0].name} is` : `${pending.length} files are`} not uploaded yet.</span>
+            <Button variant="outline" size="sm" onClick={() => void send(pending)}>Upload</Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

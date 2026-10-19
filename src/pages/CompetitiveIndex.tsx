@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { LoadError } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
-import { describeReport, describeSelection, describeTracking, pickRunSelection, trackingAllowsRun, type SetRow } from "@/lib/competitiveFlow";
+import { describeReport, describeSelection, describeTracking, pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
 import { Crosshair, FileText, History, Play, Rss } from "lucide-react";
 
 export default function CompetitiveIndex() {
@@ -44,7 +44,8 @@ export default function CompetitiveIndex() {
         setsByClient.get(s.client_id)!.push(s as SetRow);
       }
       const latestReport = new Map<string, any>();
-      for (const r of reportsRes.data || []) if (!latestReport.has(r.client_id)) latestReport.set(r.client_id, r);
+      // A run that did not finish is made again by the product and never shown.
+      for (const r of reportsRes.data || []) if (r.status !== "failed" && !latestReport.has(r.client_id)) latestReport.set(r.client_id, r);
       return (clientsRes.data || []).map((c) => {
         const sets = setsByClient.get(c.id) || [];
         const { runnable, newerDraft } = pickRunSelection(sets);
@@ -109,8 +110,7 @@ export default function CompetitiveIndex() {
                       size="sm"
                       variant="outline"
                       onClick={() => navigate(`/clients/${c.id}/competitive/run`)}
-                      disabled={!c.runnable || (!trackingAllowsRun(c.tracking) && c.report?.status !== 'running')}
-                      title={!c.runnable ? "Confirm three competitors before running a report" : !trackingAllowsRun(c.tracking) ? "Connect tracking from Edit competitors first" : undefined}
+                      disabled={!c.runnable}
                     >
                       <Play className="h-3.5 w-3.5 mr-1" /> {c.report?.status === "running" ? "View running report" : "Run competitive report"}
                     </Button>

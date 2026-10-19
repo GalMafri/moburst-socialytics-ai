@@ -1,6 +1,4 @@
 import { useEffect, useState } from "react";
-import { canRetry } from "@/lib/reportRun";
-import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -184,7 +182,6 @@ export default function AllReports() {
                                   <Eye className="h-4 w-4 mr-1" /> Open report
                                 </Button>
                               )}
-                              {r.display.state === "scheduled" && canRetry(r) && <RetryReportButton reportId={r.id} kind="monthly" label="Run now" />}
                               <ReportActions report={r} />
                             </div>
                           </TableCell>
@@ -246,7 +243,6 @@ export default function AllReports() {
                                     <Eye className="h-4 w-4 mr-1" /> Open report
                                   </Button>
                                 )}
-                                {r.display.state === "scheduled" && canRetry(r, Date.now(), "competitive") && <RetryReportButton reportId={r.id} kind="competitive" label="Run now" />}
                                 <ReportActions report={r} kind="competitive" />
                               </div>
                             </TableCell>

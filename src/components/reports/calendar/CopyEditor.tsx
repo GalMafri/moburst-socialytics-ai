@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Pencil, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { describeInvokeError } from "@/lib/invokeError";
+import { invokeResendable, sendQuietly } from "@/lib/quietSend";
 import { toast } from "sonner";
 import { track, editDistancePct } from "@/lib/telemetry";
 import { postCopyOf } from "@/lib/postCopy";
@@ -27,6 +27,8 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
   const [displayCopy, setDisplayCopy] = useState(initialCopy);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  /** An edit that has not reached the server yet; the editor keeps it open with the person's text. */
+  const [notSaved, setNotSaved] = useState(false);
   useEffect(() => {
     setDisplayCopy(initialCopy);
     setEditedCopy(initialCopy);
@@ -45,8 +47,9 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
       CTA: generated?.CTA ?? generated?.cta ?? post.CTA ?? post.cta,
     };
     // Saved through calendar-posts, which checks the caller belongs to the
-    // client: a client's own users can edit their posts' copy too.
-    const { data, error } = await supabase.functions.invoke("calendar-posts", {
+    // client: a client's own users can edit their posts' copy too. A save is
+    // versioned, so sending it again saves it once.
+    const { data, error } = await sendQuietly(() => supabase.functions.invoke("calendar-posts", {
       body: {
         action: "save_copy",
         client_id: clientId, report_id: reportId ?? null, calendar_post_key: post._calendarPostKey,
@@ -55,8 +58,8 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
         cta: updated.CTA || null, concept: post.concept || null, visual_direction: post.visual_direction || null,
         format: post.format || null, source: generated ? "regeneration" : "calendar",
       },
-    });
-    if (error || data?.error) throw new Error(await describeInvokeError(error, data));
+    }), { again: (e) => invokeResendable(e, { idempotent: true }) });
+    if (error || data?.error) throw new Error("The copy is not saved yet.");
     onCopySaved?.(updated);
     return updated;
   };
@@ -89,6 +92,7 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
   const handleSaveEdit = async () => {
     if (!clientId || !editedCopy.trim()) return;
     setIsSavingEdit(true);
+    setNotSaved(false);
     const distance = editDistancePct(displayCopy, editedCopy);
     try {
       await saveRevision(editedCopy);
@@ -111,14 +115,10 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
       setDisplayCopy(editedCopy);
       setIsEditing(false);
       toast.success("Post copy saved");
-    } catch (err: any) {
-      track("post_copy_edited", {
-        client_id: clientId,
-        platform: post.platform || null,
-        ok: false,
-        error_code: String(err?.message || "unknown").slice(0, 80),
-      });
-      toast.error("Failed to save edit: " + (err.message || "Unknown error"));
+    } catch {
+      track("post_copy_edited", { client_id: clientId, platform: post.platform || null, ok: false, error_code: "not_saved" });
+      // The editor stays open with the person's text.
+      setNotSaved(true);
     } finally {
       setIsSavingEdit(false);
     }
@@ -131,7 +131,8 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
     const t0 = performance.now();
     const previousCopy = displayCopy;
     try {
-      const { data, error } = await supabase.functions.invoke("regenerate-post-copy", {
+      // A new draft each time, so it is sent again only when it never reached the server.
+      const { data, error } = await sendQuietly(() => supabase.functions.invoke("regenerate-post-copy", {
         body: {
           client_id: clientId,
           platform: post.platform || null,
@@ -146,13 +147,12 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
           current_copy: displayCopy,
           current_cta: post.CTA || post.cta || null,
         },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      }));
+      if (error || data?.error) throw new Error("not rewritten");
 
       const postResult = data?.post || data;
       const newCopy = postResult?.caption_angle || postResult?.copy || postResult?.post_copy;
-      if (!newCopy?.trim()) throw new Error("No copy was returned. Your existing copy is unchanged.");
+      if (!newCopy?.trim()) throw new Error("not rewritten");
       if (newCopy) {
         await saveRevision(newCopy, postResult);
 
@@ -173,6 +173,7 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
         toast.success("Copy regenerated");
       }
     } catch (err: any) {
+      // The copy on the post stays as it was.
       track("post_copy_regenerated", {
         client_id: clientId,
         platform: post.platform || null,
@@ -181,7 +182,6 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
         ok: false,
         error_code: String(err?.message || "unknown").slice(0, 80),
       });
-      toast.error("Failed to regenerate: " + (err.message || "Unknown error"));
     } finally {
       setIsRegenerating(false);
     }
@@ -212,12 +212,14 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
               size="sm"
               onClick={() => {
                 setEditedCopy(displayCopy);
+                setNotSaved(false);
                 cancelEdit();
               }}
               disabled={isSavingEdit}
             >
               Cancel
             </Button>
+            {notSaved && <span role="status" className="t-secondary">Not saved yet. Your text is kept here.</span>}
           </div>
         </div>
       ) : (

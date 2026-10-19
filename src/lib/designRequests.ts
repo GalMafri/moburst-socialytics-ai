@@ -10,6 +10,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { describeInvokeError } from "@/lib/invokeError";
+import { invokeResendable, sendQuietly, uploadQuietly } from "@/lib/quietSend";
 import { postCopyOf } from "@/lib/postCopy";
 import type { Iteration } from "@/lib/postMediaTiles";
 
@@ -127,7 +128,8 @@ export function elapsedLabel(fromIso: string, now = Date.now()): string {
 }
 
 export async function createDesigns(args: { clientId: string; reportId?: string; post: { _calendarPostKey?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown }; route?: "posts" }): Promise<{ request?: DesignRequest; notSetUp?: boolean; needsFilming?: string }> {
-  const { data, error } = await supabase.functions.invoke("design-request", {
+  // Sent again quietly when it never reached the server.
+  const { data, error } = await sendQuietly(() => supabase.functions.invoke("design-request", {
     body: {
       action: "create",
       client_id: args.clientId,
@@ -139,7 +141,7 @@ export async function createDesigns(args: { clientId: string; reportId?: string;
       visual_direction: (args.post as any).visual_direction ?? (args.post as any)["Visual Direction"] ?? null,
       ...(args.route ? { route: args.route } : {}),
     },
-  });
+  }));
   if (data?.code === "not_set_up") return { notSetUp: true };
   // A video with a real person on camera is filmed; the post keeps that answer.
   if (data?.code === "needs_filming") return { request: data.request, needsFilming: String(data.who || "it needs footage filmed for it") };
@@ -161,21 +163,25 @@ export interface ShotBrief {
 /** The largest filmed clip accepted (the storage bucket's own limit). */
 export const MAX_CLIP_BYTES = 500 * 1024 * 1024;
 
+/** A clip the video cannot be made from, with why, as a fact about the file. Nothing was sent. */
+export class ClipNotAccepted extends Error {}
+
 /**
  * Upload the filmed clip for a video post with a real person on camera, and
  * start its video: the post's hook and the client's logo laid over the clip,
  * keeping its sound.
  */
 export async function uploadFilmedClip(args: { clientId: string; reportId?: string; post: { _calendarPostKey?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown }; file: File }): Promise<DesignRequest> {
-  if (args.file.size > MAX_CLIP_BYTES) throw new Error("The clip is too large. Keep it under 500 MB.");
+  if (args.file.size > MAX_CLIP_BYTES) throw new ClipNotAccepted(`${args.file.name} is over 500 MB, the largest clip a video is made from.`);
   // The video is made at 9:16: a landscape clip would lose its sides.
   const shape = await clipShape(args.file);
-  if (shape && shape.width > shape.height) throw new Error("Upload a vertical clip (9:16), filmed in portrait.");
+  if (shape && shape.width > shape.height) throw new ClipNotAccepted(`${args.file.name} is filmed in landscape. The video is made from a vertical (9:16) clip.`);
   const mov = /quicktime/i.test(args.file.type) || /\.mov$/i.test(args.file.name);
-  const path = `${args.clientId}/${crypto.randomUUID()}.${mov ? "mov" : "mp4"}`;
-  const { error: upload } = await supabase.storage.from("post-footage").upload(path, args.file, { contentType: mov ? "video/quicktime" : "video/mp4", upsert: false });
-  if (upload) throw new Error("The clip could not be uploaded. Check it is an MP4 or MOV file and try again.");
-  const { data, error } = await supabase.functions.invoke("design-request", {
+  // A path made from the file, so sending the same clip again writes the same object.
+  const path = `${args.clientId}/${args.post._calendarPostKey ?? "post"}-${args.file.lastModified}-${args.file.size}.${mov ? "mov" : "mp4"}`.replace(/[^a-zA-Z0-9/_.-]/g, "-");
+  const { error: upload } = await uploadQuietly(() => supabase.storage.from("post-footage").upload(path, args.file, { contentType: mov ? "video/quicktime" : "video/mp4", upsert: true }));
+  if (upload) throw new Error("not uploaded");
+  const { data, error } = await sendQuietly(() => supabase.functions.invoke("design-request", {
     body: {
       action: "footage",
       client_id: args.clientId,
@@ -187,9 +193,8 @@ export async function uploadFilmedClip(args: { clientId: string; reportId?: stri
       visual_direction: (args.post as any).visual_direction ?? (args.post as any)["Visual Direction"] ?? null,
       path,
     },
-  });
-  if (data?.code === "not_set_up") throw new Error("Design settings are not confirmed for this client yet.");
-  if (error || data?.error) throw new Error(await describeInvokeError(error, data));
+  }));
+  if (error || data?.error || data?.code === "not_set_up") throw new Error("not started");
   return data.request as DesignRequest;
 }
 
@@ -209,7 +214,8 @@ function clipShape(file: File): Promise<{ width: number; height: number } | null
 }
 
 export async function putDesignInUse(iterationId: string): Promise<void> {
-  const { data, error } = await supabase.functions.invoke("design-request", { body: { action: "use", iteration_id: iterationId } });
+  // Putting a design in use twice puts it in use once.
+  const { data, error } = await sendQuietly(() => supabase.functions.invoke("design-request", { body: { action: "use", iteration_id: iterationId } }), { again: (e) => invokeResendable(e, { idempotent: true }) });
   if (error || data?.error) throw new Error(await describeInvokeError(error, data));
 }
 
@@ -255,9 +261,9 @@ export const DESIGN_FEEDBACK_REASONS: Array<{ value: string; label: string }> = 
  * design is started unless makeNew is false) or delete it.
  */
 export async function sendDesignFeedback(args: { iterationId: string; verdict: "rejected" | "deleted"; reason?: string; note?: string; makeNew?: boolean }): Promise<{ request: DesignRequest | null }> {
-  const { data, error } = await supabase.functions.invoke("design-request", {
+  const { data, error } = await sendQuietly(() => supabase.functions.invoke("design-request", {
     body: { action: "feedback", iteration_id: args.iterationId, verdict: args.verdict, reason: args.reason, note: args.note, make_new: args.makeNew },
-  });
+  }));
   if (error || data?.error) throw new Error(await describeInvokeError(error, data));
   return { request: (data?.request as DesignRequest | null) ?? null };
 }

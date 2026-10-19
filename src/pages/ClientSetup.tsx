@@ -1,29 +1,42 @@
-import { mergeStrategySuggestions } from "@/lib/strategySuggestions";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { StrategyDocUpload } from "@/components/onboarding/StrategyDocUpload";
-import { PillarDerivationCard } from "@/components/onboarding/PillarDerivationCard";
-import { PlatformIcon, normalizePlatformKey } from "@/lib/platform-config";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+// A client's setup page: a view of what the client lifecycle produced, with
+// edit controls (self-serve design, section 1, 19 Oct 2026). The server reads
+// the website (brand, logo, location, timezone, language), drafts the brief
+// and derives pillars and keywords, matches the Sprout accounts, picks the
+// competitors, connects tracking and works out the design settings, all on
+// its own. This page shows where each value came from and lets a person
+// change any of it. A save sends only the fields the person changed
+// (src/lib/clientSetupForm.ts), and the product never overwrites those.
+// Nothing here starts paid work on opening, and nothing tells anyone to set
+// something up.
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Play, Plus, RefreshCw, Save, X, CalendarClock } from "lucide-react";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PostingRhythmField } from "@/components/onboarding/PostingRhythmField";
-import { rhythmSetting, type ResolvedRhythmLine, type RhythmSourcesSummary } from "@/lib/postingRhythm";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loading } from "@/components/ui/loading";
-import { useToast } from "@/hooks/use-toast";
-import { useState, useEffect } from "react";
-import { Save, Plus, X, RefreshCw, Loader2, Play, Info, CalendarClock, Globe } from "lucide-react";
-import { Navigate } from "react-router-dom";
-import { Switch } from "@/components/ui/switch";
+import { PlatformIcon } from "@/lib/platform-config";
+import { countryNames, formatDate, languageNames, locationSourceWords, platformName, scheduleLines, timeZoneName } from "@/lib/display";
+import { changedColumns, EMPTY_FORM, formFromClient, keywordPhrases, rebaseForm, setByOf, type SetupForm } from "@/lib/clientSetupForm";
+import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
+import { useLifecycleStep } from "@/hooks/useLifecycleStep";
+import { type ResolvedRhythmLine, type RhythmSourcesSummary } from "@/lib/postingRhythm";
+import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { PostingRhythmField } from "@/components/onboarding/PostingRhythmField";
+import { StrategyDocUpload } from "@/components/onboarding/StrategyDocUpload";
 import { BrandBookUpload } from "@/components/onboarding/BrandBookUpload";
 import { DesignReferencesUpload } from "@/components/onboarding/DesignReferencesUpload";
 import { AutomaticBrandReferences } from "@/components/onboarding/AutomaticBrandReferences";
@@ -66,6 +79,12 @@ const LANGUAGES = [
   { value: "th", label: "Thai (ไทย)" },
 ];
 
+const TIME_ZONES = [
+  "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Europe/London", "Europe/Paris",
+  "Europe/Berlin", "Asia/Jerusalem", "Asia/Tokyo", "Asia/Seoul", "Asia/Shanghai", "America/Sao_Paulo", "Asia/Dubai",
+  "Australia/Sydney", "Pacific/Auckland", "UTC",
+];
+
 const BRAND_VOICE_PRESETS = [
   "Professional / Corporate",
   "Conversational / Friendly",
@@ -74,105 +93,95 @@ const BRAND_VOICE_PRESETS = [
   "Playful / Casual",
 ];
 
-interface ContentPillar {
-  name: string;
-  description: string;
-}
-
-const DEFAULT_PILLARS: ContentPillar[] = [
-  { name: "Thought Leadership", description: "" },
-  { name: "Product Education", description: "" },
-  { name: "Client Wins", description: "" },
-  { name: "Industry Trends", description: "" },
-  { name: "Team Culture", description: "" },
-];
-
 /** How a learned writing preference's type reads to people (brand_voice_learnings.pattern_type). */
 const PATTERN_LABELS: Record<string, string> = {
   tone: "Tone", length: "Length", emoji_usage: "Emoji", cta_style: "Calls to action", hashtag_preference: "Hashtags",
   vocabulary: "Wording", structure: "Structure", topics: "Topics", format: "Format", other: "Other",
 };
 
+const PILLAR_SOURCES: Record<string, string> = {
+  strategy_doc: "the strategy document",
+  social_posts: "the client's own posts",
+  brief: "the brief",
+  site: "the website",
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = Record<string, any>;
+interface SproutProfile { id: string | number; name?: string; native_name?: string; network_type?: string; network_display?: string; native_link?: string; missing?: boolean }
+
+/** A plain line saying where a value came from; nothing when nobody set it yet. */
+function Origin({ children }: { children: React.ReactNode }) {
+  return children ? <p className="t-label text-muted-foreground">{children}</p> : null;
+}
+
+/** A quiet "Refresh" for one lifecycle step, with a plain line while it runs. */
+function StepRefresh({ step, working }: { step: ReturnType<typeof useLifecycleStep>; working: string }) {
+  return (
+    <div className="flex items-center gap-3 flex-wrap">
+      <Button type="button" variant="outline" size="sm" onClick={() => void step.refresh()} disabled={step.running} className="shrink-0">
+        {step.running ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+        Refresh
+      </Button>
+      {step.running && <span role="status" className="t-secondary">{working}</span>}
+    </div>
+  );
+}
+
 export default function ClientSetup() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const setupTab = searchParams.get("tab") || "info";
   const navigate = useNavigate();
-  const { user, canManageClients } = useAuth();
-  const { toast } = useToast();
+  const { canManageClients } = useAuth();
   const queryClient = useQueryClient();
   const isNew = id === "new";
+  const clientId = !isNew ? id : undefined;
 
-  const [form, setForm] = useState({
-    name: "",
-    website_url: "",
-    social_keywords: [] as string[],
-    content_pillars: [...DEFAULT_PILLARS] as ContentPillar[],
-    strategy_doc_file_path: "",
-    pillars_source: "" as string,
-    primary_platforms: ["Instagram", "TikTok", "Facebook", "LinkedIn"],
-    geo: ["US"] as string[],
-    language: ["en"] as string[],
-    brand_notes: "",
-    brand_voice_preset: "",
-    brand_book_text: "",
-    brand_book_url: "",
-    brand_book_file_path: "",
-    logo_url: "",
-    timezone: "UTC",
-    // Every client runs on Higgsfield. Defaulting a new one to gemini put it
-    // on a path nobody exercises, which is where the leaked-key and
-    // poll-past-the-request-limit bugs were found.
-    media_backend: "higgsfield",
-    design_references: [] as string[],
-    brand_identity: null as any,
-    brief_text: "",
-    brief_file_id: "",
-    design_style_synthesis: null as any,
-    competitor_seed_notes: "",
-    posting_rhythm: {} as Record<string, string>,
-  });
-  const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
-  // Whether Sprout actually answered. Without this the save path cannot tell
-  // "the user deselected everything" from "Sprout was down".
-  // "Sprout answered AND listed profiles we could choose from". Not merely
-  // "Sprout answered": an empty list leaves the selection empty too, and the
-  // prune below would then read that as "assign nothing" and delete the lot.
-  const [sproutListed, setSproutListed] = useState(false);
-  const [researchingBrand, setResearchingBrand] = useState(false);
-  const [brandDebug, setBrandDebug] = useState<any>(null);
+  const [form, setForm] = useState<SetupForm>(EMPTY_FORM);
+  /** The form's values as the database had them when they were loaded: what a save is compared with. */
+  const loaded = useRef<SetupForm | null>(null);
+  const [selectedProfiles, setSelectedProfiles] = useState<SproutProfile[] | null>(null);
   const [newKeyword, setNewKeyword] = useState("");
   const [newPillarName, setNewPillarName] = useState("");
-  // Counts design uploads and removals made in this session; the synthesis card
-  // auto-runs only after one of those, never on merely opening the tab.
-  const [designInputsVersion, setDesignInputsVersion] = useState(0);
   const [savedVersion, setSavedVersion] = useState(0);
+  const [notSaved, setNotSaved] = useState(false);
 
-  const { data: client } = useQuery({
+  const { data: client, refetch: refetchClient } = useQuery({
     queryKey: ["client", id],
     queryFn: async () => {
       const { data, error } = await supabase.from("clients").select("*").eq("id", id!).maybeSingle();
       if (error) throw error;
-      return data;
+      return data as Row | null;
     },
-    enabled: !isNew && !!id,
+    enabled: !!clientId,
+  });
+
+  // The lifecycle steps this page offers to run again. When one finishes, the page reads what it wrote.
+  const brandStep = useLifecycleStep(clientId, "brand_read", { onDone: () => void refetchClient() });
+  const briefStep = useLifecycleStep(clientId, "brief_pillars", { onDone: () => void refetchClient() });
+
+  const { data: assignedProfiles } = useQuery({
+    queryKey: ["sprout-profiles", clientId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("sprout_profiles").select("*").eq("client_id", clientId!).neq("is_active", false);
+      if (error) throw error;
+      return data as Row[];
+    },
+    enabled: !!clientId,
   });
 
   const { data: voiceLearnings } = useQuery({
     queryKey: ["brand-voice-learnings", id],
     queryFn: async () => {
-      // Columns from 20261019140000_weekly_calendar.sql, before the generated types know them.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase.from("brand_voice_learnings" as never) as any)
-        .select("*")
-        .eq("client_id", id)
-        .eq("status", "active")
-        .order("times_confirmed", { ascending: false })
-        .order("last_confirmed_at", { ascending: false });
+        .select("*").eq("client_id", id).eq("status", "active")
+        .order("times_confirmed", { ascending: false }).order("last_confirmed_at", { ascending: false });
       if (error) throw error;
-      return data || [];
+      return (data || []) as Row[];
     },
-    enabled: !!id && !isNew,
+    enabled: !!clientId,
   });
 
   // The rhythm the latest week's plan worked out, per platform, and where it came from.
@@ -186,241 +195,115 @@ export default function ClientSetup() {
       const rhythm = data?.rhythm as { learned?: ResolvedRhythmLine[]; sources?: RhythmSourcesSummary } | null | undefined;
       return rhythm?.learned ? { resolved: rhythm.learned, sources: rhythm.sources ?? null } : null;
     },
-    enabled: !!id && !isNew,
+    enabled: !!clientId,
   });
 
+  // The client row as loaded. A row that changes under an open form (the
+  // lifecycle wrote something) updates every field the person has not
+  // touched, and keeps every field they changed.
   useEffect(() => {
-    if (client) {
-      // Parse pillars - handle both old string[] format and new object[] format
-      let pillars: ContentPillar[] = [...DEFAULT_PILLARS];
-      if (client.content_pillars) {
-        const raw = client.content_pillars as any;
-        if (Array.isArray(raw)) {
-          pillars = raw.map((p: any) =>
-            typeof p === "string"
-              ? { name: p, description: "" }
-              : { name: p.name || "", description: p.description || "" },
-          );
-        }
-      }
-      // Parse [VOICE:preset] prefix from brand_notes
-      let brandNotes = client.brand_notes || "";
-      let voicePreset = "";
-      const voiceMatch = brandNotes.match(/^\[VOICE:(.+?)]\n?/);
-      if (voiceMatch) {
-        voicePreset = voiceMatch[1];
-        brandNotes = brandNotes.slice(voiceMatch[0].length);
-      }
-
-      // Parse comma-separated geo/language to arrays
-      const geoArr = client.geo
-        ? client.geo
-            .split(",")
-            .map((s: string) => s.trim())
-            .filter(Boolean)
-        : ["US"];
-      const langArr = client.language
-        ? client.language
-            .split(",")
-            .map((s: string) => s.trim())
-            .filter(Boolean)
-        : ["en"];
-
-      setForm({
-        name: client.name || "",
-        website_url: client.website_url || "",
-        social_keywords: client.social_keywords || [],
-        content_pillars: pillars,
-        strategy_doc_file_path: (client as any).strategy_doc_file_path || "",
-        pillars_source: "",
-        primary_platforms: client.primary_platforms || ["Instagram", "TikTok", "Facebook", "LinkedIn"],
-        geo: geoArr,
-        language: langArr,
-        brand_notes: brandNotes,
-        brand_voice_preset: voicePreset,
-        brand_book_text: client.brand_book_text || "",
-        brand_book_url: (client as any).brand_book_url || "",
-        brand_book_file_path: (client as any).brand_book_file_path || "",
-        logo_url: (client as any).logo_url || "",
-        timezone: (client as any).timezone || "UTC",
-        media_backend: (client as any).media_backend || "gemini",
-        design_references: ((client as any).design_references as string[]) || [],
-        brand_identity: client.brand_identity || null,
-        brief_text: client.brief_text || "",
-        brief_file_id: client.brief_file_id || "",
-        design_style_synthesis: (client as any).design_style_synthesis || null,
-        competitor_seed_notes: (client as any).competitor_seed_notes || "",
-        posting_rhythm: Object.fromEntries(Object.entries(((client as any).posting_rhythm as Record<string, number> | null) ?? {}).map(([k, v]) => [k, String(v)])),
-      });
-    }
+    if (!client) return;
+    const next = formFromClient(client);
+    const before = loaded.current;
+    setForm((f) => (before ? rebaseForm(f, before, next) : next));
+    loaded.current = next;
   }, [client]);
 
-  const toggleGeo = (value: string) => {
-    setForm((f) => ({
-      ...f,
-      geo: f.geo.includes(value) ? f.geo.filter((g) => g !== value) : [...f.geo, value],
-    }));
-  };
-
-  const toggleLanguage = (value: string) => {
-    setForm((f) => ({
-      ...f,
-      language: f.language.includes(value) ? f.language.filter((l) => l !== value) : [...f.language, value],
-    }));
-  };
+  // The Sprout accounts as assigned in the database, the baseline for a save.
+  const assignedIds = new Set((assignedProfiles ?? []).map((p) => String(p.sprout_profile_id)));
+  const profilesChanged = selectedProfiles !== null && (selectedProfiles.length !== assignedIds.size || selectedProfiles.some((p) => !assignedIds.has(String(p.id))));
+  const fieldsChanged = Object.keys(isNew ? changedColumns(EMPTY_FORM, form) : loaded.current ? changedColumns(loaded.current, form) : {}).length > 0;
+  const dirty = fieldsChanged || profilesChanged;
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      // Serialize brand voice preset into brand_notes
-      const serializedBrandNotes = form.brand_voice_preset
-        ? `[VOICE:${form.brand_voice_preset}]\n${form.brand_notes}`
-        : form.brand_notes;
-      const { brand_voice_preset, design_references, design_style_synthesis, posting_rhythm, ...formWithoutPreset } = form;
-      const payload = {
-        ...formWithoutPreset,
-        brand_notes: serializedBrandNotes,
-        geo: form.geo.join(","),
-        language: form.language.join(","),
-        // Whatever the client already has is kept. The form never loads this
-        // column, so writing a literal here silently reset any client that had
-        // been pointed at a different Sprout account. New clients are left
-        // null and the server falls back to the account default.
-        sprout_customer_id: (client as any)?.sprout_customer_id ?? null,
-        content_pillars: form.content_pillars as any,
-        strategy_doc_file_path: form.strategy_doc_file_path || null,
-        // Provenance is stamped when the proposed pillars are actually saved,
-        // not when they were proposed.
-        ...(form.pillars_source
-          ? { pillars_source: form.pillars_source, pillars_derived_at: new Date().toISOString() }
-          : {}),
-        brand_book_url: form.brand_book_url || null,
-        brand_book_file_path: form.brand_book_file_path || null,
-        logo_url: form.logo_url || null,
-        timezone: form.timezone || "UTC",
-        media_backend: form.media_backend || "gemini",
-        design_references: design_references.length > 0 ? design_references : null,
-        posting_rhythm: rhythmSetting(posting_rhythm),
-      };
-      let clientId: string;
+      setNotSaved(false);
+      const changes = isNew ? changedColumns(EMPTY_FORM, form) : changedColumns(loaded.current ?? form, form);
+      let savedId = id!;
       if (isNew) {
-        // clients.created_by references auth.users(id) — a Supabase UUID.
-        // user._id is the Hub Mongo ObjectId, which Postgres rejects as not-a-UUID.
-        // Use the Supabase session's UUID (set by hub-auth-bridge); null if no session.
+        // clients.created_by references auth.users(id): the Supabase session's id.
         const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-        const { data, error } = await supabase
-          .from("clients")
-          .insert({ ...payload, created_by: supabaseUser?.id ?? null } as any)
-          .select()
-          .single();
+        // The id is made here, so sending the insert again can never make a second client.
+        savedId = crypto.randomUUID();
+        const { error } = await sendQuietly(() => supabase.from("clients").insert({ id: savedId, ...changes, created_by: supabaseUser?.id ?? null } as never), { again: writeResendable });
+        // The client's own id taken: an earlier try of this same insert landed.
+        const landed = (error as { code?: string; message?: string } | null)?.code === "23505" && /clients_pkey/.test(String((error as { message?: string }).message));
+        if (error && !landed) throw error;
+      } else if (Object.keys(changes).length) {
+        const { error } = await sendQuietly(() => supabase.from("clients").update(changes as never).eq("id", savedId), { again: writeResendable });
         if (error) throw error;
-        clientId = data.id;
-      } else {
-        const { error } = await supabase
-          .from("clients")
-          .update(payload as any)
-          .eq("id", id!);
-        if (error) throw error;
-        clientId = id!;
       }
 
-      // Save selected Sprout profiles.
-      //
-      // Only when Sprout actually answered: this used to delete every
-      // assignment and re-insert the current selection, so a Sprout outage
-      // (or a save from another tab, where the selector had nothing loaded)
-      // wiped the client's profiles. Upsert first, prune second, so a failure
-      // never leaves a client with none.
-      if (sproutListed) {
-        const rows = selectedSproutProfiles.map((p) => ({
-          client_id: clientId,
-          // The column is numeric; Sprout gives the id as a number and the
-          // stored row reads back as one, so only the comparison is string-wise.
-          sprout_profile_id: Number(p.id),
-          profile_name: p.name,
-          native_name: p.native_name,
-          network_type: p.network_type,
-          native_link: p.native_link,
+      // Sprout accounts: only what the person added or removed. A removal is
+      // recorded (sprout_profile_removals) so the matcher never adds it back.
+      if (!isNew && selectedProfiles && profilesChanged) {
+        const chosen = new Set(selectedProfiles.map((p) => String(p.id)));
+        const added = selectedProfiles.filter((p) => !assignedIds.has(String(p.id))).map((p) => ({
+          client_id: savedId, sprout_profile_id: Number(p.id), profile_name: p.name, native_name: p.native_name,
+          network_type: p.network_type, native_link: p.native_link, is_active: true,
         }));
-        if (rows.length > 0) {
-          const { error: upsertErr } = await supabase
-            .from("sprout_profiles")
-            .upsert(rows, { onConflict: "client_id,sprout_profile_id" });
-          if (upsertErr) throw upsertErr;
+        const removed = [...assignedIds].filter((pid) => !chosen.has(pid)).map(Number).filter(Number.isFinite);
+        if (added.length) {
+          const { error } = await sendQuietly(() => supabase.from("sprout_profiles").upsert(added as never, { onConflict: "client_id,sprout_profile_id" }), { again: writeResendable });
+          if (error) throw error;
         }
-        const keep = rows.map((r) => r.sprout_profile_id).filter((x) => Number.isFinite(x));
-        let prune = supabase.from("sprout_profiles").delete().eq("client_id", clientId);
-        if (keep.length > 0) prune = prune.not("sprout_profile_id", "in", `(${keep.join(",")})`);
-        const { error: pruneErr } = await prune;
-        if (pruneErr) throw pruneErr;
+        if (removed.length) {
+          const { error } = await sendQuietly(() => supabase.from("sprout_profiles").delete().eq("client_id", savedId).in("sprout_profile_id", removed), { again: writeResendable });
+          if (error) throw error;
+        }
       }
 
-      return { id: clientId };
+      // References and the brand book are what the design language is learned
+      // from: a person changing them asks the lifecycle to learn it again.
+      if (!isNew && ("design_references" in changes || "brand_book_file_path" in changes)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await sendQuietly(() => (supabase.rpc as any)("lifecycle_request", { p_client: savedId, p_step: "design_refs" }), { again: writeResendable });
+      }
+      return { id: savedId };
     },
-    onSuccess: (data: any) => {
-      setSavedVersion(v => v + 1);
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
-      queryClient.invalidateQueries({ queryKey: ["client", isNew ? data.id : id] });
-      queryClient.invalidateQueries({ queryKey: ["sprout-profiles"] });
-      toast({ title: "Saved", description: "Client configuration saved successfully." });
+    onSuccess: (data) => {
+      loaded.current = form;
+      setSelectedProfiles(null);
+      setSavedVersion((v) => v + 1);
+      void queryClient.invalidateQueries({ queryKey: ["clients"] });
+      void queryClient.invalidateQueries({ queryKey: ["client", isNew ? data.id : id] });
+      void queryClient.invalidateQueries({ queryKey: ["sprout-profiles"] });
+      toast.success("Saved");
       if (isNew) navigate(`/clients/${data.id}/setup`, { replace: true });
     },
-    onError: (err: any) => {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+    // The person's changes stay in the form.
+    onError: (err) => {
+      console.warn("[client setup] not saved yet", err);
+      setNotSaved(true);
     },
   });
 
-  const togglePlatform = (platform: string) => {
-    setForm((f) => ({
-      ...f,
-      primary_platforms: f.primary_platforms.includes(platform)
-        ? f.primary_platforms.filter((p) => p !== platform)
-        : [...f.primary_platforms, platform],
-    }));
-  };
+  const set = <K extends keyof SetupForm>(key: K, value: SetupForm[K]) => setForm((f) => ({ ...f, [key]: value }));
+  const toggleIn = (key: "primary_platforms" | "geo" | "language", value: string) =>
+    setForm((f) => ({ ...f, [key]: f[key].includes(value) ? f[key].filter((v) => v !== value) : [...f[key], value] }));
 
   const addKeyword = () => {
-    const trimmed = newKeyword.trim();
-    if (!trimmed) return;
-
-    // Validate: warn about commas
-    if (trimmed.includes(",")) {
-      toast({
-        title: "Use separate entries instead of commas",
-        description:
-          'Each keyword phrase should be added individually. e.g., add "AI content strategy" and "performance marketing tips" as two separate keywords.',
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!form.social_keywords.includes(trimmed)) {
-      setForm((f) => ({ ...f, social_keywords: [...f.social_keywords, trimmed] }));
-      setNewKeyword("");
-    }
+    const phrases = keywordPhrases(newKeyword, form.social_keywords);
+    if (phrases.length) set("social_keywords", [...form.social_keywords, ...phrases]);
+    setNewKeyword("");
   };
 
   const addPillar = () => {
-    if (newPillarName.trim() && !form.content_pillars.some((p) => p.name === newPillarName.trim())) {
-      setForm((f) => ({
-        ...f,
-        content_pillars: [...f.content_pillars, { name: newPillarName.trim(), description: "" }],
-      }));
-      setNewPillarName("");
-    }
-  };
-
-  const updatePillarDescription = (index: number, description: string) => {
-    setForm((f) => ({
-      ...f,
-      content_pillars: f.content_pillars.map((p, i) => (i === index ? { ...p, description } : p)),
-    }));
-  };
-
-  const removePillar = (index: number) => {
-    setForm((f) => ({ ...f, content_pillars: f.content_pillars.filter((_, i) => i !== index) }));
+    const name = newPillarName.trim();
+    if (name && !form.content_pillars.some((p) => p.name === name)) set("content_pillars", [...form.content_pillars, { name, description: "" }]);
+    setNewPillarName("");
   };
 
   if (!canManageClients) return <Navigate to="/" replace />;
+
+  const fs = client?.field_sources;
+  const by = (field: string) => setByOf(fs, field);
+  const location = (client?.location ?? null) as { source?: string | null } | null;
+  const brandReadOn = formatDate(brandStep.row?.done_at);
+  const pillarsOn = formatDate(client?.pillars_derived_at);
+  const zones = form.timezone && !TIME_ZONES.includes(form.timezone) ? [form.timezone, ...TIME_ZONES] : TIME_ZONES;
+  const geoOptions = [...GEOS, ...form.geo.filter((g) => !GEOS.some((o) => o.value === g)).map((g) => ({ value: g, label: countryNames(g) }))];
+  const languageOptions = [...LANGUAGES, ...form.language.filter((l) => !LANGUAGES.some((o) => o.value === l)).map((l) => ({ value: l, label: languageNames(l) }))];
 
   return (
     <AppLayout
@@ -434,7 +317,7 @@ export default function ClientSetup() {
               <Play className="h-4 w-4 mr-2" /> Run Report
             </Button>
           )}
-          <Button variant="outline" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name}>
+          <Button variant="outline" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name.trim() || (!isNew && !dirty)}>
             {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
             Save
           </Button>
@@ -442,15 +325,17 @@ export default function ClientSetup() {
       }
     >
       <div className="max-w-5xl mx-auto space-y-6">
+        {notSaved && <p role="status" className="t-secondary">Your changes are kept here and are not saved yet.</p>}
+        {isNew && <p className="t-secondary">A name and a website are all a new client needs. The rest is read from the website once the client is created, and every value can be changed here.</p>}
 
         <AutomaticBrandReferences
-          clientId={!isNew && client ? id : undefined}
+          clientId={clientId && client ? clientId : undefined}
           savedVersion={savedVersion}
-          onReady={(synthesis) => setForm(f => ({ ...f, design_style_synthesis: synthesis }))}
+          // A style learned again: the design language card reads it from the client row.
+          onReady={() => void refetchClient()}
         />
         <Tabs defaultValue={setupTab}>
-          {/* On mobile (<sm), tabs scroll horizontally to keep labels readable.
-              From sm and up, they fill the row in a 5-column grid. */}
+          {/* On mobile (<sm), tabs scroll horizontally to keep labels readable. */}
           <TabsList className="w-full overflow-x-auto sm:grid sm:grid-cols-7 flex sm:flex-none gap-1 sm:gap-0 justify-start">
             <TabsTrigger value="info" className="flex-shrink-0">Client info</TabsTrigger>
             <TabsTrigger value="sprout" className="flex-shrink-0">Sprout Social</TabsTrigger>
@@ -469,108 +354,43 @@ export default function ClientSetup() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="client-name">Client Name *</Label>
-                  <Input id="client-name"
-                    value={form.name}
-                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                    placeholder="e.g., Acme Corp"
-                  />
+                  <Input id="client-name" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g., Acme Corp" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="client-website">Website URL</Label>
-                  <div className="flex gap-2">
-                    <Input id="client-website"
-                      value={form.website_url}
-                      onChange={(e) => setForm((f) => ({ ...f, website_url: e.target.value }))}
-                      placeholder="https://example.com"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        if (!form.website_url) {
-                          toast({ title: "Enter a website URL first", variant: "destructive" });
-                          return;
-                        }
-                        setResearchingBrand(true);
-                        try {
-                          const { data, error } = await supabase.functions.invoke("research-brand-identity", {
-                            body: { website_url: form.website_url.trim(), client_name: form.name },
-                          });
-                          if (error) {
-                            const detail = typeof data === "object" && data?.error ? data.error : error.message;
-                            throw new Error(detail);
-                          }
-                          if (data?.error) throw new Error(data.error);
-                          setForm((f) => ({ ...f, brand_identity: data.brand_identity }));
-                          setBrandDebug(data._debug || null);
-                          const colorCount = data._debug?.structured_colors_found || 0;
-                          const imgCount = data._debug?.raster_images_sent || 0;
-                          toast({
-                            title: "Brand identity extracted",
-                            description: `Found ${colorCount} color(s) from source code, ${imgCount} image(s) analyzed. Review and edit below.`,
-                          });
-                        } catch (err: any) {
-                          toast({ title: "Brand research failed", description: err.message, variant: "destructive" });
-                        } finally {
-                          setResearchingBrand(false);
-                        }
-                      }}
-                      disabled={researchingBrand || !form.website_url}
-                      className="shrink-0"
-                    >
-                      {researchingBrand ? (
-                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                      ) : (
-                        <Globe className="h-4 w-4 mr-1" />
-                      )}
-                      Research Brand
-                    </Button>
+                  <div className="flex gap-2 items-start flex-wrap sm:flex-nowrap">
+                    <Input id="client-website" value={form.website_url} onChange={(e) => set("website_url", e.target.value)} placeholder="https://example.com" />
+                    {clientId && <StepRefresh step={brandStep} working="Reading the website" />}
                   </div>
-                  <p className="t-secondary">
-                    Enter the client's website to automatically extract brand colors and visual style.
-                  </p>
+                  <Origin>
+                    {clientId && brandReadOn
+                      ? `The brand, logo, location, time zone and language are read from the website, last on ${brandReadOn}, and again whenever it changes.`
+                      : "The brand, logo, location, time zone and language are read from the website."}
+                  </Origin>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="client-timezone">Client Timezone</Label>
-                  <Select
-                    value={form.timezone}
-                    onValueChange={(value) => setForm((f) => ({ ...f, timezone: value }))}
-                  >
+                  <Select value={form.timezone || undefined} onValueChange={(value) => set("timezone", value)}>
                     <SelectTrigger id="client-timezone" className="w-full">
-                      <SelectValue placeholder="Select a timezone" />
+                      <SelectValue placeholder="Worked out from the website" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="UTC">UTC</SelectItem>
-                      <SelectItem value="America/New_York">Eastern Time (US)</SelectItem>
-                      <SelectItem value="America/Chicago">Central Time (US)</SelectItem>
-                      <SelectItem value="America/Denver">Mountain Time (US)</SelectItem>
-                      <SelectItem value="America/Los_Angeles">Pacific Time (US)</SelectItem>
-                      <SelectItem value="Europe/London">London (GMT/BST)</SelectItem>
-                      <SelectItem value="Europe/Paris">Central Europe (CET/CEST)</SelectItem>
-                      <SelectItem value="Europe/Berlin">Berlin (CET/CEST)</SelectItem>
-                      <SelectItem value="Asia/Jerusalem">Israel (IST/IDT)</SelectItem>
-                      <SelectItem value="Asia/Tokyo">Tokyo (JST)</SelectItem>
-                      <SelectItem value="Asia/Seoul">Seoul (KST)</SelectItem>
-                      <SelectItem value="Asia/Shanghai">Shanghai (CST)</SelectItem>
-                      <SelectItem value="America/Sao_Paulo">São Paulo (BRT)</SelectItem>
-                      <SelectItem value="Asia/Dubai">Dubai (GST)</SelectItem>
-                      <SelectItem value="Australia/Sydney">Sydney (AEST/AEDT)</SelectItem>
-                      <SelectItem value="Pacific/Auckland">Auckland (NZST/NZDT)</SelectItem>
+                      {zones.map((z) => <SelectItem key={z} value={z}>{timeZoneName(z)}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <p className="t-secondary">
-                    Used for scheduling content calendar posting times.
-                  </p>
+                  <Origin>
+                    {by("timezone") === "person"
+                      ? "Set by your team. The product keeps it as it is."
+                      : by("timezone") === "lifecycle" && locationSourceWords(location?.source)
+                        ? `Worked out from ${locationSourceWords(location?.source)}. You can change it here.`
+                        : "Used for posting times on the calendar."}
+                  </Origin>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="client-media-backend">Image &amp; video generation</Label>
-                  <Select
-                    value={form.media_backend}
-                    onValueChange={(value) => setForm((f) => ({ ...f, media_backend: value }))}
-                  >
+                  <Select value={form.media_backend} onValueChange={(value) => set("media_backend", value)}>
                     <SelectTrigger id="client-media-backend" className="w-full">
                       <SelectValue placeholder="Select a generator" />
                     </SelectTrigger>
@@ -579,194 +399,65 @@ export default function ClientSetup() {
                       <SelectItem value="higgsfield">Higgsfield (sharper type, team credits)</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="t-secondary">
-                    Higgsfield renders headline type far more cleanly, and spends the team's shared Higgsfield
-                    credits: roughly 2 per design. Connect the account under Settings before switching a client over.
-                  </p>
+                  <p className="t-secondary">Higgsfield renders headline type far more cleanly and spends the team's shared Higgsfield credits: roughly 2 per design.</p>
                 </div>
 
                 {form.brand_identity && (
                   <div className="space-y-4 rounded-lg border p-4 bg-[rgba(255,255,255,0.02)]">
-                    <Label className="t-body font-semibold">Brand identity</Label>
-
-                    {/* Colors */}
+                    <div className="space-y-1">
+                      <Label className="t-body font-semibold">Brand identity</Label>
+                      <Origin>
+                        {by("brand_identity") === "person"
+                          ? "Set by your team. The product keeps it as it is."
+                          : by("brand_identity") === "lifecycle"
+                            ? `Read from the website${brandReadOn ? ` on ${brandReadOn}` : ""}. You can change any of it here.`
+                            : ""}
+                      </Origin>
+                    </div>
                     <div className="grid grid-cols-3 gap-3">
-                      {(["primary_color", "secondary_color", "accent_color"] as const).map((key) => (
+                      {([["primary_color", "Primary color"], ["secondary_color", "Secondary color"], ["accent_color", "Accent color"]] as const).map(([key, label]) => (
                         <div key={key} className="space-y-1">
-                          <Label className="t-label capitalize">{key.replace(/_/g, " ")}</Label>
+                          <Label className="t-label">{label}</Label>
                           <div className="flex items-center gap-2">
-                            <div
-                              className="h-8 w-8 rounded border shrink-0"
-                              style={{ backgroundColor: form.brand_identity?.[key] || "#ccc" }}
-                            />
-                            <Input
-                              value={form.brand_identity?.[key] || ""}
-                              onChange={(e) =>
-                                setForm((f) => ({
-                                  ...f,
-                                  brand_identity: { ...f.brand_identity, [key]: e.target.value },
-                                }))
-                              }
-                              placeholder="#000000"
-                              className="h-8 t-label font-mono"
-                            />
+                            <div className="h-8 w-8 rounded border shrink-0" style={{ backgroundColor: form.brand_identity?.[key] || "#ccc" }} />
+                            <Input value={form.brand_identity?.[key] || ""} onChange={(e) => set("brand_identity", { ...form.brand_identity, [key]: e.target.value })} placeholder="#000000" className="h-8 t-label font-mono" />
                           </div>
                         </div>
                       ))}
                     </div>
-
-                    {/* Font + Visual Style */}
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="brand-font" className="t-label">Font Family</Label>
-                        <Input id="brand-font"
-                          value={form.brand_identity?.font_family || ""}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              brand_identity: { ...f.brand_identity, font_family: e.target.value },
-                            }))
-                          }
-                          placeholder="Inter, sans-serif"
-                          className="h-8 text-sm"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="brand-visual-style" className="t-label">Visual Style</Label>
-                        <Input id="brand-visual-style"
-                          value={form.brand_identity?.visual_style || ""}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              brand_identity: { ...f.brand_identity, visual_style: e.target.value },
-                            }))
-                          }
-                          placeholder="Modern, clean, minimalist"
-                          className="h-8 text-sm"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Tone of Voice + Background Style */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="brand-tone" className="t-label">Tone of Voice</Label>
-                        <Input id="brand-tone"
-                          value={form.brand_identity?.tone_of_voice || ""}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              brand_identity: { ...f.brand_identity, tone_of_voice: e.target.value },
-                            }))
-                          }
-                          placeholder="Warm, approachable, health-conscious"
-                          className="h-8 text-sm"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="brand-background" className="t-label">Background Style</Label>
-                        <Input id="brand-background"
-                          value={form.brand_identity?.background_style || ""}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              brand_identity: { ...f.brand_identity, background_style: e.target.value },
-                            }))
-                          }
-                          placeholder="Soft gradients, lifestyle photography"
-                          className="h-8 text-sm"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Design Elements */}
-                    <div className="space-y-1">
-                      <Label htmlFor="brand-elements" className="t-label">Design Elements</Label>
-                      <Input id="brand-elements"
-                        value={form.brand_identity?.design_elements || ""}
-                        onChange={(e) =>
-                          setForm((f) => ({
-                            ...f,
-                            brand_identity: { ...f.brand_identity, design_elements: e.target.value },
-                          }))
-                        }
-                        placeholder="Rounded shapes, lifestyle photography, organic textures"
-                        className="h-8 text-sm"
-                      />
-                    </div>
-
-                    {/* Logo Description */}
-                    <div className="space-y-1">
-                      <Label htmlFor="brand-logo" className="t-label">Logo Description</Label>
-                      <Input id="brand-logo"
-                        value={form.brand_identity?.logo_description || ""}
-                        onChange={(e) =>
-                          setForm((f) => ({
-                            ...f,
-                            brand_identity: { ...f.brand_identity, logo_description: e.target.value },
-                          }))
-                        }
-                        placeholder="Rounded wordmark in green with leaf icon"
-                        className="h-8 text-sm"
-                      />
-                    </div>
-
-                    {/* Debug: Color Sources */}
-                    {brandDebug?.structured_colors && brandDebug.structured_colors.length > 0 && (
-                      <details className="t-label">
-                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                          Source code colors found ({brandDebug.structured_colors.length}) — click to expand
-                        </summary>
-                        <div className="mt-2 space-y-1 rounded bg-[rgba(255,255,255,0.04)] p-2">
-                          {brandDebug.structured_colors.map((c: any, i: number) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <div className="h-4 w-4 rounded border shrink-0" style={{ backgroundColor: c.hex }} />
-                              <span className="font-mono">{c.hex}</span>
-                              <span className="text-muted-foreground">— {c.source}</span>
-                              <Badge
-                                variant={c.confidence === "high" ? "default" : "outline"}
-                                className="t-label h-4"
-                              >
-                                {c.confidence}
-                              </Badge>
-                            </div>
-                          ))}
-                          {brandDebug.log && (
-                            <div className="mt-2 pt-2 border-t t-secondary space-y-0.5">
-                              {brandDebug.log.map((l: string, i: number) => (
-                                <div key={i}>{l}</div>
-                              ))}
-                            </div>
-                          )}
+                      {([["font_family", "Font Family", "Inter, sans-serif"], ["visual_style", "Visual Style", "Modern, clean, minimalist"], ["tone_of_voice", "Tone of Voice", "Warm, approachable, health-conscious"], ["background_style", "Background Style", "Soft gradients, lifestyle photography"]] as const).map(([key, label, placeholder]) => (
+                        <div key={key} className="space-y-1">
+                          <Label htmlFor={`brand-${key}`} className="t-label">{label}</Label>
+                          <Input id={`brand-${key}`} value={form.brand_identity?.[key] || ""} onChange={(e) => set("brand_identity", { ...form.brand_identity, [key]: e.target.value })} placeholder={placeholder} className="h-8 text-sm" />
                         </div>
-                      </details>
-                    )}
+                      ))}
+                    </div>
+                    {([["design_elements", "Design Elements", "Rounded shapes, lifestyle photography, organic textures"], ["logo_description", "Logo Description", "Rounded wordmark in green with leaf icon"]] as const).map(([key, label, placeholder]) => (
+                      <div key={key} className="space-y-1">
+                        <Label htmlFor={`brand-${key}`} className="t-label">{label}</Label>
+                        <Input id={`brand-${key}`} value={form.brand_identity?.[key] || ""} onChange={(e) => set("brand_identity", { ...form.brand_identity, [key]: e.target.value })} placeholder={placeholder} className="h-8 text-sm" />
+                      </div>
+                    ))}
                   </div>
                 )}
 
                 <div className="space-y-2">
                   <Label>Primary Platforms</Label>
-                  <p className="t-secondary">
-                    Select ALL platforms the client is active on or wants to grow on. This determines which platforms
-                    receive content recommendations and calendar posts.
-                  </p>
+                  <Origin>
+                    {by("primary_platforms") === "person"
+                      ? "Set by your team. These platforms get content recommendations and calendar posts."
+                      : by("primary_platforms") === "lifecycle"
+                        ? "Taken from the client's Sprout accounts. These platforms get content recommendations and calendar posts."
+                        : "These platforms get content recommendations and calendar posts."}
+                  </Origin>
                   <div className="flex flex-wrap gap-2">
                     {PLATFORMS.map((p) => {
                       const active = form.primary_platforms.includes(p);
                       return (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => togglePlatform(p)}
-                          aria-pressed={active}
-                          className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                        >
-                          <Badge
-                            variant={active ? "default" : "outline"}
-                            className="cursor-pointer t-body py-1.5 px-3"
-                          >
-                            {p}
-                          </Badge>
+                        <button key={p} type="button" onClick={() => toggleIn("primary_platforms", p)} aria-pressed={active}
+                          className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+                          <Badge variant={active ? "default" : "outline"} className="cursor-pointer t-body py-1.5 px-3">{p}</Badge>
                         </button>
                       );
                     })}
@@ -774,23 +465,14 @@ export default function ClientSetup() {
                 </div>
                 <div className="space-y-2">
                   <Label>Geographic Focus (select multiple)</Label>
+                  <Origin>{by("geo") === "lifecycle" ? "Read from the website. You can change it here." : ""}</Origin>
                   <div className="flex flex-wrap gap-2">
-                    {GEOS.map((g) => {
+                    {geoOptions.map((g) => {
                       const active = form.geo.includes(g.value);
                       return (
-                        <button
-                          key={g.value}
-                          type="button"
-                          onClick={() => toggleGeo(g.value)}
-                          aria-pressed={active}
-                          className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                        >
-                          <Badge
-                            variant={active ? "default" : "outline"}
-                            className="cursor-pointer t-body py-1.5 px-3"
-                          >
-                            {g.label}
-                          </Badge>
+                        <button key={g.value} type="button" onClick={() => toggleIn("geo", g.value)} aria-pressed={active}
+                          className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+                          <Badge variant={active ? "default" : "outline"} className="cursor-pointer t-body py-1.5 px-3">{g.label}</Badge>
                         </button>
                       );
                     })}
@@ -799,29 +481,18 @@ export default function ClientSetup() {
                 <div className="space-y-2">
                   <Label>Content Languages (select multiple)</Label>
                   <div className="flex flex-wrap gap-2">
-                    {LANGUAGES.map((l) => {
+                    {languageOptions.map((l) => {
                       const active = form.language.includes(l.value);
                       return (
-                        <button
-                          key={l.value}
-                          type="button"
-                          onClick={() => toggleLanguage(l.value)}
-                          aria-pressed={active}
-                          className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                        >
-                          <Badge
-                            variant={active ? "default" : "outline"}
-                            className="cursor-pointer t-body py-1.5 px-3"
-                          >
-                            {l.label}
-                          </Badge>
+                        <button key={l.value} type="button" onClick={() => toggleIn("language", l.value)} aria-pressed={active}
+                          className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+                          <Badge variant={active ? "default" : "outline"} className="cursor-pointer t-body py-1.5 px-3">{l.label}</Badge>
                         </button>
                       );
                     })}
                   </div>
                   <p className="t-secondary">
-                    AI-generated copy will target these languages. Trends will include posts matching any selected
-                    language.
+                    {by("language") === "lifecycle" ? "Read from the website. " : ""}AI-generated copy targets these languages, and trends include posts in any of them.
                   </p>
                 </div>
               </CardContent>
@@ -832,16 +503,20 @@ export default function ClientSetup() {
             <Card>
               <CardHeader>
                 <CardTitle className="t-h3">Sprout Social Profiles</CardTitle>
-                <CardDescription>Select the Sprout Social profiles that belong to this client</CardDescription>
+                <CardDescription>
+                  Matched automatically from Sprout's brand names and the profiles the client's website links to, and looked at again every day. Add or remove any here; a profile you remove stays removed.
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <SproutProfileSelector
-                  clientId={isNew ? undefined : id}
-                  selectedProfiles={selectedSproutProfiles}
-                  onSelectionChange={setSelectedSproutProfiles}
-                  onLoadStateChange={setSproutListed}
-                  primaryPlatforms={form.primary_platforms}
-                />
+                {clientId ? (
+                  <SproutProfileSelector
+                    assigned={assignedProfiles ?? null}
+                    selected={selectedProfiles}
+                    onChange={setSelectedProfiles}
+                  />
+                ) : (
+                  <p className="t-secondary">The client's accounts are matched once it is created.</p>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -852,52 +527,39 @@ export default function ClientSetup() {
                 <CardTitle className="t-h3">Content strategy</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* For a client with no posting history the strategy document
-                    is the only source of pillars, so it comes first. */}
                 <StrategyDocUpload
-                  clientId={isNew ? undefined : id}
+                  clientId={clientId}
                   clientName={form.name}
                   filePath={form.strategy_doc_file_path}
-                  onFilePathChange={(path) => setForm((f) => ({ ...f, strategy_doc_file_path: path }))}
-                />
-                <PillarDerivationCard
-                  clientId={isNew ? undefined : id}
-                  hasStrategyDoc={!!form.strategy_doc_file_path}
-                  hasBrief={!!form.brief_text?.trim() || !!form.brand_notes?.trim()}
-                  derivedAt={(client as any)?.pillars_derived_at}
-                  source={(client as any)?.pillars_source}
-                  onDerived={(pillars, keywords, source) =>
-                    setForm((f) => ({
-                      ...f,
-                      pillars_source: source || "brief",
-                      ...mergeStrategySuggestions(f.content_pillars, f.social_keywords, pillars, keywords),
-
-                    }))
-                  }
+                  onFilePathChange={(path) => set("strategy_doc_file_path", path)}
                 />
                 <div className="space-y-3">
-                  <Label>Current content pillars</Label>
-                  <p className="t-secondary">
-                    Read from the strategy or the client's own posts above, or written here. Either way, edit anything that looks wrong.
-                  </p>
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="space-y-1 min-w-0">
+                      <Label>Content pillars</Label>
+                      <Origin>
+                        {by("content_pillars") === "person"
+                          ? "Set by your team. The product keeps them as they are."
+                          : by("content_pillars") === "lifecycle"
+                            ? `Read from ${PILLAR_SOURCES[String(client?.pillars_source ?? "")] ?? "the brief and the website"}${pillarsOn ? ` on ${pillarsOn}` : ""}, and again when the brief or strategy document changes. You can change any of them here.`
+                            : "Read from the strategy document, the brief and the website."}
+                      </Origin>
+                    </div>
+                    {clientId && <StepRefresh step={briefStep} working="Reading the brief and the website" />}
+                  </div>
                   <div className="space-y-3">
                     {form.content_pillars.map((pillar, index) => (
                       <div key={index} className="p-3 rounded-md border bg-card space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="font-medium t-body">{pillar.name}</span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removePillar(index)}
-                            aria-label={`Remove pillar ${pillar.name}`}
-                          >
+                          <Button variant="ghost" size="sm" onClick={() => set("content_pillars", form.content_pillars.filter((_, i) => i !== index))} aria-label={`Remove pillar ${pillar.name}`}>
                             <X className="h-3.5 w-3.5" />
                           </Button>
                         </div>
                         <Textarea
                           value={pillar.description}
-                          onChange={(e) => updatePillarDescription(index, e.target.value)}
-                          placeholder={`Describe what "${pillar.name}" content looks like: topics, tone, examples...`}
+                          onChange={(e) => set("content_pillars", form.content_pillars.map((p, i) => (i === index ? { ...p, description: e.target.value } : p)))}
+                          placeholder={`What "${pillar.name}" content looks like: topics, tone, examples...`}
                           rows={2}
                           className="t-body"
                         />
@@ -905,12 +567,7 @@ export default function ClientSetup() {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <Input
-                      value={newPillarName}
-                      onChange={(e) => setNewPillarName(e.target.value)}
-                      placeholder="Add a content pillar"
-                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPillar())}
-                    />
+                    <Input value={newPillarName} onChange={(e) => setNewPillarName(e.target.value)} placeholder="Add a content pillar" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPillar())} />
                     <Button variant="outline" size="sm" onClick={addPillar} aria-label="Add content pillar">
                       <Plus className="h-4 w-4" aria-hidden="true" />
                     </Button>
@@ -920,44 +577,22 @@ export default function ClientSetup() {
                 <div className="space-y-2">
                   <Label>Social Keywords</Label>
                   <p className="t-secondary">
-                    Add multi-word phrases used for TikTok/Instagram trend search. Enter one phrase at a time — do not
-                    use commas.
-                    <br />
-                    Examples: "AI content strategy", "performance marketing tips", "social media automation"
+                    Phrases used for TikTok and Instagram trend search, such as "AI content strategy" or "performance marketing tips".
+                    {by("social_keywords") === "lifecycle" ? " Read with the pillars; you can change any of them here." : ""}
                   </p>
                   <div className="flex flex-wrap gap-2 mb-2">
                     {form.social_keywords.map((k) => (
                       <Badge key={k} variant="outline" className="gap-1.5 pr-1 t-body py-1">
                         {k}
-                        <button
-                          type="button"
-                          aria-label={`Remove keyword ${k}`}
-                          onClick={() =>
-                            setForm((f) => ({ ...f, social_keywords: f.social_keywords.filter((x) => x !== k) }))
-                          }
-                          className="rounded-full p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                        >
+                        <button type="button" aria-label={`Remove keyword ${k}`} onClick={() => set("social_keywords", form.social_keywords.filter((x) => x !== k))}
+                          className="rounded-full p-0.5 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                           <X className="h-3 w-3" />
                         </button>
                       </Badge>
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <Input
-                      value={newKeyword}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val.includes(",")) {
-                          toast({
-                            title: "No commas needed",
-                            description: "Press Enter or click + to add each keyword phrase separately.",
-                          });
-                        }
-                        setNewKeyword(val);
-                      }}
-                      placeholder="Add keyword phrase (press Enter)"
-                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())}
-                    />
+                    <Input value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)} placeholder="Add keyword phrases (press Enter)" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())} />
                     <Button variant="outline" size="sm" onClick={addKeyword} aria-label="Add keyword phrase">
                       <Plus className="h-4 w-4" aria-hidden="true" />
                     </Button>
@@ -969,7 +604,7 @@ export default function ClientSetup() {
                   value={form.posting_rhythm}
                   resolved={planRhythm?.resolved ?? null}
                   sources={planRhythm?.sources ?? null}
-                  onChange={(posting_rhythm) => setForm((f) => ({ ...f, posting_rhythm }))}
+                  onChange={(posting_rhythm) => set("posting_rhythm", posting_rhythm)}
                 />
               </CardContent>
             </Card>
@@ -980,26 +615,21 @@ export default function ClientSetup() {
               <CardHeader>
                 <CardTitle className="t-h3">Competitive context</CardTitle>
                 <CardDescription>
-                  Who does the account team think this client competes with? These notes are fed
-                  into AI competitor identification and weighed heavily.
+                  The three closest competitors with a website are chosen automatically. Notes from the account team are weighed heavily when they are.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="competitor-notes">Competitor notes</Label>
-                  <Textarea id="competitor-notes"
-                    rows={5}
+                  <Textarea id="competitor-notes" rows={5}
                     placeholder={'e.g. "Direct: Brand A, Brand B (same price point). Aspirational: Brand C, do not include. Regional player: Brand D."'}
                     value={form.competitor_seed_notes}
-                    onChange={(e) => setForm((f) => ({ ...f, competitor_seed_notes: e.target.value }))}
+                    onChange={(e) => set("competitor_seed_notes", e.target.value)}
                   />
-                  <p className="t-secondary">
-                    Saved with the client. Remember to hit Save before running identification.
-                  </p>
                 </div>
-                {!isNew && (
+                {clientId && (
                   <Button variant="outline" onClick={() => navigate(`/clients/${id}/competitive`)}>
-                    Open competitor review
+                    Open competitors
                   </Button>
                 )}
               </CardContent>
@@ -1010,113 +640,55 @@ export default function ClientSetup() {
             <Card>
               <CardHeader>
                 <CardTitle className="t-h3">Client brief</CardTitle>
-                <CardDescription>
-                  Brand voice, target audience, campaign objectives, and content restrictions
-                </CardDescription>
+                <CardDescription>Brand voice, target audience, campaign objectives, and content restrictions</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Brand Voice Preset</Label>
-                  <p className="t-secondary">
-                    Select a tone that best matches this client's brand voice.
-                  </p>
+                  <p className="t-secondary">The tone that best matches this client's brand voice.</p>
                   <div className="flex flex-wrap gap-2">
                     {BRAND_VOICE_PRESETS.map((preset) => (
-                      <Badge
-                        key={preset}
-                        variant={form.brand_voice_preset === preset ? "default" : "outline"}
-                        className="cursor-pointer"
-                        onClick={() =>
-                          setForm((f) => ({
-                            ...f,
-                            brand_voice_preset: f.brand_voice_preset === preset ? "" : preset,
-                          }))
-                        }
-                      >
-                        {preset}
-                      </Badge>
+                      <button key={preset} type="button" aria-pressed={form.brand_voice_preset === preset} onClick={() => set("brand_voice_preset", form.brand_voice_preset === preset ? "" : preset)}
+                        className="inline-flex items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                        <Badge variant={form.brand_voice_preset === preset ? "default" : "outline"} className="cursor-pointer">{preset}</Badge>
+                      </button>
                     ))}
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="brand-notes">Brand Notes</Label>
-                  <Textarea id="brand-notes"
-                    value={form.brand_notes}
-                    onChange={(e) => setForm((f) => ({ ...f, brand_notes: e.target.value }))}
-                    placeholder="Brand voice, positioning, key messaging..."
-                    rows={3}
-                  />
+                  <Textarea id="brand-notes" value={form.brand_notes} onChange={(e) => set("brand_notes", e.target.value)} placeholder="Brand voice, positioning, key messaging..." rows={3} />
                 </div>
-                <LogoFileField clientId={isNew ? undefined : id} clientName={form.name} logoUrl={form.logo_url} onChange={(url) => setForm((f) => ({ ...f, logo_url: url }))} />
+                <LogoFileField clientId={clientId} clientName={form.name} logoUrl={form.logo_url} onChange={(url) => set("logo_url", url)} />
+                <Origin>{by("logo_url") === "lifecycle" ? "The logo on file was taken from the client's website." : ""}</Origin>
                 <details className="space-y-3"><summary className="cursor-pointer t-secondary">Optional brand documents and additional references</summary>
-                <BrandBookUpload
-                  clientId={isNew ? undefined : id}
-                  clientName={form.name}
-                  brandBookUrl={form.brand_book_url}
-                  brandBookFilePath={form.brand_book_file_path}
-                  onBrandBookUrlChange={(url) => setForm((f) => ({ ...f, brand_book_url: url }))}
-                  onBrandBookFilePathChange={(path) => {
-                    setForm((f) => ({ ...f, brand_book_file_path: path }));
-                    setDesignInputsVersion((v) => v + 1);
-                  }}
-                  onBrandIdentityExtracted={(identity) =>
-                    setForm((f) => ({ ...f, brand_identity: { ...f.brand_identity, ...identity } }))
-                  }
-                />
-
-                <DesignReferencesUpload
-                  clientId={isNew ? undefined : id}
-                  clientName={form.name}
-                  designReferences={form.design_references}
-                  onDesignReferencesChange={(refs) => {
-                    setForm((f) => ({ ...f, design_references: refs }));
-                    setDesignInputsVersion((v) => v + 1);
-                  }}
-                />
-
-                <DesignSynthesisCard
-                  clientId={id !== "new" ? id : undefined}
-                  designReferencesCount={form.design_references.length}
-                  hasBrandBook={!!form.brand_book_file_path}
-                  existingSynthesis={form.design_style_synthesis}
-                  autoTrigger={false}
-                  inputsVersion={designInputsVersion}
-                  onSynthesized={(s) => setForm((f) => ({ ...f, design_style_synthesis: s }))}
-                />
+                  <BrandBookUpload
+                    clientId={clientId}
+                    clientName={form.name}
+                    brandBookUrl={form.brand_book_url}
+                    brandBookFilePath={form.brand_book_file_path}
+                    onBrandBookUrlChange={(url) => set("brand_book_url", url)}
+                    onBrandBookFilePathChange={(path) => set("brand_book_file_path", path)}
+                    onBrandIdentityExtracted={(identity) => setForm((f) => ({ ...f, brand_identity: { ...f.brand_identity, ...identity } }))}
+                  />
+                  <DesignReferencesUpload
+                    clientId={clientId}
+                    clientName={form.name}
+                    designReferences={form.design_references}
+                    onDesignReferencesChange={(refs) => set("design_references", refs)}
+                  />
+                  <DesignSynthesisCard existingSynthesis={client?.design_style_synthesis ?? null} />
                 </details>
                 <div className="space-y-2">
                   <Label htmlFor="brief-text">Brief Text</Label>
-                  <Textarea id="brief-text"
-                    value={form.brief_text}
-                    onChange={(e) => setForm((f) => ({ ...f, brief_text: e.target.value }))}
-                    rows={10}
+                  <Origin>
+                    {by("brief_text") === "lifecycle"
+                      ? `Written by the product from ${client?.strategy_doc_file_path ? "the strategy document" : "the website"}. You can rewrite it; the product never replaces your version.`
+                      : ""}
+                  </Origin>
+                  <Textarea id="brief-text" value={form.brief_text} onChange={(e) => set("brief_text", e.target.value)} rows={10}
                     placeholder={`Brand Voice: Professional yet approachable\nTarget Audience: B2B SaaS decision-makers\nCampaign Objectives: Increase brand awareness and thought leadership\nContent Restrictions: No competitor mentions\nCompetitive Positioning: Market leader in AI-powered analytics`}
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="brief-doc-id">Google Doc ID (optional)</Label>
-                  <Input id="brief-doc-id"
-                    value={form.brief_file_id}
-                    onChange={(e) => setForm((f) => ({ ...f, brief_file_id: e.target.value }))}
-                    placeholder="e.g., 1BxiMVs0XRA5nFMdKvBdBZjgmUii3ObRy2CmEkTzOQ5s"
-                  />
-                  <div className="bg-[rgba(255,255,255,0.03)] rounded-md p-3 t-secondary space-y-1.5">
-                    <p className="font-medium text-foreground flex items-center gap-1">
-                      <Info className="h-3 w-3" /> How to find your Google Doc ID:
-                    </p>
-                    <ol className="list-decimal pl-4 space-y-1">
-                      <li>Open your brief document in Google Docs</li>
-                      <li>Look at the URL in your browser's address bar</li>
-                      <li>
-                        The ID is the long string between <code className="bg-background px-1 rounded">/d/</code> and{" "}
-                        <code className="bg-background px-1 rounded">/edit</code>
-                      </li>
-                      <li>
-                        Example: docs.google.com/document/d/<strong>1BxiMVs0XRA5nF...</strong>/edit
-                      </li>
-                    </ol>
-                    <p>If provided, the AI analysis will use this Google Doc instead of the brief text above.</p>
-                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -1131,16 +703,11 @@ export default function ClientSetup() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {voiceLearnings.map((learning: any) => (
-                      <div
-                        key={learning.id}
-                        className="flex items-start justify-between gap-3 p-3 rounded-md border bg-card"
-                      >
+                    {voiceLearnings.map((learning) => (
+                      <div key={learning.id} className="flex items-start justify-between gap-3 p-3 rounded-md border bg-card">
                         <div className="flex-1 space-y-1">
                           <div className="flex items-center gap-2">
-                            <Badge variant="secondary" className="t-label">
-                              {PATTERN_LABELS[learning.pattern_type] ?? "Other"}
-                            </Badge>
+                            <Badge variant="secondary" className="t-label">{PATTERN_LABELS[learning.pattern_type] ?? "Other"}</Badge>
                             <span className="t-secondary">
                               {learning.times_confirmed > 1 ? `Confirmed ${learning.times_confirmed} times` : "Seen once"}
                               {" · "}
@@ -1149,26 +716,12 @@ export default function ClientSetup() {
                           </div>
                           <p className="t-body">{learning.pattern_description}</p>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="shrink-0 h-8 px-2"
-                          aria-label="Remove brand voice learning"
+                        <Button variant="ghost" size="sm" className="shrink-0 h-8 px-2" aria-label="Remove brand voice learning"
                           onClick={async () => {
-                            try {
-                              const { error } = await supabase
-                                .from("brand_voice_learnings")
-                                .delete()
-                                .eq("id", learning.id);
-                              if (error) throw error;
-                              queryClient.invalidateQueries({
-                                queryKey: ["brand-voice-learnings", id],
-                              });
-                            } catch (err: any) {
-                              toast({ title: "Failed to remove", description: err.message, variant: "destructive" });
-                            }
-                          }}
-                        >
+                            await sendQuietly(() => supabase.from("brand_voice_learnings").delete().eq("id", learning.id), { again: writeResendable });
+                            // The list shows what the database has.
+                            void queryClient.invalidateQueries({ queryKey: ["brand-voice-learnings", id] });
+                          }}>
                           <X className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -1179,19 +732,19 @@ export default function ClientSetup() {
             )}
           </TabsContent>
 
-          {!isNew && id && (
+          {clientId && (
             <TabsContent value="designs" className="space-y-4 mt-4">
-              <DesignSettingsCard clientId={id} />
+              <DesignSettingsCard clientId={clientId} />
             </TabsContent>
           )}
 
           <TabsContent value="schedule" className="space-y-4 mt-4">
-            {!isNew && id ? (
-              <ReportScheduleManager clientId={id} />
+            {clientId ? (
+              <ReportScheduleManager clientId={clientId} timeZone={client?.timezone || undefined} />
             ) : (
               <Card>
                 <CardContent className="py-8 text-center text-muted-foreground">
-                  Save the client first to configure report scheduling.
+                  Both monthly reports are scheduled for the 7th of each month when the client is created.
                 </CardContent>
               </Card>
             )}
@@ -1202,59 +755,50 @@ export default function ClientSetup() {
   );
 }
 
-function ReportScheduleManager({ clientId }: { clientId: string }) {
-  const { toast } = useToast();
-  const navigate = useNavigate();
+/** Next 7th of the month at 07:15 UTC, which is when the daily scheduler fires. */
+function nextSeventh(): string {
+  const now = new Date();
+  let next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 7, 7, 15, 0));
+  if (next <= now) next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 7, 7, 15, 0));
+  return next.toISOString();
+}
+
+function ReportScheduleManager({ clientId, timeZone }: { clientId: string; timeZone?: string }) {
   const queryClient = useQueryClient();
   const KINDS = [
-    { kind: "social", label: "Monthly social report", description: "Sprout performance and trends for the previous calendar month. Its findings feed the weekly calendar plans." },
-    { kind: "competitive", label: "Monthly competitive analysis", description: "RivalIQ landscape pull for the previous calendar month. Needs a confirmed competitor set connected to RivalIQ tracking; until then it waits, and the social report goes ahead without it." },
+    { kind: "social", noun: "monthly" as const, label: "Monthly social report", description: "Sprout performance and trends for the previous calendar month. Its findings feed the weekly calendar plans." },
+    { kind: "competitive", noun: "competitive" as const, label: "Monthly competitive analysis", description: "The client and its three competitors in RivalIQ for the previous calendar month. It runs first, so the social report can use it." },
   ] as const;
 
-  const { data: schedules, isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["report-schedules", clientId],
     queryFn: async () => {
-      const { data, error } = await supabase.from("report_schedules").select("*").eq("client_id", clientId);
-      if (error) throw error;
-      return data || [];
+      const [schedules, social, competitive] = await Promise.all([
+        supabase.from("report_schedules").select("*").eq("client_id", clientId),
+        supabase.from("reports").select("date_range_start, date_range_end, created_at").eq("client_id", clientId).eq("status", "completed").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        supabase.from("competitive_reports").select("date_range_start, date_range_end, created_at, report_data").eq("client_id", clientId).eq("status", "complete").order("created_at", { ascending: false }).limit(6),
+      ]);
+      if (schedules.error) throw schedules.error;
+      // The latest analysis that passed its checks: a held one is not the last report anyone got.
+      const ready = (competitive.data || []).find((r) => competitiveReportQuality(r.report_data).ready) ?? null;
+      return { schedules: (schedules.data || []) as Row[], latest: { social: social.data ?? null, competitive: ready } as Record<string, Row | null> };
     },
   });
 
-  // Next 7th of the month at 07:15 UTC, which is when the daily scheduler fires.
-  const nextRun = () => {
-    const now = new Date();
-    let next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 7, 7, 15, 0));
-    if (next <= now) next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 7, 7, 15, 0));
-    return next.toISOString();
-  };
-
   const toggle = useMutation({
     mutationFn: async ({ kind, active }: { kind: string; active: boolean }) => {
-      const existing = (schedules || []).find((s: any) => (s.report_kind || "social") === kind);
-      const payload: any = {
-        client_id: clientId,
-        report_kind: kind,
-        frequency: "monthly",
-        run_day_of_month: 7,
-        range_mode: "previous_month",
-        is_active: active,
-        next_run_at: active ? nextRun() : null,
+      const existing = (data?.schedules || []).find((s) => (s.report_kind || "social") === kind);
+      const payload = {
+        client_id: clientId, report_kind: kind, frequency: "monthly", run_day_of_month: 7, range_mode: "previous_month",
+        is_active: active, next_run_at: active ? nextSeventh() : null,
       };
-      if (existing) {
-        const { error } = await supabase.from("report_schedules").update(payload).eq("id", existing.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("report_schedules").insert(payload);
-        if (error) throw error;
-      }
+      const { error } = existing
+        ? await sendQuietly(() => supabase.from("report_schedules").update(payload).eq("id", existing.id), { again: writeResendable })
+        : await sendQuietly(() => supabase.from("report_schedules").upsert(payload, { onConflict: "client_id,report_kind" }), { again: writeResendable });
+      if (error) throw error;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["report-schedules", clientId] });
-      toast({ title: "Schedule saved" });
-    },
-    onError: (err: any) => {
-      toast({ title: "Failed to save schedule", description: err.message, variant: "destructive" });
-    },
+    // The switch shows what the schedule is in the database.
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["report-schedules", clientId] }),
   });
 
   if (isLoading) return <Loading label="Loading schedules" />;
@@ -1265,38 +809,26 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
         <CardTitle className="t-h3 flex items-center gap-2">
           <CalendarClock className="h-4 w-4" /> Monthly schedules
         </CardTitle>
-        <CardDescription>
-          Both reports run automatically on the 7th of each month at 07:15 UTC and cover the previous calendar month. The competitive analysis runs first so the social report can use it.
-        </CardDescription>
+        <CardDescription>Both reports run on the 7th of each month and cover the previous calendar month.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {KINDS.map(({ kind, label, description }) => {
-          const row: any = (schedules || []).find((s: any) => (s.report_kind || "social") === kind);
+        {KINDS.map(({ kind, noun, label, description }) => {
+          const row = (data?.schedules || []).find((s) => (s.report_kind || "social") === kind);
           const active = !!row?.is_active;
-          // last_result is the scheduler's text note. A competitive schedule
-          // that cannot run because RivalIQ does not track the client says
-          // "needs tracking: ..." (run-scheduled-jobs/dispatch.ts NEEDS_TRACKING).
-          const last: string | null = typeof row?.last_result === "string" && row.last_result.trim() ? row.last_result : null;
-          const needsTracking = kind === "competitive" && !!last && /^needs tracking:/i.test(last);
+          const latest = data?.latest[kind];
+          const lines = scheduleLines({
+            kind: noun, active, nextRunAt: row?.next_run_at,
+            latest: latest ? { start: latest.date_range_start, end: latest.date_range_end, ranAt: latest.created_at } : null,
+            timeZone,
+          });
           return (
             <div key={kind} className="flex items-start justify-between gap-4 glass-inner p-4">
               <div className="space-y-1">
                 <Label>{label}</Label>
                 <p className="t-secondary">{description}</p>
-                <p className="t-secondary">
-                  {active && row?.next_run_at ? `Next run ${new Date(row.next_run_at).toLocaleDateString()}` : "Paused"}
-                  {row?.last_run_at ? ` · Last run ${new Date(row.last_run_at).toLocaleDateString()}` : ""}
-                </p>
-                {needsTracking ? (
-                  <div className="space-y-2">
-                    <p className="t-secondary">Needs tracking: {last!.replace(/^needs tracking:\s*/i, "")}</p>
-                    <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive`)}>Open competitors</Button>
-                  </div>
-                ) : last ? (
-                  <p className="t-label">Latest: {last}</p>
-                ) : null}
+                {lines.map((line) => <p key={line} className="t-secondary">{line}</p>)}
               </div>
-              <Switch checked={active} disabled={toggle.isPending} onCheckedChange={(v) => toggle.mutate({ kind, active: v })} />
+              <Switch checked={active} disabled={toggle.isPending} onCheckedChange={(v) => toggle.mutate({ kind, active: v })} aria-label={`${label} on or off`} />
             </div>
           );
         })}
@@ -1305,211 +837,104 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
   );
 }
 
-function SproutProfileSelector({
-  clientId,
-  selectedProfiles,
-  onSelectionChange,
-  onLoadStateChange,
-  primaryPlatforms = [],
-}: {
-  clientId?: string;
-  selectedProfiles: any[];
-  onSelectionChange: (profiles: any[]) => void;
-  /** True once Sprout has answered. The save path must not prune on a failure. */
-  onLoadStateChange?: (hasProfiles: boolean) => void;
-  primaryPlatforms?: string[];
+/**
+ * The client's Sprout accounts. The lifecycle assigns them (the accounts
+ * step); this shows them and lets a person add or remove any. Sprout's list
+ * of every profile on the agency account is read quietly, and asked for again
+ * a minute later when it does not come back; the assigned accounts show
+ * either way.
+ */
+function SproutProfileSelector({ assigned, selected, onChange }: {
+  assigned: Row[] | null;
+  /** The person's selection, or null while it equals what is assigned. */
+  selected: SproutProfile[] | null;
+  onChange: (profiles: SproutProfile[] | null) => void;
 }) {
-  const [fetching, setFetching] = useState(false);
-  const [allProfiles, setAllProfiles] = useState<any[]>([]);
+  const [allProfiles, setAllProfiles] = useState<SproutProfile[] | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const { toast } = useToast();
 
-  const { data: assignedProfiles } = useQuery({
-    queryKey: ["sprout-profiles", clientId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("sprout_profiles")
-        .select("*")
-        .eq("client_id", clientId!)
-        .neq("is_active", false); // include rows where is_active is NULL or TRUE
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!clientId,
-  });
-
-  useEffect(() => {
-    fetchProfiles();
+  const fetchProfiles = useCallback(async () => {
+    const { data, error } = await sendQuietly(() => supabase.functions.invoke("sprout-profiles", { body: {} }), { again: (e) => invokeResendable(e, { idempotent: true }) });
+    if (!error && Array.isArray(data?.profiles)) setAllProfiles(data.profiles);
+    return !error;
   }, []);
-
   useEffect(() => {
-    if (assignedProfiles && allProfiles.length > 0 && selectedProfiles.length === 0) {
-      // Match on strings: the assignment stores the id as text and Sprout
-      // returns it as a number, so a strict compare dropped every row.
-      // A profile assigned here that Sprout no longer lists is KEPT as a
-      // stub — dropping it silently deleted the assignment on the next save.
-      const preSelected = allProfiles.filter((p) =>
-        assignedProfiles.some((a: any) => String(a.sprout_profile_id) === String(p.id)),
-      );
-      const orphans = assignedProfiles
-        .filter((a: any) => !allProfiles.some((p) => String(p.id) === String(a.sprout_profile_id)))
-        .map((a: any) => ({
-          id: a.sprout_profile_id,
-          name: a.profile_name,
-          native_name: a.native_name,
-          network_type: a.network_type,
-          network_display: a.network_type,
-          native_link: a.native_link,
-          missing: true,
-        }));
-      const all = [...preSelected, ...orphans];
-      if (all.length > 0) onSelectionChange(all);
-    }
-  }, [assignedProfiles, allProfiles]);
+    let timer: number | undefined;
+    const load = async () => { if (!(await fetchProfiles())) timer = window.setTimeout(load, 60_000); };
+    void load();
+    return () => window.clearTimeout(timer);
+  }, [fetchProfiles]);
 
-  // Platforms the client publishes on that have no profile connected.
-  const missingPlatforms = primaryPlatforms.filter((platform) => {
-    const want = normalizePlatformKey(platform);
-    return !selectedProfiles.some((p) => normalizePlatformKey(p.network_type || p.network_display || "") === want);
+  // What is assigned, as Sprout lists it when it does; an assigned profile Sprout no longer lists is kept.
+  const fromAssigned: SproutProfile[] = (assigned ?? []).map((a) => {
+    const listed = (allProfiles ?? []).find((p) => String(p.id) === String(a.sprout_profile_id));
+    return listed ?? { id: a.sprout_profile_id, name: a.profile_name, native_name: a.native_name, network_type: a.network_type, native_link: a.native_link, missing: allProfiles !== null };
   });
+  const current = selected ?? fromAssigned;
+  const isSelected = (p: SproutProfile) => current.some((s) => String(s.id) === String(p.id));
+  const toggleProfile = (p: SproutProfile) => onChange(isSelected(p) ? current.filter((s) => String(s.id) !== String(p.id)) : [...current, p]);
 
-  const fetchProfiles = async () => {
-    setFetching(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("sprout-profiles", {
-        body: {},
-      });
-      if (error) throw error;
-      const listed = data.profiles || [];
-      setAllProfiles(listed);
-      // Report whether there is anything to choose from, not just that the
-      // call succeeded. An empty list must not authorise a prune.
-      onLoadStateChange?.(listed.length > 0);
-    } catch (err: any) {
-      onLoadStateChange?.(false);
-      toast({ title: "Could not reach Sprout Social", description: `${err.message}. Profile assignments are left as they are.`, variant: "destructive" });
-    } finally {
-      setFetching(false);
-    }
-  };
-
-  const toggleProfile = (profile: any) => {
-    const isSelected = selectedProfiles.some((p) => p.id === profile.id);
-    if (isSelected) {
-      onSelectionChange(selectedProfiles.filter((p) => p.id !== profile.id));
-    } else {
-      onSelectionChange([...selectedProfiles, profile]);
-    }
-  };
-
-  const platformIcon: Record<string, string> = {
-    Facebook: "📘",
-    Instagram: "📸",
-    TikTok: "🎵",
-    "Twitter/X": "𝕏",
-    LinkedIn: "💼",
-    YouTube: "▶️",
-    Pinterest: "📌",
-    Threads: "🧵",
-  };
-
-  const filteredProfiles = allProfiles
-    .filter(
-      (p) =>
-        !searchTerm ||
-        (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (p.native_name || "").toLowerCase().includes(searchTerm.toLowerCase()),
-    )
+  const filtered = (allProfiles ?? [])
+    .filter((p) => !searchTerm || (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) || (p.native_name || "").toLowerCase().includes(searchTerm.toLowerCase()))
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-
-  if (fetching) {
-    return (
-      <div className="flex items-center gap-2 t-secondary py-4">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading Sprout Social profiles...
-      </div>
-    );
-  }
-
-  if (allProfiles.length === 0) {
-    return (
-      <div className="space-y-3">
-        <p className="t-secondary">Could not load profiles.</p>
-        <Button variant="outline" size="sm" onClick={fetchProfiles}>
-          <RefreshCw className="h-4 w-4 mr-2" /> Retry
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="t-secondary">
-          {selectedProfiles.length} of {allProfiles.length} profiles in Sprout are assigned to this client
-        </p>
-        <Button variant="ghost" size="sm" onClick={fetchProfiles}>
-          <RefreshCw className="h-4 w-4 mr-1" /> Refresh
-        </Button>
-      </div>
-
-      {/* Which ones, by name — a count alone never answered the question
-          the page is asked: is this client's Instagram connected? */}
-      {selectedProfiles.length > 0 && (
+      {current.length > 0 ? (
         <div className="glass-inner p-3 space-y-2">
           <p className="t-subhead">Connected</p>
           <ul className="space-y-1.5">
-            {selectedProfiles.map((profile) => (
-              <li key={profile.id} className="flex items-center gap-2 min-w-0">
+            {current.map((profile) => (
+              <li key={String(profile.id)} className="flex items-center gap-2 min-w-0">
                 <PlatformIcon platform={profile.network_type || profile.network_display} className="h-4 w-4 shrink-0" />
                 <span className="t-body truncate">{profile.name}</span>
                 {profile.native_name && <span className="t-label text-muted-foreground truncate">@{profile.native_name}</span>}
-                {profile.missing && (
-                  <span className="t-label text-[#e0b563] shrink-0">no longer in Sprout</span>
-                )}
+                {profile.missing && <span className="t-label text-muted-foreground shrink-0">No longer listed in Sprout</span>}
                 {profile.native_link && (
-                  <a href={profile.native_link} target="_blank" rel="noopener noreferrer" className="t-label text-primary ml-auto shrink-0">
-                    Open
-                  </a>
+                  <a href={profile.native_link} target="_blank" rel="noopener noreferrer" className="t-label text-primary ml-auto shrink-0">Open</a>
                 )}
               </li>
             ))}
           </ul>
-          {missingPlatforms.length > 0 && (
-            <p className="t-secondary">
-              No profile connected for {missingPlatforms.join(", ")}, {missingPlatforms.length === 1 ? "which is" : "which are"} on this client's platform list.
-            </p>
-          )}
         </div>
+      ) : (
+        <p className="t-secondary">No accounts are matched to this client yet. Accounts added to Moburst's Sprout account are picked up within a day.</p>
       )}
 
-      <Input placeholder="Search by name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-
-      <div className="max-h-96 overflow-y-auto space-y-1.5 pr-1">
-        {filteredProfiles.map((profile) => {
-          const isSelected = selectedProfiles.some((p) => p.id === profile.id);
-          return (
-            <div
-              key={profile.id}
-              className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                isSelected ? "bg-primary/10 border-primary/30" : "bg-card hover:bg-accent/30"
-              }`}
-              onClick={() => toggleProfile(profile)}
-            >
-              <Checkbox checked={isSelected} onCheckedChange={() => toggleProfile(profile)} />
-              <div className="flex-1 min-w-0">
-                <span className="font-medium t-body">{profile.name}</span>
-                {profile.native_name && (
-                  <span className="text-muted-foreground t-label ml-1.5">@{profile.native_name}</span>
-                )}
-              </div>
-              <Badge variant={isSelected ? "default" : "secondary"} className="t-label shrink-0 gap-1">
-                {platformIcon[profile.network_display] || "🌐"} {profile.network_display}
-              </Badge>
-            </div>
-          );
-        })}
-      </div>
+      {allProfiles === null ? (
+        <div className="flex items-center gap-2 t-secondary py-2">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading Sprout Social profiles...
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-2">
+            <p className="t-secondary">{current.length} of {allProfiles.length} profiles in Sprout are assigned to this client</p>
+            <Button variant="ghost" size="sm" onClick={() => void fetchProfiles()}>
+              <RefreshCw className="h-4 w-4 mr-1" /> Refresh
+            </Button>
+          </div>
+          <Input placeholder="Search by name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <div className="max-h-96 overflow-y-auto space-y-1.5 pr-1">
+            {filtered.map((profile) => {
+              const on = isSelected(profile);
+              return (
+                <div key={String(profile.id)}
+                  className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${on ? "bg-primary/10 border-primary/30" : "bg-card hover:bg-accent/30"}`}
+                  onClick={() => toggleProfile(profile)}>
+                  <Checkbox checked={on} onCheckedChange={() => toggleProfile(profile)} aria-label={`Assign ${profile.name}`} />
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium t-body">{profile.name}</span>
+                    {profile.native_name && <span className="text-muted-foreground t-label ml-1.5">@{profile.native_name}</span>}
+                  </div>
+                  <Badge variant={on ? "default" : "secondary"} className="t-label shrink-0 gap-1">
+                    <PlatformIcon platform={profile.network_type || profile.network_display} className="h-3 w-3" /> {platformName(profile.network_type || profile.network_display)}
+                  </Badge>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }

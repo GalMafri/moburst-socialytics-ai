@@ -1,8 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { canRetry } from "@/lib/reportRun";
 import { firstRunSentence, formatDate, formatRange, listedRuns } from "@/lib/display";
 import { useNextRun } from "@/lib/nextRun";
-import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -110,7 +108,6 @@ export default function ReportHistory() {
                               <Eye className="h-4 w-4 mr-1" /> View
                             </Button>
                           )}
-                          {r.display.state === "scheduled" && canRetry(r) && <RetryReportButton reportId={r.id} kind="monthly" label="Run now" />}
                           <ReportActions report={r} />
                         </TableCell>
                       </TableRow>
