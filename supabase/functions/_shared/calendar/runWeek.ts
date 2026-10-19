@@ -10,7 +10,7 @@
 import { anthropicMessages } from "../anthropic.ts";
 import { collectOwnedCompetitive } from "../competitive/ownedSource.ts";
 import { competitiveBrief } from "../competitive/brief.ts";
-import { applyRhythmSetting, bestExamples, numberEvidence, platformName, rhythmFromPosts, scoreCompetitorPosts, scoreOwnPosts, MIN_COMPETITOR_WEEKS, OWN_DAYS, type CompetitorPost, type EvidenceItem, type OwnPost, type RhythmLine } from "./evidence.ts";
+import { applyRhythmSetting, bestExamples, isBoosted, numberEvidence, platformName, rhythmFromPosts, scoreCompetitorPosts, scoreOwnPosts, MIN_COMPETITOR_WEEKS, OWN_DAYS, type CompetitorPost, type EvidenceItem, type OwnPost, type RhythmLine } from "./evidence.ts";
 import { parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type Reason, type RevisePost } from "./weekPlan.ts";
 import { buildVoiceProfile, COPY_MODEL, learnFromSignal, loadClientVoice } from "../voice/load.ts";
 import { voicePromptBlock } from "../voice/voice.ts";
@@ -125,10 +125,16 @@ function isClientPost(p: any, clientCompany: string | null, clientName: string):
   return !!clientName && !!name && name.includes(clientName.toLowerCase());
 }
 
+/** The client's weekly competitor feeds, newest first (14 weeks covers the 90 days of own posts). */
+async function feedSnapshots(admin: Db, clientId: string): Promise<Array<{ payload: any }>> {
+  const { data, error } = await admin.from("rivaliq_snapshots").select("payload, fetched_at")
+    .eq("client_id", clientId).eq("endpoint", "feed").order("fetched_at", { ascending: false }).limit(14);
+  if (error) throw new Error(`Could not read the competitor feed: ${error.message}`);
+  return (data ?? []).filter((s: any) => Array.isArray(s.payload?.socialPosts));
+}
+
 export async function gatherEvidence(admin: Db, client: Record<string, any>, now: Date): Promise<Gathered> {
-  const { data: snapshotRows } = await admin.from("rivaliq_snapshots").select("payload, fetched_at")
-    .eq("client_id", client.id).eq("endpoint", "feed").order("fetched_at", { ascending: false }).limit(14);
-  const snapshots = (snapshotRows ?? []).filter((s: any) => Array.isArray(s.payload?.socialPosts));
+  const snapshots = await feedSnapshots(admin, client.id);
   const { posts: own, sprout } = await ownPosts(admin, client, snapshots, now);
 
   // Competitors: the newest feed week against the four before it.
@@ -144,7 +150,7 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
       byId.set(id, {
         id, company: String(p.companyName), platform: platformName(p.channel), format: String(p.type || "unknown"), publishedAt: String(p.publishedAt),
         text: String(p.message || ""), link: p.postLink ?? null, engagement: Number(p.engagementTotal) || 0,
-        followers: Number(p.presenceReach) > 0 ? Number(p.presenceReach) : null, boosted: p.facebookLikelyBoosted === true,
+        followers: Number(p.presenceReach) > 0 ? Number(p.presenceReach) : null, boosted: isBoosted(p.facebookLikelyBoosted),
       });
     }
   }
@@ -155,8 +161,9 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
       .eq("client_id", client.id).neq("status", "dismissed").gte("window_start", newestStart).order("confidence", { ascending: false }).limit(8)
     : { data: [] };
 
-  const { data: report } = await admin.from("reports").select("id, created_at, report_data").eq("client_id", client.id).eq("status", "completed")
+  const { data: report, error: reportError } = await admin.from("reports").select("id, created_at, report_data").eq("client_id", client.id).eq("status", "completed")
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (reportError) throw new Error(`Could not read the latest report: ${reportError.message}`);
   const rd = Array.isArray(report?.report_data) ? report.report_data[0] : report?.report_data;
   const ai = rd?.ai_analysis ?? {};
   const perf = ai.sprout_performance_analysis ?? {};
@@ -181,30 +188,69 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
 
 // ── Plan a week ─────────────────────────────────────────────────────────────
 
-function fail(job: WeekJob, reason: string): boolean {
-  return job.attempts >= job.max_attempts || /no posting rhythm|week is over/i.test(reason);
+/** Longer than the worker's 5-minute lease, so a run still going is never doubled. */
+const CLAIM_MS = 6 * 60_000;
+
+async function must(p: PromiseLike<{ error: { message: string } | null }>, what: string): Promise<void> {
+  const { error } = await p;
+  if (error) throw new Error(`${what}: ${error.message}`);
 }
+
+/**
+ * One run at a time per week: a run claims the plan before it writes or
+ * revises, and a claim older than CLAIM_MS belonged to a run that died.
+ */
+async function claimPlan(admin: Db, planId: string, now: Date): Promise<boolean> {
+  const stale = new Date(now.getTime() - CLAIM_MS).toISOString();
+  const { data, error } = await admin.from("calendar_plans").update({ claimed_at: now.toISOString(), updated_at: now.toISOString() })
+    .eq("id", planId).or(`claimed_at.is.null,claimed_at.lt."${stale}"`).select("id");
+  if (error) throw new Error(`Could not claim the week: ${error.message}`);
+  return !!data?.length;
+}
+
+const busyElsewhere = (now: Date): WeekJobOutcome => ({ status: "queued", reason: "Another run is working on this week.", available_at: new Date(now.getTime() + 2 * 60_000).toISOString(), deferred: true });
+
+/** Setup a person has to do (not an outage): the job is skipped, so the daily check doesn't alert. */
+const NEEDS_SETUP = /no posting rhythm|week is over/i;
 
 export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Promise<WeekJobOutcome> {
   const week = String(job.occurrence ?? "").slice(0, 10);
-  const { data: plan } = await admin.from("calendar_plans").select("*").eq("client_id", job.client_id).eq("week_start", week).maybeSingle();
+  const { data: plan, error: planError } = await admin.from("calendar_plans").select("*").eq("client_id", job.client_id).eq("week_start", week).maybeSingle();
+  if (planError) throw new Error(`Could not read the plan: ${planError.message}`);
   if (!plan) return { status: "skipped", reason: "The plan this job was for no longer exists." };
   if (plan.status === "ready") return { status: "done", result: { plan_id: plan.id, already: true } };
+
+  // Runs that died before finishing (wall clock, memory) never reach catch below.
+  if (job.attempts > job.max_attempts) {
+    const reason = `The plan stopped before finishing ${job.attempts - 1} times.`;
+    await must(admin.from("calendar_plans").update({ status: "failed", error: reason, claimed_at: null, updated_at: now.toISOString() }).eq("id", plan.id), "Could not mark the plan failed");
+    return { status: "failed", reason };
+  }
 
   // The voice profile is learned first when it is due.
   const { count: voicePending } = await admin.from("scheduled_jobs").select("id", { count: "exact", head: true })
     .eq("client_id", job.client_id).eq("kind", "voice_profile").in("status", ["queued", "running"]);
   if (voicePending) return { status: "queued", reason: "Waiting for the client's voice profile.", available_at: new Date(now.getTime() + 60_000).toISOString(), deferred: true };
 
-  // A run cut off after writing the posts: finish the plan, don't write them twice.
-  const { count: written } = await admin.from("calendar_posts").select("id", { count: "exact", head: true }).eq("plan_id", plan.id);
-  if (written) {
-    await admin.from("calendar_plans").update({ status: "ready", ready_at: now.toISOString(), updated_at: now.toISOString() }).eq("id", plan.id);
-    return { status: "done", result: { plan_id: plan.id, posts: written, finished: true } };
-  }
+  if (!(await claimPlan(admin, plan.id, now))) return busyElsewhere(now);
 
-  await admin.from("calendar_plans").update({ status: "planning", error: null, updated_at: now.toISOString() }).eq("id", plan.id);
+  const writtenSoFar = async () => {
+    const { count, error } = await admin.from("calendar_posts").select("id", { count: "exact", head: true }).eq("plan_id", plan.id);
+    if (error) throw new Error(`Could not read the week's posts: ${error.message}`);
+    return count ?? 0;
+  };
+  const markReady = (extra: Record<string, unknown> = {}) => must(admin.from("calendar_plans")
+    .update({ status: "ready", ready_at: new Date().toISOString(), updated_at: new Date().toISOString(), error: null, claimed_at: null, ...extra }).eq("id", plan.id), "Could not finish the plan");
+
   try {
+    // A run cut off after writing the posts: finish the plan, don't write them twice.
+    const written = await writtenSoFar();
+    if (written) {
+      await markReady();
+      return { status: "done", result: { plan_id: plan.id, posts: written, finished: true } };
+    }
+    await must(admin.from("calendar_plans").update({ status: "planning", error: null, updated_at: now.toISOString() }).eq("id", plan.id), "Could not start the plan");
+
     const { data: client, error } = await admin.from("clients").select(CLIENT_COLUMNS).eq("id", job.client_id).maybeSingle();
     if (error || !client) throw new Error("Could not read the client.");
     const tz = String(client.timezone || "UTC");
@@ -216,8 +262,9 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     if (!gathered.rhythm.length) throw new Error("No posting rhythm: the client hasn't published in the last 8 weeks. Set posts per week in client settings.");
 
     const voice = await loadClientVoice(admin, client.id);
-    const { data: weekPosts } = await admin.from("calendar_posts").select("post_date, platform, copy, plan_id")
+    const { data: weekPosts, error: nearError } = await admin.from("calendar_posts").select("post_date, platform, copy, plan_id")
       .eq("client_id", client.id).gte("post_date", addDays(week, -21)).lte("post_date", addDays(week, 27)).order("post_date");
+    if (nearError) throw new Error(`Could not read the posts around the week: ${nearError.message}`);
     const inWeek = (d: string) => d >= week && d <= addDays(week, 6);
     const existing = (weekPosts ?? []).filter((p: any) => inWeek(p.post_date) && !p.plan_id).map((p: any) => ({ date: p.post_date, platform: p.platform, copy: p.copy || "" }));
     const recent = (weekPosts ?? []).filter((p: any) => !inWeek(p.post_date) && p.copy).map((p: any) => ({ date: p.post_date, platform: p.platform, copy: p.copy }));
@@ -246,69 +293,79 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       posts = parseWeekPlan(result.text, ctx);
     }
     if (!posts.length) throw new Error("The planner's reply had no usable posts.");
-    const rows = posts.map((p) => ({ ...p, client_id: client.id, plan_id: plan.id, created_by: plan.requested_by ?? null }));
-    const { error: insertError } = await admin.from("calendar_posts").insert(rows);
-    if (insertError) throw new Error(`Could not add the week's posts: ${insertError.message}`);
-    await admin.from("calendar_plans").update({
-      status: "ready", ready_at: new Date().toISOString(), updated_at: new Date().toISOString(), model: COPY_MODEL,
-      input_tokens: tokens.input, output_tokens: tokens.output, rhythm: { applied: gathered.rhythm, learned: gathered.learnedRhythm },
+    const finishing = {
+      model: COPY_MODEL, input_tokens: tokens.input, output_tokens: tokens.output,
+      rhythm: { applied: gathered.rhythm, learned: gathered.learnedRhythm },
       evidence: { items: gathered.evidence, avoid: gathered.avoid, thin: gathered.thin, sources: gathered.sources, first_date: firstDate },
-    }).eq("id", plan.id);
+    };
+    // Checked again right before writing: a run that outlived its claim may have written them meanwhile.
+    if (await writtenSoFar()) {
+      await markReady(finishing);
+      return { status: "done", result: { plan_id: plan.id, finished: true } };
+    }
+    const rows = posts.map((p) => ({ ...p, client_id: client.id, plan_id: plan.id, created_by: plan.requested_by ?? null }));
+    await must(admin.from("calendar_posts").insert(rows), "Could not add the week's posts");
+    await markReady(finishing);
     return { status: "done", result: { plan_id: plan.id, posts: rows.length, input_tokens: tokens.input, output_tokens: tokens.output } };
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
-    if (fail(job, reason)) {
-      await admin.from("calendar_plans").update({ status: "failed", error: reason, updated_at: new Date().toISOString() }).eq("id", plan.id);
-      // Setup a person has to do is not an outage: skipped, not failed, so the daily check doesn't alert.
-      return { status: /no posting rhythm|week is over/i.test(reason) ? "skipped" : "failed", reason };
-    }
-    await admin.from("calendar_plans").update({ status: "queued", error: reason, updated_at: new Date().toISOString() }).eq("id", plan.id);
+    const final = job.attempts >= job.max_attempts || NEEDS_SETUP.test(reason);
+    await admin.from("calendar_plans").update({ status: final ? "failed" : "queued", error: reason, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", plan.id);
+    if (final) return { status: NEEDS_SETUP.test(reason) ? "skipped" : "failed", reason };
     return { status: "queued", reason, available_at: new Date(Date.now() + RETRY_MINUTES * 60_000).toISOString() };
   }
 }
 
 // ── Revise a week ───────────────────────────────────────────────────────────
 
-/** The ids of posts someone worked on: edited copy, moved, designed or scheduled (calendar_post_worked, in bulk). */
-export async function workedOn(admin: Db, clientId: string, posts: Array<{ id: string; post_key: string; platform: string; copy: string; touched_at: string | null }>): Promise<Set<string>> {
-  const keys = posts.map((p) => p.post_key);
-  const [{ data: iterations }, { data: designs }, { data: scheduled }] = await Promise.all([
-    admin.from("post_iterations").select("calendar_post_key").eq("client_id", clientId).in("calendar_post_key", keys),
-    admin.from("design_requests").select("calendar_post_key, status").eq("client_id", clientId).in("calendar_post_key", keys),
-    admin.from("scheduled_posts").select("platform, post_content").eq("client_id", clientId),
-  ]);
-  const edited = new Set((iterations ?? []).map((r: any) => r.calendar_post_key));
-  const designed = new Set((designs ?? []).filter((r: any) => r.status !== "canceled").map((r: any) => r.calendar_post_key));
-  const head = (s: string) => String(s || "").trim().slice(0, 200);
-  const sent = new Set((scheduled ?? []).map((r: any) => `${String(r.platform || "").toLowerCase()}|${head(r.post_content)}`));
-  return new Set(posts.filter((p) => p.touched_at || edited.has(p.post_key) || designed.has(p.post_key) || (p.copy && sent.has(`${p.platform.toLowerCase()}|${head(p.copy)}`))).map((p) => p.id));
+/**
+ * The ids of posts someone worked on: edited copy, moved, designed or
+ * scheduled. Asked of calendar_post_worked() post by post: a report post's
+ * key is JSON text, which an in() filter on the key does not survive.
+ */
+export async function workedOn(admin: Db, clientId: string, posts: Array<{ id: string; post_key: string; platform: string; copy: string | null; touched_at: string | null }>): Promise<Set<string>> {
+  const ids = await Promise.all(posts.map(async (p) => {
+    const { data, error } = await admin.rpc("calendar_post_worked", { p_client: clientId, p_key: p.post_key, p_platform: p.platform, p_copy: p.copy ?? "", p_touched: p.touched_at });
+    if (error) throw new Error(`Could not tell whether a post was worked on: ${error.message}`);
+    return data === true ? p.id : null;
+  }));
+  return new Set(ids.filter((id): id is string => !!id));
 }
 
 export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): Promise<WeekJobOutcome> {
   const week = String(job.occurrence ?? "").slice(0, 10);
-  const { data: plan } = await admin.from("calendar_plans").select("*").eq("client_id", job.client_id).eq("week_start", week).maybeSingle();
+  const { data: plan, error: planError } = await admin.from("calendar_plans").select("*").eq("client_id", job.client_id).eq("week_start", week).maybeSingle();
+  if (planError) throw new Error(`Could not read the plan: ${planError.message}`);
   const pending = plan?.pending_revision as { note: string; by: string | null; at: string; scope: "untouched" | "empty" } | null;
   if (!plan || !pending) return { status: "skipped", reason: "No revision is waiting for this week." };
 
-  const finish = async (entry: Record<string, unknown>) => {
-    await admin.from("calendar_plans").update({
-      pending_revision: null, updated_at: new Date().toISOString(),
-      revisions: [...(Array.isArray(plan.revisions) ? plan.revisions : []), { note: pending.note, by: pending.by, at: pending.at, scope: pending.scope, done_at: new Date().toISOString(), ...entry }],
-    }).eq("id", plan.id);
-  };
+  const finish = (entry: Record<string, unknown>) => must(admin.from("calendar_plans").update({
+    pending_revision: null, claimed_at: null, updated_at: new Date().toISOString(),
+    revisions: [...(Array.isArray(plan.revisions) ? plan.revisions : []), { note: pending.note, by: pending.by, at: pending.at, scope: pending.scope, done_at: new Date().toISOString(), ...entry }],
+  }).eq("id", plan.id), "Could not record the revision");
+
+  // Runs that died before finishing never reach catch below.
+  if (job.attempts > job.max_attempts) {
+    const reason = `The revision stopped before finishing ${job.attempts - 1} times.`;
+    await finish({ failed: true, error: reason, rewritten: 0 });
+    return { status: "failed", reason };
+  }
+  if (!(await claimPlan(admin, plan.id, now))) return busyElsewhere(now);
 
   try {
     const { data: client, error } = await admin.from("clients").select(CLIENT_COLUMNS).eq("id", job.client_id).maybeSingle();
     if (error || !client) throw new Error("Could not read the client.");
     const today = todayIn(String(client.timezone || "UTC"), now);
-    const { data: rows } = await admin.from("calendar_posts").select("id, post_key, post_date, platform, format, pillar, copy, hashtags, cta, visual_direction, reasons, touched_at, plan_id")
+    const { data: rows, error: rowsError } = await admin.from("calendar_posts").select("id, post_key, post_date, platform, format, pillar, copy, hashtags, cta, visual_direction, reasons, touched_at, plan_id")
       .eq("client_id", client.id).gte("post_date", week).lte("post_date", addDays(week, 6)).order("post_date");
+    if (rowsError) throw new Error(`Could not read the week's posts: ${rowsError.message}`);
     const all = (rows ?? []) as any[];
     const planPosts = all.filter((p) => p.plan_id === plan.id && p.post_date >= today);
     const worked = await workedOn(admin, client.id, planPosts);
+    const kept = planPosts.filter((p) => worked.has(p.id)).map((p) => p.id);
     const targets = planPosts.filter((p) => !worked.has(p.id) && (pending.scope === "empty" ? !String(p.copy || "").trim() : true));
     if (!targets.length) {
-      await finish({ rewritten: 0, kept: planPosts.filter((p) => worked.has(p.id)).map((p) => p.id) });
+      await finish({ rewritten: 0, kept });
       return { status: "done", result: { plan_id: plan.id, rewritten: 0 } };
     }
 
@@ -335,12 +392,13 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     for (const r of revised) {
       const was = targets.find((p) => p.id === r.id)!;
       const patch: Record<string, unknown> = { copy: r.copy, hashtags: r.hashtags, cta: r.cta, visual_direction: r.visual_direction, ...(r.pillar ? { pillar: r.pillar } : {}), ...(r.reason ? { reasons: [r.reason] } : {}) };
-      // Only if nobody changed the copy since it was read.
-      const { data: updated } = await admin.from("calendar_posts").update(patch).eq("id", r.id).eq("copy", was.copy ?? "").is("touched_at", null).select("id");
+      // Only if nobody changed the copy or moved the post since it was read.
+      const { data: updated, error: updateError } = await admin.from("calendar_posts").update(patch).eq("id", r.id).eq("copy", was.copy ?? "").is("touched_at", null).select("id");
+      if (updateError) throw new Error(`Could not rewrite a post: ${updateError.message}`);
       if (updated?.length) replaced.push({ id: was.id, copy: was.copy, hashtags: was.hashtags, cta: was.cta, pillar: was.pillar, visual_direction: was.visual_direction, reasons: was.reasons });
     }
     const u = usage(result.raw);
-    await finish({ rewritten: replaced.length, kept: planPosts.filter((p) => worked.has(p.id)).map((p) => p.id), replaced, input_tokens: u.input, output_tokens: u.output });
+    await finish({ rewritten: replaced.length, kept, replaced, input_tokens: u.input, output_tokens: u.output });
 
     // A person's note teaches the memory; the cutover's own note does not.
     if (pending.by && pending.scope === "untouched") {
@@ -353,6 +411,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       await finish({ failed: true, error: reason, rewritten: 0 });
       return { status: "failed", reason };
     }
+    await admin.from("calendar_plans").update({ claimed_at: null }).eq("id", plan.id);
     return { status: "queued", reason, available_at: new Date(Date.now() + RETRY_MINUTES * 60_000).toISOString() };
   }
 }
@@ -360,12 +419,11 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
 // ── Voice profile ───────────────────────────────────────────────────────────
 
 export async function runVoiceProfile(admin: Db, job: WeekJob, now = new Date()): Promise<WeekJobOutcome> {
+  if (job.attempts > job.max_attempts) return { status: "failed", reason: `The voice profile stopped before finishing ${job.attempts - 1} times.` };
   try {
     const { data: client, error } = await admin.from("clients").select(CLIENT_COLUMNS).eq("id", job.client_id).maybeSingle();
     if (error || !client) throw new Error("Could not read the client.");
-    const { data: snapshotRows } = await admin.from("rivaliq_snapshots").select("payload, fetched_at")
-      .eq("client_id", client.id).eq("endpoint", "feed").order("fetched_at", { ascending: false }).limit(14);
-    const { posts, sprout } = await ownPosts(admin, client, (snapshotRows ?? []).filter((s: any) => Array.isArray(s.payload?.socialPosts)), now);
+    const { posts, sprout } = await ownPosts(admin, client, await feedSnapshots(admin, client.id), now);
     const voice = await buildVoiceProfile(admin, client.id, posts, now);
     return { status: "done", result: { posts: voice.post_count, platforms: Object.keys(voice.platforms), sprout } };
   } catch (e) {
@@ -374,4 +432,3 @@ export async function runVoiceProfile(admin: Db, job: WeekJob, now = new Date())
     return { status: "queued", reason, available_at: new Date(Date.now() + RETRY_MINUTES * 60_000).toISOString() };
   }
 }
-

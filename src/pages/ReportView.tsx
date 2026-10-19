@@ -253,7 +253,9 @@ export default function ReportView() {
     aiAnalysis?.instagram_trends_analysis ||
     instagramTrends?.posts?.length
   );
-  const hasContent = aiAnalysis?.content_recommendations?.length > 0 || contentCalendar.length > 0;
+  // Reports since 19 Oct 2026 write no posts (the calendar is planned a week at a
+  // time); the tab still links to the calendar.
+  const hasContent = !!aiAnalysis || contentCalendar.length > 0;
   const gammaUrl = report.gamma_url || rd?.gamma_url;
 
   // Every recommendation that asks for a decision, gathered in one place and

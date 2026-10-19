@@ -45,6 +45,11 @@ function apiKey(): string {
 
 const excerpt = (s: string, n = 300) => String(s || "").replace(/\s+/g, " ").trim().slice(0, n);
 
+async function mustWrite(p: PromiseLike<{ error: { message: string } | null }>, what: string): Promise<void> {
+  const { error } = await p;
+  if (error) throw new Error(`${what}: ${error.message}`);
+}
+
 /**
  * Learn from one signal (a copy edit or a Revise note): confirm, replace or
  * add preferences so the list stays short and current.
@@ -60,18 +65,34 @@ export async function learnFromSignal(admin: Db, clientId: string, signal: Memor
   const source = signal.kind === "revise_note" ? "revise_note" : "copy_edit";
   const evidence = signal.kind === "revise_note" ? excerpt(signal.note) : excerpt(`${signal.before} => ${signal.after}`);
   const now = new Date().toISOString();
+  const confirm = async (p: Preference) => {
+    await mustWrite(admin.from("brand_voice_learnings").update({ times_confirmed: p.times_confirmed + 1, last_confirmed_at: now, updated_at: now }).eq("id", p.id).eq("status", "active"), "Could not confirm a preference");
+  };
+  // Only one active preference may say a thing; the same wording again is a confirmation.
+  const sameAs = (type: string, description: string) => current.find((p) => p.pattern_type === type && p.pattern_description.trim().toLowerCase() === description.trim().toLowerCase());
   for (const op of ops) {
     if (op.op === "confirm") {
-      const was = current.find((p) => p.id === op.id)!;
-      await admin.from("brand_voice_learnings").update({ times_confirmed: was.times_confirmed + 1, last_confirmed_at: now, updated_at: now }).eq("id", op.id).eq("status", "active");
+      await confirm(current.find((p) => p.id === op.id)!);
+      continue;
+    }
+    const existing = sameAs(op.pattern_type, op.description);
+    let keptId: string;
+    if (existing && existing.id !== (op.op === "replace" ? op.id : "")) {
+      await confirm(existing);
+      keptId = existing.id;
+    } else if (existing) {
+      // Replaced by its own wording: nothing changes but the confirmation.
+      await confirm(existing);
+      continue;
     } else {
       const { data: added, error } = await admin.from("brand_voice_learnings")
         .insert({ client_id: clientId, pattern_type: op.pattern_type, pattern_description: op.description, source, evidence, last_confirmed_at: now })
         .select("id").single();
       if (error) throw new Error(`Could not save a preference: ${error.message}`);
-      if (op.op === "replace") {
-        await admin.from("brand_voice_learnings").update({ status: "replaced", replaced_by: added.id, updated_at: now }).eq("id", op.id).eq("status", "active");
-      }
+      keptId = added.id;
+    }
+    if (op.op === "replace") {
+      await mustWrite(admin.from("brand_voice_learnings").update({ status: "replaced", replaced_by: keptId, updated_at: now }).eq("id", op.id).eq("status", "active"), "Could not retire a preference");
     }
   }
   return { ops: ops.length };
@@ -87,24 +108,27 @@ export async function consolidateMemory(admin: Db, clientId: string): Promise<{ 
   if (!merged.length) throw new Error("The memory merge returned nothing usable; nothing was changed.");
   const byId = new Map(current.map((p) => [p.id, p]));
   const now = new Date().toISOString();
-  const kept = new Set<string>();
-  for (const m of merged) {
-    const sources = m.from.map((id) => byId.get(id)!).filter(Boolean);
-    const latest = sources.map((s) => s.last_confirmed_at).sort().slice(-1)[0] ?? now;
-    const { data: added, error } = await admin.from("brand_voice_learnings").insert({
-      client_id: clientId, pattern_type: m.pattern_type, pattern_description: m.description, source: "copy_edit",
-      times_confirmed: sources.reduce((n, s) => n + Math.max(1, s.times_confirmed), 0), last_confirmed_at: latest,
-      evidence: `Merged from ${sources.length} earlier preference${sources.length === 1 ? "" : "s"}.`,
-    }).select("id").single();
-    if (error) throw new Error(`Could not save a merged preference: ${error.message}`);
-    for (const s of sources) {
-      kept.add(s.id);
-      await admin.from("brand_voice_learnings").update({ status: "replaced", replaced_by: added.id, updated_at: now }).eq("id", s.id);
+  const ids = current.map((p) => p.id);
+  // Retire the old list first, so a merged preference may reuse an old one's wording.
+  await mustWrite(admin.from("brand_voice_learnings").update({ status: "replaced", updated_at: now }).in("id", ids), "Could not retire the old preferences");
+  try {
+    for (const m of merged) {
+      const sources = m.from.map((id) => byId.get(id)!).filter(Boolean);
+      const latest = sources.map((x) => x.last_confirmed_at).sort().slice(-1)[0] ?? now;
+      const { data: added, error } = await admin.from("brand_voice_learnings").insert({
+        client_id: clientId, pattern_type: m.pattern_type, pattern_description: m.description, source: "copy_edit",
+        times_confirmed: sources.reduce((n, x) => n + Math.max(1, x.times_confirmed), 0), last_confirmed_at: latest,
+        evidence: `Merged from ${sources.length} earlier preference${sources.length === 1 ? "" : "s"}.`,
+      }).select("id").single();
+      if (error) throw new Error(`Could not save a merged preference: ${error.message}`);
+      await mustWrite(admin.from("brand_voice_learnings").update({ replaced_by: added.id }).in("id", sources.map((x) => x.id)), "Could not link a merged preference");
     }
+  } catch (e) {
+    // Put the old list back rather than leave a half-merged one; the merged rows written so far are retired.
+    await admin.from("brand_voice_learnings").update({ status: "replaced" }).eq("client_id", clientId).eq("status", "active").not("id", "in", `(${ids.join(",")})`);
+    await admin.from("brand_voice_learnings").update({ status: "active", replaced_by: null }).in("id", ids);
+    throw e;
   }
-  // What the merge left out lost to a newer, contradicting preference.
-  const dropped = current.filter((p) => !kept.has(p.id)).map((p) => p.id);
-  if (dropped.length) await admin.from("brand_voice_learnings").update({ status: "replaced", updated_at: now }).in("id", dropped);
   return { before: current.length, after: merged.length };
 }
 

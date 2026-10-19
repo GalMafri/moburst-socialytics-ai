@@ -522,7 +522,7 @@ async function prepareUpcoming(admin: any, opts: { dryRun?: boolean; clientId?: 
 
   const due: Array<{ settings: Settings; post: any }> = [];
   for (const settings of clients) {
-    // What the calendar shows: each week's plan in force (_shared/calendar/plans.ts).
+    // The client's upcoming posts (each week has one plan, calendar_plans).
     const { data: posts } = await admin.from("calendar_posts").select("*").eq("client_id", settings.client_id).gte("post_date", today).lte("post_date", until).order("post_date");
     const candidates = posts ?? [];
     if (!candidates.length) continue;

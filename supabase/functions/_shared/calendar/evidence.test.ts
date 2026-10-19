@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyRhythmSetting, bestExamples, median, numberEvidence, platformName, rhythmFromPosts, scoreCompetitorPosts, scoreOwnPosts, type CompetitorPost, type OwnPost } from "./evidence";
+import { applyRhythmSetting, bestExamples, isBoosted, median, numberEvidence, platformName, rhythmFromPosts, scoreCompetitorPosts, scoreOwnPosts, type CompetitorPost, type OwnPost } from "./evidence";
 
 const NOW = new Date("2026-10-19T07:15:00Z");
 const own = (id: string, platform: string, format: string, publishedAt: string, impressions: number | null, engagement = 10, text = `Post ${id} with enough words to count as an example`): OwnPost =>
@@ -12,6 +12,16 @@ describe("median", () => {
     expect(median([3, 1, 2])).toBe(2);
     expect(median([4, 1, 2, 3])).toBe(2.5);
     expect(median([])).toBeNull();
+  });
+});
+
+describe("isBoosted", () => {
+  it("reads RivalIQ's text labels", () => {
+    expect(isBoosted("Likely Boosted")).toBe(true);
+    expect(isBoosted("Not Likely Boosted")).toBe(false);
+    expect(isBoosted("No Prediction")).toBe(false);
+    expect(isBoosted(undefined)).toBe(false);
+    expect(isBoosted(true)).toBe(true);
   });
 });
 

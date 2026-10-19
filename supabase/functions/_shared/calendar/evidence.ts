@@ -88,6 +88,15 @@ export function platformName(raw: unknown): string {
   return PLATFORM_NAMES[key] ?? (key ? key[0].toUpperCase() + key.slice(1) : "");
 }
 
+/**
+ * RivalIQ marks Facebook posts "Likely Boosted", "Not Likely Boosted" or "No
+ * Prediction" (as text); paid reach is not a content signal. The same reading
+ * as the competitor feed page and the competitive aggregate.
+ */
+export function isBoosted(v: unknown): boolean {
+  return typeof v === "string" ? v.trim().toLowerCase() === "likely boosted" : v === true;
+}
+
 export function median(xs: number[]): number | null {
   const v = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
   if (!v.length) return null;

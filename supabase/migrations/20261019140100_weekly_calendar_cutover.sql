@@ -1,15 +1,13 @@
--- The weekly calendar's cutover (Lital, 19 Oct 2026). Applied in two steps
--- around the deploy of the code that reads calendar_posts directly.
+-- The weekly calendar's cutover, step A (Lital, 19 Oct 2026). Applied before
+-- the deploy of the code that reads calendar_posts directly; the old view
+-- keeps showing the same posts. Step B is 20261019140200_weekly_calendar_removals.sql.
 -- Spec: docs/superpowers/specs/2026-10-19-weekly-calendar-design.md
 --
--- Step A (before the deploy; the old view keeps showing the same posts):
 --   1. Posts the calendar hides today are moved to calendar_posts_archive.
 --      These are untouched posts of a plan that lost its week to a newer one.
 --      Nothing anyone worked on is moved.
 --   2. Every week with planned posts gets a plan (trigger cutover), and its
 --      posts become source 'plan' with the plan's id.
--- Step B (after the deploy): the four-week planner, the view, the trend-post
--- schedule and the old memory columns are removed.
 
 -- ── Step A ───────────────────────────────────────────────────────────────────
 
@@ -71,21 +69,3 @@ update public.calendar_posts cp
    and cp.source in ('report', 'trend_slot');
 
 drop table if exists pg_temp.cutover_worked;
-
--- ── Step B ───────────────────────────────────────────────────────────────────
-
-select cron.unschedule('calendar-keep-planned') where exists (select 1 from cron.job where jobname = 'calendar-keep-planned');
-select cron.unschedule('calendar-fill-trend-slots') where exists (select 1 from cron.job where jobname = 'calendar-fill-trend-slots');
-
-drop view if exists public.calendar_posts_current;
-drop function if exists public.calendar_assign_week(uuid, date, uuid);
-drop table if exists public.calendar_weeks;
-
-alter table public.calendar_posts drop constraint if exists calendar_posts_source_check;
-alter table public.calendar_posts add constraint calendar_posts_source_check
-  check (source in ('plan', 'ad_hoc', 'insight'));
-
--- The preference memory counts confirmations now (times_confirmed, last_confirmed_at).
-alter table public.brand_voice_learnings drop constraint if exists brand_voice_learnings_confidence_check;
-alter table public.brand_voice_learnings drop column if exists confidence;
-alter table public.brand_voice_learnings drop column if exists source_iterations;

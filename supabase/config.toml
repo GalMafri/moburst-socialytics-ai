@@ -82,8 +82,6 @@ verify_jwt = false
 [functions.validate-design-output]
 verify_jwt = false
 
-[functions.analyze-post-edits]
-verify_jwt = false
 
 [functions.generate-ad-hoc-post]
 verify_jwt = false

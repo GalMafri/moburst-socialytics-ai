@@ -32,6 +32,8 @@ create table if not exists public.calendar_plans (
   -- The revision waiting to run: {note, by, at, scope}. One at a time.
   pending_revision jsonb,
   error text,
+  -- Set by the job that is writing or revising the week; another run waits it out.
+  claimed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   ready_at timestamptz,
@@ -82,7 +84,15 @@ update public.brand_voice_learnings
  where last_confirmed_at is null;
 alter table public.brand_voice_learnings alter column last_confirmed_at set default now();
 alter table public.brand_voice_learnings alter column last_confirmed_at set not null;
-create index if not exists brand_voice_learnings_active on public.brand_voice_learnings (client_id) where status = 'active';
+-- Replaced preferences stay as history, so the same wording can come back:
+-- only one active preference per client may say a thing.
+alter table public.brand_voice_learnings drop constraint if exists brand_voice_learnings_client_id_pattern_type_pattern_descri_key;
+create unique index if not exists brand_voice_learnings_one_active
+  on public.brand_voice_learnings (client_id, pattern_type, lower(pattern_description)) where status = 'active';
+-- Staff remove a preference from client settings; there was no delete policy, so the button did nothing.
+drop policy if exists "Moburst staff can delete brand_voice_learnings" on public.brand_voice_learnings;
+create policy "Moburst staff can delete brand_voice_learnings" on public.brand_voice_learnings
+  for delete to authenticated using (public.is_moburst_staff());
 
 -- ── Jobs ─────────────────────────────────────────────────────────────────────
 
