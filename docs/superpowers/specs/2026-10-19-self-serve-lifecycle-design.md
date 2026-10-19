@@ -16,7 +16,7 @@
 4. Work runs when its inputs change. Opening a page never starts paid work.
 5. Every number has one definition and one source, shared by every screen.
 6. Every stored value reaches a screen through one display layer.
-7. The daily alert reports product outages only (a provider down, the worker not running). Setup gaps can no longer exist, so nothing alerts on them.
+7. Nothing fails visibly (Lital, 19 Oct, 16:22: "i don't want you building anything that will fail and flag the user it failed, structurally fix any issues now"). No failure status, toast, "needs a look" state or alert email reaches anyone. A passing problem (a provider down for an hour) is retried quietly until the result no longer matters; a cause that recurs is fixed at its root in the same build.
 
 ## What the audit found
 
@@ -110,7 +110,7 @@ The API demo becomes a caller of this same lifecycle, so there is one onboarding
 
 - **Cadence always resolves.** Per platform, in order: the client's own posting in the last 8 weeks, its own posting over 90 days, the median of its confirmed competitors on that platform, then the median of every company the app tracks on that platform. A platform with no rate from any source (X, whose tracked posts carry no dates) is left out; a client always gets the platforms that do resolve. Staff can still override per platform; it is never required. Rates under one a week plan posts by a fixed, stateless rule (a rate of 0.25 gets one post every fourth week). Proof on 19 Oct: every client resolves; Bader and Moburst keep exactly their current rhythm.
 - **No readiness gate.** Every active client is planned. A client with no posts and no tracking is planned from its brief, pillars and dated moments.
-- **No final failure.** A plan that fails for a passing reason (an API error) is re-queued by the next daily run until its week starts. The screen shows the week as not planned yet, with the Plan button.
+- **No final failure.** A plan that does not finish stays queued and runs again on its own until its week is over; a week that is over closes quietly. Nobody sees a failed state. The Plan and Revise buttons only queue work, so they cannot fail in front of anyone.
 - **Reasons are worded when shown,** from the stored evidence. A wording change never needs a stored rebuild, so the rebuild action is deleted.
 - **Memory stays short for every client.** The monthly voice job merges the preference list whenever it has more than 8 active entries.
 - **No empty posts.** The daily run writes copy for any upcoming post that has none.
@@ -119,13 +119,13 @@ The API demo becomes a caller of this same lifecycle, so there is one onboarding
 
 ### 3. Every pipeline finishes or recovers on its own
 
-- A failed monthly or competitive report retries automatically (3 attempts over 24 hours). A month is never lost to one bad run.
+- A monthly or competitive report that does not finish runs again on its own with growing waits, for as long as its month can still be reported, and the schedule waits for it. The causes found in the audit (an unconfirmed n8n call, a brief file the workflow cannot read) are removed: the app reads the brief itself and falls back to the brief the lifecycle drafted.
 - A design request with no progress for 30 minutes is replanned. Automatic work runs as a system actor; nothing acts as Lital. The automatic-designs limit counts only requests that are moving.
-- Design options that fail are regenerated the next day, until 3 days before the post date. The root causes in the current pipeline get fixed: carousel covers (10 failures), headline and logo placement (6), reading the area around the logo (4), and 2 code errors. The 41 failures from the retired Canva path stop with that path.
+- Design options that do not come out are made again on their own until the post's date. The root causes in the current pipeline are fixed in this build without changing how designs look: carousel covers (10 failures), headline and logo placement (6), reading the area around the logo (4), and 2 code errors. The 41 failures from the retired Canva path stop with that path.
 - RivalIQ setup is advanced by the worker. A landscape that disappears is set up again by the lifecycle.
 - Archiving a client pauses its schedules; unarchiving schedules from today.
 - The old creative-plan media path (no jobs since 30 Sep, 7 orphaned results) is retired.
-- The daily alert keeps only outage checks: the worker or cron not running, a provider failing for every client. The waiting, blocked and needs-setup lists go away with their causes.
+- No alert emails. The daily check becomes a repair sweep: it re-queues stuck work and releases dead leases, and records what it did. The n8n "Scheduled Jobs Check" workflow (m6hj4kWuT1tPSeJg) is retired at release.
 
 ### 4. One definition per number
 
@@ -161,7 +161,7 @@ The readiness gate, "Your calendar is being set up", the staff note linking to s
 - Adding the client's accounts to Moburst's Sprout account, outside the app. The app picks them up within a day.
 - Changing anything the product produced: competitors, pillars, accounts, cadence, design settings, copy.
 - Revise notes and copy edits, which teach the memory.
-- Workspace connections, once per workspace (n8n links, Higgsfield and Canva sign-in). Tokens refresh on their own; a revoked token is an outage alert.
+- Workspace connections, once per workspace (n8n links, Higgsfield sign-in). Tokens refresh on their own, and connections use credentials that do not expire wherever the provider offers them.
 - Scheduling each post to Sprout (Decision 4).
 
 ## Lital's decisions (19 Oct)
