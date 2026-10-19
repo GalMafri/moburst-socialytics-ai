@@ -32,7 +32,7 @@ for(const kind of ['social','competitive']) describe(kind+' running screen',()=>
   const first=mount(kind);await tick();expect(screen.getByText('Analysis in progress')).toBeInTheDocument();
   await tick(16*60000);expect(screen.queryByText('Analysis issue')).toBeNull();expect(screen.queryByRole('button',{name:/retry/i})).toBeNull();
   first.unmount();mount(kind);await tick();expect(screen.getByText('Elapsed: 16 minutes. This page updates when the report is ready.')).toBeInTheDocument();
-  await tick(74*60000);expect(screen.getByRole('button',{name:'Review retry'})).toBeInTheDocument();expect(f.invokes).not.toHaveBeenCalled();
+  await tick(74*60000);expect(screen.getByRole('button',{name:'Run now'})).toBeInTheDocument();expect(screen.getByText(/taking longer than usual/)).toBeInTheDocument();expect(f.invokes).not.toHaveBeenCalled();
  });
  it('does not enable start when the active run check fails',async()=>{
   f.readError=true;f.status='complete';mount(kind);await tick();expect(screen.getByRole('button',{name:kind==='social'?'Run Full Analysis':'Run competitive analysis'})).toBeDisabled();

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { canRetry, retryLabel } from "@/lib/reportRun";
+import { canRetry } from "@/lib/reportRun";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -16,13 +16,16 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/ui/load-error";
 import { Eye, ExternalLink, Crosshair, FileText } from "lucide-react";
 import { ReportActions } from "@/components/reports/ReportActions";
-import { formatRange } from "@/lib/dateRange";
+import { firstRunSentence, formatDate, formatDateTime, formatRange, listedRuns } from "@/lib/display";
 import { landscapeLabel } from "@/lib/competitiveStatus";
+import { useActiveClients } from "@/lib/activeClients";
+import { useNextRun } from "@/lib/nextRun";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function AllReports() {
   const navigate = useNavigate();
-  const { isClient, user } = useAuth();
+  const { isClient, isMoburstStaff, user } = useAuth();
+  const viewer = { isStaff: isMoburstStaff };
   const [tab, setTab] = useState<"social" | "competitive">("social");
   /** "all", or a client id. Both tabs follow it. */
   const [clientFilter, setClientFilter] = useState<string>("all");
@@ -47,20 +50,11 @@ export default function AllReports() {
 
   const ready = !isClient || (isClient && clientAccess !== undefined);
 
-  // The picker lists every client the viewer can see, not only the ones with a
-  // report on the current page. The filter applies to both paginated lists.
-  const { data: clientOptions } = useQuery({
-    queryKey: ["report-filter-clients", isClient ? clientAccess : "all"],
-    queryFn: async () => {
-      let query = supabase.from("clients").select("id, name").order("name");
-      if (isClient && clientAccess && clientAccess.length > 0) query = query.in("id", clientAccess);
-      else if (isClient) return [];
-      const { data, error } = await query;
-      if (error) throw error;
-      return data ?? [];
-    },
-    enabled: ready,
-  });
+  // The picker lists every active client the viewer can see, not only the ones
+  // with a report on the current page. The filter applies to both paginated lists.
+  const { data: clientOptions } = useActiveClients("id, name", { ids: isClient ? clientAccess ?? [] : undefined, enabled: ready });
+  const nextMonthly = useNextRun(clientFilter !== "all" ? clientFilter : null, "monthly");
+  const nextCompetitive = useNextRun(clientFilter !== "all" ? clientFilter : null, "competitive");
 
   const { data: reports, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["all-reports", isClient ? clientAccess : "all", clientFilter, socialLimit],
@@ -149,7 +143,7 @@ export default function AllReports() {
                   <Loading label="Loading reports" />
                 ) : isError ? (
                   <LoadError title="Could not load the reports" error={error} onRetry={() => refetch()} />
-                ) : reports && reports.length > 0 ? (
+                ) : listedRuns("monthly", reports?.slice(0, 50), viewer).length > 0 ? (
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -162,17 +156,15 @@ export default function AllReports() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {reports.slice(0, 50).map((r: any) => (
+                      {listedRuns("monthly", reports?.slice(0, 50), viewer).map((r: any) => (
                         <TableRow key={r.id}>
-                          <TableCell className="font-medium t-body">{r.clients?.name ?? "—"}</TableCell>
-                          <TableCell className="t-body">{new Date(r.created_at).toLocaleDateString()}</TableCell>
+                          <TableCell className="font-medium t-body">{r.clients?.name ?? ""}</TableCell>
+                          <TableCell className="t-body">{formatDate(r.created_at)}</TableCell>
                           <TableCell>
-                            <Badge variant={r.status === "completed" ? "default" : r.status === "running" ? "secondary" : "destructive"}>
-                              {r.status}
-                            </Badge>
+                            <Badge variant={r.display.variant}>{r.display.label}</Badge>
                           </TableCell>
                           <TableCell className="t-secondary">
-                            {r.date_range_start && r.date_range_end ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "—"}
+                            {formatRange({ start: r.date_range_start, end: r.date_range_end })}
                           </TableCell>
                           {!isClient && (
                             <TableCell>
@@ -180,19 +172,19 @@ export default function AllReports() {
                                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
                                   <ExternalLink className="h-3.5 w-3.5" /> Presentation
                                 </Button>
-                              ) : (
-                                <span className="t-secondary">{r.status === "running" || r.status === "pending" ? "Generating" : "Unavailable"}</span>
-                              )}
+                              ) : r.display.state === "running" ? (
+                                <span className="t-secondary">Being made</span>
+                              ) : null}
                             </TableCell>
                           )}
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-1">
-                              {r.status === "completed" && (
+                              {r.display.state === "ready" && (
                                 <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.clients?.id}/reports/${r.id}`)}>
                                   <Eye className="h-4 w-4 mr-1" /> Open report
                                 </Button>
                               )}
-                              {canRetry(r) && <RetryReportButton reportId={r.id} kind="monthly" label={retryLabel(r)} />}
+                              {r.display.state === "scheduled" && canRetry(r) && <RetryReportButton reportId={r.id} kind="monthly" label="Run now" />}
                               <ReportActions report={r} />
                             </div>
                           </TableCell>
@@ -202,15 +194,11 @@ export default function AllReports() {
                   </Table>
                 ) : (
                   <EmptyState
-                    title={filteredClientName ? `No reports for ${filteredClientName}` : "No reports yet"}
-                    description={
-                      filteredClientName
-                        ? "This client has no monthly reports yet. Pick another client, or run an analysis."
-                        : "Reports across all clients will appear here once analyses have been run."
-                    }
+                    title={filteredClientName ? `No reports for ${filteredClientName} yet` : "No reports yet"}
+                    description={firstRunSentence("monthly", nextMonthly.data) || undefined}
                   />
                 )}
-                {!isLoading && !isError && (!!reports?.length || socialLimit > 50) && <div className="flex items-center justify-between gap-3 mt-4"><p className="t-secondary">Monthly reports {reports?.length ? `${socialLimit - 49}–${socialLimit - 50 + Math.min(reports.length, 50)}` : "— no more results"}{(reports?.length || 0) > 50 ? "; more available" : ""}.</p>{socialLimit > 50 && <Button variant="outline" onClick={() => setSocialLimit((n) => n - 50)}>Previous monthly reports</Button>}{(reports?.length || 0) > 50 && <Button variant="outline" onClick={() => setSocialLimit((n) => n + 50)}>Next monthly reports</Button>}</div>}
+                {!isLoading && !isError && (!!reports?.length || socialLimit > 50) && <div className="flex items-center justify-between gap-3 mt-4"><p className="t-secondary">Monthly reports {reports?.length ? `${socialLimit - 49}–${socialLimit - 50 + Math.min(reports.length, 50)}` : ": no more results"}{(reports?.length || 0) > 50 ? "; more available" : ""}.</p>{socialLimit > 50 && <Button variant="outline" onClick={() => setSocialLimit((n) => n - 50)}>Previous monthly reports</Button>}{(reports?.length || 0) > 50 && <Button variant="outline" onClick={() => setSocialLimit((n) => n + 50)}>Next monthly reports</Button>}</div>}
               </CardContent>
             </Card>
           </TabsContent>
@@ -225,7 +213,7 @@ export default function AllReports() {
                   <Loading label="Loading competitive analyses" />
                 ) : competitiveFailed ? (
                   <LoadError title="Could not load competitive analyses" error={competitiveError} onRetry={() => refetchCompetitive()} />
-                ) : competitive && competitive.length > 0 ? (
+                ) : listedRuns("competitive", competitive?.slice(0, 50), viewer).length > 0 ? (
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -233,32 +221,32 @@ export default function AllReports() {
                         <TableHead>Run</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Period analyzed</TableHead>
-                        <TableHead>Landscape</TableHead>
+                        {isMoburstStaff && <TableHead>Tracking</TableHead>}
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {competitive.slice(0, 50).map((r: any) => {
+                      {listedRuns("competitive", competitive?.slice(0, 50), viewer).map((r: any) => {
                         const rd = (r.report_data || {}) as any;
-                        const period = rd.period?.start ? formatRange(rd.period) : r.date_range_start ? formatRange({ start: r.date_range_start, end: r.date_range_end }) : "—";
+                        const period = formatRange(rd.period) || formatRange({ start: r.date_range_start, end: r.date_range_end });
                         return (
                           <TableRow key={r.id}>
-                            <TableCell className="font-medium t-body">{r.clients?.name ?? "—"}</TableCell>
-                            <TableCell className="t-body">{new Date(r.created_at).toLocaleString()}</TableCell>
+                            <TableCell className="font-medium t-body">{r.clients?.name ?? ""}</TableCell>
+                            <TableCell className="t-body">{formatDateTime(r.created_at)}</TableCell>
                             <TableCell>
-                              <Badge variant={r.status === "complete" ? "default" : r.status === "running" ? "secondary" : "destructive"}>{r.status}</Badge>
+                              <Badge variant={r.display.variant}>{r.display.label}</Badge>
                             </TableCell>
                             <TableCell className="t-secondary">{period}</TableCell>
-                            <TableCell className="t-secondary">{rd.landscape?.name ? landscapeLabel(rd.landscape.name) : "—"}</TableCell>
+                            {isMoburstStaff && <TableCell className="t-secondary">{rd.landscape?.name ? landscapeLabel(rd.landscape.name) : ""}</TableCell>}
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
                                 <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.client_id}/competitive/reports`)}>All runs</Button>
-                                {r.status !== "running" && (
+                                {r.display.state === "ready" && (
                                   <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.client_id}/competitive/reports/${r.id}`)}>
                                     <Eye className="h-4 w-4 mr-1" /> Open report
                                   </Button>
                                 )}
-                                {canRetry(r) && <RetryReportButton reportId={r.id} kind="competitive" label={retryLabel(r)} />}
+                                {r.display.state === "scheduled" && canRetry(r, Date.now(), "competitive") && <RetryReportButton reportId={r.id} kind="competitive" label="Run now" />}
                                 <ReportActions report={r} kind="competitive" />
                               </div>
                             </TableCell>
@@ -270,12 +258,11 @@ export default function AllReports() {
                 ) : (
                   <EmptyState
                     icon={Crosshair}
-                    title={filteredClientName ? `No competitive analyses for ${filteredClientName}` : "No competitive analyses yet"}
-                    description="Confirm a competitor set for a client and run the RivalIQ analysis; results will be listed here."
-                    action={!isClient ? <Button onClick={() => navigate("/competitive")}>Go to competitive analysis</Button> : undefined}
+                    title={filteredClientName ? `No competitive analyses for ${filteredClientName} yet` : "No competitive analyses yet"}
+                    description={firstRunSentence("competitive", nextCompetitive.data) || undefined}
                   />
                 )}
-                {!competitiveLoading && !competitiveFailed && (!!competitive?.length || competitiveLimit > 50) && <div className="flex items-center justify-between gap-3 mt-4"><p className="t-secondary">Competitive analyses {competitive?.length ? `${competitiveLimit - 49}–${competitiveLimit - 50 + Math.min(competitive.length, 50)}` : "— no more results"}{(competitive?.length || 0) > 50 ? "; more available" : ""}.</p>{competitiveLimit > 50 && <Button variant="outline" onClick={() => setCompetitiveLimit((n) => n - 50)}>Previous competitive analyses</Button>}{(competitive?.length || 0) > 50 && <Button variant="outline" onClick={() => setCompetitiveLimit((n) => n + 50)}>Next competitive analyses</Button>}</div>}
+                {!competitiveLoading && !competitiveFailed && (!!competitive?.length || competitiveLimit > 50) && <div className="flex items-center justify-between gap-3 mt-4"><p className="t-secondary">Competitive analyses {competitive?.length ? `${competitiveLimit - 49}–${competitiveLimit - 50 + Math.min(competitive.length, 50)}` : ": no more results"}{(competitive?.length || 0) > 50 ? "; more available" : ""}.</p>{competitiveLimit > 50 && <Button variant="outline" onClick={() => setCompetitiveLimit((n) => n - 50)}>Previous competitive analyses</Button>}{(competitive?.length || 0) > 50 && <Button variant="outline" onClick={() => setCompetitiveLimit((n) => n + 50)}>Next competitive analyses</Button>}</div>}
               </CardContent>
             </Card>
           </TabsContent>

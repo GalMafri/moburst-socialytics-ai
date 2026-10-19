@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from '../../../supabase/functions/_shared/competitive/reportEvidence';
+import { normalizedCompetitiveMetrics } from '../../../supabase/functions/_shared/competitive/reportMetrics';
 
 const fixture = () => ({schema_note:'Existing coverage note.', aggregates:{companies:[
   {name:'Client',is_client:true,post_count:0,rivaliq_metrics:{posts:{current:0},audience:{current:9332}}},
@@ -70,9 +71,10 @@ it('holds a network mismatch even when cross-network counts cancel out, and miss
 });
 
 it('calculates the summary from provider metrics instead of preserving unsupported AI headline claims',()=>{
- const input={aggregates:{metric_semantics_version:2,companies:[{name:'Client',is_client:true,post_count:2,rivaliq_metrics:{posts:{current:2,previous:4},engagement_rate_per_post:{current:0.0015,previous:0.002},audience:{current:1000,previous:990}}},{name:'Rival',post_count:3,rivaliq_metrics:{posts:{current:3}}}]},ai_analysis:{executive_summary:'Guaranteed reach lift of 25%'}};
- const out=withCompetitiveEvidenceLimits(input);
- expect(out.ai_analysis.executive_summary).toContain('0.15%');expect(out.ai_analysis.executive_summary).toContain('up 10');expect(out.ai_analysis.executive_summary).not.toContain('Guaranteed');expect(input.ai_analysis.executive_summary).toContain('Guaranteed');
+ const input={aggregates:{metric_semantics_version:2,companies:[{name:'Client',is_client:true,post_count:2,rivaliq_metrics:{posts:{current:2,previous:4},engagement:{current:3,previous:4},estimated_impressions:{current:2000,previous:2000},engagement_rate_per_post:{current:0.9,previous:0.9},audience:{current:1000,previous:990}}},{name:'Rival',post_count:3,rivaliq_metrics:{posts:{current:3}}}]},ai_analysis:{executive_summary:'Guaranteed reach lift of 25%'}};
+ const out=withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(input));
+ // Engagements divided by impressions (3 of 2,000), not the stored per-follower 90%.
+ expect(out.ai_analysis.executive_summary).toContain('0.15%');expect(out.ai_analysis.executive_summary).toContain('0.20% in the previous period');expect(out.ai_analysis.executive_summary).not.toContain('90.00%');expect(out.ai_analysis.executive_summary).toContain('up 10');expect(out.ai_analysis.executive_summary).not.toContain('Guaranteed');expect(input.ai_analysis.executive_summary).toContain('Guaranteed');
 });
 
 it('does not recommend copying a competitor with no observed posts', () => {

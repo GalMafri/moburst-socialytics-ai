@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { supabase } from "@/integrations/supabase/client";
-import { describeInvokeError } from "@/lib/invokeError";
+import { describeInvokeError, withQuietRetry } from "@/lib/invokeError";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2, RotateCw } from "lucide-react";
@@ -22,7 +22,8 @@ const COMPETITIVE_KEYS = [
 ];
 
 /**
- * Runs a failed report again.
+ * Runs a report that did not finish again, now, instead of waiting for the
+ * product to run it again on its own.
  *
  * The same report row is reused rather than a new one created: a failed row
  * holds nothing but an error message, the workflow writes its result back to
@@ -36,7 +37,7 @@ export function RetryReportButton({
   kind,
   size = "sm",
   variant = "ghost",
-  label = "Retry",
+  label = "Run now",
   onStarted,
 }: {
   reportId: string;
@@ -57,13 +58,13 @@ export function RetryReportButton({
   const run = async () => {
     setBusy(true);
     try {
-      const { data, error } = await supabase.functions.invoke("run-report", { body: { report_id: reportId } });
+      const { data, error } = await withQuietRetry(() => supabase.functions.invoke("run-report", { body: { report_id: reportId } }));
       // invoke() reports every non-2xx as "Edge Function returned a non-2xx
       // status code" and leaves the real reason on the response body.
       if (error || data?.error) throw new Error(await describeInvokeError(error, data));
       toast({
-        title: "Running again",
-        description: "The workflow has taken the run. This page updates when it finishes.",
+        title: "Running now",
+        description: "This page updates when it finishes.",
       });
       for (const key of kind === "competitive" ? COMPETITIVE_KEYS : MONTHLY_KEYS) {
         queryClient.invalidateQueries({ queryKey: [key] });
@@ -71,7 +72,7 @@ export function RetryReportButton({
       onStarted?.();
     } catch (e) {
       toast({
-        title: "Could not start the run",
+        title: "The run did not start",
         description: e instanceof Error ? e.message : String(e),
         variant: "destructive",
       });
@@ -98,21 +99,18 @@ export function RetryReportButton({
       <ConfirmDialog
         open={open}
         onOpenChange={setOpen}
-        title="Run this report again?"
+        title="Run this report now?"
         description={
           <>
             <p>
-              {kind === "competitive" ? "A new attempt will use the same selected companies and dates. Responses from the previous attempt cannot replace its result." : "Retry only after confirming the original workflow has stopped. It may still be running even after 90 minutes."}
-              {kind !== "competitive" && "Retrying replaces this attempt and can duplicate work if the original is still active."}
-            </p>
-            <p className="t-secondary">
               {kind === "competitive"
-                ? "It keeps this report's original competitor selection and date range, and fetches fresh data from the connected sources."
-                : "It reads the client's Sprout profiles, brief and latest competitive analysis as they stand now."}
+                ? "It runs with the same competitors and dates, and fetches fresh data."
+                : "It reads the client's accounts, brief and latest competitive analysis as they stand now."}
             </p>
+            <p className="t-secondary">It replaces the attempt that did not finish. Without this, the product runs it again on its own.</p>
           </>
         }
-        confirmLabel="Run again"
+        confirmLabel="Run now"
         destructive={false}
         onConfirm={run}
       />

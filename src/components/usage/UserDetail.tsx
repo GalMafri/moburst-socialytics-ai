@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Loader2 } from "lucide-react";
+import { eventName, timelineDetail, timelineKindName } from "@/lib/display";
 
 /**
  * One person's full story: their own numbers and a chronological log of
@@ -47,8 +48,8 @@ const KIND_STYLE: Record<string, string> = {
 function when(iso: string) {
   const d = new Date(iso);
   return {
-    date: d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "2-digit" }),
-    time: d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
+    date: d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+    time: d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
   };
 }
 
@@ -149,16 +150,17 @@ export function UserDetail({
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                   <span className="t-label tabular-nums text-muted-foreground">{t.time}</span>
                   <Badge variant="outline" className={`${KIND_STYLE[r.kind] ?? ""} text-[12px]`}>
-                    {r.kind}
+                    {timelineKindName(r.kind)}
                   </Badge>
-                  <span className="t-body">{r.label}</span>
+                  {/* Event rows carry the event's key as their label; it is named here. */}
+                  <span className="t-body">{r.kind === "event" ? eventName(r.label) : r.label}</span>
                   {r.status === "failed" && (
-                    <span className="t-label font-medium text-rose-400">failed</span>
+                    <span className="t-label font-medium text-rose-400">did not finish</span>
                   )}
                 </div>
-                {(r.client_name || r.detail) && (
+                {(r.client_name || timelineDetail(r.kind, r.detail)) && (
                   <div className="mt-0.5 t-secondary">
-                    {[r.client_name, r.detail].filter(Boolean).join(" · ")}
+                    {[r.client_name, timelineDetail(r.kind, r.detail)].filter(Boolean).join(" · ")}
                   </div>
                 )}
               </li>

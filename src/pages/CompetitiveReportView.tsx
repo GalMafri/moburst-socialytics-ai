@@ -9,9 +9,10 @@ import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../s
 // by_channel data, so the filter only appears when it can do something.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { canRetry, retryLabel, STUCK_AFTER_MINUTES } from "@/lib/reportRun";
+import { canRetry } from "@/lib/reportRun";
 import { competitiveRecovery } from "@/lib/competitiveFlow";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
+import { cleanText, competitiveRunStatus, formatDate, formatDateTime } from "@/lib/display";
 import { StatCard, formatPercentChange } from "@/components/ui/stat-card";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -25,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/ui/load-error";
-import { competitiveStatusBadge, landscapeLabel } from "@/lib/competitiveStatus";
+import { landscapeLabel } from "@/lib/competitiveStatus";
 import { watchExpired, watchInterval } from "@/lib/runWatch";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
@@ -40,14 +41,14 @@ import { Section, SectionNav } from "@/components/ui/section";
 import { RankedBars, compactNumber } from "@/components/ui/bars";
 import { ChangeCards } from "@/components/competitive/ChangeCards";
 import { companiesFromReport, diffCompanies, pickComparableReport, reportPeriod as periodOf } from "@/lib/competitiveChanges";
-import { comparisonScale, normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
+import { comparisonScale, normalizedCompetitiveMetrics, postReach } from "@/lib/competitiveMetrics";
 import { editedSuggestion } from "../../supabase/functions/_shared/competitive/suggestionEdits";
 import { SuggestionEditor } from "@/components/competitive/SuggestionEditor";
 import { ArrowLeft, Crosshair, ExternalLink, Gauge, Lightbulb, Clock, Trophy, Hash, Layers, ThumbsUp, ThumbsDown, History, CalendarCheck, Eye, RotateCcw, Rss, Images, Users } from "lucide-react";
 
 type TopPost = {
   authorship?: string;
-  engagement: number; engagement_rate: number | null; est_impressions?: number | null; reach?: number; followers_at_publication?: number | null; views: number | null;
+  engagement: number; engagement_rate: number | null; est_impressions?: number | null; actual_impressions?: number | null; reach?: number; followers_at_publication?: number | null; views: number | null;
   applause?: number | null; conversation?: number | null; amplification?: number | null;
   text: string; url: string | null; image?: string | null; created: string | null; media_type: string; channel: string;
   /** RivalIQ's paid-promotion signal, Facebook posts only. */
@@ -64,8 +65,8 @@ type RivalIQMetrics = {
   audience_as_of?: string;
   period?: { start: string; end: string };
   previous_period?: { start: string; end: string } | null;
-  audience?: Both; engagement?: Both; estimated_impressions?: Both; posts?: Both; engagement_rate_per_post?: Both; likely_boosted_facebook_posts?: Both;
-  by_network?: Record<string, { audience_as_of?: string; followers?: Both; posts?: Both; engagement?: Both; impressions?: Both; views?: Both; rate?: Both; likely_boosted?: Both }>;
+  audience?: Both; engagement?: Both; estimated_impressions?: Both; posts?: Both; engagement_rate?: Both; likely_boosted_facebook_posts?: Both;
+  by_network?: Record<string, { audience_as_of?: string; followers?: Both; posts?: Both; engagement?: Both; impressions?: Both; views?: Both; engagement_rate?: Both; likely_boosted?: Both }>;
   daily?: Array<{ date: string; posts: number; engagement: number; audience: number }>;
 };
 type Bucket = {
@@ -107,6 +108,8 @@ function peakOf(counts: Record<string, number> | undefined): { key: string; coun
   return { key, count: Number(count), share: total ? Number(count) / total : 0 };
 }
 
+/** The dates an audience figure was read on ("2026-10-06 / 2026-10-07"), as words. */
+const asOf = (value: string) => value.split(" / ").map((d) => formatDate(d.trim())).filter(Boolean).join(" and ");
 const fmt = (n: number | null | undefined) => (n == null ? "–" : Math.round(n).toLocaleString());
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${(n * 100).toFixed(2)}%`);
 
@@ -303,7 +306,6 @@ export default function CompetitiveReportView() {
     return () => clearInterval(timer);
   }, [report?.status]);
   const retryReady = report ? canRetry(report, now, "competitive") : false;
-  const retryAt = report?.created_at ? Date.parse(report.created_at) + STUCK_AFTER_MINUTES * 60000 : NaN;
   const recovery = competitiveRecovery(report?.report_data, isMoburstStaff);
   // Data sources are named to staff only; a client reads what the figure is, not who supplied it.
   const vendor = (staffText: string, clientText: string) => (isMoburstStaff ? staffText : clientText);
@@ -357,7 +359,13 @@ export default function CompetitiveReportView() {
     );
   }
 
-  if (report.status === "running") return <AppLayout>
+  // One status per run, from the whole row: running, ready, held back, or
+  // scheduled to run again. Clients see ready analyses only.
+  const runStatus = competitiveRunStatus(report, { isStaff: isMoburstStaff });
+  if (runStatus.hidden) return <AppLayout>
+    <EmptyState icon={Crosshair} title="Report not available" description="It appears here when it is ready." />
+  </AppLayout>;
+  if (runStatus.state === "running") return <AppLayout>
     <Loading label="Competitive analysis in progress" />
     {watchExpired(report.created_at, now) ? (
       <p className="t-secondary" role="status">This analysis is taking longer than usual, so this page has stopped checking on its own. Refresh the page to see its latest status.</p>
@@ -366,26 +374,24 @@ export default function CompetitiveReportView() {
     )}
     <div className="flex gap-2 mt-4">
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
-      {canRetry(report, Date.now(), "competitive") && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
     </div>
   </AppLayout>;
-  if (!competitiveReportQuality(report.report_data).ready) return <AppLayout title={recovery.title} description="This analysis is not ready to share yet.">
-    <Card><CardContent className="pt-6 space-y-4">
-      <p className="t-body">{recovery.detail}</p>
-      {report.date_range_start && report.date_range_end && <p className="t-secondary">Period checked: {formatRange({start: report.date_range_start, end: report.date_range_end})}</p>}
-      <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to reports</Button>
-      {retryReady && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
-      {isMoburstStaff && !retryReady && report.status === 'failed' && Number.isFinite(retryAt) && retryAt > now && <p className="t-secondary" role="status">Retry becomes available at {new Date(retryAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}. The 90-minute wait prevents overlapping analyses.</p>}
-      {isMoburstStaff && <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/run`)}>Choose another period</Button>}
-      {isMoburstStaff && <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive`)}>Review tracked profiles</Button>}
-      {isMoburstStaff && <details className="t-secondary"><summary className="cursor-pointer">Internal validation details</summary><ul className="mt-3 space-y-2">{competitiveReportQuality(report.report_data).reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></details>}
-    </CardContent></Card>
-  </AppLayout>;
-  if (report.status === "failed") return <AppLayout>
-    <EmptyState icon={Crosshair} title="This report needs attention" description={isMoburstStaff && rd.error ? rd.error : "The analysis did not complete. Its figures are unavailable."} />
+  if (runStatus.state === "held") {
+    // The checks' own reasons are for the logs, never the page.
+    console.info("[competitive report held]", competitiveReportQuality(report.report_data).reasons);
+    return <AppLayout title={recovery.title} description="This analysis is not shared.">
+      <Card><CardContent className="pt-6 space-y-4">
+        <p className="t-body">{recovery.detail}</p>
+        {report.date_range_start && report.date_range_end && <p className="t-secondary">Period: {formatRange({start: report.date_range_start, end: report.date_range_end})}</p>}
+        <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to reports</Button>
+      </CardContent></Card>
+    </AppLayout>;
+  }
+  if (runStatus.state === "scheduled") return <AppLayout>
+    <EmptyState icon={Crosshair} title="Scheduled to run again" description="This analysis did not finish on its first attempt and runs again on its own. It appears here when it is ready." />
     <div className="flex gap-2 mt-4">
       <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
-      {canRetry(report, Date.now(), "competitive") && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" />}
+      {retryReady && <RetryReportButton reportId={report.id} kind="competitive" variant="outline" label="Run now" />}
     </div>
   </AppLayout>;
   const me = companies.find((c) => c.is_client) || null;
@@ -526,7 +532,8 @@ export default function CompetitiveReportView() {
         toast({ title: "Marked to implement", description: "The next monthly report and the weekly calendar plans will address this gap." });
       }
     } catch (e: any) {
-      toast({ title: "Could not save feedback", description: e?.message || String(e), variant: "destructive" });
+      console.error("[suggestion feedback]", e);
+      toast({ title: "Your feedback was not saved", description: "Nothing changed. Try again in a minute.", variant: "destructive" });
     }
   };
 
@@ -535,12 +542,17 @@ export default function CompetitiveReportView() {
     <div key={key} data-pdf-unit className="glass-inner p-4 space-y-2.5 h-full flex flex-col">
       {p.authorship === "collaboration" && <Badge variant="secondary" className="self-start">Company collaboration</Badge>}
       <PostVisual url={p.url} image={p.image} preview={p.url ? previews[p.url] : null} mediaType={p.media_type} platform={p.channel} maxHeight="26rem" />
-      <p className={`t-body line-clamp-2 min-h-[3rem] ${p.text ? "" : "text-[#b1b7c1]"}`}>{p.text || (normalizePlatform(p.channel) === "x" || normalizePlatform(p.channel) === "twitter" ? vendor("X posts arrive from RivalIQ without a caption or link.", "X posts arrive without a caption or link.") : "No caption provided.")}</p>
+      <p className={`t-body line-clamp-2 min-h-[3rem] whitespace-pre-line ${p.text ? "" : "text-[#b1b7c1]"}`}>{p.text ? cleanText(p.text) : (normalizePlatform(p.channel) === "x" || normalizePlatform(p.channel) === "twitter" ? vendor("X posts arrive from RivalIQ without a caption or link.", "X posts arrive without a caption or link.") : "No caption provided.")}</p>
+      {/* Ranked by engagements, so that number leads; the rate is engagements
+          divided by the impressions (or views) shown beside it, or not shown. */}
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <Stat label="Est. impr." value={p.est_impressions != null ? fmt(p.est_impressions) : "–"} />
         <Stat label="Engagements" value={fmt(p.engagement)} />
-        <Stat label="Eng. rate" value={p.engagement_rate != null ? pct(p.engagement_rate) : "–"} />
-        <Stat label={p.views ? "Views" : "Followers at publication"} value={p.views ? fmt(p.views) : (p.followers_at_publication ?? p.reach) != null ? fmt((p.followers_at_publication ?? p.reach)!) : "–"} />
+        {(() => {
+          const reach = postReach(p);
+          return reach ? <Stat label={reach.kind === "views" ? "Views" : reach.kind === "impressions" ? "Impressions" : "Est. impressions"} value={fmt(reach.value)} /> : null;
+        })()}
+        {p.engagement_rate != null && <Stat label="Engagement rate" value={pct(p.engagement_rate)} />}
+        {(p.followers_at_publication ?? p.reach) != null && <Stat label="Followers at publication" value={fmt((p.followers_at_publication ?? p.reach)!)} />}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 t-secondary mt-auto">
         {(p.applause || p.conversation || p.amplification) ? (
@@ -548,7 +560,7 @@ export default function CompetitiveReportView() {
         ) : <span />}
         <span className="flex items-center gap-2">
           {p.likely_boosted && <Badge variant="secondary" title={vendor("RivalIQ estimates this Facebook post was paid promotion", "Estimated to be paid promotion on Facebook")}>Likely boosted</Badge>}
-          {p.created ? new Date(p.created).toLocaleDateString(undefined, { timeZone: "UTC" }) : ""}
+          {formatDate(p.created ? String(p.created).slice(0, 10) : null)}
         </span>
       </div>
     </div>
@@ -622,7 +634,7 @@ export default function CompetitiveReportView() {
             </Button>
             <h1 className="t-h1">{clientName} vs. the field</h1>
             <div className="flex items-center gap-2 flex-wrap t-secondary">
-              <Badge variant={competitiveStatusBadge(report.status).variant}>{competitiveStatusBadge(report.status).label}</Badge>
+              <Badge variant={runStatus.variant}>{runStatus.label}</Badge>
               {period && <Chip>{period}{rd.period?.days ? ` · ${rd.period.days} days` : ""}</Chip>}
               {/* Sources and the tracking setup's name are for the account team,
                   and stay out of a PDF they export for the client. */}
@@ -647,7 +659,7 @@ export default function CompetitiveReportView() {
                 ))}
               </div>
             )}
-            <p className="t-secondary">Snapshot from the report run started {new Date(report.created_at).toLocaleString()}. Posts were published within the selected UTC dates; their performance reflects the collected source snapshots, not only interactions made within those dates. Client impressions from connected profiles are measured; competitor impressions are estimates.</p>
+            <p className="t-secondary">Snapshot from the report run started {formatDateTime(report.created_at)}. Posts were published within the selected UTC dates; their performance reflects the collected source snapshots, not only interactions made within those dates. Client impressions from connected profiles are measured; competitor impressions are estimates.</p>
           </div>
           <div data-print="hide" className="flex gap-2 flex-wrap">
             <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}><History className="h-4 w-4 mr-2" /> All runs</Button>
@@ -655,9 +667,6 @@ export default function CompetitiveReportView() {
               <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/feed`)}><Rss className="h-4 w-4 mr-2" /> Latest posts</Button>
             )}
             <ExportPdfButton contentRef={printRef} filename={`${clientName.replace(/[^a-z0-9]+/gi, "_")}_competitive_${period ? period.replace(/[^a-z0-9]+/gi, "_") : report.id.slice(0, 8)}`} title={`${clientName} vs. the field${period ? ` (${period})` : ""}`} />
-            {canRetry(report, Date.now(), "competitive") && (
-              <RetryReportButton reportId={report.id} kind="competitive" variant="outline" label={retryLabel(report)} />
-            )}
             <ReportActions
               report={report as any}
               kind="competitive"
@@ -665,10 +674,6 @@ export default function CompetitiveReportView() {
             />
           </div>
         </div>
-
-        {report.status === "failed" && (
-          <Card><CardContent className="text-destructive break-words">{String(rd.error || "The run failed before producing a report.")}</CardContent></Card>
-        )}
 
         {/* Platform filter */}
         {hasChannels && (
@@ -704,11 +709,12 @@ export default function CompetitiveReportView() {
               sub={`Client + ${rivals.length} competitor${rivals.length === 1 ? "" : "s"} · tracked accounts`}
             />
             {meM?.audience && (
-              <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={`${effectivePlat === "all" ? "Tracked networks · excluding LinkedIn" : `on ${platformLabel(effectivePlat)}`}${meM.audience_as_of ? ` · as of ${meM.audience_as_of}` : ""}`} />
+              <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={`${effectivePlat === "all" ? "Tracked networks · excluding LinkedIn" : `on ${platformLabel(effectivePlat)}`}${meM.audience_as_of ? ` · as of ${asOf(meM.audience_as_of)}` : ""}`} />
             )}
             <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} tracked posts`} />
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`competitor avg ${avgCadence.toFixed(1)}/wk`} />
-            <Kpi label="Engagement rate" value={meB.post_count ? pct(meB.engagement_rate_avg) : "Not available"} sub={`${effectivePlat === "all" ? "Excluding LinkedIn · " : ""}active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`} />
+            {/* Engagements divided by impressions (views on video), the same for every company. No impressions figure, no tile. */}
+            {meB.post_count > 0 && meB.engagement_rate_avg != null && <Kpi label="Engagement rate" value={pct(meB.engagement_rate_avg)} sub={`${effectivePlat === "all" ? "Excluding LinkedIn · " : ""}${avg((b) => b.engagement_rate_avg) == null ? "engagements per impression" : `active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`}`} />}
             <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`active peers avg ${fmt(avg((b) => b.engagement_avg))}`} />
           </div>
         )}
@@ -786,7 +792,7 @@ export default function CompetitiveReportView() {
                   <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => v.toFixed(1)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).cadence_per_week || 0), emphasized: !!c.is_client }))} />
                 </div>
                 <div className="space-y-3">
-                    <p className="t-subhead">Engagement rate</p><p className="t-secondary">Companies with tracked posts and an available rate.{effectivePlat === "all" ? " Tracked networks, excluding LinkedIn." : ""}</p>
+                    <p className="t-subhead">Engagement rate</p><p className="t-secondary">Engagements divided by impressions (views on video), for companies with an impressions figure.{effectivePlat === "all" ? " Tracked networks, excluding LinkedIn." : ""}</p>
                   <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => pct(v)} rows={ordered.filter(c => { const b = bucketFor(c, effectivePlat); return b.post_count > 0 && b.engagement_rate_avg != null; }).map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).engagement_rate_avg || 0), emphasized: !!c.is_client }))} />
                 </div>
               </CardContent>
@@ -813,7 +819,7 @@ export default function CompetitiveReportView() {
                         <div className="grid grid-cols-3 gap-3">
                           <TileStat value={String(b.post_count)} label="Tracked posts" />
                           <TileStat value={String(b.cadence_per_week)} label="Posts / week" />
-                          <TileStat value={pct(b.engagement_rate_avg)} label="Engagement rate" />
+                          {b.engagement_rate_avg != null && <TileStat value={pct(b.engagement_rate_avg)} label="Engagement rate" />}
                           <TileStat value={b.engagement_avg == null ? "Not available" : compactNumber(b.engagement_avg)} exact={fmt(b.engagement_avg)} label="Engagements / post" />
                           <TileStat
                             value={b.impressions_avg == null ? "Not available" : compactNumber(b.impressions_avg)}
@@ -926,7 +932,7 @@ export default function CompetitiveReportView() {
                         </div>
                         {m.profiles?.length>0 && <p className="t-secondary">Connected profiles: {profilesLine(m.profiles)}</p>}
                         {m.actual_impressions?.current != null && (m.impressions_missing?.length ?? 0) > 0 && (m.impressions_networks?.length ?? 0) > 0 && <p className="t-secondary">Client impressions are for {andList(m.impressions_networks!.map(platformLabel))}.</p>}
-                        {m.audience_as_of && <p className="t-secondary">Audience measured {m.audience_as_of}. Activity above covers the selected report dates.</p>}
+                        {m.audience_as_of && <p className="t-secondary">Audience measured {asOf(m.audience_as_of)}. Activity above covers the selected report dates.</p>}
                         {nets.length > 0 && (
                           <div className="space-y-1.5">
                             <p className="t-subhead">Followers by network</p>
@@ -1176,7 +1182,7 @@ export default function CompetitiveReportView() {
                                 <span className="flex items-baseline gap-2 flex-wrap">
                                   <span className="t-body font-semibold text-white tabular-nums">{ex.post ? fmt(ex.post.engagement) : "–"}</span>
                                   <span className="t-label">engagements</span>
-                                  {ex.post?.engagement_rate ? <span className="t-label">· {pct(ex.post.engagement_rate)} ER</span> : null}
+                                  {ex.post?.engagement_rate != null ? <span className="t-label">· {pct(ex.post.engagement_rate)} engagement rate</span> : null}
                                 </span>
                                 <span className="t-label block mt-0.5">
                                   {ex.post?.channel ? platformLabel(ex.post.channel) : "Post"}

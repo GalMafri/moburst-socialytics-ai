@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { platformName } from "@/lib/display";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -254,8 +255,8 @@ export function SchedulePostModal({
                 <span className="font-medium">
                   {selectedProfile.name || selectedProfile.native_name || "Profile"}
                 </span>
-                <Badge variant="secondary" className="t-label capitalize">
-                  {selectedProfile.network_type}
+                <Badge variant="secondary" className="t-label">
+                  {platformName(selectedProfile.network_type)}
                 </Badge>
                 <span className="ml-auto t-secondary">auto-detected</span>
               </div>
@@ -282,7 +283,7 @@ export function SchedulePostModal({
                   <SelectContent>
                     {displayProfiles.map((profile: any) => (
                       <SelectItem key={String(profile.id)} value={String(profile.id)}>
-                        {profile.name || profile.native_name || "Profile"} ({profile.network_type})
+                        {profile.name || profile.native_name || "Profile"} ({platformName(profile.network_type)})
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -146,11 +146,8 @@ export function describeReport(report: ReportRow | null): FlowState {
   if (!report) return { headline: "No report run yet", ready: false };
   if (report.status === "complete") return { headline: "Last report is ready to open", ready: true };
   if (report.status === "running") return { headline: "A report is running now", detail: "It finishes on its own; you can leave this page.", ready: false };
-  return {
-    headline: "Last report did not finish",
-    detail: "Open it to see why, or start a new one once the retry window opens.",
-    ready: false,
-  };
+  // A run that did not finish runs again on its own; it is never shown as a failure.
+  return { headline: "The last report is scheduled to run again", ready: false };
 }
 
 /**
@@ -182,34 +179,23 @@ export function plainCompetitiveError(raw: string | null | undefined): string {
   return message;
 }
 
-/** Explain saved validation failures without exposing internal diagnostics. */
-export function competitiveFailureMessage(data: unknown): string {
-  const report = data as { quality_check?: { state?: string }; error?: string } | null;
-  if (report?.quality_check?.state === "needs_review") {
-    return "The analysis was saved, but its source figures did not pass validation. The report is being withheld to avoid showing inaccurate results.";
-  }
-  if (typeof report?.error === "string" && report.error.trim()) return plainCompetitiveError(report.error);
-  return "The analysis could not be completed. Its saved status is available in report history.";
-}
-
 /**
- * Explain a source hold as a recoverable outcome, rather than an unnamed review.
- *
- * Staff get the provider's name and the next step; a client (staff = false)
- * gets the same fact with no vendor named and no step only staff can take.
+ * Why an analysis is held back, as facts. Nothing here asks anyone to act:
+ * the next run for the period replaces a held one. Staff read the source's
+ * name; a client (staff = false) reads the same fact with no vendor named.
  */
 export function competitiveRecovery(data: any, staff = true): { title: string; detail: string } {
   const reasons = (data?.quality_check?.reasons || []).join(' ');
   if (data?.provider_status === 2 || /still collecting/i.test(reasons + ' ' + (data?.error || ''))) {
     return { title: 'Source data was still loading', detail: staff
-      ? 'RivalIQ had not finished collecting these profiles when this report ran. Retry after collection finishes; the original attempt is kept unavailable because its figures are incomplete.'
-      : 'The tracked profiles were still being collected when this report ran, so its figures are incomplete. It is held back until they are complete.' };
+      ? 'RivalIQ had not finished collecting these profiles when this analysis ran, so its figures are incomplete and it is not shared. The next run replaces it.'
+      : 'The tracked profiles were still being collected when this analysis ran, so its figures are incomplete. The next run replaces it.' };
   }
   const companies = data?.aggregates?.companies;
   if (Array.isArray(companies) && companies.length && companies.every(c => c.post_count === 0 && (c.observed_post_count ?? c.post_count) === 0)) {
     return { title: 'No posts available for this period', detail: staff
-      ? 'RivalIQ returned no posts for the client or selected competitors in this date range. Choose another period or review the tracked profiles. This does not establish that these companies did not publish.'
+      ? 'RivalIQ returned no posts for the client or the selected competitors in this date range. This does not establish that these companies did not publish.'
       : 'No posts were found for the client or the selected competitors in this date range. This does not establish that these companies did not publish.' };
   }
-  return { title: 'Report awaiting review', detail: 'We need to verify the source data before this report can be released.' };
+  return { title: 'Held back', detail: 'Its source figures did not pass the checks, so it is not shared. The next run replaces it.' };
 }

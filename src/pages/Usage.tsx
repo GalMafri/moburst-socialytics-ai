@@ -24,6 +24,7 @@ import {
   type FeatureRow,
 } from "@/components/usage/UsageSections";
 import { UserDetail } from "@/components/usage/UserDetail";
+import { formatDate, roleName, usageStateName } from "@/lib/display";
 
 import {
   Area,
@@ -37,6 +38,12 @@ import {
 
 /**
  * Admin-only view of who actually uses Socialytics.
+ *
+ * Every count of actions and of actions that did not finish comes from one
+ * database function, usage_actions() (migration 20261019210000): the tiles
+ * and the chart read get_usage_trend(), the Features tab reads
+ * get_feature_adoption(), and the per-person table reads user_analytics, and
+ * all three are built on it.
  *
  * Reads through get_user_analytics() / get_usage_trend() rather than the
  * underlying views. Both functions are SECURITY DEFINER and gate on
@@ -72,7 +79,7 @@ type UserRow = {
   state: string;
 };
 
-type TrendRow = { day: string; actions: number; active_users: number };
+type TrendRow = { day: string; actions: number; active_users: number; failures: number };
 
 const STATE_STYLE: Record<string, string> = {
   habit: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
@@ -82,10 +89,7 @@ const STATE_STYLE: Record<string, string> = {
   "never logged in": "bg-muted text-muted-foreground border-border",
 };
 
-function fmtDate(v: string | null) {
-  if (!v) return "—";
-  return new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
-}
+const fmtDate = (v: string | null) => formatDate(v);
 
 function Tile({ label, value, hint, icon: Icon, tone }: { label: string; value: number | string; hint?: string; icon: typeof Users; tone?: "warn" }) {
   return (
@@ -143,6 +147,12 @@ export default function Usage() {
     [users.data],
   );
 
+  // Actions and the ones that did not finish, from the same rows the chart draws.
+  const activity = useMemo(() => {
+    const rows = trend.data ?? [];
+    return { actions: rows.reduce((n, d) => n + Number(d.actions || 0), 0), failures: rows.reduce((n, d) => n + Number(d.failures || 0), 0) };
+  }, [trend.data]);
+
   const summary = useMemo(() => {
     const r = users.data ?? [];
     const byState = r.reduce<Record<string, number>>((acc, u) => {
@@ -154,8 +164,6 @@ export default function Usage() {
       producing: r.filter((u) => u.actions_total > 0).length,
       idle: (byState["logged in, no output"] ?? 0) + (byState["never logged in"] ?? 0),
       habit: byState["habit"] ?? 0,
-      actions: r.reduce((n, u) => n + u.actions_total, 0),
-      failures: r.reduce((n, u) => n + u.failures, 0),
       byState,
     };
   }, [users.data]);
@@ -200,8 +208,7 @@ export default function Usage() {
       <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature.">
         <Card>
           <CardContent className="p-5">
-            <p className="t-body text-rose-400">Could not load usage data.</p>
-            <p className="mt-1 t-secondary">{(users.error as Error).message}</p>
+            <p className="t-body">Usage did not load. Reload the page to try again.</p>
           </CardContent>
         </Card>
       </AppLayout>
@@ -228,8 +235,8 @@ export default function Usage() {
     <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature.">
       <div className="space-y-6">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Tile label="Provisioned" value={summary.total} hint={`${summary.producing} have produced something`} icon={Users} />
-          <Tile label="Regular users" value={summary.habit} hint="3+ completed reports" icon={Zap} />
+          <Tile label="Provisioned" value={summary.total} hint={`${summary.producing} have done work in the product`} icon={Users} />
+          <Tile label="Regular users" value={summary.habit} hint="3 or more finished reports" icon={Zap} />
           <Tile
             label="Idle seats"
             value={summary.idle}
@@ -237,7 +244,8 @@ export default function Usage() {
             icon={MoonStar}
             tone={summary.idle > summary.producing ? "warn" : undefined}
           />
-          <Tile label="Failures" value={summary.failures} hint={`across ${summary.actions} actions`} icon={AlertCircle} />
+          {/* Internal health, admins only: the same rows as the activity chart. */}
+          <Tile label="Did not finish" value={activity.failures} hint={`of ${activity.actions} actions, all time`} icon={AlertCircle} />
         </div>
 
         <Tabs defaultValue="people" className="space-y-4">
@@ -310,7 +318,7 @@ export default function Usage() {
                   .map(([state, n]) => (
                     <div key={state}>
                       <div className="mb-1 flex items-baseline justify-between gap-2">
-                        <span className="t-body capitalize">{state}</span>
+                        <span className="t-body">{usageStateName(state)}</span>
                         <span className="t-body font-medium tabular-nums">{n}</span>
                       </div>
                       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -383,12 +391,12 @@ export default function Usage() {
                           <div className="t-secondary">
                             {u.email}
                             {u.company ? ` · ${u.company}` : ""}
-                            {u.role ? ` · ${u.role}` : ""}
+                            {u.role ? ` · ${roleName(u.role)}` : ""}
                           </div>
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className={STATE_STYLE[u.state] ?? ""}>
-                            {u.state}
+                            {usageStateName(u.state)}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right tabular-nums">{u.reports_ok}</TableCell>
@@ -416,10 +424,10 @@ export default function Usage() {
         />
 
         <p className="glass-inner px-4 py-3 t-secondary">
-          Counts come from work the product recorded. Rows written before Aug 2026 mostly carry no
-          author, so historical per-user figures understate real usage; totals per client were always
-          complete. Page views and report opens are not tracked, so a user with zero actions may still
-          have been reading reports.
+          Actions are the work the product recorded: reports, competitive analyses, posts, approvals,
+          scheduling, designs and videos. Rows written before Aug 2026 mostly carry no author, so
+          per-person figures before then understate real use; the totals were always complete. Page
+          views and report opens are recorded separately and are not counted as actions.
         </p>
       </div>
     </AppLayout>

@@ -15,6 +15,7 @@ import { LoadError } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { ALL_CLIENTS, ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
+import { isActiveClient, useActiveClients } from "@/lib/activeClients";
 import { AllClientsWeek, type ClientPost } from "@/components/calendar/AllClientsWeek";
 import { addDays, mondayOf, shortDate, todayIn, type CalendarPostRow } from "@/lib/calendarPosts";
 
@@ -23,14 +24,8 @@ export default function CalendarIndex() {
   const [params, setParams] = useSearchParams();
   const { isClient, isMoburstStaff, user, isGosSession } = useAuth();
 
-  const clients = useQuery({
-    queryKey: ["calendar-clients"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("id, name, hub_company_name, archived_at").order("name");
-      if (error) throw error;
-      return data || [];
-    },
-  });
+  // Active clients only, the one shared definition every client list uses.
+  const clients = useActiveClients<{ id: string; name: string; hub_company_name: string | null; archived_at: string | null }>("id, name, hub_company_name, archived_at");
 
   // A client's own users go straight to their calendar.
   useEffect(() => {
@@ -69,7 +64,7 @@ export default function CalendarIndex() {
     },
   });
 
-  const active = useMemo(() => new Map((clients.data || []).filter((c) => !c.archived_at).map((c) => [c.id, c.name] as const)), [clients.data]);
+  const active = useMemo(() => new Map((clients.data || []).filter(isActiveClient).map((c) => [c.id, c.name] as const)), [clients.data]);
   const weekPosts: ClientPost[] = (posts.data || []).filter((p) => active.has(p.client_id)).map((p) => ({ ...p, client_name: active.get(p.client_id)! }));
 
   if (isClient) return <AppLayout title="Calendar"><Loading label="Opening your calendar" /></AppLayout>;

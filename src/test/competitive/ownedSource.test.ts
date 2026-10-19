@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {normalizeOwnedCompetitive} from '../../../supabase/functions/_shared/competitive/ownedSource';
+import {isPublishedPost,normalizeOwnedCompetitive} from '../../../supabase/functions/_shared/competitive/ownedSource';
 import {mergeOwnedCompetitivePosts} from '../../../supabase/functions/_shared/competitive/ownedMerge';
 import {competitiveCompanyMetrics,normalizedCompetitiveMetrics} from '../../../supabase/functions/_shared/competitive/reportMetrics';
 import {competitiveReportQuality} from '../../../supabase/functions/_shared/competitive/reportEvidence';
@@ -18,12 +18,29 @@ describe('owned competitive sources',()=>{
   expect(result.metrics.by_network.instagram.posts).toEqual({current:2,previous:1});
   expect(result.metrics.by_network.instagram.engagement).toEqual({current:24,previous:12});
   expect(result.metrics.by_network.instagram.followers).toEqual({current:3000,previous:3000});
-  expect(result.metrics.by_network.instagram.rate.current).toBeCloseTo(.009,10);
+  // Per-follower rates left the product: the owned source carries totals only.
+  expect(result.metrics.by_network.instagram.rate).toBeUndefined();
+  expect(result.metrics.by_network.instagram.impressions).toEqual({current:200,previous:100});
+  expect(result.posts[0].engagementRate).toBeUndefined();
   expect(result.metrics.audience_snapshot.by_network.instagram).toEqual({followers:3000,as_of:'2026-09-29'});
  });
  it('deduplicates exact identities and excludes stories and unsent posts',()=>{
   const row=post(1,'2026-08-02');
   expect(normalize([row,row,{...post(2,'2026-08-02'),post_type:'INSTAGRAM_STORY'},{...post(3,'2026-08-02'),sent:false}]).posts).toHaveLength(1);
+ });
+ it('counts no ads as posts: every Sprout ad post type, and every "fa:" ad guid',()=>{
+  const ads=['FACEBOOK_AD','TIKTOK_AD','FB_INSTAGRAM_AD_POST','FACEBOOK_AD_COMMENT','AD_POST'].map((post_type,i)=>({...post(1,'2026-08-02','ad'+i),post_type}));
+  // Bader Law, Sept 2026: 29 zero-impression copies of one caption, stored with "fa:" guids under an ordinary type.
+  const faGuid={...post(2,'2026-08-03','fa:62392002280_1683812133750940'),post_type:'INSTAGRAM_MEDIA'};
+  const result=normalize([...ads,faGuid,post(1,'2026-08-04','p:real')]);
+  expect(result.posts.map((p:any)=>p.postId)).toEqual(['sprout:p:real']);
+  expect(result.metrics.by_network.instagram.posts.current).toBe(1);
+  expect(isPublishedPost({post_type:'FACEBOOK_POST',guid:'p:1'})).toBe(true);
+  expect(isPublishedPost({post_type:'FACEBOOK_REEL',guid:'p:2'})).toBe(true);
+  expect(isPublishedPost({post_type:'LINKEDIN_COMPANY_UPDATE',guid:'li:1'})).toBe(true);
+  expect(isPublishedPost({post_type:'YOUTUBE_VIDEO',guid:'yt:1'})).toBe(true);
+  for (const post_type of ['FACEBOOK_AD','TIKTOK_AD','FB_INSTAGRAM_AD_POST','INSTAGRAM_STORY','TWITTER_DIRECT_MESSAGE','YOUTUBE_COMMENT','THREADS_REPLY','FACEBOOK_RATING','INSTAGRAM_PHOTO_TAG']) expect(isPublishedPost({post_type}),post_type).toBe(false);
+  expect(isPublishedPost({post_type:'FACEBOOK_POST',guid:'fa:1_2'})).toBe(false);
  });
  it('rejects another client, wrong network, wrong dates, and unknown engagement instead of reporting zeros',()=>{
   expect(()=>normalize([post(999,'2026-08-02')])).toThrow('unassigned');

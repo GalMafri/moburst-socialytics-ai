@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { formatDate } from "@/lib/display";
 import { ClientOverview } from "@/components/dashboard/ClientOverview";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -117,7 +118,7 @@ export function ClientDashboard() {
           <CardContent>
             {latestReport ? (
               <p className="t-secondary">
-                Generated on {new Date(latestReport.created_at).toLocaleDateString()}
+                Generated on {formatDate(latestReport.created_at)}
               </p>
             ) : (
               <p className="t-secondary">No reports available yet</p>

@@ -79,10 +79,11 @@ it('names no data vendor to a client, even where the figures come from one', asy
   expect(document.body.innerHTML).not.toMatch(/Rival ?IQ|Sprout/);
 });
 
-it('keeps a held report vendor-free for a client and named for staff', async () => {
+it('shows a client no held report at all, and staff the fact with its source named', async () => {
   fixture.data = { ...complete(), provider_status: 2 };
   mount(<CompetitiveReportView />); await tick(20);
-  expect(screen.getByText(/still being collected when this report ran/)).toBeInTheDocument();
+  expect(screen.getByText('Report not available')).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(/still being collected|held/i);
   expect(document.body.textContent).not.toMatch(banned);
   cleanup(); fixture.staff = true;
   mount(<CompetitiveReportView />); await tick(20);
@@ -107,7 +108,7 @@ it('says a report failed to load, with a retry, instead of looking empty', async
 });
 
 it('stops polling a run past the watch limit and says so plainly', async () => {
-  fixture.status = 'running'; fixture.data = {};
+  fixture.staff = true; fixture.status = 'running'; fixture.data = {};
   fixture.createdAt = new Date(Date.now() - (WATCH_LIMIT_MINUTES + 1) * 60000).toISOString();
   mount(<CompetitiveReportView />); await tick(20);
   expect(screen.getByText(/stopped checking on its own/)).toBeInTheDocument();
@@ -123,11 +124,11 @@ it('keeps polling a run inside the limit', async () => {
 it('history shows clients plain statuses and no landscape column', async () => {
   mount(<CompetitiveReportHistory />, '/clients/client/history', '/clients/:id/history'); await tick(20);
   expect(screen.getByText('Ready')).toBeInTheDocument();
-  expect(screen.queryByText('Landscape')).toBeNull();
+  expect(screen.queryByText('Tracking')).toBeNull();
   expect(document.body.textContent).not.toMatch(banned);
   cleanup(); fixture.staff = true;
   mount(<CompetitiveReportHistory />, '/clients/client/history', '/clients/:id/history'); await tick(20);
-  expect(screen.getByText('Landscape')).toBeInTheDocument();
+  expect(screen.getByText('Tracking')).toBeInTheDocument();
 });
 
 it('snapshot shows measured figures against the competitors, with no score or internal wording', async () => {
@@ -146,7 +147,7 @@ it('snapshot says it failed to load rather than "no analysis yet"', async () => 
   expect(screen.queryByText('No competitive analysis yet')).toBeNull();
 });
 
-it('LoadError shows a raw error to staff only, and written copy to everyone', () => {
+it('LoadError never shows raw error text, to staff or clients, and shows written copy to everyone', () => {
   const raw = new Error('JWT expired at 10:02');
   render(<LoadError error={raw} />);
   expect(screen.queryByText(/JWT/)).toBeNull();
@@ -156,5 +157,6 @@ it('LoadError shows a raw error to staff only, and written copy to everyone', ()
   expect(screen.getByText('It may have been deleted.')).toBeInTheDocument();
   cleanup(); fixture.staff = true;
   render(<LoadError error={raw} />);
-  expect(screen.getByText('JWT expired at 10:02')).toBeInTheDocument();
+  expect(screen.queryByText(/JWT/)).toBeNull();
+  expect(screen.getByText(/did not complete/)).toBeInTheDocument();
 });

@@ -13,56 +13,55 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Loading } from "@/components/ui/loading";
 import { compactNumber } from "@/components/ui/bars";
 import { formatPercentChange } from "@/components/ui/stat-card";
-import { formatRange } from "@/lib/dateRange";
+import { firstRunSentence, formatRange } from "@/lib/display";
 import { displayCompanyName } from "@/lib/companyName";
-import { todayIn } from "@/lib/calendarPosts";
-import { describeTracking, pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
+import { thisWeek } from "@/lib/weekWindow";
+import { fetchOpenTopics } from "@/lib/openTopics";
+import { fetchNextRun } from "@/lib/nextRun";
 import { buildCompetitiveContext } from "@/components/competitive/CompetitiveSnapshot";
 import { competitiveReportQuality } from "../../../supabase/functions/_shared/competitive/reportEvidence";
 import { actionItems, competitiveStanding, contentWeek, reportHeadline, type PostMedia, type WeekPost } from "@/lib/clientOverview";
 
 const andList = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
-const TOPIC_DAYS = 14;
 
 export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaff: boolean }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["client-overview", clientId, isStaff],
     queryFn: async () => {
       const { data: client } = await supabase.from("clients").select("id, name, timezone").eq("id", clientId).maybeSingle();
-      const today = todayIn(client?.timezone || "UTC");
-      const since = new Date(Date.now() - TOPIC_DAYS * 86400000).toISOString();
-      const [report, lastRun, competitive, feedback, sets, posts, media, topics] = await Promise.all([
+      const timeZone = client?.timezone || "UTC";
+      // "This week" is Monday to Sunday in the client's time zone, as on the calendar.
+      const week = thisWeek(timeZone);
+      const [report, competitive, feedback, posts, media, topics, nextMonthly, nextCompetitive] = await Promise.all([
         supabase.from("reports").select("id, report_data, date_range_start, date_range_end, created_at").eq("client_id", clientId).eq("status", "completed").order("created_at", { ascending: false }).limit(1).maybeSingle(),
-        supabase.from("reports").select("status, created_at").eq("client_id", clientId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
         supabase.from("competitive_reports").select("id, created_at, report_data").eq("client_id", clientId).eq("status", "complete").order("created_at", { ascending: false }).limit(1).maybeSingle(),
         supabase.from("competitive_insight_feedback").select("insight_key, verdict, gap_text, edited").eq("client_id", clientId),
-        isStaff ? supabase.from("competitor_sets").select("id, status, created_at, confirmed_at, rivaliq_landscape_id, tracking_check").eq("client_id", clientId) : Promise.resolve({ data: [] as SetRow[] }),
         // The calendar shows each week's plan in force, never the raw posts table.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (supabase.from("calendar_posts" as never) as any).select("id, post_key, post_date, platform, source, copy").eq("client_id", clientId).gte("post_date", today).order("post_date").limit(200),
+        (supabase.from("calendar_posts" as never) as any).select("id, post_key, post_date, platform, source, copy").eq("client_id", clientId).gte("post_date", week.start).order("post_date").limit(200),
         supabase.from("post_iterations").select("calendar_post_key, is_selected, is_approved, media_urls").eq("client_id", clientId).is("rejected_at", null).is("archived_at", null).not("calendar_post_key", "is", null),
-        isStaff ? supabase.from("competitive_alerts").select("id", { count: "exact", head: true }).eq("client_id", clientId).eq("status", "new").gte("created_at", since) : Promise.resolve({ count: 0 }),
+        // The one definition of open topics, shared with the feed page and the planner.
+        isStaff ? fetchOpenTopics(clientId).catch(() => []) : Promise.resolve([]),
+        fetchNextRun(clientId, "monthly").catch(() => null),
+        fetchNextRun(clientId, "competitive").catch(() => null),
       ]);
       const compRow = competitive.data && competitiveReportQuality(competitive.data.report_data).ready ? competitive.data : null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fb = (feedback.data || []) as any[];
-      const content = contentWeek((posts.data || []) as WeekPost[], (media.data || []) as PostMedia[], today);
-      const { runnable } = pickRunSelection((sets.data || []) as SetRow[]);
-      const tracking = isStaff && compRow ? describeTracking(runnable) : null;
+      const content = contentWeek((posts.data || []) as WeekPost[], (media.data || []) as PostMedia[], week);
       return {
-        today,
+        week,
         report: report.data,
         headline: report.data ? reportHeadline(report.data.report_data) : null,
         competitive: compRow,
         standing: compRow ? competitiveStanding(buildCompetitiveContext(compRow, fb)) : null,
         content,
+        firstMonthly: firstRunSentence("monthly", nextMonthly, timeZone),
+        // A run that was held back is not shown; the next one is a fact worth stating.
+        firstCompetitive: firstRunSentence("competitive", nextCompetitive, timeZone, { first: !competitive.data }),
         actions: actionItems({
-          clientId, isStaff, today, content,
-          lastRun: lastRun.data,
-          hasReport: !!report.data,
-          tracking,
-          hasCompetitiveReport: !!compRow,
-          openTopics: topics.count ?? 0,
+          clientId, isStaff, week, content,
+          openTopics: topics.length,
           endorsedTests: fb.filter((r) => r.verdict === "up").length,
         }),
       };
@@ -72,7 +71,7 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
 
   if (isLoading) return <Loading label="Loading the overview" />;
   if (isError || !data) return null;
-  const { report, headline, competitive, standing, content, actions } = data;
+  const { report, headline, competitive, standing, content, actions, firstMonthly, firstCompetitive } = data;
 
   return (
     <div className="space-y-4">
@@ -96,9 +95,9 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
                 {headline.total > 0 && <p className="t-body">{headline.rose} of {headline.total} measures rose.</p>}
                 <Link to={`/clients/${clientId}/reports/${report.id}`} className="t-label underline underline-offset-2 inline-flex items-center gap-1">Open the report <ArrowRight className="h-3 w-3" /></Link>
               </>
-            ) : (
-              <p className="t-body">The first monthly report is not ready yet.</p>
-            )}
+            ) : firstMonthly ? (
+              <p className="t-body">{firstMonthly}</p>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -123,16 +122,16 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
                 )}
                 <Link to={`/clients/${clientId}/competitive/reports/${competitive.id}`} className="t-label underline underline-offset-2 inline-flex items-center gap-1">Open the competitive report <ArrowRight className="h-3 w-3" /></Link>
               </>
-            ) : (
-              <p className="t-body">The competitive analysis is not ready yet.</p>
-            )}
+            ) : firstCompetitive ? (
+              <p className="t-body">{firstCompetitive}</p>
+            ) : null}
           </CardContent>
         </Card>
 
-        {/* Content: the coming seven days of the calendar. */}
+        {/* Content: this week of the calendar, Monday to Sunday. */}
         <Card>
           <CardContent className="pt-5 space-y-3">
-            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" /> Next 7 days</p>
+            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" /> This week</p>
             {content.planned > 0 ? (
               <div className="grid grid-cols-3 gap-2">
                 <div><p className="t-h2 tabular-nums">{content.planned}</p><p className="t-secondary">planned</p></div>
@@ -140,7 +139,7 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
                 <div><p className="t-h2 tabular-nums">{content.approved}</p><p className="t-secondary">approved</p></div>
               </div>
             ) : (
-              <p className="t-body">No posts are planned for the next seven days.</p>
+              <p className="t-body">No posts are planned for this week.</p>
             )}
             <Link to={`/clients/${clientId}/calendar`} className="t-label underline underline-offset-2 inline-flex items-center gap-1">Open the calendar <ArrowRight className="h-3 w-3" /></Link>
           </CardContent>

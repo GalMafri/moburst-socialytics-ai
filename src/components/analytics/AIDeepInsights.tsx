@@ -5,6 +5,8 @@ import { InsightGrid } from "@/components/ui/insight-card";
 import { Section } from "@/components/ui/section";
 import { Badge } from "@/components/ui/badge";
 import { Eye, Heart, Percent, ListChecks } from "lucide-react";
+import { reportCounts } from "@/lib/reportFigures";
+import { engagementRate } from "@/lib/competitiveMetrics";
 
 interface Props {
   reports: any[];
@@ -89,28 +91,17 @@ export function AIDeepInsights({ reports, chartData }: Props) {
     // Cumulative totals
     const totalImpr = chartData.reduce((s, d) => s + d.impressions, 0);
     const totalEng = chartData.reduce((s, d) => s + d.engagements, 0);
-    const avgEngRate = totalImpr > 0 ? (totalEng / totalImpr) * 100 : 0;
+    // The one definition: engagements divided by impressions.
+    const avgEngRate = (engagementRate(totalEng, totalImpr) ?? 0) * 100;
     if (avgEngRate > 0) {
       result.push({ text: `Average engagement rate across all reports: ${avgEngRate.toFixed(2)}%`, type: "neutral" });
     }
 
-    // Content calendar coverage
-    let totalCalendarDays = 0;
+    // What the reports produced, counted as the report page counts it.
     let totalRecs = 0;
-    for (const r of reports) {
-      const rawRd = r.report_data;
-      const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
-      const dc = rd?.data_counts;
-      if (dc) {
-        totalCalendarDays += dc.content_calendar_days || 0;
-        totalRecs += dc.total_recommendations || 0;
-      }
-    }
-    if (totalCalendarDays > 0) {
-      result.push({
-        text: `${totalCalendarDays} content calendar days and ${totalRecs} recommendations generated across ${reports.length} reports`,
-        type: "neutral",
-      });
+    for (const r of reports) totalRecs += reportCounts(r.report_data).recommendations;
+    if (totalRecs > 0) {
+      result.push({ text: `${totalRecs} recommendations across ${reports.length} reports`, type: "neutral" });
     }
 
     // Trend coverage
@@ -143,11 +134,12 @@ export function AIDeepInsights({ reports, chartData }: Props) {
     let recs = 0, tiktok = 0, ig = 0;
     for (const r of reports) {
       const rd = Array.isArray(r.report_data) ? r.report_data[0] : r.report_data;
-      recs += rd?.data_counts?.total_recommendations || 0;
+      // Recommendations means the actions a report recommends, as on the report page.
+      recs += reportCounts(rd).recommendations;
       if (rd?.ai_analysis?.tiktok_trends_analysis) tiktok++;
       if (rd?.ai_analysis?.instagram_trends_analysis) ig++;
     }
-    return { bestImpr, bestEng, avgRate: totalImpr > 0 ? (totalEng / totalImpr) * 100 : 0, recs, tiktok, ig };
+    return { bestImpr, bestEng, avgRate: (engagementRate(totalEng, totalImpr) ?? 0) * 100, recs, tiktok, ig };
   }, [reports, chartData]);
   const compact = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 10_000 ? `${(v / 1_000).toFixed(1)}K` : v.toLocaleString());
   const trends = insights.filter((x) => x.type !== "neutral").map((x) => x.text);
@@ -161,7 +153,7 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Peak impressions" icon={<Eye className="h-3.5 w-3.5" />} value={compact(facts.bestImpr.impressions)} sub={`on ${facts.bestImpr.date}`} />
         <StatCard label="Peak engagement" icon={<Heart className="h-3.5 w-3.5" />} value={compact(facts.bestEng.engagements)} sub={`on ${facts.bestEng.date}`} />
-        <StatCard label="Avg engagement rate" icon={<Percent className="h-3.5 w-3.5" />} value={`${facts.avgRate.toFixed(2)}%`} sub="engagements over impressions" />
+        <StatCard label="Avg engagement rate" icon={<Percent className="h-3.5 w-3.5" />} value={`${facts.avgRate.toFixed(2)}%`} sub="engagements divided by impressions" />
         <StatCard label="Recommendations" icon={<ListChecks className="h-3.5 w-3.5" />} value={facts.recs} sub={`across ${n} ${n === 1 ? "report" : "reports"}`} />
       </div>
       {(trends.length > 0 || facts.tiktok > 0 || facts.ig > 0) && (

@@ -73,7 +73,7 @@ describe('QA-02 actual copy and scheduling components',()=>{
  });
  it('shows failure and never success when persistence returns an error',async()=>{
   f.insertError={message:'fixture write rejected'};mount(<CopyEditor post={original} clientId="fixture-client" reportId="fixture-report"/>);await edit('Reviewed fixture copy',false);
-  expect(f.rows).toHaveLength(0);expect(f.success).not.toHaveBeenCalled();expect(f.error).toHaveBeenCalledWith(expect.stringContaining('fixture write rejected'));
+  expect(f.rows).toHaveLength(0);expect(f.success).not.toHaveBeenCalled();expect(f.error).toHaveBeenCalledWith(expect.stringContaining('did not go through'));expect(f.error).not.toHaveBeenCalledWith(expect.stringContaining('fixture write rejected'));
  });
  it('restores the persisted revision after remount',async()=>{
   const first=mount(<CopyEditor post={original} clientId="fixture-client" reportId="fixture-report"/>);await edit();first.unmount();mount(<CopyEditor post={applyCopyRevisions(original,f.rows)} clientId="fixture-client"/>);
@@ -103,7 +103,7 @@ describe('QA-03 counterexamples through actual permitted client routes',()=>{
  });
  it('control: actual client history displays its report without client_users',async()=>{
   f.role='client';mount(<Routes><Route path="/clients/:id/reports" element={<ReportHistory/>}/></Routes>,'/clients/fixture-client/reports');
-  expect(await screen.findByText('completed')).toBeInTheDocument();expect(screen.getByRole('button',{name:'View'})).toBeInTheDocument();expect(f.reads).not.toContain('client_users');
+  expect(await screen.findByText('Ready')).toBeInTheDocument();expect(screen.queryByText('completed')).toBeNull();expect(screen.getByRole('button',{name:'View'})).toBeInTheDocument();expect(f.reads).not.toContain('client_users');
  });
 });
 

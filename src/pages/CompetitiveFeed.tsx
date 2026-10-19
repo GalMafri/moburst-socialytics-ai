@@ -22,7 +22,9 @@ import { clipText } from "@/lib/clipText";
 import { displayCompanyName } from "@/lib/companyName";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
-import { describeInvokeError } from "@/lib/invokeError";
+import { describeInvokeError, withQuietRetry } from "@/lib/invokeError";
+import { cleanText, formatDate, formatDateTime, formatRange } from "@/lib/display";
+import { fetchOpenTopics } from "@/lib/openTopics";
 import { ChangeCards } from "@/components/competitive/ChangeCards";
 import { aggregatePosts, pickComparableFeed, diffCompanies, sameCompany } from "@/lib/competitiveChanges";
 import { ArrowLeft, RefreshCw, Rss, Sparkles, TrendingUp, X, Loader2, ExternalLink, History } from "lucide-react";
@@ -92,34 +94,18 @@ export default function CompetitiveFeed() {
   /** The window this page is showing, so its topics can be scoped to it. */
   const windowStart: string | null = (snapshot as any)?.payload?.window?.start ?? null;
 
+  // The one definition of open topics (the newest feed window's topics that
+  // nobody dismissed), shared with the dashboard and the weekly planner.
   const { data: alerts } = useQuery({
-    // Scoped to the window the page is showing. It used to take the newest 12
-    // rows for the client whatever window they belonged to, so cards from
-    // three weeks earlier sat under a heading that says "this week" beside a
-    // meta line naming a different date range.
     queryKey: ["competitive-alerts", id, windowStart],
-    queryFn: async () => {
-      let q = supabase
-        .from("competitive_alerts")
-        .select("*")
-        .eq("client_id", id!)
-        .neq("status", "dismissed");
-      if (windowStart) q = q.eq("window_start", windowStart);
-      const { data, error } = await q
-        .order("window_start", { ascending: false })
-        .order("confidence", { ascending: false })
-        .limit(12);
-      if (error) throw error;
-      return data || [];
-    },
+    queryFn: () => fetchOpenTopics(id!),
     enabled: !!id,
   });
 
   const refresh = useMutation({
     mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("refresh-competitor-feed", { body: { client_id: id } });
-      if (error) throw new Error(await describeInvokeError(error));
-      if ((data as any)?.error) throw new Error((data as any).error);
+      const { data, error } = await withQuietRetry(() => supabase.functions.invoke("refresh-competitor-feed", { body: { client_id: id } }));
+      if (error || (data as any)?.error) throw new Error(await describeInvokeError(error, data));
       return data as any;
     },
     onSuccess: (d: any) => {
@@ -132,10 +118,10 @@ export default function CompetitiveFeed() {
 
   const draft = useMutation({
     mutationFn: async ({ topic, reason, platform, alertId }: { topic: string; reason: string; platform: string; alertId?: string }) => {
-      const { data, error } = await supabase.functions.invoke("generate-ad-hoc-post", { body: { client_id: id, platform, topic } });
-      if (error) throw new Error(await describeInvokeError(error));
+      const { data, error } = await withQuietRetry(() => supabase.functions.invoke("generate-ad-hoc-post", { body: { client_id: id, platform, topic } }));
+      if (error) throw new Error(await describeInvokeError(error, data));
       const post = (data as any)?.post;
-      if (!post) throw new Error("The generator returned no post.");
+      if (!post) throw new Error("The post was not written. Nothing was added to the calendar.");
       const hashtags = Array.isArray(post.hashtags) ? post.hashtags : typeof post.hashtags === "string" ? post.hashtags.split(/[\s,]+/).filter(Boolean) : null;
       // Drafts go to the client's Calendar (today, to be moved), with the topic as the reason.
       // calendar_posts is not in the generated types yet.
@@ -155,7 +141,10 @@ export default function CompetitiveFeed() {
         source: "insight",
         raw: post,
       }).select("id, post_date").single();
-      if (insErr) throw insErr;
+      if (insErr) {
+        console.error("[draft] calendar insert", insErr);
+        throw new Error("The post was written but could not be added to the calendar. Try again.");
+      }
       if (alertId) await supabase.from("competitive_alerts").update({ status: "drafted" }).eq("id", alertId);
       return row as { id: string; post_date: string };
     },
@@ -171,7 +160,10 @@ export default function CompetitiveFeed() {
   const dismiss = useMutation({
     mutationFn: async (alertId: string) => {
       const { error } = await supabase.from("competitive_alerts").update({ status: "dismissed" }).eq("id", alertId);
-      if (error) throw error;
+      if (error) {
+        console.error("[dismiss topic]", error);
+        throw new Error("The topic is still on the feed. Try again in a minute.");
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["competitive-alerts", id] }),
     onError: (e: any) =>
@@ -223,7 +215,7 @@ export default function CompetitiveFeed() {
           <ArrowLeft className="h-4 w-4 mr-1" /> Competitive reports
         </Button>
       }
-      meta={<span className="t-label">{snapshot ? <>Pulled {new Date(snapshot.fetched_at).toLocaleString()}{payload.window ? ` · ${payload.window.start} to ${payload.window.end}` : ""}{payload.truncated ? ` · capped at ${posts.length} posts` : ""}</> : "No pull yet for this client."}</span>}
+      meta={snapshot ? <span className="t-label">Pulled {formatDateTime(snapshot.fetched_at)}{payload.window ? ` · ${formatRange(payload.window)}` : ""}{payload.truncated ? ` · capped at ${posts.length} posts` : ""}</span> : undefined}
       actions={
         canRunAnalysis ? (
           <Button onClick={() => setConfirmRefresh(true)} disabled={refresh.isPending}>
@@ -241,9 +233,8 @@ export default function CompetitiveFeed() {
         ) : !snapshot ? (
           <EmptyState
             icon={Rss}
-            title="No competitor feed yet"
-            description="Pull the last week of posts from this client’s tracked social profiles. The weekly scheduler keeps it fresh afterwards."
-            action={canRunAnalysis ? <Button onClick={() => setConfirmRefresh(true)} disabled={refresh.isPending}>Pull the last 7 days</Button> : undefined}
+            title="No competitor posts yet"
+            description="The weekly refresh pulls the last seven days of posts from every tracked company on its own."
           />
         ) : (
           <>
@@ -267,7 +258,7 @@ export default function CompetitiveFeed() {
                               <Badge variant={conf >= 75 ? "default" : "secondary"}>{conf}% confidence</Badge>
                               {(a.companies || []).map((c: string) => <Badge key={c} variant="outline">{c}</Badge>)}
                               {(a.platforms || []).map((p: string) => <Badge key={p} variant="outline">{platformLabel(p)}</Badge>)}
-                              {a.status === "drafted" && <Badge>drafted</Badge>}
+                              {a.status === "drafted" && <Badge>Drafted</Badge>}
                             </div>
                           </div>
                           {canRunAnalysis && (
@@ -297,7 +288,7 @@ export default function CompetitiveFeed() {
               <Card>
                 <CardHeader>
                   <CardTitle className="t-h3 flex items-center gap-2"><History className="h-5 w-5" /> Since last week</CardTitle>
-                  <CardDescription>Against the pull of {new Date(prevSnapshot.fetched_at).toLocaleDateString()}{prevWindow ? ` covering ${prevWindow.start} to ${prevWindow.end}` : ""}.</CardDescription>
+                  <CardDescription>Against the pull of {formatDate(prevSnapshot.fetched_at)}{prevWindow ? ` covering ${formatRange(prevWindow)}` : ""}.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {changes.length > 0 ? <ChangeCards changes={changes} /> : <p className="t-body">No notable movement: cadence, engagement, channels and formats all held.</p>}
@@ -331,11 +322,11 @@ export default function CompetitiveFeed() {
                       <span className="font-medium text-foreground truncate">{p.companyName}</span>
                       <span className="flex items-center gap-2 shrink-0">
                         {isBoosted(p.facebookLikelyBoosted) && <Badge variant="secondary" title="RivalIQ estimates this Facebook post was paid promotion">Likely boosted</Badge>}
-                        {p.publishedAt ? new Date(p.publishedAt).toLocaleDateString() : ""}
+                        {formatDate(p.publishedAt)}
                       </span>
                     </div>
                     {p.authorship === "collaboration" && <Badge variant="secondary">Company collaboration</Badge>}
-                    <p className="t-body line-clamp-3 min-h-[4.5rem]">{p.message || "(no caption)"}</p>
+                    <p className="t-body line-clamp-3 min-h-[4.5rem] whitespace-pre-line">{p.message ? cleanText(p.message) : "No caption."}</p>
                     <div className="flex gap-2 flex-wrap t-secondary">
                       <span>{fmt(p.engagementTotal)} eng.</span>
                       {p.estimatedImpressions ? <span>· {fmt(p.estimatedImpressions)} est. impr.</span> : null}

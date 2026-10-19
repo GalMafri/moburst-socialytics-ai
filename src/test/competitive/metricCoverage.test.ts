@@ -10,7 +10,10 @@ it('preserves measured audience, impressions and rates when LinkedIn adds activi
  const report=normalizedCompetitiveMetrics(input),company=report.aggregates.companies[0] as any;
  expect(company.comparison_metrics.audience).toEqual(raw.audience);
  expect(company.comparison_metrics.estimated_impressions).toEqual(raw.estimated_impressions);
- expect(company.comparison_metrics.engagement_rate_per_post).toEqual(raw.engagement_rate_per_post);
+ // One rate for every company: RivalIQ engagement over estimated impressions (7/684), never the stored per-follower rate.
+ expect(company.comparison_metrics.engagement_rate).toEqual({current:7/684,previous:26/944});
+ expect(company.comparison_metrics.engagement_rate_per_post).toBeUndefined();
+ expect(company.engagement_rate_avg).toBe(7/684);
  expect(company.post_count).toBe(18);expect(company.engagement_avg).toBe(99/18);
  expect(company.impressions_avg).toBe(684/4);expect(company.comparison_metrics.posts.previous).toBeNull();
  expect(company.rivaliq_metrics).toEqual(raw);expect(normalizedCompetitiveMetrics(report)).toEqual(report);

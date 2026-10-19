@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { useActiveClients } from "@/lib/activeClients";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,17 +14,8 @@ export default function AnalyticsIndex() {
   const navigate = useNavigate();
   const { isClient, user, isGosSession } = useAuth();
 
-  const { data: clients, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["clients-for-analytics"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("clients")
-        .select("id, name, logo_url, hub_company_name")
-        .order("name");
-      if (error) throw error;
-      return data;
-    },
-  });
+  // Active clients only, the one shared definition every client list uses.
+  const { data: clients, isLoading, isError, error, refetch } = useActiveClients<{ id: string; name: string; logo_url: string | null; hub_company_name: string | null }>("id, name, logo_url, hub_company_name");
 
   // Client-role users should skip the chooser and go straight to their own
   // client's analytics page.
@@ -53,11 +43,7 @@ export default function AnalyticsIndex() {
         ) : isError ? (
           <LoadError title="Could not load the clients" error={error} onRetry={() => refetch()} />
         ) : !clients?.length ? (
-          <EmptyState
-            icon={BarChart3}
-            title="No clients yet"
-            description="Create a client first to see analytics."
-          />
+          <EmptyState icon={BarChart3} title="No clients yet" />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {clients.map((c) => (

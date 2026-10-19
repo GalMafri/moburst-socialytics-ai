@@ -4,6 +4,8 @@
  * and customer ids, RivalIQ landscape and company ids, media provider
  * request ids) never appear in any output.
  */
+import { normalizedCompetitiveMetrics } from "../_shared/competitive/reportMetrics.ts";
+import { withCompetitiveEvidenceLimits } from "../_shared/competitive/reportEvidence.ts";
 declare const Deno: { env: { get(k: string): string | undefined } } | undefined;
 /**
  * The host the API puts in `links.app`. gOS users reach the tool through its branded
@@ -100,6 +102,8 @@ export function omitDeep<T>(value: T, keys: string[]): T {
   }
   return value;
 }
+/** Per-company keys that hold Sprout profile ids or the client's raw source records. */
+const COMPANY_INTERNAL_KEYS = ["owned_metrics", "owned_profile_scope", "profiles", "source_profile_id"];
 const INTERNAL_KEYS = ["post_id", "post_ids", "profile_id", "profile_ids", "sprout_profile_id", "sprout_customer_id", "company_id", "company_ids", "focus_company_id", "landscape_id", "landscape", "rivaliq_landscape_id", "rivaliq_company_id", "rivaliq_metrics", "rivaliq_calls", "post_windows", "request_id", "model_path"];
 
 const BRAND_FIELDS = ["primary_color", "secondary_color", "accent_color", "font_family", "visual_style", "tone_of_voice", "logo_description", "design_elements", "background_style"];
@@ -197,7 +201,11 @@ export function reportOut(row: ReportRow, opts: { detail?: boolean } = {}): Repo
 }
 
 export function competitiveReportOut(row: CompetitiveReportRow, opts: { detail?: boolean } = {}): CompetitiveReportOut {
-  const rd = obj(row.report_data);
+  // The same normalized view every screen reads: one engagement rate
+  // (engagements divided by impressions) for every company, never the rate
+  // stored by the workflow that wrote the report.
+  const raw = obj(row.report_data);
+  const rd = raw.aggregates ? obj(withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(raw))) : raw;
   const period = obj(rd.period);
   const out: CompetitiveReportOut = {
     id: row.id, client_id: row.client_id, set_id: row.set_id, status: row.status,
@@ -208,7 +216,7 @@ export function competitiveReportOut(row: CompetitiveReportRow, opts: { detail?:
   if (opts.detail) {
     out.analysis = rd.ai_analysis && typeof rd.ai_analysis === "object" ? omitDeep(rd.ai_analysis as Record<string, unknown>, INTERNAL_KEYS) : null;
     const agg = obj(rd.aggregates);
-    out.aggregates = rd.aggregates ? { client_name: str(agg.client_name), metrics_available: typeof agg.metrics_available === "boolean" ? agg.metrics_available : null, companies: Array.isArray(agg.companies) ? agg.companies.map((c) => omitDeep(obj(c), INTERNAL_KEYS)) : [] } : null;
+    out.aggregates = rd.aggregates ? { client_name: str(agg.client_name), metrics_available: typeof agg.metrics_available === "boolean" ? agg.metrics_available : null, companies: Array.isArray(agg.companies) ? agg.companies.map((c) => omitDeep(obj(c), [...INTERNAL_KEYS, ...COMPANY_INTERNAL_KEYS])) : [] } : null;
   }
   return out;
 }

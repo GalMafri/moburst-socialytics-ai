@@ -4,7 +4,8 @@ import { ReportRunStatus } from "@/components/reports/ReportRunStatus";
 import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { RUN_ESTIMATE, canRetry } from "@/lib/reportRun";
 import { useParams, useNavigate } from "react-router-dom";
-import { describeInvokeError } from "@/lib/invokeError";
+import { describeInvokeError, withQuietRetry } from "@/lib/invokeError";
+import { formatDate, formatDateTime, listedRuns } from "@/lib/display";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -15,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Play, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, CalendarDays, TrendingUp } from "lucide-react";
+import { Play, Loader2, CheckCircle2, Clock, RefreshCw, CalendarDays, TrendingUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -38,6 +39,9 @@ const STEPS_NO_TRENDS = [
   "Generating presentation...",
 ];
 
+
+/** What a person reads when a run stops before it finishes: the product runs it again. */
+const SCHEDULED_AGAIN = "This report did not finish on this attempt and is scheduled to run again. It appears in report history when it is ready.";
 
 export default function RunAnalysis() {
   const { id } = useParams();
@@ -184,7 +188,7 @@ export default function RunAnalysis() {
         ok: false,
         error_code: "server_failed",
       });
-      setError("Analysis failed on the server. Check workflow logs.");
+      setError(SCHEDULED_AGAIN);
     }
   }, [pastReports, reportId, running, id, navigate, toast, stopAllTimers]);
 
@@ -231,7 +235,7 @@ export default function RunAnalysis() {
               ok: false,
               error_code: "server_failed",
             });
-            setError("Analysis failed on the server. Check n8n execution logs.");
+            setError(SCHEDULED_AGAIN);
             refetchReports();
           }
         } catch {
@@ -278,7 +282,7 @@ export default function RunAnalysis() {
       // One place builds what n8n receives: the same function serves this
       // page, the scheduler and a retry, so a rerun can never send something
       // different from the original attempt.
-      const { data: started, error: runErr } = await supabase.functions.invoke("run-report", {
+      const { data: started, error: runErr } = await withQuietRetry(() => supabase.functions.invoke("run-report", {
         body: {
           client_id: id,
           kind: "social",
@@ -286,7 +290,7 @@ export default function RunAnalysis() {
           date_range_end: dateRangeEnd || undefined,
           skip_trends: skipTrends,
         },
-      });
+      }));
       if (runErr || started?.error) throw new Error(await describeInvokeError(runErr, started));
       const reportRowId: string = started.report_id;
       setReportId(reportRowId);
@@ -304,7 +308,7 @@ export default function RunAnalysis() {
         ok: false,
         error_code: String(err?.message || "unknown").slice(0, 120),
       });
-      toast({ title: "Analysis failed", description: err.message, variant: "destructive" });
+      toast({ title: "The analysis did not start", description: err.message, variant: "destructive" });
     } finally {
       submitting.current = false;
       activeRun.refetch();
@@ -348,13 +352,11 @@ export default function RunAnalysis() {
               </div>
               <div>
                 <span className="text-muted-foreground">Competitive context:</span>{" "}
-                {latestCompetitive ? `from ${new Date(latestCompetitive.created_at).toLocaleDateString()}` : "none yet"}
+                {latestCompetitive ? `from ${formatDate(latestCompetitive.created_at)}` : "none yet"}
               </div>
             </div>
             {profiles && profiles.length === 0 && (
-              <p className="t-label text-destructive font-medium">
-                No Sprout profiles assigned! Add profiles in Client Setup before running analysis.
-              </p>
+              <p className="t-secondary">No social accounts are matched to this client yet. They are matched on their own once the accounts are in Sprout.</p>
             )}
           </CardContent>
         </Card>
@@ -423,14 +425,13 @@ export default function RunAnalysis() {
               />
             </div>
             {!hasKeywords && (
-              <p className="t-label text-amber-600 dark:text-amber-400">
-                No social keywords configured for this client. Trend analysis requires keywords to be set in Client
-                Setup under "Content Strategy". The report will include performance analysis and content calendar only.
+              <p className="t-secondary">
+                This client has no social keywords yet, so the report covers performance without trends.
               </p>
             )}
             {hasKeywords && skipTrends && (
               <p className="t-secondary">
-                Trend analysis will be skipped. The report will focus on performance metrics and content calendar only.
+                Trends are left out of this report. It covers performance.
               </p>
             )}
             </>}
@@ -464,15 +465,14 @@ export default function RunAnalysis() {
 
             {error && (
               <div className="space-y-4">
-                <div className="flex items-center gap-2 justify-center text-destructive">
-                  <XCircle className="h-6 w-6" />
-                  <span className="font-medium">Analysis issue</span>
+                <div className="flex items-center gap-2 justify-center">
+                  <Clock className="h-6 w-6" />
+                  <span className="font-medium">{reportId ? "Scheduled to run again" : "The analysis did not start"}</span>
                 </div>
                 <p className="t-secondary">{error}</p>
                 {reportId ? (
                   canRetry({ status: "failed", created_at: startedAt }) ?
-                    <RetryReportButton reportId={reportId} kind="monthly" variant="outline" onStarted={() => { setError(null); setRunning(true); setCurrentStep(0); setStartedAt(new Date().toISOString()); pollForCompletion(reportId); }} /> :
-                    <p className="t-secondary">Retry becomes available 90 minutes after this run started. You can return later from report history.</p>
+                    <RetryReportButton reportId={reportId} kind="monthly" variant="outline" label="Run now" onStarted={() => { setError(null); setRunning(true); setCurrentStep(0); setStartedAt(new Date().toISOString()); pollForCompletion(reportId); }} /> : null
                 ) : (
                 <Button
                   variant="outline"
@@ -491,30 +491,24 @@ export default function RunAnalysis() {
         </Card>
 
         {/* Past runs */}
-        {pastReports && pastReports.length > 0 && (
+        {listedRuns("monthly", pastReports, { isStaff: true }).length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle className="t-h3">Recent analyses</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {pastReports.map((r: any) => (
+                {listedRuns("monthly", pastReports, { isStaff: true }).map((r: any) => (
                   <div
                     key={r.id}
-                    className="glass-inner flex items-center justify-between p-3 cursor-pointer"
-                    onClick={() => r.status === "completed" && navigate(`/clients/${id}/reports/${r.id}`)}
+                    className={`glass-inner flex items-center justify-between p-3 ${r.display.state === "ready" ? "cursor-pointer" : ""}`}
+                    onClick={() => r.display.state === "ready" && navigate(`/clients/${id}/reports/${r.id}`)}
                   >
                     <div className="flex items-center gap-3">
-                      <Badge
-                        variant={
-                          r.status === "completed" ? "default" : r.status === "running" ? "secondary" : "destructive"
-                        }
-                      >
-                        {r.status}
-                      </Badge>
-                      <span className="t-body">{new Date(r.created_at).toLocaleString()}</span>
+                      <Badge variant={r.display.variant}>{r.display.label}</Badge>
+                      <span className="t-body">{formatDateTime(r.created_at)}</span>
                     </div>
-                    {Number(r.duration_minutes) > 0 ? <span className="t-secondary">Duration: {r.duration_minutes}m</span> : null}
+                    {r.display.state === "ready" && Number(r.duration_minutes) > 0 ? <span className="t-secondary">Duration: {r.duration_minutes} min</span> : null}
                   </div>
                 ))}
               </div>

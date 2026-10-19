@@ -16,6 +16,23 @@ const previousPeriod=(period:Period)=>{
   return {start:new Date(Date.parse(period.start)-days*DAY).toISOString().slice(0,10),end:new Date(Date.parse(period.start)-DAY).toISOString().slice(0,10)};
 };
 
+/**
+ * Ads are not posts. Sprout's post types name every ad (FACEBOOK_AD,
+ * TIKTOK_AD, FB_INSTAGRAM_AD_POST, and the comments on them), and its ad rows
+ * carry a guid starting "fa:". On Bader Law in September 2026 all 34 stored
+ * "fa:" rows had no impressions and no engagement: copies of one caption
+ * seconds apart. Counting them inflated post counts, share of voice and
+ * cadence; without them the client's 13 Facebook posts equal RivalIQ's 13.
+ * Stories, messages, comments, replies and dark posts are not posts either.
+ */
+export function isPublishedPost(row: { post_type?: unknown; guid?: unknown }): boolean {
+  const type = String(row?.post_type || '').toUpperCase();
+  if (/(^|_)ADS?(_|$)/.test(type)) return false;
+  if (/STORY|DIRECT_MESSAGE|MESSENGER|COMMENT|REPLY|DARK|MENTION|RATING|PHOTO_TAG|FOLLOWER_ALERT/.test(type)) return false;
+  if (/^fa:/i.test(String(row?.guid || ''))) return false;
+  return true;
+}
+
 /** Normalize all assigned owned profiles, never an agency-wide name search.
  * Public actions exclude private clicks, saves, IG shares, and YouTube shares
  * so the benchmark uses the same action definitions as competitor sources. */
@@ -45,7 +62,7 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
     const network=ownedNetwork(profile.network_type);
     if(row.network && ownedNetwork(row.network)!==network) throw new Error('Sprout post network does not match its assigned profile');
     if(row.sent===false) continue;
-    if(/STORY|DIRECT_MESSAGE|COMMENT|REPLY|DARK|AD_POST/.test(String(row.post_type||''))) continue;
+    if(!isPublishedPost(row)) continue;
     const date=day(row.created_time);
     if(!date || !Number.isFinite(Date.parse(row.created_time)) || date<previous.start || date>period.end) throw new Error('Sprout post is outside the requested source period');
     const key=String(row.guid || row.perma_link || '');
@@ -66,7 +83,7 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
       channel:network,publishedAt:row.created_time,message:String(row.text||''),postLink:row.perma_link||null,
       image:media?.thumbnail_url || (String(media?.media_type||'').toLowerCase().includes('video')?null:media?.media_url) || null,
       engagementTotal:engagement,applause,conversation,amplification,
-      engagementRate:audience?.followers>0?engagement/audience.followers:null,presenceReach:audience?.followers??null,
+      presenceReach:audience?.followers??null,
       // YouTube reports views, not impressions; views are YouTube's impressions here, as RivalIQ counts them for every company.
       ownedImpressions:metric(row,'lifetime.impressions') ?? (network==='youtube' ? metric(row,'lifetime.video_views') : null),views:metric(row,'lifetime.video_views'),
       type:category==='album'||category==='document'?'carousel':category==='photo'?'image':category||'unknown',authorship:'company',
@@ -79,7 +96,6 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
     const posts=all.filter(p=>p.channel===network&&day(p.publishedAt)>=range.start&&day(p.publishedAt)<=range.end);
     return {posts:posts.length,engagement:posts.reduce((n,p)=>n+p.engagementTotal,0),
       followers:sum(selected.map(p=>followers(String(p.sprout_profile_id),range.start,range.end)?.followers??null)),
-      rate:posts.length && posts.every(p=>p.engagementRate!==null)?posts.reduce((n,p)=>n+p.engagementRate,0)/posts.length:null,
       impressions:posts.length?sum(posts.map(p=>p.ownedImpressions)):0};
   };
   const by_network:Record<string,any>=Object.fromEntries(networks.map(network=>{

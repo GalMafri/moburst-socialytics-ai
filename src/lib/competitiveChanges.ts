@@ -4,7 +4,7 @@
 // Cadence is per week so periods of different lengths compare fairly.
 
 import { normalizePlatform, platformLabel } from "@/lib/platform";
-import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
+import { engagementRate, normalizedCompetitiveMetrics, postReach } from "@/lib/competitiveMetrics";
 
 export type MixEntry = { key: string; count: number };
 export type CompanyStats = {
@@ -13,7 +13,8 @@ export type CompanyStats = {
   post_count: number;
   cadence_per_week: number;
   engagement_avg: number;
-  engagement_rate_avg: number;
+  /** Engagements divided by impressions (views on video networks); null when there is no impressions figure. */
+  engagement_rate_avg: number | null;
   channel_mix: MixEntry[];
   media_type_mix: MixEntry[];
 };
@@ -77,7 +78,7 @@ export function pickComparableFeed<T extends FeedSnapshot>(current: T, candidate
     .sort((a, b) => Date.parse(b.payload.window.start) - Date.parse(a.payload.window.start))[0] || null;
 }
 
-type RawPost = { companyId?: string | number; companyName?: string; channel?: string; type?: string; engagementTotal?: number | string; engagementRate?: number | string };
+type RawPost = { companyId?: string | number; companyName?: string; channel?: string; type?: string; engagementTotal?: number | string; estimatedImpressions?: number | string | null; ownedImpressions?: number | string | null; views?: number | string | null; tiktokViews?: number | string | null; youtubeViews?: number | string | null };
 
 /** Per-company stats from raw RivalIQ posts (the feed snapshots), on the same fields the report aggregates carry. */
 /**
@@ -97,7 +98,9 @@ export function sameCompany(a: string, b: string): boolean {
 }
 
 export function aggregatePosts(posts: RawPost[], days: number, clientName?: string): CompanyStats[] {
-  type Acc = CompanyStats & { engSum: number; rateSum: number; ch: Record<string, number>; mt: Record<string, number> };
+  // The rate is the one definition: engagements over impressions, summed over
+  // the posts that carry an impressions (or, on video, views) figure.
+  type Acc = CompanyStats & { engSum: number; reachEng: number; reach: number; ch: Record<string, number>; mt: Record<string, number> };
   const by = new Map<string, Acc>();
   const needle = lower(clientName || "");
   for (const p of posts || []) {
@@ -109,12 +112,14 @@ export function aggregatePosts(posts: RawPost[], days: number, clientName?: stri
       // client's, used to come back as the client itself, which moves a
       // competitor's posts into the client's own row.
       const isClient = !!needle && sameCompany(name, needle);
-      c = { name, is_client: isClient, post_count: 0, cadence_per_week: 0, engagement_avg: 0, engagement_rate_avg: 0, channel_mix: [], media_type_mix: [], engSum: 0, rateSum: 0, ch: {}, mt: {} };
+      c = { name, is_client: isClient, post_count: 0, cadence_per_week: 0, engagement_avg: 0, engagement_rate_avg: null, channel_mix: [], media_type_mix: [], engSum: 0, reachEng: 0, reach: 0, ch: {}, mt: {} };
       by.set(name, c);
     }
     c.post_count += 1;
     c.engSum += num(p.engagementTotal);
-    c.rateSum += num(p.engagementRate);
+    const optional = (v: unknown) => (v == null || v === "" ? null : num(v));
+    const reach = postReach({ channel: p.channel, views: optional(p.views ?? p.tiktokViews ?? p.youtubeViews), actual_impressions: optional(p.ownedImpressions), est_impressions: optional(p.estimatedImpressions) });
+    if (reach) { c.reach += reach.value; c.reachEng += num(p.engagementTotal); }
     const ch = lower(String(p.channel || "unknown"));
     c.ch[ch] = (c.ch[ch] || 0) + 1;
     const mt = lower(String(p.type || "unknown"));
@@ -128,7 +133,7 @@ export function aggregatePosts(posts: RawPost[], days: number, clientName?: stri
     post_count: c.post_count,
     cadence_per_week: Math.round((c.post_count / span) * 7 * 10) / 10,
     engagement_avg: c.post_count ? c.engSum / c.post_count : 0,
-    engagement_rate_avg: c.post_count ? c.rateSum / c.post_count : 0,
+    engagement_rate_avg: engagementRate(c.reachEng, c.reach),
     channel_mix: toMix(c.ch),
     media_type_mix: toMix(c.mt),
   }));
@@ -144,7 +149,7 @@ export function companiesFromReport(rd: any): CompanyStats[] {
     post_count: num(c.post_count),
     cadence_per_week: num(c.cadence_per_week),
     engagement_avg: num(c.engagement_avg),
-    engagement_rate_avg: num(c.engagement_rate_avg),
+    engagement_rate_avg: typeof c.engagement_rate_avg === "number" && Number.isFinite(c.engagement_rate_avg) ? c.engagement_rate_avg : null,
     channel_mix: Array.isArray(c.channel_mix) ? c.channel_mix : [],
     media_type_mix: Array.isArray(c.media_type_mix) ? c.media_type_mix : [],
   }));
@@ -214,9 +219,10 @@ export function diffCompanies(prev: CompanyStats[], curr: CompanyStats[], max = 
       }
     }
     if (p.post_count >= 3 && c.post_count >= 3) {
-      const a = p.engagement_rate_avg, b = c.engagement_rate_avg;
-      const rel = a > 0 ? (b - a) / a : 0;
-      if (Math.abs(rel) >= 0.3 && Math.abs(b - a) >= 0.003) {
+      const a = p.engagement_rate_avg ?? 0, b = c.engagement_rate_avg ?? 0;
+      const rated = p.engagement_rate_avg != null && c.engagement_rate_avg != null;
+      const rel = rated && a > 0 ? (b - a) / a : 0;
+      if (rated && Math.abs(rel) >= 0.3 && Math.abs(b - a) >= 0.003) {
         const up = b > a;
         out.push({ company: who, is_client: mine, kind: "engagement_rate", headline: `${who}'s engagement rate ${up ? "rose" : "fell"} to ${rateText(b)}`, detail: `From ${rateText(a)} in the previous period, across ${c.post_count} posts.`, magnitude: Math.abs(rel), direction: up ? "up" : "down", tone: mine ? (up ? "good" : "bad") : "neutral" });
       } else {

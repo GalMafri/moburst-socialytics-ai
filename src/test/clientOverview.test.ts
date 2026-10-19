@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { actionItems, competitiveStanding, contentWeek, reportHeadline } from '@/lib/clientOverview';
+import { thisWeek } from '@/lib/weekWindow';
 
 describe('client overview', () => {
   it('takes three headline metrics from the report and counts what rose', () => {
@@ -19,23 +20,35 @@ describe('client overview', () => {
     const s = competitiveStanding({ share_of_voice_pct: 19, competitors: [{ name: 'A' }, { name: 'B' }], benchmark_dimensions: [{ dimension: 'Audience', client: 10, competitor_avg: 5 }, { dimension: 'Cadence', client: 2, competitor_avg: 4 }] })!;
     expect(s).toEqual({ shareOfVoice: 19, competitors: ['A', 'B'], ahead: ['audience'], behind: ['cadence'] });
   });
-  it('counts the coming week and finds posts without a design or approval, ignoring unwritten trend slots', () => {
+  it('counts this week Monday to Sunday, as the calendar does, and finds posts without a design or approval', () => {
     const posts = [
+      { id: '0', post_key: 'k0', post_date: '2026-10-12', platform: 'Instagram', source: 'plan', copy: 'past day this week' },
       { id: '1', post_key: 'k1', post_date: '2026-10-13', platform: 'LinkedIn', source: 'report', copy: 'a' },
       { id: '2', post_key: 'k2', post_date: '2026-10-15', platform: 'LinkedIn', source: 'report', copy: 'b' },
       { id: '3', post_key: 'k3', post_date: '2026-10-18', platform: 'X', source: 'plan', copy: '' },
-      { id: '4', post_key: 'k4', post_date: '2026-10-25', platform: 'X', source: 'report', copy: 'd' },
+      { id: '4', post_key: 'k4', post_date: '2026-10-19', platform: 'X', source: 'report', copy: 'next Monday' },
     ];
     const media = [{ calendar_post_key: 'k1', is_selected: true, is_approved: true, media_urls: ['x.png'] }];
-    const w = contentWeek(posts, media, '2026-10-13');
-    expect([w.planned, w.designed, w.approved]).toEqual([2, 1, 1]);
+    const week = thisWeek('America/New_York', new Date('2026-10-13T15:00:00Z'));
+    expect(week).toEqual({ today: '2026-10-13', start: '2026-10-12', end: '2026-10-18' });
+    const w = contentWeek(posts, media, week);
+    // Monday to Sunday: the past Monday and the unwritten Sunday slot count, next Monday does not.
+    expect([w.planned, w.designed, w.approved]).toEqual([4, 1, 1]);
     expect(w.withoutDesign.map((p) => p.id)).toEqual(['2']);
     expect(w.unapprovedSoon.map((p) => p.id)).toEqual(['2']);
-    const items = actionItems({ clientId: 'c', isStaff: false, today: '2026-10-13', content: w, lastRun: { status: 'failed', created_at: '' }, hasReport: true, tracking: { headline: 'Tracking needs reconnecting', ready: false }, hasCompetitiveReport: false, openTopics: 4, endorsedTests: 0 });
-    // A client sees only their content items, never setup or run problems.
+    const items = actionItems({ clientId: 'c', isStaff: false, week, content: w, openTopics: 4, endorsedTests: 0 });
+    // A client sees only their content items.
     expect(items.map((i) => i.key)).toEqual(['approve', 'design']);
     expect(items[0].href).toBe('/clients/c/calendar?week=2026-10-12');
-    const staff = actionItems({ clientId: 'c', isStaff: true, today: '2026-10-13', content: w, lastRun: { status: 'failed', created_at: '' }, hasReport: true, tracking: { headline: 'Tracking needs reconnecting', ready: false }, hasCompetitiveReport: true, openTopics: 4, endorsedTests: 2 });
-    expect(staff.map((i) => i.key)).toEqual(['approve', 'design', 'tracking', 'topics', 'tests']);
+    // Work the product runs on its own (reports, tracking) is never an item, for staff either.
+    const staff = actionItems({ clientId: 'c', isStaff: true, week, content: w, openTopics: 4, endorsedTests: 2 });
+    expect(staff.map((i) => i.key)).toEqual(['approve', 'design', 'topics', 'tests']);
+  });
+  it('takes the week in the client time zone', () => {
+    // 23:30 UTC on Sunday is already Monday in Tel Aviv, still Sunday in New York.
+    const now = new Date('2026-10-18T23:30:00Z');
+    expect(thisWeek('Asia/Jerusalem', now).start).toBe('2026-10-19');
+    expect(thisWeek('America/New_York', now).start).toBe('2026-10-12');
+    expect(thisWeek('Not/AZone', now).start).toBe('2026-10-12');
   });
 });

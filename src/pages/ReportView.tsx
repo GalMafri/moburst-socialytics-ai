@@ -1,7 +1,6 @@
 import { useNavigate, useParams } from "react-router-dom";
-import { reportNotices } from "@/lib/reportNotices";
-import { canRetry, retryLabel } from "@/lib/reportRun";
-import { RetryReportButton } from "@/components/reports/RetryReportButton";
+import { cleanText, countryNames, formatDate, formatDateTime, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
+import { reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -35,13 +34,7 @@ import {
   ChevronDown,
   CalendarPlus,
 } from "lucide-react";
-import {
-  PlatformBadge,
-  PlatformIcon,
-  getPlatformColor,
-  normalizePlatformKey,
-  prettyPlatformName,
-} from "@/lib/platform-config";
+import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Loading } from "@/components/ui/loading";
 import { useRef, useState, useMemo } from "react";
@@ -148,10 +141,21 @@ export default function ReportView() {
         <Loading label="Loading report" />
       </AppLayout>
     );
-  if (!report)
+  // A report that is not ready shows where it stands in words: running, or
+  // scheduled to run again (the product reruns it). Clients see ready reports only.
+  const status = report ? monthlyReportStatus(report, { isStaff: isMoburstStaff }) : null;
+  if (!report || status?.hidden)
     return (
       <AppLayout>
-        <p className="text-muted-foreground">Report not found.</p>
+        <p className="text-muted-foreground">This report is not available.</p>
+      </AppLayout>
+    );
+  if (status && status.state !== "ready")
+    return (
+      <AppLayout>
+        {status.state === "running" ? <Loading label="This report is being written. It appears here when it is ready." /> : (
+          <p className="t-body">This report is scheduled to run again. It appears here when it is ready.</p>
+        )}
       </AppLayout>
     );
 
@@ -161,7 +165,6 @@ export default function ReportView() {
 
   // Build the full client context once, pass down via props.
   const clientRow = (report as any).clients || {};
-  const notices = reportNotices(rd?.warnings, { briefText: clientRow.brief_text });
   const clientContext: ClientContext = {
     client_id: clientRow.id || id || "",
     client_name: clientRow.name || "Client",
@@ -223,7 +226,7 @@ export default function ReportView() {
         ...p,
         ai:
           aiPlatformInsights.find(
-            (a: any) => normalizePlatformKey(a.platform) === normalizePlatformKey(p.network),
+            (a: any) => platformKey(a.platform) === platformKey(p.network),
           ) || null,
       }))
       .sort((a: any, b: any) => (b.current?.impressions || 0) - (a.current?.impressions || 0));
@@ -313,6 +316,9 @@ export default function ReportView() {
     const plat = platformLabelOf(best.network_type || best.platform || "");
     return `The best post reached ${compactNumber(Number(best.impressions ?? 0))} impressions${plat ? ` on ${plat}` : ""}${best.engagements != null ? ` with ${compactNumber(Number(best.engagements))} engagements` : ""}. Lifetime metrics for posts published in the report period; ranked by impressions and engagement.`;
   })();
+  const counts = reportCounts(rd);
+  // Every recommendation the page can show: the report's own, and competitor gaps the team endorsed.
+  const totalRecommendations = counts.recommendations + endorsedGaps.length;
   type Action = { source: "Competitors" | "Performance" | "Trends"; title: string; detail?: string; tab?: string; anchor?: string; href?: string };
   const actions: Action[] = [];
   for (const g of endorsedGaps.slice(0, 2)) actions.push({ source: "Competitors", title: g.gap, detail: g.suggested_play, href: `/clients/${report.client_id}/competitive/reports/${latestCompetitive!.id}` });
@@ -388,11 +394,11 @@ export default function ReportView() {
           <div className="space-y-1.5">
             <h1 className="t-h1">{clientName}: monthly report</h1>
             <p className="t-secondary flex items-center gap-2 flex-wrap">
-              <span>{rd?.report_period?.current_month?.start} to {rd?.report_period?.current_month?.end}</span>
+              <span>{formatRange(rd?.report_period?.current_month) || formatRange({ start: report.date_range_start, end: report.date_range_end })}</span>
               <span className="opacity-50">·</span>
-              <span>Generated {new Date(report.created_at).toLocaleDateString()}</span>
-              {rd?.context?.geo?.length > 0 && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Globe className="h-3.5 w-3.5" />{(Array.isArray(rd.context.geo) ? rd.context.geo : [rd.context.geo]).join(", ")}</span></>)}
-              {rd?.context?.languages?.length > 0 && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Languages className="h-3.5 w-3.5" />{(Array.isArray(rd.context.languages) ? rd.context.languages : [rd.context.languages]).join(", ")}</span></>)}
+              <span>Generated {formatDate(report.created_at)}</span>
+              {countryNames(rd?.context?.geo) && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Globe className="h-3.5 w-3.5" />{countryNames(rd.context.geo)}</span></>)}
+              {languageNames(rd?.context?.languages) && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Languages className="h-3.5 w-3.5" />{languageNames(rd.context.languages)}</span></>)}
             </p>
           </div>
           <div data-print="hide" className="flex items-center gap-2 flex-wrap">
@@ -402,19 +408,9 @@ export default function ReportView() {
               </Button>
             )}
             <ExportPdfButton contentRef={reportContentRef} filename={`${clientName}-report-${new Date(report.created_at).toISOString().slice(0, 10)}`} />
-            {canRetry(report) && (
-              <RetryReportButton reportId={report.id} kind="monthly" variant="outline" label={retryLabel(report)} />
-            )}
             <ReportActions report={report} />
           </div>
         </div>
-
-        {/* Setup notes from the run are for the team, and only while still true. */}
-        {isMoburstStaff && notices.length > 0 && (
-          <div role="status" data-print="hide" className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm space-y-1">
-            {notices.map((warning, index) => <p key={index}>{warning}</p>)}
-          </div>
-        )}
 
         <Tabs value={tab} onValueChange={setTab} className="space-y-6">
           <TabsList className="h-auto flex-wrap justify-start">
@@ -467,7 +463,7 @@ export default function ReportView() {
             )}
 
             {actions.length > 0 && (
-              <Section id="actions" index={3} title="Where to act next" description={`${actions.length} recommendations from this report${(() => { const c: Record<string, number> = {}; for (const a of actions) c[a.source] = (c[a.source] || 0) + 1; const parts = Object.entries(c).map(([k, n]) => `${n} from ${k === "Competitors" ? "the competitive analysis" : k === "Trends" ? "the trends" : "performance"}`); return parts.length ? `: ${parts.join(", ")}` : ""; })()}. Each one opens its evidence.`}>
+              <Section id="actions" index={3} title="Where to act next" description={`${actions.length < totalRecommendations ? `${actions.length} of ${totalRecommendations}` : actions.length} recommendation${totalRecommendations === 1 ? "" : "s"}${(() => { const c: Record<string, number> = {}; for (const a of actions) c[a.source] = (c[a.source] || 0) + 1; const parts = Object.entries(c).map(([k, n]) => `${n} from ${k === "Competitors" ? "the competitive analysis" : k === "Trends" ? "the trends" : "performance"}`); return parts.length ? `: ${parts.join(", ")}` : ""; })()}. Each one opens its evidence.`}>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {actions.map((a, i) => (
                     <ActionCard
@@ -514,7 +510,7 @@ export default function ReportView() {
 
             {platformBreakdown.length > 0 && (
               <Section id="platforms" index={6} className="[&>*:not(:first-child)]:mt-4" title="Performance by platform" description={platformLine || "How each connected account performed this period."}>
-                <p className="t-secondary">Snapshot collected {new Date(report.created_at).toLocaleString()}. Profile figures cover the selected reporting period; Facebook and Instagram impressions represent views. LinkedIn clicks include all post clicks. Providers may revise historical data after collection.</p>
+                <p className="t-secondary">Snapshot collected {formatDateTime(report.created_at)}. Profile figures cover the selected reporting period; Facebook and Instagram impressions represent views. LinkedIn clicks include all post clicks. Providers may revise historical data after collection.</p>
                 <Card>
                   <CardContent className="pt-5 grid gap-8 lg:grid-cols-2">
                     <div className="space-y-3">
@@ -575,10 +571,11 @@ export default function ReportView() {
                 <CardContent className="pt-5 flex items-center gap-8 flex-wrap">
                   <p className="t-subhead">In this report</p>
                   <ul className="flex items-center gap-6 flex-wrap t-body">
-                    <li className="flex items-center gap-2"><span>Sprout posts analyzed</span><span className="font-semibold tabular-nums">{rd.data_counts.sprout_top_posts ?? 0}</span></li>
-                    <li className="flex items-center gap-2"><span>TikTok trends</span><span className="font-semibold tabular-nums">{rd.data_counts.tiktok_trends ?? 0}</span></li>
-                    <li className="flex items-center gap-2"><span>Instagram trends</span><span className="font-semibold tabular-nums">{rd.data_counts.instagram_trends ?? 0}</span></li>
-                    <li className="flex items-center gap-2"><span>Recommendations</span><span className="font-semibold tabular-nums">{rd.data_counts.total_recommendations ?? 0}</span></li>
+                    {counts.postsAnalyzed != null && <li className="flex items-center gap-2"><span>Posts analyzed</span><span className="font-semibold tabular-nums">{counts.postsAnalyzed}</span></li>}
+                    <li className="flex items-center gap-2"><span>TikTok trends</span><span className="font-semibold tabular-nums">{counts.tiktokTrends}</span></li>
+                    <li className="flex items-center gap-2"><span>Instagram trends</span><span className="font-semibold tabular-nums">{counts.instagramTrends}</span></li>
+                    <li className="flex items-center gap-2"><span>Recommendations</span><span className="font-semibold tabular-nums">{counts.recommendations}</span></li>
+                    {counts.calendarPosts > 0 && <li className="flex items-center gap-2"><span>Calendar posts</span><span className="font-semibold tabular-nums">{counts.calendarPosts}</span></li>}
                     {latestCompetitive && <li className="t-secondary">Latest competitive analysis included</li>}
                   </ul>
                 </CardContent>
@@ -675,11 +672,7 @@ function MetricsCards({ changes, previousMonth }: { changes: Record<string, any>
 }
 
 /* ─── Performance Chart (per-metric mini bars) ─── */
-function platformLabelOf(n: string): string {
-  const k = String(n || "").toLowerCase();
-  const map: Record<string, string> = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", linkedin: "LinkedIn", youtube: "YouTube", twitter: "X", x: "X", threads: "Threads", pinterest: "Pinterest" };
-  return map[k] || (n ? n[0].toUpperCase() + n.slice(1) : "");
-}
+const platformLabelOf = platformName;
 
 function PerformanceChart({ comparison }: { comparison: any }) {
   const order = ["impressions", "video_views", "reactions", "link_clicks", "comments", "shares"];
@@ -713,10 +706,15 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
         <div className="flex items-center justify-between">
           <PlatformBadge platform={post.network_type || post.platform} size="sm" />
           <span className="t-secondary">
-            {post.posted_at && new Date(post.posted_at).toLocaleDateString()}
+            {formatDate(post.posted_at)}
           </span>
         </div>
-        <p className="t-body line-clamp-3">{post.text || post.content}</p>
+        <p className="t-body line-clamp-3 whitespace-pre-line">{cleanText(post.text || post.content)}</p>
+        {/* The figure the post is ranked by, and the one rate definition: engagements divided by impressions. */}
+        <p className="t-label tabular-nums">
+          {(sproutEngagements(post) ?? 0).toLocaleString()} engagements
+          {sproutEngagementRate(post) != null && ` · ${(sproutEngagementRate(post)! * 100).toFixed(2)}% engagement rate`}
+        </p>
         <div className="flex items-center gap-4 t-secondary pt-1">
           <span className="flex items-center gap-1">
             <Eye className="h-3 w-3" />
@@ -760,15 +758,14 @@ function pick6(m: any) {
   return out;
 }
 
+/** The figure the engagement list is ranked by, and shows on every card. */
 function engagementOf(p: any): number {
-  if (typeof p?.engagements === "number") return p.engagements;
-  if (typeof p?.engagement === "number") return p.engagement;
-  return (p?.reactions ?? p?.likes ?? 0) + (p?.comments ?? 0) + (p?.shares ?? 0);
+  return sproutEngagements(p) ?? 0;
 }
 
 /** Canonical platform key for a Sprout post (carries platform/network_type per post). */
 function postPlatformKey(post: any): string {
-  return normalizePlatformKey(post?.network_type || post?.platform || post?.platform_display || "");
+  return platformKey(post?.network_type || post?.platform || post?.platform_display || "");
 }
 
 /* ─── Platform Performance Card (mirrors the aggregate MetricsCards styling) ─── */
@@ -788,7 +785,7 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
   const prev = platform.previous || null;
   const changes = platform.changes || null;
   const ai = platform.ai || null;
-  const name = prettyPlatformName(platform.network);
+  const name = platformName(platform.network);
   const handles: string[] = Array.isArray(platform.profile_names) ? platform.profile_names : [];
   return (
     <article className="glass p-5 flex flex-col gap-4">
@@ -877,7 +874,7 @@ function TopPostsSection({ posts }: { posts: any[] }) {
           <span className="t-subhead">Platform</span>
           <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)]">
             <FilterChip active={effective === "all"} onClick={() => setActive("all")}>All</FilterChip>
-            {platforms.map((k) => <PlatformFilterChip key={k} platform={prettyPlatformName(k)} active={effective === k} onClick={() => setActive(k)} />)}
+            {platforms.map((k) => <PlatformFilterChip key={k} platform={platformName(k)} active={effective === k} onClick={() => setActive(k)} />)}
           </div>
         </div>
       )}
@@ -1077,7 +1074,7 @@ function TrendsSection({
                           {sl && <Badge data-print="hide" variant="outline" className={`t-label shrink-0 ${sl.color}`} title={getScoreExplanation(platform)}>Score: {Number(post.engagement_score).toLocaleString()} {sl.label}</Badge>}
                           {engagements != null && <Badge variant="outline" className="t-label shrink-0" title="Likes, comments and shares on this post">{engagements.toLocaleString()} engagements</Badge>}
                         </div>
-                        <p className="t-body line-clamp-4">{post.caption}</p>
+                        <p className="t-body line-clamp-4 whitespace-pre-line">{cleanText(post.caption)}</p>
                         {/* A hashtag has no spaces to wrap at, so one long enough (#fyppppp…) runs past the card unless it may break mid-word. */}
                         {Array.isArray(post.hashtags) && post.hashtags.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 min-w-0">{post.hashtags.slice(0, 6).map((h: string) => <span key={h} className="t-label text-primary max-w-full break-all">{h.startsWith("#") ? h : `#${h}`}</span>)}</div>

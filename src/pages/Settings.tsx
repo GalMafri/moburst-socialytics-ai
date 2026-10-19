@@ -13,6 +13,7 @@ import { Save, Loader2 } from "lucide-react";
 import { HubCompanySync } from "@/components/HubCompanySync";
 import { HiggsfieldConnection } from "@/components/settings/HiggsfieldConnection";
 import { ApiAccessCard } from "@/components/settings/ApiAccessCard";
+import { fetchActiveClients } from "@/lib/activeClients";
 
 /**
  * Why a sign-in did not take. Higgsfield's callback cannot render a page of
@@ -72,9 +73,8 @@ export default function Settings() {
   const { data: clientSlugs = [] } = useQuery({
     queryKey: ["client-slugs"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("company_slug").is("archived_at", null);
-      if (error) throw error;
-      return Array.from(new Set((data ?? []).map((c) => c.company_slug).filter((x): x is string => !!x))).sort();
+      const data = await fetchActiveClients<{ company_slug: string | null }>("company_slug");
+      return Array.from(new Set(data.map((c) => c.company_slug).filter((x): x is string => !!x))).sort();
     },
     enabled: isAdmin,
   });
@@ -102,7 +102,8 @@ export default function Settings() {
       toast({ title: "Settings saved" });
     },
     onError: (err: Error) => {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+      console.error("[settings save]", err);
+      toast({ title: "The settings were not saved", description: "Nothing changed. Try again in a minute.", variant: "destructive" });
     },
   });
 
@@ -143,12 +144,12 @@ export default function Settings() {
         <Card>
           <CardHeader>
             <CardTitle className="t-h3">Sprout Social</CardTitle>
-            <CardDescription>OAuth2 credentials are managed as backend secrets</CardDescription>
+            <CardDescription>Connected for the whole workspace</CardDescription>
           </CardHeader>
           <CardContent>
             <p className="t-secondary">
-              The Sprout Social access token is stored securely as a backend secret (SPROUT_SOCIAL_ACCESS_TOKEN).
-              Contact your administrator to update these credentials.
+              Sprout Social is connected once for every client. Its sign-in is stored securely on the server and
+              renews on its own.
             </p>
           </CardContent>
         </Card>

@@ -1,34 +1,22 @@
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 const PLAIN_MESSAGE = "The request did not complete. Your connection or the server may be having a moment.";
-
-/** Staff see why a load failed; anyone else, or a render outside the auth provider, does not. */
-function useShowsRawDetail(): boolean {
-  try {
-    return useAuth().isMoburstStaff === true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * A query that failed, said so.
  *
  * Pages used to render a failed load as an empty state, which asserts
- * something true of the data ("No competitive analyses yet") on the strength
- * of a request that never answered. A reader cannot tell the difference, and
- * the difference is the whole message: one means run your first analysis, the
- * other means the request failed and the analyses are probably still there.
+ * something true of the data on the strength of a request that never
+ * answered. Kept separate from EmptyState so the two can never be confused at
+ * a call site: this one carries a way to try again, and an empty state never
+ * should.
  *
- * Kept separate from EmptyState so the two can never be confused at a call
- * site: this one carries a way to try again, and an empty state never should.
- *
- * A thrown error's own text (a raw Supabase or network message) is shown to
- * staff only; a client sees the plain sentence. A string passed as `error`
- * is copy written for the reader and is shown to everyone.
+ * A thrown error's own text (a raw Supabase or network message) goes to the
+ * console for the team and is never shown: everyone reads the plain
+ * sentence. A string passed as `error` is copy written for the reader and is
+ * shown as it is.
  */
 export function LoadError({
   title = "That did not load",
@@ -41,14 +29,14 @@ export function LoadError({
   onRetry?: () => void;
   className?: string;
 }) {
-  const staff = useShowsRawDetail();
   const raw =
     error instanceof Error && error.message
       ? error.message
       : error && typeof error === "object" && typeof (error as { message?: unknown }).message === "string"
         ? (error as { message: string }).message
         : "";
-  const message = typeof error === "string" && error ? error : staff && raw ? raw : PLAIN_MESSAGE;
+  if (raw) console.error("[load failed]", raw);
+  const message = typeof error === "string" && error ? error : PLAIN_MESSAGE;
 
   return (
     <div

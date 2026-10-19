@@ -16,15 +16,14 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/ui/load-error";
 import { Loading } from "@/components/ui/loading";
-import { platformLabel } from "@/components/competitive/PostVisual";
 import { insightKey, partitionGaps, useInsightFeedback, type InsightFeedbackRow } from "@/hooks/useInsightFeedback";
-import { formatRange } from "@/lib/dateRange";
+import { firstRunSentence, formatDate, formatRange, platformName } from "@/lib/display";
+import { useNextRun } from "@/lib/nextRun";
 import { Prose } from "@/components/ui/prose";
 import { InsightGrid } from "@/components/ui/insight-card";
 import { Crosshair, ArrowRight, Lightbulb, ThumbsUp, Rss } from "lucide-react";
 import { normalizedCompetitiveMetrics } from "@/lib/competitiveMetrics";
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../../supabase/functions/_shared/competitive/reportEvidence";
-import { competitiveRecovery } from "@/lib/competitiveFlow";
 import { landscapeLabel } from "@/lib/competitiveStatus";
 import { editedSuggestion } from "../../../supabase/functions/_shared/competitive/suggestionEdits";
 
@@ -49,6 +48,8 @@ export function CompetitiveSnapshot({
 
   // Its own key: ReportView reads a different column set for its own summary,
   // and a shared key let whichever loaded first answer for both.
+  // The newest analysis that passed its source checks. A run held back is
+  // hidden behind the last ready one, as on every other competitive screen.
   const { data: latest, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["competitive-snapshot", clientId],
     queryFn: async () => {
@@ -58,42 +59,21 @@ export function CompetitiveSnapshot({
         .eq("client_id", clientId)
         .eq("status", "complete")
         .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(12);
       if (error) throw error;
-      return data;
+      return (data || []).find((r) => competitiveReportQuality(r.report_data).ready) ?? null;
     },
     enabled: !!clientId,
   });
+  const nextRun = useNextRun(clientId, "competitive", !isLoading && !latest);
 
   if (isLoading) return <Loading label="Loading competitive analysis" />;
   if (isError) return <LoadError title="The competitive analysis did not load" error={error} onRetry={() => refetch()} />;
 
   if (!latest) {
-    return (
-      <EmptyState
-        icon={Crosshair}
-        title="No competitive analysis yet"
-        description={
-          isMoburstStaff
-            ? "Confirm a competitor set and run the RivalIQ analysis. Its results appear here and shape the next monthly report."
-            : "Your account team has not run a competitive analysis for this period yet."
-        }
-        action={
-          isMoburstStaff ? (
-            <Button onClick={() => navigate(`/clients/${clientId}/competitive`)}>
-              <Crosshair className="h-4 w-4 mr-2" /> Set up competitors
-            </Button>
-          ) : undefined
-        }
-      />
-    );
-  }
-
-  if (!competitiveReportQuality(latest.report_data).ready) {
-    const recovery = competitiveRecovery(latest.report_data, isMoburstStaff);
-    return <EmptyState icon={Crosshair} title={recovery.title} description={recovery.detail}
-      action={<Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports/${latest.id}`)}>View report status</Button>} />;
+    // What exists: when the first analysis runs, if one is scheduled. Never a setup step.
+    const first = firstRunSentence("competitive", nextRun.data);
+    return first ? <EmptyState icon={Crosshair} title="No competitive analysis yet" description={first} /> : null;
   }
   const rd: any = withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(latest.report_data));
   const ai = rd.ai_analysis || {};
@@ -120,7 +100,7 @@ export function CompetitiveSnapshot({
           {rivals.length} competitors
           {/* The tracking setup's name is for staff, and stays out of an exported PDF. */}
           {isMoburstStaff && rd.landscape?.name ? <span data-print="hide">{` · ${landscapeLabel(rd.landscape.name)}`}</span> : null}
-          {period ? ` · ${period}` : ""} · analyzed {new Date(latest.created_at).toLocaleDateString()}
+          {period ? ` · ${period}` : ""} · analyzed {formatDate(latest.created_at)}
         </p>
         <div className="flex gap-2 flex-wrap">
           {isMoburstStaff && (
@@ -142,7 +122,8 @@ export function CompetitiveSnapshot({
           <Tile accent label="Avg engagement" value={me.post_count ? whole(me.engagement_avg) : "–"} sub={`competitor average ${whole(avg((c) => c.engagement_avg))}`} />
           <Tile label="Share of voice" value={share == null ? "–" : `${share}%`} sub={`${me.post_count} of ${totalPosts} posts`} />
           <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`competitor average ${(rivals.length ? (rivals.reduce((sum, c) => sum + c.cadence_per_week, 0) / rivals.length).toFixed(1) : "–")}/wk`} />
-          <Tile label="Engagement rate" value={pct(me.engagement_rate_avg)} sub={`competitor average ${pct(avg((c) => c.engagement_rate_avg))}`} />
+          {/* Engagements divided by impressions, the same definition for every company. No impressions figure, no tile. */}
+          {me.engagement_rate_avg != null && <Tile label="Engagement rate" value={pct(me.engagement_rate_avg)} sub={avg((c) => c.engagement_rate_avg) == null ? "engagements per impression" : `competitor average ${pct(avg((c) => c.engagement_rate_avg))}`} />}
         </div>
       )}
 
@@ -167,7 +148,7 @@ export function CompetitiveSnapshot({
             {gaps.map((g, i) => (
               <div key={i} className="glass-inner p-4 space-y-2">
                 <div className="flex gap-1.5 flex-wrap">
-                  {g.platform && g.platform !== "all" && <Badge variant="outline" className="t-label">{platformLabel(g.platform)}</Badge>}
+                  {g.platform && g.platform !== "all" && <Badge variant="outline" className="t-label">{platformName(g.platform)}</Badge>}
                   {verdictFor(g.gap) === "up" && <Badge className="t-label gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                 </div>
                 <p className="t-body font-medium">{editedSuggestion(g, editFor(g.gap)).gap}</p>
