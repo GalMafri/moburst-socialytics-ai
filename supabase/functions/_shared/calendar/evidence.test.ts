@@ -36,27 +36,36 @@ describe("platformName", () => {
 
 describe("scoreOwnPosts", () => {
   const posts = [
-    own("a", "LinkedIn", "carousel", "2026-10-01T10:00:00Z", 1000),
-    own("b", "LinkedIn", "carousel", "2026-10-03T10:00:00Z", 1200),
-    own("c", "LinkedIn", "carousel", "2026-10-05T10:00:00Z", 3000),
-    own("d", "LinkedIn", "carousel", "2026-10-07T10:00:00Z", 800),
-    own("e", "LinkedIn", "carousel", "2026-10-09T10:00:00Z", 1100),
+    own("a", "LinkedIn", "carousel", "2026-10-01T10:00:00Z", 1000, 10),
+    own("b", "LinkedIn", "carousel", "2026-10-03T10:00:00Z", 1200, 12),
+    own("c", "LinkedIn", "carousel", "2026-10-05T10:00:00Z", 3000, 40),
+    own("d", "LinkedIn", "carousel", "2026-10-07T10:00:00Z", 800, 8),
+    own("e", "LinkedIn", "carousel", "2026-10-09T10:00:00Z", 1100, 11),
     // Not settled yet: posted 12 hours ago.
-    own("f", "LinkedIn", "carousel", "2026-10-18T19:00:00Z", 9000),
+    own("f", "LinkedIn", "carousel", "2026-10-18T19:00:00Z", 9000, 90),
     // Too old: more than 90 days.
-    own("g", "LinkedIn", "carousel", "2026-06-01T10:00:00Z", 9000),
+    own("g", "LinkedIn", "carousel", "2026-06-01T10:00:00Z", 9000, 90),
   ];
 
-  it("ranks settled posts against the client's own median for the platform and format", () => {
+  it("ranks settled posts against the client's own median, by the lower of reach and engagement", () => {
     const { top, low, platforms } = scoreOwnPosts(posts, NOW);
     expect(top[0].post.id).toBe("c");
-    expect(top[0].median).toBe(1100);
-    expect(top[0].multiple).toBe(2.7);
-    expect(top[0].metric).toBe("impressions");
+    // Impressions 3001/1101 = 2.7x is lower than engagement 41/12 = 3.4x, so impressions is the figure shown.
+    expect(top[0]).toMatchObject({ metric: "impressions", median: 1100, multiple: 2.7 });
     expect(top.map((s) => s.post.id)).not.toContain("f");
     expect(top.map((s) => s.post.id)).not.toContain("g");
     expect(low[0].post.id).toBe("d");
     expect(platforms.LinkedIn).toEqual({ posts: 5, thin: false });
+  });
+
+  it("can't be topped by paid reach: an ad's views don't lift it above its engagement", () => {
+    const ad = own("ad", "LinkedIn", "carousel", "2026-10-06T10:00:00Z", 596000, 12);
+    const boosted = { ...own("boost", "LinkedIn", "carousel", "2026-10-08T10:00:00Z", 50000, 400), boosted: true };
+    const { top } = scoreOwnPosts([...posts, ad, boosted], NOW);
+    expect(top[0].post.id).toBe("c");
+    // 596,000 impressions, but engagement at its usual level: it doesn't beat the client's usual at all.
+    expect(top.map((s) => s.post.id)).not.toContain("ad");
+    expect(top.map((s) => s.post.id)).not.toContain("boost");
   });
 
   it("uses engagement where the platform does not report impressions, and flags thin history", () => {
@@ -65,10 +74,13 @@ describe("scoreOwnPosts", () => {
       own("t2", "TikTok", "video", "2026-10-02T10:00:00Z", null, 20),
       own("t3", "TikTok", "video", "2026-10-03T10:00:00Z", null, 5),
     ], NOW);
-    expect(top[0].metric).toBe("engagement");
-    expect(top[0].multiple).toBe(4);
-    expect(top[0].thin).toBe(true);
+    expect(top[0]).toMatchObject({ metric: "engagement", multiple: 3.5, thin: true });
     expect(platforms.TikTok.thin).toBe(true);
+  });
+
+  it("keeps a near-zero usual from producing an absurd multiple", () => {
+    const { top } = scoreOwnPosts([0, 0, 0, 1, 30].map((eng, i) => own(`z${i}`, "Instagram", "image", `2026-10-0${i + 1}T10:00:00Z`, null, eng)), NOW);
+    expect(top[0].multiple).toBe(31);
   });
 });
 
@@ -93,6 +105,11 @@ describe("scoreCompetitorPosts", () => {
 
   it("calls a competitor with under four stored weeks an early signal", () => {
     expect(scoreCompetitorPosts(history, "2026-10-12", 1)[0].thin).toBe(true);
+  });
+
+  it("leaves out posts with no date or no text", () => {
+    const out = scoreCompetitorPosts([...history, { ...comp("x1", "BenchApp", "null", 400), publishedAt: "null" }, { ...comp("x2", "BenchApp", "2026-10-15T10:00:00Z", 400), text: "" }], "2026-10-12", 5);
+    expect(out.map((s) => s.post.id)).toEqual(["n1"]);
   });
 
   it("falls back to raw engagement when followers are missing", () => {
@@ -131,9 +148,9 @@ describe("rhythmFromPosts", () => {
 describe("numberEvidence and bestExamples", () => {
   it("numbers each kind of evidence and keeps the real figures", () => {
     const { top } = scoreOwnPosts([
-      own("a", "LinkedIn", "carousel", "2026-10-01T10:00:00Z", 1000), own("b", "LinkedIn", "carousel", "2026-10-03T10:00:00Z", 1200),
-      own("c", "LinkedIn", "carousel", "2026-10-05T10:00:00Z", 3000), own("d", "LinkedIn", "carousel", "2026-10-07T10:00:00Z", 800),
-      own("e", "LinkedIn", "carousel", "2026-10-09T10:00:00Z", 1100),
+      own("a", "LinkedIn", "carousel", "2026-10-01T10:00:00Z", 1000, 10), own("b", "LinkedIn", "carousel", "2026-10-03T10:00:00Z", 1200, 12),
+      own("c", "LinkedIn", "carousel", "2026-10-05T10:00:00Z", 3000, 40), own("d", "LinkedIn", "carousel", "2026-10-07T10:00:00Z", 800, 8),
+      own("e", "LinkedIn", "carousel", "2026-10-09T10:00:00Z", 1100, 11),
     ], NOW);
     const items = numberEvidence({
       ownTop: top,

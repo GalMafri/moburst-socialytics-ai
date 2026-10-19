@@ -69,7 +69,9 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
       engagementRate:audience?.followers>0?engagement/audience.followers:null,presenceReach:audience?.followers??null,
       // YouTube reports views, not impressions; views are YouTube's impressions here, as RivalIQ counts them for every company.
       ownedImpressions:metric(row,'lifetime.impressions') ?? (network==='youtube' ? metric(row,'lifetime.video_views') : null),views:metric(row,'lifetime.video_views'),
-      type:category==='album'||category==='document'?'carousel':category==='photo'?'image':category||'unknown',authorship:'company'});
+      type:category==='album'||category==='document'?'carousel':category==='photo'?'image':category||'unknown',authorship:'company',
+      // Sprout's is_boosted (Facebook and TikTok), present only when the caller asked for it.
+      boosted:row.is_boosted===true});
   }
   const networks=[...new Set(profiles.map(p=>ownedNetwork(p.network_type)))];
   const summarize=(network:string,range:Period)=>{
@@ -98,7 +100,8 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
     posts:all.filter(p=>day(p.publishedAt)>=period.start),metrics:{provider:'sprout',coverage:'complete',period,previous_period:previous,by_network,audience_snapshot}};
 }
 
-export async function collectOwnedCompetitive(db:any,client:any,period:Period) {
+/** opts.fields: extra Sprout post fields to request (the weekly calendar asks for is_boosted). */
+export async function collectOwnedCompetitive(db:any,client:any,period:Period,opts:{fields?:string[]}={}) {
   const {data:profiles,error}=await db.from('sprout_profiles').select('sprout_profile_id,network_type,native_name,profile_name,native_link').eq('client_id',client.id).neq('is_active',false);
   if(error) throw new Error('Could not read assigned client profiles');
   // Sprout does not expose X consistently; RivalIQ remains the X source.
@@ -132,7 +135,7 @@ export async function collectOwnedCompetitive(db:any,client:any,period:Period) {
   };
   const audience=async(range:Period)=>pages('profiles',{filters:[filter,`reporting_period.in(${range.start}...${range.end})`],metrics:['lifetime_snapshot.followers_count'],limit:1000});
   const [postRows,currentRows,previousRows,latestRows]=await Promise.all([
-    pages('posts',{timezone:'UTC',filters:[filter,`created_time.in(${previous.start}T00:00:00...${period.end}T23:59:59)`],fields:['guid','customer_profile_id','network','created_time','perma_link','text','post_type','content_category','visual_media'],metrics:['lifetime.reactions','lifetime.likes','lifetime.comments_count','lifetime.shares_count','lifetime.impressions','lifetime.video_views'],limit:50}),
+    pages('posts',{timezone:'UTC',filters:[filter,`created_time.in(${previous.start}T00:00:00...${period.end}T23:59:59)`],fields:['guid','customer_profile_id','network','created_time','perma_link','text','post_type','content_category','visual_media',...(opts.fields||[])],metrics:['lifetime.reactions','lifetime.likes','lifetime.comments_count','lifetime.shares_count','lifetime.impressions','lifetime.video_views'],limit:50}),
     audience(period),audience(previous),audience({start:new Date(Date.parse(latest)-2*DAY).toISOString().slice(0,10),end:latest}),
   ]);
   return normalizeOwnedCompetitive(selected,period,postRows,[...currentRows,...previousRows,...latestRows],collectedAt);

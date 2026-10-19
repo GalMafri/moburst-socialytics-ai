@@ -86,12 +86,13 @@ async function ownPosts(admin: Db, client: Record<string, unknown>, snapshots: A
   let sprout = "not_connected";
   const covered = new Set<string>();
   try {
-    const owned = await collectOwnedCompetitive(admin, client, { start, end });
+    const owned = await collectOwnedCompetitive(admin, client, { start, end }, { fields: ["is_boosted"] });
     sprout = owned.coverage;
     for (const p of owned.profiles ?? []) covered.add(platformName(p.network));
     posts = (owned.posts ?? []).map((p: any) => ({
       id: String(p.postId), platform: platformName(p.channel), format: String(p.type || "unknown"), publishedAt: String(p.publishedAt),
       text: String(p.message || ""), link: p.postLink ?? null, impressions: p.ownedImpressions ?? null, engagement: Number(p.engagementTotal) || 0,
+      boosted: p.boosted === true,
     }));
   } catch (e) {
     sprout = "failed";
@@ -107,7 +108,7 @@ async function ownPosts(admin: Db, client: Record<string, unknown>, snapshots: A
       const id = String(p.postId || p.nativeId || p.postLink || "");
       if (!id || covered.has(platform) || seen.has(id)) continue;
       seen.add(id);
-      posts.push({ id, platform, format: String(p.type || "unknown"), publishedAt: String(p.publishedAt), text: String(p.message || ""), link: p.postLink ?? null, impressions: null, engagement: Number(p.engagementTotal) || 0 });
+      posts.push({ id, platform, format: String(p.type || "unknown"), publishedAt: String(p.publishedAt), text: String(p.message || ""), link: p.postLink ?? null, impressions: null, engagement: Number(p.engagementTotal) || 0, boosted: isBoosted(p.facebookLikelyBoosted) });
     }
   }
   return { posts, sprout };

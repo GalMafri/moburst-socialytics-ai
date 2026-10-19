@@ -22,6 +22,8 @@ export interface OwnPost {
   link: string | null;
   impressions: number | null;
   engagement: number;
+  /** Paid promotion (Sprout's is_boosted, RivalIQ's "Likely Boosted"): left out, paid reach is not a content signal. */
+  boosted?: boolean;
 }
 
 export interface CompetitorPost {
@@ -121,10 +123,16 @@ interface Scored<T> {
   thin: boolean;
 }
 
+/** How far above its usual a value is, smoothed so a near-zero usual can't produce a four-digit multiple. */
+const ratio = (value: number, usual: number) => (value + 1) / (usual + 1);
+
 /**
- * The client's posts from the last 90 days that have settled, each against
- * the client's median for the same platform and format: impressions where
- * the platform reports them for most posts, engagement where it does not.
+ * The client's organic posts from the last 90 days that have settled, each
+ * against the client's median for the same platform and format. A post
+ * counts as far above its usual as both its reach (impressions, where the
+ * platform reports them for most posts) and its engagement say: paid views
+ * inflate reach far more than engagement, so an ad cannot top the list on
+ * reach alone. The multiple shown is the lower of the two, with its metric.
  */
 export function scoreOwnPosts(posts: OwnPost[], now: Date, opts: { top?: number; low?: number } = {}): {
   top: Scored<OwnPost>[];
@@ -134,7 +142,7 @@ export function scoreOwnPosts(posts: OwnPost[], now: Date, opts: { top?: number;
   const t = now.getTime();
   const settled = posts.filter((p) => {
     const at = Date.parse(p.publishedAt);
-    return Number.isFinite(at) && at <= t - SETTLE_HOURS * 3600_000 && at >= t - OWN_DAYS * 86400_000;
+    return !p.boosted && Number.isFinite(at) && at <= t - SETTLE_HOURS * 3600_000 && at >= t - OWN_DAYS * 86400_000;
   });
   const perPlatform = new Map<string, number>();
   for (const p of settled) perPlatform.set(p.platform, (perPlatform.get(p.platform) ?? 0) + 1);
@@ -145,18 +153,18 @@ export function scoreOwnPosts(posts: OwnPost[], now: Date, opts: { top?: number;
   }
   const scored: Scored<OwnPost>[] = [];
   for (const group of groups.values()) {
-    const withImpressions = group.filter((p) => (p.impressions ?? 0) > 0).length;
-    const useImpressions = withImpressions >= Math.ceil(group.length / 2);
-    const metric = useImpressions ? "impressions" : "engagement";
-    const valueOf = (p: OwnPost) => (useImpressions ? (p.impressions ?? null) : p.engagement);
-    const values = group.map(valueOf).filter((v): v is number => v !== null && Number.isFinite(v));
-    const mid = median(values);
-    if (mid === null || mid <= 0) continue;
+    const reported = group.filter((p) => (p.impressions ?? 0) > 0);
+    const useImpressions = reported.length >= Math.ceil(group.length / 2);
+    const engagementMid = median(group.map((p) => p.engagement)) ?? 0;
+    const impressionsMid = useImpressions ? median(reported.map((p) => p.impressions as number)) : null;
     const thin = group.length < MIN_SAMPLE || (perPlatform.get(group[0].platform) ?? 0) < MIN_SAMPLE;
     for (const p of group) {
-      const v = valueOf(p);
-      if (v === null) continue;
-      scored.push({ post: p, value: v, median: mid, multiple: round1(v / mid), metric, sample: group.length, thin });
+      const byEngagement = { metric: "engagement", value: p.engagement, median: engagementMid, multiple: ratio(p.engagement, engagementMid) };
+      const byReach = impressionsMid !== null && (p.impressions ?? 0) > 0
+        ? { metric: "impressions", value: p.impressions as number, median: impressionsMid, multiple: ratio(p.impressions as number, impressionsMid) }
+        : null;
+      const binding = byReach && byReach.multiple < byEngagement.multiple ? byReach : byEngagement;
+      scored.push({ post: p, value: binding.value, median: binding.median, multiple: round1(binding.multiple), metric: binding.metric, sample: group.length, thin });
     }
   }
   const platforms = Object.fromEntries([...perPlatform].map(([k, n]) => [k, { posts: n, thin: n < MIN_SAMPLE }]));
@@ -174,7 +182,8 @@ export function scoreOwnPosts(posts: OwnPost[], now: Date, opts: { top?: number;
  * out because paid reach is not a content signal.
  */
 export function scoreCompetitorPosts(posts: CompetitorPost[], newestStart: string, weeksOfHistory: number, opts: { top?: number } = {}): Scored<CompetitorPost>[] {
-  const organic = posts.filter((p) => !p.boosted);
+  // A post with no date can't be placed in a week, and one with no text can't be judged for fit.
+  const organic = posts.filter((p) => !p.boosted && /^\d{4}-\d{2}-\d{2}/.test(String(p.publishedAt)) && String(p.text || "").trim().length > 0);
   const groups = new Map<string, CompetitorPost[]>();
   for (const p of organic) {
     const key = `${p.company}|${p.platform}`;
@@ -186,12 +195,13 @@ export function scoreCompetitorPosts(posts: CompetitorPost[], newestStart: strin
     const metric = perFollower ? "engagement per follower" : "engagement";
     const valueOf = (p: CompetitorPost) => (perFollower ? p.engagement / (p.followers as number) : p.engagement);
     const mid = median(group.map(valueOf));
-    if (mid === null || mid <= 0) continue;
+    if (mid === null || (perFollower && mid <= 0)) continue;
     const thin = group.length < MIN_SAMPLE || weeksOfHistory < MIN_COMPETITOR_WEEKS;
     for (const p of group) {
       if (day(p.publishedAt) < newestStart) continue;
       const v = valueOf(p);
-      const multiple = round1(v / mid);
+      // Per follower, both sides are small fractions of the same scale; raw engagement is smoothed like the client's.
+      const multiple = round1(perFollower ? v / mid : ratio(v, mid));
       if (multiple <= 1) continue;
       out.push({ post: p, value: v, median: mid, multiple, metric, sample: group.length, thin });
     }
