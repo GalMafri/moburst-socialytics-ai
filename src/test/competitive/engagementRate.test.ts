@@ -61,6 +61,44 @@ describe("one engagement rate: engagements divided by impressions", () => {
     expect(JSON.stringify(bader.comparison_metrics)).not.toMatch(/"rate":|engagement_rate_per_post/);
   });
 
+  it("reads the client's posts, engagement, audience, share of voice and cadence from RivalIQ like its peers (Bader 1c4f4805)", () => {
+    const rq = (posts: number, audience: number, engagement: number, impressions: number, by_network: Record<string, unknown>) => ({
+      period, posts: both(posts), audience: both(audience), engagement: both(engagement), estimated_impressions: both(impressions), by_network,
+    });
+    const sample = (keys: string[]) => Object.fromEntries(keys.map((k) => [k, { post_count: 99 }]));
+    const report = {
+      period: { ...period, days: 30 },
+      aggregates: {
+        metric_semantics_version: 4,
+        companies: [
+          { name: "Bader Law", is_client: true, post_count: 94, by_channel: sample(["facebook", "instagram", "linkedin", "tiktok", "twitter", "youtube"]),
+            rivaliq_metrics: rq(54, 15056, 2533, 2097537, { facebook: network(13, 677, 230566), instagram: network(13, 437, 17211), tiktok: network(12, 511, 90170, { views: both(90170) }), twitter: network(0, 0, 0), youtube: network(16, 908, 1759590, { views: both(1759590) }) }),
+            // Sprout's figures for Bader: 42 Facebook posts (29 of them ads), 8 LinkedIn posts, 13,809 followers.
+            owned_metrics: { coverage: "complete", period, by_network: {
+              facebook: { posts: both(42), engagement: both(755), followers: both(8367), impressions: both(235735), profiles: [{ id: "1", name: "Bader Law" }] },
+              linkedin: { posts: both(8), engagement: both(62), followers: both(3646), impressions: both(2705), profiles: [{ id: "2", name: "Bader Law" }] },
+            } } },
+          { name: "TopDog Law", is_client: false, post_count: 50, by_channel: sample(["facebook", "instagram"]), rivaliq_metrics: rq(50, 683428, 11538, 900620, { facebook: network(22, 1027, 302809), instagram: network(28, 10511, 597811) }) },
+          { name: "Morgan & Morgan P.A.", is_client: false, post_count: 51, by_channel: sample(["facebook"]), rivaliq_metrics: rq(51, 385867, 11459, 396194, { facebook: network(16, 1039, 96943) }) },
+          { name: "reyeslaw.com", is_client: false, post_count: 33, by_channel: sample(["facebook"]), rivaliq_metrics: rq(33, 41623, 538, 33274, { facebook: network(9, 126, 11585) }) },
+        ],
+      },
+    };
+    const companies = normalizedCompetitiveMetrics(report).aggregates.companies as any[];
+    const bader = companies[0];
+    expect(bader.post_count).toBe(54);
+    expect(bader.comparison_metrics.audience.current).toBe(15056);
+    expect(bader.comparison_metrics.engagement.current).toBe(2533);
+    expect(bader.cadence_per_week).toBe(12.6);
+    expect(bader.by_channel.facebook.post_count).toBe(13);
+    // RivalIQ has no LinkedIn: Bader's 8 Sprout LinkedIn posts show nothing in the comparison.
+    expect(bader.by_channel.linkedin).toBeUndefined();
+    const total = companies.reduce((n, c) => n + c.post_count, 0);
+    expect(Math.round((bader.post_count / total) * 100)).toBe(29);
+    const dims = Object.fromEntries((normalizedCompetitiveMetrics(report).ai_analysis.benchmark_scorecard as any).dimensions.map((d: any) => [d.dimension, d.client]));
+    expect(dims).toMatchObject({ Audience: 15056, Engagement: 2533 });
+  });
+
   it("leaves a platform RivalIQ has no impressions for without a rate (LegaBot Facebook showed 304.19%)", () => {
     const report = {
       period,
@@ -80,7 +118,8 @@ describe("one engagement rate: engagements divided by impressions", () => {
       },
     };
     const legabot = normalizedCompetitiveMetrics(report).aggregates.companies[0] as any;
-    expect(legabot.by_channel.facebook.engagement_rate_avg).toBeNull();
+    // RivalIQ has no Facebook figures for LegaBot: the comparison shows nothing there.
+    expect(legabot.by_channel.facebook).toBeUndefined();
     expect(legabot.by_channel.instagram.engagement_rate_avg).toBe(8133 / 186562);
     expect(legabot.by_channel.twitter.engagement_rate_avg).toBeNull();
   });

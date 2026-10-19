@@ -104,9 +104,15 @@ function withRates(metrics: any, rates: ReturnType<typeof rivalIqRates>) {
   };
 }
 
-/** Retain each measured metric at its actual source scope. Adding LinkedIn
- * activity must not erase RivalIQ audience, impressions, or engagement rates. */
-export function competitiveCompanyMetrics(c: {rivaliq_metrics?: any; linkedin_metrics?: any; rivaliq_audience_snapshot?: any;owned_metrics?:any}): any {
+/**
+ * A company's comparison figures, the same sources for every company, the
+ * client included (self-serve design, 19 Oct 2026): RivalIQ's period totals,
+ * plus the public LinkedIn source where it was collected. The client's own
+ * Sprout figures (owned_metrics) never enter a comparison; they belong to the
+ * client's own performance screens. Adding LinkedIn activity must not erase
+ * RivalIQ audience, impressions or engagement rates.
+ */
+export function competitiveCompanyMetrics(c: {rivaliq_metrics?: any; linkedin_metrics?: any; rivaliq_audience_snapshot?: any}): any {
   const r = c.rivaliq_metrics;
   const li = c.linkedin_metrics;
   if (!r) return r;
@@ -124,12 +130,12 @@ export function competitiveCompanyMetrics(c: {rivaliq_metrics?: any; linkedin_me
         ? {...value,followers:{current:snapshot.by_network[network],previous:null},audience_as_of:snapshot.as_of} : value,
     ])),
   };
-  if (!li || li.coverage !== 'complete') return withRates(applyOwnedMetrics(base,c.owned_metrics), rates);
+  if (!li || li.coverage !== 'complete') return withRates(base, rates);
   const add = (value: Numeric, extra: Numeric) => valid(value) && valid(extra) ? value + extra : null;
   const unknown = { current: null, previous: null };
   const previous = li.previous?.coverage === 'complete' && r.previous_period
     && li.previous.period?.start === r.previous_period.start && li.previous.period?.end === r.previous_period.end ? li.previous : null;
-  return withRates(applyOwnedMetrics({
+  return withRates({
     ...base,
     posts: { current: add(r.posts?.current, li.posts), previous: previous ? add(r.posts?.previous, previous.posts) : null },
     engagement: { current: add(r.engagement?.current, li.engagement), previous: previous ? add(r.engagement?.previous, previous.engagement) : null },
@@ -140,52 +146,7 @@ export function competitiveCompanyMetrics(c: {rivaliq_metrics?: any; linkedin_me
       impressions:unknown, rate:unknown,
       source:li.provider,
     } },
-  },c.owned_metrics), rates);
-}
-
-function applyOwnedMetrics(base:any,owned:any) {
-  if(owned?.coverage!=='complete') return base;
-  if(owned.period?.start!==base.period?.start||owned.period?.end!==base.period?.end) throw new Error('Owned client source period does not match the competitive report');
-  const by_network={...base.by_network,...Object.fromEntries(Object.entries(owned.by_network).map(([network,raw]:[string,any])=>{
-    const snapshot=owned.audience_snapshot?.by_network?.[network];
-    // YouTube reports views, not impressions. Views are YouTube's impressions in
-    // this report, as RivalIQ counts them for every company; a report collected
-    // before the owned source did the same takes the client's views from RivalIQ.
-    const views=base.by_network?.[network]?.views;
-    const value=!valid(raw.impressions?.current)&&network==='youtube'&&valid(views?.current)
-      ? {...raw,impressions:{current:views.current,previous:valid(views.previous)?views.previous:null},impressions_kind:'views'}:raw;
-    return [network,!valid(value.followers?.current)&&valid(snapshot?.followers)&&snapshot?.as_of
-      ? {...value,followers:{current:snapshot.followers,previous:null},audience_as_of:snapshot.as_of}:value];
-  }))};
-  const combined=(key:string,which:string,networks=Object.values(by_network) as any[])=>{
-    const values=networks.map(n=>n[key]?.[which]);
-    return values.length&&values.every(valid)?values.reduce((a,b)=>a+b,0):null;
-  };
-  const both=(key:string)=>({current:combined(key,'current'),previous:combined(key,'previous')});
-  const publicNetworks=Object.entries(by_network).filter(([key])=>key!=='linkedin');
-  const audienceNets=publicNetworks.filter(([,n]:[string,any])=>valid(n.followers?.current));
-  const audience=audienceNets.length?{
-    current:combined('followers','current',audienceNets.map(([,n])=>n)),
-    previous:audienceNets.some(([,n]:[string,any])=>n.audience_as_of)?null:combined('followers','previous',audienceNets.map(([,n])=>n)),
-  }:base.audience;
-  // Client impressions are summed over the connected networks that report
-  // them, and those networks are named; one network without impressions
-  // (YouTube, through Sprout) must not hide the others' measured totals.
-  const ownedEntries=Object.keys(owned.by_network).map((network)=>[network,by_network[network]]) as [string,any][];
-  const impressionNets=ownedEntries.filter(([,n])=>valid(n.impressions?.current));
-  const actual_impressions=impressionNets.length?{
-    current:combined('impressions','current',impressionNets.map(([,n])=>n)),
-    previous:combined('impressions','previous',impressionNets.map(([,n])=>n)),
-  }:{current:null,previous:null};
-  return {...base,by_network,posts:both('posts'),engagement:both('engagement'),audience,
-    audience_as_of:audienceNets.some(([,n]:[string,any])=>n.audience_as_of)?[...new Set(audienceNets.map(([,n]:[string,any])=>n.audience_as_of||base.period.end))].sort().join(' / '):undefined,
-    metric_scopes:{...base.metric_scopes,audience:'connected_and_public'},
-    audience_networks:audienceNets.map(([key])=>key),
-    actual_impressions,
-    actual_impressions_networks:impressionNets.map(([key])=>key),
-    actual_impressions_missing:ownedEntries.filter(([,n])=>!valid(n.impressions?.current)).map(([key])=>key),
-    owned_profile_scope:ownedEntries.flatMap(([network,n])=>(n.profiles||[]).map((p:any)=>({...p,network}))),
-  };
+  }, rates);
 }
 
 export function factualDimensions(companies: Company[], days: number | null): Dimension[] {
@@ -240,10 +201,16 @@ export function normalizedCompetitiveMetrics<T>(input: T): T & MetricReport {
   };
   const companies = (report.aggregates?.companies || []).map((c) => {
     const metrics = competitiveCompanyMetrics(c);
-    const channels = { ...c.by_channel };
-    if (authoritative) for (const network of Object.keys(metrics?.by_network || {})) {
-      const key = network === 'twitter' && channels.x ? 'x' : network;
-      channels[key] ??= { post_count: 0 };
+    const channels: NonNullable<Company["by_channel"]> = { ...c.by_channel };
+    if (authoritative && metrics) {
+      for (const network of Object.keys(metrics.by_network || {})) {
+        const key = network === 'twitter' && channels.x ? 'x' : network;
+        channels[key] ??= { post_count: 0 };
+      }
+      // A platform the comparison sources have no figures for shows nothing,
+      // for the client as for its peers: the client's own posts there (from
+      // Sprout) are its own performance, never a comparison.
+      for (const key of Object.keys(channels)) if (!metrics.by_network?.[key === 'x' ? 'twitter' : key]) delete channels[key];
     }
     return {
       ...c,

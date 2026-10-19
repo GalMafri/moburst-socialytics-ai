@@ -56,12 +56,8 @@ type TopPost = {
 };
 /** A RivalIQ period total with the previous equal-length period beside it. */
 type Both = { current: number | null; previous: number | null };
+/** A company's comparison figures: RivalIQ and the public LinkedIn source, the same for every company, the client included. */
 type RivalIQMetrics = {
-  actual_impressions?: Both;
-  /** The connected networks the client impressions cover, and those without an impressions figure. */
-  actual_impressions_networks?: string[];
-  actual_impressions_missing?: string[];
-  owned_profile_scope?: Array<{id:string;name:string;network?:string}>;
   audience_as_of?: string;
   period?: { start: string; end: string };
   previous_period?: { start: string; end: string } | null;
@@ -215,18 +211,6 @@ function formatMix(mix: Array<{ key: string; count: number }>): Array<{ label: s
   return [...totals].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || (a.label === "Other" ? 1 : b.label === "Other" ? -1 : 0));
 }
 
-const andList = (xs: string[]) => xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
-
-/** "Brand on Facebook and Instagram", one entry per profile name, instead of the name once per network. */
-function profilesLine(profiles: Array<{ name: string; network?: string }>): string {
-  const byName = new Map<string, string[]>();
-  for (const p of profiles) {
-    const nets = byName.get(p.name) ?? [];
-    if (p.network && !nets.includes(platformLabel(p.network))) nets.push(platformLabel(p.network));
-    byName.set(p.name, nets);
-  }
-  return [...byName].map(([name, nets]) => (nets.length ? `${name} on ${andList(nets)}` : name)).join(" · ");
-}
 
 function MetricRow({ label, value, format = compactNumber, signed = false }: { label: string; value: Both | null | undefined; format?: (v: number) => string; signed?: boolean }) {
   if (!value || value.current == null) return <Stat label={label} value="Not available" />;
@@ -418,10 +402,10 @@ export default function CompetitiveReportView() {
   const metricsFor = (c: Company) => {
     const m = c.comparison_metrics || c.rivaliq_metrics;
     if (!m) return null;
-    if (effectivePlat === "all") return { audience: m.audience, audience_as_of:m.audience_as_of, engagement: m.engagement, actual_impressions:m.actual_impressions, impressions_missing:m.actual_impressions_missing, impressions_networks:m.actual_impressions_networks, profiles:m.owned_profile_scope, impressions: m.estimated_impressions, posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
+    if (effectivePlat === "all") return { audience: m.audience, audience_as_of:m.audience_as_of, engagement: m.engagement, impressions: m.estimated_impressions, posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
     const n = m.by_network?.[netKey];
     if (!n) return null;
-    return { audience: n.followers, audience_as_of:n.audience_as_of, engagement: n.engagement, actual_impressions:(n as {source?:string}).source==='sprout'?n.impressions:undefined, impressions_missing:undefined as string[] | undefined, impressions_networks:undefined as string[] | undefined, profiles:(n as {profiles?:Array<{id:string;name:string}>}).profiles, impressions:(n as {source?:string}).source==='sprout'?undefined:n.impressions, posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
+    return { audience: n.followers, audience_as_of:n.audience_as_of, engagement: n.engagement, impressions: n.impressions, posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
   };
   const withMetrics = ordered.map((c) => ({ c, m: metricsFor(c) })).filter((x) => x.m) as { c: Company; m: NonNullable<ReturnType<typeof metricsFor>> }[];
   const hasMetrics = withMetrics.length > 0;
@@ -926,12 +910,9 @@ export default function CompetitiveReportView() {
                         <div className="grid grid-cols-2 gap-x-3 gap-y-3">
                           <MetricRow label={effectivePlat === "all" && (m.by_network?.linkedin?.followers?.current ?? 0) > 0 ? "Followers excl. LinkedIn" : "Followers"} value={m.audience} signed={c.is_client} />
                           <MetricRow label="Engagement" value={m.engagement} signed={c.is_client} />
-                          {m.actual_impressions && <MetricRow label="Client impressions" value={m.actual_impressions} signed={c.is_client} />}
                           {m.impressions && <MetricRow label={vendor("Est. impressions (RivalIQ)", "Est. impressions")} value={m.impressions} signed={c.is_client} />}
                           <MetricRow label="Posts" value={m.posts} format={(v) => String(Math.round(v))} signed={c.is_client} />
                         </div>
-                        {m.profiles?.length>0 && <p className="t-secondary">Connected profiles: {profilesLine(m.profiles)}</p>}
-                        {m.actual_impressions?.current != null && (m.impressions_missing?.length ?? 0) > 0 && (m.impressions_networks?.length ?? 0) > 0 && <p className="t-secondary">Client impressions are for {andList(m.impressions_networks!.map(platformLabel))}.</p>}
                         {m.audience_as_of && <p className="t-secondary">Audience measured {asOf(m.audience_as_of)}. Activity above covers the selected report dates.</p>}
                         {nets.length > 0 && (
                           <div className="space-y-1.5">

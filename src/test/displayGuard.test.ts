@@ -12,16 +12,13 @@ import { join, relative } from "path";
 const SRC = join(__dirname, "..");
 
 /**
- * Screens another stage of the 19 Oct build owns while it is being rebuilt
- * (the calendar, client setup and onboarding, the RivalIQ setup dialog), and
- * the UI primitives, which print what they are given. Remove an entry once
- * that stage lands, so the guard covers it too.
+ * Screens the lifecycle UI stage of the 19 Oct build owns while it is being
+ * rebuilt (client setup, onboarding, the RivalIQ setup dialog), and the UI
+ * primitives, which print what they are given. Remove an entry once that
+ * stage lands, so the guard covers it too.
  */
 const OWNED_ELSEWHERE = [
-  "pages/ClientCalendar.tsx",
   "pages/ClientSetup.tsx",
-  "pages/DevCalendarPreview.tsx",
-  "components/calendar/",
   "components/onboarding/",
   "components/competitive/RivalIqSetup.tsx",
   "components/ui/",

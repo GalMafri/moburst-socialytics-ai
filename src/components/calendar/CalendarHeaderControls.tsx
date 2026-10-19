@@ -4,9 +4,8 @@
  */
 
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { useActiveClients } from "@/lib/activeClients";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { addDays, weekLabel } from "@/lib/calendarPosts";
@@ -15,14 +14,8 @@ export const ALL_CLIENTS = "all";
 
 export function ClientPicker({ value, week }: { value: string; week: string }) {
   const navigate = useNavigate();
-  const { data: clients = [] } = useQuery({
-    queryKey: ["calendar-client-list"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("id, name, archived_at").order("name");
-      if (error) throw error;
-      return (data || []).filter((c) => !c.archived_at);
-    },
-  });
+  // Active clients only, the one shared definition every client list uses.
+  const { data: clients = [] } = useActiveClients("id, name");
   return (
     <Select value={value} onValueChange={(v) => navigate(v === ALL_CLIENTS ? `/calendar?week=${week}` : `/clients/${v}/calendar?week=${week}`)}>
       <SelectTrigger className="w-[220px]" aria-label="Client"><SelectValue placeholder="Client" /></SelectTrigger>

@@ -24,7 +24,8 @@ import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
 import { PlanNextWeekButton, ReviseWeekButton, WeekPlanStatus } from "@/components/calendar/WeekPlanControls";
 import { CLIENT_CONTEXT_COLUMNS, buildClientContext } from "@/lib/clientContext";
-import { addDays, canRevise, mondayOf, nextPlannableWeek, shortDate, todayIn, weekBoard, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
+import { addDays, canRevise, mondayOf, nextPlannableWeek, shortDate, weekBoard, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
+import { thisWeek as thisWeekWindow, weekOf } from "@/lib/weekWindow";
 
 const DEFAULT_PLATFORMS = ["Instagram", "LinkedIn", "TikTok", "Facebook", "X"];
 
@@ -77,9 +78,12 @@ export default function ClientCalendar() {
   });
 
   const clientContext = buildClientContext(client.data as Record<string, unknown> | null, id);
-  const today = todayIn(clientContext.timezone);
-  const week = mondayOf(params.get("week") || today);
-  const thisWeek = mondayOf(today);
+  // "This week" is Monday to Sunday in the client's time zone, the one
+  // definition the dashboard counts too (src/lib/weekWindow.ts).
+  const current = thisWeekWindow(clientContext.timezone);
+  const today = current.today;
+  const week = weekOf(params.get("week") || today).start;
+  const thisWeek = current.start;
   const all = posts.data ?? [];
   const inWeek = all.filter((p) => p.post_date >= week && p.post_date <= addDays(week, 6));
   const board = useMemo(() => weekBoard(inWeek, week), [inWeek, week]);
