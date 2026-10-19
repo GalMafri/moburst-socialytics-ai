@@ -19,6 +19,7 @@ import { checkClientLandscape, recordTrackingCheck, RIVALIQ_UNAVAILABLE, type La
 import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
 import { runFeedJob } from "./feed.ts";
 import { runVoiceProfile, runWeekPlan, runWeekRevise } from "../_shared/calendar/runWeek.ts";
+import { runLifecycle, runLifecycleStep, type LifecycleJob } from "../_shared/lifecycle/run.ts";
 import { LEASE_SECONDS, summarize, workerTick } from "./worker.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
 import type { ScheduledJob } from "./types.ts";
@@ -33,6 +34,8 @@ const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
   week_plan: "week plan",
   week_revise: "week revision",
   voice_profile: "voice profile",
+  lifecycle: "client lifecycle",
+  lifecycle_step: "client lifecycle step",
 };
 
 Deno.serve(async (req) => {
@@ -121,6 +124,8 @@ Deno.serve(async (req) => {
           case "week_plan": return runWeekPlan(db, job);
           case "week_revise": return runWeekRevise(db, job);
           case "voice_profile": return runVoiceProfile(db, job);
+          case "lifecycle": return runLifecycle(db, job as unknown as LifecycleJob);
+          case "lifecycle_step": return runLifecycleStep(db, job as unknown as LifecycleJob);
           default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
         }
       },

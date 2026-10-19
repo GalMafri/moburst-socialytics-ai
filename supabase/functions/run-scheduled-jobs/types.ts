@@ -1,6 +1,6 @@
 // Shapes shared by the scheduled-jobs worker, its store and its tests.
 
-export type JobKind = "feed_refresh" | "dispatch" | "week_plan" | "week_revise" | "voice_profile";
+export type JobKind = "feed_refresh" | "dispatch" | "week_plan" | "week_revise" | "voice_profile" | "lifecycle" | "lifecycle_step";
 export type JobStatus = "queued" | "running" | "waiting" | "blocked" | "done" | "skipped" | "failed";
 
 /** A row of public.scheduled_jobs. */
@@ -21,6 +21,8 @@ export interface ScheduledJob {
   lease_until: string | null;
   reason: string | null;
   result: Record<string, unknown> | null;
+  /** What a lifecycle_step job runs: { step, force }. */
+  payload?: Record<string, unknown> | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

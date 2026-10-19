@@ -1,17 +1,21 @@
 import { fetchSocialImage } from './mediaFetch.ts';
 import { defaultSproutCustomerId } from '../sprout/customer.ts';
 import { sproutCandidates, usableClassification, referenceFingerprint } from './candidates.ts';
+import { StyleError } from './errors.ts';
 
 const MAX_BYTES = 4 * 1024 * 1024;
 const CAP = 8;
 const DAY = 86400000;
+/** Fewer designed posts than this is too little to learn a reliable style from. */
+export const MIN_REFERENCES = 3;
 
 async function responseJson(response: Response, label: string) {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const detail = [body.message, body.error?.message, ...(Array.isArray(body.errors) ? body.errors.map((e: any) => e.message) : [])]
       .filter((s) => typeof s === 'string').join(' ').replace(/Bearer\s+\S+/gi, '[redacted]').slice(0, 300);
-    throw new Error(`${label} failed (${response.status}). ${detail || (label === 'Published-post lookup' ? JSON.stringify(body).slice(0, 400) : 'Retry after checking the connection.')}`);
+    console.error(`[brand-discovery] ${label} failed (${response.status})`, detail || JSON.stringify(body).slice(0, 400));
+    throw new StyleError('provider', `${label} did not answer. It will be tried again.`);
   }
   return response.json();
 }
@@ -42,17 +46,18 @@ async function imageBytes(url: string) {
 export async function discoverReferences(db: any, client: any, apiKey: string, force = false) {
   const { data: profiles, error } = await db.from('sprout_profiles').select('sprout_profile_id')
     .eq('client_id', client.id).eq('is_active', true);
-  if (error) throw new Error('Could not read assigned social accounts');
+  if (error) throw new StyleError('provider', 'The assigned social accounts could not be read.');
   const ids = (profiles || []).map((p: any) => String(p.sprout_profile_id));
   const customer = String(client.sprout_customer_id || defaultSproutCustomerId());
   const fingerprint = referenceFingerprint(ids, customer);
   const previous = client.design_style_synthesis;
-  if (!force && previous?.reference_profile_fingerprint === fingerprint &&
-      previous?.reference_pipeline_version === 1 &&
-      Date.now() - Date.parse(previous.synthesized_at) < 7 * DAY) {
+  // Unchanged accounts reuse the stored references. How often they are
+  // refreshed is the client lifecycle's decision (it passes force), never the
+  // age of a cache a page visit happens to find.
+  if (!force && previous?.reference_profile_fingerprint === fingerprint && previous?.reference_pipeline_version === 1) {
     return { cached: true, refs: client.harvested_design_references || [], fingerprint, inspected: 0, skipped: 0 };
   }
-  if (!ids.length) throw new Error('Assign the client’s social accounts and save. Their published posts will be analyzed automatically; no uploads are needed.');
+  if (!ids.length) throw new StyleError('no_accounts', 'The client has no social accounts assigned yet.');
   const tokenResult = await responseJson(await fetch('https://identity.sproutsocial.com/oauth2/84e39c75-d770-45d9-90a9-7b79e3037d2c/v1/token', {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: Deno.env.get('SPROUT_CLIENT_ID') || '', client_secret: Deno.env.get('SPROUT_CLIENT_SECRET') || '', grant_type: 'client_credentials', scope: 'organization_id' }),
@@ -70,7 +75,7 @@ export async function discoverReferences(db: any, client: any, apiKey: string, f
         metrics: ['lifetime.impressions'], sort: ['lifetime.impressions:desc'], timezone: 'UTC', page, limit: 50 }),
       signal: AbortSignal.timeout(15000),
     }), 'Published-post lookup');
-    if (!Array.isArray(result.data)) throw new Error('Published-post lookup returned invalid data');
+    if (!Array.isArray(result.data)) throw new StyleError('provider', 'Published-post lookup did not answer. It will be tried again.');
     posts.push(...result.data);
     if (page >= Number(result.paging?.total_pages || 1)) break;
   }
@@ -120,6 +125,6 @@ export async function discoverReferences(db: any, client: any, apiKey: string, f
     }));
     refs.push(...batch.filter(Boolean));
   }
-  if (refs.length < 3) throw new Error(`Found ${refs.length} usable branded references in ${posts.length} recent posts. At least 3 distinct designed posts are needed to learn a reliable style. Check the assigned accounts or retry when more posts are available; uploads are optional.`);
+  if (refs.length < MIN_REFERENCES) throw new StyleError('too_few', `${refs.length} of the client's ${posts.length} recent posts are designed posts; ${MIN_REFERENCES} are needed to learn its style.`);
   return { cached: false, refs: refs.slice(0, CAP), fingerprint, inspected, skipped };
 }
