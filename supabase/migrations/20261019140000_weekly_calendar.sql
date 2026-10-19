@@ -8,7 +8,8 @@
 -- they share the queue's leasing, retries and daily alert.
 --
 -- This part only adds. 20261019140100_weekly_calendar_cutover.sql moves the
--- existing calendar onto plans and removes what this replaces.
+-- existing calendar onto plans; 20261019140200_weekly_calendar_removals.sql
+-- removes what this replaces.
 
 -- ── Plans ────────────────────────────────────────────────────────────────────
 
