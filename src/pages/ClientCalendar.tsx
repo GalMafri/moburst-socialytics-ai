@@ -21,7 +21,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
-import { PlanNextWeekButton, ReviseWeekButton, WeekPlanStatus } from "@/components/calendar/WeekPlanControls";
+import { NotReadyNote, PlanNextWeekButton, ReviseWeekButton, WeekPlanStatus } from "@/components/calendar/WeekPlanControls";
 import { CLIENT_CONTEXT_COLUMNS, buildClientContext } from "@/lib/clientContext";
 import { addDays, canRevise, mondayOf, nextPlannableWeek, shortDate, todayIn, weekBoard, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
 
@@ -56,6 +56,17 @@ export default function ClientCalendar() {
         .order("week_start");
       if (error) throw error;
       return (data || []) as CalendarPlanRow[];
+    },
+  });
+  // Whether there is anything to plan from (Sprout profiles or competitor tracking).
+  const ready = useQuery({
+    queryKey: ["calendar-ready", id],
+    enabled: !!id,
+    queryFn: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase.rpc as any)("calendar_client_ready", { p_client: id });
+      if (error) throw error;
+      return data === true;
     },
   });
   const busy = (plans.data ?? []).some(inFlight);
@@ -96,7 +107,7 @@ export default function ClientCalendar() {
   const planOnItsWay = !!weekPlan && weekPlan.status !== "failed" && weekPlan.status !== "ready";
   const nextWeek = plans.data ? nextPlannableWeek(plans.data, today) : null;
   const refresh = () => { void plans.refetch(); void posts.refetch(); };
-  const planButton = id ? <PlanNextWeekButton clientId={id} week={nextWeek} onRequested={(w) => { goTo(w); refresh(); }} /> : null;
+  const planButton = id && ready.data ? <PlanNextWeekButton clientId={id} week={nextWeek} onRequested={(w) => { goTo(w); refresh(); }} /> : null;
   const showPlanBar = !!weekPlan && (weekPlan.status !== "ready" || !!weekPlan.pending_revision || canRevise(weekPlan, today));
 
   return (
@@ -121,7 +132,7 @@ export default function ClientCalendar() {
 
           {showPlanBar && weekPlan && (
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <WeekPlanStatus plan={weekPlan} isStaff={isMoburstStaff} />
+              <WeekPlanStatus plan={weekPlan} isStaff={isMoburstStaff} clientId={id!} />
               {canRevise(weekPlan, today) && <div className="ml-auto"><ReviseWeekButton plan={weekPlan} onRequested={refresh} /></div>}
             </div>
           )}
@@ -132,10 +143,12 @@ export default function ClientCalendar() {
               title="No posts planned for this week"
               description={planOnItsWay
                 ? "This week's plan is on its way."
-                : nextWeek === week
+                : ready.data === false
+                  ? undefined
+                  : nextWeek === week
                   ? "Each week is planned on the Monday before it. You can plan this one now."
                   : nextPlanned ? "The next planned posts are in a later week." : "Each week is planned on the Monday before it."}
-              action={!planOnItsWay && nextWeek === week ? planButton : nextPlanned ? (
+              action={ready.data === false && id ? <NotReadyNote isStaff={isMoburstStaff} clientId={id} /> : !planOnItsWay && nextWeek === week ? planButton : nextPlanned ? (
                 <Button size="sm" variant="outline" onClick={() => goTo(mondayOf(nextPlanned.post_date))}>
                   Go to the week of {shortDate(mondayOf(nextPlanned.post_date))}
                 </Button>

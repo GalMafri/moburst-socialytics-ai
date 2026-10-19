@@ -82,7 +82,7 @@ export const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
 
 const PLATFORM_NAMES: Record<string, string> = {
   instagram: "Instagram", fb_instagram_account: "Instagram", facebook: "Facebook", linkedin: "LinkedIn", linkedin_company: "LinkedIn",
-  tiktok: "TikTok", youtube: "YouTube", twitter: "X", x: "X", threads: "Threads", pinterest: "Pinterest",
+  tiktok: "TikTok", youtube: "YouTube", twitter: "X", x: "X", "twitter/x": "X", "x (twitter)": "X", threads: "Threads", pinterest: "Pinterest",
 };
 
 export function platformName(raw: unknown): string {

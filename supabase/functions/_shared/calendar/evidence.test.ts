@@ -30,6 +30,7 @@ describe("platformName", () => {
     expect(platformName("fb_instagram_account")).toBe("Instagram");
     expect(platformName("linkedin_company")).toBe("LinkedIn");
     expect(platformName("twitter")).toBe("X");
+    expect(platformName("Twitter/X")).toBe("X");
     expect(platformName("tiktok")).toBe("TikTok");
   });
 });

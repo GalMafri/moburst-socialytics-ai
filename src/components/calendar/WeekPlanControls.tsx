@@ -7,6 +7,7 @@
  */
 
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Loader2, PenLine, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -95,7 +96,7 @@ export function ReviseWeekButton({ plan, onRequested }: { plan: CalendarPlanRow;
 }
 
 /** One line on where the week's plan stands, when it isn't simply ready. */
-export function WeekPlanStatus({ plan, isStaff }: { plan: CalendarPlanRow | null | undefined; isStaff: boolean }) {
+export function WeekPlanStatus({ plan, isStaff, clientId }: { plan: CalendarPlanRow | null | undefined; isStaff: boolean; clientId: string }) {
   if (!plan) return null;
   if (plan.status === "queued" || plan.status === "planning") {
     return (
@@ -112,14 +113,29 @@ export function WeekPlanStatus({ plan, isStaff }: { plan: CalendarPlanRow | null
     );
   }
   if (plan.status === "failed") {
-    // Staff get the one cause they can fix themselves; nobody sees a raw error.
-    const needsRhythm = /posting rhythm/i.test(plan.error ?? "");
-    return (
-      <p role="alert" className="t-secondary">
-        This week couldn't be planned yet.
-        {isStaff && needsRhythm ? " The client hasn't published in the last 8 weeks, so set posts per week in the client's Content strategy settings." : " Try again with the button above."}
-      </p>
-    );
+    // Staff get the fix; clients are told their team has it. Nobody sees a raw error.
+    if (!isStaff) return <p role="status" className="t-secondary">Your team is setting this week up.</p>;
+    if (/posting rhythm/i.test(plan.error ?? "")) {
+      return (
+        <p role="alert" className="t-secondary">
+          This week couldn't be planned: the client hasn't published in the last 8 weeks, so there's no posting rhythm to follow.{" "}
+          <Link className="underline underline-offset-2 hover:text-white" to={`/clients/${clientId}/setup?tab=strategy`}>Set posts per week</Link>, then plan it again.
+        </p>
+      );
+    }
+    return <p role="alert" className="t-secondary">This week couldn't be planned. Try again with the button above.</p>;
   }
   return null;
+}
+
+/** Shown instead of "Plan next week" while the client has nothing to plan from. */
+export function NotReadyNote({ isStaff, clientId }: { isStaff: boolean; clientId: string }) {
+  if (!isStaff) return <p className="t-secondary">Your calendar is being set up.</p>;
+  return (
+    <p className="t-secondary">
+      Weeks can be planned once the client has{" "}
+      <Link className="underline underline-offset-2 hover:text-white" to={`/clients/${clientId}/setup?tab=sprout`}>Sprout profiles</Link> or{" "}
+      <Link className="underline underline-offset-2 hover:text-white" to={`/clients/${clientId}/competitive`}>competitor tracking</Link>.
+    </p>
+  );
 }

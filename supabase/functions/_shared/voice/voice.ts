@@ -49,6 +49,8 @@ export interface SocialVoice {
   post_count: number;
   platforms: Record<string, PlatformVoice>;
   examples: Record<string, VoiceExample[]>;
+  /** How often the client published per platform when the profile was built (evidence.ts rhythmFromPosts). */
+  rhythm?: Array<{ platform: string; perWeek: number; average: number }>;
 }
 
 export interface ClientVoice {

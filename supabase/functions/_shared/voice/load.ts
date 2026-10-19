@@ -7,7 +7,7 @@
 
 import { anthropicMessages } from "../anthropic.ts";
 import { consolidatePrompt, mergePrompt, parseConsolidation, parseMergeOps, parseVoiceProfile, voiceProfilePrompt, type ClientVoice, type MemorySignal, type Preference, type SocialVoice } from "./voice.ts";
-import { bestExamples, scoreOwnPosts, type OwnPost } from "../calendar/evidence.ts";
+import { bestExamples, rhythmFromPosts, scoreOwnPosts, type OwnPost } from "../calendar/evidence.ts";
 
 /** The model every piece of client copy is written with. */
 export const COPY_MODEL = "claude-opus-5-5";
@@ -137,7 +137,7 @@ export async function consolidateMemory(admin: Db, clientId: string): Promise<{ 
  * in the last 90 days, and keep its best ones as examples.
  */
 export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnPost[], now = new Date()): Promise<SocialVoice> {
-  const { data: client } = await admin.from("clients").select("name").eq("id", clientId).maybeSingle();
+  const { data: client } = await admin.from("clients").select("name, timezone").eq("id", clientId).maybeSingle();
   const withText = posts.filter((p) => String(p.text || "").trim().length >= 20);
   const byPlatform: Record<string, Array<{ text: string; date: string; format: string }>> = {};
   for (const p of [...withText].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))) {
@@ -156,6 +156,7 @@ export async function buildVoiceProfile(admin: Db, clientId: string, posts: OwnP
     post_count: withText.length,
     platforms: profile,
     examples: bestExamples(scoreOwnPosts(posts, now, { top: 30 }).top),
+    rhythm: rhythmFromPosts(posts, now, String(client?.timezone || "UTC")).map(({ platform, perWeek, average }) => ({ platform, perWeek, average })),
   };
   const { error } = await admin.from("clients").update({ social_voice: voice }).eq("id", clientId);
   if (error) throw new Error(`Could not save the voice profile: ${error.message}`);

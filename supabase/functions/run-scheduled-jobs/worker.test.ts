@@ -146,4 +146,12 @@ describe("summarize", () => {
     expect(s.unscheduled).toEqual([gap]);
     expect(summarize([], now).ok).toBe(true);
   });
+
+  it("alerts when a week plan was skipped because the client has no posting rhythm", () => {
+    const skipped = row({ id: "w", kind: "week_plan", status: "skipped", reason: "No posting rhythm: the client hasn't published in the last 8 weeks. Set posts per week in client settings." });
+    const s = summarize([skipped], now);
+    expect(s.ok).toBe(false);
+    expect(s.needsSetup.map((r) => r.id)).toEqual(["w"]);
+    expect(summarize([{ ...skipped, reason: "The week is over, so it can't be planned." }], now).ok).toBe(true);
+  });
 });

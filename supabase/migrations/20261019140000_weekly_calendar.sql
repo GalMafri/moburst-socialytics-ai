@@ -107,7 +107,7 @@ alter table public.scheduled_jobs add constraint scheduled_jobs_kind_check
 create or replace function public.calendar_client_ready(p_client uuid)
 returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (
+  select (auth.role() = 'service_role' or auth.uid() is null or is_moburst_staff() or is_client_member(p_client)) and exists (
     select 1 from clients c
      where c.id = p_client and c.archived_at is null and not coalesce(c.exclude_from_reporting, false)
        and (exists (select 1 from sprout_profiles sp where sp.client_id = c.id and sp.is_active is distinct from false)
@@ -218,6 +218,8 @@ revoke all on function public.calendar_request_week(uuid, date, text, uuid) from
 revoke all on function public.calendar_request_revision(uuid, text, uuid, text) from public, anon, authenticated;
 grant execute on function public.calendar_client_ready(uuid), public.calendar_request_week(uuid, date, text, uuid),
   public.calendar_request_revision(uuid, text, uuid, text) to service_role;
+-- The calendar asks whether it can offer "Plan next week"; it answers only for a client the caller may see.
+grant execute on function public.calendar_client_ready(uuid) to authenticated;
 
 -- The daily tick, as in 20261014090000_feed_refresh_linked_landscapes_only.sql,
 -- plus the Monday plans: on Mondays (Israel time) every client the calendar

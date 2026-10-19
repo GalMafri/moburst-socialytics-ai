@@ -90,6 +90,7 @@ Deno.serve(async (req) => {
         ok: summary.ok, at: now.toISOString(), counts: summary.counts,
         failed: brief(summary.failed), blocked: brief(summary.blocked), stuck: brief(summary.stuck), overdue: brief(summary.overdue),
         unscheduled: summary.unscheduled.map((g) => ({ client: g.client_name ?? g.client_id, job: `${g.report_kind} dispatch`, reason: `due ${g.next_run_at} and never queued` })),
+        needs_setup: brief(summary.needsSetup),
       }, summary.ok ? 200 : 500);
     }
 

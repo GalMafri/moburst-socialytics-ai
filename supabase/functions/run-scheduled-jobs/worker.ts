@@ -89,10 +89,16 @@ export interface JobsSummary {
   stuck: ScheduledJob[];
   overdue: ScheduledJob[];
   unscheduled: ScheduleGap[];
+  /** Week plans skipped in the last day because the client needs setup a person must do (a posting rhythm). */
+  needsSetup: ScheduledJob[];
 }
 
+/** Why a week plan was skipped for setup (runWeek.ts NEEDS_SETUP, rhythm only: a week that is over needs nothing). */
+const RHYTHM_MISSING = /no posting rhythm/i;
+
 /**
- * What the daily check alerts on: a job that failed in the last day, a job
+ * What the daily check alerts on: a week plan that needs a client's posting
+ * rhythm set (nothing else would tell staff), a job that failed in the last day, a job
  * blocked on something a person has to fix, a lease that ran out without the
  * job finishing, due work nobody picked up (the worker is not running), and a
  * due schedule with no job at all (the daily enqueue did not run).
@@ -105,6 +111,7 @@ export function summarize(rows: ScheduledJob[], now: Date, gaps: ScheduleGap[] =
   const blocked = rows.filter((r) => r.status === "blocked");
   const stuck = rows.filter((r) => r.status === "running" && r.lease_until && new Date(r.lease_until).getTime() < t - LEASE_GRACE_MS);
   const overdue = rows.filter((r) => r.status === "queued" && t - new Date(r.available_at).getTime() > DRAIN_GRACE_MS);
-  const ok = !failed.length && !blocked.length && !stuck.length && !overdue.length && !gaps.length;
-  return { ok, counts, failed, blocked, stuck, overdue, unscheduled: gaps };
+  const needsSetup = rows.filter((r) => r.kind === "week_plan" && r.status === "skipped" && RHYTHM_MISSING.test(r.reason ?? "") && r.finished_at && t - new Date(r.finished_at).getTime() < DAY_MS);
+  const ok = !failed.length && !blocked.length && !stuck.length && !overdue.length && !gaps.length && !needsSetup.length;
+  return { ok, counts, failed, blocked, stuck, overdue, unscheduled: gaps, needsSetup };
 }

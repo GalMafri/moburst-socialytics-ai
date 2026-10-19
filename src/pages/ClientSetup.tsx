@@ -177,10 +177,12 @@ export default function ClientSetup() {
       const { data } = await (supabase.from("calendar_plans" as never) as any)
         .select("rhythm").eq("client_id", id).eq("status", "ready").not("rhythm", "is", null)
         .order("week_start", { ascending: false }).limit(1).maybeSingle();
-      return ((data?.rhythm?.learned ?? []) as LearnedRhythm[]);
+      return ((data?.rhythm?.learned ?? null) as LearnedRhythm[] | null);
     },
     enabled: !!id && !isNew,
   });
+  // The voice profile measures it too; it's rebuilt monthly, plans weekly.
+  const measuredRhythm: LearnedRhythm[] | null = ((client as any)?.social_voice?.rhythm as LearnedRhythm[] | undefined) ?? learnedRhythm ?? null;
 
   useEffect(() => {
     if (client) {
@@ -960,7 +962,7 @@ export default function ClientSetup() {
                 <PostingRhythmField
                   platforms={form.primary_platforms}
                   value={form.posting_rhythm}
-                  learned={learnedRhythm ?? []}
+                  learned={measuredRhythm}
                   onChange={(posting_rhythm) => setForm((f) => ({ ...f, posting_rhythm }))}
                 />
               </CardContent>

@@ -17,12 +17,12 @@ export function PostingRhythmField({ platforms, value, learned, onChange }: {
   platforms: string[];
   /** Platform to posts per week, as typed ("" follows what the client publishes). */
   value: Record<string, string>;
-  /** What the client published, as the latest plan measured it. */
-  learned: LearnedRhythm[];
+  /** What the client published, as last measured; null when nothing has been measured yet. */
+  learned: LearnedRhythm[] | null;
   onChange: (next: Record<string, string>) => void;
 }) {
-  const names = [...new Map([...platforms, ...learned.map((l) => l.platform), ...Object.keys(value)].map((n) => [n.toLowerCase(), n])).values()];
-  const published = new Map(learned.map((l) => [l.platform.toLowerCase(), l.perWeek]));
+  const names = [...new Map([...platforms, ...(learned ?? []).map((l) => l.platform), ...Object.keys(value)].map((n) => [n.toLowerCase(), n])).values()];
+  const published = new Map((learned ?? []).map((l) => [l.platform.toLowerCase(), l.perWeek]));
   return (
     <div className="space-y-2">
       <Label>Posts per week</Label>
@@ -36,7 +36,7 @@ export function PostingRhythmField({ platforms, value, learned, onChange }: {
             <div key={platform} className="flex items-center justify-between gap-3 rounded-md border border-white/[0.06] px-3 py-2">
               <div className="min-w-0">
                 <p className="t-body">{platform}</p>
-                <p className="t-secondary">{usual !== undefined ? `Publishes about ${usual} a week` : "Not planned unless you set a number"}</p>
+                <p className="t-secondary">{usual !== undefined ? `Publishes about ${usual} a week` : learned ? "Not planned unless you set a number" : "Measured from published posts at the next plan"}</p>
               </div>
               <Input
                 type="number"
