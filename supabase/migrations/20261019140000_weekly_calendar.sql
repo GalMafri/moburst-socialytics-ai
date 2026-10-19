@@ -200,6 +200,12 @@ begin
     if v_plan.pending_revision is not null then raise exception 'This week is already being revised.'; end if;
     raise exception 'This week is still being planned.';
   end if;
+  -- A client with no voice profile yet gets one first, so the rewrite is in its real voice.
+  if (select social_voice is null from clients where id = v_plan.client_id) then
+    insert into scheduled_jobs (kind, client_id, dedupe_key, priority, available_at)
+    values ('voice_profile', v_plan.client_id, 'voice_profile:' || v_plan.client_id || ':' || to_char(current_date, 'YYYY-MM-DD'), 14, now())
+    on conflict (dedupe_key) do nothing;
+  end if;
   insert into scheduled_jobs (kind, client_id, occurrence, dedupe_key, priority, available_at)
   values ('week_revise', v_plan.client_id, v_plan.week_start::timestamptz,
           'week_revise:' || v_plan.id || ':' || floor(extract(epoch from clock_timestamp()) * 1000)::bigint,

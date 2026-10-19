@@ -209,6 +209,16 @@ async function claimPlan(admin: Db, planId: string, now: Date): Promise<boolean>
   return !!data?.length;
 }
 
+/** The client's voice profile is being learned: plans and revisions wait for it. */
+async function voicePending(admin: Db, clientId: string): Promise<boolean> {
+  const { count, error } = await admin.from("scheduled_jobs").select("id", { count: "exact", head: true })
+    .eq("client_id", clientId).eq("kind", "voice_profile").in("status", ["queued", "running"]);
+  if (error) throw new Error(`Could not check the voice profile: ${error.message}`);
+  return !!count;
+}
+
+const waitForVoice = (now: Date): WeekJobOutcome => ({ status: "queued", reason: "Waiting for the client's voice profile.", available_at: new Date(now.getTime() + 60_000).toISOString(), deferred: true });
+
 const busyElsewhere = (now: Date): WeekJobOutcome => ({ status: "queued", reason: "Another run is working on this week.", available_at: new Date(now.getTime() + 2 * 60_000).toISOString(), deferred: true });
 
 /** Setup a person has to do (not an outage): the job is skipped, so the daily check doesn't alert. */
@@ -228,10 +238,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
     return { status: "failed", reason };
   }
 
-  // The voice profile is learned first when it is due.
-  const { count: voicePending } = await admin.from("scheduled_jobs").select("id", { count: "exact", head: true })
-    .eq("client_id", job.client_id).eq("kind", "voice_profile").in("status", ["queued", "running"]);
-  if (voicePending) return { status: "queued", reason: "Waiting for the client's voice profile.", available_at: new Date(now.getTime() + 60_000).toISOString(), deferred: true };
+  if (await voicePending(admin, job.client_id)) return waitForVoice(now);
 
   if (!(await claimPlan(admin, plan.id, now))) return busyElsewhere(now);
 
@@ -351,6 +358,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
     await finish({ failed: true, error: reason, rewritten: 0 });
     return { status: "failed", reason };
   }
+  if (await voicePending(admin, job.client_id)) return waitForVoice(now);
   if (!(await claimPlan(admin, plan.id, now))) return busyElsewhere(now);
 
   try {
