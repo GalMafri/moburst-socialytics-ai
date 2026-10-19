@@ -2,15 +2,15 @@
 //
 // Staff deselect misfits, add manual competitors, and rank exactly three.
 // This validates that state on the server and flips the set to 'confirmed',
-// stamping who confirmed it (_shared/competitive/confirmSet.ts, the same
-// confirmation the client lifecycle makes as the system). A person's confirm
-// also needs every selected competitor to carry an active social handle a
-// person or RivalIQ stands behind, or one found with high confidence.
+// stamping who confirmed it (_shared/competitive/confirmSet.ts). It is the
+// same rule the client lifecycle confirms by as the system: three ranked
+// competitors. RivalIQ tracks companies by website, and the lifecycle's
+// tracking step takes each company's profiles from RivalIQ, so a person's
+// confirm never waits on how confident a profile search was.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
-import { isReviewReadyHandle } from "../_shared/competitive/extractSocialHandles.ts";
-import { checkedSelection, ConfirmError, confirmDraftSet } from "../_shared/competitive/confirmSet.ts";
+import { ConfirmError, confirmDraftSet } from "../_shared/competitive/confirmSet.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -48,27 +48,7 @@ Deno.serve(async (req) => {
       return jsonResp({ error: `Set is '${set.status}', only a draft can be confirmed.` }, 409);
     }
 
-    const selected = await checkedSelection(supabase, set_id);
-    const missing: string[] = [];
-    const unreviewed: string[] = [];
-    for (const s of selected) {
-      const { data: activeHandles, error: handlesErr } = await supabase
-        .from("competitor_handles")
-        .select("source, detection_confidence, is_active")
-        .eq("competitor_id", s.id)
-        .eq("is_active", true);
-      if (handlesErr) throw new Error(`Could not verify handles for ${s.name}: ${handlesErr.message}`);
-      if (!activeHandles?.length) missing.push(s.name);
-      else if (!activeHandles.some(isReviewReadyHandle)) unreviewed.push(s.name);
-    }
-    if (missing.length > 0) {
-      return jsonResp({ error: `No active social handles for: ${missing.join(", ")}. Detect or add handles first.` }, 422);
-    }
-    if (unreviewed.length > 0) {
-      return jsonResp({ error: `Only low-confidence automatic profiles were found for: ${unreviewed.join(", ")}. Verify and add at least one profile manually before confirming.` }, 422);
-    }
-
-    await confirmDraftSet(supabase, set_id, { confirmedBy: userId, notes: typeof notes === "string" ? notes : null });
+    const { selected } = await confirmDraftSet(supabase, set_id, { confirmedBy: userId, notes: typeof notes === "string" ? notes : null });
     return jsonResp({ ok: true, set_id, selected });
   } catch (err: unknown) {
     if (err instanceof AuthzError || err instanceof ConfirmError) {

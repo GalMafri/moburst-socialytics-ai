@@ -1,154 +1,37 @@
-import { useState, useEffect, useRef } from "react";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import {
-  Loader2,
-  RefreshCw,
-  Sparkles,
-  CheckCircle2,
-  AlertCircle,
-} from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+import { CheckCircle2, Sparkles } from "lucide-react";
+import { formatDate } from "@/lib/display";
 
-interface Props {
-  clientId?: string;
-  designReferencesCount: number;
-  hasBrandBook: boolean;
-  existingSynthesis: any | null;
-  onSynthesized: (s: any) => void;
-  /**
-   * If true, schedules a debounced auto-trigger when inputs change.
-   * Default true. Pass false from forms that aren't saved yet (e.g., new client).
-   */
-  autoTrigger?: boolean;
-  /**
-   * Bumped by the parent on every upload or removal made in this session. The
-   * auto-run follows those bumps, and otherwise only fills a missing synthesis,
-   * so opening the tab never re-synthesizes a client that already has one.
-   */
-  inputsVersion?: number;
-}
-
+/**
+ * The client's design language, as the lifecycle learned it (design_refs):
+ * from its own posts, the references a person added and the brand book.
+ * Adding or removing either is an input change, so saving the client asks
+ * the lifecycle to learn it again (ClientSetup). This card only shows what is
+ * stored; it never starts paid work itself.
+ */
 export function DesignSynthesisCard({
-  clientId,
-  designReferencesCount,
-  hasBrandBook,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   existingSynthesis,
-  onSynthesized,
-  autoTrigger = true,
-  inputsVersion = 0,
-}: Props) {
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const timerRef = useRef<number | null>(null);
-
-  const hasInputs = designReferencesCount > 0 || hasBrandBook;
-  const synthesizedAt = existingSynthesis?.synthesized_at
-    ? new Date(existingSynthesis.synthesized_at)
-    : null;
-  const sourceCount = existingSynthesis?.source_count ?? 0;
-
-  const run = async () => {
-    if (!clientId) {
-      toast.error("Save the client first, then synthesize.");
-      return;
-    }
-    setRunning(true);
-    setError(null);
-    try {
-      const { data, error: invokeErr } = await supabase.functions.invoke(
-        "synthesize-design-language",
-        { body: { client_id: clientId } },
-      );
-      if (invokeErr) throw invokeErr;
-      if (data?.error) throw new Error(data.error);
-      if (data?.design_style_synthesis) {
-        onSynthesized(data.design_style_synthesis);
-        toast.success("Design language synthesized");
-      }
-    } catch (e: any) {
-      setError(e.message || String(e));
-      toast.error("Synthesis failed");
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  // Debounced auto-trigger: after an upload or removal in this session, or once
-  // when the client has inputs but no synthesis yet. Loading a client that is
-  // already synthesized does nothing (each run is a paid model call).
-  useEffect(() => {
-    if (!autoTrigger || !clientId || !hasInputs) return;
-    if (inputsVersion === 0 && existingSynthesis) return;
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      run();
-    }, 10_000);
-    return () => {
-      if (timerRef.current) window.clearTimeout(timerRef.current);
-    };
-    // inputsVersion (session uploads), hasInputs, clientId and autoTrigger drive the debounce;
-    // existingSynthesis is read, not watched, so a finished run does not schedule another.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputsVersion, hasInputs, clientId, autoTrigger]);
-
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  existingSynthesis: any | null;
+}) {
+  const learnedOn = formatDate(existingSynthesis?.synthesized_at);
+  const sources = Number(existingSynthesis?.source_count ?? 0);
   return (
     <Card>
       <CardContent className="pt-5 space-y-3">
-        <div className="flex items-center justify-between">
-          <Label className="t-body font-semibold flex items-center gap-2">
-            <Sparkles className="h-4 w-4" /> Brand design language
-          </Label>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={running || !hasInputs || !clientId}
-            onClick={run}
-          >
-            {running ? (
-              <Loader2 className="h-3 w-3 animate-spin mr-1" />
-            ) : (
-              <RefreshCw className="h-3 w-3 mr-1" />
-            )}
-            {existingSynthesis ? "Re-run" : "Synthesize"}
-          </Button>
-        </div>
-
-        {!hasInputs && (
-          <p className="t-secondary">
-            Social references are discovered automatically above. You may optionally
-            add a brand book or specific references here.
-          </p>
-        )}
-
-        {hasInputs && !existingSynthesis && !running && !error && (
-          <p className="t-secondary">
-            Optional uploaded references can be analyzed with Synthesize.
-          </p>
-        )}
-
-        {running && (
+        <Label className="t-body font-semibold flex items-center gap-2">
+          <Sparkles className="h-4 w-4" /> Brand design language
+        </Label>
+        {existingSynthesis ? (
           <p className="t-secondary flex items-center gap-2">
-            <Loader2 className="h-3 w-3 animate-spin" /> Synthesizing brand
-            design language…
-          </p>
-        )}
-
-        {error && !running && (
-          <div className="t-label text-destructive flex items-center gap-2">
-            <AlertCircle className="h-3 w-3" /> Synthesis failed. Run it again. ({error})
-          </div>
-        )}
-
-        {existingSynthesis && !running && (
-          <div className="t-secondary flex items-center gap-2">
             <CheckCircle2 className="h-3 w-3 text-success" />
-            Synthesized{" "}
-            {synthesizedAt ? synthesizedAt.toLocaleString() : "(unknown)"} from{" "}
-            {sourceCount} sources.
-          </div>
+            {learnedOn ? `Learned on ${learnedOn}` : "Learned"}{sources ? ` from ${sources} source${sources === 1 ? "" : "s"}` : ""}. It is learned again when the client's posts, references or brand book change.
+          </p>
+        ) : (
+          <p className="t-secondary">Learned from the client's own posts, and from any references and brand book here.</p>
         )}
       </CardContent>
     </Card>

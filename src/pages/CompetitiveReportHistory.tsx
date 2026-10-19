@@ -3,11 +3,9 @@
 // completed reports and staff everything.
 
 import { useNavigate, useParams } from "react-router-dom";
-import { canRetry } from "@/lib/reportRun";
 import { landscapeLabel } from "@/lib/competitiveStatus";
 import { firstRunSentence, formatDateTime, formatRange, listedRuns } from "@/lib/display";
 import { useNextRun } from "@/lib/nextRun";
-import { RetryReportButton } from "@/components/reports/RetryReportButton";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -120,7 +118,6 @@ export default function CompetitiveReportHistory() {
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             )}
-                            {r.display.state === "scheduled" && canRetry(r, Date.now(), "competitive") && <RetryReportButton reportId={r.id} kind="competitive" label="Run now" />}
                             <ReportActions report={r} kind="competitive" />
                           </div>
                         </TableCell>

@@ -83,8 +83,8 @@ describe("usage words", () => {
 });
 
 describe("statuses take the whole competitive row", () => {
-  it("holds back a finished run whose sources did not pass, without any screen deciding", () => {
-    expect(competitiveRunStatus({ status: "complete", report_data: { provider_status: 2 } }, { isStaff: true }).label).toBe("Held back");
+  it("holds back a finished run whose sources did not pass, without any screen deciding, and says it is being redone", () => {
+    expect(competitiveRunStatus({ status: "complete", report_data: { provider_status: 2 } }, { isStaff: true })).toMatchObject({ state: "held", label: "Being redone" });
   });
 });
 

@@ -1,4 +1,8 @@
-// Elapsed time permits a manual retry; it does not prove the workflow stopped.
+// How long a report run takes, as people are told it. A run that does not
+// finish is made again by the product (run-scheduled-jobs/dispatch.ts), so
+// nothing here offers a retry.
+
+/** Mirrors STUCK_AFTER_MINUTES in supabase/functions/_shared/reports/payloads.ts; a test asserts the two agree. */
 export const STUCK_AFTER_MINUTES = 90;
 export const RUN_ESTIMATE = "Allow up to 90 minutes for analysis. You can leave this page and return later; the run continues.";
 
@@ -12,20 +16,4 @@ export function minutesRunning(report: RunnableReport, now = Date.now()): number
   const started = new Date(report.created_at).getTime();
   if (!Number.isFinite(started)) return 0;
   return Math.max(0, (now - started) / 60000);
-}
-
-/** True when a running report is old enough to review for a manual retry. */
-export function isStuck(report: RunnableReport, now = Date.now()): boolean {
-  return report.status === "running" && minutesRunning(report, now) >= STUCK_AFTER_MINUTES;
-}
-
-/** True when the report is worth offering a retry on. */
-export function canRetry(report: RunnableReport, now = Date.now(), kind?: "competitive"): boolean {
-  if (kind === "competitive" && report.status === "failed") return true;
-  return (report.status === "failed" || report.status === "running") && minutesRunning(report, now) >= STUCK_AFTER_MINUTES;
-}
-
-/** What to call the control, so a stuck run does not read as a failure. */
-export function retryLabel(report: RunnableReport, now = Date.now()): string {
-  return isStuck(report, now) ? "Review retry" : "Retry";
 }

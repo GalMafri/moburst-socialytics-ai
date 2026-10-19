@@ -11,17 +11,42 @@ import { join, relative } from "path";
 
 const SRC = join(__dirname, "..");
 
-/**
- * Screens the lifecycle UI stage of the 19 Oct build owns while it is being
- * rebuilt (client setup, onboarding, the RivalIQ setup dialog), and the UI
- * primitives, which print what they are given. Remove an entry once that
- * stage lands, so the guard covers it too.
- */
+/** The UI primitives, which print what they are given. Every screen is guarded. */
 const OWNED_ELSEWHERE = [
-  "pages/ClientSetup.tsx",
-  "components/onboarding/",
-  "components/competitive/RivalIqSetup.tsx",
   "components/ui/",
+];
+
+/**
+ * Screens rebuilt so nothing fails visibly (self-serve design, rule 7, 19 Oct
+ * 2026): a request that does not get through is sent again quietly and the
+ * screen shows the true state. None of these may report a failure with an
+ * error toast, a destructive toast or an alert.
+ */
+const NOTHING_FAILS_VISIBLY = [
+  "pages/ClientSetup.tsx",
+  "pages/CompetitorReview.tsx",
+  "pages/CompetitiveRun.tsx",
+  "pages/CompetitiveIndex.tsx",
+  "pages/CompetitiveReportView.tsx",
+  "pages/CompetitiveReportHistory.tsx",
+  "pages/RunAnalysis.tsx",
+  "pages/ReportHistory.tsx",
+  "pages/AllReports.tsx",
+  "components/onboarding/",
+  "components/reports/ReportRunStatus.tsx",
+  "components/reports/SchedulePostModal.tsx",
+  "components/reports/CreatePostDesignButton.tsx",
+  "components/reports/CreatePostVideoButton.tsx",
+  "components/reports/CreateAdHocPost.tsx",
+  "components/reports/calendar/CopyEditor.tsx",
+  "components/reports/calendar/PostPanel.tsx",
+  "components/editor/DesignEditor.tsx",
+];
+
+const FAILURE_RULES: Array<[string, RegExp]> = [
+  ["an error toast", /\b(?:sonnerToast|toast)\.(?:error|warning)\(/g],
+  ["a destructive toast", /toast\(\{[^}]*variant:\s*["']destructive["']/g],
+  ["an alert", /role=["']alert["']/g],
 ];
 
 function files(dir: string): string[] {
@@ -49,12 +74,14 @@ const RULES: Array<[string, RegExp]> = [
   // A date in whatever format the viewer's browser picks ("10/7/2026").
   ["a date in the browser's own format", /new Date\([^()]*(?:\([^()]*\))?[^()]*\)\.toLocale(?:Date|Time)?String\(\)|\.toLocale(?:Date|Time)String\(\)/g],
   ["developer text", /SPROUT_SOCIAL_ACCESS_TOKEN|No Hub token in session|DB update failed|could not parse JSON|Check workflow logs|n8n execution logs|Analysis failed on the server|Server error \$\{/g],
+  // Work the product does on its own is never handed to a person (rules 2 and 3).
+  ["a setup instruction", /Connect RivalIQ tracking|Connect tracking|Needs tracking|needs tracking:|Remember to hit Save|Confirm design settings|No profile connected for|Set up RivalIQ tracking|Failed to save edit/g],
 ];
 
 describe("screens print stored values through the display layer", () => {
   it("scans the screens it guards", () => {
     expect(screens.length).toBeGreaterThan(40);
-    for (const path of ["pages/ReportView.tsx", "pages/AllReports.tsx", "pages/Usage.tsx", "components/HubCompanySync.tsx", "pages/CompetitiveReportView.tsx"]) {
+    for (const path of ["pages/ReportView.tsx", "pages/AllReports.tsx", "pages/Usage.tsx", "components/HubCompanySync.tsx", "pages/CompetitiveReportView.tsx", "pages/ClientSetup.tsx", "components/onboarding/DesignSettingsCard.tsx"]) {
       expect(screens.map((f) => f.path)).toContain(path);
     }
   });
@@ -75,6 +102,24 @@ describe("screens print stored values through the display layer", () => {
       expect(hits).toEqual([]);
     });
   }
+
+  describe("nothing fails visibly on the screens rebuilt for it", () => {
+    const guarded = screens.filter((f) => NOTHING_FAILS_VISIBLY.some((p) => f.path.startsWith(p)));
+    it("guards every one of them", () => {
+      for (const p of NOTHING_FAILS_VISIBLY) expect(guarded.some((f) => f.path.startsWith(p)), p).toBe(true);
+    });
+    it("catches what it guards against", () => {
+      const caught = (text: string) => FAILURE_RULES.some(([, rule]) => { rule.lastIndex = 0; const hit = rule.test(text); rule.lastIndex = 0; return hit; });
+      for (const bad of ['toast.error("Upload failed")', 'sonnerToast.error(`Failed to save`)', 'toast({ title: "Import failed", description: e.message, variant: "destructive" })', '<p role="alert">x</p>']) expect(caught(bad), bad).toBe(true);
+      for (const fine of ['toast.success("Saved")', '<p role="status">Not saved yet.</p>', '<Button variant="destructive">']) expect(caught(fine), fine).toBe(false);
+    });
+    for (const [what, rule] of FAILURE_RULES) {
+      it(`shows no ${what}`, () => {
+        const hits = guarded.flatMap((f) => [...f.text.matchAll(rule)].map((m) => `${f.path}:${f.text.slice(0, m.index).split("\n").length}: ${m[0]}`));
+        expect(hits).toEqual([]);
+      });
+    }
+  });
 
   it("names roles, people's states and events on the usage pages", () => {
     const usage = screens.find((f) => f.path === "pages/Usage.tsx")!.text;

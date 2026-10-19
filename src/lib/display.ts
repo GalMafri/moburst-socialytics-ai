@@ -9,7 +9,7 @@
  * screen prints one of these values raw.
  */
 
-import { competitiveReportQuality } from "../../supabase/functions/_shared/competitive/reportEvidence";
+import { competitiveReportQuality, HELD_REDOS } from "../../supabase/functions/_shared/competitive/reportEvidence";
 
 // ── Platforms ──────────────────────────────────────────────────────────────
 
@@ -116,15 +116,20 @@ const DONE = ["completed", "complete", "done"];
 const STATUS: Record<RunState, Omit<RunStatus, "hidden">> = {
   ready: { state: "ready", label: "Ready", variant: "default" },
   running: { state: "running", label: "Running", variant: "secondary" },
-  // A run that did not finish is run again by the product; it is never shown as a failure.
+  // A run that did not finish is taken away and made again by the product
+  // (run-scheduled-jobs/dispatch.ts); no screen lists it.
   scheduled: { state: "scheduled", label: "Scheduled", variant: "outline" },
-  // Finished, but its sources did not pass the checks, so it is not shared.
-  held: { state: "held", label: "Held back", variant: "outline" },
+  // Finished, but its sources did not pass the checks: not shared with the
+  // client, and made again once a day (HELD_REDOS times) by the dispatch.
+  held: { state: "held", label: "Being redone", variant: "outline" },
 };
 
+/** A held period whose redos are used up: it stays unshared until the next scheduled run. */
+const HELD_DONE_LABEL = "Not shared";
+
 function statusFor(state: RunState, viewer: Viewer): RunStatus {
-  // Clients see finished work only.
-  return { ...STATUS[state], hidden: !viewer.isStaff && state !== "ready" };
+  // Clients see finished work only; nobody sees a run that did not finish.
+  return { ...STATUS[state], hidden: state === "scheduled" || (!viewer.isStaff && state !== "ready") };
 }
 
 /** A monthly report row ("completed", "running", "failed" in the reports table). */
@@ -157,15 +162,22 @@ function periodKey(row: RunRow): string {
 }
 
 /**
- * The runs a list shows. Rows this viewer may not see are left out, and a run
- * that did not finish or was held back is hidden behind a ready or running run
- * for the same client and period.
+ * The runs a list shows. Rows this viewer may not see are left out (a run
+ * that did not finish is never listed). A held run is hidden behind a ready
+ * or running run for the same client and period, and a period held more than
+ * once shows its newest held run only, which reads "Not shared" once the
+ * product has made it again HELD_REDOS times.
  */
 export function listedRuns<T extends RunRow>(kind: "monthly" | "competitive", rows: T[] | null | undefined, viewer: Viewer): Array<T & { display: RunStatus }> {
   const status = (row: T) => (kind === "monthly" ? monthlyReportStatus(row, viewer) : competitiveRunStatus(row, viewer));
   const all = (rows ?? []).map((row) => ({ ...row, display: status(row) }));
   const covered = new Set(all.filter((r) => r.display.state === "ready" || r.display.state === "running").map((r) => periodKey(r)));
-  return all.filter((r) => !r.display.hidden && (r.display.state === "ready" || r.display.state === "running" || !covered.has(periodKey(r))));
+  const held = new Map<string, Array<T & { display: RunStatus }>>();
+  for (const r of all) if (r.display.state === "held") held.set(periodKey(r), [...(held.get(periodKey(r)) ?? []), r]);
+  const newestHeld = new Map([...held].map(([key, list]) => [key, [...list].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))[0]]));
+  return all
+    .filter((r) => !r.display.hidden && (r.display.state === "ready" || r.display.state === "running" || (!covered.has(periodKey(r)) && newestHeld.get(periodKey(r)) === r)))
+    .map((r) => (r.display.state === "held" && (held.get(periodKey(r))?.length ?? 0) > HELD_REDOS ? { ...r, display: { ...r.display, label: HELD_DONE_LABEL } } : r));
 }
 
 // ── Countries and languages ────────────────────────────────────────────────
@@ -363,6 +375,71 @@ export function firstRunSentence(kind: "monthly" | "competitive", nextRunAt: str
   const when = formatDate(nextRunAt, { timeZone });
   if (!when) return "";
   return `The ${opts.first === false ? "next" : "first"} ${kind === "competitive" ? "competitive analysis" : "monthly report"} runs on ${when}.`;
+}
+
+/** A report's period: "Sep 2026" for a whole calendar month, else its dates. */
+export function periodLabel(range: { start?: string | null; end?: string | null } | null | undefined): string {
+  const start = String(range?.start ?? "").slice(0, 10);
+  const end = String(range?.end ?? "").slice(0, 10);
+  if (!DATE_ONLY.test(start) || !DATE_ONLY.test(end)) return "";
+  const s = new Date(start + "T00:00:00Z");
+  const lastDay = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+  if (start.endsWith("-01") && end === lastDay) return s.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+  return formatRange({ start, end });
+}
+
+/**
+ * Where a monthly schedule stands, in sentences built from its own fields and
+ * its latest finished report: "Last report: Sep 2026, ran Oct 7, 2026." and
+ * "The next one runs on Nov 7, 2026." The scheduler's own note is never shown.
+ */
+export function scheduleLines(args: {
+  kind: "monthly" | "competitive";
+  active: boolean;
+  nextRunAt?: string | null;
+  latest?: { start?: string | null; end?: string | null; ranAt?: string | null } | null;
+  timeZone?: string;
+}): string[] {
+  const out: string[] = [];
+  const noun = args.kind === "competitive" ? "analysis" : "report";
+  const period = periodLabel(args.latest);
+  const ran = formatDate(args.latest?.ranAt, { timeZone: args.timeZone });
+  if (period || ran) out.push(`Last ${noun}: ${[period, ran ? `ran ${ran}` : ""].filter(Boolean).join(", ")}.`);
+  if (!args.active) out.push("Paused.");
+  else {
+    const next = formatDate(args.nextRunAt, { timeZone: args.timeZone });
+    if (next) out.push(`The ${out.length ? "next" : "first"} one runs on ${next}.`);
+  }
+  return out;
+}
+
+// ── Where the product's own values came from ───────────────────────────────
+
+const LOCATION_SOURCES: Record<string, string> = {
+  "schema.org": "the business address the website publishes",
+  page_footer: "the address in the website's footer",
+  page_text: "an address on the website",
+  site_read: "where the website says the business is based",
+  country: "the main time zone of the business's country",
+};
+
+/** Where the client's time zone was read from (clients.location.source), as words. */
+export function locationSourceWords(source: string | null | undefined): string {
+  return LOCATION_SOURCES[String(source ?? "")] ?? "";
+}
+
+/** "America/New_York" as people say it: "Eastern Time (New York)". */
+export function timeZoneName(zone: string | null | undefined): string {
+  const z = String(zone ?? "").trim();
+  if (!z) return "";
+  if (z === "UTC") return "UTC";
+  const city = z.split("/").pop()!.replace(/_/g, " ");
+  try {
+    const part = new Intl.DateTimeFormat("en-US", { timeZone: z, timeZoneName: "longGeneric" }).formatToParts(new Date()).find((p) => p.type === "timeZoneName")?.value;
+    return part && !/^GMT/.test(part) ? `${part} (${city})` : city;
+  } catch {
+    return city;
+  }
 }
 
 // ── Competitor profiles ────────────────────────────────────────────────────

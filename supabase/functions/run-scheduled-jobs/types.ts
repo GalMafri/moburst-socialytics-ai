@@ -21,7 +21,7 @@ export interface ScheduledJob {
   lease_until: string | null;
   reason: string | null;
   result: Record<string, unknown> | null;
-  /** What a lifecycle_step job runs: { step, force }. */
+  /** What a lifecycle_step job runs ({ step, force }), or a manual report run (dispatch.ts ManualRun). */
   payload?: Record<string, unknown> | null;
   created_at: string;
   started_at: string | null;

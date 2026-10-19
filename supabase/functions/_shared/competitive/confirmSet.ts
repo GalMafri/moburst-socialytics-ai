@@ -3,9 +3,8 @@
 // Confirm a draft competitor set: exactly three selected, ranked 1, 2 and 3,
 // then the set becomes 'confirmed' with who confirmed it (null when the
 // client lifecycle confirmed it as the system). RivalIQ tracks companies by
-// website, so the lifecycle confirms its pick without social handles; the
-// Competitors screen's confirm keeps its own handle rule on top of this
-// (confirm-competitor-set).
+// website, so neither the lifecycle nor a person's confirm on the
+// Competitors screen (confirm-competitor-set) needs social handles.
 
 // deno-lint-ignore no-explicit-any
 type Db = any;

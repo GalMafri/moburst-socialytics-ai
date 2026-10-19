@@ -15,16 +15,16 @@ describe("run statuses, one per row for both report tables", () => {
     expect(competitiveRunStatus({ status: "running", report_data: null }, staff).label).toBe("Running");
   });
 
-  it("never shows a failure: a run that did not finish is scheduled to run again, for staff only", () => {
+  it("never shows a failure: a run that did not finish is made again by the product and shown to nobody", () => {
     for (const s of ["failed", "error", "cancelled"]) {
-      expect(monthlyReportStatus({ status: s }, staff)).toMatchObject({ state: "scheduled", label: "Scheduled", hidden: false });
-      expect(competitiveRunStatus({ status: s, report_data: null }, staff)).toMatchObject({ state: "scheduled", label: "Scheduled" });
+      expect(monthlyReportStatus({ status: s }, staff)).toMatchObject({ state: "scheduled", hidden: true });
+      expect(competitiveRunStatus({ status: s, report_data: null }, staff)).toMatchObject({ state: "scheduled", hidden: true });
       expect(monthlyReportStatus({ status: s }, client).hidden).toBe(true);
     }
   });
 
   it("works out held from the whole row, so no screen can call a held run ready", () => {
-    expect(competitiveRunStatus({ status: "complete", report_data: held }, staff)).toMatchObject({ state: "held", label: "Held back", hidden: false });
+    expect(competitiveRunStatus({ status: "complete", report_data: held }, staff)).toMatchObject({ state: "held", label: "Being redone", hidden: false });
     expect(competitiveRunStatus({ status: "complete", report_data: held }, client).hidden).toBe(true);
     expect(competitiveRunStatus({ status: "running", report_data: held }, staff).label).toBe("Running");
   });
@@ -33,7 +33,7 @@ describe("run statuses, one per row for both report tables", () => {
     for (const status of ["complete", "completed", "running", "failed", "draft", "", null, undefined, "something_new"]) {
       for (const label of [monthlyReportStatus({ status }, staff).label, competitiveRunStatus({ status, report_data: ready }, staff).label]) {
         expect(label).not.toBe(status);
-        expect(["Ready", "Running", "Scheduled", "Held back"]).toContain(label);
+        expect(["Ready", "Running", "Scheduled", "Being redone"]).toContain(label);
       }
     }
   });
@@ -44,13 +44,24 @@ describe("run statuses, one per row for both report tables", () => {
       { id: "old", client_id: "c", status: "failed", date_range_start: "2026-09-01", date_range_end: "2026-09-30" },
       { id: "aug", client_id: "c", status: "failed", date_range_start: "2026-08-01", date_range_end: "2026-08-31" },
     ];
-    expect(listedRuns("monthly", rows, staff).map((r) => [r.id, r.display.label])).toEqual([["new", "Ready"], ["aug", "Scheduled"]]);
+    // A run that did not finish is listed for nobody: the product makes it again.
+    expect(listedRuns("monthly", rows, staff).map((r) => [r.id, r.display.label])).toEqual([["new", "Ready"]]);
     expect(listedRuns("monthly", rows, client).map((r) => r.id)).toEqual(["new"]);
     const competitive = [
       { id: "r", client_id: "c", status: "complete", report_data: { ...ready, period: { start: "2026-09-01", end: "2026-09-30" } } },
       { id: "h", client_id: "c", status: "complete", report_data: { ...held, period: { start: "2026-09-01", end: "2026-09-30" } } },
     ];
     expect(listedRuns("competitive", competitive, staff).map((r) => r.id)).toEqual(["r"]);
+  });
+
+  it("shows a period held more than once by its newest held run, and says when the redos are used up", () => {
+    const period = { period: { start: "2026-09-01", end: "2026-09-30" } };
+    const heldRun = (id: string, created_at: string) => ({ id, client_id: "c", status: "complete", created_at, report_data: { ...held, ...period } });
+    const twice = [heldRun("h1", "2026-10-07T07:15:00Z"), heldRun("h2", "2026-10-08T07:15:00Z")];
+    expect(listedRuns("competitive", twice, staff).map((r) => [r.id, r.display.label])).toEqual([["h2", "Being redone"]]);
+    expect(listedRuns("competitive", twice, client)).toEqual([]);
+    const used = [...twice, heldRun("h3", "2026-10-09T07:15:00Z"), heldRun("h4", "2026-10-10T07:15:00Z")];
+    expect(listedRuns("competitive", used, staff).map((r) => [r.id, r.display.label])).toEqual([["h4", "Not shared"]]);
   });
 });
 

@@ -16,6 +16,16 @@
 // schedule's next run is close does the occurrence close, quietly, and that
 // run takes over.
 //
+// A run a person asks for (run-report) is the same job with no schedule
+// behind it: a manual run, its kind and period on the job's payload. It
+// follows every rule above, retries included, for MANUAL_RUN_DAYS from when
+// it was asked for, and touches no schedule.
+//
+// A competitive analysis that finishes but does not pass its checks
+// (competitiveReportQuality) is held: never shown to clients. The occurrence
+// then stays open and the analysis is made again once a day, up to
+// HELD_REDOS times; the held run stays for staff, read as being redone.
+//
 // Each dispatch is its own job with recorded phases:
 //
 //   prepared  the report row exists and its id is on the job. A resumed job
@@ -30,6 +40,7 @@
 import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/schedule.ts";
 import { STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
 import { isTrackingProblem, LANDSCAPE_MISSING, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
+import { HELD_REDOS } from "../_shared/competitive/reportEvidence.ts";
 import type { JobOutcome, ScheduledJob } from "./types.ts";
 import { RETRY_MINUTES } from "./worker.ts";
 
@@ -46,6 +57,32 @@ export const RETRY_FIRST_MINUTES = 30;
 export const RETRY_MAX_MINUTES = 24 * 60;
 /** The last run of an occurrence starts at least this long before the schedule's next run. */
 export const LAST_RUN_LEAD_MINUTES = 180;
+/** How long a manual run keeps trying, from when it was asked for. */
+export const MANUAL_RUN_DAYS = 7;
+/** The wait before a held competitive analysis is made again. */
+export const HELD_REDO_MINUTES = 24 * 60;
+
+/** A run a person asked for, with no schedule behind it (scheduled_jobs.payload). */
+export interface ManualRun {
+  run: "manual";
+  kind: "social" | "competitive";
+  range: ReportRange;
+  requested_by: string | null;
+  requested_at: string;
+  skip_trends?: boolean;
+}
+
+/** The job's manual run, or null for a schedule's dispatch. */
+export function manualRun(job: Pick<ScheduledJob, "schedule_id" | "payload" | "created_at">): ManualRun | null {
+  const p = (job.payload ?? null) as Partial<ManualRun> | null;
+  if (job.schedule_id || !p || p.run !== "manual") return null;
+  const kind = p.kind === "competitive" || p.kind === "social" ? p.kind : null;
+  if (!kind || !p.range?.start || !p.range?.end) return null;
+  return {
+    run: "manual", kind, range: { start: String(p.range.start), end: String(p.range.end) },
+    requested_by: p.requested_by ?? null, requested_at: p.requested_at ?? job.created_at, skip_trends: p.skip_trends === true,
+  };
+}
 
 export interface ScheduleRow {
   id: string;
@@ -87,6 +124,8 @@ export interface ReportRun {
   created_at: string | null;
   /** What the workflow said when it stopped, kept on the job for the logs. */
   error: string | null;
+  /** A finished competitive analysis that did not pass its checks (competitiveReportQuality). */
+  held?: boolean;
 }
 
 /** Everything a dispatch reads and writes, so the rules can run against a fake. */
@@ -134,8 +173,8 @@ export interface DispatchDeps {
   now(): Date;
   /** Sends the workflow request. Throws on a network failure. */
   post(url: string, body: unknown): Promise<{ ok: boolean; status: number }>;
-  buildSocialPayload(args: { client: ClientRow; reportId: string; range: ReportRange; scheduled: true; staggerSeconds: number; competitiveReportId?: string }): Promise<Record<string, unknown>>;
-  buildCompetitivePayload(args: { client: ClientRow; reportId: string; set: CompetitorSetRow; range: ReportRange; attemptStartedAt: string; scheduled: true; staggerSeconds: number }): Promise<Record<string, unknown>>;
+  buildSocialPayload(args: { client: ClientRow; reportId: string; range: ReportRange; scheduled: boolean; staggerSeconds: number; competitiveReportId?: string; skipTrends?: boolean }): Promise<Record<string, unknown>>;
+  buildCompetitivePayload(args: { client: ClientRow; reportId: string; set: CompetitorSetRow; range: ReportRange; attemptStartedAt: string; scheduled: boolean; staggerSeconds: number }): Promise<Record<string, unknown>>;
   /** The shared RivalIQ landscape check (landscapeCheck.ts), bound to the project's key. One provider read. */
   checkLandscape(client: ClientRow, set: CompetitorSetRow): Promise<LandscapeCheck>;
   /** Persist the job's phase before the step that depends on it. */
@@ -149,7 +188,8 @@ export interface DispatchRun {
   report_id: string;
   started_at: string;
   ended_at?: string;
-  outcome?: "ran" | "stopped";
+  /** held: it finished, did not pass its checks, and is made again. */
+  outcome?: "ran" | "stopped" | "held";
   note?: string;
 }
 
@@ -167,6 +207,7 @@ export interface DispatchMemory {
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
 
 /** Both n8n webhooks answer on receipt; a request still open after this long is treated as unanswered. */
 export const POST_TIMEOUT_MS = 30_000;
@@ -210,18 +251,24 @@ const inProgress = (status: string | null | undefined) => status === "running" |
 
 export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<JobOutcome> {
   const now = d.now();
-  const schedule = job.schedule_id ? await d.store.schedule(job.schedule_id) : null;
-  if (!schedule || !schedule.is_active) return { status: "skipped", reason: "The schedule was deleted or turned off before it ran." };
-  const client = await d.store.client(schedule.client_id);
+  const manual = manualRun(job);
+  const schedule = manual ? null : job.schedule_id ? await d.store.schedule(job.schedule_id) : null;
+  if (!manual && (!schedule || !schedule.is_active)) return { status: "skipped", reason: "The schedule was deleted or turned off before it ran." };
+  const client = await d.store.client(manual ? job.client_id : schedule!.client_id);
   if (!client || client.archived_at) return { status: "skipped", reason: "client archived or missing" };
-  const competitive = schedule.report_kind === "competitive";
+  const competitive = (manual ? manual.kind : schedule!.report_kind) === "competitive";
   const table = competitive ? "competitive_reports" : "reports";
   const memory: DispatchMemory = { ...((job.result ?? {}) as DispatchMemory) };
   const runs: DispatchRun[] = Array.isArray(memory.runs) ? memory.runs.map((r) => ({ ...r })) : [];
-  const occurrence = job.occurrence ?? schedule.next_run_at;
+  const occurrence = manual ? manual.requested_at : job.occurrence ?? schedule!.next_run_at;
   // A person who changed the schedule meanwhile keeps the next run they chose.
-  const moved = new Date(schedule.next_run_at).getTime() !== new Date(occurrence).getTime();
-  const deadline = nextRun(new Date(occurrence), schedule.run_day_of_month, schedule.frequency);
+  const moved = !!schedule && new Date(schedule.next_run_at).getTime() !== new Date(occurrence).getTime();
+  const deadline = manual
+    ? new Date(Date.parse(manual.requested_at) + MANUAL_RUN_DAYS * DAY).toISOString()
+    : nextRun(new Date(occurrence), schedule!.run_day_of_month, schedule!.frequency);
+  const createdBy = manual ? manual.requested_by : schedule!.created_by;
+  /** Where the schedule stands, for the logs; a manual run has no schedule to note. */
+  const note = async (result: string | null) => { if (schedule) await d.store.note(schedule.id, result); };
 
   /** The run with this report ended; the occurrence runs again later, or closes. */
   const runAgain = async (reportId: string | null, why: string, run: ReportRun | null = null): Promise<JobOutcome> => {
@@ -238,10 +285,10 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     await d.saveJob({ phase: null, report_id: null, result: kept });
     const next = nextRunOfOccurrence(runs.length, now, deadline);
     if (!next) {
-      await d.store.close(schedule, moved ? schedule.next_run_at : deadline);
-      return { status: "skipped", reason: `No run finished before the schedule's next run (${why}).`, result: kept };
+      if (schedule) await d.store.close(schedule, moved ? schedule.next_run_at : deadline);
+      return { status: "skipped", reason: `No run finished before ${schedule ? "the schedule's next run" : "the manual run's window closed"} (${why}).`, result: kept };
     }
-    await d.store.note(schedule.id, null);
+    await note(null);
     // The lease that found this does not count against the job.
     return { status: "queued", reason: `Runs again: ${why}.`, available_at: next.toISOString(), deferred: true, result: kept };
   };
@@ -251,8 +298,23 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     const run = await d.store.reportRun(table, reportId);
     if (run && finished(run.status)) {
       const open = runs.find((r) => r.report_id === reportId && !r.ended_at);
-      if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "ran" as const });
-      if (!d.dryRun) await d.store.advance(schedule, moved ? schedule.next_run_at : followingRun(schedule, occurrence, now), "The report ran.");
+      if (competitive && run.held) {
+        // Held: kept for staff, never shown to clients, and made again tomorrow.
+        if (open) Object.assign(open, { ended_at: now.toISOString(), outcome: "held" as const });
+        const held = runs.filter((r) => r.outcome === "held").length;
+        const at = Math.min(now.getTime() + HELD_REDO_MINUTES * MINUTE, Date.parse(deadline) - LAST_RUN_LEAD_MINUTES * MINUTE);
+        if (held <= HELD_REDOS && at > now.getTime()) {
+          const kept: DispatchMemory = { range: memory.range, runs };
+          if (d.dryRun) return { status: "waiting", reason: "dry run: would make the held analysis again", result: kept };
+          if (memory.set_id) await d.store.releaseSet(memory.set_id);
+          await d.saveJob({ phase: null, report_id: null, result: kept });
+          await note(null);
+          return { status: "queued", reason: `The analysis did not pass its checks; it is made again (${held} of ${HELD_REDOS}).`, available_at: new Date(at).toISOString(), deferred: true, result: kept };
+        }
+      } else if (open) {
+        Object.assign(open, { ended_at: now.toISOString(), outcome: "ran" as const });
+      }
+      if (!d.dryRun && schedule) await d.store.advance(schedule, moved ? schedule.next_run_at : followingRun(schedule, occurrence, now), "The report ran.");
       return { status: "done", result: { ...memory, runs, report_id: reportId } };
     }
     const started = Date.parse(run?.created_at ?? "");
@@ -264,13 +326,19 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
   if (job.phase === "sent" && job.report_id) return watch(job.report_id);
 
   if (!job.report_id && job.occurrence && moved) {
-    return { status: "skipped", reason: `The schedule moved to ${schedule.next_run_at} before this run started.` };
+    return { status: "skipped", reason: `The schedule moved to ${schedule!.next_run_at} before this run started.` };
+  }
+
+  // A manual run that could not start inside its window (tracking that never
+  // came, for one) ends quietly; nothing was made, so nothing is shown.
+  if (manual && !job.report_id && now.getTime() >= Date.parse(deadline)) {
+    return { status: "skipped", reason: `The manual run was asked for ${MANUAL_RUN_DAYS} days ago and could not start.` };
   }
 
   if (job.attempts > job.max_attempts) {
     const why = `the worker stopped ${job.attempts - 1} times before the request was answered`;
     if (job.report_id) return runAgain(job.report_id, why);
-    if (!d.dryRun) await d.store.note(schedule.id, `error: ${why}`);
+    if (!d.dryRun) await note(`error: ${why}`);
     return { status: "blocked", reason: `The worker stopped ${job.attempts - 1} times before the request was answered.` };
   }
 
@@ -316,7 +384,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       return runAgain(reportId, `the workflow refused the request (${r.status})`);
     }
     await d.saveJob({ phase: "sent", result });
-    await d.store.note(schedule.id, "The report is running.");
+    await note("The report is running.");
     return { status: "waiting", reason: "The report is running.", result };
   };
 
@@ -329,7 +397,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       if (!set) {
         const reason = "Waiting for a confirmed competitor set. The paired social report goes ahead without it.";
         if (!d.dryRun) {
-          await d.store.note(schedule.id, reason);
+          await note(reason);
           await d.store.releaseHeldSocial(client.id);
         }
         return { status: "waiting", reason };
@@ -344,7 +412,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
           // blocked, which the daily status check alerts on.
           const reason = `${NEEDS_TRACKING}: ${tracking.message}`;
           if (!d.dryRun) {
-            await d.store.note(schedule.id, reason);
+            await note(reason);
             await d.store.releaseHeldSocial(client.id);
           }
           return { status: tracking.code === LANDSCAPE_MISSING ? "blocked" : "waiting", reason, result: { ...memory, code: tracking.code, set_id: set.id } };
@@ -356,19 +424,19 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
             return { status: "queued", reason: tracking.message, available_at: new Date(now.getTime() + RETRY_MINUTES * MINUTE).toISOString() };
           }
           if (!d.dryRun) {
-            await d.store.note(schedule.id, `error: ${tracking.message}`);
+            await note(`error: ${tracking.message}`);
             await d.store.releaseHeldSocial(client.id);
           }
           return { status: "blocked", reason: tracking.message, result: { code: tracking.code } };
         }
       }
-      const range = memory.range ?? rangeForSchedule(schedule.range_mode, now);
+      const range = memory.range ?? (manual ? manual.range : rangeForSchedule(schedule!.range_mode, now));
       const attemptStartedAt = (reportId && memory.attempt_started_at) || now.toISOString();
       if (!reportId) {
         if (d.dryRun) {
           reportId = "dry-run";
         } else {
-          reportId = await d.store.insertCompetitiveReport({ created_at: attemptStartedAt, client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: schedule.created_by });
+          reportId = await d.store.insertCompetitiveReport({ created_at: attemptStartedAt, client_id: client.id, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: createdBy });
           setId = set.id;
           runs.push({ report_id: reportId, started_at: attemptStartedAt });
           await d.saveJob({ phase: "prepared", report_id: reportId, result: { ...memory, set_id: set.id, attempt_started_at: attemptStartedAt, range, runs } });
@@ -377,24 +445,25 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       const result: DispatchMemory = { ...memory, set_id: setId ?? set.id, attempt_started_at: attemptStartedAt, range, runs };
       memory.set_id = result.set_id;
       if (!d.dryRun) {
-        // Both guarded, so a resumed job repeats them safely.
-        await d.store.holdSocial(client.id, reportId, now);
+        // Both guarded, so a resumed job repeats them safely. Only a
+        // schedule's analysis holds the due social report.
+        if (schedule) await d.store.holdSocial(client.id, reportId, now);
         await d.store.setAnalyzing(set.id);
       }
-      const payload = await d.buildCompetitivePayload({ client, reportId, set, range, attemptStartedAt, scheduled: true, staggerSeconds: job.stagger_seconds });
+      const payload = await d.buildCompetitivePayload({ client, reportId, set, range, attemptStartedAt, scheduled: !manual, staggerSeconds: job.stagger_seconds });
       if (d.dryRun) return { status: "done", reason: "dry run: would post", result: { ...result, payload_keys: Object.keys(payload) } };
       return await send(hooks.competitive, payload, result);
     }
 
     // Social.
     if (!hooks.social) throw new Error("n8n webhook URL not configured");
-    let range = memory.range ?? rangeForSchedule(schedule.range_mode, now);
+    let range = memory.range ?? (manual ? manual.range : rangeForSchedule(schedule!.range_mode, now));
     let wait: string | null = null;
     /** The competitive report this social report is built on, when it is the pinned one. */
     let competitiveReportId: string | undefined;
     /** A pinned competitive report that will not arrive, and what became of it. */
     let without: string | null = null;
-    const dependencyId = schedule.pending_competitive_report_id || undefined;
+    const dependencyId = schedule?.pending_competitive_report_id || undefined;
     if (repeat) {
       // The same request as the one that may already have gone out.
       competitiveReportId = memory.competitive_report_id ?? undefined;
@@ -413,11 +482,11 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
         // competitive report that is not coming: it uses the latest complete analysis.
         without = `competitive report ${dependencyId} ${dependency ? `(${dependency.status})` : "(no longer available)"}`;
       }
-    } else if (await d.store.pairedCompetitivePending(client.id, now)) {
+    } else if (schedule && await d.store.pairedCompetitivePending(client.id, now)) {
       wait = "Waiting for the due competitive analysis to start.";
     }
     if (wait && !d.dryRun) {
-      await d.store.note(schedule.id, wait);
+      await note(wait);
       return { status: "waiting", reason: wait };
     }
 
@@ -425,7 +494,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       if (d.dryRun) {
         reportId = "dry-run";
       } else {
-        reportId = await d.store.insertSocialReport({ client_id: client.id, status: "running", report_data: {}, created_by: schedule.created_by, date_range_start: range.start, date_range_end: range.end });
+        reportId = await d.store.insertSocialReport({ client_id: client.id, status: "running", report_data: {}, created_by: createdBy, date_range_start: range.start, date_range_end: range.end });
         runs.push({ report_id: reportId, started_at: now.toISOString() });
         await d.saveJob({ phase: "prepared", report_id: reportId, result: { ...memory, range, runs } });
       }
@@ -435,7 +504,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       ...memory, range, runs, competitive_report_id: sentOn ?? null,
       ...(without && dependencyId ? { competitive_report_skipped: dependencyId } : {}),
     };
-    const payload = await d.buildSocialPayload({ client, reportId, range, scheduled: true, staggerSeconds: job.stagger_seconds, competitiveReportId: sentOn });
+    const payload = await d.buildSocialPayload({ client, reportId, range, scheduled: !manual, staggerSeconds: job.stagger_seconds, competitiveReportId: sentOn, ...(manual?.skip_trends ? { skipTrends: true } : {}) });
     if (d.dryRun) {
       const preview = { range, payload_keys: Object.keys(payload) };
       return wait
@@ -448,7 +517,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     if (d.dryRun) return { status: "failed", reason: `dry run: ${msg}` };
     // A report this job opened is taken away and the occurrence runs again.
     if (reportId) return runAgain(reportId, msg);
-    await d.store.note(schedule.id, `error: ${msg}`);
+    await note(`error: ${msg}`);
     return { status: "blocked", reason: msg };
   }
 }

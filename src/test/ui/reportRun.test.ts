@@ -1,59 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { canRetry, isStuck, minutesRunning, retryLabel } from "@/lib/reportRun";
+import { minutesRunning } from "@/lib/reportRun";
+import { runView } from "@/hooks/useReportRun";
 
 const NOW = new Date("2026-09-10T12:00:00Z").getTime();
 const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60000).toISOString();
 
-describe("canRetry", () => {
-  it("withholds retry on a recently failed run", () => {
-    expect(canRetry({ status: "failed", created_at: at(5) }, NOW)).toBe(false);
-  });
-
-  it("offers a retry on a run that died without saying so", () => {
-    // The workflow crashes before its writeback node and the row never moves
-    // off "running" — the only signal is the clock.
-    expect(canRetry({ status: "running", created_at: at(90) }, NOW)).toBe(true);
-    expect(retryLabel({ status: "running", created_at: at(90) }, NOW)).toBe("Review retry");
-  });
-
-  it("leaves a run that is genuinely still going alone", () => {
-    expect(canRetry({ status: "running", created_at: at(3) }, NOW)).toBe(false);
-    expect(isStuck({ status: "running", created_at: at(44) }, NOW)).toBe(false);
-  });
-
-  it("never offers a retry on a finished report", () => {
-    expect(canRetry({ status: "complete", created_at: at(900) }, NOW)).toBe(false);
-    expect(canRetry({ status: "completed", created_at: at(900) }, NOW)).toBe(false);
-  });
-
-  it("copes with a row that has no timestamp", () => {
+describe("minutesRunning", () => {
+  it("counts from the run's start, and copes with a row that has no timestamp", () => {
+    expect(minutesRunning({ status: "running", created_at: at(30) }, NOW)).toBeCloseTo(30);
     expect(minutesRunning({ status: "running" }, NOW)).toBe(0);
-    expect(canRetry({ status: "running" }, NOW)).toBe(false);
   });
 });
 
-describe("the app and the server agree on when a run is stuck", () => {
+describe("the app and the server agree on how long a run may take", () => {
   it("uses the same threshold on both sides", async () => {
     const { STUCK_AFTER_MINUTES } = await import("@/lib/reportRun");
     const server = await import("../../../supabase/functions/_shared/reports/payloads");
-    // They are separate files by necessity (browser and Deno); if one moves
-    // without the other, Retry either refuses a dead run or fires a live one.
     expect(server.STUCK_AFTER_MINUTES).toBe(STUCK_AFTER_MINUTES);
-  });
-
-  it("agrees on individual rows", async () => {
-    const { isStuck } = await import("@/lib/reportRun");
-    const { isStuckRun } = await import("../../../supabase/functions/_shared/reports/payloads");
-    const now = new Date("2026-09-10T12:00:00Z").getTime();
-    for (const minutes of [1, 10, 15, 45, 89.999, 90, 91, 3000]) {
-      const created = new Date(now - minutes * 60000).toISOString();
-      expect(isStuckRun("running", created, now)).toBe(isStuck({ status: "running", created_at: created }, now));
-    }
   });
 });
 
-it.each(["running", "failed"])("%s respects the exact 90-minute boundary", (status) => {
-  expect(canRetry({status, created_at: at(89.999)}, NOW)).toBe(false);
-  expect(canRetry({status, created_at: at(90)}, NOW)).toBe(true);
-  expect(canRetry({status, created_at: "invalid"}, NOW)).toBe(false);
+describe("a manual run, from the request until its report exists", () => {
+  const request = (over: Record<string, unknown> = {}) => ({
+    job_id: "j", status: "queued", requested_at: at(1), range_start: "2026-09-01", range_end: "2026-09-30", report_id: null, open: true, runs: 0, next_at: at(1), ...over,
+  });
+  it("is starting while only the request exists, and running once the report does", () => {
+    expect(runView(request(), null, true).state).toBe("starting");
+    expect(runView(request({ report_id: "r" }), null, true)).toMatchObject({ state: "running", reportId: "r" });
+    expect(runView(null, { id: "r2", created_at: at(5), date_range_start: null, date_range_end: null }, false)).toMatchObject({ state: "running", reportId: "r2" });
+  });
+  it("says when a run that did not finish runs again, and never shows a failure", () => {
+    const later = new Date(Date.now() + 30 * 60000).toISOString();
+    expect(runView(request({ runs: 1, next_at: later }), null, true)).toMatchObject({ state: "again", nextAt: later });
+  });
+  it("is ready only for the run this page watched", () => {
+    expect(runView(request({ status: "done", open: false, report_id: "r" }), null, true)).toMatchObject({ state: "ready", reportId: "r" });
+    expect(runView(request({ status: "done", open: false, report_id: "r" }), null, false).state).toBe("idle");
+    expect(runView(request({ status: "skipped", open: false }), null, true).state).toBe("idle");
+  });
 });

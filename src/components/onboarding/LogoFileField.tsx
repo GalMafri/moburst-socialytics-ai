@@ -1,44 +1,46 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Loader2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { fileKey, useQuietUpload } from "@/hooks/useQuietUpload";
+
+const TYPES = ["image/png", "image/jpeg", "image/webp"];
+const MAX_BYTES = 5 * 1024 * 1024;
 
 /**
- * The client's logo as a file. It is the one brand input the design run
- * cannot read reliably from the posts: the model is handed this file and
- * places it as it is, and the review judges the designed logo against it.
- * Stored in the public generated-media bucket so the image provider can
- * fetch it; the URL is saved on the client row (clients.logo_url).
+ * The client's logo as a file. The lifecycle takes it from the client's
+ * website on its own (brand_read); a person may replace it here. Designs
+ * place this file as it is. Stored in the public generated-media bucket so
+ * the image provider can fetch it; the URL is saved on the client row
+ * (clients.logo_url). An upload that does not go through is sent again
+ * quietly, and the chosen file stays selected until it has.
  */
 export function LogoFileField({ clientId, clientName, logoUrl, onChange }: { clientId?: string; clientName: string; logoUrl: string; onChange: (url: string) => void }) {
-  const [uploading, setUploading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const [refused, setRefused] = useState<string | null>(null);
+  const folder = clientId || clientName.replace(/[^a-zA-Z0-9]/g, "-") || "client";
+  const pathFor = (file: File) => `${folder}/logo-${fileKey(file)}`;
+  const upload = useCallback((file: File) => supabase.storage.from("generated-media").upload(pathFor(file), file, { contentType: file.type, upsert: true }), [folder]);
+  const done = useCallback((file: File) => {
+    onChange(supabase.storage.from("generated-media").getPublicUrl(pathFor(file)).data.publicUrl);
+    toast.success("Logo uploaded");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onChange, folder]);
+  const { send, again, uploading, pending } = useQuietUpload(upload, done);
 
-  const upload = async (file: File) => {
-    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { toast.error("The logo must be a PNG, JPG or WebP file; PNG with a transparent background is best."); return; }
-    if (file.size > 5 * 1024 * 1024) { toast.error("The logo file must be under 5MB"); return; }
-    setUploading(true);
-    try {
-      const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
-      const path = `${clientId || clientName.replace(/[^a-zA-Z0-9]/g, "-") || "client"}/logo-${Date.now()}.${ext}`;
-      const { error } = await supabase.storage.from("generated-media").upload(path, file, { contentType: file.type, upsert: true });
-      if (error) throw error;
-      onChange(supabase.storage.from("generated-media").getPublicUrl(path).data.publicUrl);
-      toast.success("Logo saved. Save the client to apply it to new designs.");
-    } catch (err: any) {
-      toast.error("The logo could not be uploaded: " + (err?.message || "unknown error"));
-    } finally {
-      setUploading(false);
-      if (input.current) input.current.value = "";
-    }
+  const choose = (file: File) => {
+    // The bucket would refuse these, so they are not sent.
+    if (!TYPES.includes(file.type) || file.size > MAX_BYTES) { setRefused(file.name); return; }
+    setRefused(null);
+    void send(file);
   };
 
   return (
     <div className="space-y-2">
       <Label className="t-secondary">Logo file</Label>
-      <p className="t-tertiary">PNG with a transparent background. Designs place this file as it is; without it the logo is read from the client's posts.</p>
+      <p className="t-tertiary">PNG, JPG or WebP under 5 MB; PNG with a transparent background is best. Designs place this file as it is. The product takes the logo from the client's website when none is here.</p>
       {logoUrl ? (
         <div className="flex items-center gap-3 p-3 rounded-md border glass-inner">
           <div className="h-12 w-28 rounded bg-[#0A1016] flex items-center justify-center overflow-hidden">
@@ -60,7 +62,14 @@ export function LogoFileField({ clientId, clientName, logoUrl, onChange }: { cli
           </div>
         </button>
       )}
-      <input ref={input} type="file" className="hidden" accept=".png,.jpg,.jpeg,.webp" data-testid="logo-file-input" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); }} disabled={uploading} />
+      {refused && <p className="t-secondary" role="status">{refused} is not a PNG, JPG or WebP file under 5 MB, so the current logo stays.</p>}
+      {pending && !uploading && (
+        <div className="flex items-center gap-2" role="status">
+          <span className="t-secondary truncate">{pending.name} is not uploaded yet.</span>
+          <Button variant="outline" size="sm" onClick={() => void again()}>Upload</Button>
+        </div>
+      )}
+      <input ref={input} type="file" className="hidden" accept=".png,.jpg,.jpeg,.webp" data-testid="logo-file-input" onChange={(e) => { const f = e.target.files?.[0]; if (f) choose(f); e.target.value = ""; }} disabled={uploading} />
     </div>
   );
 }

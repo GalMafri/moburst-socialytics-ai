@@ -11,12 +11,13 @@ import { Video, Loader2, Download, RefreshCw, Scissors, Check, Star, Ban } from 
 import { VideoTrimmer } from "@/components/editor/VideoTrimmer";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { sendQuietly, uploadQuietly, writeResendable } from "@/lib/quietSend";
 import type { ClientContext } from "@/lib/clientContext";
 import { GenerationStages } from "@/components/reports/GenerationStages";
 import { clipSize, renderMotionClip } from "@/lib/motion";
 import { verdictIsDirty, correctionFor, verdictSummary } from "@/lib/designGuard";
 import { useGenerationContext, postKeyOf } from "@/components/reports/calendar/GenerationContext";
-import { brandAdviceFrom, brandWarning } from "@/lib/designGuard";
+import { brandWarning } from "@/lib/designGuard";
 import { useMediaBackend } from "@/hooks/useMediaBackend";
 import { tileAspectFor } from "@/lib/tileAspect";
 import { postCopyOf } from "@/lib/postCopy";
@@ -155,7 +156,9 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
   const [showTrimmer, setShowTrimmer] = useState(false);
   // Phase 7 — multi-variant state.
   const [variantCount, setVariantCount] = useState(usesSocialTemplate ? 1 : 2);
+  /** The last run saved nothing; its detail goes to the console. */
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [favoritesNotSaved, setFavoritesNotSaved] = useState(false);
   const [sourcePreviews, setSourcePreviews] = useState<string[]>([]);
   const [sourceClipAspect, setSourceClipAspect] = useState("4 / 5");
   const [angles, setAngles] = useState<Array<{ label: string; instruction: string }>>([]);
@@ -301,7 +304,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       );
       return;
     }
-    const { data: savedIteration, error } = await supabase.from("post_iterations").insert({
+    const { data: savedIteration, error } = await sendQuietly(() => supabase.from("post_iterations").insert({
       client_id: clientId,
       platform: post.platform || null,
       post_copy: postCopyOf(post) || null,
@@ -312,10 +315,10 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       variant_group_id: groupId,
       variant_angle: angle || null,
       is_selected: isSelected,
-    } as any).select("id").single();
+    } as any).select("id").single(), { again: writeResendable });
     if (error) {
-      console.error("[CreatePostVideoButton] persistVariantRow failed:", error);
-      throw new Error(`Failed to save video variant: ${error.message}`);
+      console.warn("[CreatePostVideoButton] variant not saved yet:", error);
+      throw new Error("not saved");
     }
     return savedIteration?.id;
   };
@@ -327,16 +330,19 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       .map((i) => (typeof variantUrls[i] === "string" ? (variantUrls[i] as string) : null))
       .filter((u): u is string => !!u);
 
+    setFavoritesNotSaved(false);
     try {
-      const cleared = await supabase.from("post_iterations").update({ is_selected: false } as any).eq("variant_group_id", variantGroupId);
+      // Both writes repeat safely, so each is sent again quietly.
+      const cleared = await sendQuietly(() => supabase.from("post_iterations").update({ is_selected: false } as any).eq("variant_group_id", variantGroupId), { again: writeResendable });
       if (cleared.error) throw cleared.error;
-      const selected = await Promise.all(favoriteUrls.map((url) => supabase.from("post_iterations").update({ is_selected: true } as any).eq("variant_group_id", variantGroupId).contains("media_urls", [url])));
-      const failed = selected.find(result => result.error);
-      if (failed?.error) throw failed.error;
+      const selected = await Promise.all(favoriteUrls.map((url) => sendQuietly(() => supabase.from("post_iterations").update({ is_selected: true } as any).eq("variant_group_id", variantGroupId).contains("media_urls", [url]), { again: writeResendable })));
+      const notSaved = selected.find(result => result.error);
+      if (notSaved?.error) throw notSaved.error;
       if (favoriteUrls.length > 0 && onVideoGenerated) onVideoGenerated(favoriteUrls[0]);
       toast.success(`Saved ${favoriteUrls.length} favorite${favoriteUrls.length === 1 ? "" : "s"}`);
     } catch {
-      toast.error("Could not save your video selection. Please retry.");
+      // The favorites stay marked here.
+      setFavoritesNotSaved(true);
     }
   };
 
@@ -392,7 +398,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
       if(cancelRef.current) return;
       setMotionStage(3);
       const path=`${id}/${Date.now()}-reference-film.mp4`;
-      const {error:uploadError}=await supabase.storage.from('generated-media').upload(path,result.blob,{contentType:'video/mp4'});
+      const {error:uploadError}=await uploadQuietly(()=>supabase.storage.from('generated-media').upload(path,result.blob,{contentType:'video/mp4',upsert:true}));
       if(uploadError) throw uploadError;
       const {data:publicData}=supabase.storage.from('generated-media').getPublicUrl(path);
       const iterationId=await persistVariantRow(publicData.publicUrl,`Reference film ${plan.id}`,groupId,false);
@@ -611,12 +617,6 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
         continue;
       }
       const r = results[i];
-      const advice = r.status === "fulfilled" ? brandAdviceFrom(r.value.data) : null;
-      if (advice && i === 0) {
-        // sonner in this file, not the shadcn useToast used by the design button:
-        // the message is the first argument, options the second.
-        toast("Generated without brand references", { description: advice });
-      }
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.video_url) {
         const rawUrl = r.value.data.video_url;
         const seedUrl: string | null = r.value.data.seed_image_url || null;
@@ -722,7 +722,8 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
               )}
             </div>
 
-            {generationError && <p role="alert" className="text-destructive">{generationError}</p>}
+            {/* What the run came to, as a fact; the reason is in the console for the team. */}
+            {generationError && <p role="status" className="t-secondary">No video came out of this run, and nothing was saved to the post.</p>}
             {(loading || briefing) && (() => {
               const elapsed = startedAt ? (Date.now() - startedAt) / 1000 : 0;
               void tick;
@@ -790,8 +791,8 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                         </div>
                       )}
                       {url === "FAILED" && (
-                        <div className="absolute inset-0 flex items-center justify-center t-label text-destructive p-2 text-center">
-                          Failed
+                        <div className="absolute inset-0 flex items-center justify-center t-label text-muted-foreground p-2 text-center">
+                          Not made
                         </div>
                       )}
                       {typeof url === "string" && url !== "FAILED" && (
@@ -817,6 +818,7 @@ export function CreatePostVideoButton({ post, clientContext, brandIdentity, clie
                       Use {favoriteIdxs.size} favorite{favoriteIdxs.size === 1 ? "" : "s"}
                     </Button>
                   )}
+                  {favoritesNotSaved && <span role="status" className="t-secondary self-center">The favorites are not saved yet.</span>}
                   <Button variant="outline" size="sm" onClick={anotherTake}>
                     <RefreshCw className="h-4 w-4 mr-1" /> Another take
                   </Button>

@@ -14,11 +14,12 @@ import { useMediaBackend } from "@/hooks/useMediaBackend";
 import { tileAspectFor } from "@/lib/tileAspect";
 import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "sonner";
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { supabase } from "@/integrations/supabase/client";
 import { DesignEditor } from "@/components/editor/DesignEditor";
 import type { ClientContext } from "@/lib/clientContext";
 import { useGenerationContext, useGenerationForPost, postKeyOf } from "@/components/reports/calendar/GenerationContext";
-import { brandAdviceFrom, brandWarning, correctionFor, verdictIsDirty, verdictSummary } from "@/lib/designGuard";
+import { brandWarning, correctionFor, verdictIsDirty, verdictSummary } from "@/lib/designGuard";
 import { headlineFrom } from "../../../supabase/functions/_shared/design-prompts/headline";
 import { postCopyOf } from "@/lib/postCopy";
 
@@ -125,6 +126,9 @@ function slideOverlays(brief: { headline?: string; body?: string } | undefined, 
   return out;
 }
 
+/** A run a person stopped. */
+const CANCELLED = "cancelled";
+
 export function CreatePostDesignButton({ post, clientContext, brandIdentity, designReferences, brandBookFilePath, clientId, onImagesGenerated }: CreatePostDesignButtonProps) {
   const effectiveBrandIdentity = clientContext?.brand_identity ?? brandIdentity ?? null;
   const effectiveDesignReferences = clientContext?.design_references ?? designReferences ?? [];
@@ -146,7 +150,9 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
   // For carousels these are slide slots; for non-carousels they are variant slots.
   const [variantUrls, setVariantUrls] = useState<VariantSlot[]>([]);
   // What the brand review still objected to on a variant that shipped anyway.
+  /** How the last run ended when it saved nothing: CANCELLED, or anything else for "no design came out". The detail goes to the console. */
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [favoritesNotSaved, setFavoritesNotSaved] = useState(false);
   const [referencePreviews, setReferencePreviews] = useState<Record<number, string>>({});
   const [failedPreviews, setFailedPreviews] = useState<Record<number, string>>({});
   const [reviewFlags, setReviewFlags] = useState<Record<number, string>>({});
@@ -303,7 +309,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       );
       return;
     }
-    const { data: savedIteration, error } = await supabase.from("post_iterations").insert({
+    const { data: savedIteration, error } = await sendQuietly(() => supabase.from("post_iterations").insert({
       client_id: clientId,
       platform: post.platform || null,
       post_copy: postCopyOf(post) || null,
@@ -314,7 +320,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       variant_group_id: groupId,
       variant_angle: angle || null,
       is_selected: isSelected,
-    } as any).select("id").single();
+    } as any).select("id").single(), { again: writeResendable });
     if (error?.code === "23505" && angle) {
       // Another copy of this run already saved the same design (the panel
       // was reopened while it ran). That row is the design.
@@ -322,8 +328,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       return existing?.id;
     }
     if (error) {
-      console.error("[CreatePostDesignButton] persistVariantRow failed:", error);
-      sonnerToast.error(`Failed to save variant: ${error.message}`);
+      console.warn("[CreatePostDesignButton] variant not saved yet:", error);
       throw error;
     }
     return savedIteration?.id;
@@ -346,28 +351,29 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       .map((i) => (typeof variantUrls[i] === "string" ? (variantUrls[i] as string) : null))
       .filter((u): u is string => !!u);
 
+    setFavoritesNotSaved(false);
     try {
-      // Mark all variants in this group as not selected.
-      const cleared = await supabase
+      // Mark all variants in this group as not selected, then the favorites. Both repeat safely.
+      const cleared = await sendQuietly(() => supabase
         .from("post_iterations")
         .update({ is_selected: false } as any)
-        .eq("variant_group_id", variantGroupId);
+        .eq("variant_group_id", variantGroupId), { again: writeResendable });
       if (cleared.error) throw cleared.error;
 
-      // Then mark favorites as selected.
       for (const url of favoriteUrls) {
-        const selected = await supabase
+        const selected = await sendQuietly(() => supabase
           .from("post_iterations")
           .update({ is_selected: true } as any)
           .eq("variant_group_id", variantGroupId)
-          .contains("media_urls", [url]);
+          .contains("media_urls", [url]), { again: writeResendable });
         if (selected.error) throw selected.error;
       }
 
       if (onImagesGenerated) onImagesGenerated(favoriteUrls);
       sonnerToast.success(`Saved ${favoriteUrls.length} favorite${favoriteUrls.length === 1 ? "" : "s"}`);
     } catch {
-      sonnerToast.error("Could not save your design selection. Please retry.");
+      // The favorites stay marked here.
+      setFavoritesNotSaved(true);
     }
   };
 
@@ -468,10 +474,6 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       const r = results[i];
       // Thin brand material is advice, not a failure: the draft still lands,
       // and the note says how to make the next one on-brand.
-      const advice = r.status === "fulfilled" ? brandAdviceFrom(r.value.data) : null;
-      if (advice && i === 0) {
-        toast({ title: "Generated without brand references", description: advice });
-      }
       if (r.status === "fulfilled" && !r.value.error && r.value.data?.image_url) {
         let dataUrl = r.value.data.image_url;
         let referencePath = r.value.data.reference_path;
@@ -866,7 +868,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         // them together; first variant is pre-selected for the SchedulePost
         // path that picks one set to publish.
         if (clientId && variantSlides.length === slides) {
-          const { error: insertErr } = await supabase.from("post_iterations").insert({
+          const { error: insertErr } = await sendQuietly(() => supabase.from("post_iterations").insert({
             client_id: clientId,
             platform: post.platform || null,
             post_copy: postCopyOf(post) || null,
@@ -877,11 +879,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
             variant_group_id: groupId,
             variant_angle: variantAngle.instruction || null,
             is_selected: v === 0,
-          } as any);
-          if (insertErr) {
-            console.error("[CreatePostDesignButton] carousel variant persist failed:", insertErr);
-            sonnerToast.error(`Failed to save carousel variant ${v + 1}: ${insertErr.message}`);
-          }
+          } as any), { again: writeResendable });
+          if (insertErr) console.warn("[CreatePostDesignButton] carousel variant not saved yet:", insertErr);
         }
 
         if (v === 0 && variantSlides.length === slides && onImagesGenerated) {
@@ -896,7 +895,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
         );
       }
     } catch (err: any) {
-      toast({ title: "Generation failed", description: err.message, variant: "destructive" });
+      console.warn("[CreatePostDesignButton] carousel run did not finish:", err?.message ?? err);
+      setGenerationError("not_made");
     } finally {
       generation.completeGeneration(postKey);
       setLoading(false);
@@ -937,7 +937,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
       onImagesGenerated?.([]);
       sonnerToast.success("The designs were saved to this post.");
     } else {
-      setGenerationError(backgroundRun.status === "cancelled" ? "The design run was cancelled." : "The design run could not be completed. Run it again.");
+      setGenerationError(backgroundRun.status === "cancelled" ? CANCELLED : "not_made");
       setVariantUrls(new Array(Math.max(1, backgroundRun.total)).fill("FAILED"));
     }
   }, [backgroundRun?.status]);
@@ -1013,7 +1013,8 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
               </div>
             )}
 
-            {generationError && <p role="alert" className="text-destructive">{generationError}</p>}
+            {/* What the run came to, as a fact; the reason is in the console for the team. */}
+            {generationError && <p role="status" className="t-secondary">{generationError === CANCELLED ? "The run was stopped. Nothing was saved to the post." : "No design came out of this run, and nothing was saved to the post."}</p>}
             {loading && (
               <GenerationStages
                 stages={runStages}
@@ -1068,7 +1069,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                       {url === "FAILED" && (
                         <div className="absolute inset-0">
                           {failedPreviews[i] && <img src={failedPreviews[i]} alt={`Rejected variant ${i + 1}, not available for use`} className="w-full h-full object-contain opacity-60" />}
-                          <span className="absolute bottom-0 inset-x-0 bg-black/90 text-white t-label p-2">{failedPreviews[i] ? "Rejected by quality review" : "Could not be made"}</span>
+                          <span className="absolute bottom-0 inset-x-0 bg-black/90 text-white t-label p-2">{failedPreviews[i] ? "Left out by the brand check" : "Not made"}</span>
                         </div>
                       )}
                       {typeof url === "string" && url !== "FAILED" && (
@@ -1221,6 +1222,7 @@ export function CreatePostDesignButton({ post, clientContext, brandIdentity, des
                       Use {favoriteIdxs.size} favorite{favoriteIdxs.size === 1 ? "" : "s"}
                     </Button>
                   )}
+                  {favoritesNotSaved && <span role="status" className="t-secondary self-center">The favorites are not saved yet.</span>}
                   <Button variant="outline" size="sm" onClick={anotherTake}>
                     <Paintbrush className="h-4 w-4 mr-1" /> Another take
                   </Button>

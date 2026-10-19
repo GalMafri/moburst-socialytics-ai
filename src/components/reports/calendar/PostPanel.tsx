@@ -10,14 +10,13 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Archive, Check, Download, Expand, Loader2, Settings2, Sparkles, Star, ThumbsDown } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Archive, Check, Download, Expand, Loader2, Sparkles, Star, ThumbsDown } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { useDesignRequestForPost, useDesignRequests, useFilmedReasonForPost } from "./DesignRequestsContext";
 import { PostDesign } from "./PostDesign";
 import { CalendarPostActions } from "@/components/calendar/CalendarPostActions";
-import { createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback, uploadFilmedClip, type ShotBrief } from "@/lib/designRequests";
+import { ClipNotAccepted, createDesigns, designVersions, isDesignOption, isPreparing, putDesignInUse, sendDesignFeedback, uploadFilmedClip, type ShotBrief } from "@/lib/designRequests";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -27,7 +26,8 @@ import { CopyEditor } from "./CopyEditor";
 import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
 import { useGenerationForPost } from "@/components/reports/calendar/GenerationContext";
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
-import { SchedulePostModal } from "@/components/reports/SchedulePostModal";
+import { SchedulePostModal, scheduledFor, useScheduledPosts } from "@/components/reports/SchedulePostModal";
+import { formatDateTime } from "@/lib/display";
 import type { ClientContext } from "@/lib/clientContext";
 import { isTextOnlyFormat, isVideoFormat } from "@/lib/platform";
 import { useEffect, useRef, useState } from "react";
@@ -95,8 +95,8 @@ export function PostPanel({
   const preparingDesigns = isPreparing(designRequest, isMoburstStaff);
   const [startingDesigns, setStartingDesigns] = useState(false);
   const [usingId, setUsingId] = useState<string | null>(null);
-  // Whether this client's design settings are confirmed decides who sees what:
-  // staff get a way to confirm them, clients only ever see a ready feature.
+  // Designs are offered once the client's design settings exist: the
+  // lifecycle works them out on its own (decision 2), so nobody confirms them.
   const { data: designSettings, isLoading: designSettingsLoading } = useQuery({
     queryKey: ["design-settings", clientId],
     enabled: !!clientId && open,
@@ -107,17 +107,9 @@ export function PostPanel({
     },
   });
   const designsReady = !!designSettings?.confirmed_at;
-  // Staff see when a client's social accounts are not connected: without them
-  // there are no posts or videos of its own for designs to learn from.
-  const { data: accountsConnected } = useQuery({
-    queryKey: ["client-accounts-connected", clientId],
-    enabled: !!clientId && open && isMoburstStaff,
-    queryFn: async () => {
-      const { count, error } = await supabase.from("sprout_profiles").select("id", { count: "exact", head: true }).eq("client_id", clientId).eq("is_active", true);
-      if (error) throw error;
-      return (count ?? 0) > 0;
-    },
-  });
+  // The post's state in Sprout: scheduled for a time, or not scheduled yet.
+  const { data: scheduledRows } = useScheduledPosts(clientId, open && !isClient);
+  const scheduled = scheduledFor(scheduledRows, sourcePost);
   // A filmed post's video can instead be made in the look of the client's
   // posts; once chosen, making it again follows the same route.
   // The shot brief for a filmed post: only Moburst staff and admins can read it.
@@ -137,59 +129,58 @@ export function PostPanel({
     if (!clientId || !post) return;
     setStartingDesigns(true);
     try {
-      const result = await createDesigns({ clientId, reportId, post, route: route ?? (filmedReason ? "posts" : undefined) });
-      if (result.notSetUp) {
-        toast.error("Design settings are not confirmed for this client yet.");
-        return;
-      }
-      if (result.needsFilming) {
-        designRequests?.refresh();
-        return;
-      }
+      // A client whose settings are still being worked out gets its design once they are.
+      await createDesigns({ clientId, reportId, post, route: route ?? (filmedReason ? "posts" : undefined) });
       designRequests?.refresh();
     } catch {
-      // Nothing is shown: the panel shows a design being prepared once one is,
-      // and the automatic designs (on for every client by default) make the
-      // design of a post that still has none.
+      // Nothing is shown: the panel shows a design being prepared once one is.
       designRequests?.refresh();
     } finally {
       setStartingDesigns(false);
     }
   };
   const [uploadingClip, setUploadingClip] = useState(false);
+  /** A clip that has not gone up yet: it stays selected, so sending it again never means choosing it again. */
+  const [pendingClip, setPendingClip] = useState<File | null>(null);
+  const [clipNote, setClipNote] = useState<string | null>(null);
   const uploadClip = async (file: File) => {
     if (!clientId || !post) return;
     setUploadingClip(true);
+    setClipNote(null);
     try {
       await uploadFilmedClip({ clientId, reportId, post, file });
+      setPendingClip(null);
       designRequests?.refresh();
       toast.success("Clip uploaded", { description: "The hook and your logo are being added." });
     } catch (e) {
-      toast.error("Could not use the clip", { description: e instanceof Error ? e.message : "Try again." });
+      if (e instanceof ClipNotAccepted) setClipNote(e.message);
+      else setPendingClip(file);
     } finally {
       setUploadingClip(false);
     }
   };
+  // Sent again quietly when they do not get through; the designs then show what the server has.
   const applyDesign = async (iterationId: string) => {
     setUsingId(iterationId);
     try {
       await putDesignInUse(iterationId);
-      refreshMedia();
       toast.success("In use for this post");
-    } catch (e) {
-      toast.error("Could not use this design", { description: e instanceof Error ? e.message : "Try again." });
+    } catch {
+      // The design shown in use is the one the server has.
     } finally {
+      refreshMedia();
       setUsingId(null);
     }
   };
   const designFeedback = async (iterationId: string, verdict: "rejected" | "deleted", reason?: string, note?: string, makeNew?: boolean) => {
     try {
       const { request } = await sendDesignFeedback({ iterationId, verdict, reason, note, makeNew });
+      toast.success(verdict === "deleted" ? "Deleted" : request ? "Thanks. A new design is being made with your feedback." : "Thanks. The next designs will take it into account.");
+    } catch {
+      // The post's designs show what the server has.
+    } finally {
       refreshMedia();
       designRequests?.refresh();
-      toast.success(verdict === "deleted" ? "Deleted" : request ? "Thanks. A new design is being made with your feedback." : "Thanks. The next designs will take it into account.");
-    } catch (e) {
-      toast.error(verdict === "deleted" ? "Could not delete it" : "Could not send that", { description: e instanceof Error ? e.message : "Try again." });
     }
   };
   // Artwork the server completed while nobody was watching still needs its
@@ -303,9 +294,11 @@ export function PostPanel({
 
             {/* Design tab */}
             <TabsContent value="design" className="mt-4 space-y-4">
-              {isMoburstStaff && accountsConnected === false && (
-                <div className="glass-inner p-4 border border-[#f5b14c]/30">
-                  <p className="t-body">This client's social accounts aren't connected in Sprout, so its designs and videos have none of its own posts to learn from yet. Connect them in Client setup.</p>
+              {clipNote && <p role="status" className="t-secondary">{clipNote}</p>}
+              {pendingClip && !uploadingClip && (
+                <div className="glass-inner p-3 flex items-center justify-between gap-3" role="status">
+                  <p className="t-secondary min-w-0 truncate">{pendingClip.name} is not uploaded yet.</p>
+                  <Button size="sm" variant="outline" className="shrink-0" onClick={() => void uploadClip(pendingClip)}>Upload</Button>
                 </div>
               )}
               {plannedVideo && !designsReady && (
@@ -388,7 +381,7 @@ export function PostPanel({
                           ? "Click a design to see it at full size."
                           : designRun?.status === "running"
                             ? "The run continues while this panel is closed. Open Design to follow it."
-                            : isMoburstStaff ? "Generate brand-aligned variants to get started." : "The design for this post will appear here."}
+                            : "The design for this post will appear here."}
                       </p>
                     </div>
                     {!designSettingsLoading && isMoburstStaff && <CreatePostDesignButton
@@ -399,14 +392,6 @@ export function PostPanel({
                     />}
                   </div>
 
-                  {!designSettingsLoading && isMoburstStaff && clientId && (
-                    <div className="glass-inner p-3 flex items-center justify-between gap-3 flex-wrap">
-                      <p className="t-secondary min-w-0">Confirm this client's design settings once to offer designs here, for your team and the client.</p>
-                      <Button asChild size="sm" variant="outline" className="shrink-0">
-                        <Link to={`/clients/${clientId}/setup?tab=designs`}><Settings2 className="h-3.5 w-3.5 mr-1.5" />Design settings</Link>
-                      </Button>
-                    </div>
-                  )}
 
                   {imageTiles.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -490,13 +475,14 @@ export function PostPanel({
             {/* Schedule tab — hidden for clients */}
             {!isClient && (
               <TabsContent value="schedule" className="mt-4 space-y-3">
-                <p className="t-secondary">
-                  Schedule this post to your Sprout profile. Make sure design and copy are
-                  finalized first.
+                <p className="t-body" role="status">
+                  {scheduled?.scheduled_time
+                    ? `Scheduled for ${formatDateTime(scheduled.scheduled_time, { timeZone: clientTimezone })}.`
+                    : "Not scheduled yet."}
                 </p>
                 {clientId ? (
                   <>
-                    <Button onClick={() => setScheduleOpen(true)}>Open scheduler</Button>
+                    <Button onClick={() => setScheduleOpen(true)}>{scheduled ? "Open scheduler" : "Schedule to Sprout"}</Button>
                     <SchedulePostModal
                       open={scheduleOpen}
                       onOpenChange={setScheduleOpen}

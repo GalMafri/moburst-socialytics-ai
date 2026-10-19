@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Plus, Sparkles, Loader2, Copy, Check, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { PlatformBadge } from "@/lib/platform-config";
 import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
@@ -58,6 +59,8 @@ export function CreateAdHocPost({
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedPost, setGeneratedPost] = useState<any>(null);
   const [copied, setCopied] = useState(false);
+  /** A request that has not come back with a post; the platform and topic stay as they are. */
+  const [notMade, setNotMade] = useState(false);
 
   const resetForm = () => {
     setPlatform("");
@@ -73,13 +76,13 @@ export function CreateAdHocPost({
   };
 
   const handleGenerate = async () => {
-    if (!platform || !topic.trim()) {
-      toast.error("Please select a platform and enter a topic");
-      return;
-    }
+    // The button waits for both.
+    if (!platform || !topic.trim()) return;
     setIsGenerating(true);
+    setNotMade(false);
     try {
-      const { data, error } = await supabase.functions.invoke(
+      // A new post each time, so it is sent again only when it never reached the server.
+      const { data, error } = await sendQuietly(() => supabase.functions.invoke(
         "generate-ad-hoc-post",
         {
           body: {
@@ -90,8 +93,11 @@ export function CreateAdHocPost({
               creativeType === "ai_decides" ? undefined : creativeType,
           },
         }
-      );
-      if (error) throw error;
+      ));
+      if (error || !data?.post) {
+        setNotMade(true);
+        return;
+      }
       if (data?.post) {
         setGeneratedPost(data.post);
         // Save to post_iterations
@@ -100,7 +106,7 @@ export function CreateAdHocPost({
           : typeof data.post.hashtags === "string"
             ? data.post.hashtags.split(/[\s,]+/).filter(Boolean)
             : null;
-        await supabase.from("post_iterations").insert({
+        await sendQuietly(() => supabase.from("post_iterations").insert({
           client_id: clientId,
           version: 1,
           platform: data.post.platform,
@@ -111,12 +117,10 @@ export function CreateAdHocPost({
           visual_direction: data.post.visual_direction,
           format: data.post.format,
           source: "ad_hoc",
-        });
-        toast.success("Post generated!");
+        }), { again: writeResendable });
+        toast.success("Post written");
         onPostCreated?.(data.post);
       }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to generate post");
     } finally {
       setIsGenerating(false);
     }
@@ -230,6 +234,7 @@ export function CreateAdHocPost({
                   </>
                 )}
               </Button>
+              {notMade && <p role="status" className="t-secondary">No post yet. The platform and topic are kept here.</p>}
             </>
           )}
 

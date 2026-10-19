@@ -1,25 +1,23 @@
 import { competitiveRangeError } from "../_shared/reports/competitiveRange.ts";
 // supabase/functions/run-report/index.ts
 //
-// Starts a report run, or starts a failed one again.
+// A person asks for a report for a period. Every run the app starts by hand
+// comes through here: the monthly page and the competitive page.
 //
-// Every run in the app comes through here — the monthly page, the
-// competitive page, and the Retry control on any list — so there is one
-// place that decides what n8n receives. Before this, three copies of the
-// payload existed and had already drifted apart.
+// The run itself goes through the scheduled path (run-scheduled-jobs,
+// dispatch.ts): this queues a manual dispatch job with the kind and period,
+// and the worker makes the report, sends the workflow request, watches it,
+// and runs it again quietly when it does not finish, exactly as it does for
+// a schedule. Nothing here sends a workflow request, so a request that is
+// sent twice, or a page that is reloaded, never starts a second run: an open
+// request or a running report for the client answers it.
 //
-// A retry reuses the failed report's own row rather than making a new one:
-// the row holds nothing but an error, n8n writes its result back to that
-// report_id, and the run keeps the place it already has in the client's
-// history.
+// A report id (an older screen's "Run now" on a run that did not finish)
+// asks for that report's kind and period again, the same way.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
-import { buildCompetitivePayload, buildSocialPayload, isStuckRun, STUCK_AFTER_MINUTES, type ReportRange } from "../_shared/reports/payloads.ts";
-import { checkClientLandscape, isAppCreatedLandscape, LANDSCAPE_MISSING, recordTrackingCheck, RIVALIQ_BUSY, RIVALIQ_UNAVAILABLE } from "../_shared/competitive/landscapeCheck.ts";
-import { rivalIqFetch } from "../_shared/competitive/rivaliqFetch.ts";
-import { isReviewReadyHandle } from "../_shared/competitive/extractSocialHandles.ts";
-import { missingProfileRepairs } from "../_shared/competitive/profileRepairs.ts";
+import { type ReportRange, STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,11 +25,11 @@ const corsHeaders = {
 };
 
 type Kind = "social" | "competitive";
+const OPEN = ["queued", "running", "waiting", "blocked"];
+const RUNNABLE_SETS = ["confirmed", "analyzing", "complete", "failed"];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  let closeStartedRun: ((message: string) => Promise<void>) | undefined;
-  const attemptStartedAt = new Date().toISOString();
   try {
     const body = await req.json();
     const retryId: string | undefined = body.report_id || undefined;
@@ -42,101 +40,25 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    // Staff, before any lookup. The report is resolved with the service-role
-    // key, so without this an anonymous caller could tell a real report id
-    // from an invented one by whether it got a 404. The client-scoped check
-    // follows below, once the row says which client this is.
+    // Staff, before any lookup: an anonymous caller must not tell a real
+    // report id from an invented one. The client-scoped check follows.
     await requireStaff(req);
 
-    // A retry names only the report; everything else comes from the row.
-    let existing: any = null;
-    let existingSetId: string | null = null;
     if (retryId) {
-      const social = await admin
-        .from("reports")
-        .select("id, client_id, status, created_at, date_range_start, date_range_end")
-        .eq("id", retryId)
-        .maybeSingle();
-      if (social.data) {
-        existing = social.data;
-        kind = "social";
-      } else {
-        const comp = await admin
-          .from("competitive_reports")
-          .select("id, client_id, status, created_at, set_id, date_range_start, date_range_end")
-          .eq("id", retryId)
-          .maybeSingle();
-        if (!comp.data) return json({ error: "That report no longer exists." }, 404);
-        existing = comp.data;
-        existingSetId = comp.data.set_id;
-        kind = "competitive";
-      }
-      clientId = existing.client_id;
-      if (!range.start) range = { start: existing.date_range_start || "", end: existing.date_range_end || "" };
+      const social = await admin.from("reports").select("id, client_id, date_range_start, date_range_end").eq("id", retryId).maybeSingle();
+      const row = social.data ?? (await admin.from("competitive_reports").select("id, client_id, date_range_start, date_range_end").eq("id", retryId).maybeSingle()).data;
+      if (!row) return json({ error: "That report no longer exists." }, 404);
+      kind = social.data ? "social" : "competitive";
+      clientId = row.client_id;
+      if (!range.start) range = { start: row.date_range_start || "", end: row.date_range_end || "" };
     }
-
     if (!clientId) return json({ error: "client_id is required" }, 400);
 
-    // Staff, with write access to this client. Checked before anything is
-    // read back to the caller.
     const caller = await requireStaff(req, { writeClientId: clientId });
-    const dispatchSecret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
-    if (!dispatchSecret) return json({ error: "Workflow authentication is not configured." }, 503);
 
-    if (existing && ["running", "failed"].includes(existing.status) && !(kind === "competitive" && existing.status === "failed")) {
-      const started = Date.parse(existing.created_at || "");
-      if (!Number.isFinite(started) || Date.now() - started < STUCK_AFTER_MINUTES * 60000) {
-        return json({ error: "Retry is unavailable until 90 minutes after this run started. The original workflow may still be working." }, 409);
-      }
-    }
-
-    // Navigation, refresh or an uncertain response must resume an existing run,
-    // not launch a second workflow. This also protects clients with an older UI.
-    const table = kind === "competitive" ? "competitive_reports" : "reports";
-    const { data: active, error: activeError } = await admin.from(table)
-      .select("id, created_at, date_range_start, date_range_end")
-      .eq("client_id", clientId).eq("status", "running")
-      .order("created_at", { ascending: false }).limit(1).maybeSingle();
-    if (activeError) throw activeError;
-    if (active && active.id !== retryId) {
-      return json({ report_id: active.id, kind, created_at: active.created_at,
-        range: { start: active.date_range_start, end: active.date_range_end }, resumed: true });
-    }
-
-    if (existing) {
-      const stuck = isStuckRun(existing.status, existing.created_at);
-      // A row that is genuinely mid-run must not be fired twice. A row that
-      // says "running" but stopped talking hours ago is the case Retry exists
-      // for, so only a recent one is refused.
-      if (existing.status === "running" && !stuck) {
-        return json({ error: "That run is still going. Wait for it to finish or fail." }, 409);
-      }
-      // Retrying reuses the row and clears report_data, so pointing it at a
-      // report that already finished would destroy the analysis. Only a run
-      // that failed, or one that died without saying so, may be run again;
-      // anything else needs a new report, which is a call without a
-      // report_id. Until now only the button's own canRetry() stopped this,
-      // which is no protection at all for a direct call.
-      if (existing.status !== "failed" && !stuck) {
-        return json(
-          {
-            error:
-              "That report has already finished, so it cannot be retried. Running it again would erase it. Start a new report for this client instead.",
-          },
-          409,
-        );
-      }
-    }
-
-    const { data: client, error: clientErr } = await admin.from("clients").select("*").eq("id", clientId).maybeSingle();
+    const { data: client, error: clientErr } = await admin.from("clients").select("id, name, archived_at").eq("id", clientId).maybeSingle();
     if (clientErr || !client) return json({ error: "Client not found" }, 404);
     if (client.archived_at) return json({ error: `${client.name} is archived.` }, 422);
-
-    const settingKey = kind === "competitive" ? "competitive_n8n_webhook_url" : "n8n_webhook_url";
-    const { data: setting } = await admin.from("app_settings").select("value").eq("key", settingKey).maybeSingle();
-    if (!setting?.value) {
-      return json({ error: `The ${kind === "competitive" ? "competitive" : "monthly"} workflow is not configured (app_settings.${settingKey}).` }, 500);
-    }
 
     // Default range: the last 30 days, matching what the run pages offer.
     if (kind === "competitive" && (!!range.start !== !!range.end)) return json({ error: "Choose both start and end dates." }, 400);
@@ -146,239 +68,79 @@ Deno.serve(async (req) => {
       const start = new Date(end.getTime() - 29 * 86400000);
       range = { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
     }
-
     if (kind === "competitive") {
       const rangeError = competitiveRangeError(range);
       if (rangeError) return json({ error: rangeError }, 400);
+      // The run reads the client's confirmed selection; tracking for it is
+      // the lifecycle's, and the dispatch waits for it when it is still starting.
+      const { data: set } = await admin.from("competitor_sets").select("id").eq("client_id", clientId).in("status", RUNNABLE_SETS)
+        .order("confirmed_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+      if (!set) return json({ error: `${client.name} has no confirmed competitors yet.` }, 422);
     }
 
-    if (!retryId) {
-      const { data: recentFailure, error: failureError } = await admin.from(table)
-        .select("id, status, created_at")
-        .eq("client_id", clientId).eq("status", "failed")
-        .eq("date_range_start", range.start).eq("date_range_end", range.end)
-        .order("created_at", { ascending: false }).limit(1).maybeSingle();
-      if (failureError) throw failureError;
-      if (recentFailure && Date.now() - Date.parse(recentFailure.created_at) < STUCK_AFTER_MINUTES * 60000) {
-        return json({report_id: recentFailure.id, kind, range, created_at: recentFailure.created_at, resumed: true});
-      }
+    // An open request, or a report running now, answers this one.
+    const existing = await openRequest(admin, clientId, kind);
+    if (existing) return json(existing);
+    const table = kind === "competitive" ? "competitive_reports" : "reports";
+    const { data: active } = await admin.from(table).select("id, created_at, date_range_start, date_range_end")
+      .eq("client_id", clientId).eq("status", "running").gt("created_at", new Date(Date.now() - STUCK_AFTER_MINUTES * 60000).toISOString())
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (active) {
+      return json({ report_id: active.id, kind, created_at: active.created_at, range: { start: active.date_range_start, end: active.date_range_end }, resumed: true });
     }
 
-    let reportId: string;
-    let payload: Record<string, unknown>;
-    /** Set moved to 'analyzing' by this call, so it can be released again. */
-    let startedSetId: string | null = null;
-    const rememberStartedRun = (id: string, setId?: string) => {
-      const table = kind === "competitive" ? "competitive_reports" : "reports";
-      closeStartedRun = async (message) => {
-        const { error } = await admin.from(table)
-          .update({ status: "failed", report_data: { error: message } })
-          .eq("id", id).eq("status", "running").eq("created_at", attemptStartedAt);
-        if (error) console.error("Could not record run failure:", error.message);
-        if (setId) await admin.from("competitor_sets").update({ status: "failed" }).eq("id", setId).eq("status", "analyzing");
-      };
-    };
-
-    if (kind === "competitive") {
-      // The set the failed run used, or the client's current confirmed one.
-      let set: any = null;
-      if (existingSetId) {
-        const { data } = await admin.from("competitor_sets").select("*").eq("id", existingSetId).maybeSingle();
-        set = data;
-      }
-      if (!set) {
-        const { data } = await admin
-          .from("competitor_sets")
-          .select("*")
-          .eq("client_id", clientId)
-          .in("status", ["confirmed", "analyzing", "complete", "failed"])
-          .order("confirmed_at", { ascending: false, nullsFirst: false })
-          .limit(1)
-          .maybeSingle();
-        set = data;
-      }
-      if (!set) return json({ error: `${client.name} has no confirmed competitor set to analyse.` }, 422);
-
-      // Older sets may have been confirmed before profile verification was
-      // required. Refuse those here as well as in the UI, before creating a
-      // report row or dispatching the workflow. This also protects callers
-      // using an older cached frontend or invoking the function directly.
-      const { data: selected, error: selectedErr } = await admin
-        .from("competitors")
-        .select("id, name, website_url")
-        .eq("set_id", set.id)
-        .eq("is_selected", true);
-      if (selectedErr) throw new Error(`Could not verify selected competitors: ${selectedErr.message}`);
-      if (!selected || selected.length !== 3) {
-        return json({ error: "The competitor set must contain exactly three selected competitors before analysis." }, 422);
-      }
-      const missingProfiles: string[] = [];
-      const unreviewedProfiles: string[] = [];
-      const reviewedCompanies: any[] = [];
-      for (const competitor of selected) {
-        const { data: activeHandles, error: handlesErr } = await admin
-          .from("competitor_handles")
-          .select("source, detection_confidence, is_active, platform, handle")
-          .eq("competitor_id", competitor.id)
-          .eq("is_active", true);
-        if (handlesErr) throw new Error(`Could not verify profiles for ${competitor.name}: ${handlesErr.message}`);
-        if (!activeHandles?.length) missingProfiles.push(competitor.name);
-        else if (!activeHandles.some(isReviewReadyHandle)) unreviewedProfiles.push(competitor.name);
-        reviewedCompanies.push({ ...competitor, handles: activeHandles || [] });
-      }
-      if (missingProfiles.length || unreviewedProfiles.length) {
-        const reasons = [
-          missingProfiles.length ? `no active profiles for ${missingProfiles.join(", ")}` : "",
-          unreviewedProfiles.length
-            ? `only low-confidence automatic profiles for ${unreviewedProfiles.join(", ")}`
-            : "",
-        ].filter(Boolean).join("; ");
-        return json({
-          error: `Deep analysis is paused: ${reasons}. Reopen the set, verify or replace those profiles, and confirm it again.`,
-        }, 422);
-      }
-
-      // The analysis reads a RivalIQ landscape, not the competitor list in
-      // the app. A client with no landscape used to spend a whole run to be
-      // told so by a JavaScript error inside the workflow. The check is the
-      // shared one (_shared/competitive/landscapeCheck.ts), so a scheduled
-      // run and a retry get exactly the protection the run page gets.
-      const rivaliqKey = Deno.env.get("RIVALIQ_API_KEY");
-      if (!rivaliqKey) return json({ error: "RivalIQ is not configured. No report was started." }, 503);
-      const redact = (text: string) => text.replaceAll(rivaliqKey, "[redacted]").replaceAll(encodeURIComponent(rivaliqKey), "[redacted]");
-      const tracking = await checkClientLandscape(rivaliqKey, client, set.rivaliq_landscape_id);
-      // The Competitors screen shows this instead of assuming a linked set is tracked.
-      await recordTrackingCheck(admin, set.id, set.rivaliq_landscape_id, tracking);
-      if (!tracking.ok) {
-        if (tracking.code === RIVALIQ_BUSY) {
-          return json({ error: "RivalIQ cannot accept a new request yet. No report was started; please wait before trying again.", code: RIVALIQ_BUSY }, 429);
-        }
-        if (tracking.code === RIVALIQ_UNAVAILABLE) {
-          return json({ error: tracking.status ? `RivalIQ connection check failed (HTTP ${tracking.status}). No report was started.` : "RivalIQ connection could not be verified. No report was started." }, 502);
-        }
-        return json({ error: tracking.code === LANDSCAPE_MISSING ? `${tracking.message} No report was started.` : tracking.message, code: tracking.code }, 422);
-      }
-
-      // Reviewed profiles RivalIQ is missing are filled in, but only on a
-      // landscape this app created. A strategy team's shared landscape (the
-      // "TIER 2 FIRMS" kind) is theirs: it is read, and its companies are
-      // never edited from here. The selection is still checked against it.
-      try {
-        const wantedId = tracking.summary.id;
-        const repairs = missingProfileRepairs(reviewedCompanies, (tracking.landscape.companies || []) as any[]);
-        let ours = false;
-        if (repairs.length) {
-          const { data: setupJobs, error: setupError } = await admin
-            .from("rivaliq_setup_jobs")
-            .select("landscape_id, plan")
-            .eq("landscape_id", wantedId);
-          if (setupError) throw new Error(`Could not check who owns the tracked landscape: ${setupError.message}`);
-          ours = isAppCreatedLandscape(tracking.landscape, setupJobs || []);
-          if (!ours) console.log(`[run-report] ${client.name}: ${repairs.length} profile update(s) skipped on landscape ${wantedId}, which this app did not create`);
-        }
-        for (const repair of ours ? repairs : []) {
-          const updated = await rivalIqFetch(`https://api.rivaliq.com/v3/landscapes/${encodeURIComponent(wantedId)}/companies/${encodeURIComponent(String(repair.companyId))}?apiKey=${encodeURIComponent(rivaliqKey)}`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(repair.patch), signal: AbortSignal.timeout(25000),
-          });
-          if (!updated.ok) return json({ error: `${repair.name}'s reviewed profiles could not be connected to RivalIQ (HTTP ${updated.status}). No report was started. Review tracking before trying again.` }, 422);
-          const company = (await updated.json()).company;
-          if (Object.keys(repair.patch).some(field => !company?.[field]?.handle && !company?.[field]?.nativeId && !company?.[field]?.url)) {
-            return json({ error: `${repair.name}'s profile update is not confirmed yet. No report was started. Check tracking again after RivalIQ finishes collecting it.` }, 422);
-          }
-        }
-      } catch (error) {
-        return json({ error: error instanceof Error ? redact(error.message) : 'Could not verify reviewed competitor profiles. No report was started.' }, 422);
-      }
-
-      if (existing) {
-        reportId = existing.id;
-        const { data: claimed, error } = await admin
-          .from("competitive_reports")
-          // The clock restarts with the run: the row now IS this attempt, and
-          // a stale created_at would leave a fresh run reading as stuck.
-          .update({ status: "running", report_data: {}, gamma_url: null, duration_minutes: null, set_id: set.id, date_range_start: range.start, date_range_end: range.end, created_at: attemptStartedAt })
-          .eq("id", reportId).eq("created_at", existing.created_at).eq("status", existing.status)
-          .select("id").maybeSingle();
-        if (error) throw new Error(error.message);
-        if (!claimed) return json({ error: "This report changed while you were reviewing it. Refresh before trying again." }, 409);
-      } else {
-        const { data, error } = await admin
-          .from("competitive_reports")
-          // created_by defaults to auth.uid(), which is NULL under the
-          // service role, so the author is set explicitly. The browser-side
-          // insert this path replaced got one for free.
-          .insert({ client_id: clientId, set_id: set.id, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: caller.userId, created_at: attemptStartedAt })
-          .select("id")
-          .single();
-        if (error) throw new Error(error.message);
-        reportId = data.id;
-      }
-      // The set follows its run, so a retry takes it out of 'failed'.
-      rememberStartedRun(reportId, set.id);
-      await admin.from("competitor_sets").update({ status: "analyzing" }).eq("id", set.id).in("status", ["confirmed", "complete", "failed"]);
-      startedSetId = set.id;
-      payload = await buildCompetitivePayload({ supabase: admin, client, reportId, set, range, attemptStartedAt });
-    } else {
-      if (existing) {
-        reportId = existing.id;
-        const { data: claimed, error } = await admin
-          .from("reports")
-          // Same here: the row is this attempt, so its clock starts now.
-          .update({ status: "running", report_data: {}, gamma_url: null, duration_minutes: null, date_range_start: range.start, date_range_end: range.end, created_at: attemptStartedAt })
-          .eq("id", reportId).eq("created_at", existing.created_at).eq("status", existing.status)
-          .select("id").maybeSingle();
-        if (error) throw new Error(error.message);
-        if (!claimed) return json({ error: "This report changed while you were reviewing it. Refresh before trying again." }, 409);
-      } else {
-        const { data, error } = await admin
-          .from("reports")
-          // Same here: under the service role auth.uid() is NULL.
-          .insert({ client_id: clientId, status: "running", report_data: {}, date_range_start: range.start, date_range_end: range.end, created_by: caller.userId, created_at: attemptStartedAt })
-          .select("id")
-          .single();
-        if (error) throw new Error(error.message);
-        reportId = data.id;
-      }
-      rememberStartedRun(reportId);
-      payload = await buildSocialPayload({ supabase: admin, client, reportId, range, skipTrends });
+    const requestedAt = new Date().toISOString();
+    const { data: job, error: jobError } = await admin.from("scheduled_jobs").insert({
+      kind: "dispatch",
+      client_id: clientId,
+      dedupe_key: `run:${kind}:${clientId}:${range.start}:${range.end}:${Date.now()}`,
+      priority: 15,
+      available_at: requestedAt,
+      payload: { run: "manual", kind, range, requested_by: caller.userId ?? null, requested_at: requestedAt, ...(skipTrends ? { skip_trends: true } : {}) },
+      result: { range },
+    }).select("id, created_at").single();
+    if (jobError) {
+      // Two requests at once: the one-open-run index lets one in, and that one answers both.
+      const raced = jobError.code === "23505" ? await openRequest(admin, clientId, kind) : null;
+      if (raced) return json(raced);
+      throw new Error(jobError.message);
     }
 
-    const resp = await fetch(setting.value, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Socialytics-Secret": dispatchSecret },
-      body: JSON.stringify(payload),
-    });
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => "");
-      // The row was set running; a webhook that never accepted the run must
-      // not leave it spinning for ever.
-      const table = kind === "competitive" ? "competitive_reports" : "reports";
-      await admin
-        .from(table)
-        .update({ status: "failed", report_data: { error: `The workflow did not accept the run (${resp.status}).` } })
-        .eq("id", reportId).eq("status", "running").eq("created_at", attemptStartedAt);
-      // The set was moved to 'analyzing' in anticipation of a run that never
-      // started. Only an n8n callback ever moves it out of that state, and
-      // none is coming, so it would sit there for ever — and a set stuck on
-      // 'analyzing' is skipped by the scheduler, silently dropping the client.
-      if (kind === "competitive" && startedSetId) {
-        await admin.from("competitor_sets").update({ status: "failed" }).eq("id", startedSetId).eq("status", "analyzing");
-      }
-      return json({ error: `The workflow returned ${resp.status}${text ? `. ${text.slice(0, 200)}` : "."}` }, 502);
-    }
-
-    return json({ report_id: reportId, kind, range, created_at: attemptStartedAt, retried: !!existing });
+    kickWorker();
+    return json({ job_id: job.id, kind, range, requested_at: job.created_at, queued: true });
   } catch (err) {
     if (err instanceof AuthzError) return json({ error: err.message }, err.status);
     const msg = err instanceof Error ? err.message : String(err);
-    if (closeStartedRun) {
-      try { await closeStartedRun(`Dispatch could not be confirmed: ${msg}. Check the workflow before retrying.`); }
-      catch (cleanupError) { console.error("Failed to close run:", cleanupError); }
-    }
     console.error("[run-report]", msg);
     return json({ error: msg }, 500);
   }
 });
+
+// deno-lint-ignore no-explicit-any
+async function openRequest(admin: any, clientId: string, kind: Kind) {
+  const { data } = await admin.from("scheduled_jobs").select("id, created_at, report_id, payload")
+    .eq("kind", "dispatch").eq("client_id", clientId).is("schedule_id", null)
+    .eq("payload->>run", "manual").eq("payload->>kind", kind).in("status", OPEN)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (!data) return null;
+  return { job_id: data.id, kind, range: data.payload?.range ?? null, requested_at: data.created_at, report_id: data.report_id ?? null, queued: true, resumed: true };
+}
+
+/** The worker runs every minute; asking it now starts the run in seconds. Best effort. */
+function kickWorker() {
+  const url = Deno.env.get("SUPABASE_URL");
+  const secret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
+  if (!url || !secret) return;
+  const tick = fetch(`${url}/functions/v1/run-scheduled-jobs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret },
+    body: "{}",
+    signal: AbortSignal.timeout(55_000),
+  }).then((r) => r.body?.cancel()).catch((e) => console.warn("[run-report] the worker will pick the run up on its next minute:", e instanceof Error ? e.message : e));
+  // deno-lint-ignore no-explicit-any
+  const runtime = (globalThis as any).EdgeRuntime;
+  if (runtime?.waitUntil) runtime.waitUntil(tick);
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
