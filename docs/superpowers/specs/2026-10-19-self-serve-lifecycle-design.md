@@ -129,7 +129,7 @@ The API demo becomes a caller of this same lifecycle, so there is one onboarding
 
 ### 4. One definition per number
 
-- **Engagement rate.** Comparisons with competitors use one formula and one source for every company, the client included: RivalIQ's cross-channel rate per post. The client's own performance from Sprout keeps its per-impression rate under its own name. Two names, one definition each, one shared helper.
+- **Engagement rate (Lital's decision, 19 Oct: per impression).** Every screen uses one definition: engagements divided by impressions (views on video platforms). Comparisons read every company, the client included, from RivalIQ; the client's own performance reads Sprout with the same definition. Where a source has no impressions for a platform, the screen shows nothing for it, never another formula. Per-follower rates leave the product. Proof on 19 Oct: Bader 0.12% against competitors from about 1.3% to 2.9%, where it showed 28.58% against 0.15%.
 - **Post counts** exclude ads and dark posts using Sprout's own fields (to be identified in the proof on Bader's 29 zero-impression posts).
 - **Labels match their fields:** posts analyzed is the real count, recommendations is the number of actions, the calendar count gets its own name.
 - **Top posts** show the number they are ranked by.
@@ -144,7 +144,7 @@ The API demo becomes a caller of this same lifecycle, so there is one onboarding
 - Every server error carries a plain message written for people and a code. Technical detail goes to the logs.
 - Captions are decoded when the report workflow stores them, and the stored reports are decoded once (all 281 rows, every client).
 - The Schedule tab stores a structured last result and shows "Report ran on 7 Oct", with a link.
-- Competitor handles store a display name, and every legacy handle guessed before 16 Sep is re-scored by the current scorer.
+- Competitor handles show a readable name (from the profile page or RivalIQ, else the competitor's own name with a link), never a raw id. Handles are trusted from exact sources (RivalIQ's record of a tracked company, the profile page itself) rather than from where a link sits on a page: the 19 Oct proof showed re-scoring by link position would demote two-thirds of the correct legacy handles.
 - Developer text on Settings is rewritten.
 
 ### 6. Paid work runs only when inputs change
