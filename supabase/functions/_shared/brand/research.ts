@@ -530,11 +530,18 @@ export function extractCssStructuredColors(cssText: string, debug: string[]): St
 
 export function extractImageUrls(html: string, baseUrl: string): { url: string; label: string; isSvg: boolean }[] {
   const results: { url: string; label: string; isSvg: boolean }[] = [];
-  const logoImgMatch = html.match(/<img[^>]*(?:class=["'][^"']*logo[^"']*["']|alt=["'][^"']*logo[^"']*["'])[^>]*src=["']([^"']+)["']/i)
-    || html.match(/<img[^>]*src=["']([^"']*logo[^"']+)["']/i);
+  // The organization's own record first: a page's "logo" image can be a press
+  // badge from an "as seen in" strip (Bader Law's was Bloomberg's, 19 Oct 2026).
+  const ld = schemaLogo(html);
+  if (ld) results.push({ url: resolveUrl(ld, baseUrl), label: "Logo from the site's schema.org data", isSvg: /\.svg/i.test(ld) });
+  const header = html.match(/<(?:header|nav)\b[\s\S]{0,20000}?<\/(?:header|nav)>/i)?.[0] ?? "";
+  const logoImgMatch = header.match(/<img[^>]*(?:class=["'][^"']*logo[^"']*["']|alt=["'][^"']*logo[^"']*["'])[^>]*src=["']([^"']+)["']/i)
+    || header.match(/<img[^>]*src=["']([^"']*logo[^"']+)["']/i)
+    || (ld ? null : html.match(/<img[^>]*(?:class=["'][^"']*logo[^"']*["']|alt=["'][^"']*logo[^"']*["'])[^>]*src=["']([^"']+)["']/i)
+      || html.match(/<img[^>]*src=["']([^"']*logo[^"']+)["']/i));
   if (logoImgMatch) {
     const url = resolveUrl(logoImgMatch[1], baseUrl);
-    results.push({ url, label: "Logo image", isSvg: /\.svg/i.test(url) });
+    if (!results.some((r) => r.url === url)) results.push({ url, label: "Logo image", isSvg: /\.svg/i.test(url) });
   }
   const appleTouchMatch = html.match(/<link[^>]*rel=["']apple-touch-icon["'][^>]*href=["']([^"']+)["']/i);
   if (appleTouchMatch) results.push({ url: resolveUrl(appleTouchMatch[1], baseUrl), label: "Apple touch icon", isSvg: false });
@@ -545,7 +552,20 @@ export function extractImageUrls(html: string, baseUrl: string): { url: string; 
   return results.slice(0, 5);
 }
 
-const RASTER_MIMES = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/bmp", "image/tiff"];
+/**
+ * The image formats the vision model accepts, told from the file's own first
+ * bytes: a server's content type can be missing or wrong (Bader Law's logo
+ * strip served AVIF with none, which went out labeled PNG and the model
+ * refused the whole read, 19 Oct 2026). Anything else is left out.
+ */
+export function visionImageType(bytes: Uint8Array): "image/png" | "image/jpeg" | "image/gif" | "image/webp" | null {
+  const at = (i: number) => bytes[i] ?? -1;
+  if (at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4e && at(3) === 0x47) return "image/png";
+  if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return "image/jpeg";
+  if (at(0) === 0x47 && at(1) === 0x49 && at(2) === 0x46) return "image/gif";
+  if (at(0) === 0x52 && at(1) === 0x49 && at(2) === 0x46 && at(3) === 0x46 && at(8) === 0x57 && at(9) === 0x45 && at(10) === 0x42 && at(11) === 0x50) return "image/webp";
+  return null;
+}
 
 async function fetchRasterImagesAsBase64(images: { url: string; label: string; isSvg: boolean }[], debug: string[], f: Fetch): Promise<{ dataUrl: string; label: string }[]> {
   const results: { dataUrl: string; label: string }[] = [];
@@ -561,31 +581,20 @@ async function fetchRasterImagesAsBase64(images: { url: string; label: string; i
         debug.push(`Image fetch failed (${resp.status}): ${img.label}`);
         continue;
       }
-      const contentType = (resp.headers.get("content-type") || "").toLowerCase();
-      if (contentType.includes("svg") || contentType.includes("xml")) {
-        debug.push(`Skipped SVG/XML content-type (${contentType}): ${img.label}`);
-        continue;
-      }
-      const mime = contentType.split(";")[0].trim();
-      const allowed = RASTER_MIMES.includes(mime);
-      if (!allowed && mime !== "") {
-        debug.push(`Skipped non-raster MIME (${mime}): ${img.label}`);
-        continue;
-      }
       const buffer = await resp.arrayBuffer();
       if (buffer.byteLength > 5_000_000 || buffer.byteLength < 100) {
         debug.push(`Image size out of range (${buffer.byteLength} bytes): ${img.label}`);
         continue;
       }
       const bytes = new Uint8Array(buffer);
-      const header = new TextDecoder().decode(bytes.slice(0, 200)).toLowerCase();
-      if (header.includes("<svg") || header.includes("<?xml") || header.includes("<!doctype svg")) {
-        debug.push(`Skipped file with SVG/XML content signature: ${img.label}`);
+      const mime = visionImageType(bytes);
+      if (!mime) {
+        debug.push(`Skipped an image in a format the model does not read: ${img.label}`);
         continue;
       }
       let binary = "";
       for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-      results.push({ dataUrl: `data:${allowed ? mime : "image/png"};base64,${btoa(binary)}`, label: img.label });
+      results.push({ dataUrl: `data:${mime};base64,${btoa(binary)}`, label: img.label });
       debug.push(`Fetched raster image (${(buffer.byteLength / 1024).toFixed(0)}KB): ${img.label}`);
     } catch (err) {
       debug.push(`Image fetch error: ${img.label}: ${err instanceof Error ? err.message : String(err)}`);
@@ -596,9 +605,12 @@ async function fetchRasterImagesAsBase64(images: { url: string; label: string; i
 
 export function resolveUrl(href: string, baseUrl: string): string {
   if (href.startsWith("//")) return "https:" + href;
-  if (href.startsWith("/")) return baseUrl + href;
   if (href.startsWith("http")) return href;
-  return baseUrl + "/" + href;
+  try {
+    return new URL(href, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
+  } catch {
+    return baseUrl.replace(/\/+$/, "") + "/" + href.replace(/^\/+/, "");
+  }
 }
 
 async function fetchExternalCss(html: string, baseUrl: string, f: Fetch): Promise<string> {
