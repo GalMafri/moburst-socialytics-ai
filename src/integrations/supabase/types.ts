@@ -1187,6 +1187,7 @@ export type Database = {
           rivaliq_landscape_id: string | null
           source: string
           status: string
+          tracked_since: string | null
           tracking_check: Json | null
           updated_at: string
         }
@@ -1202,6 +1203,7 @@ export type Database = {
           rivaliq_landscape_id?: string | null
           source?: string
           status?: string
+          tracked_since?: string | null
           tracking_check?: Json | null
           updated_at?: string
         }
@@ -1217,6 +1219,7 @@ export type Database = {
           rivaliq_landscape_id?: string | null
           source?: string
           status?: string
+          tracked_since?: string | null
           tracking_check?: Json | null
           updated_at?: string
         }
@@ -2446,6 +2449,7 @@ export type Database = {
       }
       scheduled_posts: {
         Row: {
+          calendar_post_key: string | null
           client_id: string | null
           created_at: string | null
           created_by: string | null
@@ -2460,6 +2464,7 @@ export type Database = {
           status: string | null
         }
         Insert: {
+          calendar_post_key?: string | null
           client_id?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -2474,6 +2479,7 @@ export type Database = {
           status?: string | null
         }
         Update: {
+          calendar_post_key?: string | null
           client_id?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -3013,6 +3019,20 @@ export type Database = {
       release_worker_lease: {
         Args: { p_holder: string; p_name: string }
         Returns: undefined
+      }
+      report_run_request: {
+        Args: { p_client: string; p_kind: string }
+        Returns: {
+          job_id: string
+          next_at: string
+          open: boolean
+          range_end: string
+          range_start: string
+          report_id: string
+          requested_at: string
+          runs: number
+          status: string
+        }[]
       }
       report_schedule_first_run: {
         Args: { p_frequency: string; p_from: string; p_run_day: number }
