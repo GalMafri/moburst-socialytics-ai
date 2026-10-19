@@ -615,7 +615,7 @@ export default function ReportView() {
 
           {/* ── COMPETITIVE ── */}
           <TabsContent value="competitive" className="space-y-6">
-            <Section id="field-compare" title="How the field compares" description="The latest competitive analysis for this client. Endorsed gaps feed the next report's calendar.">
+            <Section id="field-compare" title="How the field compares" description="The latest competitive analysis for this client. Endorsed gaps feed the weekly calendar plans.">
               <CompetitiveSnapshot clientId={report.client_id} takeaways={aiAnalysis?.competitive_takeaways} />
             </Section>
           </TabsContent>

@@ -45,7 +45,7 @@ export function WeekNav({ week, thisWeek, count, onGo }: { week: string; thisWee
       </Button>
       <h2 className="text-[17px] font-semibold tracking-[-0.3px] text-white px-1" aria-live="polite">{weekLabel(week)}</h2>
       {week !== thisWeek && <Button variant="ghost" size="sm" onClick={() => onGo(thisWeek)}>This week</Button>}
-      <span className="t-secondary ml-auto">{count} post{count === 1 ? "" : "s"} this week</span>
+      <span className="t-secondary ml-auto">{count} post{count === 1 ? "" : "s"}{week === thisWeek ? " this week" : ""}</span>
     </nav>
   );
 }

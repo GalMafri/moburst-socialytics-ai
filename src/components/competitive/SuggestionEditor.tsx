@@ -96,7 +96,7 @@ export function SuggestionEditor({ reportId, originalGap, shown, edited, onSave,
           <DialogHeader>
             <DialogTitle className="t-h3">Edit this suggested test</DialogTitle>
             <DialogDescription>
-              Change it by hand, or tell it what to change and rewrite it from the report's figures. The edited version is what the client sees, and what the next monthly report and content calendar work from.
+              Change it by hand, or tell it what to change and rewrite it from the report's figures. The edited version is what the client sees, and what the next monthly report and the weekly calendar plans work from.
             </DialogDescription>
           </DialogHeader>
 

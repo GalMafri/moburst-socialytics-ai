@@ -87,6 +87,12 @@ const DEFAULT_PILLARS: ContentPillar[] = [
   { name: "Team Culture", description: "" },
 ];
 
+/** How a learned writing preference's type reads to people (brand_voice_learnings.pattern_type). */
+const PATTERN_LABELS: Record<string, string> = {
+  tone: "Tone", length: "Length", emoji_usage: "Emoji", cta_style: "Calls to action", hashtag_preference: "Hashtags",
+  vocabulary: "Wording", structure: "Structure", topics: "Topics", format: "Format", other: "Other",
+};
+
 export default function ClientSetup() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -1133,7 +1139,7 @@ export default function ClientSetup() {
                         <div className="flex-1 space-y-1">
                           <div className="flex items-center gap-2">
                             <Badge variant="secondary" className="t-label">
-                              {learning.pattern_type}
+                              {PATTERN_LABELS[learning.pattern_type] ?? "Other"}
                             </Badge>
                             <span className="t-secondary">
                               {learning.times_confirmed > 1 ? `Confirmed ${learning.times_confirmed} times` : "Seen once"}
@@ -1201,7 +1207,7 @@ function ReportScheduleManager({ clientId }: { clientId: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const KINDS = [
-    { kind: "social", label: "Monthly social report", description: "Sprout performance, trends and the content calendar for the previous calendar month." },
+    { kind: "social", label: "Monthly social report", description: "Sprout performance and trends for the previous calendar month. Its findings feed the weekly calendar plans." },
     { kind: "competitive", label: "Monthly competitive analysis", description: "RivalIQ landscape pull for the previous calendar month. Needs a confirmed competitor set connected to RivalIQ tracking; until then it waits, and the social report goes ahead without it." },
   ] as const;
 

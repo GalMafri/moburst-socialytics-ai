@@ -8,7 +8,7 @@
  */
 
 import { useMemo } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -172,12 +172,6 @@ export default function ClientCalendar() {
             />
           )}
 
-          {inWeek.some((p) => p.report_id) && (
-            <p className="t-secondary">
-              Planned from{" "}
-              <Link className="underline underline-offset-2 hover:text-white" to={`/clients/${id}/reports/${inWeek.find((p) => p.report_id)!.report_id}`}>the monthly report</Link>.
-            </p>
-          )}
         </div>
       )}
     </AppLayout>

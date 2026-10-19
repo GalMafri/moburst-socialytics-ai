@@ -1,7 +1,8 @@
 /**
- * The posts a report planned now live in the Calendar tab. A report whose
- * posts are in the calendar points there; an older report, planned before the
- * calendar existed, keeps showing its own posts (passed as children).
+ * A report's posts live in the Calendar tab, planned a week at a time (Lital,
+ * 19 Oct 2026), so the report's Content ideas tab points there. A report from
+ * before the calendar existed, whose week was never imported, keeps showing
+ * its own posts (passed as children).
  */
 
 import type { ReactNode } from "react";
@@ -10,8 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { PlatformBadge } from "@/lib/platform-config";
-import { mondayOf, shortDate, todayIn, type CalendarPostRow } from "@/lib/calendarPosts";
+import { mondayOf, todayIn } from "@/lib/calendarPosts";
 
 /**
  * hasBoard: the report wrote its own week of posts (reports before 19 Oct
@@ -19,62 +19,32 @@ import { mondayOf, shortDate, todayIn, type CalendarPostRow } from "@/lib/calend
  * time from their findings, so the report links to it instead.
  */
 export function ReportCalendarLink({ clientId, reportId, hasBoard, children }: { clientId: string; reportId: string; hasBoard: boolean; children: ReactNode }) {
-  const { data: posts, isLoading } = useQuery({
+  const { data: imported, isLoading } = useQuery({
     queryKey: ["report-calendar-posts", reportId],
     queryFn: async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase.from("calendar_posts" as never) as any)
-        .select("id, post_date, posting_time, platform, format, copy")
-        .eq("report_id", reportId)
-        .order("post_date");
+      const { count, error } = await (supabase.from("calendar_posts" as never) as any)
+        .select("id", { count: "exact", head: true })
+        .eq("report_id", reportId);
       if (error) throw error;
-      return (data || []) as Pick<CalendarPostRow, "id" | "post_date" | "posting_time" | "platform" | "format" | "copy">[];
+      return count ?? 0;
     },
   });
   if (isLoading) return null;
-  if (!posts?.length && hasBoard) return <>{children}</>;
-  if (!posts?.length) {
-    return (
-      <div className="glass p-5 flex items-start justify-between gap-3 flex-wrap">
-        <div className="flex items-start gap-3 min-w-0">
-          <div className="shrink-0 rounded-full p-2 bg-[rgba(185,224,69,0.10)] text-[#b9e045]"><CalendarDays className="h-4 w-4" aria-hidden /></div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-white">Posts are planned a week at a time</p>
-            <p className="t-secondary">Each week's posts are written the Monday before, from the latest results, competitors and trends. They're in the Calendar, where each post's copy, design and schedule are managed.</p>
-          </div>
-        </div>
-        <Button asChild size="sm">
-          <Link to={`/clients/${clientId}/calendar?week=${mondayOf(todayIn("UTC"))}`}>Open the calendar<ArrowRight className="h-3.5 w-3.5 ml-1.5" /></Link>
-        </Button>
-      </div>
-    );
-  }
-
-  const week = mondayOf(posts[0].post_date);
+  // A report from before the calendar tab, whose week was never imported, keeps its own board.
+  if (!imported && hasBoard) return <>{children}</>;
   return (
-    <div className="glass p-5 space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="flex items-start gap-3 min-w-0">
-          <div className="shrink-0 rounded-full p-2 bg-[rgba(185,224,69,0.10)] text-[#b9e045]"><CalendarDays className="h-4 w-4" aria-hidden /></div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-white">{posts.length} post{posts.length === 1 ? "" : "s"} planned from this report</p>
-            <p className="t-secondary">They're in the Calendar, where each post's copy, design and schedule are managed.</p>
-          </div>
+    <div className="glass p-5 flex items-start justify-between gap-3 flex-wrap">
+      <div className="flex items-start gap-3 min-w-0">
+        <div className="shrink-0 rounded-full p-2 bg-[rgba(185,224,69,0.10)] text-[#b9e045]"><CalendarDays className="h-4 w-4" aria-hidden /></div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-white">Posts are planned a week at a time</p>
+          <p className="t-secondary">Each week's posts are written the Monday before, from the latest results, competitors and trends, including this report's findings. They're in the Calendar, where each post's copy, design and schedule are managed.</p>
         </div>
-        <Button asChild size="sm">
-          <Link to={`/clients/${clientId}/calendar?week=${week}`}>Open the calendar<ArrowRight className="h-3.5 w-3.5 ml-1.5" /></Link>
-        </Button>
       </div>
-      <ul className="divide-y divide-white/[0.06]">
-        {posts.map((p) => (
-          <li key={p.id} className="py-2.5 flex items-center gap-3 min-w-0">
-            <span className="t-label w-16 shrink-0 tabular-nums">{shortDate(p.post_date)}</span>
-            <PlatformBadge platform={p.platform} size="sm" />
-            {p.format && <span className="t-badge text-[#b1b7c1] shrink-0">{p.format}</span>}
-            <span className="t-body truncate min-w-0">{p.copy.split("\n")[0]}</span>
-          </li>
-        ))}
-      </ul>
+      <Button asChild size="sm">
+        <Link to={`/clients/${clientId}/calendar?week=${mondayOf(todayIn("UTC"))}`}>Open the calendar<ArrowRight className="h-3.5 w-3.5 ml-1.5" /></Link>
+      </Button>
     </div>
   );
 }

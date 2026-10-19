@@ -523,7 +523,7 @@ export default function CompetitiveReportView() {
       if (verdict === "down" && verdictFor(g.gap) !== "down") {
         toast({ title: "Suggestion hidden", description: `It will not be proposed again for ${clientName}. Restore it from "hidden suggestions" if you change your mind.` });
       } else if (verdict === "up" && verdictFor(g.gap) !== "up") {
-        toast({ title: "Marked to implement", description: "The next monthly report and its content calendar will address this gap." });
+        toast({ title: "Marked to implement", description: "The next monthly report and the weekly calendar plans will address this gap." });
       }
     } catch (e: any) {
       toast({ title: "Could not save feedback", description: e?.message || String(e), variant: "destructive" });
@@ -1029,7 +1029,7 @@ export default function CompetitiveReportView() {
             title={<><Lightbulb className="h-5 w-5" /> Suggested tests for {clientName}</>}
             description={
               <span data-print={isMoburstStaff ? "hide" : undefined}>
-                {isMoburstStaff ? "Proposed experiments; targets are goals to test. Implement sends a suggestion into the next monthly report and content calendar. Not for us hides it and stops it being proposed again. Edit changes it by hand or from your feedback, and what you change is remembered for this client's future suggestions." : "Proposed experiments based on observed posts. Targets are goals to test."}
+                {isMoburstStaff ? "Proposed experiments; targets are goals to test. Implement sends a suggestion into the next monthly report and the weekly calendar plans. Not for us hides it and stops it being proposed again. Edit changes it by hand or from your feedback, and what you change is remembered for this client's future suggestions." : "Proposed experiments based on observed posts. Targets are goals to test."}
               </span>
             }
             action={
