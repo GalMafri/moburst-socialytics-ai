@@ -198,7 +198,8 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         </div>
       )}
 
-      {reasons[0]?.label && reasons[0].type !== "idea" && (
+      {/* The reason in words; a "From report" tag already says all its generic label does. */}
+      {reasons[0]?.label && reasons[0].type !== "idea" && reasons[0].type !== "report" && (
         <p className="t-secondary line-clamp-2 print:line-clamp-none">{reasons[0].label}</p>
       )}
 
