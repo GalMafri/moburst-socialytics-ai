@@ -362,6 +362,42 @@ export type Database = {
           },
         ]
       }
+      calendar_weeks: {
+        Row: {
+          assigned_at: string
+          client_id: string
+          report_id: string
+          week_start: string
+        }
+        Insert: {
+          assigned_at?: string
+          client_id: string
+          report_id: string
+          week_start: string
+        }
+        Update: {
+          assigned_at?: string
+          client_id?: string
+          report_id?: string
+          week_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calendar_weeks_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "calendar_weeks_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       canva_finish_jobs: {
         Row: {
           attempts: number
@@ -2323,6 +2359,48 @@ export type Database = {
       }
     }
     Views: {
+      calendar_posts_current: {
+        Row: {
+          client_id: string | null
+          copy: string | null
+          created_at: string | null
+          created_by: string | null
+          cta: string | null
+          format: string | null
+          hashtags: string[] | null
+          id: string | null
+          language: string | null
+          pillar: string | null
+          platform: string | null
+          post_date: string | null
+          post_key: string | null
+          posting_time: string | null
+          rationale: string | null
+          raw: Json | null
+          reasons: Json | null
+          report_id: string | null
+          source: string | null
+          touched_at: string | null
+          updated_at: string | null
+          visual_direction: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calendar_posts_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "calendar_posts_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       gos_events: {
         Row: {
           company_slug: string | null
@@ -2399,11 +2477,19 @@ export type Database = {
           failing: number
         }[]
       }
-      calendar_posts_worked_on: {
-        Args: { p_ids: string[] }
-        Returns: {
-          id: string
-        }[]
+      calendar_assign_week: {
+        Args: { p_client: string; p_report: string; p_week: string }
+        Returns: boolean
+      }
+      calendar_post_worked: {
+        Args: {
+          p_client: string
+          p_copy: string
+          p_key: string
+          p_platform: string
+          p_touched: string
+        }
+        Returns: boolean
       }
       can_access_client: { Args: { _client_id: string }; Returns: boolean }
       can_manage_roster: { Args: never; Returns: boolean }
