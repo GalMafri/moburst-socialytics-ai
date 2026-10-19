@@ -53,6 +53,7 @@ export function makeJobStore(db: SupabaseClient): JobStore {
       // Attempts count consecutive interruptions. A job parked to wait for a
       // dependency starts counting again when it is released.
       if (outcome.status === "waiting" || outcome.status === "blocked") patch.attempts = 0;
+      else if (outcome.deferred) patch.attempts = Math.max(0, job.attempts - 1);
       await must(db.from("scheduled_jobs").update(patch).eq("id", job.id));
     },
     async statusRows(now) {

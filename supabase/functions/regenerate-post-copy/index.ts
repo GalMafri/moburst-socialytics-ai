@@ -7,6 +7,9 @@ const corsHeaders = {
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { competitiveBrief } from "../_shared/competitive/brief.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
+import { anthropicMessages } from "../_shared/anthropic.ts";
+import { COPY_MODEL, loadClientVoice } from "../_shared/voice/load.ts";
+import { voicePromptBlock } from "../_shared/voice/voice.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -40,28 +43,9 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Load voice learnings (non-blocking — table may not exist yet)
-    let voiceLearningsText = "";
-    try {
-      const { data: voiceLearnings } = await supabase
-        .from("brand_voice_learnings")
-        .select("pattern_type, pattern_description, confidence")
-        .eq("client_id", client_id)
-        .order("confidence", { ascending: false })
-        .limit(10);
-
-      voiceLearningsText =
-        voiceLearnings && voiceLearnings.length > 0
-          ? voiceLearnings
-              .map(
-                (v: any) =>
-                  `- ${v.pattern_type}: ${v.pattern_description} (confidence: ${v.confidence})`,
-              )
-              .join("\n")
-          : "";
-    } catch (e) {
-      console.error("Voice learnings query failed (table may not exist):", e);
-    }
+    // How the client writes: the team's preferences, its real social voice, then the brief.
+    const voice = await loadClientVoice(supabase, client_id);
+    const voiceBlock = voicePromptBlock(voice, { platforms: platform ? [String(platform)] : undefined });
 
     const competitive = await competitiveBrief(supabase, client_id, platform).catch(() => "");
     const prompt = `Rewrite this social media post copy with a fresh take. Keep the same strategic angle and concept, but create completely new wording.
@@ -73,7 +57,7 @@ CONCEPT: ${effectiveConcept}
 CURRENT COPY (rewrite this): ${current_copy}
 CURRENT CTA: ${current_cta || ""}
 
-${voiceLearningsText ? `VOICE PREFERENCES:\n${voiceLearningsText}` : ""}
+${voiceBlock}
 
 Return ONLY this JSON:
 {
@@ -82,34 +66,20 @@ Return ONLY this JSON:
   "hashtags": "relevant hashtags"
 }`;
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 500,
-        messages: [{ role: "user", content: prompt }],
-      }),
+    const result = await anthropicMessages({
+      apiKey: anthropicKey,
+      body: { model: COPY_MODEL, max_tokens: 2000, messages: [{ role: "user", content: prompt }] },
     });
+    const postText = result.text.trim();
 
-    if (!response.ok) {
-      const errBody = await response.text().catch(() => "");
-      throw new Error(`Claude API error ${response.status}: ${errBody.slice(0, 200)}`);
-    }
-
-    const result = await response.json();
-    const postText = result.content?.[0]?.text?.trim() || "";
-
+    // The JSON object in the reply, wherever it sits.
     let post;
     try {
-      post = JSON.parse(postText);
+      const start = postText.indexOf("{");
+      const end = postText.lastIndexOf("}");
+      post = start >= 0 && end > start ? JSON.parse(postText.slice(start, end + 1)) : null;
     } catch {
-      const jsonMatch = postText.match(/```(?:json)?\s*([\s\S]*?)```/);
-      post = jsonMatch ? JSON.parse(jsonMatch[1]) : null;
+      post = null;
     }
 
     if (!post) {

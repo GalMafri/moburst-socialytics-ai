@@ -74,7 +74,8 @@ export interface ContentWeek {
 export function contentWeek(posts: WeekPost[], media: PostMedia[], today: string): ContentWeek {
   const end = addDays(today, 6);
   const soon = addDays(today, 2);
-  const week = posts.filter((p) => p.post_date >= today && p.post_date <= end && !(p.source === "trend_slot" && !p.copy.trim()))
+  // A post with no copy yet isn't ready to design or approve.
+  const week = posts.filter((p) => p.post_date >= today && p.post_date <= end && p.copy.trim())
     .sort((a, b) => a.post_date.localeCompare(b.post_date));
   const byKey = new Map<string, PostMedia[]>();
   for (const m of media) {

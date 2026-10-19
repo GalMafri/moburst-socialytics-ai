@@ -152,7 +152,7 @@ async function runCallback(state,kind,status,reportId,{authorized=true,resume=tr
  let handler;const requests=[];
  const attempt = state.tables.competitive_reports.find(r=>r.id===reportId)?.created_at;
  if(kind==='competitive') state.tables.rivaliq_snapshots.push({report_id:reportId,attempt_started_at:attempt,endpoint:'socialposts',fetched_at:new Date().toISOString(),payload:{expected_windows:5,failed_windows:0}});
- moduleFrom('supabase/functions/update-'+(kind==='competitive'?'competitive-':'')+'report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/secretEquals.ts':{secretEquals:async()=>authorized},'../_shared/calendar/fromReport.ts':{importReportPosts:async()=>({added:0,removed:0})}},{Deno:{env:{get:()=> 'https://fixture.invalid'},serve:f=>handler=f},fetch:async(url,opts)=>{requests.push({url,body:JSON.parse(opts.body)});throw Error('Unexpected outbound call');}});
+ moduleFrom('supabase/functions/update-'+(kind==='competitive'?'competitive-':'')+'report/index.ts',{'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>state.db},'../_shared/auth/secretEquals.ts':{secretEquals:async()=>authorized}},{Deno:{env:{get:()=> 'https://fixture.invalid'},serve:f=>handler=f},fetch:async(url,opts)=>{requests.push({url,body:JSON.parse(opts.body)});throw Error('Unexpected outbound call');}});
  const response=await handler(new Request('https://fixture.invalid/callback',{method:'POST',body:JSON.stringify({op:'report',report_id:reportId,attempt_started_at:attempt,status,report_data:{ai_analysis:{executive_summary:'Completed fixture'}}})}));
  return{status:response.status,body:await response.json(),requests};
 }

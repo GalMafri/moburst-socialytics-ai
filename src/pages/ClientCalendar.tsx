@@ -1,8 +1,10 @@
 /**
  * A client's content calendar, its own tab (Lital, 12 and 13 Oct): every
- * planned post on its date, week by week. Monthly reports plan posts into it,
- * the team adds posts at any time, and each post's design is prepared and can
- * be regenerated from the post's current copy.
+ * planned post on its date, week by week. Each week is planned once (Lital,
+ * 19 Oct): every Monday for the following week, or with "Plan next week",
+ * and "Revise this week" rewrites what nobody has worked on. The team adds
+ * posts at any time, and each post's design is prepared and can be
+ * regenerated from the post's current copy.
  */
 
 import { useMemo } from "react";
@@ -19,11 +21,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
-import { PlanWeekButton } from "@/components/calendar/PlanWeekButton";
+import { PlanNextWeekButton, ReviseWeekButton, WeekPlanStatus } from "@/components/calendar/WeekPlanControls";
 import { CLIENT_CONTEXT_COLUMNS, buildClientContext } from "@/lib/clientContext";
-import { CALENDAR_VIEW, addDays, mondayOf, shortDate, todayIn, weekBoard, type CalendarPostRow } from "@/lib/calendarPosts";
+import { addDays, canRevise, mondayOf, nextPlannableWeek, shortDate, todayIn, weekBoard, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
 
 const DEFAULT_PLATFORMS = ["Instagram", "LinkedIn", "TikTok", "Facebook", "X"];
+
+const inFlight = (p: CalendarPlanRow) => p.status === "queued" || p.status === "planning" || !!p.pending_revision;
 
 export default function ClientCalendar() {
   const { id } = useParams();
@@ -39,13 +43,29 @@ export default function ClientCalendar() {
       return data;
     },
   });
+  const plans = useQuery({
+    queryKey: ["calendar-plans", id],
+    enabled: !!id,
+    // While a week is being planned or revised, look again every 10 seconds.
+    refetchInterval: (q) => ((q.state.data as CalendarPlanRow[] | undefined)?.some(inFlight) ? 10_000 : false),
+    queryFn: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase.from("calendar_plans" as never) as any)
+        .select("id, client_id, week_start, status, trigger, error, pending_revision, revisions, ready_at, created_at")
+        .eq("client_id", id)
+        .order("week_start");
+      if (error) throw error;
+      return (data || []) as CalendarPlanRow[];
+    },
+  });
+  const busy = (plans.data ?? []).some(inFlight);
   const posts = useQuery({
     queryKey: ["calendar-posts", id],
     enabled: !!id,
+    refetchInterval: busy ? 10_000 : false,
     queryFn: async () => {
-      // The calendar shows each week's plan in force, never the raw posts table.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase.from(CALENDAR_VIEW as never) as any)
+      const { data, error } = await (supabase.from("calendar_posts" as never) as any)
         .select("*")
         .eq("client_id", id)
         .order("post_date")
@@ -72,38 +92,50 @@ export default function ClientCalendar() {
   const openPostId = params.get("post");
   const openPostKey = openPostId ? all.find((p) => p.id === openPostId)?.post_key : undefined;
 
+  const weekPlan = (plans.data ?? []).find((p) => p.week_start === week) ?? null;
+  const planOnItsWay = !!weekPlan && weekPlan.status !== "failed" && weekPlan.status !== "ready";
+  const nextWeek = plans.data ? nextPlannableWeek(plans.data, today) : null;
+  const refresh = () => { void plans.refetch(); void posts.refetch(); };
+  const planButton = id ? <PlanNextWeekButton clientId={id} week={nextWeek} onRequested={(w) => { goTo(w); refresh(); }} /> : null;
+  const showPlanBar = !!weekPlan && (weekPlan.status !== "ready" || !!weekPlan.pending_revision || canRevise(weekPlan, today));
+
   return (
     <AppLayout
       title="Calendar"
       description="Every planned post on its date. Open a post to edit its copy, see its design or schedule it."
-      actions={isMoburstStaff && id ? (
+      actions={id ? (
         <div className="flex items-center gap-2 flex-wrap">
-          <ClientPicker value={id} week={week} />
-          <NewPostDialog clientId={id} platforms={platforms} defaultDate={week > today ? week : today} onCreated={(d) => goTo(mondayOf(d))} />
+          {isMoburstStaff && <ClientPicker value={id} week={week} />}
+          {planButton}
+          {isMoburstStaff && <NewPostDialog clientId={id} platforms={platforms} defaultDate={week > today ? week : today} onCreated={(d) => goTo(mondayOf(d))} />}
         </div>
       ) : undefined}
     >
-      {client.isLoading || posts.isLoading ? (
+      {client.isLoading || posts.isLoading || plans.isLoading ? (
         <Loading label="Loading the calendar" />
-      ) : client.isError || posts.isError ? (
-        <LoadError title="Could not load the calendar" error={client.error || posts.error} onRetry={() => { void client.refetch(); void posts.refetch(); }} />
+      ) : client.isError || posts.isError || plans.isError ? (
+        <LoadError title="Could not load the calendar" error={client.error || posts.error || plans.error} onRetry={() => { void client.refetch(); refresh(); }} />
       ) : (
         <div className="space-y-4">
           <WeekNav week={week} thisWeek={thisWeek} count={inWeek.length} onGo={goTo} />
+
+          {showPlanBar && weekPlan && (
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <WeekPlanStatus plan={weekPlan} isStaff={isMoburstStaff} />
+              {canRevise(weekPlan, today) && <div className="ml-auto"><ReviseWeekButton plan={weekPlan} onRequested={refresh} /></div>}
+            </div>
+          )}
 
           {inWeek.length === 0 ? (
             <EmptyState
               icon={CalendarDays}
               title="No posts planned for this week"
-              description={nextPlanned
-                ? "The next planned posts are in a later week."
-                : isMoburstStaff ? "Plan this week from the client's latest report, or add a post with New post." : "Posts appear here once they are planned."}
-              action={isMoburstStaff && id && all.length > 0 ? (
-                <div className="flex items-center gap-2 flex-wrap justify-center">
-                  <PlanWeekButton clientId={id} week={week} onPlanned={() => void posts.refetch()} />
-                  {nextPlanned && <Button size="sm" variant="outline" onClick={() => goTo(mondayOf(nextPlanned.post_date))}>Go to the week of {shortDate(mondayOf(nextPlanned.post_date))}</Button>}
-                </div>
-              ) : nextPlanned ? (
+              description={planOnItsWay
+                ? "This week's plan is on its way."
+                : nextWeek === week
+                  ? "Each week is planned on the Monday before it. You can plan this one now."
+                  : nextPlanned ? "The next planned posts are in a later week." : "Each week is planned on the Monday before it."}
+              action={!planOnItsWay && nextWeek === week ? planButton : nextPlanned ? (
                 <Button size="sm" variant="outline" onClick={() => goTo(mondayOf(nextPlanned.post_date))}>
                   Go to the week of {shortDate(mondayOf(nextPlanned.post_date))}
                 </Button>

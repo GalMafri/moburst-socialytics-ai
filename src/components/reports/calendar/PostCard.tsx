@@ -9,7 +9,6 @@ import { postCopyOf } from "@/lib/postCopy";
 import { useAuth } from "@/hooks/useAuth";
 import { useDesignRequestForPost } from "./DesignRequestsContext";
 import { isPreparing, stageLine } from "@/lib/designRequests";
-import { isOpenTrendSlot } from "@/lib/calendarPosts";
 
 interface Iteration {
   id?: string;
@@ -35,13 +34,14 @@ interface Props {
   onToggleApproved?: () => void;
 }
 
-/** Why a calendar post is in the plan, as short tags; the full reason is the tag's tooltip. */
+/** Why a calendar post is in the plan: a short tag, and the reason itself under it. */
 const REASON_LABELS: Record<string, string> = {
   report: "From report",
   performance: "Performance",
   trend: "Trend",
   competitor: "Competitor",
   seasonal: "Seasonal",
+  test: "Test",
   idea: "Idea",
 };
 
@@ -198,9 +198,11 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         </div>
       )}
 
-      {isOpenTrendSlot(post as never) && (
-        <p className="t-secondary flex-1">Trend post. Written shortly before its date from what's trending then.</p>
+      {reasons[0]?.label && reasons[0].type !== "idea" && (
+        <p className="t-secondary line-clamp-2 print:line-clamp-none">{reasons[0].label}</p>
       )}
+
+      {!copy && <p className="t-secondary flex-1">No copy yet.</p>}
 
       {/* Copy */}
       {copy && (

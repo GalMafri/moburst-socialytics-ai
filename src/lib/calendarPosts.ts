@@ -1,14 +1,37 @@
 // The content calendar's posts (table calendar_posts) and how the week board
-// shows them. The calendar is its own tab; reports plan posts into it.
+// shows them. The calendar is its own tab; each week is planned once
+// (calendar_plans), every Monday for the following week or when someone
+// presses "Plan next week" (weekly calendar, Lital 19 Oct 2026).
 
 import type { CalendarPost } from "@/lib/calendarRevision";
 
-/**
- * What the calendar shows: each week's plan in force, worked-on posts of
- * earlier plans, and posts people added (supabase/functions/_shared/calendar/plans.ts).
- * Screens read this view; only the code that writes posts reads the table.
- */
-export const CALENDAR_VIEW = "calendar_posts_current";
+/** The evidence a planned post acts on, with its real numbers (supabase/functions/_shared/calendar/weekPlan.ts). */
+export interface PostEvidence {
+  id: string;
+  kind: "own" | "competitor" | "topic" | "trend" | "report";
+  text: string;
+  platform?: string;
+  company?: string;
+  format?: string;
+  date?: string;
+  link?: string | null;
+  metric?: string;
+  value?: number;
+  median?: number;
+  multiple?: number;
+  sample?: number;
+  thin?: boolean;
+  companies?: number;
+}
+
+export interface PostReason {
+  type: string;
+  label: string;
+  fit?: string;
+  evidence?: PostEvidence[];
+  thin?: boolean;
+  report_id?: string;
+}
 
 export interface CalendarPostRow {
   id: string;
@@ -25,8 +48,9 @@ export interface CalendarPostRow {
   visual_direction: string | null;
   rationale: string | null;
   language: string | null;
-  reasons: Array<{ type: string; label: string; report_id?: string }> | null;
-  source: "report" | "ad_hoc" | "insight" | "trend_slot";
+  reasons: PostReason[] | null;
+  source: "plan" | "ad_hoc" | "insight";
+  plan_id: string | null;
   post_key: string;
   raw: Record<string, unknown> | null;
   created_at: string;
@@ -77,9 +101,42 @@ export function weekLabel(monday: string): string {
   return `${shortDate(monday)} – ${end}, ${b.getUTCFullYear()}`;
 }
 
-/** A trend slot nobody has written yet: it is written shortly before its date from what is trending then. */
-export function isOpenTrendSlot(post: { _source?: unknown; copy?: unknown } | null | undefined): boolean {
-  return post?._source === "trend_slot" && !String(post?.copy ?? "").trim();
+/** One week's plan (calendar_plans). */
+export interface CalendarPlanRow {
+  id: string;
+  client_id: string;
+  week_start: string;
+  status: "queued" | "planning" | "ready" | "failed";
+  trigger: "monday" | "button" | "cutover";
+  error: string | null;
+  pending_revision: { note: string; at: string } | null;
+  revisions: Array<{ note: string; at: string; done_at?: string; rewritten?: number; kept?: string[]; failed?: boolean }> | null;
+  ready_at: string | null;
+  created_at: string;
+}
+
+/** How far ahead "Plan next week" goes: a month (the same limit calendar-posts applies). */
+export const WEEKS_AHEAD = 4;
+
+/**
+ * The week "Plan next week" would plan: the earliest week from this week up
+ * to four weeks ahead that still has days to come and no plan (or a plan that
+ * failed). Null when the month ahead is planned.
+ */
+export function nextPlannableWeek(plans: Array<Pick<CalendarPlanRow, "week_start" | "status">>, today: string): string | null {
+  const tomorrow = addDays(today, 1);
+  const held = new Map(plans.map((p) => [p.week_start, p.status]));
+  for (let i = 0; i <= WEEKS_AHEAD; i++) {
+    const week = addDays(mondayOf(today), i * 7);
+    if (addDays(week, 6) < tomorrow) continue;
+    if (!held.has(week) || held.get(week) === "failed") return week;
+  }
+  return null;
+}
+
+/** A week someone can still revise: planned, and with days to come. */
+export function canRevise(plan: Pick<CalendarPlanRow, "status" | "week_start" | "pending_revision"> | null | undefined, today: string): boolean {
+  return !!plan && plan.status === "ready" && !plan.pending_revision && addDays(plan.week_start, 6) >= today;
 }
 
 /** A calendar row as the board's post: the same shape a report's post has, plus its key, date and reasons. */

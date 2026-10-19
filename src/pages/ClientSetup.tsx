@@ -8,6 +8,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PostingRhythmField, type LearnedRhythm } from "@/components/onboarding/PostingRhythmField";
+import { rhythmSetting } from "@/lib/postingRhythm";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -122,6 +124,7 @@ export default function ClientSetup() {
     brief_file_id: "",
     design_style_synthesis: null as any,
     competitor_seed_notes: "",
+    posting_rhythm: {} as Record<string, string>,
   });
   const [selectedSproutProfiles, setSelectedSproutProfiles] = useState<any[]>([]);
   // Whether Sprout actually answered. Without this the save path cannot tell
@@ -152,13 +155,29 @@ export default function ClientSetup() {
   const { data: voiceLearnings } = useQuery({
     queryKey: ["brand-voice-learnings", id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("brand_voice_learnings")
+      // Columns from 20261019140000_weekly_calendar.sql, before the generated types know them.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase.from("brand_voice_learnings" as never) as any)
         .select("*")
         .eq("client_id", id)
-        .order("confidence", { ascending: false });
+        .eq("status", "active")
+        .order("times_confirmed", { ascending: false })
+        .order("last_confirmed_at", { ascending: false });
       if (error) throw error;
       return data || [];
+    },
+    enabled: !!id && !isNew,
+  });
+
+  // What the client actually publishes, as the latest week's plan measured it.
+  const { data: learnedRhythm } = useQuery({
+    queryKey: ["learned-rhythm", id],
+    queryFn: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (supabase.from("calendar_plans" as never) as any)
+        .select("rhythm").eq("client_id", id).eq("status", "ready").not("rhythm", "is", null)
+        .order("week_start", { ascending: false }).limit(1).maybeSingle();
+      return ((data?.rhythm?.learned ?? []) as LearnedRhythm[]);
     },
     enabled: !!id && !isNew,
   });
@@ -224,6 +243,7 @@ export default function ClientSetup() {
         brief_file_id: client.brief_file_id || "",
         design_style_synthesis: (client as any).design_style_synthesis || null,
         competitor_seed_notes: (client as any).competitor_seed_notes || "",
+        posting_rhythm: Object.fromEntries(Object.entries(((client as any).posting_rhythm as Record<string, number> | null) ?? {}).map(([k, v]) => [k, String(v)])),
       });
     }
   }, [client]);
@@ -248,7 +268,7 @@ export default function ClientSetup() {
       const serializedBrandNotes = form.brand_voice_preset
         ? `[VOICE:${form.brand_voice_preset}]\n${form.brand_notes}`
         : form.brand_notes;
-      const { brand_voice_preset, design_references, design_style_synthesis, ...formWithoutPreset } = form;
+      const { brand_voice_preset, design_references, design_style_synthesis, posting_rhythm, ...formWithoutPreset } = form;
       const payload = {
         ...formWithoutPreset,
         brand_notes: serializedBrandNotes,
@@ -272,6 +292,7 @@ export default function ClientSetup() {
         timezone: form.timezone || "UTC",
         media_backend: form.media_backend || "gemini",
         design_references: design_references.length > 0 ? design_references : null,
+        posting_rhythm: rhythmSetting(posting_rhythm),
       };
       let clientId: string;
       if (isNew) {
@@ -935,6 +956,13 @@ export default function ClientSetup() {
                     </Button>
                   </div>
                 </div>
+
+                <PostingRhythmField
+                  platforms={form.primary_platforms}
+                  value={form.posting_rhythm}
+                  learned={learnedRhythm ?? []}
+                  onChange={(posting_rhythm) => setForm((f) => ({ ...f, posting_rhythm }))}
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1088,9 +1116,9 @@ export default function ClientSetup() {
             {voiceLearnings && voiceLearnings.length > 0 && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="t-h3">Learned voice preferences</CardTitle>
+                  <CardTitle className="t-h3">Learned writing preferences</CardTitle>
                   <CardDescription>
-                    These patterns were learned from post edits. The AI will apply them to future content.
+                    Learned from copy edits and "Revise this week" notes. Every post written for this client follows these first, then the voice of its own published posts.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1106,7 +1134,9 @@ export default function ClientSetup() {
                               {learning.pattern_type}
                             </Badge>
                             <span className="t-secondary">
-                              {Math.round((learning.confidence || 0) * 100)}% confidence
+                              {learning.times_confirmed > 1 ? `Confirmed ${learning.times_confirmed} times` : "Seen once"}
+                              {" · "}
+                              {learning.source === "revise_note" ? "From a revise note" : "From a copy edit"}
                             </span>
                           </div>
                           <p className="t-body">{learning.pattern_description}</p>

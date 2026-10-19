@@ -9,6 +9,8 @@ import { track, editDistancePct } from "@/lib/telemetry";
 import { postCopyOf } from "@/lib/postCopy";
 import { useAuth } from "@/hooks/useAuth";
 import type { CalendarPost } from "@/lib/calendarRevision";
+import { PostReason } from "@/components/calendar/PostReason";
+import type { PostReason as Reason } from "@/lib/calendarPosts";
 
 interface Props {
   post: any;
@@ -91,14 +93,7 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
     try {
       await saveRevision(editedCopy);
 
-      // Fire-and-forget call to learn from this edit.
-      if (isMoburstStaff) void supabase.functions.invoke("analyze-post-edits", {
-        body: {
-          client_id: clientId,
-          original_copy: displayCopy,
-          edited_copy: editedCopy,
-        },
-      }).catch(() => undefined);
+      // The save teaches the client's preference memory on the server (calendar-posts save_copy).
 
       // distance 0 means the draft was accepted verbatim ("strong acceptance");
       // anything above ~50 means the user effectively rewrote it.
@@ -279,6 +274,7 @@ export function CopyEditor({ post, clientId, reportId, onCopySaved }: Props) {
               💡 {post.rationale}
             </div>
           )}
+          <PostReason reasons={(post as { _reasons?: Reason[] })._reasons} />
         </>
       )}
     </div>

@@ -11,15 +11,19 @@ import { ArrowRight, CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { PlatformBadge } from "@/lib/platform-config";
-import { CALENDAR_VIEW, mondayOf, shortDate, type CalendarPostRow } from "@/lib/calendarPosts";
+import { mondayOf, shortDate, todayIn, type CalendarPostRow } from "@/lib/calendarPosts";
 
-export function ReportCalendarLink({ clientId, reportId, children }: { clientId: string; reportId: string; children: ReactNode }) {
+/**
+ * hasBoard: the report wrote its own week of posts (reports before 19 Oct
+ * 2026). Reports since then write none: the calendar is planned a week at a
+ * time from their findings, so the report links to it instead.
+ */
+export function ReportCalendarLink({ clientId, reportId, hasBoard, children }: { clientId: string; reportId: string; hasBoard: boolean; children: ReactNode }) {
   const { data: posts, isLoading } = useQuery({
     queryKey: ["report-calendar-posts", reportId],
     queryFn: async () => {
-      // The report's posts the calendar shows (a newer plan may have taken some weeks).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase.from(CALENDAR_VIEW as never) as any)
+      const { data, error } = await (supabase.from("calendar_posts" as never) as any)
         .select("id, post_date, posting_time, platform, format, copy")
         .eq("report_id", reportId)
         .order("post_date");
@@ -28,7 +32,23 @@ export function ReportCalendarLink({ clientId, reportId, children }: { clientId:
     },
   });
   if (isLoading) return null;
-  if (!posts?.length) return <>{children}</>;
+  if (!posts?.length && hasBoard) return <>{children}</>;
+  if (!posts?.length) {
+    return (
+      <div className="glass p-5 flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="shrink-0 rounded-full p-2 bg-[rgba(185,224,69,0.10)] text-[#b9e045]"><CalendarDays className="h-4 w-4" aria-hidden /></div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-white">Posts are planned a week at a time</p>
+            <p className="t-secondary">Each week's posts are written the Monday before, from the latest results, competitors and trends. They're in the Calendar, where each post's copy, design and schedule are managed.</p>
+          </div>
+        </div>
+        <Button asChild size="sm">
+          <Link to={`/clients/${clientId}/calendar?week=${mondayOf(todayIn("UTC"))}`}>Open the calendar<ArrowRight className="h-3.5 w-3.5 ml-1.5" /></Link>
+        </Button>
+      </div>
+    );
+  }
 
   const week = mondayOf(posts[0].post_date);
   return (

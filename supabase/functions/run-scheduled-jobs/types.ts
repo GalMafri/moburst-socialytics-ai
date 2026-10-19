@@ -1,6 +1,6 @@
 // Shapes shared by the scheduled-jobs worker, its store and its tests.
 
-export type JobKind = "feed_refresh" | "dispatch";
+export type JobKind = "feed_refresh" | "dispatch" | "week_plan" | "week_revise" | "voice_profile";
 export type JobStatus = "queued" | "running" | "waiting" | "blocked" | "done" | "skipped" | "failed";
 
 /** A row of public.scheduled_jobs. */
@@ -33,6 +33,8 @@ export interface JobOutcome {
   result?: Record<string, unknown> | null;
   /** For a retry: when the job may be leased again. */
   available_at?: string;
+  /** Waiting on another job (a week plan waits for the voice profile): the lease doesn't count as an attempt. */
+  deferred?: boolean;
 }
 
 /** Terminal states: the job is finished and finished_at is set. */

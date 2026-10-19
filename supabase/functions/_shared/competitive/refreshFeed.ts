@@ -257,7 +257,7 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
     client_id: clientId,
     landscape_id: landscapeId,
     endpoint: "feed",
-    payload: { window, socialPosts, owned_source: {profiles:owned.profiles,coverage:owned.coverage}, owned_metrics:owned.metrics, linkedin_sources: plan.sources, additional_metrics: linkedin.additional_metrics, fetched_at: new Date().toISOString(), truncated: false },
+    payload: { window, client_company_id: match.client_company_id, socialPosts, owned_source: {profiles:owned.profiles,coverage:owned.coverage}, owned_metrics:owned.metrics, linkedin_sources: plan.sources, additional_metrics: linkedin.additional_metrics, fetched_at: new Date().toISOString(), truncated: false },
   });
 
   if (snapshotError) throw new Error('Could not save the refreshed feed.');

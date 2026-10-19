@@ -18,6 +18,7 @@ import { refreshCompetitorFeed } from "../_shared/competitive/refreshFeed.ts";
 import { checkClientLandscape, recordTrackingCheck, RIVALIQ_UNAVAILABLE, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
 import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
 import { runFeedJob } from "./feed.ts";
+import { runVoiceProfile, runWeekPlan, runWeekRevise } from "../_shared/calendar/runWeek.ts";
 import { LEASE_SECONDS, summarize, workerTick } from "./worker.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
 import type { ScheduledJob } from "./types.ts";
@@ -25,6 +26,13 @@ import type { ScheduledJob } from "./types.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-socialytics-secret, x-cron-secret",
+};
+
+const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
+  feed_refresh: "feed refresh",
+  week_plan: "week plan",
+  week_revise: "week revision",
+  voice_profile: "voice profile",
 };
 
 Deno.serve(async (req) => {
@@ -75,7 +83,7 @@ Deno.serve(async (req) => {
       // The rows carry the client's name and the schedule's kind (embedded by statusRows) for a readable alert.
       type Named = ScheduledJob & { clients?: { name?: string } | null; report_schedules?: { report_kind?: string } | null };
       const brief = (rows: ScheduledJob[]) => (rows as Named[]).map((r) => ({
-        id: r.id, client: r.clients?.name ?? r.client_id, job: r.kind === "dispatch" ? `${r.report_schedules?.report_kind ?? "report"} dispatch` : "feed refresh",
+        id: r.id, client: r.clients?.name ?? r.client_id, job: JOB_LABELS[r.kind] ?? (r.kind === "dispatch" ? `${r.report_schedules?.report_kind ?? "report"} dispatch` : r.kind),
         status: r.status, reason: r.reason, attempts: r.attempts,
       }));
       return json({
@@ -105,9 +113,16 @@ Deno.serve(async (req) => {
     const result = await workerTick({
       now: () => new Date(),
       lease: () => jobs.lease(LEASE_SECONDS),
-      run: (job) => (job.kind === "dispatch"
-        ? runDispatch(job, dispatchDeps(job, false))
-        : runFeedJob(job, { now: () => new Date(), refreshFeed })),
+      run: (job) => {
+        switch (job.kind) {
+          case "dispatch": return runDispatch(job, dispatchDeps(job, false));
+          case "feed_refresh": return runFeedJob(job, { now: () => new Date(), refreshFeed });
+          case "week_plan": return runWeekPlan(db, job);
+          case "week_revise": return runWeekRevise(db, job);
+          case "voice_profile": return runVoiceProfile(db, job);
+          default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
+        }
+      },
       finish: (job, outcome) => jobs.finish(job, outcome),
       closeAbandoned: () => closeAbandonedRuns(db, new Date(), false),
       releaseReady: () => jobs.releaseReady(),

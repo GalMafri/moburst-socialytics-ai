@@ -23,7 +23,7 @@ describe('client overview', () => {
     const posts = [
       { id: '1', post_key: 'k1', post_date: '2026-10-13', platform: 'LinkedIn', source: 'report', copy: 'a' },
       { id: '2', post_key: 'k2', post_date: '2026-10-15', platform: 'LinkedIn', source: 'report', copy: 'b' },
-      { id: '3', post_key: 'k3', post_date: '2026-10-18', platform: 'X', source: 'trend_slot', copy: '' },
+      { id: '3', post_key: 'k3', post_date: '2026-10-18', platform: 'X', source: 'plan', copy: '' },
       { id: '4', post_key: 'k4', post_date: '2026-10-25', platform: 'X', source: 'report', copy: 'd' },
     ];
     const media = [{ calendar_post_key: 'k1', is_selected: true, is_approved: true, media_urls: ['x.png'] }];

@@ -587,7 +587,7 @@ export default function ReportView() {
           {/* ── CONTENT IDEAS ── */}
           {hasContent && (
             <TabsContent value="content" className="space-y-4">
-              <ReportCalendarLink clientId={id!} reportId={reportId!}>
+              <ReportCalendarLink clientId={id!} reportId={reportId!} hasBoard={contentCalendar.length > 0}>
                 <ContentIdeasTab
                   contentCalendar={contentCalendar}
                   aiAnalysis={aiAnalysis}

@@ -1,34 +1,32 @@
 // supabase/functions/calendar-posts/index.ts
 //
-// The content calendar's posts (table calendar_posts, read through the view
-// calendar_posts_current; see _shared/calendar/plans.ts), for staff and for the
-// project's own schedules. Monthly reports plan posts into the calendar when
-// they finish (update-report calls the same import); these actions cover
-// existing reports and a report staff want to bring in again.
+// The content calendar's actions (weekly calendar, Lital 19 Oct 2026). Plans
+// are made once per week by the scheduled jobs (_shared/calendar/runWeek.ts):
+// every Monday for the following week, or when someone asks here.
 //
-//   POST {action:"import_report", report_id}   staff with write access to the report's client
-//   POST {action:"import_latest"}              operational secret: each client's latest finished report
-//   POST {action:"plan_weeks", client_id, start, count | weeks[], report_id?}
-//        staff or the operational secret: plan weeks from the client's latest
-//        report, one week per call, starting the next itself
-//   POST {action:"keep_planned", client_id?}   operational secret: plan every
-//        active client's next weeks that need it (daily, and when a report lands)
-//   POST {action:"fill_trend_slots"}           operational secret: write trend slots due in the next 10 days
+//   POST {action:"plan_next_week", client_id}
+//        a member of the client or staff: plan the earliest week without a
+//        plan, from this week up to four weeks ahead
+//   POST {action:"revise_week", plan_id, note}
+//        a member of the client or staff: rewrite the week's posts nobody
+//        worked on, following the note (the note also teaches the memory)
 //   POST {action:"save_copy", client_id, calendar_post_key, post_copy, ...}
 //        a member of the client or staff: save a copy edit (a revision row
-//        without media) and update the calendar post
+//        without media) and update the calendar post; a person's edit
+//        teaches the client's preference memory
+//   POST {action:"consolidate_memory", client_id}
+//        staff with write access, or the operational secret: merge the
+//        client's preferences learned before the memory merged them
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
-import { importReportPosts } from "../_shared/calendar/fromReport.ts";
-import { CALENDAR_VIEW, PLAN_WINDOW_WEEKS, addDays, assignWeek, latestReport, mondayOf, weekOwners, weeksToPlan } from "../_shared/calendar/plans.ts";
-import { type PlanContext, WEEKDAYS, parseWeek, trendSlotPrompt, weekDates, weekPrompt } from "../_shared/calendar/planner.ts";
-import { anthropicMessages } from "../_shared/anthropic.ts";
-import { clipText } from "../_shared/text/clip.ts";
+import { consolidateMemory, learnFromSignal } from "../_shared/voice/load.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
-const PLANNER_MODEL = "claude-opus-5-5";
+
+/** How far ahead "Plan next week" goes: a month. */
+const WEEKS_AHEAD = 4;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,32 +35,59 @@ const corsHeaders = {
 
 const service = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 
+function background(work: Promise<unknown>, label: string) {
+  const guarded = work.catch((e) => console.warn(`[calendar-posts] ${label}:`, e instanceof Error ? e.message : e));
+  if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(guarded);
+}
+
+function todayIn(timeZone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
+const mondayOf = (day: string) => addDays(day, -((new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7));
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const admin = service();
   try {
     const body = await req.json().catch(() => ({}));
 
-    if (body?.action === "import_report") {
-      const { data: report } = await admin.from("reports").select("id, client_id, status").eq("id", String(body.report_id || "")).maybeSingle();
-      if (!report) return json({ error: "No such report." }, 404);
-      await requireStaff(req, { writeClientId: report.client_id });
-      if (report.status !== "completed") return json({ error: "The report has not finished yet." }, 409);
-      return json(await importReportPosts(admin, report.id));
+    if (body?.action === "plan_next_week") {
+      const clientId = String(body.client_id || "");
+      if (!clientId) return json({ error: "client_id is required." }, 400);
+      const userId = await requireMember(req, clientId);
+      const { data: client } = await admin.from("clients").select("timezone").eq("id", clientId).maybeSingle();
+      if (!client) return json({ error: "No such client." }, 404);
+      const tomorrow = addDays(todayIn(String(client.timezone || "UTC")), 1);
+      const thisWeek = mondayOf(todayIn(String(client.timezone || "UTC")));
+      const weeks = Array.from({ length: WEEKS_AHEAD + 1 }, (_, i) => addDays(thisWeek, i * 7)).filter((w) => addDays(w, 6) >= tomorrow);
+      const { data: plans } = await admin.from("calendar_plans").select("week_start, status").eq("client_id", clientId).in("week_start", weeks);
+      const held = new Map((plans ?? []).map((p: { week_start: string; status: string }) => [p.week_start, p.status]));
+      const week = weeks.find((w) => !held.has(w) || held.get(w) === "failed");
+      if (!week) return json({ error: "The next four weeks are already planned." }, 409);
+      const { data: plan, error } = await admin.rpc("calendar_request_week", { p_client: clientId, p_week: week, p_trigger: "button", p_user: userId });
+      if (error) return json({ error: error.message }, 409);
+      return json({ plan, week }, 202);
     }
 
-    if (body?.action === "import_latest") {
-      const caller = await requireStaff(req);
-      if (!caller.viaSecret) return json({ error: "Not allowed." }, 403);
-      const { data: reports } = await admin.from("reports").select("id, client_id, created_at").eq("status", "completed").order("created_at", { ascending: false });
-      const latest = new Map<string, string>();
-      for (const r of reports ?? []) if (!latest.has(r.client_id)) latest.set(r.client_id, r.id);
-      const results: Record<string, unknown> = {};
-      for (const [clientId, reportId] of latest) {
-        try { results[clientId] = await importReportPosts(admin, reportId); }
-        catch (e) { results[clientId] = { error: e instanceof Error ? e.message : String(e) }; }
-      }
-      return json({ clients: latest.size, results });
+    if (body?.action === "revise_week") {
+      const planId = String(body.plan_id || "");
+      const note = String(body.note || "").trim();
+      if (!planId || !note) return json({ error: "plan_id and note are required." }, 400);
+      const { data: found } = await admin.from("calendar_plans").select("id, client_id").eq("id", planId).maybeSingle();
+      if (!found) return json({ error: "No such plan." }, 404);
+      const viaSecret = !!req.headers.get("x-socialytics-secret");
+      const userId = await requireMember(req, found.client_id);
+      // Writing the posts that have no copy yet is the cutover's job, not a button.
+      const scope = viaSecret && body.scope === "empty" ? "empty" : "untouched";
+      const { data: plan, error } = await admin.rpc("calendar_request_revision", { p_plan: planId, p_note: note, p_user: viaSecret ? null : userId, p_scope: scope });
+      if (error) return json({ error: error.message }, 409);
+      return json({ plan }, 202);
     }
 
     if (body?.action === "save_copy") {
@@ -72,6 +97,7 @@ Deno.serve(async (req) => {
       if (!clientId || !key || !copy) return json({ error: "client_id, calendar_post_key and post_copy are required." }, 400);
       const userId = await requireMember(req, clientId);
       const hashtags = Array.isArray(body.hashtags) ? body.hashtags.map(String).slice(0, 30) : null;
+      const { data: before } = await admin.from("calendar_posts").select("copy, platform").eq("client_id", clientId).eq("post_key", key).maybeSingle();
       const { error } = await admin.from("post_iterations").insert({
         client_id: clientId, report_id: body.report_id || null, calendar_post_key: key,
         version: Number(body.version) || 1, platform: body.platform || null, post_copy: copy,
@@ -82,33 +108,19 @@ Deno.serve(async (req) => {
       // The calendar post holds the current copy too, for every view that reads it directly.
       await admin.from("calendar_posts").update({ copy, touched_at: new Date().toISOString(), ...(hashtags ? { hashtags } : {}), ...(body.cta ? { cta: String(body.cta) } : {}) })
         .eq("client_id", clientId).eq("post_key", key);
+      // A person's edit says how they want copy written; a regeneration doesn't.
+      const previous = String(before?.copy || "").trim();
+      if (body.source !== "regeneration" && previous && previous !== copy) {
+        background(learnFromSignal(admin, clientId, { kind: "copy_edit", before: previous, after: copy, platform: before?.platform ?? body.platform ?? null }), "memory");
+      }
       return json({ ok: true });
     }
 
-    if (body?.action === "plan_weeks") {
+    if (body?.action === "consolidate_memory") {
       const clientId = String(body.client_id || "");
+      if (!clientId) return json({ error: "client_id is required." }, 400);
       await requireStaff(req, { writeClientId: clientId });
-      const start = String(body.start || "");
-      const count = Math.max(1, Math.min(PLAN_WINDOW_WEEKS, Number(body.count) || 1));
-      const weeks: string[] = Array.isArray(body.weeks)
-        ? body.weeks.map(String)
-        : Array.from({ length: count }, (_, i) => addDays(start, i * 7));
-      if (!clientId || !weeks.length || weeks.some((w) => !/^\d{4}-\d{2}-\d{2}$/.test(w))) return json({ error: "client_id and start (a Monday, YYYY-MM-DD) or weeks are required." }, 400);
-      const work = planWeeks(admin, clientId, weeks.map(mondayOf).slice(0, PLAN_WINDOW_WEEKS + 2), body.report_id ? String(body.report_id) : null);
-      if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) { EdgeRuntime.waitUntil(work.catch((e) => console.error("[calendar-posts] plan:", e))); return json({ accepted: true }, 202); }
-      return json(await work);
-    }
-
-    if (body?.action === "keep_planned") {
-      const caller = await requireStaff(req);
-      if (!caller.viaSecret) return json({ error: "Not allowed." }, 403);
-      return json(await keepPlanned(admin, body.client_id ? String(body.client_id) : null));
-    }
-
-    if (body?.action === "fill_trend_slots") {
-      const caller = await requireStaff(req);
-      if (!caller.viaSecret) return json({ error: "Not allowed." }, 403);
-      return json(await fillTrendSlots(admin));
+      return json(await consolidateMemory(admin, clientId));
     }
 
     return json({ error: `Unknown action '${body?.action}'` }, 400);
@@ -119,187 +131,6 @@ Deno.serve(async (req) => {
     return json({ error: msg }, 500);
   }
 });
-
-// ── Planning ────────────────────────────────────────────────────────────────
-
-const strings = (x: unknown): string[] => (Array.isArray(x) ? x.map((v) => (typeof v === "string" ? v : v && typeof v === "object" ? Object.values(v as Record<string, unknown>).filter((t) => typeof t === "string").join(": ") : "")).filter(Boolean) : []);
-
-/** Everything a week's plan is written from: the client, its latest report's findings, its posting pattern and nearby posts. */
-async function planContext(admin: any, clientId: string, monday: string, reportId: string | null): Promise<{ ctx: PlanContext; reportId: string | null } | null> {
-  const { data: client } = await admin.from("clients").select("name, brand_identity, content_pillars, geo, language").eq("id", clientId).maybeSingle();
-  if (!client) return null;
-  const reportQuery = reportId
-    ? admin.from("reports").select("id, report_data").eq("id", reportId).maybeSingle()
-    : admin.from("reports").select("id, report_data").eq("client_id", clientId).eq("status", "completed").order("created_at", { ascending: false }).limit(1).maybeSingle();
-  const { data: report } = await reportQuery;
-  const rd = Array.isArray(report?.report_data) ? report.report_data[0] : report?.report_data;
-  const ai = rd?.ai_analysis ?? {};
-  const perf = ai.sprout_performance_analysis ?? {};
-  const findings = {
-    performance: [...strings(perf.key_insights), ...strings(perf.pillar_alignment?.recommendations), ...strings((perf.platform_breakdown ?? []).map((p: any) => p?.headline))],
-    trends: [...strings(ai.tiktok_trends_analysis?.opportunities_for_client), ...strings(ai.instagram_trends_analysis?.opportunities_for_client)],
-    competitors: strings(ai.competitive_takeaways),
-  };
-
-  // The posting pattern: the client's report week, or its most recent planned week.
-  const { data: patternRows } = await admin.from(CALENDAR_VIEW).select("post_date, platform, format, posting_time, report_id, source")
-    .eq("client_id", clientId).neq("source", "ad_hoc").order("post_date", { ascending: false }).limit(60);
-  const rows = (patternRows ?? []) as Array<{ post_date: string; platform: string; format: string | null; posting_time: string | null; report_id: string | null }>;
-  const fromReport = report?.id ? rows.filter((r) => r.report_id === report.id) : [];
-  const basis = fromReport.length ? fromReport : rows;
-  const firstWeek = basis.length ? mondayOf(basis.map((r) => r.post_date).sort()[0]) : null;
-  const pattern = basis
-    .filter((r) => firstWeek && r.post_date >= firstWeek && r.post_date <= addDays(firstWeek, 6))
-    .map((r) => ({ weekday: WEEKDAYS[(new Date(`${r.post_date}T00:00:00Z`).getUTCDay() + 6) % 7], platform: r.platform, format: r.format, posting_time: r.posting_time }))
-    .sort((a, b) => WEEKDAYS.indexOf(a.weekday) - WEEKDAYS.indexOf(b.weekday));
-  if (!pattern.length) return null;
-
-  const { data: near } = await admin.from(CALENDAR_VIEW).select("post_date, platform, copy").eq("client_id", clientId)
-    .gte("post_date", addDays(monday, -21)).lte("post_date", addDays(monday, 27)).neq("copy", "").order("post_date");
-  return {
-    reportId: report?.id ?? null,
-    ctx: {
-      brand: client.name,
-      voice: client.brand_identity?.tone_of_voice ?? null,
-      pillars: (Array.isArray(client.content_pillars) ? client.content_pillars : []).map((p: any) => ({ name: String(p?.name ?? ""), description: p?.description ? String(p.description).slice(0, 240) : undefined })).filter((p: any) => p.name),
-      market: String(client.geo ?? "").split(",").map((s: string) => s.trim()).filter(Boolean),
-      languages: String(client.language ?? "").split(",").map((s: string) => s.trim()).filter(Boolean),
-      findings,
-      pattern,
-      nearby: (near ?? []).map((n: any) => ({ date: n.post_date, platform: n.platform, copy: n.copy })),
-    },
-  };
-}
-
-/**
- * Plan the first of `weeks` from a report's findings (the client's latest
- * report unless one is named), then start the next week's plan. A week a newer
- * report's plan holds is left to it. The posts go in before the plan takes the
- * week, so a week is never shown empty, and a plan that made no posts never
- * takes a week.
- */
-async function planWeeks(admin: any, clientId: string, weeks: string[], reportId: string | null): Promise<{ planned: number; week: string }> {
-  const [monday, ...rest] = weeks;
-  let planned = 0;
-  const report = reportId
-    ? (await admin.from("reports").select("id, created_at").eq("id", reportId).eq("client_id", clientId).maybeSingle()).data
-    : await latestReport(admin, clientId);
-  if (report) {
-    const owner = (await weekOwners(admin, clientId, monday)).get(monday);
-    const newer = owner && owner.report_id !== report.id && owner.created_at > report.created_at;
-    if (!newer) {
-      // Posts this plan already placed there (a run that stopped before taking the week) are kept.
-      const { count: own } = await admin.from("calendar_posts").select("id", { count: "exact", head: true })
-        .eq("client_id", clientId).eq("report_id", report.id).in("source", ["report", "trend_slot"])
-        .gte("post_date", monday).lte("post_date", addDays(monday, 6));
-      if (!own) planned = await planWeek(admin, clientId, monday, report.id);
-      if (own || planned) await assignWeek(admin, clientId, monday, report.id);
-    }
-  }
-  if (rest.length) await nextCall({ action: "plan_weeks", client_id: clientId, weeks: rest, report_id: reportId });
-  return { planned, week: monday };
-}
-
-/** Write one week's posts from the report's findings; days already past are left out. */
-async function planWeek(admin: any, clientId: string, monday: string, reportId: string): Promise<number> {
-  const built = await planContext(admin, clientId, monday, reportId);
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!built || !apiKey) return 0;
-  let posts = [] as ReturnType<typeof parseWeek>;
-  for (let attempt = 0; attempt < 2 && !posts.length; attempt++) {
-    const result = await anthropicMessages({ apiKey, body: { model: PLANNER_MODEL, max_tokens: 12000, messages: [{ role: "user", content: weekPrompt(built.ctx, monday) }] } });
-    posts = parseWeek(result.text, monday, built.reportId);
-  }
-  const today = new Date().toISOString().slice(0, 10);
-  const rows = posts.filter((p) => p.post_date >= today).map((p) => ({ ...p, client_id: clientId, report_id: built.reportId }));
-  if (!rows.length) return 0;
-  const { error } = await admin.from("calendar_posts").insert(rows);
-  if (error) throw new Error(`Could not add the week's posts: ${error.message}`);
-  return rows.length;
-}
-
-/**
- * Start planning each active client's weeks that need it (plans.ts): the
- * client's weeks are planned one after another in requests of their own.
- */
-async function keepPlanned(admin: any, onlyClient: string | null): Promise<{ started: Record<string, string[]> }> {
-  let query = admin.from("clients").select("id, name").is("archived_at", null).eq("exclude_from_reporting", false);
-  if (onlyClient) query = query.eq("id", onlyClient);
-  const { data: clients, error } = await query;
-  if (error) throw new Error(`Could not read the clients: ${error.message}`);
-  const today = new Date().toISOString().slice(0, 10);
-  const started: Record<string, string[]> = {};
-  for (const client of clients ?? []) {
-    const latest = await latestReport(admin, client.id);
-    if (!latest) continue;
-    const weeks = weeksToPlan({ today, latest, owners: await weekOwners(admin, client.id, mondayOf(today)) });
-    if (!weeks.length) continue;
-    started[client.name] = weeks;
-    await nextCall({ action: "plan_weeks", client_id: client.id, weeks, report_id: latest.id });
-  }
-  return { started };
-}
-
-async function nextCall(body: Record<string, unknown>): Promise<void> {
-  const url = Deno.env.get("SUPABASE_URL");
-  const secret = Deno.env.get("SOCIALYTICS_N8N_SECRET");
-  const user = Deno.env.get("SOCIALYTICS_SYSTEM_USER_ID") || "04b86c53-de62-4d3d-a661-c714f337c8fc";
-  if (!url || !secret) return;
-  try {
-    const res = await fetch(`${url}/functions/v1/calendar-posts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Socialytics-Secret": secret, "X-Socialytics-User": user },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15_000),
-    });
-    await res.body?.cancel();
-  } catch (e) {
-    console.warn("[calendar-posts] could not start the next week's plan:", e instanceof Error ? e.message : e);
-  }
-}
-
-/** Trend slots due in the next 10 days that nobody has written: write each from what is trending now. */
-async function fillTrendSlots(admin: any): Promise<{ filled: number; waiting: number }> {
-  const today = new Date().toISOString().slice(0, 10);
-  const { data: slots } = await admin.from(CALENDAR_VIEW).select("*").eq("source", "trend_slot").eq("copy", "")
-    .gte("post_date", today).lte("post_date", addDays(today, 10)).order("post_date").limit(12);
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  let filled = 0;
-  for (const slot of slots ?? []) {
-    if (!apiKey) break;
-    // Someone already wrote it (a saved copy edit): leave it as theirs.
-    const { data: edits } = await admin.from("post_iterations").select("id, media_urls").eq("client_id", slot.client_id).eq("calendar_post_key", slot.post_key).limit(5);
-    if ((edits ?? []).some((r: any) => !(Array.isArray(r.media_urls) && r.media_urls.length))) continue;
-    const built = await planContext(admin, slot.client_id, mondayOf(slot.post_date), null);
-    if (!built) continue;
-    const since = addDays(today, -14);
-    const { data: alerts } = await admin.from("competitive_alerts").select("topic, summary").eq("client_id", slot.client_id).gte("created_at", since).order("created_at", { ascending: false }).limit(6);
-    const trends = [
-      ...(alerts ?? []).map((a: any) => `${a.topic}${a.summary ? `: ${String(a.summary).slice(0, 200)}` : ""}`),
-      ...built.ctx.findings.trends,
-    ];
-    if (!trends.length) continue;
-    // Trends other posts near this date already act on, so two slots in a week do not take the same one.
-    const { data: takenRows } = await admin.from(CALENDAR_VIEW).select("reasons").eq("client_id", slot.client_id).neq("id", slot.id)
-      .gte("post_date", addDays(slot.post_date, -7)).lte("post_date", addDays(slot.post_date, 7)).neq("copy", "");
-    const taken = (takenRows ?? []).map((r: any) => r.reasons?.[0]).filter((r: any) => r?.type === "trend" && r.label).map((r: any) => String(r.label));
-    const result = await anthropicMessages({ apiKey, body: { model: PLANNER_MODEL, max_tokens: 2500, messages: [{ role: "user", content: trendSlotPrompt({ brand: built.ctx.brand, voice: built.ctx.voice, languages: built.ctx.languages, platform: slot.platform, format: slot.format, date: slot.post_date, trends, nearby: built.ctx.nearby, taken }) }] } });
-    const start = result.text.indexOf("{"), end = result.text.lastIndexOf("}");
-    let out: any = null;
-    try { out = start >= 0 && end > start ? JSON.parse(result.text.slice(start, end + 1)) : null; } catch { out = null; }
-    const copy = String(out?.copy ?? "").trim();
-    if (!copy) continue;
-    await admin.from("calendar_posts").update({
-      copy,
-      hashtags: Array.isArray(out.hashtags) ? out.hashtags.map(String).slice(0, 12) : [],
-      cta: out.cta ? String(out.cta) : null,
-      visual_direction: out.visual_direction ? String(out.visual_direction) : null,
-      reasons: [{ type: "trend", label: clipText(out.trend || "A current trend", 200) }],
-    }).eq("id", slot.id).eq("copy", "");
-    filled++;
-  }
-  return { filled, waiting: Math.max(0, (slots ?? []).length - filled) };
-}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });

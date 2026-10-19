@@ -16,7 +16,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { ALL_CLIENTS, ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
 import { AllClientsWeek, type ClientPost } from "@/components/calendar/AllClientsWeek";
-import { CALENDAR_VIEW, addDays, mondayOf, shortDate, todayIn, type CalendarPostRow } from "@/lib/calendarPosts";
+import { addDays, mondayOf, shortDate, todayIn, type CalendarPostRow } from "@/lib/calendarPosts";
 
 export default function CalendarIndex() {
   const navigate = useNavigate();
@@ -52,9 +52,8 @@ export default function CalendarIndex() {
     queryKey: ["calendar-all-posts", week],
     enabled: isMoburstStaff,
     queryFn: async () => {
-      // The calendar shows each week's plan in force, never the raw posts table.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase.from(CALENDAR_VIEW as never) as any)
+      const { data, error } = await (supabase.from("calendar_posts" as never) as any)
         .select("*").gte("post_date", week).lte("post_date", addDays(week, 6)).order("post_date").limit(2000);
       if (error) throw error;
       return (data || []) as CalendarPostRow[];
@@ -65,7 +64,7 @@ export default function CalendarIndex() {
     enabled: isMoburstStaff && !!posts.data && posts.data.length === 0,
     queryFn: async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data } = await (supabase.from(CALENDAR_VIEW as never) as any).select("post_date").gt("post_date", addDays(week, 6)).order("post_date").limit(1);
+      const { data } = await (supabase.from("calendar_posts" as never) as any).select("post_date").gt("post_date", addDays(week, 6)).order("post_date").limit(1);
       return (data?.[0]?.post_date as string | undefined) ?? null;
     },
   });
