@@ -234,7 +234,6 @@ export type Database = {
       brand_voice_learnings: {
         Row: {
           client_id: string
-          confidence: number | null
           created_at: string | null
           evidence: string | null
           id: string
@@ -243,14 +242,12 @@ export type Database = {
           pattern_type: string
           replaced_by: string | null
           source: string
-          source_iterations: number | null
           status: string
           times_confirmed: number
           updated_at: string | null
         }
         Insert: {
           client_id: string
-          confidence?: number | null
           created_at?: string | null
           evidence?: string | null
           id?: string
@@ -259,14 +256,12 @@ export type Database = {
           pattern_type: string
           replaced_by?: string | null
           source?: string
-          source_iterations?: number | null
           status?: string
           times_confirmed?: number
           updated_at?: string | null
         }
         Update: {
           client_id?: string
-          confidence?: number | null
           created_at?: string | null
           evidence?: string | null
           id?: string
@@ -275,7 +270,6 @@ export type Database = {
           pattern_type?: string
           replaced_by?: string | null
           source?: string
-          source_iterations?: number | null
           status?: string
           times_confirmed?: number
           updated_at?: string | null
@@ -551,42 +545,6 @@ export type Database = {
           visual_direction?: string | null
         }
         Relationships: []
-      }
-      calendar_weeks: {
-        Row: {
-          assigned_at: string
-          client_id: string
-          report_id: string
-          week_start: string
-        }
-        Insert: {
-          assigned_at?: string
-          client_id: string
-          report_id: string
-          week_start: string
-        }
-        Update: {
-          assigned_at?: string
-          client_id?: string
-          report_id?: string
-          week_start?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "calendar_weeks_client_id_fkey"
-            columns: ["client_id"]
-            isOneToOne: false
-            referencedRelation: "clients"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "calendar_weeks_report_id_fkey"
-            columns: ["report_id"]
-            isOneToOne: false
-            referencedRelation: "reports"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       canva_finish_jobs: {
         Row: {
@@ -2555,48 +2513,6 @@ export type Database = {
       }
     }
     Views: {
-      calendar_posts_current: {
-        Row: {
-          client_id: string | null
-          copy: string | null
-          created_at: string | null
-          created_by: string | null
-          cta: string | null
-          format: string | null
-          hashtags: string[] | null
-          id: string | null
-          language: string | null
-          pillar: string | null
-          platform: string | null
-          post_date: string | null
-          post_key: string | null
-          posting_time: string | null
-          rationale: string | null
-          raw: Json | null
-          reasons: Json | null
-          report_id: string | null
-          source: string | null
-          touched_at: string | null
-          updated_at: string | null
-          visual_direction: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "calendar_posts_client_id_fkey"
-            columns: ["client_id"]
-            isOneToOne: false
-            referencedRelation: "clients"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "calendar_posts_report_id_fkey"
-            columns: ["report_id"]
-            isOneToOne: false
-            referencedRelation: "reports"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       gos_events: {
         Row: {
           company_slug: string | null
@@ -2672,10 +2588,6 @@ export type Database = {
           detail: string
           failing: number
         }[]
-      }
-      calendar_assign_week: {
-        Args: { p_client: string; p_report: string; p_week: string }
-        Returns: boolean
       }
       calendar_client_ready: { Args: { p_client: string }; Returns: boolean }
       calendar_post_worked: {
