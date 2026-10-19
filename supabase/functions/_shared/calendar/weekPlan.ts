@@ -120,7 +120,7 @@ export function weekPrompt(c: WeekContext): string {
       "- A holiday, awareness day or industry event that matters in the client's market this week can carry a post instead: reason_type \"seasonal\", the moment and its date in moment, and evidence_ids may be empty.",
       "- At most one post is a test: something the evidence hasn't proven for this client yet, such as a competitor format it hasn't tried. Mark it \"test\": true.",
       "- copy is the full caption, ready to publish, written the way the voice section says.",
-      "- fit is one short sentence on why this suits the client. Don't repeat any numbers in it.",
+      "- fit is ONE short sentence (under 20 words) written for the client on why this post suits them. Never mention evidence ids (like P1 or C2), numbers, other posts, or what the post avoids.",
     ].join("\n"),
     'Reply with JSON only: {"posts":[{"date":"YYYY-MM-DD","platform":"...","format":"...","posting_time":"HH:MM","pillar":"...","copy":"...","hashtags":["..."],"cta":"...","visual_direction":"one sentence on what the visual shows","reason_type":"performance|competitor|trend|seasonal","evidence_ids":["P1"],"fit":"...","moment":"","test":false}]}',
   ].filter(Boolean).join("\n\n");
@@ -155,6 +155,28 @@ function shortDate(iso?: string): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
+/**
+ * A report finding's headline. The report writes findings as "claim: evidence";
+ * a short label before the colon (such as "TikTok") is not a claim, so the
+ * first sentence is used instead.
+ */
+export function headline(text: string): string {
+  const first = text.split(/(?<=[.!?])\s/)[0].replace(/[.!?]$/, "").trim();
+  const [claim, rest] = [first.split(":")[0].trim(), first.includes(":")];
+  return rest && claim.split(/\s+/).length >= 3 ? claim : first;
+}
+
+/**
+ * The model's "why it fits", as a client reads it: its first sentence, kept
+ * only when it names no evidence id and is short. Planner notes ("doesn't
+ * repeat this week's topics") don't survive the first-sentence rule.
+ */
+export function clientFit(fit: string | undefined): string | undefined {
+  const first = String(fit ?? "").replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0]?.trim() ?? "";
+  if (!first || /\b[PCTNR]\d{1,2}\b/.test(first) || first.length > 180) return undefined;
+  return first;
+}
+
 /** The first sentence of a reason, from the first piece of evidence it cites. */
 export function evidenceSentence(e: EvidenceRef): string {
   const when = shortDate(e.date);
@@ -168,9 +190,9 @@ export function evidenceSentence(e: EvidenceRef): string {
       return e.companies && e.companies > 1 ? `${e.companies} competitors posted about ${topic} this week` : `Competitors posted about ${topic} this week`;
     }
     case "trend":
-      return `Trend from the monthly report: ${e.text.split(/(?<=[.!?])\s/)[0].replace(/[.!?]$/, "")}`;
+      return `Trend from the monthly report: ${headline(e.text)}`;
     case "report":
-      return `From the monthly report: ${e.text.split(/(?<=[.!?])\s/)[0].replace(/[.!?]$/, "")}`;
+      return `From the monthly report: ${headline(e.text)}`;
   }
 }
 
@@ -179,7 +201,7 @@ export function buildReason(input: { type: ReasonType; evidence: EvidenceRef[]; 
   const thin = input.evidence.some((e) => e.thin);
   const first = input.evidence[0];
   const base = first ? evidenceSentence(first) : input.moment?.trim() || (input.type === "seasonal" ? "A dated moment this week" : "Planned from the client's content pillars");
-  const fit = input.fit?.trim().replace(/\s+/g, " ");
+  const fit = clientFit(input.fit);
   const label = [
     input.test ? "Test: " : "",
     base.replace(/[.\s]+$/, ""),

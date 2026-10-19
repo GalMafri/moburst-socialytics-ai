@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildReason, parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type WeekContext } from "./weekPlan";
+import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type WeekContext } from "./weekPlan";
 import type { EvidenceItem } from "./evidence";
 
 const EVIDENCE: EvidenceItem[] = [
@@ -79,6 +79,22 @@ describe("parseWeekPlan", () => {
 
   it("returns nothing for a reply that isn't JSON", () => {
     expect(parseWeekPlan("Sorry, I can't.", CTX)).toEqual([]);
+  });
+});
+
+describe("what clients read in a reason", () => {
+  it("keeps the first sentence of the fit, and drops one that names an evidence id or runs long", () => {
+    expect(clientFit("Captains live this every week. It doesn't repeat this week's topics.")).toBe("Captains live this every week.");
+    expect(clientFit("This takes P7's strong topic and cuts it down.")).toBeUndefined();
+    expect(clientFit("Pairs a hook with share asks, which R4 found drives engagement.")).toBeUndefined();
+    expect(clientFit("x".repeat(200))).toBeUndefined();
+    expect(clientFit(undefined)).toBeUndefined();
+  });
+
+  it("uses a report finding's headline, unless the part before the colon is only a label", () => {
+    expect(headline("Carousel education can support clicks: Publish 1 rights-focused carousel weekly.")).toBe("Carousel education can support clicks");
+    expect(headline("TikTok: post 3 weekly Myth vs Fact videos; measure completion.")).toBe("TikTok: post 3 weekly Myth vs Fact videos; measure completion");
+    expect(headline("LinkedIn drove 464 of 465 clicks. More detail.")).toBe("LinkedIn drove 464 of 465 clicks");
   });
 });
 
