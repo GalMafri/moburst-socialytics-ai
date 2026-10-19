@@ -38,7 +38,9 @@ export const STEPS: Record<string, StepDef> = {
     async run(db, client, { force }) {
       try {
         const learned = await learnBrandStyle(db, String(client.id), { discover: true, force });
-        return { status: "done", result: { references: learned.refs?.length ?? 0, cached: learned.cached, synthesized_at: learned.synthesis?.synthesized_at ?? null } };
+        const learnedAt = learned.synthesis?.synthesized_at ?? null;
+        // A reused style keeps its own date, so the 90-day refresh counts from when it was learned.
+        return { status: "done", result: { references: learned.refs?.length ?? 0, cached: learned.cached, synthesized_at: learnedAt }, doneAt: learnedAt };
       } catch (e) {
         if (!(e instanceof StyleError)) throw e;
         if (e.code === "no_accounts") return { status: "waiting", reason: "social_accounts" };

@@ -66,7 +66,8 @@ export function decide(row: StepRow | null, inputsKey: string | null, policy: St
 
 /** What a step's run came to, as the lifecycle stores it. */
 export type StepOutcome =
-  | { status: "done"; result: Record<string, unknown> }
+  /** `doneAt`: when the result was really produced, if earlier (a stored result reused). */
+  | { status: "done"; result: Record<string, unknown>; doneAt?: string | null }
   /** Waiting for data: `recheck` days, or until the inputs change when absent. */
   | { status: "waiting"; reason: string; recheckDays?: number; result?: Record<string, unknown> }
   /** A passing failure: tried again later with backoff. `soon` retries in minutes. */
@@ -76,7 +77,8 @@ export function rowAfter(prev: StepRow | null, base: { client_id: string; step: 
   const at = now.toISOString();
   const sameInputs = prev?.inputs_key === base.inputs_key;
   if (outcome.status === "done") {
-    return { ...base, status: "done", attempts: 0, attempted_at: at, done_at: at, next_attempt_at: null, result: outcome.result, error: null };
+    const producedAt = outcome.doneAt && Date.parse(outcome.doneAt) <= now.getTime() ? new Date(outcome.doneAt).toISOString() : at;
+    return { ...base, status: "done", attempts: 0, attempted_at: at, done_at: producedAt, next_attempt_at: null, result: outcome.result, error: null };
   }
   if (outcome.status === "waiting") {
     return {

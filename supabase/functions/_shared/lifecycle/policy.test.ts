@@ -60,4 +60,8 @@ describe("rowAfter", () => {
     expect(rowAfter(ok, base, { status: "waiting", reason: "designed_posts", recheckDays: 30 }, NOW).result).toMatchObject({ references: 8, waiting_for: "designed_posts" });
     expect(rowAfter(ok, base, { status: "failed", error: "down" }, NOW).result).toMatchObject({ references: 8 });
   });
+  it("dates a reused result by when it was produced, never in the future", () => {
+    expect(rowAfter(null, base, { status: "done", result: {}, doneAt: "2026-10-13T11:35:30.496Z" }, NOW).done_at).toBe("2026-10-13T11:35:30.496Z");
+    expect(rowAfter(null, base, { status: "done", result: {}, doneAt: "2027-01-01T00:00:00Z" }, NOW).done_at).toBe(NOW.toISOString());
+  });
 });
