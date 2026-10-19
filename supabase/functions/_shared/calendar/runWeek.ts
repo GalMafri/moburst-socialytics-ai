@@ -39,7 +39,7 @@ export interface WeekJobOutcome {
 const RETRY_MINUTES = 10;
 const DAY = 86400_000;
 
-const CLIENT_COLUMNS = "id, name, brand_identity, content_pillars, geo, language, timezone, posting_rhythm, sprout_customer_id, website_url";
+export const CLIENT_COLUMNS = "id, name, brand_identity, content_pillars, geo, language, timezone, posting_rhythm, sprout_customer_id, website_url";
 
 function apiKey(): string {
   const key = Deno.env.get("ANTHROPIC_API_KEY");

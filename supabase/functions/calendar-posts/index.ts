@@ -14,6 +14,9 @@
 //        a member of the client or staff: save a copy edit (a revision row
 //        without media) and update the calendar post; a person's edit
 //        teaches the client's preference memory
+//   POST {action:"preview_evidence", client_id}
+//        staff with write access: what the planner would see for this client
+//        now (rhythm, scored evidence, thin data), with no model call
 //   POST {action:"consolidate_memory", client_id}
 //        staff with write access, or the operational secret: merge the
 //        client's preferences learned before the memory merged them
@@ -22,6 +25,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { consolidateMemory, learnFromSignal } from "../_shared/voice/load.ts";
+import { CLIENT_COLUMNS, gatherEvidence } from "../_shared/calendar/runWeek.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -114,6 +118,16 @@ Deno.serve(async (req) => {
         background(learnFromSignal(admin, clientId, { kind: "copy_edit", before: previous, after: copy, platform: before?.platform ?? body.platform ?? null }), "memory");
       }
       return json({ ok: true });
+    }
+
+    if (body?.action === "preview_evidence") {
+      const clientId = String(body.client_id || "");
+      if (!clientId) return json({ error: "client_id is required." }, 400);
+      await requireStaff(req, { writeClientId: clientId });
+      const { data: client } = await admin.from("clients").select(CLIENT_COLUMNS).eq("id", clientId).maybeSingle();
+      if (!client) return json({ error: "No such client." }, 404);
+      const g = await gatherEvidence(admin, client, new Date());
+      return json({ own_posts: g.own.length, rhythm: g.rhythm, learned_rhythm: g.learnedRhythm, evidence: g.evidence, avoid: g.avoid, thin: g.thin, sources: g.sources, examples: g.examples });
     }
 
     if (body?.action === "consolidate_memory") {

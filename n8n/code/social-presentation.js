@@ -396,7 +396,9 @@ if (skipTrends) {
 // ============================================
 // WEEKLY CONTENT CALENDAR
 // ============================================
+// Reports since 19 Oct 2026 write no posts: the calendar is planned a week at a time in Socialytics.
 const totalCalendarPosts = contentCalendar.reduce((sum, day) => sum + (day.posts || []).length, 0);
+if (totalCalendarPosts > 0) {
 prompt += `
 ---
 
@@ -438,13 +440,15 @@ ${i + 1}. ${(post.platform || 'Social').toUpperCase()} - ${(post.format || 'Post
   });
 });
 
+}
+
 // ============================================
 // ACTION ITEMS
 // ============================================
 prompt += `
 ---
 
-SLIDE ${slideNum + 1}: ACTION ITEMS & NEXT STEPS
+SLIDE ${slideNum + (totalCalendarPosts > 0 ? 1 : 0)}: ACTION ITEMS & NEXT STEPS
 
 🚨 IMMEDIATE PRIORITIES (This Week):
 • Implement top 3 content recommendations
@@ -452,12 +456,7 @@ SLIDE ${slideNum + 1}: ACTION ITEMS & NEXT STEPS
 • Focus on underrepresented pillar: ${sproutAnalysis.pillar_alignment?.underrepresented?.[0] || 'Client Wins'}
 • Test hooks inspired by top-performing TikTok content
 
-📅 CONTENT CALENDAR RECOMMENDATIONS:
-• LinkedIn: ${platformCounts['LinkedIn'] || 0} posts/week
-• Instagram: ${platformCounts['Instagram'] || 0} posts/week
-• Facebook: ${platformCounts['Facebook'] || 0} posts/week
-• TikTok: ${platformCounts['TikTok'] || 0} posts/week
-
+${totalCalendarPosts > 0 ? `📅 CONTENT CALENDAR RECOMMENDATIONS:\n• LinkedIn: ${platformCounts['LinkedIn'] || 0} posts/week\n• Instagram: ${platformCounts['Instagram'] || 0} posts/week\n• Facebook: ${platformCounts['Facebook'] || 0} posts/week\n• TikTok: ${platformCounts['TikTok'] || 0} posts/week\n` : `📅 WEEKLY POSTS:\n• Each week's posts are planned in the Socialytics calendar the Monday before, from the latest results.\n`}
 📈 METRICS TO PRIORITIZE:
 `;
 
