@@ -2,12 +2,16 @@
 //
 // Writing one week of a client's calendar, and revising it from a note
 // (weekly calendar, Lital 19 Oct 2026). The model plans posts and cites the
-// evidence each one acts on by id; the numbers on a post's reason are filled
-// in here from the evidence, so a reason never carries a figure the data
-// does not have. At most one post a week is a test. Free of Deno and network
-// imports so it can be tested.
+// evidence each one acts on by id; a post's reason keeps that evidence with
+// its real numbers, so a reason never carries a figure the data does not
+// have, and is worded from it when shown (reasonText.ts). At most one post a
+// week is a test. Free of Deno and network imports so it can be tested.
 
 import type { EvidenceItem, RhythmLine } from "./evidence.ts";
+import { clientFit, fmtMultiple, reasonLabel, type EvidenceRef, type Reason, type ReasonType } from "./reasonText.ts";
+
+export { clientFit, evidenceSentence, fmtMultiple, headline } from "./reasonText.ts";
+export type { EvidenceRef, Reason, ReasonType } from "./reasonText.ts";
 
 export interface WeekContext {
   brand: string;
@@ -30,34 +34,8 @@ export interface WeekContext {
   recent: Array<{ date: string; platform: string; copy: string }>;
   /** Where the evidence is thin, in plain words. */
   thin: string[];
-}
-
-export type ReasonType = "performance" | "competitor" | "trend" | "seasonal" | "test";
-
-export interface EvidenceRef {
-  id: string;
-  kind: EvidenceItem["kind"];
-  text: string;
-  platform?: string;
-  company?: string;
-  format?: string;
-  date?: string;
-  link?: string | null;
-  metric?: string;
-  value?: number;
-  median?: number;
-  multiple?: number;
-  sample?: number;
-  thin?: boolean;
-  companies?: number;
-}
-
-export interface Reason {
-  type: ReasonType;
-  label: string;
-  fit?: string;
-  evidence?: EvidenceRef[];
-  thin?: boolean;
+  /** The client uploaded filmed footage in the last 60 days, so ideas that need someone on camera can be produced. */
+  canFilm: boolean;
 }
 
 export interface PlannedPost {
@@ -101,7 +79,7 @@ export function weekPrompt(c: WeekContext): string {
     c.pillars.length ? ["Content pillars:", ...c.pillars.map((p) => `- ${p.name}${p.description ? `: ${p.description}` : ""}`)].join("\n") : "",
     c.market.length ? `Market: ${c.market.join(", ")}.` : "",
     c.languages.length ? `Write in: ${c.languages.join(", ")}.` : "",
-    ["Posts for this week, per platform (this is how often the team actually publishes; follow it exactly):", ...rhythm].join("\n"),
+    rhythm.length ? ["Posts for this week, per platform (this is how often the team actually publishes; follow it exactly):", ...rhythm].join("\n") : "",
     `Dates you can use: ${dates.map((d) => `${WEEKDAYS[weekDates(c.monday).indexOf(d)]} ${d}`).join(", ")}.`,
     "Evidence, by id. Cite the ids each post acts on.",
     section(`${c.brand}'s own posts that beat its usual numbers:`, byKind("own")),
@@ -120,6 +98,7 @@ export function weekPrompt(c: WeekContext): string {
       "- A holiday, awareness day or industry event that matters in the client's market this week can carry a post instead: reason_type \"seasonal\", the moment and its date in moment, and evidence_ids may be empty.",
       "- At most one post is a test: something the evidence hasn't proven for this client yet, such as a competitor format it hasn't tried. Mark it \"test\": true.",
       "- copy is the full caption, ready to publish, written the way the voice section says.",
+      ...(c.canFilm ? [] : ["- Every post has to be one the team can make without filming: don't plan ideas that need a specific person on camera (a team member, the founder, a customer) or footage only the client could shoot (its office, events, products in use). Videos made from designed scenes, text and motion are fine."]),
       "- Never invent facts: no names, titles, numbers, quotes, client results, launches or claims about people that aren't in the evidence, the pillars or the voice section.",
       "- fit is ONE short sentence (under 20 words) written for the client on why this post suits them. Never mention evidence ids (like P1 or C2), numbers, other posts, or what the post avoids.",
     ].join("\n"),
@@ -136,95 +115,21 @@ function jsonObject(text: string): Record<string, unknown> | null {
 
 const str = (x: unknown, n = 4000) => (typeof x === "string" ? x.trim().slice(0, n) : "");
 
-export function fmtMultiple(m: number): string {
-  return `${Number.isInteger(m) ? m : m.toFixed(1)}x`;
-}
-
-const FORMAT_WORDS: Record<string, string> = {
-  photo: "image post", image: "image post", single_image: "image post", "single image": "image post", video: "video", reel: "reel", "reel/video": "reel",
-  carousel: "carousel", album: "carousel", document: "document post", link: "link post", status: "text post", text: "text post", short: "short",
-};
-
-function formatWord(f?: string): string {
-  const key = String(f || "").toLowerCase().trim();
-  return FORMAT_WORDS[key] ?? (key && key !== "unknown" ? key : "post");
-}
-
-function shortDate(iso?: string): string {
-  if (!iso) return "";
-  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-}
-
-/**
- * A report finding's headline. The report writes findings as "claim: evidence";
- * a short label before the colon (such as "TikTok") is not a claim, so the
- * first sentence is used instead.
- */
-export function headline(text: string): string {
-  const first = text.split(/(?<=[.!?])\s/)[0].replace(/[.!?]$/, "").trim();
-  const [claim, rest] = [first.split(":")[0].trim(), first.includes(":")];
-  return rest && claim.split(/\s+/).length >= 3 ? claim : first;
-}
-
-/**
- * The model's "why it fits", as a client reads it: its first sentence, kept
- * only when it names no evidence id and is short. Planner notes ("doesn't
- * repeat this week's topics") don't survive the first-sentence rule.
- */
-export function clientFit(fit: string | undefined): string | undefined {
-  const first = String(fit ?? "").replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0]?.trim() ?? "";
-  if (!first || /\b[PCTNR]\d{1,2}\b/.test(first) || first.length > 180) return undefined;
-  return first;
-}
-
-/** The first sentence of a reason, from the first piece of evidence it cites. */
-export function evidenceSentence(e: EvidenceRef): string {
-  const when = shortDate(e.date);
-  switch (e.kind) {
-    case "own":
-      return `Your ${e.platform} ${formatWord(e.format)}${when ? ` from ${when}` : ""} got ${fmtMultiple(e.multiple ?? 0)} your usual ${e.metric}`;
-    case "competitor":
-      return `${e.company}'s ${e.platform} ${formatWord(e.format)}${when ? ` from ${when}` : ""} got ${fmtMultiple(e.multiple ?? 0)} their usual ${e.metric}`;
-    case "topic": {
-      const topic = e.text.split(":")[0].trim();
-      return e.companies && e.companies > 1 ? `${e.companies} competitors posted about ${topic} this week` : `Competitors posted about ${topic} this week`;
-    }
-    case "trend":
-      return `Trend from the monthly report: ${headline(e.text)}`;
-    case "report":
-      return `From the monthly report: ${headline(e.text)}`;
-  }
-}
-
-/** A post's reason: the evidence in words with its real numbers, then why it fits. */
+/** A post's reason: its parts, stored so it can be worded when shown, and its words as of now. */
 export function buildReason(input: { type: ReasonType; evidence: EvidenceRef[]; fit?: string; moment?: string; test?: boolean }): Reason {
   const thin = input.evidence.some((e) => e.thin);
-  const first = input.evidence[0];
-  const base = first ? evidenceSentence(first) : input.moment?.trim() || (input.type === "seasonal" ? "A dated moment this week" : "Planned from the client's content pillars");
   const fit = clientFit(input.fit);
-  const label = [
-    input.test ? "Test: " : "",
-    base.replace(/[.\s]+$/, ""),
-    ".",
-    fit ? ` ${fit.replace(/[.\s]+$/, "")}.` : "",
-    thin ? " Early signal." : "",
-  ].join("").slice(0, 400);
-  return { type: input.test ? "test" : input.type, label, ...(fit ? { fit } : {}), ...(input.evidence.length ? { evidence: input.evidence } : {}), ...(thin ? { thin } : {}) };
-}
-
-/**
- * A stored reason written again with the current rules (buildReason), from
- * the evidence and fit kept on it, so a change to how reasons read reaches
- * posts already on the calendar without a model call.
- */
-export function rebuildReason(r: Reason): Reason {
-  const evidence = r.evidence ?? [];
-  const test = r.type === "test";
-  const type = test ? typeFor(evidence, "performance") : r.type;
-  // A seasonal reason without evidence is its moment, then the fit.
-  const moment = !evidence.length ? r.label.replace(/^Test: /, "").replace(/\.(\s.*)?$/, "") : undefined;
-  return buildReason({ type, evidence, fit: r.fit, moment, test });
+  const moment = input.moment?.trim();
+  const test = !!input.test;
+  return {
+    type: test ? "test" : input.type,
+    label: reasonLabel({ type: input.type, evidence: input.evidence, fit, moment, test }),
+    ...(fit ? { fit } : {}),
+    ...(input.evidence.length ? { evidence: input.evidence } : {}),
+    ...(thin ? { thin } : {}),
+    ...(moment ? { moment } : {}),
+    test,
+  };
 }
 
 function typeFor(evidence: EvidenceRef[], declared: string): Exclude<ReasonType, "test"> {

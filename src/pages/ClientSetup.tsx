@@ -8,8 +8,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PostingRhythmField, type LearnedRhythm } from "@/components/onboarding/PostingRhythmField";
-import { rhythmSetting } from "@/lib/postingRhythm";
+import { PostingRhythmField } from "@/components/onboarding/PostingRhythmField";
+import { rhythmSetting, type ResolvedRhythmLine, type RhythmSourcesSummary } from "@/lib/postingRhythm";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -175,20 +175,19 @@ export default function ClientSetup() {
     enabled: !!id && !isNew,
   });
 
-  // What the client actually publishes, as the latest week's plan measured it.
-  const { data: learnedRhythm } = useQuery({
-    queryKey: ["learned-rhythm", id],
+  // The rhythm the latest week's plan worked out, per platform, and where it came from.
+  const { data: planRhythm } = useQuery({
+    queryKey: ["plan-rhythm", id],
     queryFn: async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data } = await (supabase.from("calendar_plans" as never) as any)
         .select("rhythm").eq("client_id", id).eq("status", "ready").not("rhythm", "is", null)
-        .order("week_start", { ascending: false }).limit(1).maybeSingle();
-      return ((data?.rhythm?.learned ?? null) as LearnedRhythm[] | null);
+        .order("ready_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+      const rhythm = data?.rhythm as { learned?: ResolvedRhythmLine[]; sources?: RhythmSourcesSummary } | null | undefined;
+      return rhythm?.learned ? { resolved: rhythm.learned, sources: rhythm.sources ?? null } : null;
     },
     enabled: !!id && !isNew,
   });
-  // The voice profile measures it too; it's rebuilt monthly, plans weekly.
-  const measuredRhythm: LearnedRhythm[] | null = ((client as any)?.social_voice?.rhythm as LearnedRhythm[] | undefined) ?? learnedRhythm ?? null;
 
   useEffect(() => {
     if (client) {
@@ -968,7 +967,8 @@ export default function ClientSetup() {
                 <PostingRhythmField
                   platforms={form.primary_platforms}
                   value={form.posting_rhythm}
-                  learned={measuredRhythm}
+                  resolved={planRhythm?.resolved ?? null}
+                  sources={planRhythm?.sources ?? null}
                   onChange={(posting_rhythm) => setForm((f) => ({ ...f, posting_rhythm }))}
                 />
               </CardContent>

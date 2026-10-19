@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { addDays, canRevise, mondayOf, nextPlannableWeek, weekBoard, weekLabel, type CalendarPostRow } from "@/lib/calendarPosts";
+import { rateWords, sourceWords } from "@/lib/postingRhythm";
 
 const row = (over: Partial<CalendarPostRow>): CalendarPostRow => ({
   id: "1", client_id: "c", report_id: "r", post_date: "2026-10-14", posting_time: "9:00 AM", platform: "LinkedIn",
@@ -23,6 +24,26 @@ describe("calendar weeks", () => {
     expect(board.map((d) => d.posts.length)).toEqual([0, 0, 1, 0, 0, 0, 0]);
     expect(board[2]).toMatchObject({ day: "Wednesday", date_label: "Oct 14" });
     expect(board[2].posts[0]).toMatchObject({ _calendarPostKey: "key-1", date_label: "2026-10-14", copy: "Copy" });
+  });
+  it("words each card's reason now, from its stored parts", () => {
+    const reasons = [{ type: "seasonal", label: "Old words", moment: "Halloween on Oct 31", test: false }, { type: "idea", label: "Added by the team" }];
+    const [post] = weekBoard([row({ reasons })], "2026-10-12")[2].posts as Array<{ _reasons: Array<{ label: string }> }>;
+    expect(post._reasons.map((r) => r.label)).toEqual(["Halloween on Oct 31.", "Added by the team"]);
+  });
+});
+
+describe("the posting rhythm on screen", () => {
+  it("says how often and where the number came from", () => {
+    expect(rateWords(3.2)).toBe("3 a week");
+    expect(rateWords(21.9)).toBe("7 a week");
+    expect(rateWords(0.25)).toBe("1 every 4 weeks");
+    expect(rateWords(0.5)).toBe("1 every 2 weeks");
+    expect(rateWords(0.9)).toBe("1 a week");
+    expect(sourceWords("published_8w")).toBe("From its posts in the last 8 weeks");
+    expect(sourceWords("published")).toBe("From its posts in the last 8 weeks");
+    expect(sourceWords("published_90d")).toBe("From its posts in the last 90 days");
+    expect(sourceWords("competitors")).toBe("From its competitors");
+    expect(sourceWords("all_tracked")).toBe("From companies the app tracks");
   });
 });
 

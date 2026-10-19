@@ -7,7 +7,8 @@
 //   * competitor posts from the newest weekly feed, each against that
 //     competitor's own median on that platform over the stored weeks, per
 //     follower, leaving out posts RivalIQ marks as likely boosted;
-//   * the client's posting rhythm, from what it actually published.
+//   * the client's posting rhythm, which always resolves (resolveRhythm):
+//     its own posting, then its competitors', then every tracked company's.
 // There is no published threshold for "outperformed", so posts are ranked by
 // how far above their own median they are and the multiple is shown as is.
 // Free of Deno and network imports so it can be tested.
@@ -61,16 +62,25 @@ export interface EvidenceItem {
   companies?: number;
 }
 
+/**
+ * Where a platform's posts per week came from, in order of preference:
+ * the client's own posts over the last 8 full weeks, its own posts over 90
+ * days, the median of its tracked competitors, the median of every company
+ * the app tracks; or staff's setting, which overrides all of them.
+ */
+export type RhythmSource = "published_8w" | "published_90d" | "competitors" | "all_tracked" | "setting";
+
 export interface RhythmLine {
   platform: string;
+  /** Posts this week (a rate under 1 a week plans some weeks only). */
   perWeek: number;
   /** Weekdays the client usually posts on this platform, most used first. */
   days: string[];
   /** The hour it usually posts at, in the client's time zone ("17:00"). */
   time: string | null;
-  /** Posts per week over the weeks looked at, before rounding. */
+  /** Posts per week, before rounding. */
   average: number;
-  source: "published" | "setting";
+  source: RhythmSource;
 }
 
 export const SETTLE_HOURS = 48;
@@ -209,8 +219,14 @@ export function scoreCompetitorPosts(posts: CompetitorPost[], newestStart: strin
   return out.sort((a, b) => b.multiple - a.multiple).slice(0, opts.top ?? 10);
 }
 
-function zoned(iso: string, timeZone: string): { weekday: string; hour: string; date: string } {
-  const d = new Date(iso);
+function zoned(iso: string, timeZone: string): { weekday: string; hour: string | null; date: string } {
+  const text = String(iso ?? "");
+  // A date with no time (some feed rows) is that calendar day, with no hour to learn from.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return { weekday: WEEKDAYS[(new Date(`${text}T00:00:00Z`).getUTCDay() + 6) % 7], hour: null, date: text };
+  }
+  const d = new Date(text);
+  if (Number.isNaN(d.getTime())) return { weekday: "", hour: null, date: "" };
   try {
     const parts = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long", hour: "2-digit", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d);
     const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
@@ -220,56 +236,370 @@ function zoned(iso: string, timeZone: string): { weekday: string; hour: string; 
   }
 }
 
+const DAY_MS = 86400_000;
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const addDay = (isoDay: string, n: number) => new Date(Date.parse(`${isoDay}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+const validDay = (s: unknown) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}/.test(s) && Number.isFinite(Date.parse(s.slice(0, 10)));
+
 function mondayOfDate(isoDay: string): string {
   const d = new Date(`${isoDay}T00:00:00Z`);
   return new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86400_000).toISOString().slice(0, 10);
 }
 
+interface Timing {
+  posts: number;
+  days: string[];
+  time: string | null;
+}
+
 /**
- * How often the client publishes on each platform: posts per week over the
- * last eight full weeks, with the weekdays and hour it usually posts at.
- * Platforms it posts on less than every other week are left out.
+ * Per platform: how many posts went out from one date up to (not including)
+ * another, in the client's time zone, the weekdays used most and the usual
+ * hour.
  */
-export function rhythmFromPosts(posts: OwnPost[], now: Date, timeZone: string): RhythmLine[] {
-  const thisMonday = mondayOfDate(zoned(now.toISOString(), timeZone).date);
-  const first = new Date(Date.parse(`${thisMonday}T00:00:00Z`) - RHYTHM_WEEKS * 7 * 86400_000).toISOString().slice(0, 10);
-  const byPlatform = new Map<string, Array<{ weekday: string; hour: string }>>();
+function timing(posts: Array<{ platform: string; publishedAt: string }>, timeZone: string, from: string, before: string): Map<string, Timing> {
+  const seen = new Map<string, Array<{ weekday: string; hour: string | null }>>();
   for (const p of posts) {
     const z = zoned(p.publishedAt, timeZone);
-    if (!z.date || z.date < first || z.date >= thisMonday) continue;
-    byPlatform.set(p.platform, [...(byPlatform.get(p.platform) ?? []), { weekday: z.weekday, hour: z.hour }]);
+    if (!p.platform || !z.date || z.date < from || z.date >= before) continue;
+    seen.set(p.platform, [...(seen.get(p.platform) ?? []), z]);
   }
-  const lines: RhythmLine[] = [];
-  for (const [platform, seen] of byPlatform) {
-    const average = seen.length / RHYTHM_WEEKS;
-    const perWeek = Math.min(7, Math.round(average));
-    if (perWeek < 1) continue;
+  const out = new Map<string, Timing>();
+  for (const [platform, list] of seen) {
     const dayCounts = new Map<string, number>();
     const hourCounts = new Map<string, number>();
-    for (const s of seen) {
+    for (const s of list) {
       dayCounts.set(s.weekday, (dayCounts.get(s.weekday) ?? 0) + 1);
-      hourCounts.set(s.hour, (hourCounts.get(s.hour) ?? 0) + 1);
+      if (s.hour !== null) hourCounts.set(s.hour, (hourCounts.get(s.hour) ?? 0) + 1);
     }
     const days = [...dayCounts].sort((a, b) => b[1] - a[1] || WEEKDAYS.indexOf(a[0]) - WEEKDAYS.indexOf(b[0])).map(([d]) => d);
     const hour = [...hourCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0];
-    lines.push({ platform, perWeek, days, time: hour ? `${hour}:00` : null, average: round1(average), source: "published" });
+    out.set(platform, { posts: list.length, days, time: hour ? `${hour}:00` : null });
   }
-  return lines.sort((a, b) => b.perWeek - a.perWeek || a.platform.localeCompare(b.platform));
+  return out;
 }
 
-/** Staff's posts-per-week setting wins for the platforms it names; 0 removes a platform. */
-export function applyRhythmSetting(learned: RhythmLine[], setting: Record<string, unknown> | null | undefined): RhythmLine[] {
+/** The last eight full weeks, Monday to Sunday in the client's time zone, before the current one. */
+function rhythmWindow(now: Date, timeZone: string): { from: string; before: string } {
+  const before = mondayOfDate(zoned(now.toISOString(), timeZone).date);
+  return { from: addDay(before, -RHYTHM_WEEKS * 7), before };
+}
+
+const sortLines = (lines: RhythmLine[]) =>
+  lines.sort((a, b) => b.perWeek - a.perWeek || b.average - a.average || a.platform.localeCompare(b.platform));
+
+/**
+ * How often the client publishes on each platform: posts per week over the
+ * last eight full weeks, with the weekdays and hour it usually posts at.
+ * Platforms it posts on less than every other week are left out. This is the
+ * learned part of the rhythm; resolveRhythm plans from it first.
+ */
+export function rhythmFromPosts(posts: OwnPost[], now: Date, timeZone: string): RhythmLine[] {
+  const { from, before } = rhythmWindow(now, timeZone);
+  const lines: RhythmLine[] = [];
+  for (const [platform, t] of timing(posts, timeZone, from, before)) {
+    const average = t.posts / RHYTHM_WEEKS;
+    const perWeek = Math.min(7, Math.round(average));
+    if (perWeek < 1) continue;
+    lines.push({ platform, perWeek, days: t.days, time: t.time, average: round1(average), source: "published_8w" });
+  }
+  return sortLines(lines);
+}
+
+/** The Monday the rule for rates under one a week counts weeks from. */
+export const RATE_EPOCH = "2026-01-05";
+
+/**
+ * Posts a platform gets in the week that starts on a Monday. A rate of one a
+ * week or more is rounded (at most 7). A rate under one is spread by a fixed
+ * rule with no state: week w, counted in whole weeks from RATE_EPOCH, gets
+ * floor(rate*(w+1)) - floor(rate*w) posts, so 0.5 a week posts every other
+ * week and 0.25 every fourth.
+ */
+export function postsInWeek(rate: number, monday: string): number {
+  if (!(rate > 0)) return 0;
+  if (rate >= 1) return Math.min(7, Math.round(rate));
+  const w = Math.floor((Date.parse(`${monday}T00:00:00Z`) - Date.parse(`${RATE_EPOCH}T00:00:00Z`)) / (7 * DAY_MS));
+  // The small margin keeps float error (0.29 * 100 = 28.999…) from moving a post a week.
+  const floor = (x: number) => Math.floor(x + 1e-9);
+  return Math.min(7, floor(rate * (w + 1)) - floor(rate * w));
+}
+
+/**
+ * Staff's posts-per-week setting wins for the platforms it names; 0 removes a
+ * platform. A platform it adds gets its usual days and hour from timingOf.
+ */
+export function applyRhythmSetting(
+  learned: RhythmLine[],
+  setting: Record<string, unknown> | null | undefined,
+  timingOf: (platform: string) => { days: string[]; time: string | null } | undefined = () => undefined,
+): RhythmLine[] {
   if (!setting || typeof setting !== "object") return learned;
   const out = new Map(learned.map((l) => [l.platform, l]));
   for (const [rawPlatform, rawCount] of Object.entries(setting)) {
+    if (rawCount === null || rawCount === undefined || rawCount === "") continue;
     const platform = platformName(rawPlatform);
     const n = Math.max(0, Math.min(7, Math.round(Number(rawCount))));
     if (!platform || !Number.isFinite(n)) continue;
     if (n === 0) { out.delete(platform); continue; }
     const had = out.get(platform);
-    out.set(platform, { platform, perWeek: n, days: had?.days ?? [], time: had?.time ?? null, average: had?.average ?? 0, source: "setting" });
+    const usual = had ?? timingOf(platform);
+    out.set(platform, { platform, perWeek: n, days: usual?.days ?? [], time: usual?.time ?? null, average: had?.average ?? n, source: "setting" });
   }
-  return [...out.values()].sort((a, b) => b.perWeek - a.perWeek || a.platform.localeCompare(b.platform));
+  return sortLines([...out.values()]);
+}
+
+// ── Where the rhythm comes from when the client's own posting can't say ────
+
+/** A company's post, as posting rates need it. */
+export interface TrackedPost {
+  /** The company, the same key in every feed (its normalized name). */
+  company: string;
+  platform: string;
+  publishedAt: string;
+}
+
+/** A company's name without case, punctuation or legal suffixes ("Ltd", "LLC"), so feeds and competitor sets agree on who is who. */
+export function companyKey(name: unknown): string {
+  return String(name ?? "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\b(inc|llc|ltd|limited|corp|corporation|co|plc|gmbh|pa|llp|lp|group|the)\b/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The median posts per week on each platform across companies. A company's
+ * rate is its posts there over the weeks its feed covers; only companies that
+ * posted on the platform count. A company seen in several clients' feeds
+ * counts once, from the feed that covers the most weeks.
+ */
+export function medianRates(groups: Array<{ weeks: number; posts: TrackedPost[] }>): Record<string, number> {
+  const best = new Map<string, { weeks: number; counts: Map<string, number> }>();
+  for (const g of groups) {
+    const weeks = Math.max(1, g.weeks);
+    const byCompany = new Map<string, Map<string, number>>();
+    for (const p of g.posts) {
+      if (!p.company || !p.platform) continue;
+      const counts = byCompany.get(p.company) ?? new Map<string, number>();
+      counts.set(p.platform, (counts.get(p.platform) ?? 0) + 1);
+      byCompany.set(p.company, counts);
+    }
+    for (const [company, counts] of byCompany) {
+      const had = best.get(company);
+      if (!had || weeks > had.weeks) best.set(company, { weeks, counts });
+    }
+  }
+  const rates = new Map<string, number[]>();
+  for (const { weeks, counts } of best.values()) {
+    for (const [platform, n] of counts) rates.set(platform, [...(rates.get(platform) ?? []), n / weeks]);
+  }
+  const out: Record<string, number> = {};
+  for (const [platform, xs] of rates) {
+    const m = round2(median(xs) ?? 0);
+    if (m > 0) out[platform] = m;
+  }
+  return out;
+}
+
+/** Which company in a feed is the client: the feed's own id for it, else its Sprout posts or its name. */
+// deno-lint-ignore no-explicit-any
+export function clientCompanyId(payload: any, clientName: string): string | null {
+  if (payload?.client_company_id) return String(payload.client_company_id);
+  // deno-lint-ignore no-explicit-any
+  const own = (payload?.socialPosts ?? []).find((p: any) => p?.source === "sprout" || String(p?.companyName || "").toLowerCase() === clientName.toLowerCase());
+  return own?.companyId ? String(own.companyId) : null;
+}
+
+// deno-lint-ignore no-explicit-any
+export function isClientPost(p: any, clientCompany: string | null, clientName: string): boolean {
+  if (clientCompany && String(p?.companyId) === clientCompany) return true;
+  const name = String(p?.companyName || "").toLowerCase();
+  return !!clientName && !!name && name.includes(clientName.toLowerCase());
+}
+
+/** A weekly feed snapshot reduced to what posting rates need; the post text is left behind, since snapshots are large. */
+export interface FeedRow {
+  client_id: string;
+  window: { start: string; end: string } | null;
+  client_company_id: string | null;
+  posts: Array<{ id: string; companyId: string; companyName: string; channel: string; publishedAt: string; source: string | null }>;
+}
+
+// deno-lint-ignore no-explicit-any
+export function compactFeedRow(row: { client_id: unknown; feed_window?: any; client_company_id?: unknown; posts?: unknown }): FeedRow {
+  const w = row.feed_window;
+  // deno-lint-ignore no-explicit-any
+  const posts = (Array.isArray(row.posts) ? row.posts : []).map((p: any) => ({
+    id: String(p?.postId || p?.nativeId || p?.postLink || ""),
+    companyId: String(p?.companyId ?? ""),
+    companyName: String(p?.companyName ?? ""),
+    channel: String(p?.channel ?? ""),
+    publishedAt: String(p?.publishedAt ?? ""),
+    source: p?.source ? String(p.source) : null,
+  }));
+  return {
+    client_id: String(row.client_id ?? ""),
+    window: w && validDay(w.start) && validDay(w.end) ? { start: String(w.start).slice(0, 10), end: String(w.end).slice(0, 10) } : null,
+    client_company_id: row.client_company_id ? String(row.client_company_id) : null,
+    posts,
+  };
+}
+
+export interface FeedPost extends TrackedPost {
+  companyId: string;
+  companyName: string;
+  /** The client's own post, in its own feed. */
+  own: boolean;
+}
+
+export interface FeedHistory {
+  /** Weeks the feeds cover: the distinct days inside their windows over 7, at least 1. */
+  weeks: number;
+  posts: FeedPost[];
+}
+
+/**
+ * Each client's feed history: every post once (by post id, native id or
+ * link), only posts with a date, and the weeks the feeds cover with
+ * overlapping windows counted once.
+ */
+export function feedHistories(rows: FeedRow[], clientNames: Record<string, string> = {}): Map<string, FeedHistory> {
+  const acc = new Map<string, { days: Set<string>; posts: Map<string, FeedPost> }>();
+  for (const row of rows) {
+    if (!row.client_id) continue;
+    const h = acc.get(row.client_id) ?? { days: new Set<string>(), posts: new Map<string, FeedPost>() };
+    acc.set(row.client_id, h);
+    if (row.window && row.window.start <= row.window.end) {
+      for (let d = row.window.start, i = 0; d <= row.window.end && i < 400; d = addDay(d, 1), i++) h.days.add(d);
+    }
+    const name = clientNames[row.client_id] ?? "";
+    const clientCompany = clientCompanyId({ client_company_id: row.client_company_id, socialPosts: row.posts }, name);
+    for (const p of row.posts) {
+      if (!p.id || h.posts.has(p.id) || !validDay(p.publishedAt)) continue;
+      const platform = platformName(p.channel);
+      const company = companyKey(p.companyName) || (p.companyId ? `id:${p.companyId}` : "");
+      if (!platform || !company) continue;
+      h.posts.set(p.id, { company, platform, publishedAt: p.publishedAt, companyId: p.companyId, companyName: p.companyName, own: isClientPost(p, clientCompany, name) });
+    }
+  }
+  return new Map([...acc].map(([id, h]) => [id, { weeks: Math.max(1, h.days.size / 7), posts: [...h.posts.values()] }]));
+}
+
+/**
+ * The posts of the client's tracked competitors: only the companies in its
+ * current competitor set, matched by RivalIQ company id where the set stores
+ * one and by name otherwise, so a feed that briefly held another landscape
+ * can't skew the client's numbers. Never the client's own posts.
+ */
+export function competitorPosts(history: FeedHistory | undefined, set: Array<{ name: string; rivaliq_company_id?: string | null }>): { weeks: number; posts: TrackedPost[] } {
+  const weeks = history?.weeks ?? 1;
+  if (!history || !set.length) return { weeks, posts: [] };
+  const idOf = (c: { rivaliq_company_id?: string | null }) => String(c.rivaliq_company_id ?? "").trim();
+  const ids = new Set(set.map(idOf).filter(Boolean));
+  const names = new Set(set.filter((c) => !idOf(c)).map((c) => companyKey(c.name)).filter(Boolean));
+  return { weeks, posts: history.posts.filter((p) => !p.own && (ids.has(p.companyId) || names.has(companyKey(p.companyName)))) };
+}
+
+export interface RhythmInput {
+  /** The client's own posts from the last 90 days. */
+  own: OwnPost[];
+  /** clients.primary_platforms, as stored. */
+  primaryPlatforms: unknown;
+  /** The client's tracked competitors' posts, from all its feeds. */
+  competitors: { weeks: number; posts: TrackedPost[] };
+  /** Median posts per week per platform across every company the app tracks; null when not read yet (it is read only when needed). */
+  allTracked: Record<string, number> | null;
+  /** clients.posting_rhythm: staff's override, optional. */
+  setting: Record<string, unknown> | null | undefined;
+  /** The Monday of the week being planned. */
+  monday: string;
+  now: Date;
+  timeZone: string;
+}
+
+export interface RhythmSources {
+  /** Where the list of platforms came from. */
+  platforms: "published_90d" | "primary_platforms" | "all_tracked";
+  /** Weeks of competitor feeds the competitor rates are from. */
+  competitor_weeks: number;
+  /** Competitors with posts in those feeds. */
+  competitor_companies: number;
+  /** Platforms no source had a rate for, left out of the plan. */
+  unrated: string[];
+}
+
+export interface ResolvedRhythm {
+  /** Each platform's rate, where it came from, and its posts this week before staff's setting. */
+  learned: RhythmLine[];
+  /** What the week follows: the setting applied, platforms with no post this week left out. */
+  applied: RhythmLine[];
+  /** A rate can only come from every tracked company and allTracked was not given: read it and resolve again. */
+  needsAllTracked: boolean;
+  sources: RhythmSources;
+}
+
+/**
+ * The posting rhythm a week is planned with. It never needs a setting:
+ *   * platforms: those the client published on in the last 90 days; with
+ *     none, its primary platforms;
+ *   * each platform's rate, the first that exists: its own posts over the
+ *     last 8 full weeks, its own posts over 90 days, the median of its
+ *     tracked competitors, the median of every company the app tracks;
+ *   * a platform no source has a rate for is left out, and when no platform
+ *     resolves at all, every platform with a median across tracked companies
+ *     is planned, so a plan always has platforms;
+ *   * rates under one a week post some weeks only (postsInWeek);
+ *   * usual days and hour from the client's own posts, else its competitors';
+ *   * staff's setting overrides per platform (0 removes one).
+ */
+export function resolveRhythm(input: RhythmInput): ResolvedRhythm {
+  const tz = input.timeZone;
+  const today = zoned(input.now.toISOString(), tz).date || input.now.toISOString().slice(0, 10);
+  const last8 = rhythmWindow(input.now, tz);
+  const own8 = timing(input.own, tz, last8.from, last8.before);
+  const own90 = timing(input.own, tz, addDay(today, -OWN_DAYS), today);
+  const competitorRates = medianRates([input.competitors]);
+  const competitorTiming = timing(input.competitors.posts, tz, "0000-01-01", "9999-12-31");
+  const timingOf = (platform: string) => own90.get(platform) ?? own8.get(platform) ?? competitorTiming.get(platform);
+  const line = (platform: string, rate: number, source: RhythmSource, t: Timing | undefined): RhythmLine =>
+    ({ platform, perWeek: postsInWeek(rate, input.monday), days: t?.days ?? [], time: t?.time ?? null, average: rate, source });
+
+  const primary = [...new Set((Array.isArray(input.primaryPlatforms) ? input.primaryPlatforms : []).map(platformName).filter(Boolean))];
+  let from: RhythmSources["platforms"] = own90.size ? "published_90d" : "primary_platforms";
+  const platforms = own90.size ? [...own90.keys()] : primary;
+
+  const learned: RhythmLine[] = [];
+  const unrated: string[] = [];
+  let needsAllTracked = false;
+  for (const platform of platforms) {
+    const n8 = own8.get(platform)?.posts ?? 0;
+    const n90 = own90.get(platform)?.posts ?? 0;
+    if (n8 > 0) learned.push(line(platform, round2(n8 / RHYTHM_WEEKS), "published_8w", own8.get(platform)));
+    else if (n90 > 0) learned.push(line(platform, round2((n90 * 7) / OWN_DAYS), "published_90d", own90.get(platform)));
+    else if ((competitorRates[platform] ?? 0) > 0) learned.push(line(platform, competitorRates[platform], "competitors", competitorTiming.get(platform)));
+    else if (input.allTracked === null) needsAllTracked = true;
+    else if ((input.allTracked[platform] ?? 0) > 0) learned.push(line(platform, input.allTracked[platform], "all_tracked", timingOf(platform)));
+    else unrated.push(platform);
+  }
+  if (!learned.length) {
+    if (input.allTracked === null) needsAllTracked = true;
+    else {
+      from = "all_tracked";
+      for (const [platform, rate] of Object.entries(input.allTracked)) {
+        if (rate > 0) learned.push(line(platform, rate, "all_tracked", timingOf(platform)));
+      }
+    }
+  }
+  sortLines(learned);
+  return {
+    learned,
+    applied: applyRhythmSetting(learned, input.setting, timingOf).filter((l) => l.perWeek > 0),
+    needsAllTracked,
+    sources: {
+      platforms: from,
+      competitor_weeks: round1(input.competitors.weeks),
+      competitor_companies: new Set(input.competitors.posts.map((p) => p.company)).size,
+      unrated,
+    },
+  };
 }
 
 /** The client's best recent posts per platform, as examples of its real voice. */
