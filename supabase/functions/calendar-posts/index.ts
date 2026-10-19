@@ -17,6 +17,10 @@
 //   POST {action:"preview_evidence", client_id}
 //        staff with write access: what the planner would see for this client
 //        now (rhythm, scored evidence, thin data), with no model call
+//   POST {action:"rebuild_reasons", client_id}
+//        staff with write access, or the operational secret: write the
+//        client's planned posts' reasons again with the current rules
+//        (no model call)
 //   POST {action:"consolidate_memory", client_id}
 //        staff with write access, or the operational secret: merge the
 //        client's preferences learned before the memory merged them
@@ -26,6 +30,7 @@ import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { consolidateMemory, learnFromSignal } from "../_shared/voice/load.ts";
 import { CLIENT_COLUMNS, gatherEvidence } from "../_shared/calendar/runWeek.ts";
+import { rebuildReason, type Reason } from "../_shared/calendar/weekPlan.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -128,6 +133,26 @@ Deno.serve(async (req) => {
       if (!client) return json({ error: "No such client." }, 404);
       const g = await gatherEvidence(admin, client, new Date());
       return json({ own_posts: g.own.length, rhythm: g.rhythm, learned_rhythm: g.learnedRhythm, evidence: g.evidence, avoid: g.avoid, thin: g.thin, sources: g.sources, examples: g.examples });
+    }
+
+    if (body?.action === "rebuild_reasons") {
+      const clientId = String(body.client_id || "");
+      if (!clientId) return json({ error: "client_id is required." }, 400);
+      await requireStaff(req, { writeClientId: clientId });
+      const { data: rows, error } = await admin.from("calendar_posts").select("id, reasons").eq("client_id", clientId).eq("source", "plan").limit(2000);
+      if (error) throw new Error(`Could not read the posts: ${error.message}`);
+      let changed = 0;
+      for (const row of rows ?? []) {
+        const first = (Array.isArray(row.reasons) ? row.reasons[0] : null) as Reason | null;
+        // Only reasons the week planner wrote (with evidence or a fit) have the parts to rebuild from.
+        if (!first?.label || (!first.evidence?.length && !first.fit)) continue;
+        const next = rebuildReason(first);
+        if (next.label === first.label) continue;
+        const { error: updateError } = await admin.from("calendar_posts").update({ reasons: [next, ...(row.reasons as Reason[]).slice(1)] }).eq("id", row.id);
+        if (updateError) throw new Error(`Could not update a reason: ${updateError.message}`);
+        changed++;
+      }
+      return json({ checked: rows?.length ?? 0, changed });
     }
 
     if (body?.action === "consolidate_memory") {

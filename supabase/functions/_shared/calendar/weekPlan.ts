@@ -212,6 +212,20 @@ export function buildReason(input: { type: ReasonType; evidence: EvidenceRef[]; 
   return { type: input.test ? "test" : input.type, label, ...(fit ? { fit } : {}), ...(input.evidence.length ? { evidence: input.evidence } : {}), ...(thin ? { thin } : {}) };
 }
 
+/**
+ * A stored reason written again with the current rules (buildReason), from
+ * the evidence and fit kept on it, so a change to how reasons read reaches
+ * posts already on the calendar without a model call.
+ */
+export function rebuildReason(r: Reason): Reason {
+  const evidence = r.evidence ?? [];
+  const test = r.type === "test";
+  const type = test ? typeFor(evidence, "performance") : r.type;
+  // A seasonal reason without evidence is its moment, then the fit.
+  const moment = !evidence.length ? r.label.replace(/^Test: /, "").replace(/\.(\s.*)?$/, "") : undefined;
+  return buildReason({ type, evidence, fit: r.fit, moment, test });
+}
+
 function typeFor(evidence: EvidenceRef[], declared: string): Exclude<ReasonType, "test"> {
   const kind = evidence[0]?.kind;
   if (kind === "own" || kind === "report") return "performance";

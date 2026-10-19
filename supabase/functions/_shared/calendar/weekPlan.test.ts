@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type WeekContext } from "./weekPlan";
+import { buildReason, clientFit, headline, rebuildReason, parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type WeekContext } from "./weekPlan";
 import type { EvidenceItem } from "./evidence";
 
 const EVIDENCE: EvidenceItem[] = [
@@ -95,6 +95,15 @@ describe("what clients read in a reason", () => {
     expect(headline("Carousel education can support clicks: Publish 1 rights-focused carousel weekly.")).toBe("Carousel education can support clicks");
     expect(headline("TikTok: post 3 weekly Myth vs Fact videos; measure completion.")).toBe("TikTok: post 3 weekly Myth vs Fact videos; measure completion");
     expect(headline("LinkedIn drove 464 of 465 clicks. More detail.")).toBe("LinkedIn drove 464 of 465 clicks");
+  });
+});
+
+describe("rebuildReason", () => {
+  it("rewrites a stored reason with the current rules, keeping its evidence", () => {
+    const stored = { type: "trend" as const, label: "Old long label with N5 in it.", fit: "Pairs a hook with share asks, which R4 found works. More notes.", evidence: [{ id: "N5", kind: "trend" as const, text: "Carousel education can support clicks: Publish 1 carousel weekly." }] };
+    expect(rebuildReason(stored)).toMatchObject({ type: "trend", label: "Trend from the monthly report: Carousel education can support clicks." });
+    const seasonal = { type: "seasonal" as const, label: "Halloween on Oct 31. Fits the team.", fit: "Fits the team." };
+    expect(rebuildReason(seasonal).label).toBe("Halloween on Oct 31. Fits the team.");
   });
 });
 
