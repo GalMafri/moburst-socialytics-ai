@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { runFeedJob, FEED_RETRY_MINUTES } from "./feed";
-import { summarize, workerTick, START_WINDOW_MS } from "./worker";
+import { repairsFor, summarize, workerTick, START_WINDOW_MS } from "./worker";
 import type { JobOutcome, ScheduledJob } from "./types";
 
 const T0 = new Date("2026-10-07T07:16:00Z");
@@ -21,11 +21,11 @@ describe("runFeedJob", () => {
     expect(r.status).toBe("skipped");
     expect(r.result).toEqual({ code: "RIVALIQ_CLIENT_NOT_TRACKED" });
   });
-  it("fails at once, for the daily alert, when the linked landscape is missing", async () => {
+  it("fails at once when the linked landscape is missing, and the daily sweep lists it", async () => {
     const r = await runFeedJob(job("j", { attempts: 1 }), { now: () => T0, refreshFeed: async () => { throw err("The linked landscape no longer exists.", 422, "RIVALIQ_LANDSCAPE_MISSING"); } });
     expect(r.status).toBe("failed");
     expect(r.result).toEqual({ code: "RIVALIQ_LANDSCAPE_MISSING" });
-    expect(summarize([{ ...job("j"), status: "failed", finished_at: T0.toISOString(), reason: r.reason ?? null }], T0).ok).toBe(false);
+    expect(summarize([{ ...job("j"), status: "failed", finished_at: T0.toISOString(), reason: r.reason ?? null }], T0).failed.map((j) => j.id)).toEqual(["j"]);
   });
   for (const status of [401, 403, 429, 500, 502]) {
     it(`keeps a provider failure (${status}) a failure even when it carries the not-tracked code`, async () => {
@@ -114,16 +114,17 @@ describe("workerTick", () => {
   });
 });
 
-describe("summarize", () => {
+describe("summarize and repairsFor (the daily sweep)", () => {
   const now = new Date("2026-10-07T08:30:00Z");
   const row = (over: Partial<ScheduledJob>) => job(over.id ?? "x", { status: "done", finished_at: "2026-10-07T07:30:00Z", ...over });
 
-  it("is ok when everything finished or is waiting on a running dependency", () => {
+  it("has nothing to repair when everything finished or is waiting on a running dependency", () => {
     const s = summarize([row({ id: "a" }), row({ id: "b", status: "skipped" }), row({ id: "c", status: "waiting", finished_at: null })], now);
-    expect(s.ok).toBe(true);
     expect(s.counts).toEqual({ done: 1, skipped: 1, waiting: 1 });
+    expect(repairsFor(s)).toEqual({ requeue: [], enqueue: false, work: false });
   });
-  it("flags failed jobs from the last day, blocked jobs, dead leases and an undrained queue", () => {
+
+  it("lists failed jobs from the last day, blocked jobs, dead leases and an undrained queue, and repairs the last two", () => {
     const s = summarize([
       row({ id: "failed-today", status: "failed", reason: "competitive webhook 503" }),
       row({ id: "failed-last-week", status: "failed", finished_at: "2026-09-30T07:30:00Z" }),
@@ -133,25 +134,25 @@ describe("summarize", () => {
       row({ id: "undrained", status: "queued", finished_at: null, available_at: "2026-10-07T07:15:00Z" }),
       row({ id: "retry-later", status: "queued", finished_at: null, available_at: "2026-10-07T08:35:00Z" }),
     ], now);
-    expect(s.ok).toBe(false);
     expect(s.failed.map((j) => j.id)).toEqual(["failed-today"]);
     expect(s.blocked.map((j) => j.id)).toEqual(["blocked"]);
     expect(s.stuck.map((j) => j.id)).toEqual(["dead-lease"]);
     expect(s.overdue.map((j) => j.id)).toEqual(["undrained"]);
-  });
-  it("is not ok when a due schedule has no job at all, even with an empty queue", () => {
-    const gap = { schedule_id: "s-1", client_id: "c-1", client_name: "Bader Law", report_kind: "social", next_run_at: "2026-10-07T07:00:00Z" };
-    const s = summarize([], now, [gap]);
-    expect(s.ok).toBe(false);
-    expect(s.unscheduled).toEqual([gap]);
-    expect(summarize([], now).ok).toBe(true);
+    // Failed and blocked jobs keep their own retries; the sweep only reads them out.
+    expect(repairsFor(s)).toEqual({ requeue: ["dead-lease"], enqueue: false, work: true });
   });
 
-  it("alerts when a week plan was skipped because the client has no posting rhythm", () => {
-    const skipped = row({ id: "w", kind: "week_plan", status: "skipped", reason: "No posting rhythm: the client hasn't published in the last 8 weeks. Set posts per week in client settings." });
-    const s = summarize([skipped], now);
-    expect(s.ok).toBe(false);
-    expect(s.needsSetup.map((r) => r.id)).toEqual(["w"]);
-    expect(summarize([{ ...skipped, reason: "The week is over, so it can't be planned." }], now).ok).toBe(true);
+  it("queues due work that has no job, even with an empty queue", () => {
+    const gap = { schedule_id: "s-1", client_id: "c-1", client_name: "Bader Law", report_kind: "social", next_run_at: "2026-10-07T07:00:00Z" };
+    const s = summarize([], now, [gap]);
+    expect(s.unscheduled).toEqual([gap]);
+    expect(repairsFor(s)).toEqual({ requeue: [], enqueue: true, work: false });
+    expect(repairsFor(summarize([], now)).enqueue).toBe(false);
+  });
+
+  it("has no pass or fail and no setup list: a week plan skipped because its week is over needs nobody", () => {
+    const s = summarize([row({ id: "w", kind: "week_plan", status: "skipped", reason: "The week is over." })], now);
+    expect(Object.keys(s).sort()).toEqual(["blocked", "counts", "failed", "overdue", "stuck", "unscheduled"]);
+    expect(repairsFor(s).work).toBe(false);
   });
 });

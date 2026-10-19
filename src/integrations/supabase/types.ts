@@ -2642,7 +2642,6 @@ export type Database = {
           failing: number
         }[]
       }
-      calendar_client_ready: { Args: { p_client: string }; Returns: boolean }
       calendar_post_worked: {
         Args: {
           p_client: string

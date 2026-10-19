@@ -1,4 +1,4 @@
-// The scheduled-jobs worker loop and the daily status summary.
+// The scheduled-jobs worker loop and the daily repair sweep.
 //
 // pg_cron calls the worker every minute. Each call sweeps abandoned runs,
 // then leases and runs one job at a time. It starts a new job only inside
@@ -82,26 +82,20 @@ export interface ScheduleGap {
 }
 
 export interface JobsSummary {
-  ok: boolean;
   counts: Record<string, number>;
   failed: ScheduledJob[];
   blocked: ScheduledJob[];
   stuck: ScheduledJob[];
   overdue: ScheduledJob[];
   unscheduled: ScheduleGap[];
-  /** Week plans skipped in the last day because the client needs setup a person must do (a posting rhythm). */
-  needsSetup: ScheduledJob[];
 }
 
-/** Why a week plan was skipped for setup (runWeek.ts NEEDS_SETUP, rhythm only: a week that is over needs nothing). */
-const RHYTHM_MISSING = /no posting rhythm/i;
-
 /**
- * What the daily check alerts on: a week plan that needs a client's posting
- * rhythm set (nothing else would tell staff), a job that failed in the last day, a job
- * blocked on something a person has to fix, a lease that ran out without the
- * job finishing, due work nobody picked up (the worker is not running), and a
- * due schedule with no job at all (the daily enqueue did not run).
+ * What the daily sweep looks at: a job that failed in the last day, a job
+ * blocked on something outside it, a lease that ran out without the job
+ * finishing, due work nobody picked up (the worker is not running), and a
+ * due schedule with no job at all (the daily enqueue did not run). Nothing
+ * here alerts anyone; repairsFor says what the sweep puts right.
  */
 export function summarize(rows: ScheduledJob[], now: Date, gaps: ScheduleGap[] = []): JobsSummary {
   const t = now.getTime();
@@ -111,7 +105,24 @@ export function summarize(rows: ScheduledJob[], now: Date, gaps: ScheduleGap[] =
   const blocked = rows.filter((r) => r.status === "blocked");
   const stuck = rows.filter((r) => r.status === "running" && r.lease_until && new Date(r.lease_until).getTime() < t - LEASE_GRACE_MS);
   const overdue = rows.filter((r) => r.status === "queued" && t - new Date(r.available_at).getTime() > DRAIN_GRACE_MS);
-  const needsSetup = rows.filter((r) => r.kind === "week_plan" && r.status === "skipped" && RHYTHM_MISSING.test(r.reason ?? "") && r.finished_at && t - new Date(r.finished_at).getTime() < DAY_MS);
-  const ok = !failed.length && !blocked.length && !stuck.length && !overdue.length && !gaps.length && !needsSetup.length;
-  return { ok, counts, failed, blocked, stuck, overdue, unscheduled: gaps, needsSetup };
+  return { counts, failed, blocked, stuck, overdue, unscheduled: gaps };
+}
+
+export interface Repairs {
+  /** Running jobs whose worker stopped long ago: back in the queue now. */
+  requeue: string[];
+  /** Due schedules with no job: the daily enqueue runs again (it only adds what is missing). */
+  enqueue: boolean;
+  /** Due work nobody picked up: the worker runs now. */
+  work: boolean;
+}
+
+/**
+ * What the daily sweep puts right on its own. Failed and blocked jobs are
+ * left to their own retries (the next daily enqueue releases blocked
+ * dispatches and adds the day's feed refreshes again); they stay in the
+ * sweep's answer for developers to read.
+ */
+export function repairsFor(s: JobsSummary): Repairs {
+  return { requeue: s.stuck.map((j) => j.id), enqueue: s.unscheduled.length > 0, work: s.stuck.length > 0 || s.overdue.length > 0 };
 }

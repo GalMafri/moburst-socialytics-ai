@@ -4,8 +4,9 @@
 // presses "Plan next week" (weekly calendar, Lital 19 Oct 2026).
 
 import type { CalendarPost } from "@/lib/calendarRevision";
+import { wordReason } from "../../supabase/functions/_shared/calendar/reasonText";
 
-/** The evidence a planned post acts on, with its real numbers (supabase/functions/_shared/calendar/weekPlan.ts). */
+/** The evidence a planned post acts on, with its real numbers (supabase/functions/_shared/calendar/reasonText.ts). */
 export interface PostEvidence {
   id: string;
   kind: "own" | "competitor" | "topic" | "trend" | "report";
@@ -26,11 +27,21 @@ export interface PostEvidence {
 
 export interface PostReason {
   type: string;
+  /** The words saved with the reason; shown only when the reason doesn't carry its parts. */
   label: string;
   fit?: string;
   evidence?: PostEvidence[];
   thin?: boolean;
+  /** A seasonal post's moment and its date. */
+  moment?: string;
+  /** The week's one test (stored on every week-plan post since 19 Oct 2026). */
+  test?: boolean;
   report_id?: string;
+}
+
+/** A reason in the words it shows now: worded from its parts when it has them, else its saved label. */
+export function reasonWords(r: PostReason | null | undefined): string {
+  return wordReason(r) || r?.label || "";
 }
 
 export interface CalendarPostRow {
@@ -106,7 +117,8 @@ export interface CalendarPlanRow {
   id: string;
   client_id: string;
   week_start: string;
-  status: "queued" | "planning" | "ready" | "failed";
+  /** expired: the week ended before it was planned; failed: only on plans from before 20 Oct 2026. */
+  status: "queued" | "planning" | "ready" | "failed" | "expired";
   trigger: "monday" | "button" | "cutover";
   error: string | null;
   pending_revision: { note: string; at: string } | null;
@@ -120,8 +132,9 @@ export const WEEKS_AHEAD = 4;
 
 /**
  * The week "Plan next week" would plan: the earliest week from this week up
- * to four weeks ahead that still has days to come and no plan (or a plan that
- * failed). Null when the month ahead is planned.
+ * to four weeks ahead that still has days to come and no plan, or a plan that
+ * failed (the daily run also asks for those again). Null when the month ahead
+ * is planned.
  */
 export function nextPlannableWeek(plans: Array<Pick<CalendarPlanRow, "week_start" | "status">>, today: string): string | null {
   const tomorrow = addDays(today, 1);
@@ -158,7 +171,8 @@ export function boardPost(row: CalendarPostRow): CalendarPost {
     _calendarPostKey: row.post_key,
     _calendarPostId: row.id,
     _reportId: row.report_id ?? undefined,
-    _reasons: row.reasons ?? [],
+    // Worded now, so every card reads the current wording.
+    _reasons: (row.reasons ?? []).map((r) => ({ ...r, label: reasonWords(r) })),
     _source: row.source,
   };
 }

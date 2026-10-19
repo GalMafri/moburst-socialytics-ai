@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildReason, clientFit, headline, rebuildReason, parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type WeekContext } from "./weekPlan";
+import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type WeekContext } from "./weekPlan";
+import { wordReason } from "./reasonText";
 import type { EvidenceItem } from "./evidence";
 
 const EVIDENCE: EvidenceItem[] = [
@@ -18,8 +19,8 @@ const CTX: WeekContext = {
   monday: "2026-10-26",
   firstDate: "2026-10-26",
   rhythm: [
-    { platform: "Instagram", perWeek: 2, days: ["Tuesday", "Thursday"], time: "17:00", average: 2.1, source: "published" },
-    { platform: "Facebook", perWeek: 1, days: ["Wednesday"], time: null, average: 0.9, source: "published" },
+    { platform: "Instagram", perWeek: 2, days: ["Tuesday", "Thursday"], time: "17:00", average: 2.1, source: "published_8w" },
+    { platform: "Facebook", perWeek: 1, days: ["Wednesday"], time: null, average: 0.9, source: "published_8w" },
   ],
   evidence: EVIDENCE,
   avoid: ["Instagram image from Oct 1 got 0.3x the usual impressions"],
@@ -27,6 +28,7 @@ const CTX: WeekContext = {
   existing: [],
   recent: [],
   thin: [],
+  canFilm: true,
 };
 
 const post = (over: Record<string, unknown>) => ({ date: "2026-10-27", platform: "Instagram", format: "Reel", posting_time: "17:00", pillar: "Beer League Truths", copy: "Copy", hashtags: ["#a"], cta: "Download", visual_direction: "A rink", reason_type: "competitor", evidence_ids: ["C1"], fit: "Captains live this every week", moment: "", test: false, ...over });
@@ -40,6 +42,16 @@ describe("weekPrompt", () => {
     for (const id of ["P1", "C1", "T1", "R1"]) expect(p).toContain(`${id} [`);
     expect(p).toContain("Don't mock other apps");
   });
+
+  it("leaves out ideas that need filming when the client hasn't uploaded footage in 60 days", () => {
+    const rule = "don't plan ideas that need a specific person on camera";
+    expect(weekPrompt(CTX)).not.toContain(rule);
+    expect(weekPrompt({ ...CTX, canFilm: false })).toContain(rule);
+  });
+
+  it("has no rhythm section when there is no rhythm, rather than an empty one", () => {
+    expect(weekPrompt({ ...CTX, rhythm: [] })).not.toContain("Posts for this week, per platform");
+  });
 });
 
 describe("parseWeekPlan", () => {
@@ -48,6 +60,7 @@ describe("parseWeekPlan", () => {
     expect(p.reasons[0].type).toBe("competitor");
     expect(p.reasons[0].label).toBe("BenchApp's Instagram video from Oct 14 got 4x their usual engagement per follower. Captains live this every week. Early signal.");
     expect(p.reasons[0].evidence?.[0]).toMatchObject({ id: "C1", link: "https://c/1", multiple: 4 });
+    expect(p.reasons[0]).toMatchObject({ fit: "Captains live this every week", test: false });
     expect(p.source).toBe("plan");
   });
 
@@ -98,20 +111,19 @@ describe("what clients read in a reason", () => {
   });
 });
 
-describe("rebuildReason", () => {
-  it("rewrites a stored reason with the current rules, keeping its evidence", () => {
-    const stored = { type: "trend" as const, label: "Old long label with N5 in it.", fit: "Pairs a hook with share asks, which R4 found works. More notes.", evidence: [{ id: "N5", kind: "trend" as const, text: "Carousel education can support clicks: Publish 1 carousel weekly." }] };
-    expect(rebuildReason(stored)).toMatchObject({ type: "trend", label: "Trend from the monthly report: Carousel education can support clicks." });
-    const seasonal = { type: "seasonal" as const, label: "Halloween on Oct 31. Fits the team.", fit: "Fits the team." };
-    expect(rebuildReason(seasonal).label).toBe("Halloween on Oct 31. Fits the team.");
-  });
-});
-
 describe("buildReason", () => {
   it("writes topic, report and seasonal reasons in plain words", () => {
     expect(buildReason({ type: "competitor", evidence: [EVIDENCE[2]] }).label).toBe("2 competitors posted about Playoff scheduling this week.");
     expect(buildReason({ type: "performance", evidence: [EVIDENCE[3]], fit: "Lead with LinkedIn." }).label).toBe("From the monthly report: LinkedIn drove 464 of 465 clicks. Lead with LinkedIn.");
     expect(buildReason({ type: "seasonal", evidence: [], moment: "Halloween on Oct 31" })).toMatchObject({ type: "seasonal", label: "Halloween on Oct 31." });
+  });
+
+  it("stores the parts a reason is worded from, so it reads the same when worded again on screen", () => {
+    const seasonal = buildReason({ type: "seasonal", evidence: [], moment: " Halloween on Oct 31 ", fit: "Fits the team. More notes." });
+    expect(seasonal).toEqual({ type: "seasonal", label: "Halloween on Oct 31. Fits the team.", fit: "Fits the team.", moment: "Halloween on Oct 31", test: false });
+    const test = buildReason({ type: "competitor", evidence: [EVIDENCE[1]], fit: "Captains live this.", test: true });
+    expect(test).toMatchObject({ type: "test", test: true, thin: true });
+    for (const r of [seasonal, test, buildReason({ type: "performance", evidence: [] })]) expect(wordReason(r)).toBe(r.label);
   });
 });
 

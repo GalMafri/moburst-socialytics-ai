@@ -2,8 +2,11 @@
 //
 // POST {}                      the per-minute tick (pg_cron job scheduled-jobs-worker):
 //                              sweep abandoned runs, then lease and run due jobs.
-// POST {"mode":"status"}       the daily check (n8n): 200 when nothing needs a person,
-//                              500 listing failed, blocked, stuck and overdue jobs.
+// POST {"mode":"status"}       the daily repair sweep: puts back in the queue work whose
+//                              worker stopped, adds due work that was never queued, and
+//                              runs the worker when work is overdue. Always 200, with what
+//                              it did and what it saw (failed and blocked jobs included,
+//                              for developers to read); it alerts nobody.
 // POST {"mode":"dry_run"}      what the next enqueue would add, and every due dispatch
 //                              built against live data with no writes and no requests.
 //                              "at" (ISO) previews a later tick, such as tomorrow's.
@@ -20,7 +23,7 @@ import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
 import { runFeedJob } from "./feed.ts";
 import { runVoiceProfile, runWeekPlan, runWeekRevise } from "../_shared/calendar/runWeek.ts";
 import { runLifecycle, runLifecycleStep, type LifecycleJob } from "../_shared/lifecycle/run.ts";
-import { LEASE_SECONDS, summarize, workerTick } from "./worker.ts";
+import { LEASE_SECONDS, repairsFor, summarize, workerTick, type TickResult } from "./worker.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
 import type { ScheduledJob } from "./types.ts";
 
@@ -45,10 +48,10 @@ Deno.serve(async (req) => {
   const presented = req.headers.get("x-socialytics-secret") ?? req.headers.get("x-cron-secret");
   if (!(await secretEquals(presented, secret))) return json({ error: "unauthorized" }, 401);
 
+  const body = await req.json().catch(() => ({}));
+  const mode = typeof body?.mode === "string" ? body.mode : "tick";
   try {
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const body = await req.json().catch(() => ({}));
-    const mode = typeof body.mode === "string" ? body.mode : "tick";
     const jobs = makeJobStore(db);
     const store = makeDispatchStore(db);
     const post = makePoster(secret);
@@ -80,21 +83,59 @@ Deno.serve(async (req) => {
       secret,
     });
 
+    // One worker pass: lease and run due jobs (the per-minute tick, and the sweep's repair).
+    const tick = (): Promise<TickResult> => workerTick({
+      now: () => new Date(),
+      lease: () => jobs.lease(LEASE_SECONDS),
+      run: (job) => {
+        switch (job.kind) {
+          case "dispatch": return runDispatch(job, dispatchDeps(job, false));
+          case "feed_refresh": return runFeedJob(job, { now: () => new Date(), refreshFeed });
+          case "week_plan": return runWeekPlan(db, job);
+          case "week_revise": return runWeekRevise(db, job);
+          case "voice_profile": return runVoiceProfile(db, job);
+          case "lifecycle": return runLifecycle(db, job as unknown as LifecycleJob);
+          case "lifecycle_step": return runLifecycleStep(db, job as unknown as LifecycleJob);
+          default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
+        }
+      },
+      finish: (job, outcome) => jobs.finish(job, outcome),
+      closeAbandoned: () => closeAbandonedRuns(db, new Date(), false),
+      releaseReady: () => jobs.releaseReady(),
+    });
+
     if (mode === "status") {
       const now = new Date();
-      const summary = summarize(await jobs.statusRows(now), now, await jobs.gaps(now));
-      // The rows carry the client's name and the schedule's kind (embedded by statusRows) for a readable alert.
+      // Each repair is tried on its own, and none of them can turn the answer into an error.
+      const notes: string[] = [];
+      const attempt = async <T>(what: string, work: () => Promise<T>, fallback: T): Promise<T> => {
+        try {
+          return await work();
+        } catch (e) {
+          const note = `${what}: ${e instanceof Error ? e.message : String(e)}`;
+          console.warn("[run-scheduled-jobs] sweep", note);
+          notes.push(note);
+          return fallback;
+        }
+      };
+      const summary = summarize(await attempt("read the jobs", () => jobs.statusRows(now), []), now, await attempt("read due schedules", () => jobs.gaps(now), []));
+      const repairs = repairsFor(summary);
+      const requeued = repairs.requeue.length ? await attempt("put stopped jobs back in the queue", () => jobs.requeue(repairs.requeue, now), 0) : 0;
+      const enqueued = repairs.enqueue ? await attempt("queue due work", async () => (await jobs.enqueue(false)).enqueued.length, 0) : 0;
+      const ran = repairs.work || requeued || enqueued ? await attempt("run the queue", async () => (await tick()).results, [] as TickResult["results"]) : [];
+      // The rows carry the client's name and the schedule's kind (embedded by statusRows) so the answer reads plainly.
       type Named = ScheduledJob & { clients?: { name?: string } | null; report_schedules?: { report_kind?: string } | null };
       const brief = (rows: ScheduledJob[]) => (rows as Named[]).map((r) => ({
         id: r.id, client: r.clients?.name ?? r.client_id, job: JOB_LABELS[r.kind] ?? (r.kind === "dispatch" ? `${r.report_schedules?.report_kind ?? "report"} dispatch` : r.kind),
         status: r.status, reason: r.reason, attempts: r.attempts,
       }));
       return json({
-        ok: summary.ok, at: now.toISOString(), counts: summary.counts,
+        at: now.toISOString(), counts: summary.counts,
+        repaired: { requeued, enqueued, ran },
         failed: brief(summary.failed), blocked: brief(summary.blocked), stuck: brief(summary.stuck), overdue: brief(summary.overdue),
         unscheduled: summary.unscheduled.map((g) => ({ client: g.client_name ?? g.client_id, job: `${g.report_kind} dispatch`, reason: `due ${g.next_run_at} and never queued` })),
-        needs_setup: brief(summary.needsSetup),
-      }, summary.ok ? 200 : 500);
+        notes,
+      });
     }
 
     if (mode === "dry_run") {
@@ -114,29 +155,11 @@ Deno.serve(async (req) => {
       return json({ plan, dispatch });
     }
 
-    const result = await workerTick({
-      now: () => new Date(),
-      lease: () => jobs.lease(LEASE_SECONDS),
-      run: (job) => {
-        switch (job.kind) {
-          case "dispatch": return runDispatch(job, dispatchDeps(job, false));
-          case "feed_refresh": return runFeedJob(job, { now: () => new Date(), refreshFeed });
-          case "week_plan": return runWeekPlan(db, job);
-          case "week_revise": return runWeekRevise(db, job);
-          case "voice_profile": return runVoiceProfile(db, job);
-          case "lifecycle": return runLifecycle(db, job as unknown as LifecycleJob);
-          case "lifecycle_step": return runLifecycleStep(db, job as unknown as LifecycleJob);
-          default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
-        }
-      },
-      finish: (job, outcome) => jobs.finish(job, outcome),
-      closeAbandoned: () => closeAbandonedRuns(db, new Date(), false),
-      releaseReady: () => jobs.releaseReady(),
-    });
-    return json(result);
+    return json(await tick());
   } catch (err) {
     console.error("[run-scheduled-jobs]", err);
-    return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    // The sweep never answers with an error: what went wrong is in the answer for developers.
+    return json({ error: err instanceof Error ? err.message : String(err) }, mode === "status" ? 200 : 500);
   }
 });
 

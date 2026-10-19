@@ -1,11 +1,14 @@
 /**
  * Why a post is on the calendar, with the evidence behind it: the real post
  * it builds on, its date and its numbers, and a link to it. Weeks planned
- * from the latest results say so; thin evidence says "early signal".
+ * from the latest results say so; thin evidence says "early signal". The
+ * reason is worded here from what the plan stored (reasonText.ts), so a
+ * change to the wording reaches every post; reasons that don't carry their
+ * parts show the words they were saved with.
  */
 
 import { ExternalLink } from "lucide-react";
-import type { PostEvidence, PostReason as Reason } from "@/lib/calendarPosts";
+import { reasonWords, type PostEvidence, type PostReason as Reason } from "@/lib/calendarPosts";
 
 const shortDate = (iso?: string) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "");
 const times = (m?: number) => (m === undefined ? "" : `${Number.isInteger(m) ? m : m.toFixed(1)}x`);
@@ -20,12 +23,13 @@ function evidenceLine(e: PostEvidence): string {
 
 export function PostReason({ reasons }: { reasons: Reason[] | null | undefined }) {
   const reason = reasons?.[0];
-  if (!reason?.label) return null;
-  const evidence = reason.evidence ?? [];
+  const words = reasonWords(reason);
+  if (!words) return null;
+  const evidence = reason?.evidence ?? [];
   return (
     <div className="bg-[rgba(255,255,255,0.03)] p-3.5 rounded-md space-y-2">
       <p className="t-label">Why this post</p>
-      <p className="t-body text-foreground">{reason.label}</p>
+      <p className="t-body text-foreground">{words}</p>
       {evidence.length > 0 && (
         <ul className="space-y-1.5">
           {evidence.map((e) => (

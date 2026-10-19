@@ -98,7 +98,11 @@ export async function learnFromSignal(admin: Db, clientId: string, signal: Memor
   return { ops: ops.length };
 }
 
-/** Merge preferences that were learned one by one and never merged (the list before 19 Oct 2026). */
+/**
+ * Merge the client's active preferences into a shorter list. The monthly
+ * voice job runs it for every client whose list has grown past eight
+ * (calendar/runWeek.ts keepMemoryShort).
+ */
 export async function consolidateMemory(admin: Db, clientId: string): Promise<{ before: number; after: number }> {
   const current = (await activePreferences(admin, clientId)).sort((a, b) => a.last_confirmed_at.localeCompare(b.last_confirmed_at));
   if (current.length < 2) return { before: current.length, after: current.length };
