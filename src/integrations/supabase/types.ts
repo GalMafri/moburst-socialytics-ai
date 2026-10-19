@@ -1513,6 +1513,8 @@ export type Database = {
           candidates_started: number
           client_id: string
           created_at: string
+          end_reason: string | null
+          ended_at: string | null
           error: string | null
           footage_path: string | null
           format: string | null
@@ -1521,6 +1523,7 @@ export type Database = {
           on_camera: string | null
           options_ready: number
           options_wanted: number
+          plan_attempts: number
           platform: string | null
           post_copy: string
           report_id: string | null
@@ -1538,6 +1541,8 @@ export type Database = {
           candidates_started?: number
           client_id: string
           created_at?: string
+          end_reason?: string | null
+          ended_at?: string | null
           error?: string | null
           footage_path?: string | null
           format?: string | null
@@ -1546,6 +1551,7 @@ export type Database = {
           on_camera?: string | null
           options_ready?: number
           options_wanted?: number
+          plan_attempts?: number
           platform?: string | null
           post_copy: string
           report_id?: string | null
@@ -1563,6 +1569,8 @@ export type Database = {
           candidates_started?: number
           client_id?: string
           created_at?: string
+          end_reason?: string | null
+          ended_at?: string | null
           error?: string | null
           footage_path?: string | null
           format?: string | null
@@ -1571,6 +1579,7 @@ export type Database = {
           on_camera?: string | null
           options_ready?: number
           options_wanted?: number
+          plan_attempts?: number
           platform?: string | null
           post_copy?: string
           report_id?: string | null
@@ -2071,6 +2080,7 @@ export type Database = {
           last_result: string | null
           last_run_at: string | null
           next_run_at: string | null
+          paused_by_archive: boolean
           pending_competitive_report_id: string | null
           range_mode: string
           report_kind: string
@@ -2090,6 +2100,7 @@ export type Database = {
           last_result?: string | null
           last_run_at?: string | null
           next_run_at?: string | null
+          paused_by_archive?: boolean
           pending_competitive_report_id?: string | null
           range_mode?: string
           report_kind?: string
@@ -2109,6 +2120,7 @@ export type Database = {
           last_result?: string | null
           last_run_at?: string | null
           next_run_at?: string | null
+          paused_by_archive?: boolean
           pending_competitive_report_id?: string | null
           range_mode?: string
           report_kind?: string
@@ -2642,7 +2654,6 @@ export type Database = {
           failing: number
         }[]
       }
-      calendar_client_ready: { Args: { p_client: string }; Returns: boolean }
       calendar_post_worked: {
         Args: {
           p_client: string
@@ -2908,6 +2919,10 @@ export type Database = {
       release_worker_lease: {
         Args: { p_holder: string; p_name: string }
         Returns: undefined
+      }
+      report_schedule_first_run: {
+        Args: { p_frequency: string; p_from: string; p_run_day: number }
+        Returns: string
       }
       scheduled_jobs_lease: {
         Args: { p_lease_seconds?: number }
