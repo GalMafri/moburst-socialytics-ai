@@ -3,7 +3,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Loader2, RefreshCw } from 'lucide-react';
-import { toast } from 'sonner';
 import { platformLabel } from '@/lib/platform';
 
 /**
@@ -67,19 +66,21 @@ export function AutomaticBrandReferences({ clientId, savedVersion, onReady }: {
     return () => window.clearInterval(t);
   }, [running, load]);
 
+  // Asking only queues work on the server. A request that does not get through
+  // (a dropped connection) is sent again quietly; nothing here shows a failure.
   const refresh = async () => {
     if (!clientId) return;
     setAsking(true);
-    try {
+    for (const wait of [0, 2000, 5000, 15000]) {
+      if (wait) await new Promise((r) => setTimeout(r, wait));
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await (supabase.rpc as any)('lifecycle_request', { p_client: clientId, p_step: 'design_refs' });
-      if (error) throw error;
-      setStep((s) => ({ status: 'running', done_at: s?.done_at ?? null }));
-    } catch {
-      toast.error("Couldn't refresh the references", { description: 'Try again in a minute.' });
-    } finally {
-      setAsking(false);
+      if (!error) {
+        setStep((s) => ({ status: 'running', done_at: s?.done_at ?? null }));
+        break;
+      }
     }
+    setAsking(false);
   };
 
   return <Card><CardContent className="pt-5 space-y-3">
