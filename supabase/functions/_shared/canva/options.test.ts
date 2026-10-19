@@ -37,8 +37,8 @@ describe("requestProgress", () => {
   it("still honors a request that asked for more than one", () => {
     expect(requestProgress([done, failed, finishing], 3, 5)).toMatchObject({ status: "preparing", stage: "finishing", start_brief: null });
   });
-  it("goes to staff, never to the person who asked, when nothing finished", () => {
-    expect(requestProgress(Array(MAX_CANDIDATES).fill(failed))).toMatchObject({ status: "needs_staff", options_ready: 0 });
+  it("closes quietly when nothing finished, so a new request is made later", () => {
+    expect(requestProgress(Array(MAX_CANDIDATES).fill(failed))).toMatchObject({ status: "closed", options_ready: 0, start_brief: null });
   });
 });
 

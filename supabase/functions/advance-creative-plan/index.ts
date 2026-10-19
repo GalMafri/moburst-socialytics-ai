@@ -40,6 +40,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const MAX_ATTEMPTS = 2; // legacy design-system path
 const WHOLE_POST_ATTEMPTS = 3; // a whole post is cheap to redo and a wrong logo or word must never reach a client
 const REVIEW_OUTAGES = 3; // review attempts that may fail (service error) before the job itself fails
+const SWEEP_DAYS = 7; // how far back the schedule looks for a plan's open render
 
 const REVIEW_IMAGE_LIMIT = 4.5 * 1024 * 1024;
 /** The delivered design as review bytes: storage's own 1080-wide rendition (about 3 MB for a 2k PNG), the original when
@@ -320,8 +321,10 @@ Deno.serve(async (req) => {
       return json({ plan_id: creative.id, mode: creative.mode, count: creative.plan.frames.length, ...result });
     }
     if (!scheduled) return json({ error: 'unauthorized' }, 401);
-    // Sweep: every plan with an open still job from the last six hours.
-    const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    // Sweep: every plan with an open still job from the last week. Six hours
+    // was shorter than a closed tab can stay closed, so a finished render
+    // could stay off its post for good.
+    const since = new Date(Date.now() - SWEEP_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const { data: open } = await db.from('media_jobs').select('client_id,input').eq('kind', 'image').is('post_iteration_id', null).in('status', ['pending', 'submitted', 'completed']).gte('created_at', since).limit(200);
     const plans = new Map<string, string>();
     for (const j of open || []) if (j.input?.creative_plan_id) plans.set(j.input.creative_plan_id, j.client_id);

@@ -52,8 +52,9 @@ export function authzResponse(err: unknown, corsHeaders: Record<string, string>)
  * Server calls to staff-gated functions. The api worker (and any schedule
  * that runs on behalf of a person) presents the project's operational secret
  * and names the user it acts for; that user id becomes created_by on
- * whatever the call writes. The secret alone is not enough: a server call
- * without an actor is refused, so every row keeps a human owner.
+ * whatever the call writes. For most functions the secret alone is not
+ * enough: a server call without an actor is refused. The few paths that
+ * automatic work calls accept it as the system (serverActor below).
  */
 export const SERVER_SECRET_HEADER = "x-socialytics-secret";
 export const SERVER_USER_HEADER = "x-socialytics-user";
@@ -64,4 +65,20 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function serverActAsUser(header: string | null | undefined): string {
   const raw = String(header ?? "").trim();
   return UUID.test(raw) ? raw : "";
+}
+
+/**
+ * Who a server call acts as: the person its user header names, or, with no
+ * user header at all, the system itself. The system is accepted only where
+ * the caller allows it (automatic designs, automatic video replans, the
+ * workers), and what it writes names no person (requested_by null). A header
+ * that is present but not a user id is refused, never read as the system.
+ */
+export type ServerActor = { kind: "user"; userId: string } | { kind: "system" };
+
+export function serverActor(header: string | null | undefined, allowSystem: boolean): ServerActor | null {
+  const userId = serverActAsUser(header);
+  if (userId) return { kind: "user", userId };
+  if (allowSystem && !String(header ?? "").trim()) return { kind: "system" };
+  return null;
 }

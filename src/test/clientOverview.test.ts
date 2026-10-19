@@ -36,6 +36,6 @@ describe('client overview', () => {
     expect(items.map((i) => i.key)).toEqual(['approve', 'design']);
     expect(items[0].href).toBe('/clients/c/calendar?week=2026-10-12');
     const staff = actionItems({ clientId: 'c', isStaff: true, today: '2026-10-13', content: w, lastRun: { status: 'failed', created_at: '' }, hasReport: true, tracking: { headline: 'Tracking needs reconnecting', ready: false }, hasCompetitiveReport: true, openTopics: 4, endorsedTests: 2 });
-    expect(staff.map((i) => i.key)).toEqual(['approve', 'design', 'report-failed', 'tracking', 'topics', 'tests']);
+    expect(staff.map((i) => i.key)).toEqual(['approve', 'design', 'tracking', 'topics', 'tests']);
   });
 });

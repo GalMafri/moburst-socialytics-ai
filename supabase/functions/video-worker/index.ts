@@ -25,6 +25,8 @@ const JOB_LEASE_MS = 120_000;
 /** Between passes that found nothing to advance (footage still rendering). */
 const IDLE_PAUSE_MS = 15_000;
 const MAX_ATTEMPTS = 4;
+/** A job is only ever moved on while it is active: a job stopped meanwhile (its request closed or canceled) stays stopped. */
+const ACTIVE = ["queued", "running"];
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -107,9 +109,9 @@ async function pass(admin: any): Promise<number> {
       let result = await runVideoStep(admin, job);
       while (result === "next" && Date.now() - started < PASS_BUDGET_MS) result = await runVideoStep(admin, job);
       if (result === "done") {
-        await admin.from("canva_finish_jobs").update({ status: "done", step: job.step, state: job.state, output_path: job.state.final_path, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+        await admin.from("canva_finish_jobs").update({ status: "done", step: job.step, state: job.state, output_path: job.state.final_path, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
       } else {
-        await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id);
+        await admin.from("canva_finish_jobs").update({ step: job.step, state: job.state, error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
       }
       if (result === "done" || job.step !== before) advanced++;
     } catch (e) {
@@ -119,7 +121,7 @@ async function pass(admin: any): Promise<number> {
       console.error(`[video-worker] job ${job.id} step ${job.step}:`, msg);
       await admin.from("canva_finish_jobs").update({
         attempts, state: job.state, error: msg.replace(/^FINAL:\s*/, ""), status: final ? "failed" : "running", lease_until: null, updated_at: new Date().toISOString(),
-      }).eq("id", job.id);
+      }).eq("id", job.id).in("status", ACTIVE);
     }
     if (job.design_request_id) requests.add(job.design_request_id);
   }

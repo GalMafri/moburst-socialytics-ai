@@ -7,7 +7,9 @@
 //        Plans the options from the post and the client's own posts, then
 //        starts them. A second call while the post's designs are being
 //        prepared returns the open request.
-//   POST {action:"auto"}   (operational secret) designs for upcoming calendar posts that have none
+//   POST {action:"auto"}   (operational secret, as the system) designs for upcoming calendar posts
+//        that have none, made again for posts whose request ended without one, and filming
+//        requests closed when their footage cannot come in time
 //   POST {action:"feedback", iteration_id, verdict:"rejected"|"deleted", reason?, note?, make_new?}
 //        Turns a design down (its reason becomes a rule for the client's next
 //        designs, and a new design is started) or deletes it.
@@ -19,11 +21,12 @@
 // design goes through here with the service role after a membership check.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { AuthzError, requireStaff } from "../_shared/auth/requireStaff.ts";
+import { AuthzError, requireStaff, requireStaffOrSystem } from "../_shared/auth/requireStaff.ts";
 import { requireMember } from "../_shared/auth/requireMember.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
 import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, carouselPlannerPrompt, filmedNeed, parseBriefs, parseShotBrief, shotBriefPrompt, parseCarouselBriefs, parseVideoBriefs, plannerPrompt, recentLines, videoPlannerPrompt, withRefs } from "../_shared/canva/options.ts";
-import { type DesignRequest, type Settings, startOption } from "../_shared/canva/jobs.ts";
+import { type DesignRequest, type Settings, endRequest, startOption } from "../_shared/canva/jobs.ts";
+import { autoDecision, filmingOutcome, NO_PROGRESS_MINUTES, type PostRequest, postInstant } from "../_shared/design/requestRules.ts";
 import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
 import { learningLines, recordFeedback } from "../_shared/design-prompts/feedback.ts";
@@ -86,7 +89,7 @@ Deno.serve(async (req) => {
       const { data: request } = await admin.from("design_requests").select("id, client_id, status").eq("id", String(body.request_id || "")).maybeSingle();
       if (!request) return json({ error: "That design is not being prepared." }, 404);
       await requireMember(req, request.client_id);
-      if (request.status !== "preparing" && request.status !== "needs_staff") return json({ request });
+      if (request.status !== "preparing") return json({ request });
       await admin.from("canva_finish_jobs").update({ status: "canceled", lease_until: null, updated_at: new Date().toISOString() })
         .eq("design_request_id", request.id).in("status", ["queued", "running"]);
       const { data: updated } = await admin.from("design_requests").update({ status: "canceled", updated_at: new Date().toISOString() })
@@ -107,12 +110,15 @@ Deno.serve(async (req) => {
       if (!path.startsWith(`${clientId}/`) || path.includes("..")) return json({ error: "That clip does not belong to this client." }, 400);
       const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", clientId).maybeSingle();
       if (!settings?.confirmed_at) return json({ code: "not_set_up" });
-      const { data: filmed } = await admin.from("design_requests").select("on_camera").eq("client_id", clientId).eq("calendar_post_key", postKey).eq("status", "needs_filming").order("updated_at", { ascending: false }).limit(1).maybeSingle();
+      const { data: filmed } = await admin.from("design_requests").select("on_camera").eq("client_id", clientId).eq("calendar_post_key", postKey).in("status", ["needs_filming", "closed"]).not("on_camera", "is", null).order("updated_at", { ascending: false }).limit(1).maybeSingle();
       const visual = typeof body.visual_direction === "string" ? body.visual_direction.trim().slice(0, 600) : "";
       const request = await startRequest(admin, settings as Settings, {
         clientId, postKey, copy, reportId: body.report_id || null, platform: body.platform || null, format: body.format || "Video", requestedBy: userId,
         visual: visual || null, footagePath: path, onCamera: filmed?.on_camera ?? "the speaker",
       });
+      // The footage came: the post no longer waits to be filmed.
+      const { data: waiting } = await admin.from("design_requests").select("id").eq("client_id", clientId).eq("calendar_post_key", postKey).eq("status", "needs_filming");
+      for (const w of waiting ?? []) await endRequest(admin, w.id, "filmed");
       return json({ request });
     }
 
@@ -125,20 +131,21 @@ Deno.serve(async (req) => {
       return json({ brief: await writeShotBrief(admin, request.id) });
     }
 
-    // A video request that waited for the client's video style, planned now.
-    // The video worker's own call.
+    // A request planned again: a video that waited for the client's video
+    // style (the video worker), or a request whose planning stopped (the
+    // design worker). Only the project's own calls, as the system.
     if (body?.action === "replan") {
-      const caller = await requireStaff(req);
+      const caller = await requireStaffOrSystem(req);
       if (!caller.viaSecret) return json({ error: "Not allowed." }, 403);
       const { data: request } = await admin.from("design_requests").select("*").eq("id", String(body.request_id || "")).maybeSingle();
-      if (!request || request.status !== "preparing") return json({ skipped: true });
+      // Only a request still planning: one past planning already has its options.
+      if (!request || request.status !== "preparing" || request.stage !== "planning") return json({ skipped: true });
       const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", request.client_id).maybeSingle();
-      if (!settings) return json({ error: "No design settings." }, 400);
-      const work = plan(admin, request as DesignRequest, settings as Settings).catch(async (e) => {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error("[design-request] planning failed:", msg);
-        await admin.from("design_requests").update({ status: "needs_staff", error: msg, updated_at: new Date().toISOString() }).eq("id", request.id);
-      });
+      if (!settings) {
+        await endRequest(admin, request.id, "no_progress", "The client's design settings are gone.");
+        return json({ skipped: true });
+      }
+      const work = plan(admin, request as DesignRequest, settings as Settings).catch((e) => planStopped(admin, request.id, e));
       // deno-lint-ignore no-explicit-any
       const runtime = (globalThis as any).EdgeRuntime;
       if (runtime?.waitUntil) runtime.waitUntil(work); else await work;
@@ -160,12 +167,15 @@ Deno.serve(async (req) => {
       return json(found);
     }
 
-    // Designs for upcoming calendar posts that have none, for clients whose
-    // staff switched it on. Run by the hourly schedule.
+    // Filming requests that cannot get footage in time, then designs for
+    // upcoming calendar posts that have none, for clients with automatic
+    // designs on. Run by the schedule every 10 minutes, as the system.
     if (body?.action === "auto") {
-      const caller = await requireStaff(req);
+      const caller = await requireStaffOrSystem(req);
       if (!caller.viaSecret) return json({ error: "Not allowed." }, 403);
-      return json(await prepareUpcoming(admin, { dryRun: body.dry_run === true, clientId: body.client_id ? String(body.client_id) : null }));
+      const dryRun = body.dry_run === true;
+      const closed = dryRun ? 0 : await closeFilming(admin, new Date());
+      return json({ ...(await prepareUpcoming(admin, { dryRun, clientId: body.client_id ? String(body.client_id) : null })), filming_closed: closed });
     }
 
     // Turn a design down (with a reason the client's next designs learn from)
@@ -474,23 +484,34 @@ async function startRequest(admin: any, settings: Settings, p: { clientId: strin
 
   // Planning takes a few seconds; the caller already has the request and
   // shows it as being prepared while this runs.
-  const work = plan(admin, created as DesignRequest, settings).catch(async (e) => {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error("[design-request] planning failed:", msg);
-    await admin.from("design_requests").update({ status: "needs_staff", error: msg, updated_at: new Date().toISOString() }).eq("id", created.id);
-  });
+  const work = plan(admin, created as DesignRequest, settings).catch((e) => planStopped(admin, created.id, e));
   // deno-lint-ignore no-explicit-any
   const runtime = (globalThis as any).EdgeRuntime;
   if (runtime?.waitUntil) runtime.waitUntil(work); else await work;
   return created as DesignRequest;
 }
 
+/**
+ * A plan that could not be made stays planning, with the reason kept for the
+ * logs. The design worker plans it again once NO_PROGRESS_MINUTES pass, and
+ * closes it quietly after a few tries (requestRules.ts): nobody is shown a
+ * request that did not finish.
+ */
+async function planStopped(admin: any, requestId: string, e: unknown): Promise<void> {
+  const msg = e instanceof Error ? e.message : String(e);
+  console.error("[design-request] planning stopped:", msg);
+  await admin.from("design_requests").update({ error: msg.slice(0, 1000), updated_at: new Date().toISOString() })
+    .eq("id", requestId).eq("status", "preparing").eq("stage", "planning");
+}
+
 /** How far ahead designs are prepared automatically. */
 const AUTO_DAYS_AHEAD = 7;
 /**
  * Automatic requests being prepared at once, across clients. The worker
- * finishes designs one Canva edit at a time, so starting more at once only
- * makes each wait, and a person's own request would queue behind them.
+ * finishes designs one at a time, so starting more at once only makes each
+ * wait, and a person's own request would queue behind them. Only requests
+ * that are moving count: one stalled in planning is planned again by the
+ * design worker and never holds back every other client.
  */
 const AUTO_AT_ONCE = 2;
 /**
@@ -505,11 +526,48 @@ export function designKind(format: string | null | undefined, platform: string |
   return "single";
 }
 
+/** How far back a filming request's post is looked for; one older than this has passed anyway. */
+const FILMING_LOOKBACK_DAYS = 31;
+
 /**
- * Upcoming calendar posts with no design and no request yet, for clients with
- * confirmed settings and automatic designs switched on, soonest first. Each
- * request uses the post's current copy, so edits made before it starts are in
- * the design.
+ * Filming requests never wait for ever, for every client: closed once
+ * footage arrived, once the post's time passed or the post left the
+ * calendar, and a day before the post's time when no footage came. The
+ * automatic designs then make that post's design from the same idea.
+ */
+async function closeFilming(admin: any, now: Date): Promise<number> {
+  const { data: waiting } = await admin.from("design_requests").select("id, client_id, calendar_post_key").eq("status", "needs_filming").limit(500);
+  if (!waiting?.length) return 0;
+  const clientIds = [...new Set((waiting as Array<{ client_id: string }>).map((w) => w.client_id))];
+  const since = new Date(now.getTime() - FILMING_LOOKBACK_DAYS * 86400000).toISOString().slice(0, 10);
+  const [{ data: zones }, { data: posts }, { data: footage }] = await Promise.all([
+    admin.from("clients").select("id, timezone").in("id", clientIds),
+    admin.from("calendar_posts").select("client_id, post_key, post_date, posting_time").in("client_id", clientIds).gte("post_date", since).limit(10000),
+    admin.from("design_requests").select("client_id, calendar_post_key").in("client_id", clientIds).not("footage_path", "is", null).limit(10000),
+  ]);
+  // Matched in code: a report post's key is JSON text, which an in() filter does not survive.
+  const zone = new Map<string, string | null>((zones ?? []).map((c: any) => [c.id, c.timezone ?? null]));
+  const postOf = new Map((posts ?? []).map((p: any) => [`${p.client_id}|${p.post_key}`, p]));
+  const filmed = new Set((footage ?? []).map((r: any) => `${r.client_id}|${r.calendar_post_key}`));
+  let closed = 0;
+  for (const w of waiting as Array<{ id: string; client_id: string; calendar_post_key: string }>) {
+    const key = `${w.client_id}|${w.calendar_post_key}`;
+    const post = postOf.get(key) as { post_date: string; posting_time: string | null } | undefined;
+    const outcome = filmingOutcome(post ? postInstant(post.post_date, post.posting_time, zone.get(w.client_id)) : null, now, filmed.has(key));
+    if (outcome === "keep") continue;
+    await endRequest(admin, w.id, outcome);
+    closed++;
+  }
+  return closed;
+}
+
+/**
+ * Upcoming calendar posts with no design, for clients with confirmed
+ * settings and automatic designs switched on, soonest first: posts never
+ * designed, posts whose request ended without a design and is due again
+ * (until the post's own time), and filmed posts whose footage did not come.
+ * Each request uses the post's current copy, so edits made before it starts
+ * are in the design. Automatic requests name no person (requested_by null).
  */
 async function prepareUpcoming(admin: any, opts: { dryRun?: boolean; clientId?: string | null } = {}): Promise<{ started: string[]; waiting: number; due?: Array<{ client_id: string; post_date: string; platform: string; format: string | null }> }> {
   // A dry run (staff checking what would start) also covers a client whose switch is off.
@@ -517,11 +575,18 @@ async function prepareUpcoming(admin: any, opts: { dryRun?: boolean; clientId?: 
   query = opts.dryRun && opts.clientId ? query.eq("client_id", opts.clientId) : query.eq("auto_designs", true);
   const { data: clients } = await query;
   if (!clients?.length) return { started: [], waiting: 0 };
-  const today = new Date().toISOString().slice(0, 10);
-  const until = new Date(Date.now() + AUTO_DAYS_AHEAD * 86400000).toISOString().slice(0, 10);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const until = new Date(now.getTime() + AUTO_DAYS_AHEAD * 86400000).toISOString().slice(0, 10);
+  const { data: zones } = await admin.from("clients").select("id, timezone, archived_at").in("id", clients.map((c: any) => c.client_id));
+  const zone = new Map<string, string | null>((zones ?? []).map((c: any) => [c.id, c.timezone ?? null]));
+  // An archived client gets nothing made.
+  const archived = new Set((zones ?? []).filter((c: any) => c.archived_at).map((c: any) => c.id));
 
-  const due: Array<{ settings: Settings; post: any }> = [];
+  type Due = { settings: Settings; post: any; postAt: Date | null; route: string | null; askFilming: boolean };
+  const due: Due[] = [];
   for (const settings of clients) {
+    if (archived.has(settings.client_id)) continue;
     // The client's upcoming posts (each week has one plan, calendar_plans).
     const { data: posts } = await admin.from("calendar_posts").select("*").eq("client_id", settings.client_id).gte("post_date", today).lte("post_date", until).order("post_date");
     const candidates = posts ?? [];
@@ -530,28 +595,45 @@ async function prepareUpcoming(admin: any, opts: { dryRun?: boolean; clientId?: 
     // which an in() filter on the key does not survive.
     const [{ data: designed }, { data: requested }] = await Promise.all([
       admin.from("post_iterations").select("calendar_post_key").eq("client_id", settings.client_id).not("calendar_post_key", "is", null).like("variant_angle", "Design option %").limit(10000),
-      admin.from("design_requests").select("calendar_post_key").eq("client_id", settings.client_id).limit(10000),
+      admin.from("design_requests").select("calendar_post_key, status, end_reason, ended_at, created_at, video_route").eq("client_id", settings.client_id).limit(10000),
     ]);
-    const has = new Set([...(designed ?? []), ...(requested ?? [])].map((r: any) => r.calendar_post_key));
-    for (const post of candidates) if (!has.has(post.post_key) && !needsNoDesign(post.format)) due.push({ settings, post });
+    const hasDesign = new Set((designed ?? []).map((r: any) => r.calendar_post_key));
+    const requests = new Map<string, PostRequest[]>();
+    for (const r of requested ?? []) requests.set(r.calendar_post_key, [...(requests.get(r.calendar_post_key) ?? []), r]);
+    for (const post of candidates) {
+      if (hasDesign.has(post.post_key) || needsNoDesign(post.format)) continue;
+      const postAt = postInstant(post.post_date, post.posting_time, zone.get(settings.client_id));
+      // Nothing is made for a post whose time has passed.
+      if (postAt && postAt.getTime() <= now.getTime()) continue;
+      const decision = autoDecision(requests.get(post.post_key) ?? [], postAt, now);
+      if (decision.start) due.push({ settings, post, postAt, route: decision.route, askFilming: decision.askFilming });
+    }
   }
   due.sort((a, b) => String(a.post.post_date).localeCompare(String(b.post.post_date)));
 
   if (opts.dryRun) {
     return { started: [], waiting: due.length, due: due.map(({ post }) => ({ client_id: post.client_id, post_date: post.post_date, platform: post.platform, format: post.format })) };
   }
-  const { count: running } = await admin.from("design_requests").select("id", { count: "exact", head: true }).eq("status", "preparing").is("requested_by", null);
-  const room = Math.max(0, AUTO_AT_ONCE - (running ?? 0));
+  // Moving: past planning, or planning with progress in the last NO_PROGRESS_MINUTES.
+  const stalledBefore = new Date(now.getTime() - NO_PROGRESS_MINUTES * 60000).toISOString();
+  const { count: moving } = await admin.from("design_requests").select("id", { count: "exact", head: true })
+    .eq("status", "preparing").is("requested_by", null).or(`stage.neq.planning,updated_at.gte.${stalledBefore}`);
+  const room = Math.max(0, AUTO_AT_ONCE - (moving ?? 0));
 
   const started: string[] = [];
-  for (const { settings, post } of due.slice(0, room)) {
+  for (const { settings, post, postAt, route, askFilming } of due.slice(0, room)) {
     const copy = await currentCopy(admin, post);
     if (!copy) continue;
-    const p = { clientId: post.client_id, postKey: post.post_key, copy, reportId: post.report_id, platform: post.platform, format: post.format, requestedBy: null, visual: post.visual_direction || null };
-    // The same rule as a person asking: a video of a real person on camera is filmed.
-    if (designKind(post.format, post.platform) === "video") {
+    const video = designKind(post.format, post.platform) === "video";
+    const p = { clientId: post.client_id, postKey: post.post_key, copy, reportId: post.report_id, platform: post.platform, format: post.format, requestedBy: null, visual: post.visual_direction || null, route: video ? route : null };
+    // The same rule as a person asking: a video of a real person on camera is
+    // filmed, while there is still a day to film it.
+    if (video && askFilming && filmingOutcome(postAt, now, false) === "keep") {
       const filmed = await filmedReason(admin, post.client_id ?? p.clientId, copy, post.visual_direction || "");
       if (filmed) { await recordFilming(admin, p, filmed); continue; }
+    } else if (video && askFilming) {
+      // Too close to film: a video in the look of the client's posts, from the same idea.
+      p.route = "posts";
     }
     const request = await startRequest(admin, settings, p);
     started.push(request.id);

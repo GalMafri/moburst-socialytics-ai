@@ -17,7 +17,8 @@ import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { decode as base64Decode, encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
 import { anthropicMessages } from "../_shared/anthropic.ts";
-import { settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
+import { endRequest, settleRequest, BUCKET } from "../_shared/canva/jobs.ts";
+import { MAX_PLAN_ATTEMPTS, NO_PROGRESS_MINUTES } from "../_shared/design/requestRules.ts";
 import { type GenerateInput, canvasLogoRect, designPrompt, resampleRGBA } from "../_shared/canva/brief.ts";
 import { outputSize, pictureSize } from "../_shared/canva/finish.ts";
 import { copyMatches, logoCheckPrompt, marksPrompt, parseLogoCheck, parseMarks, parseRead, readPrompt, removePrompt } from "../_shared/design/pipeline.ts";
@@ -48,6 +49,8 @@ const READ_MODEL = "claude-opus-5-5";
  * off after a few characters ("{\"marks") and good designs failed.
  */
 const CHECK_TOKENS = 2000;
+/** Times a check is asked again when its answer comes back unreadable, before the step counts a try. */
+const READ_TRIES = 3;
 const STEPS = new Set(["generate", "locate", "unlogo", "marks", "finish", "verify"]);
 /** A job is only ever moved on while it is active: a cancelled design stays cancelled. */
 const ACTIVE = ["queued", "running"];
@@ -106,7 +109,45 @@ async function runPass(admin: any) {
   // Requests whose jobs all ended earlier (a replacement still to start) are settled here.
   const { data: open } = await admin.from("design_requests").select("id").eq("status", "preparing").neq("stage", "planning");
   for (const r of open ?? []) await settleRequest(admin, r.id).catch((e) => console.error(`[design-worker] request ${r.id}:`, e instanceof Error ? e.message : e));
+  await replanStalled(admin).catch((e) => console.error("[design-worker] stalled planning:", e instanceof Error ? e.message : e));
   return { ran: leased.length };
+}
+
+/**
+ * Requests whose planning stopped (the request that planned them died, or
+ * the plan could not be made): planned again by design-request, as the
+ * system, after NO_PROGRESS_MINUTES without progress. After MAX_PLAN_ATTEMPTS
+ * the request closes quietly and the automatic designs make it again later.
+ */
+async function replanStalled(admin: any): Promise<void> {
+  const cutoff = new Date(Date.now() - NO_PROGRESS_MINUTES * 60_000).toISOString();
+  const { data: stalled } = await admin.from("design_requests").select("id, plan_attempts, updated_at")
+    .eq("status", "preparing").eq("stage", "planning").lt("updated_at", cutoff).order("updated_at").limit(10);
+  for (const r of stalled ?? []) {
+    const tries = r.plan_attempts ?? 1;
+    if (tries >= MAX_PLAN_ATTEMPTS) {
+      await endRequest(admin, r.id, "no_progress");
+      continue;
+    }
+    // Claimed by moving its clock, so two passes never plan it twice.
+    const { data: claimed } = await admin.from("design_requests").update({ plan_attempts: tries + 1, updated_at: new Date().toISOString() })
+      .eq("id", r.id).eq("status", "preparing").eq("updated_at", r.updated_at).select("id");
+    if (!claimed?.length) continue;
+    try {
+      const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/design-request`, {
+        method: "POST",
+        // The system's own call: no person is named.
+        headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "" },
+        body: JSON.stringify({ action: "replan", request_id: r.id }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      await res.body?.cancel();
+      if (!res.ok) throw new Error(`replan answered ${res.status}`);
+    } catch (e) {
+      // Its clock moved, so the next sweep asks again.
+      console.error(`[design-worker] could not plan request ${r.id} again:`, e instanceof Error ? e.message : e);
+    }
+  }
 }
 
 /** Start one leased job's own request; if it cannot be started, the job is released for the next pass. */
@@ -145,7 +186,11 @@ async function advanceOne(admin: any, jobId: string) {
       await admin.from("canva_finish_jobs").update({ lease_until: null }).eq("id", job.id).in("status", ACTIVE);
     }
   } catch (e) {
-    await recordFailure(admin, job as Job, e);
+    if (e instanceof Stopped) {
+      await admin.from("canva_finish_jobs").update({ status: "canceled", error: null, lease_until: null, updated_at: new Date().toISOString() }).eq("id", job.id).in("status", ACTIVE);
+    } else {
+      await recordFailure(admin, job as Job, e);
+    }
   }
   if (job.design_request_id) {
     await settleRequest(admin, job.design_request_id).catch((e) => console.error(`[design-worker] request ${job.design_request_id}:`, e instanceof Error ? e.message : e));
@@ -195,7 +240,8 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       // A carousel slide after the cover follows the cover's look, so it waits for the cover's design.
       if (job.slide_index && job.slide_index > 0) {
         const { data: cover } = await admin.from("canva_finish_jobs").select("status, state").eq("design_request_id", job.design_request_id).eq("option_index", job.option_index).eq("slide_index", 0).maybeSingle();
-        if (!cover || cover.status === "failed") throw new Error("FINAL: The carousel's cover could not be made.");
+        // The option is over with its cover; this slide stops with it, as it did nothing wrong.
+        if (!cover || cover.status === "failed" || cover.status === "canceled") throw new Stopped("The carousel's cover was not made, so its option is over.");
         if (!cover.state?.design_path) return "wait";
         s.cover_path = cover.state.design_path;
       }
@@ -216,9 +262,13 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       const found = findLogo(design.bitmap, W, H, logo.bitmap, logo.width, logo.height, usual, hexRgb(g.background), { scales: LOGO_SCALES });
       s.logo_score = Math.round(found.score * 1000) / 1000;
       if (!logoFound(found, usual.width)) {
-        // No logo at the client's usual spot, or one at a size the client never uses: designed again.
-        console.warn(`[design-worker] job ${job.id}: logo match ${s.logo_score} at ${(found.width / usual.width).toFixed(2)} of the usual width; designing again.`);
-        job.step = "generate";
+        // No logo at the client's usual spot, or one at a size the client never
+        // uses: designed again, the way every other check sends a design back,
+        // so the reason is kept and a carousel cover takes its slides with it
+        // (slides drawn on a cover sent back here used to keep following it).
+        const why = `logo match ${s.logo_score} at ${(found.width / usual.width).toFixed(2)} of the usual width`;
+        console.warn(`[design-worker] job ${job.id}: ${why}; designing again.`);
+        await designAgain(admin, job, why);
         return "next";
       }
       s.logo_rect = { x: found.x, y: found.y, width: found.width, height: found.height };
@@ -246,22 +296,9 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       const page = pageOf(job);
       const small = new Image(page.width, page.height);
       small.bitmap.set(resampleRGBA(pic.bitmap, pic.width, pic.height, page.width, page.height));
-      const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-      if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
       const g: GenerateInput = job.input.generate;
-      const result = await anthropicMessages({
-        apiKey,
-        body: {
-          model: READ_MODEL,
-          max_tokens: CHECK_TOKENS,
-          messages: [{ role: "user", content: [
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode((await small.encodeJPEG(92)) as unknown as ArrayBuffer) } },
-            { type: "text", text: marksPrompt(g.brand_name) },
-          ] }],
-        },
-      });
-      const seen = parseMarks(result.text);
-      if (!seen) throw new Error(`The picture could not be read for other brands' marks: ${result.text.slice(0, 200)}`);
+      const image = base64Encode((await small.encodeJPEG(92)) as unknown as ArrayBuffer);
+      const seen = await readCheck(() => askAbout("image/jpeg", image, marksPrompt(g.brand_name)), parseMarks, "The picture's other brand marks");
       s.marks_check = seen;
       if (!seen.marks) {
         delete s.marks_where;
@@ -326,21 +363,7 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
       small.bitmap.set(resampleRGBA(final.bitmap, final.width, final.height, page.width, page.height));
       const jpeg = await small.encodeJPEG(92);
       const g: GenerateInput = job.input.generate;
-      const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-      if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
-      const result = await anthropicMessages({
-        apiKey,
-        body: {
-          model: READ_MODEL,
-          max_tokens: CHECK_TOKENS,
-          messages: [{ role: "user", content: [
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64Encode(jpeg as unknown as ArrayBuffer) } },
-            { type: "text", text: readPrompt(g.brand_name) },
-          ] }],
-        },
-      });
-      const lines = parseRead(result.text);
-      if (!lines) throw new Error("The words on the design could not be read.");
+      const lines = await readCheck(() => askAbout("image/jpeg", base64Encode(jpeg as unknown as ArrayBuffer), readPrompt(g.brand_name)), parseRead, "The words on the design");
       s.read = lines;
       if (!copyMatches(lines, job.input.copy)) {
         // Wrong words are never fixed by hand: the design is made again.
@@ -356,19 +379,8 @@ async function runStep(admin: any, job: Job): Promise<StepResult> {
         const x0 = Math.max(0, Math.round(r.x * k) - mx), y0 = Math.max(0, Math.round(r.y * k) - my);
         const x1 = Math.min(final.width, Math.round((r.x + r.width) * k) + mx), y1 = Math.min(final.height, Math.round((r.y + r.height) * k) + my);
         const area = final.clone().crop(x0, y0, x1 - x0, y1 - y0);
-        const look = await anthropicMessages({
-          apiKey,
-          body: {
-            model: READ_MODEL,
-            max_tokens: CHECK_TOKENS,
-            messages: [{ role: "user", content: [
-              { type: "image", source: { type: "base64", media_type: "image/png", data: base64Encode((await area.encode()) as unknown as ArrayBuffer) } },
-              { type: "text", text: logoCheckPrompt(g.brand_name) },
-            ] }],
-          },
-        });
-        const seen = parseLogoCheck(look.text);
-        if (!seen) throw new Error(`The area around the logo could not be read: ${look.text.slice(0, 200)}`);
+        const crop = base64Encode((await area.encode()) as unknown as ArrayBuffer);
+        const seen = await readCheck(() => askAbout("image/png", crop, logoCheckPrompt(g.brand_name)), parseLogoCheck, "The area around the logo");
         s.logo_check = seen;
         if (!seen.clear) {
           console.warn(`[design-worker] job ${job.id}: the logo is touched by ${seen.touching}; designing again.`);
@@ -460,6 +472,43 @@ async function generateDesign(admin: any, job: Job, path: string): Promise<strin
 
 /** The image model is at its rate limit or briefly down; the step is tried again on a later pass. */
 class ModelBusy extends Error {}
+
+/** A job that has nothing left to do because its option is over: it stops, which is not a failure of its own. */
+class Stopped extends Error {}
+
+/** One image and one question to the reading model; its answer as text. */
+async function askAbout(mediaType: "image/jpeg" | "image/png", data: string, question: string): Promise<string> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
+  const result = await anthropicMessages({
+    apiKey,
+    body: {
+      model: READ_MODEL,
+      max_tokens: CHECK_TOKENS,
+      messages: [{ role: "user", content: [
+        { type: "image", source: { type: "base64", media_type: mediaType, data } },
+        { type: "text", text: question },
+      ] }],
+    },
+  });
+  return result.text;
+}
+
+/**
+ * A check's answer, asked again when it comes back unreadable (cut short, or
+ * not in the form asked for): an unreadable answer says nothing about the
+ * design, so it never costs the design a try (13 Oct: four designs ended on
+ * "The area around the logo could not be read").
+ */
+async function readCheck<T>(ask: () => Promise<string>, parse: (text: string) => T | null, what: string): Promise<T> {
+  let last = "";
+  for (let i = 0; i < READ_TRIES; i++) {
+    last = await ask();
+    const value = parse(last);
+    if (value) return value;
+  }
+  throw new Error(`${what} could not be read: ${last.slice(0, 200)}`);
+}
 
 async function imageEdit(images: { bytes: Uint8Array; name: string }[], prompt: string, size: [number, number], mask?: Uint8Array): Promise<Uint8Array> {
   const form = new FormData();

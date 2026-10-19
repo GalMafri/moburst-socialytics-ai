@@ -2,15 +2,15 @@
  * The notes a monthly report run leaves for the team (report_data.warnings),
  * as they stand now.
  *
- * They are setup notes for Moburst staff ("the linked brief could not be
- * read"), never shown to a client. A note whose cause has since been fixed in
- * client setup is dropped: Bader Law's 7 Oct report kept telling staff to add
- * a brief that had been pasted in since (13 Oct).
+ * They are notes for Moburst staff, never shown to a client. Notes about the
+ * brief are never shown: a report is built from the brief text the app holds,
+ * and a brief the workflow could not open or summarize does not stop or weaken
+ * it, so there is nothing for anyone to do about one. Reports from before
+ * 19 Oct still carry such notes ("the linked brief could not be read").
  */
-export function reportNotices(warnings: unknown, setup: { briefText?: string | null }): string[] {
+export function reportNotices(warnings: unknown, _setup: { briefText?: string | null } = {}): string[] {
   if (!Array.isArray(warnings)) return [];
-  const briefInSetup = !!String(setup.briefText ?? "").trim();
   return warnings
     .filter((w): w is string => typeof w === "string" && !!w.trim())
-    .filter((w) => !(briefInSetup && /\bbrief\b/i.test(w)));
+    .filter((w) => !/\bbrief\b/i.test(w));
 }

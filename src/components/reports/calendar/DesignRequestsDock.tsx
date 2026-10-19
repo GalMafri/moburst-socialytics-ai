@@ -52,7 +52,6 @@ export function DesignRequestsDockItems() {
     // Designs prepared without anyone asking show on their posts, not here.
     if (!r.requested_by || r.requested_by !== ctx.myId) return false;
     if (isPreparing(r, isMoburstStaff)) return true;
-    if (r.status === "needs_staff") return isMoburstStaff;
     return r.status === "ready" && now - new Date(r.updated_at).getTime() < SHOW_READY_FOR_MS;
   }).slice(0, 4);
   if (!shown.length) return null;

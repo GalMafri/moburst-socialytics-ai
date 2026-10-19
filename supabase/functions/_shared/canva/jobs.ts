@@ -7,6 +7,7 @@
 
 import { type Brief, optionStates, requestProgress, type JobState } from "./options.ts";
 import { TIMING } from "../video/compose.ts";
+import type { EndReason } from "../design/requestRules.ts";
 
 export const BUCKET = "generated-media";
 
@@ -229,22 +230,48 @@ async function settleRequestNow(admin: any, requestId: string): Promise<void> {
     await admin.from("canva_finish_jobs").update({ state: { ...job.state, iteration_id: row.id } }).eq("id", job.id);
   }
 
+  // An option ends with its first slide that does not finish; its other
+  // slides stop with it, so nothing more is spent on an option that is over.
+  const over = new Set([...byOption].filter(([, rows]) => rows.some((j) => j.status === "failed" || j.status === "canceled")).map(([k]) => k));
+  const stop = list.filter((j) => over.has(j.option_index) && (j.status === "queued" || j.status === "running"));
+  if (stop.length) {
+    await admin.from("canva_finish_jobs").update({ status: "canceled", lease_until: null, updated_at: new Date().toISOString() })
+      .in("id", stop.map((j) => j.id)).in("status", ["queued", "running"]);
+    for (const j of stop) j.status = "canceled";
+  }
+
   const options = optionStates(list);
   const progress = requestProgress(options, req.options_wanted, (req.briefs ?? []).length);
+  // Every option tried and none finished: closed quietly, and made again later.
+  if (progress.status === "closed") return endRequest(admin, requestId, "no_design");
   let started = options.length;
   if (progress.start_brief !== null) {
     const { data: settings } = await admin.from("design_brand_settings").select("*").eq("client_id", req.client_id).maybeSingle();
+    if (!settings) return endRequest(admin, requestId, "no_design", "The client's design settings are gone.");
     const { data: client } = await admin.from("clients").select("name").eq("id", req.client_id).maybeSingle();
-    if (settings) {
-      await startOption(admin, req, settings, client?.name ?? "the brand", progress.start_brief, started);
-      started += 1;
-    }
+    await startOption(admin, req, settings, client?.name ?? "the brand", progress.start_brief, started);
+    started += 1;
   }
   await admin.from("design_requests").update({
     status: progress.status,
-    stage: progress.status === "needs_staff" ? "designing" : progress.stage,
+    stage: progress.stage,
     options_ready: progress.options_ready,
     candidates_started: started,
     updated_at: new Date().toISOString(),
-  }).eq("id", requestId);
+  }).eq("id", requestId).eq("status", "preparing");
+}
+
+/**
+ * Close a request quietly (status closed, with why): its unfinished jobs
+ * stop, nobody is shown anything, and the automatic designs make the post's
+ * design again later when the reason calls for it (_shared/design/requestRules.ts).
+ * The note is kept for the logs only.
+ */
+export async function endRequest(admin: any, requestId: string, reason: EndReason, note?: string | null): Promise<void> {
+  const now = new Date().toISOString();
+  await admin.from("canva_finish_jobs").update({ status: "canceled", lease_until: null, updated_at: now })
+    .eq("design_request_id", requestId).in("status", ["queued", "running"]);
+  await admin.from("design_requests").update({
+    status: "closed", end_reason: reason, ended_at: now, updated_at: now, ...(note ? { error: String(note).slice(0, 1000) } : {}),
+  }).eq("id", requestId).in("status", ["preparing", "needs_filming"]);
 }

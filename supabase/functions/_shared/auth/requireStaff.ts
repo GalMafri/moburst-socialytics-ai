@@ -15,7 +15,7 @@
 // company-scoped staff — apply exactly as they do to direct table access.
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { AuthzError, authzResponse, bearerToken, SERVER_SECRET_HEADER, SERVER_USER_HEADER, serverActAsUser } from "./authz.ts";
+import { AuthzError, authzResponse, bearerToken, SERVER_SECRET_HEADER, SERVER_USER_HEADER, serverActAsUser, serverActor } from "./authz.ts";
 import { secretEquals } from "./secretEquals.ts";
 
 // Re-exported so all 31 importers of this path keep working unchanged.
@@ -76,6 +76,36 @@ export async function requireStaff(
   }
 
   return { userId: userData.user.id, asCaller };
+}
+
+/** A caller of a path automatic work also uses: a staff member, a server call for a person, or the system. */
+export interface InternalCaller {
+  /** Null for the system: whatever it writes names no person. */
+  userId: string | null;
+  asCaller: SupabaseClient;
+  viaSecret?: boolean;
+  /** True when the project's own automatic work called with the secret and no user. */
+  system: boolean;
+}
+
+/**
+ * requireStaff for the paths automatic work calls (automatic designs,
+ * automatic video replans, the workers). The operational secret with no user
+ * header is the system actor; anything else is checked exactly as
+ * requireStaff checks it. Nothing automatic ever acts as a person.
+ */
+export async function requireStaffOrSystem(
+  req: Request,
+  opts: { writeClientId?: string } = {},
+): Promise<InternalCaller> {
+  const presented = req.headers.get(SERVER_SECRET_HEADER);
+  if (presented && (await secretEquals(presented, Deno.env.get("SOCIALYTICS_N8N_SECRET")))) {
+    if (serverActor(req.headers.get(SERVER_USER_HEADER), true)?.kind === "system") {
+      const asService = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+      return { userId: null, asCaller: asService, viaSecret: true, system: true };
+    }
+  }
+  return { ...(await requireStaff(req, opts)), system: false };
 }
 
 /**

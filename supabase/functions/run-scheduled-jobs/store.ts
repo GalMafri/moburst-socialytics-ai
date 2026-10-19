@@ -3,7 +3,7 @@
 // on the status this worker set, as the single-request scheduler did.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { followingRun, type ClientRow, type CompetitorSetRow, type DispatchStore, type ScheduleRow } from "./dispatch.ts";
+import type { ClientRow, CompetitorSetRow, DispatchStore, ReportRun, ScheduleRow } from "./dispatch.ts";
 import { TERMINAL, type JobOutcome, type ScheduledJob } from "./types.ts";
 import type { ScheduleGap } from "./worker.ts";
 
@@ -102,32 +102,38 @@ export function makeDispatchStore(db: SupabaseClient): DispatchStore {
       return (await must(db.from("competitive_reports").select("status, date_range_start, date_range_end").eq("id", id).eq("client_id", clientId).maybeSingle())) as
         { status: string; date_range_start: string | null; date_range_end: string | null } | null;
     },
-    async reportStatus(table, id) {
-      const r = (await must(db.from(table).select("status").eq("id", id).maybeSingle())) as { status: string } | null;
-      return r?.status ?? null;
+    async reportRun(table, id) {
+      const r = (await must(db.from(table).select("status, created_at, report_data").eq("id", id).maybeSingle())) as
+        { status: string; created_at: string | null; report_data: { error?: unknown } | null } | null;
+      if (!r) return null;
+      const error = typeof r.report_data?.error === "string" ? r.report_data.error : null;
+      return { status: r.status, created_at: r.created_at, error } satisfies ReportRun;
     },
     async pairedCompetitivePending(clientId, now) {
       const due = (await must(db.from("report_schedules").select("id, next_run_at").eq("client_id", clientId).eq("report_kind", "competitive")
         .eq("is_active", true).lte("next_run_at", now.toISOString()))) as Array<{ id: string; next_run_at: string }> | null;
       for (const s of due ?? []) {
-        const jobs = (await must(db.from("scheduled_jobs").select("status").eq("kind", "dispatch").eq("schedule_id", s.id)
-          .eq("occurrence", s.next_run_at).limit(1))) as Array<{ status: string }> | null;
-        const status = jobs?.[0]?.status;
-        // Not queued yet, or about to run: the analysis may still start now.
-        if (!status || status === "queued" || status === "running") return true;
+        const jobs = (await must(db.from("scheduled_jobs").select("status, result").eq("kind", "dispatch").eq("schedule_id", s.id)
+          .eq("occurrence", s.next_run_at).limit(1))) as Array<{ status: string; result: { runs?: unknown[] } | null }> | null;
+        const job = jobs?.[0];
+        // Not queued yet, about to make its first run, or running: the
+        // analysis may still start now. Queued between runs, it may be hours.
+        if (!job || job.status === "running") return true;
+        if (job.status === "queued" && !(Array.isArray(job.result?.runs) && job.result!.runs!.length)) return true;
       }
       return false;
     },
     async releaseHeldSocial(clientId) {
       // Only schedules not pinned to a competitive report: a pinned one is
-      // released by release_ready_dispatches when that report finishes.
+      // released by release_ready_dispatches when that report finishes. A
+      // social job that already sent its own request only watches its report.
       const rows = (await must(db.from("report_schedules").select("id").eq("client_id", clientId).eq("report_kind", "social")
         .eq("is_active", true).is("pending_competitive_report_id", null))) as Array<{ id: string }> | null;
       const ids = (rows ?? []).map((r) => r.id);
       if (!ids.length) return;
       const now = new Date().toISOString();
       await must(db.from("scheduled_jobs").update({ status: "queued", available_at: now, lease_until: null, updated_at: now })
-        .eq("kind", "dispatch").eq("status", "waiting").in("schedule_id", ids));
+        .eq("kind", "dispatch").eq("status", "waiting").in("schedule_id", ids).or("phase.is.null,phase.eq.prepared"));
     },
     async webhooks() {
       const rows = (await must(db.from("app_settings").select("key, value").in("key", ["n8n_webhook_url", "competitive_n8n_webhook_url"]))) as Array<{ key: string; value: string | null }> | null;
@@ -144,30 +150,47 @@ export function makeDispatchStore(db: SupabaseClient): DispatchStore {
     },
     async holdSocial(clientId, competitiveReportId, now) {
       await must(db.from("report_schedules")
-        .update({ pending_competitive_report_id: competitiveReportId, last_result: `Waiting for competitive report ${competitiveReportId}` })
+        .update({ pending_competitive_report_id: competitiveReportId, last_result: "Waiting for the competitive analysis to finish." })
         .eq("client_id", clientId).eq("report_kind", "social").eq("is_active", true)
         .lte("next_run_at", now.toISOString()).is("pending_competitive_report_id", null));
     },
     async setAnalyzing(setId) {
       await must(db.from("competitor_sets").update({ status: "analyzing" }).eq("id", setId).in("status", ["confirmed", "complete", "failed"]));
     },
-    async failReport(table, id, message) {
-      await must(db.from(table).update({ status: "failed", report_data: { error: message } }).eq("id", id).eq("status", "running"));
+    async dropReport(table, id) {
+      // The pin first: report_schedules keeps a foreign key to the competitive report.
+      if (table === "competitive_reports") {
+        await must(db.from("report_schedules").update({ pending_competitive_report_id: null }).eq("pending_competitive_report_id", id));
+      }
+      // A run the workflow completed after all is kept.
+      await must(db.from(table).delete().eq("id", id).not("status", "in", "(complete,completed)"));
     },
-    async failSet(setId) {
-      await must(db.from("competitor_sets").update({ status: "failed" }).eq("id", setId).eq("status", "analyzing"));
+    async releaseSet(setId) {
+      // Only while no other run on the set is going.
+      const running = (await must(db.from("competitive_reports").select("id").eq("set_id", setId).in("status", ["running", "pending"]).limit(1))) as Array<{ id: string }> | null;
+      if (running?.length) return;
+      const done = (await must(db.from("competitive_reports").select("id").eq("set_id", setId).eq("status", "complete").limit(1))) as Array<{ id: string }> | null;
+      await must(db.from("competitor_sets").update({ status: done?.length ? "complete" : "confirmed" }).eq("id", setId).in("status", ["analyzing", "failed"]));
     },
-    async advance(schedule, now, result) {
+    async advance(schedule, nextRunAt, result) {
       await must(db.from("report_schedules").update({
-        last_run_at: now.toISOString(),
-        next_run_at: followingRun(schedule, now),
+        last_run_at: new Date().toISOString(),
+        next_run_at: nextRunAt,
         last_result: result.slice(0, 500),
         dispatch_claimed_at: null,
         pending_competitive_report_id: null,
       }).eq("id", schedule.id));
     },
+    async close(schedule, nextRunAt) {
+      await must(db.from("report_schedules").update({
+        next_run_at: nextRunAt,
+        last_result: null,
+        dispatch_claimed_at: null,
+        pending_competitive_report_id: null,
+      }).eq("id", schedule.id));
+    },
     async note(scheduleId, result) {
-      await must(db.from("report_schedules").update({ last_result: result.slice(0, 500) }).eq("id", scheduleId));
+      await must(db.from("report_schedules").update({ last_result: result ? result.slice(0, 500) : null }).eq("id", scheduleId));
     },
   };
 }

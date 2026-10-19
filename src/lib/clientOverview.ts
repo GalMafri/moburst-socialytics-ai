@@ -122,9 +122,8 @@ export function actionItems(args: {
     const n = content.withoutDesign.length;
     items.push({ key: "design", tone: "attention", href: week, text: `${n} post${n === 1 ? "" : "s"} this week ${n === 1 ? "has" : "have"} no design chosen yet.` });
   }
-  if (isStaff && args.lastRun?.status === "failed") {
-    items.push({ key: "report-failed", tone: "attention", href: `/clients/${clientId}/reports`, text: "The last monthly report did not finish. Run it again." });
-  }
+  // A scheduled report that does not finish runs again on its own
+  // (run-scheduled-jobs/dispatch.ts), so a run that stopped is never an item.
   if (isStaff && !args.hasReport && args.lastRun?.status !== "running") {
     items.push({ key: "no-report", tone: "info", href: `/clients/${clientId}/analyze`, text: "No monthly report yet. Run the first one." });
   }

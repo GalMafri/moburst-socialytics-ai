@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { serverActAsUser, SERVER_SECRET_HEADER, SERVER_USER_HEADER } from "../../../supabase/functions/_shared/auth/authz";
+import { serverActAsUser, serverActor, SERVER_SECRET_HEADER, SERVER_USER_HEADER } from "../../../supabase/functions/_shared/auth/authz";
 
 describe("server calls to staff-gated functions", () => {
   it("name the headers the api worker sends", () => {
@@ -12,5 +12,18 @@ describe("server calls to staff-gated functions", () => {
     expect(serverActAsUser("lital@moburst.com")).toBe("");
     expect(serverActAsUser(null)).toBe("");
     expect(serverActAsUser("")).toBe("");
+  });
+});
+
+describe("the system actor", () => {
+  it("is a server call with no user header, and only where the path allows it", () => {
+    expect(serverActor(null, true)).toEqual({ kind: "system" });
+    expect(serverActor("", true)).toEqual({ kind: "system" });
+    expect(serverActor(null, false)).toBeNull();
+  });
+  it("never stands in for a header that names someone, well formed or not", () => {
+    expect(serverActor("11111111-2222-4333-8444-555555555555", true)).toEqual({ kind: "user", userId: "11111111-2222-4333-8444-555555555555" });
+    expect(serverActor("lital@moburst.com", true)).toBeNull();
+    expect(serverActor("not-a-user", false)).toBeNull();
   });
 });

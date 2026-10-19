@@ -6,10 +6,10 @@
 // A request makes one design (Lital, 13 Oct: "one amazing option per design,
 // not 3", for every design type). The planner writes a few briefs, strongest
 // first; the first is made, and the others are kept so a design that does not
-// finish is replaced from the next brief. The person who asked sees a design,
-// never a failure. Only when the replacements run out with nothing finished
-// does the request go to Moburst staff; the person who asked still sees it
-// being prepared.
+// finish is replaced from the next brief. Nobody ever sees a failure. When the
+// replacements run out with nothing finished, the request closes quietly and a
+// new one is made later, until the post's own time
+// (_shared/design/requestRules.ts).
 
 export const OPTIONS_WANTED = 1;
 /** How many options a request may start in all, replacements included. */
@@ -193,7 +193,8 @@ export function parseBriefs(text: string, library: string[] = []): Brief[] {
 export type JobState = { status: "queued" | "running" | "done" | "failed" | "canceled"; step: string };
 
 export interface RequestProgress {
-  status: "preparing" | "ready" | "needs_staff";
+  /** closed: every option was tried and none finished; the request is made again later. */
+  status: "preparing" | "ready" | "closed";
   stage: "planning" | "designing" | "finishing" | "ready";
   options_ready: number;
   /** Start one more option (a replacement), from this brief. */
@@ -213,7 +214,7 @@ export function requestProgress(jobs: JobState[], wanted = OPTIONS_WANTED, brief
   if (active.length) return { status: "preparing", stage: stageOf(active), options_ready: ready, start_brief: null };
   return ready > 0
     ? { status: "ready", stage: "ready", options_ready: ready, start_brief: null }
-    : { status: "needs_staff", stage: "designing", options_ready: 0, start_brief: null };
+    : { status: "closed", stage: "designing", options_ready: 0, start_brief: null };
 }
 
 /** The steps of a design or video still being made, before the logo and words go on. */
