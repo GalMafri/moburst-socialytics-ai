@@ -674,6 +674,56 @@ export type Database = {
           },
         ]
       }
+      client_lifecycle_steps: {
+        Row: {
+          attempted_at: string | null
+          attempts: number
+          client_id: string
+          done_at: string | null
+          error: string | null
+          inputs_key: string | null
+          next_attempt_at: string | null
+          result: Json | null
+          status: string
+          step: string
+          updated_at: string
+        }
+        Insert: {
+          attempted_at?: string | null
+          attempts?: number
+          client_id: string
+          done_at?: string | null
+          error?: string | null
+          inputs_key?: string | null
+          next_attempt_at?: string | null
+          result?: Json | null
+          status: string
+          step: string
+          updated_at?: string
+        }
+        Update: {
+          attempted_at?: string | null
+          attempts?: number
+          client_id?: string
+          done_at?: string | null
+          error?: string | null
+          inputs_key?: string | null
+          next_attempt_at?: string | null
+          result?: Json | null
+          status?: string
+          step?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_lifecycle_steps_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_users: {
         Row: {
           client_id: string
@@ -2290,6 +2340,7 @@ export type Database = {
           lease_until: string | null
           max_attempts: number
           occurrence: string | null
+          payload: Json | null
           phase: string | null
           priority: number
           reason: string | null
@@ -2313,6 +2364,7 @@ export type Database = {
           lease_until?: string | null
           max_attempts?: number
           occurrence?: string | null
+          payload?: Json | null
           phase?: string | null
           priority?: number
           reason?: string | null
@@ -2336,6 +2388,7 @@ export type Database = {
           lease_until?: string | null
           max_attempts?: number
           occurrence?: string | null
+          payload?: Json | null
           phase?: string | null
           priority?: number
           reason?: string | null
@@ -2831,6 +2884,14 @@ export type Database = {
       is_company_restricted: { Args: never; Returns: boolean }
       is_demo_client: { Args: { _client_id: string }; Returns: boolean }
       is_moburst_staff: { Args: never; Returns: boolean }
+      lifecycle_enqueue: {
+        Args: { p_client: string; p_priority?: number }
+        Returns: undefined
+      }
+      lifecycle_request: {
+        Args: { p_client: string; p_step: string }
+        Returns: undefined
+      }
       purge_raw_events: {
         Args: { p_keep_months?: number }
         Returns: {
@@ -2862,6 +2923,7 @@ export type Database = {
           lease_until: string | null
           max_attempts: number
           occurrence: string | null
+          payload: Json | null
           phase: string | null
           priority: number
           reason: string | null
