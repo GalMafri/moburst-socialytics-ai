@@ -2,6 +2,9 @@
 -- 19 Oct). Nothing here waits for a person, and nothing tells anyone that a
 -- run did not finish: a run that stops is made again by the product.
 -- Safe to apply twice.
+-- Applied live on 19 Oct 2026 in two steps: everything but the last status
+-- tightening and the cron first (with 'needs_staff' still allowed), the
+-- functions deployed, then the tightening and the cron.
 
 -- ── Scheduled reports ───────────────────────────────────────────────────────
 -- A dispatch whose request the workflow accepted is 'sent': it watches its
