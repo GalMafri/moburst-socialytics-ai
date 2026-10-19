@@ -236,35 +236,131 @@ export type Database = {
           client_id: string
           confidence: number | null
           created_at: string | null
+          evidence: string | null
           id: string
+          last_confirmed_at: string
           pattern_description: string
           pattern_type: string
+          replaced_by: string | null
+          source: string
           source_iterations: number | null
+          status: string
+          times_confirmed: number
           updated_at: string | null
         }
         Insert: {
           client_id: string
           confidence?: number | null
           created_at?: string | null
+          evidence?: string | null
           id?: string
+          last_confirmed_at?: string
           pattern_description: string
           pattern_type: string
+          replaced_by?: string | null
+          source?: string
           source_iterations?: number | null
+          status?: string
+          times_confirmed?: number
           updated_at?: string | null
         }
         Update: {
           client_id?: string
           confidence?: number | null
           created_at?: string | null
+          evidence?: string | null
           id?: string
+          last_confirmed_at?: string
           pattern_description?: string
           pattern_type?: string
+          replaced_by?: string | null
+          source?: string
           source_iterations?: number | null
+          status?: string
+          times_confirmed?: number
           updated_at?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "brand_voice_learnings_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brand_voice_learnings_replaced_by_fkey"
+            columns: ["replaced_by"]
+            isOneToOne: false
+            referencedRelation: "brand_voice_learnings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      calendar_plans: {
+        Row: {
+          claimed_at: string | null
+          client_id: string
+          created_at: string
+          error: string | null
+          evidence: Json | null
+          id: string
+          input_tokens: number | null
+          model: string | null
+          output_tokens: number | null
+          pending_revision: Json | null
+          ready_at: string | null
+          requested_by: string | null
+          revisions: Json
+          rhythm: Json | null
+          status: string
+          trigger: string
+          updated_at: string
+          week_start: string
+        }
+        Insert: {
+          claimed_at?: string | null
+          client_id: string
+          created_at?: string
+          error?: string | null
+          evidence?: Json | null
+          id?: string
+          input_tokens?: number | null
+          model?: string | null
+          output_tokens?: number | null
+          pending_revision?: Json | null
+          ready_at?: string | null
+          requested_by?: string | null
+          revisions?: Json
+          rhythm?: Json | null
+          status?: string
+          trigger: string
+          updated_at?: string
+          week_start: string
+        }
+        Update: {
+          claimed_at?: string | null
+          client_id?: string
+          created_at?: string
+          error?: string | null
+          evidence?: Json | null
+          id?: string
+          input_tokens?: number | null
+          model?: string | null
+          output_tokens?: number | null
+          pending_revision?: Json | null
+          ready_at?: string | null
+          requested_by?: string | null
+          revisions?: Json
+          rhythm?: Json | null
+          status?: string
+          trigger?: string
+          updated_at?: string
+          week_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calendar_plans_client_id_fkey"
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
@@ -284,6 +380,7 @@ export type Database = {
           id: string
           language: string | null
           pillar: string | null
+          plan_id: string | null
           platform: string
           post_date: string
           post_key: string
@@ -308,6 +405,7 @@ export type Database = {
           id?: string
           language?: string | null
           pillar?: string | null
+          plan_id?: string | null
           platform: string
           post_date: string
           post_key: string
@@ -332,6 +430,7 @@ export type Database = {
           id?: string
           language?: string | null
           pillar?: string | null
+          plan_id?: string | null
           platform?: string
           post_date?: string
           post_key?: string
@@ -354,6 +453,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "calendar_posts_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "calendar_plans"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "calendar_posts_report_id_fkey"
             columns: ["report_id"]
             isOneToOne: false
@@ -361,6 +467,90 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      calendar_posts_archive: {
+        Row: {
+          archive_reason: string | null
+          archived_at: string
+          client_id: string
+          copy: string
+          created_at: string
+          created_by: string | null
+          cta: string | null
+          format: string | null
+          hashtags: string[]
+          id: string
+          language: string | null
+          pillar: string | null
+          plan_id: string | null
+          platform: string
+          post_date: string
+          post_key: string
+          posting_time: string | null
+          rationale: string | null
+          raw: Json | null
+          reasons: Json
+          report_id: string | null
+          source: string
+          touched_at: string | null
+          updated_at: string
+          visual_direction: string | null
+        }
+        Insert: {
+          archive_reason?: string | null
+          archived_at?: string
+          client_id: string
+          copy: string
+          created_at: string
+          created_by?: string | null
+          cta?: string | null
+          format?: string | null
+          hashtags: string[]
+          id: string
+          language?: string | null
+          pillar?: string | null
+          plan_id?: string | null
+          platform: string
+          post_date: string
+          post_key: string
+          posting_time?: string | null
+          rationale?: string | null
+          raw?: Json | null
+          reasons: Json
+          report_id?: string | null
+          source: string
+          touched_at?: string | null
+          updated_at: string
+          visual_direction?: string | null
+        }
+        Update: {
+          archive_reason?: string | null
+          archived_at?: string
+          client_id?: string
+          copy?: string
+          created_at?: string
+          created_by?: string | null
+          cta?: string | null
+          format?: string | null
+          hashtags?: string[]
+          id?: string
+          language?: string | null
+          pillar?: string | null
+          plan_id?: string | null
+          platform?: string
+          post_date?: string
+          post_key?: string
+          posting_time?: string | null
+          rationale?: string | null
+          raw?: Json | null
+          reasons?: Json
+          report_id?: string | null
+          source?: string
+          touched_at?: string | null
+          updated_at?: string
+          visual_direction?: string | null
+        }
+        Relationships: []
       }
       calendar_weeks: {
         Row: {
@@ -588,8 +778,10 @@ export type Database = {
           name: string
           pillars_derived_at: string | null
           pillars_source: string | null
+          posting_rhythm: Json | null
           primary_platforms: string[] | null
           social_keywords: string[] | null
+          social_voice: Json | null
           sprout_customer_id: string | null
           strategy_doc_file_path: string | null
           timezone: string | null
@@ -628,8 +820,10 @@ export type Database = {
           name: string
           pillars_derived_at?: string | null
           pillars_source?: string | null
+          posting_rhythm?: Json | null
           primary_platforms?: string[] | null
           social_keywords?: string[] | null
+          social_voice?: Json | null
           sprout_customer_id?: string | null
           strategy_doc_file_path?: string | null
           timezone?: string | null
@@ -668,8 +862,10 @@ export type Database = {
           name?: string
           pillars_derived_at?: string | null
           pillars_source?: string | null
+          posting_rhythm?: Json | null
           primary_platforms?: string[] | null
           social_keywords?: string[] | null
+          social_voice?: Json | null
           sprout_customer_id?: string | null
           strategy_doc_file_path?: string | null
           timezone?: string | null
@@ -2481,6 +2677,7 @@ export type Database = {
         Args: { p_client: string; p_report: string; p_week: string }
         Returns: boolean
       }
+      calendar_client_ready: { Args: { p_client: string }; Returns: boolean }
       calendar_post_worked: {
         Args: {
           p_client: string
@@ -2490,6 +2687,74 @@ export type Database = {
           p_touched: string
         }
         Returns: boolean
+      }
+      calendar_request_revision: {
+        Args: {
+          p_note: string
+          p_plan: string
+          p_scope?: string
+          p_user?: string
+        }
+        Returns: {
+          claimed_at: string | null
+          client_id: string
+          created_at: string
+          error: string | null
+          evidence: Json | null
+          id: string
+          input_tokens: number | null
+          model: string | null
+          output_tokens: number | null
+          pending_revision: Json | null
+          ready_at: string | null
+          requested_by: string | null
+          revisions: Json
+          rhythm: Json | null
+          status: string
+          trigger: string
+          updated_at: string
+          week_start: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "calendar_plans"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      calendar_request_week: {
+        Args: {
+          p_client: string
+          p_trigger: string
+          p_user?: string
+          p_week: string
+        }
+        Returns: {
+          claimed_at: string | null
+          client_id: string
+          created_at: string
+          error: string | null
+          evidence: Json | null
+          id: string
+          input_tokens: number | null
+          model: string | null
+          output_tokens: number | null
+          pending_revision: Json | null
+          ready_at: string | null
+          requested_by: string | null
+          revisions: Json
+          rhythm: Json | null
+          status: string
+          trigger: string
+          updated_at: string
+          week_start: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "calendar_plans"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       can_access_client: { Args: { _client_id: string }; Returns: boolean }
       can_manage_roster: { Args: never; Returns: boolean }
