@@ -73,12 +73,13 @@ Deno.serve(async (req) => {
 
     if (error) throw error;
 
+    // No row: a scheduled run that stopped answering was taken away and its
+    // occurrence started again (run-scheduled-jobs/dispatch.ts). A late
+    // writeback from it is answered as done, so the workflow does not stop
+    // with an error over a run nobody is waiting for.
     if (!data || data.length === 0) {
-      if (status === "failed") return new Response(JSON.stringify({ ok: true, skipped: "No unfinished report to fail" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      return new Response(
-        JSON.stringify({ error: "Report not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const skipped = status === "failed" ? "No unfinished report to fail" : "This run was replaced by a newer one";
+      return new Response(JSON.stringify({ ok: true, skipped }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify(data[0]), {

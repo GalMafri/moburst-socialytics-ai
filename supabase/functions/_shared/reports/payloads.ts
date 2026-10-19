@@ -207,8 +207,10 @@ export async function buildSocialPayload(args: {
     brand_voice: voice,
     brand_notes: notes,
     brand_book_text: client.brand_book_text || "",
+    // The brief as text the app holds. The linked Drive file is never sent:
+    // the workflow could not always open it (a sharing setting, a scanned PDF),
+    // and a file it cannot open must never stop or weaken a report.
     brief_text: client.brief_text || "",
-    brief_file_id: client.brief_file_id || "",
     design_style_synthesis: client.design_style_synthesis || null,
     design_references: client.design_references || [],
     brand_book_file_path: client.brand_book_file_path || null,

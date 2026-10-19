@@ -1,6 +1,8 @@
 // supabase/functions/canva-finish/index.ts
 //
-// Finishes a generated design in Canva: the drawn logo is replaced by the
+// Retired as a design path on 13 Oct (design-worker makes every design); only
+// the Canva account link and job reads still answer. It used to finish a
+// generated design in Canva: the drawn logo is replaced by the
 // client's logo file and the copy is set exactly, as layer edits rather than
 // pixel work (rules in _shared/canva/finish.ts).
 //
@@ -11,10 +13,9 @@
 //   GET  ?code=&state=                 the redirect back from Canva after connect
 //   POST {action:"connect"}            admin: the URL to link the team's Canva account
 //   POST {action:"connection"}         staff: whether Canva is linked
-//   POST {action:"prepare_upload", client_id, files:[name]}   staff: signed upload URLs for inputs
-//   POST {action:"enqueue", client_id, design_path, logo_path, copy:[..], placement:{..}}   staff: queue a design
 //   POST {action:"job", job_id}        staff: a job's state and finished file
-//   POST {action:"tick"}               one worker pass, which starts the next (operational secret only)
+//   prepare_upload, enqueue, tick and advance are retired (410): designs are
+//   made by design-worker without Canva since 13 Oct.
 //
 // Each design is a row in canva_finish_jobs that moves through these steps,
 // one or more per tick. Canva's jobs are started on one tick and checked on
@@ -53,6 +54,8 @@ const MAX_GENERATIONS = 3;
 const MAX_CLEANS = 2;
 const MAX_LAYER_TRIES = 4;
 const DEFAULT_PAGE = { width: 1088, height: 1360 };
+/** The Canva finishing worker and its inputs, retired on 13 Oct. */
+const RETIRED_ACTIONS = new Set(["advance", "tick", "prepare_upload", "enqueue"]);
 
 const db = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const redirectUri = () => `${Deno.env.get("SUPABASE_URL")}/functions/v1/canva-finish`;
@@ -67,6 +70,11 @@ Deno.serve(async (req) => {
     }
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const action = body?.action || "connection";
+
+    // Designs are made by design-worker without Canva since 13 Oct. The old
+    // worker's actions answer without touching a job, so no design job can be
+    // leased into the Canva steps again (41 jobs failed there on 13 Oct).
+    if (RETIRED_ACTIONS.has(action)) return json({ retired: true, by: "design-worker" }, 410);
 
     // One design job, handed out by a pass: advanced in this request, with its
     // own CPU time and Canva session.

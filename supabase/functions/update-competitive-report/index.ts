@@ -47,7 +47,9 @@ Deno.serve(async (req) => {
     const { data: attempt, error: attemptError } = await supabase.from("competitive_reports")
       .select("id,client_id,created_at,status").eq("id", body.report_id).maybeSingle();
     if (attemptError) throw new Error("Could not verify report attempt");
-    if (!attempt) return jsonResp({ error: "report not found" }, 404);
+    // A scheduled run that stopped answering is taken away and started again
+    // (run-scheduled-jobs/dispatch.ts); its late writes are superseded too.
+    if (!attempt) return jsonResp({ ok: true, skipped: "superseded report attempt" });
     if (Date.parse(attempt.created_at) !== Date.parse(body.attempt_started_at)) {
       return jsonResp({ ok: true, skipped: "superseded report attempt" });
     }

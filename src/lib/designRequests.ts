@@ -1,10 +1,12 @@
-// Design options for calendar posts: the request rows the design-request and
-// canva-finish functions keep up to date, and the words every screen uses for
-// them.
+// Design options for calendar posts: the request rows the design-request
+// function and the design and video workers keep up to date, and the words
+// every screen uses for them.
 //
 // Wording rule (Lital, 12 Oct 2026): nothing a client sees says AI, prompt,
-// model, score, pipeline or gate, and a client never sees a failure. A request
-// that needs Moburst's attention reads to a client as still being prepared.
+// model, score, pipeline or gate. Since 19 Oct nobody, client or staff, sees a
+// failure: a request that ends without a design closes quietly and the post's
+// design is made again later, so a screen shows a design when it exists, a
+// request being prepared while it is, and otherwise nothing.
 
 import { supabase } from "@/integrations/supabase/client";
 import { describeInvokeError } from "@/lib/invokeError";
@@ -20,7 +22,8 @@ export interface DesignRequest {
   calendar_post_key: string;
   platform: string | null;
   post_copy: string;
-  status: "preparing" | "ready" | "needs_staff" | "canceled" | "needs_filming";
+  /** closed: ended without a design (made again later) or a filming request that ended. Shown as nothing. */
+  status: "preparing" | "ready" | "canceled" | "needs_filming" | "closed";
   /** For a video that is filmed rather than made here: who appears on camera. */
   on_camera?: string | null;
   /** A filmed clip uploaded for the post, which the video is made from. */
@@ -92,9 +95,9 @@ export function typicalMinutes(r: Pick<DesignRequest, "kind" | "footage_path">, 
   return kind === "carousel" ? TYPICAL_MINUTES_CAROUSEL : kind === "video" ? (filmed ? TYPICAL_MINUTES_FILMED : TYPICAL_MINUTES_VIDEO) : TYPICAL_MINUTES;
 }
 
-export function isPreparing(r: DesignRequest | null | undefined, isStaff: boolean): boolean {
-  if (!r) return false;
-  return r.status === "preparing" || (r.status === "needs_staff" && !isStaff);
+/** True only while the request is actually being prepared. */
+export function isPreparing(r: DesignRequest | null | undefined, _isStaff?: boolean): boolean {
+  return r?.status === "preparing";
 }
 
 export function stageIndex(r: DesignRequest): number {
@@ -110,10 +113,9 @@ export function progressPercent(r: DesignRequest): number {
   return Math.min(95, base + Math.round((r.options_ready / Math.max(1, r.options_wanted)) * 35));
 }
 
-export function stageLine(r: DesignRequest, isStaff: boolean): string {
+export function stageLine(r: DesignRequest, _isStaff?: boolean): string {
   const noun = r.kind === "carousel" ? "Carousel" : r.kind === "video" ? "Video" : "Design";
   if (r.status === "ready") return `${noun} ready`;
-  if (r.status === "needs_staff" && isStaff) return "Needs a look from the team";
   const steps = stepsFor(r);
   return steps[Math.min(stageIndex(r), steps.length - 1)].label;
 }

@@ -147,8 +147,11 @@ export function PostPanel({
         return;
       }
       designRequests?.refresh();
-    } catch (e) {
-      toast.error("Could not start the designs", { description: e instanceof Error ? e.message : "Try again." });
+    } catch {
+      // Nothing is shown: the panel shows a design being prepared once one is,
+      // and the automatic designs (on for every client by default) make the
+      // design of a post that still has none.
+      designRequests?.refresh();
     } finally {
       setStartingDesigns(false);
     }

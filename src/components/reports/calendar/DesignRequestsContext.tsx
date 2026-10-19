@@ -49,8 +49,8 @@ export function DesignRequestsProvider({ clientId, onOpenPost, children }: { cli
       if (error) throw error;
       return (data || []) as DesignRequest[];
     },
-    // Asked again only while something is being prepared or waits on the team.
-    refetchInterval: (query) => ((query.state.data as DesignRequest[] | undefined)?.some((r) => r.status === "preparing" || r.status === "needs_staff") ? POLL_MS : false),
+    // Asked again only while something is being prepared.
+    refetchInterval: (query) => ((query.state.data as DesignRequest[] | undefined)?.some((r) => r.status === "preparing") ? POLL_MS : false),
   });
 
   // A finished option is a new post_iterations row: refresh the post's designs

@@ -12,7 +12,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { stepsFor, cancelDesign, elapsedLabel, progressPercent, stageIndex, typicalMinutes, type DesignRequest } from "@/lib/designRequests";
 import { useDesignRequests } from "./DesignRequestsContext";
 
-export function DesignProgressCard({ request, isStaff, replacing = false }: { request: DesignRequest; isStaff: boolean; replacing?: boolean }) {
+export function DesignProgressCard({ request, replacing = false }: { request: DesignRequest; isStaff: boolean; replacing?: boolean }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -24,15 +24,14 @@ export function DesignProgressCard({ request, isStaff, replacing = false }: { re
   const stop = async () => {
     try {
       await cancelDesign(request.id);
-      ctx?.refresh();
       toast.success(`The ${request.kind === "carousel" ? "carousel" : request.kind === "video" ? "video" : "design"} was stopped`);
-    } catch (e) {
-      toast.error("Could not stop it", { description: e instanceof Error ? e.message : "Try again." });
+    } catch {
+      // The card stays while it is still being prepared, so Cancel can simply be pressed again.
     }
+    ctx?.refresh();
   };
   const current = stageIndex(request);
   const pct = progressPercent(request);
-  const staffAttention = isStaff && request.status === "needs_staff";
   const noun = request.kind === "carousel" ? "carousel" : request.kind === "video" ? "video" : "design";
   const usual = typicalMinutes(request, history);
   const since = request.started_at ?? request.created_at;
@@ -43,12 +42,10 @@ export function DesignProgressCard({ request, isStaff, replacing = false }: { re
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-white tracking-[-0.2px]">
-            {staffAttention ? `This ${noun} needs a look` : replacing ? `Making a new ${noun}` : `Preparing your ${noun}`}
+            {replacing ? `Making a new ${noun}` : `Preparing your ${noun}`}
           </p>
           <p className="t-secondary mt-0.5">
-            {staffAttention
-              ? request.error || "It did not finish. The client still sees it as being prepared."
-              : `${over ? "Taking a little longer than usual" : `Usually about ${usual} minutes`}. ${replacing ? `The current ${noun} stays until the new one is ready. ` : ""}You can close this panel; it keeps going.`}
+            {`${over ? "Taking a little longer than usual" : `Usually about ${usual} minutes`}. ${replacing ? `The current ${noun} stays until the new one is ready. ` : ""}You can close this panel; it keeps going.`}
           </p>
         </div>
         <div className="shrink-0 flex items-center gap-1">
@@ -70,7 +67,7 @@ export function DesignProgressCard({ request, isStaff, replacing = false }: { re
       <ol className="grid grid-cols-3 gap-2" aria-label="Steps">
         {stepsFor(request).map((step, i) => {
           const done = i < current;
-          const active = i === current && !staffAttention;
+          const active = i === current;
           return (
             <li key={step.stage} className="space-y-1.5">
               <div className={`h-1.5 rounded-full ${done ? "bg-[#b9e045]" : active ? "bg-[rgba(185,224,69,0.45)] animate-pulse" : "bg-[rgba(255,255,255,0.08)]"}`} />

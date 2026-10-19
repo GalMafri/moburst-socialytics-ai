@@ -13,7 +13,7 @@ export interface ScheduledJob {
   priority: number;
   stagger_seconds: number;
   status: JobStatus;
-  phase: "prepared" | "posting" | null;
+  phase: "prepared" | "posting" | "sent" | null;
   report_id: string | null;
   attempts: number;
   max_attempts: number;

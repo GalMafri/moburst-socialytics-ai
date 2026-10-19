@@ -36,6 +36,20 @@ export function nextRun(now: Date, runDay: number | null | undefined, frequency:
 }
 
 /**
+ * The first run after a moment: a monthly schedule's run day at 07:15 UTC,
+ * this month when that is still ahead, else next month; a weekly or biweekly
+ * one a week or two later. Used when a schedule starts again (a client
+ * unarchived), so a run day still ahead this month is not skipped. Mirrored
+ * by public.report_schedule_first_run (migration 20261019200000).
+ */
+export function firstRunFrom(from: Date, runDay: number | null | undefined, frequency: string | null | undefined): string {
+  if (frequency === "weekly" || frequency === "biweekly") return nextRun(from, runDay, frequency);
+  const day = Math.min(Math.max(runDay || 7, 1), 28);
+  const thisMonth = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), day, 7, 15, 0);
+  return thisMonth > from.getTime() ? new Date(thisMonth).toISOString() : nextRun(from, runDay, frequency);
+}
+
+/**
  * Close out runs that died without saying so.
  *
  * A workflow that fails at an HTTP node never reaches its writeback, so the
@@ -45,8 +59,9 @@ export function nextRun(now: Date, runDay: number | null | undefined, frequency:
  * carry the report id, so the only reliable place to notice is here, from
  * the clock. The worker runs this every minute.
  *
- * They become ordinary failures with a reason, which is what the Retry
- * control is for.
+ * A scheduled run is left to its own dispatch job, which watches the same
+ * clock, takes the run away and starts the occurrence again
+ * (run-scheduled-jobs/dispatch.ts). Every other run is closed here.
  */
 export async function closeAbandonedRuns(supabase: SupabaseClient, now: Date, dryRun: boolean) {
   const cutoff = new Date(now.getTime() - STUCK_AFTER_MINUTES * 60000).toISOString();
@@ -58,18 +73,21 @@ export async function closeAbandonedRuns(supabase: SupabaseClient, now: Date, dr
         .select(table === "competitive_reports" ? "id, set_id" : "id")
         .eq("status", "running")
         .lt("created_at", cutoff);
-      for (const row of (stale || []) as unknown as Array<{ id: string; set_id?: string | null }>) {
+      const rows = (stale || []) as unknown as Array<{ id: string; set_id?: string | null }>;
+      const { data: owned } = rows.length
+        ? await supabase.from("scheduled_jobs").select("report_id").eq("kind", "dispatch")
+          .in("status", ["queued", "running", "waiting"]).in("report_id", rows.map((r) => r.id))
+        : { data: [] };
+      const scheduled = new Set(((owned || []) as Array<{ report_id: string }>).map((r) => r.report_id));
+      for (const row of rows) {
+        if (scheduled.has(row.id)) continue;
         out.push({ table, id: row.id });
         if (dryRun) continue;
         await supabase
           .from(table)
           .update({
             status: "failed",
-            report_data: {
-              error:
-                "The workflow stopped without reporting back, so this run was closed automatically. " +
-                "Run it again, and if it stops again check the n8n execution for that client.",
-            },
+            report_data: { error: "The run stopped before it finished, so it was closed." },
           })
           .eq("id", row.id)
           .eq("status", "running");

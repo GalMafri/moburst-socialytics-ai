@@ -346,7 +346,10 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       await endScript(s.compose_session);
       const made = r.state === "finished" ? parseComposed(r.reply) : null;
       if (!made) {
-        console.error(`[video-worker] job ${job.id} compose:`, r.state === "failed" ? r.reason : r.reply.slice(0, 300));
+        const why = r.state === "failed" ? r.reason : r.reply.slice(0, 300);
+        console.error(`[video-worker] job ${job.id} compose:`, why);
+        // Kept with the job: a join that never came back left no reason on 14 Oct.
+        s.compose_errors = [...(Array.isArray(s.compose_errors) ? s.compose_errors : []), String(why ?? "").slice(0, 300)].slice(-3);
         job.step = "compose"; return "next";
       }
       if (input.footage_upload) {
@@ -496,14 +499,15 @@ async function runStyleStep(admin: any, job: VideoJob): Promise<VideoStepResult>
       await admin.from("clients").update({ video_style: { profile: style, frames: s.frames, videos: videos.length, frames_per_video: STYLE_FRAMES, made_at: new Date().toISOString() } }).eq("id", job.client_id);
       s.style = style;
       // Video posts that waited for the style are planned now.
-      const { data: waiting } = await admin.from("design_requests").select("id, briefs, requested_by")
+      const { data: waiting } = await admin.from("design_requests").select("id, briefs")
         .eq("client_id", job.client_id).eq("kind", "video").eq("status", "preparing").eq("stage", "planning");
       for (const w of waiting ?? []) {
         if (Array.isArray(w.briefs) && w.briefs.length) continue;
         await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/design-request`, {
           method: "POST",
-          // A server call names the person it acts for: the one who asked for the video.
-          headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "", "X-Socialytics-User": String(w.requested_by ?? "") },
+          // The system's own call: automatic work never acts as a person (an
+          // automatic request has no one who asked, and naming nobody was refused).
+          headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "" },
           body: JSON.stringify({ action: "replan", request_id: w.id }),
           signal: AbortSignal.timeout(15_000),
         }).then(async (r) => {
