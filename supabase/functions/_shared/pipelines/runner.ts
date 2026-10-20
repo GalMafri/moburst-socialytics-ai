@@ -51,7 +51,7 @@ export interface RunStore {
 }
 
 export interface StepLog {
-  start(row: { run_id: string; job_id: string; step: string; attempt: number; started_at: string }): Promise<string | number | null>;
+  start(row: { run_id: string; job_id: string | null; step: string; attempt: number; started_at: string }): Promise<string | number | null>;
   end(id: string | number, row: { finished_at: string; outcome: StepOutcome; detail: Record<string, unknown> | null }): Promise<void>;
 }
 

@@ -1,8 +1,10 @@
 // The secrets the in-app report pipelines read, by the exact name each one is
-// read under (Deno.env.get). None is needed for the groundwork: the
-// placeholder pipelines read none. A pipeline lists what it reads in its
+// read under (Deno.env.get). A pipeline lists what it reads in its
 // definition, and a pipeline whose secrets are not all set is never chosen
 // (engine.ts), so a missing key keeps that kind on n8n instead of failing.
+// A secret a pipeline lists as awaited (APIFY_API_TOKEN, until the owner adds
+// it) does not keep a shadow from being chosen: its step waits for it quietly
+// and says so in the step log. App mode needs every one of them set.
 //
 // Owner's decisions, 20 Oct 2026: the in-app pipelines call Claude through
 // _shared/anthropic.ts (no OpenAI); the social report keeps its Gamma deck,

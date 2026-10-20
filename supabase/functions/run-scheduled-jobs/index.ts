@@ -16,6 +16,17 @@
 // In-app report pipelines (_shared/pipelines): each tick also runs due
 // report_pipeline steps in a lane of their own (worker.ts), and the daily
 // sweep removes expired pipeline payloads and old pipeline runs.
+//
+// POST {"mode":"replay_competitive","report_id":"<id>"[,"reuse_analysis":true]}
+//                              starts a shadow run of the in-app competitive
+//                              pipeline for a past report, from its saved
+//                              RivalIQ answers only (no RivalIQ, Apify or
+//                              Sprout call; with reuse_analysis no Claude
+//                              call either). Its steps run on the next ticks.
+// POST {"mode":"compare_pipeline","run_id":"<id>"}
+//                              a finished shadow run next to the real result
+//                              it shadows (compareResults), as JSON and as
+//                              plain lines.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
@@ -32,7 +43,10 @@ import { readEngine } from "../_shared/pipelines/engine.ts";
 import { REGISTRY } from "../_shared/pipelines/registry.ts";
 import { runPipelineJob, type RunnerDeps } from "../_shared/pipelines/runner.ts";
 import { startReportPipeline } from "../_shared/pipelines/shadow.ts";
-import { appRunView, expirePayloads, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
+import { compareCompetitiveRun, startCompetitiveReplay } from "../_shared/pipelines/competitive/harness.ts";
+import { COMPETITIVE_PIPELINE } from "../_shared/pipelines/definitions/competitive.ts";
+import { compareResults, formatComparison } from "../_shared/pipelines/compare.ts";
+import { appRunView, expirePayloads, loadShadowPair, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
 import type { ScheduledJob } from "./types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
@@ -183,6 +197,34 @@ Deno.serve(async (req) => {
         unscheduled: summary.unscheduled.map((g) => ({ client: g.client_name ?? g.client_id, job: `${g.report_kind} dispatch`, reason: `due ${g.next_run_at} and never queued` })),
         notes,
       });
+    }
+
+    if (mode === "replay_competitive") {
+      const reportId = typeof body.report_id === "string" ? body.report_id : "";
+      if (!reportId) return json({ error: "report_id is required" }, 400);
+      const pipeline = REGISTRY.get(COMPETITIVE_PIPELINE);
+      if (!pipeline) return json({ error: `${COMPETITIVE_PIPELINE} is not in this deployment` }, 500);
+      try {
+        return json(await startCompetitiveReplay(db, pipeline, reportId, { reuseAnalysis: body.reuse_analysis === true }));
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : String(e) }, 422);
+      }
+    }
+
+    if (mode === "compare_pipeline") {
+      const runId = typeof body.run_id === "string" ? body.run_id : "";
+      if (!runId) return json({ error: "run_id is required" }, 400);
+      try {
+        const { data: run } = await db.from("report_pipeline_runs").select("kind").eq("id", runId).maybeSingle();
+        if (!run) return json({ error: "No pipeline run has that id." }, 404);
+        if (run.kind === "competitive") return json(await compareCompetitiveRun(db, runId));
+        const pair = await loadShadowPair(db, runId);
+        if (!pair) return json({ error: "No pipeline run has that id." }, 404);
+        const comparison = compareResults(pair.real, pair.shadow, { keyBy: { socialPosts: "postId" } });
+        return json({ run_id: runId, comparison, text: formatComparison(comparison) });
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : String(e) }, 422);
+      }
     }
 
     if (mode === "dry_run") {

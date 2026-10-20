@@ -2,6 +2,8 @@
 // a run whose pipeline is not here (a rollback, say) stops quietly, and for a
 // report the dispatch then makes it again on n8n.
 
+import { competitivePipeline } from "./definitions/competitive.ts";
+import { linkedInSourcePipeline } from "./definitions/linkedinSource.ts";
 import { PLACEHOLDER_PIPELINES } from "./definitions/placeholder.ts";
 import { missingSecrets } from "./secrets.ts";
 import { REAL_WRITERS } from "./store.ts";
@@ -35,7 +37,9 @@ export function makeRegistry(defs: readonly PipelineDefinition[], canWriteReal: 
   return {
     get: (name) => byName.get(name),
     forKind(kind, mode, env) {
-      const usable = defs.filter((d) => d.kind === kind && d.modes.includes(mode) && missingSecrets(d.secrets, env).length === 0);
+      // A shadow may wait for an awaited secret; a real report never does.
+      const needs = (d: PipelineDefinition) => mode === "app" ? [...d.secrets, ...(d.awaitedSecrets ?? [])] : d.secrets;
+      const usable = defs.filter((d) => d.kind === kind && d.modes.includes(mode) && missingSecrets(needs(d), env).length === 0);
       const real = usable.find((d) => d.appCapable);
       if (mode === "app") return real && canWriteReal(kind) ? real : undefined;
       return real ?? usable[0];
@@ -44,5 +48,10 @@ export function makeRegistry(defs: readonly PipelineDefinition[], canWriteReal: 
   };
 }
 
-/** What this deployment registers: the placeholders, until the real pipelines are built. */
-export const REGISTRY: Registry = makeRegistry([...PLACEHOLDER_PIPELINES], (kind) => Boolean(REAL_WRITERS[kind]?.report));
+/**
+ * What this deployment registers: the in-app LinkedIn source and competitive
+ * pipelines (app-capable: each has its real writer, and the switch still
+ * refuses app for a kind until one of them has finished a shadow run), and
+ * a placeholder per kind (social has only its placeholder until it is built).
+ */
+export const REGISTRY: Registry = makeRegistry([linkedInSourcePipeline(), competitivePipeline(), ...PLACEHOLDER_PIPELINES], (kind) => Boolean(REAL_WRITERS[kind]?.report));
