@@ -36,8 +36,13 @@ declare
 begin
   select pg_get_constraintdef(oid) into v_def from pg_constraint
    where conrelid = 'public.scheduled_jobs'::regclass and conname = 'scheduled_jobs_kind_check';
-  select array_agg(distinct m[1] order by m[1]) into v_kinds
-    from regexp_matches(coalesce(v_def, ''), '''([a-z_]+)''', 'g') as m;
+  -- The kinds the live constraint allows, in either way Postgres prints them:
+  -- ARRAY['a'::text, ...] or '{a,b}'::text[] (the form an earlier format(%L) wrote).
+  select array_agg(distinct k order by k) into v_kinds from (
+    select m[1] as k from regexp_matches(coalesce(v_def, ''), '''([a-z_]+)''', 'g') as m
+    union
+    select btrim(e) from unnest(string_to_array(substring(coalesce(v_def, '') from '\{([a-z_,]*)\}'), ',')) as e
+  ) kinds where k ~ '^[a-z_]+$';
   v_kinds := array(select distinct k from unnest(coalesce(v_kinds, '{}'::text[])
     || array['feed_refresh', 'dispatch', 'week_plan', 'week_revise', 'voice_profile', 'lifecycle', 'lifecycle_step', 'report_text']) as k order by k);
   alter table public.scheduled_jobs drop constraint if exists scheduled_jobs_kind_check;
