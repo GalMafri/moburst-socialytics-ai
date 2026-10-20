@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Loading } from "@/components/ui/loading";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -203,7 +203,7 @@ export default function Usage() {
   if (users.error) {
     return (
       <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature.">
-        <LoadError title="Usage did not load" onRetry={() => void users.refetch()} />
+        <LoadRetry context="Usage did not load" onRetry={() => void users.refetch()} />
       </AppLayout>
     );
   }

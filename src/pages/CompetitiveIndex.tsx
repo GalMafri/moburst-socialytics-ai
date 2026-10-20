@@ -15,7 +15,7 @@ import { Section } from "@/components/ui/section";
 import { StatGrid } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { describeReport, describeSelection, describeTracking, pickRunSelection, type SetRow } from "@/lib/competitiveFlow";
 import { Crosshair, FileText, History, Play, Rss } from "lucide-react";
@@ -75,7 +75,7 @@ export default function CompetitiveIndex() {
         ) : isError ? (
           // A failed read used to render as "No clients yet", which reads as a
           // fact about the account rather than a connection problem.
-          <LoadError title="Could not load the competitive overview" error={error} onRetry={() => refetch()} />
+          <LoadRetry context="Could not load the competitive overview" error={error} onRetry={() => refetch()} />
         ) : !data?.length ? (
           <EmptyState icon={Crosshair} title="No clients yet" />
         ) : (

@@ -77,7 +77,7 @@ for (const state of ['missing','weak']) it(`runs a confirmed competitive selecti
  expect(screen.getByText(/Tracked since Sep 2, 2026/)).toBeInTheDocument();
 });
 it('distinguishes a failed selection request from having no confirmed selection',async()=>{
- f.setsError=true;mount('competitive');await tick();await tick();expect(screen.getByText('Could not load the competitor selection')).toBeInTheDocument();expect(f.invokes).not.toHaveBeenCalled();
+ f.setsError=true;mount('competitive');await tick();await tick();expect(screen.getByText(/Loading the competitor selection/)).toBeInTheDocument();expect(screen.queryByRole('alert')).toBeNull();expect(screen.queryByRole('button',{name:'Run competitive analysis'})).toBeNull();expect(f.invokes).not.toHaveBeenCalled();
 });
 it('asks for a ready competitive selection to run with the chosen period',async()=>{
  f.invokes.mockResolvedValue({data:{job_id:'job',queued:true},error:null});mount('competitive');await tick();await tick();const button=screen.getByRole('button',{name:'Run competitive analysis'});expect(button).toBeEnabled();fireEvent.click(button);await tick();expect(f.invokes).toHaveBeenCalledWith('run-report',expect.objectContaining({body:expect.objectContaining({kind:'competitive',client_id:'client',date_range_start:'2026-08-18',date_range_end:'2026-09-16'})}));

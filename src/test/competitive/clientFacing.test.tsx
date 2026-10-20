@@ -6,7 +6,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import CompetitiveReportView from '@/pages/CompetitiveReportView';
 import CompetitiveReportHistory from '@/pages/CompetitiveReportHistory';
 import { CompetitiveSnapshot } from '@/components/competitive/CompetitiveSnapshot';
-import { LoadError } from '@/components/ui/load-error';
+import { LoadRetry } from '@/components/ui/load-error';
 import { WATCH_LIMIT_MINUTES } from '@/lib/runWatch';
 
 // What a client sees on the competitive screens: no vendor or landscape
@@ -97,11 +97,12 @@ it('still shows staff the landscape and sources', async () => {
   expect(screen.getByText('LinkedIn · Apify')).toBeInTheDocument();
 });
 
-it('says a report failed to load, with a retry, instead of looking empty', async () => {
+it('a report that did not load keeps loading quietly and tries again, instead of looking empty or failed', async () => {
   fixture.fail = true;
   mount(<CompetitiveReportView />); await tick(20);
-  expect(screen.getByRole('alert')).toHaveTextContent('This report did not load');
-  expect(screen.getByRole('button', { name: /Try again/ })).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('status')).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(/did not load|failed|try again/i);
   expect(screen.queryByText('Report not available')).toBeNull();
   // A client never sees the database's own words.
   expect(document.body.textContent).not.toMatch(/permission denied|42501/);
@@ -140,23 +141,31 @@ it('snapshot shows measured figures against the competitors, with no score or in
   expect(document.body.textContent).not.toMatch(/set average|synthesis/);
 });
 
-it('snapshot says it failed to load rather than "no analysis yet"', async () => {
+it('a snapshot that did not load keeps loading quietly, never "failed" and never "no analysis yet"', async () => {
   fixture.fail = true;
   mount(<CompetitiveSnapshot clientId="client" />, '/x', '/x'); await tick(20);
-  expect(screen.getByRole('alert')).toHaveTextContent('The competitive analysis did not load');
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('status')).toBeInTheDocument();
   expect(screen.queryByText('No competitive analysis yet')).toBeNull();
+  expect(document.body.textContent).not.toMatch(/did not load|failed|try again/i);
 });
 
-it('LoadError never shows raw error text, to staff or clients, and shows written copy to everyone', () => {
-  const raw = new Error('JWT expired at 10:02');
-  render(<LoadError error={raw} />);
-  expect(screen.queryByText(/JWT/)).toBeNull();
-  expect(screen.getByText(/did not complete/)).toBeInTheDocument();
-  cleanup();
-  render(<LoadError error="It may have been deleted." />);
-  expect(screen.getByText('It may have been deleted.')).toBeInTheDocument();
-  cleanup(); fixture.staff = true;
-  render(<LoadError error={raw} />);
-  expect(screen.queryByText(/JWT/)).toBeNull();
-  expect(screen.getByText(/did not complete/)).toBeInTheDocument();
+it('LoadRetry shows only the loading state, never an error or a failure, and tries again on its own', async () => {
+  vi.useFakeTimers();
+  try {
+    const onRetry = vi.fn();
+    render(<LoadRetry error={new Error('JWT expired at 10:02')} label="Loading the reports" onRetry={onRetry} />);
+    expect(screen.queryByText(/JWT/)).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText(/Loading the reports/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/did not|failed|try again|refresh/i);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(onRetry).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(30_000 + 60_000 * 2);
+    expect(onRetry).toHaveBeenCalledTimes(5);
+  } finally {
+    vi.useRealTimers();
+  }
 });

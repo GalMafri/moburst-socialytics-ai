@@ -9,7 +9,7 @@ import { ClickableCard } from "@/components/ui/clickable-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { FileText, TrendingUp, BarChart3, Clock, Crosshair } from "lucide-react";
 import { Loading } from "@/components/ui/loading";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 
 // Defense-in-depth: even when RLS returns extra/stale clients (e.g. client_users
@@ -26,7 +26,7 @@ export function ClientDashboard() {
   const { user, isGosSession } = useAuth();
 
   // Pull everything RLS allows, then filter here.
-  const { data: allClients, isLoading, error } = useQuery({
+  const { data: allClients, isLoading, error, refetch } = useQuery({
     queryKey: ["client-dashboard-clients"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -75,7 +75,7 @@ export function ClientDashboard() {
   }
 
   if (error) {
-    return <LoadError title="Your dashboard did not load" error="Refresh the page to try again." />;
+    return <LoadRetry context="client dashboard" error={error} label="Loading your dashboard" onRetry={() => refetch()} />;
   }
 
   if (matchingClients.length === 0) {

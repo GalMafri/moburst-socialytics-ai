@@ -37,7 +37,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loading } from "@/components/ui/loading";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { PlatformBadge, prettyPlatformName } from "@/lib/platform-config";
@@ -623,11 +623,9 @@ export default function CompetitorReview() {
   if (clientFailed || !client) {
     return (
       <AppLayout title="Competitors" description="The three closest competitors, chosen automatically. Change them any time.">
-        <LoadError
-          title={clientFailed ? "Could not load this client" : "That client is not available"}
-          error={clientFailed ? clientError : "It may have been deleted, or your account may not have access to it."}
-          onRetry={clientFailed ? () => refetchClient() : undefined}
-        />
+        {clientFailed
+          ? <LoadRetry context="client" error={clientError} label="Loading the client" onRetry={() => refetchClient()} />
+          : <EmptyState title="That client is not available" description="It may have been deleted, or your account may not have access to it." />}
       </AppLayout>
     );
   }
@@ -637,7 +635,7 @@ export default function CompetitorReview() {
   if (setsFailed) {
     return (
       <AppLayout title={`Competitors: ${client.name}`} description="The three closest competitors, chosen automatically. Change them any time.">
-        <LoadError title="Could not load the competitor selection" error={setsError} onRetry={() => refetchSets()} />
+        <LoadRetry context="Could not load the competitor selection" error={setsError} onRetry={() => refetchSets()} />
       </AppLayout>
     );
   }
@@ -1041,7 +1039,7 @@ export default function CompetitorReview() {
               })}
           </Section>
         ) : competitorsFailed ? (
-          <LoadError title="Could not load the competitors" error={competitorsError} onRetry={() => refetchCompetitors()} />
+          <LoadRetry context="Could not load the competitors" error={competitorsError} onRetry={() => refetchCompetitors()} />
         ) : currentSet && competitorsLoading ? (
           // A set exists and its competitors are still arriving. Saying "no
           // competitor set yet" here told people to start over on a set that

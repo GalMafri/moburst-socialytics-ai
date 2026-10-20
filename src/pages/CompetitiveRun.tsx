@@ -25,7 +25,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loading } from "@/components/ui/loading";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { Input } from "@/components/ui/input";
 import { PRESET_LABELS, presetRange, rangeDays, formatRange, type RangePreset, type DateRange } from "@/lib/dateRange";
 import { CheckCircle2, Crosshair, History, Play } from "lucide-react";
@@ -139,18 +139,16 @@ export default function CompetitiveRun() {
   if (clientFailed || !client) {
     return (
       <AppLayout title="Competitive analysis" description="The confirmed competitors across their tracked social profiles, over any period.">
-        <LoadError
-          title={clientFailed ? "Could not load this client" : "That client is not available"}
-          error={clientFailed ? clientError : "It may have been deleted, or your account may not have access to it."}
-          onRetry={clientFailed ? () => refetchClient() : undefined}
-        />
+        {clientFailed
+          ? <LoadRetry context="client" error={clientError} label="Loading the client" onRetry={() => refetchClient()} />
+          : <EmptyState title="That client is not available" description="It may have been deleted, or your account may not have access to it." />}
       </AppLayout>
     );
   }
 
   if (setsFailed) {
     return <AppLayout title={`Competitive: ${client.name}`} description="The confirmed competitors across their tracked social profiles, over any period.">
-      <LoadError title="Could not load the competitor selection" error={setsError} onRetry={() => refetchSets()} />
+      <LoadRetry context="competitor selection" error={setsError} label="Loading the competitor selection" onRetry={() => refetchSets()} />
     </AppLayout>;
   }
 

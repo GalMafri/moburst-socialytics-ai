@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { toast as sonnerToast } from "sonner";
 import { mondayOf } from "@/lib/calendarPosts";
 import { clipText } from "@/lib/clipText";
@@ -221,7 +221,7 @@ export default function CompetitiveFeed() {
         {isLoading ? (
           <Loading label="Loading the feed" />
         ) : feedFailed ? (
-          <LoadError title="Could not load the feed" error={feedError} onRetry={() => refetchFeed()} />
+          <LoadRetry context="Could not load the feed" error={feedError} onRetry={() => refetchFeed()} />
         ) : !snapshot ? (
           <EmptyState
             icon={Rss}
@@ -321,9 +321,8 @@ export default function CompetitiveFeed() {
                     {p.authorship === "collaboration" && <Badge variant="secondary">Company collaboration</Badge>}
                     <p className="t-body line-clamp-3 min-h-[4.5rem] whitespace-pre-line">{p.message ? cleanText(p.message) : "No caption."}</p>
                     <div className="flex gap-2 flex-wrap t-secondary">
-                      <span>{fmt(p.engagementTotal)} eng.</span>
-                      {p.estimatedImpressions ? <span>· {fmt(p.estimatedImpressions)} est. impr.</span> : null}
-                      {p.views ? <span>· {fmt(p.views)} views</span> : null}
+                      {[p.engagementTotal != null ? `${fmt(p.engagementTotal)} eng.` : null, p.estimatedImpressions ? `${fmt(p.estimatedImpressions)} est. impr.` : null, p.views ? `${fmt(p.views)} views` : null]
+                        .filter(Boolean).map((t, i) => <span key={i}>{i ? `· ${t}` : t}</span>)}
                     </div>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       {p.postLink ? (

@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { Loading } from "@/components/ui/loading";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -177,8 +177,8 @@ export function AdminDashboard() {
       )}
 
       {clientsFailed ? (
-        <LoadError
-          title="Could not load the clients"
+        <LoadRetry
+          context="Could not load the clients"
           error={clientsError}
           onRetry={() => refetchClients()}
         />

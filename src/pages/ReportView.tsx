@@ -1,6 +1,7 @@
 import { COMPARED_RATE_LABEL, SPROUT_RATE_LABEL } from "@/lib/rateLabels";
 import { useNavigate, useParams } from "react-router-dom";
 import { cleanText, countryNames, formatDate, formatDateTime, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
+import { reportsMeasure } from "@/lib/platformMeasures";
 import { reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
@@ -735,10 +736,12 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
           {sproutEngagementRate(post) != null && ` · ${(sproutEngagementRate(post)! * 100).toFixed(2)}% ${SPROUT_RATE_LABEL}`}
         </p>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 t-secondary pt-1">
-          <span className="flex items-center gap-1">
-            <Eye className="h-3 w-3" />
-            {(post.impressions ?? 0).toLocaleString()}
-          </span>
+          {reportsMeasure(post.network_type || post.platform, "impressions") && (
+            <span className="flex items-center gap-1">
+              <Eye className="h-3 w-3" />
+              {(post.impressions ?? 0).toLocaleString()}
+            </span>
+          )}
           <span className="flex items-center gap-1">
             <Heart className="h-3 w-3" />
             {(post.reactions ?? post.likes ?? 0).toLocaleString()}
@@ -835,14 +838,15 @@ function PlatformPerformanceCard({ platform }: { platform: any }) {
       {ai?.headline && <p className="t-body text-white leading-[1.55]">{formatNumbersInText(ai.headline)}</p>}
 
       <dl className="grid grid-cols-3 gap-x-4 gap-y-4">
-        {metrics.map(({ key, label }) => {
+        {metrics.filter(({ key }) => reportsMeasure(platform.network, key)).map(({ key, label }) => {
           const value = Number(cur[key] ?? 0);
           const ch = changes?.[key];
           const pct = typeof ch?.percent === "number" ? ch.percent : null;
           // A zero baseline isn't "+100% growth": surface it as "new" instead.
-          const isNew = ch != null && Number(ch.previous ?? prev?.[key] ?? 0) === 0 && value > 0;
+          const before = Number(ch?.previous ?? prev?.[key] ?? 0);
+          const isNew = ch != null && before === 0 && value > 0;
           const tone = isNew || (pct != null && pct > 0) ? "text-success" : pct != null && pct < 0 ? "text-[#f87171]" : "text-[#9ca3af]";
-          const delta = isNew ? "new" : pct == null ? null : pct === 0 ? "—" : `${pct > 0 ? "+" : ""}${Math.round(pct)}%`;
+          const delta = value === 0 && before === 0 ? null : isNew ? "new" : pct == null ? null : `${pct > 0 ? "+" : ""}${Math.round(pct)}%`;
           return (
             <div key={key} className="min-w-0" title={`${label}: ${value.toLocaleString()}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}% vs previous period)` : ""}`}>
               <dd className="flex items-baseline gap-1.5 flex-wrap">

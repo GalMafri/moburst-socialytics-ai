@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
 import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
 import { CalendarKanban, findLatestSelectedIteration } from "./CalendarKanban";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { Loading } from "@/components/ui/loading";
 import { PostPanel } from "./PostPanel";
 import { WeeklyHighlights } from "./WeeklyHighlights";
@@ -88,7 +88,10 @@ export function ContentIdeasTab({
 
   const {
     data: scheduledPosts = [],
+    isLoading: scheduledPostsLoading,
     isError: scheduledPostsFailed,
+    error: scheduledPostsError,
+    refetch: reloadScheduledPosts,
   } = useQuery({
     queryKey: ["scheduled-posts", clientId],
     queryFn: async () => {
@@ -251,15 +254,8 @@ export function ContentIdeasTab({
           availableLanguages={availableLanguages}
         />
 
-        {scheduledPostsFailed && (
-          <LoadError
-            title="The schedule did not load"
-            error="A post already queued in Sprout will show here as approved rather than scheduled. Reload before scheduling anything, or you may queue it twice."
-          />
-        )}
-
         <div id="ideas-calendar" className="scroll-mt-[156px]">
-          {iterationsFailed ? <LoadError title="Saved post changes could not be loaded" error="Reload them before editing or scheduling." onRetry={() => reloadIterations()} /> : iterationsLoading ? <Loading label="Loading saved post changes" /> : <CalendarKanban
+          {iterationsFailed || scheduledPostsFailed ? <LoadRetry context="saved post changes and scheduled posts" error={scheduledPostsError} label="Loading the calendar" onRetry={() => { if (iterationsFailed) void reloadIterations(); if (scheduledPostsFailed) void reloadScheduledPosts(); }} /> : iterationsLoading || scheduledPostsLoading ? <Loading label="Loading the calendar" /> : <CalendarKanban
             contentCalendar={revisedCalendar}
             postIterations={postIterations as any}
             scheduledPosts={scheduledPosts as any}

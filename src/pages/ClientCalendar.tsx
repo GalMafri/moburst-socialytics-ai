@@ -17,7 +17,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
@@ -122,7 +122,7 @@ export default function ClientCalendar() {
       {client.isLoading || posts.isLoading || plans.isLoading ? (
         <Loading label="Loading the calendar" />
       ) : client.isError || posts.isError || plans.isError ? (
-        <LoadError title="Could not load the calendar" error={client.error || posts.error || plans.error} onRetry={() => { void client.refetch(); refresh(); }} />
+        <LoadRetry context="Could not load the calendar" error={client.error || posts.error || plans.error} onRetry={() => { void client.refetch(); refresh(); }} />
       ) : (
         <div className="space-y-section">
           <WeekNav week={week} thisWeek={thisWeek} count={inWeek.length} onGo={goTo}>

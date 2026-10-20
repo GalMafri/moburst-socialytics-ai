@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ClickableCard } from "@/components/ui/clickable-card";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { BarChart3, ArrowRight } from "lucide-react";
 
 export default function AnalyticsIndex() {
@@ -37,7 +37,7 @@ export default function AnalyticsIndex() {
         {isLoading ? (
           <Loading label="Loading clients" />
         ) : isError ? (
-          <LoadError title="Could not load the clients" error={error} onRetry={() => refetch()} />
+          <LoadRetry context="Could not load the clients" error={error} onRetry={() => refetch()} />
         ) : !clients?.length ? (
           <EmptyState icon={BarChart3} title="No clients yet" />
         ) : (

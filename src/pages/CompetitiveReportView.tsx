@@ -26,7 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { landscapeLabel } from "@/lib/competitiveStatus";
 import { watchExpired, watchInterval } from "@/lib/runWatch";
 import { useToast } from "@/hooks/use-toast";
@@ -210,7 +210,7 @@ function formatMix(mix: Array<{ key: string; count: number }>): Array<{ label: s
 
 
 function MetricRow({ label, value, format = compactNumber, signed = false }: { label: string; value: Both | null | undefined; format?: (v: number) => string; signed?: boolean }) {
-  if (!value || value.current == null) return <Stat label={label} value="Not available" />;
+  if (!value || value.current == null) return null;
   const change = deltaPct(value);
   const rounded = change == null ? null : Number(fmtDelta(change).replace(/[+%]/g, ""));
   const tone = !signed || !rounded ? "" : change! > 0 ? "text-success" : "text-destructive";
@@ -327,7 +327,7 @@ export default function CompetitiveReportView() {
   if (isError) {
     return (
       <AppLayout>
-        <LoadError title="This report did not load" error={reportError} onRetry={() => refetch()} />
+        <LoadRetry context="This report did not load" error={reportError} onRetry={() => refetch()} />
       </AppLayout>
     );
   }
@@ -531,7 +531,7 @@ export default function CompetitiveReportView() {
       {/* Ranked by engagements, so that number leads; the rate is engagements
           divided by the impressions (or views) shown beside it, or not shown. */}
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <Stat label="Engagements" value={fmt(p.engagement)} />
+        {p.engagement != null && <Stat label="Engagements" value={fmt(p.engagement)} />}
         {(() => {
           const reach = postReach(p);
           return reach ? <Stat label={reach.kind === "views" ? "Views" : reach.kind === "impressions" ? "Impressions" : "Est. impressions"} value={fmt(reach.value)} /> : null;
@@ -700,14 +700,14 @@ export default function CompetitiveReportView() {
               value={`${ordered.length}`}
               sub={`Client + ${rivals.length} competitor${rivals.length === 1 ? "" : "s"} · tracked accounts`}
             />
-            {meM?.audience && (
-              <StatCard label="Followers" value={meM.audience.current == null ? "Not available" : compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={`${effectivePlat === "all" ? "Tracked networks · excluding LinkedIn" : `on ${platformLabel(effectivePlat)}`}${meM.audience_as_of ? ` · as of ${asOf(meM.audience_as_of)}` : ""}`} />
+            {meM?.audience && meM.audience.current != null && (
+              <StatCard label="Followers" value={compactNumber(meM.audience.current)} delta={{ percent: deltaPct(meM.audience), label: "vs. previous period" }} sub={`${effectivePlat === "all" ? "Tracked networks · excluding LinkedIn" : `on ${platformLabel(effectivePlat)}`}${meM.audience_as_of ? ` · as of ${asOf(meM.audience_as_of)}` : ""}`} />
             )}
-            <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} tracked posts`} />
+            {shareOfVoice != null && <Kpi label="Share of voice" value={`${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} tracked posts`} />}
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`competitor avg ${avgCadence.toFixed(1)}/wk`} />
             {/* Engagements divided by impressions (views on video), the same for every company. No impressions figure, no tile. */}
             {meB.post_count > 0 && meB.engagement_rate_avg != null && <Kpi label={COMPARED_RATE_LABEL} value={pct(meB.engagement_rate_avg)} sub={`${effectivePlat === "all" ? "Excluding LinkedIn · " : ""}${avg((b) => b.engagement_rate_avg) == null ? "engagements per impression" : `active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`}`} />}
-            <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`active peers avg ${fmt(avg((b) => b.engagement_avg))}`} />
+            {meB.post_count > 0 && meB.engagement_avg != null && <Kpi label="Avg engagement" value={fmt(meB.engagement_avg)} sub={avg((b) => b.engagement_avg) == null ? undefined : `active peers avg ${fmt(avg((b) => b.engagement_avg))}`} />}
           </StatGrid>
         )}
 
@@ -812,13 +812,13 @@ export default function CompetitiveReportView() {
                           <TileStat value={String(b.post_count)} label="Tracked posts" />
                           <TileStat value={String(b.cadence_per_week)} label="Posts / week" />
                           {b.engagement_rate_avg != null && <TileStat value={pct(b.engagement_rate_avg)} label={COMPARED_RATE_SHORT} />}
-                          <TileStat value={b.engagement_avg == null ? "Not available" : compactNumber(b.engagement_avg)} exact={fmt(b.engagement_avg)} label="Engagements / post" />
-                          <TileStat
-                            value={b.impressions_avg == null ? "Not available" : compactNumber(b.impressions_avg)}
+                          {b.engagement_avg != null && <TileStat value={compactNumber(b.engagement_avg)} exact={fmt(b.engagement_avg)} label="Engagements / post" />}
+                          {b.impressions_avg != null && <TileStat
+                            value={compactNumber(b.impressions_avg)}
                             exact={fmt(b.impressions_avg)}
                             label={measuredImpressions(c) ? "Impressions / post" : effectivePlat === "all" ? vendor("Est. impressions / RivalIQ post", "Est. impressions / tracked post") : "Est. impressions / post"}
-                          />
-                          <TileStat value={b.views_total == null ? "Not available" : compactNumber(b.views_total)} exact={b.views_total == null ? undefined : fmt(b.views_total)} label="Reported video views" />
+                          />}
+                          {b.views_total != null && <TileStat value={compactNumber(b.views_total)} exact={fmt(b.views_total)} label="Reported video views" />}
                         </div>
                       )}
                       {effectivePlat === "all" && (c.channel_mix || []).length > 0 && (
@@ -1169,8 +1169,10 @@ export default function CompetitiveReportView() {
                               />
                               <span className="min-w-0 flex-1">
                                 <span className="flex items-baseline gap-2 flex-wrap">
-                                  <span className="t-body font-semibold text-white tabular-nums">{ex.post ? fmt(ex.post.engagement) : "–"}</span>
-                                  <span className="t-label">engagements</span>
+                                  {ex.post?.engagement != null && <>
+                                    <span className="t-body font-semibold text-white tabular-nums">{fmt(ex.post.engagement)}</span>
+                                    <span className="t-label">engagements</span>
+                                  </>}
                                   {ex.post?.engagement_rate != null ? <span className="t-label">· {pct(ex.post.engagement_rate)} {COMPARED_RATE_SHORT.toLowerCase()}</span> : null}
                                 </span>
                                 <span className="t-label block mt-0.5">

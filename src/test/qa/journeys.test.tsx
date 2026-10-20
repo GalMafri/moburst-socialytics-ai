@@ -166,7 +166,8 @@ describe('whole calendar persistence and history paging',()=>{
  it('prevents editing original copy when saved revisions cannot load',async()=>{
   f.iterationsError={message:'Fixture revision read rejected'};
   mount(calendar());
-  expect(await screen.findByRole('alert')).toHaveTextContent('Saved post changes could not be loaded');
+  expect(await screen.findByText(/Loading the calendar/)).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Open post: Original fixture copy'})).not.toBeInTheDocument();
  });
  it('opens the second page and returns to the first with 51 reports',async()=>{

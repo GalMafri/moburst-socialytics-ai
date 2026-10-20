@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { Eye, ExternalLink, Crosshair, FileText } from "lucide-react";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { firstRunSentence, formatDate, formatDateTime, formatRange, listedRuns } from "@/lib/display";
@@ -139,7 +139,7 @@ export default function AllReports() {
                 {isLoading ? (
                   <Loading label="Loading reports" />
                 ) : isError ? (
-                  <LoadError title="Could not load the reports" error={error} onRetry={() => refetch()} />
+                  <LoadRetry context="Could not load the reports" error={error} onRetry={() => refetch()} />
                 ) : listedRuns("monthly", reports?.slice(0, 50), viewer).length > 0 ? (
                   <Table>
                     <TableHeader>
@@ -210,7 +210,7 @@ export default function AllReports() {
                 {competitiveLoading ? (
                   <Loading label="Loading competitive analyses" />
                 ) : competitiveFailed ? (
-                  <LoadError title="Could not load competitive analyses" error={competitiveError} onRetry={() => refetchCompetitive()} />
+                  <LoadRetry context="Could not load competitive analyses" error={competitiveError} onRetry={() => refetchCompetitive()} />
                 ) : listedRuns("competitive", competitive?.slice(0, 50), viewer).length > 0 ? (
                   <Table>
                     <TableHeader>

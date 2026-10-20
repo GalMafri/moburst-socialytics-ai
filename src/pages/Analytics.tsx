@@ -43,8 +43,9 @@ import { AIDeepInsights } from "@/components/analytics/AIDeepInsights";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CompetitiveSnapshot } from "@/components/competitive/CompetitiveSnapshot";
 import { Loading } from "@/components/ui/loading";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { reportsMeasure } from "@/lib/platformMeasures";
 
 type TimeRange = "7d" | "30d" | "90d" | "all" | "custom";
 type AnalyticsView = "performance" | "trends";
@@ -385,8 +386,8 @@ export default function Analytics() {
         ) : reportsFailed ? (
           // "No completed reports yet" would be a claim about this client's
           // history made on the strength of a request that never answered.
-          <LoadError
-            title="Could not load this client's reports"
+          <LoadRetry
+            context="Could not load this client's reports"
             error={reportsError}
             onRetry={() => refetchReports()}
           />
@@ -983,7 +984,7 @@ function LiveSproutSection({
                     <span className="t-h4 truncate">{p.name}</span>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
-                    <div><p className="t-h3 tabular-nums">{fmtVal(p.impressions || 0)}</p><p className="t-label">Impressions</p></div>
+                    {reportsMeasure(p.network, "impressions") && <div><p className="t-h3 tabular-nums">{fmtVal(p.impressions || 0)}</p><p className="t-label">Impressions</p></div>}
                     <div><p className="t-h3 tabular-nums">{fmtVal(p.reactions || 0)}</p><p className="t-label">Reactions</p></div>
                     <div><p className="t-h3 tabular-nums">{fmtVal(p.video_views || 0)}</p><p className="t-label">Views</p></div>
                   </div>
@@ -1010,7 +1011,7 @@ function LiveSproutSection({
                     </div>
                     <p className="t-body line-clamp-3 whitespace-pre-line">{p.text ? cleanText(p.text) : "No caption."}</p>
                     <div className="flex items-center gap-4 t-secondary">
-                      <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{fmtVal(p.impressions || 0)}</span>
+                      {reportsMeasure(p.network_type, "impressions") && <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{fmtVal(p.impressions || 0)}</span>}
                       <span className="flex items-center gap-1"><Heart className="h-3 w-3" />{fmtVal(p.reactions || 0)}</span>
                       <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" />{fmtVal(p.comments || 0)}</span>
                       <span className="flex items-center gap-1"><Share2 className="h-3 w-3" />{fmtVal(p.shares || 0)}</span>

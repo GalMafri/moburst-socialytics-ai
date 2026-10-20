@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { watchExpired } from "@/lib/runWatch";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { ArrowLeft, Crosshair, Eye, Loader2, Play, Rss } from "lucide-react";
@@ -78,7 +78,7 @@ export default function CompetitiveReportHistory() {
               // Not an empty state. "No competitive analyses yet" asserts
               // something about the data on the strength of a request that
               // never answered, and the runs are almost certainly still there.
-              <LoadError title="Could not load the run history" error={error} onRetry={() => refetch()} />
+              <LoadRetry context="Could not load the run history" error={error} onRetry={() => refetch()} />
             ) : listedRuns("competitive", reports, { isStaff: isMoburstStaff }).length > 0 ? (
               <Table>
                 <TableHeader>

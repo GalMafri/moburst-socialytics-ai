@@ -11,7 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Loading } from "@/components/ui/loading";
-import { LoadError } from "@/components/ui/load-error";
+import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { ALL_CLIENTS, ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
@@ -78,7 +78,7 @@ export default function CalendarIndex() {
       {clients.isLoading || posts.isLoading ? (
         <Loading label="Loading the calendar" />
       ) : clients.isError || posts.isError ? (
-        <LoadError title="Could not load the calendar" error={clients.error || posts.error} onRetry={() => { void clients.refetch(); void posts.refetch(); }} />
+        <LoadRetry context="Could not load the calendar" error={clients.error || posts.error} onRetry={() => { void clients.refetch(); void posts.refetch(); }} />
       ) : (
         <div className="space-y-section">
           <WeekNav week={week} thisWeek={thisWeek} count={weekPosts.length} onGo={goTo} />
