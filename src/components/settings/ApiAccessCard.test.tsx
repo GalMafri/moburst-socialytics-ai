@@ -64,11 +64,26 @@ describe("ApiAccessCard", () => {
     await waitFor(() => expect(calls.some((c) => c.init?.method === "DELETE" && c.url.endsWith("/admin/keys/k1"))).toBe(true));
   });
 
-  it("says why when the keys cannot be loaded, instead of pretending there are none", async () => {
+  it("keeps loading quietly when the keys do not load, instead of pretending there are none or showing a failure", async () => {
     globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ error: { code: "unauthorized", message: "A valid API key is required" } }), { status: 401 })) as unknown as typeof fetch;
     renderCard();
-    expect(await screen.findByRole("alert")).toHaveTextContent("The keys could not be loaded: A valid API key is required");
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+    expect(await screen.findByRole("status")).toHaveTextContent(/loading keys/i);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/A valid API key is required|could not|failed/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/no keys yet/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the new key's details and says no key yet when the key is not made, never a failure", async () => {
+    mockFetch(() => ({ data: [], next_cursor: null }));
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: /create key/i }));
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ error: { code: "internal", message: "insert failed: duplicate key" } }), { status: 500 })) as unknown as typeof fetch;
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "New" } });
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    expect(await screen.findByText(/no key yet/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^name/i)).toHaveValue("New");
+    expect(screen.queryByText(/insert failed|duplicate key|could not/i)).not.toBeInTheDocument();
   });
 
   it("says so when there are no keys", async () => {

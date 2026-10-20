@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,25 +48,32 @@ export function ReportActions({ report, kind = "monthly", onDeleted }: ReportAct
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** An edit or a delete that has not reached the database yet; the report is as it was. */
+  const [notSaved, setNotSaved] = useState(false);
+  const [notDeleted, setNotDeleted] = useState(false);
 
   const [dateStart, setDateStart] = useState(report.date_range_start || "");
   const [dateEnd, setDateEnd] = useState(report.date_range_end || "");
   const [gammaUrl, setGammaUrl] = useState(report.gamma_url || "");
 
+  // Writing the same fields again is harmless, so an edit that does not get through is sent again quietly.
   const handleEdit = async () => {
     setSaving(true);
-    const { error } = await supabase
+    setNotSaved(false);
+    const { error } = await sendQuietly(() => supabase
       .from("reports")
       .update({
         date_range_start: dateStart || null,
         date_range_end: dateEnd || null,
         gamma_url: gammaUrl || null,
       })
-      .eq("id", report.id);
+      .eq("id", report.id), { again: writeResendable });
     setSaving(false);
 
     if (error) {
-      toast({ title: "Error updating report", description: error.message, variant: "destructive" });
+      // The dialog stays open with what was typed.
+      console.warn("[report edit] not saved yet", error);
+      setNotSaved(true);
     } else {
       toast({ title: "Report updated" });
       queryClient.invalidateQueries({ queryKey: ["reports"] });
@@ -79,27 +87,32 @@ export function ReportActions({ report, kind = "monthly", onDeleted }: ReportAct
   const table = kind === "competitive" ? "competitive_reports" : "reports";
 
   const handleDelete = async () => {
+    setNotDeleted(false);
     // Ask for the row back. A delete the database refuses returns no error
     // and no rows, which used to toast success over a report that is still
-    // there.
-    const { data, error } = await supabase.from(table as any).delete().eq("id", report.id).select("id");
-    if (error) {
-      toast({ title: "Could not delete the report", description: error.message, variant: "destructive" });
-    } else if (!data || data.length === 0) {
-      toast({
-        title: "Could not delete the report",
-        description: "You do not have permission to delete this one. An admin can.",
-        variant: "destructive",
-      });
-    } else {
-      toast({ title: "Report deleted" });
-      for (const key of kind === "competitive"
-        ? ["all-competitive-reports", "competitive-reports-history", "competitive-reports", "competitive-report", "competitive-latest", "competitive-latest-ready", "competitive-snapshot", "competitive-runs"]
-        : ["reports", "reports-history", "all-reports", "report"]) {
-        queryClient.invalidateQueries({ queryKey: [key] });
-      }
-      onDeleted?.();
+    // there. A delete repeats safely, so one that does not get through is
+    // sent again quietly.
+    const { data, error } = await sendQuietly(() => supabase.from(table as any).delete().eq("id", report.id).select("id"), { again: writeResendable });
+    let gone = !error && !!data && data.length > 0;
+    if (!error && !gone) {
+      // No row back: it was already gone (a repeat after a reply that was
+      // lost), or the database kept it. Reading it says which.
+      const { data: still, error: readError } = await supabase.from(table as any).select("id").eq("id", report.id).maybeSingle();
+      gone = !readError && !still;
     }
+    if (!gone) {
+      // The dialog stays up and says the report is still here.
+      console.warn("[report delete] not deleted yet", error ?? "the row is still there");
+      setNotDeleted(true);
+      return;
+    }
+    toast({ title: "Report deleted" });
+    for (const key of kind === "competitive"
+      ? ["all-competitive-reports", "competitive-reports-history", "competitive-reports", "competitive-report", "competitive-latest", "competitive-latest-ready", "competitive-snapshot", "competitive-runs"]
+      : ["reports", "reports-history", "all-reports", "report"]) {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    }
+    onDeleted?.();
     setDeleteOpen(false);
   };
 
@@ -145,6 +158,7 @@ export function ReportActions({ report, kind = "monthly", onDeleted }: ReportAct
               <Input value={gammaUrl} onChange={(e) => setGammaUrl(e.target.value)} placeholder="https://..." />
             </div>
           </div>
+          {notSaved && <p role="status" className="t-secondary">Not saved yet. Your changes are kept here.</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
             <Button onClick={handleEdit} disabled={saving}>
@@ -156,7 +170,7 @@ export function ReportActions({ report, kind = "monthly", onDeleted }: ReportAct
 
       <ConfirmDialog
         open={deleteOpen}
-        onOpenChange={setDeleteOpen}
+        onOpenChange={(o) => { setDeleteOpen(o); if (!o) setNotDeleted(false); }}
         title={kind === "competitive" ? "Delete this competitive report?" : "Delete this report?"}
         description={
           <>
@@ -166,6 +180,7 @@ export function ReportActions({ report, kind = "monthly", onDeleted }: ReportAct
                 ? "The cached RivalIQ data and any feedback on its insights stay, no longer attached to a report."
                 : "Designs and scheduled posts made from it stay, no longer attached to a report."}
             </p>
+            {notDeleted && <p role="status" className="t-secondary">Not deleted yet. The report is still here.</p>}
           </>
         }
         confirmLabel="Delete report"

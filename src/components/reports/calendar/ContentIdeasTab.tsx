@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { useToast } from "@/hooks/use-toast";
 import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
 import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
@@ -106,17 +107,21 @@ export function ContentIdeasTab({
     enabled: !!clientId,
   });
 
+  // The flip is worked out once from the stored row; the read and the write
+  // each repeat safely, so either one that does not get through is sent
+  // again quietly. The board is read again either way, so the chip shows the
+  // approval as it is stored.
   const toggleApproved = useMutation({
     mutationFn: async (iterationId: string) => {
       if (!clientId) return;
       // Read current state
-      const { data: current, error: readErr } = await supabase
+      const { data: current, error: readErr } = await sendQuietly(() => supabase
         .from("post_iterations")
         .select("variant_group_id, is_approved")
         .eq("id", iterationId)
-        .maybeSingle();
+        .maybeSingle(), { again: writeResendable });
       if (readErr) throw readErr;
-      if (!current) throw new Error("That post is no longer on the board.");
+      if (!current) throw new Error(`post_iterations ${iterationId} is no longer on the board`);
 
       const variantGroupId = (current as any).variant_group_id;
       const newApproved = !((current as any).is_approved);
@@ -132,20 +137,14 @@ export function ContentIdeasTab({
       // Both writes have to be checked: unchecked, a refused update still
       // resolved, the board refetched the unchanged row, and the chip flipped
       // back with nothing said to the person who clicked it.
-      const { error: writeErr } = variantGroupId
-        ? await supabase.from("post_iterations").update(update).eq("variant_group_id", variantGroupId)
-        : await supabase.from("post_iterations").update(update).eq("id", iterationId);
+      const { error: writeErr } = await sendQuietly(() => variantGroupId
+        ? supabase.from("post_iterations").update(update).eq("variant_group_id", variantGroupId)
+        : supabase.from("post_iterations").update(update).eq("id", iterationId), { again: writeResendable });
       if (writeErr) throw writeErr;
     },
-    onSuccess: () => {
+    onError: (err: any) => console.warn("[approval] not changed yet", err),
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
-    },
-    onError: (err: any) => {
-      toast({
-        title: "Could not change approval",
-        description: err?.message || "The change was not saved. Try again.",
-        variant: "destructive",
-      });
     },
   });
 
@@ -294,14 +293,16 @@ export function ContentIdeasTab({
           clientTimezone={clientTimezone}
           initialTab={panelTab}
           onFeedback={async (iterationId, verdict, reason, note) => {
-            const { data, error } = await supabase.functions.invoke("record-design-feedback", {
+            // Sent again only when it never reached the server. The board is
+            // read again either way, so a design that was not hidden stays on it.
+            const { data, error } = await sendQuietly(() => supabase.functions.invoke("record-design-feedback", {
               body: { iteration_id: iterationId, verdict, reason, note },
-            });
+            }));
+            qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
             if (error || data?.error) {
-              toast({ title: "Could not save that", description: String(data?.error || error?.message || "Try again."), variant: "destructive" });
+              console.warn("[design feedback] not recorded yet", error ?? data?.error);
               return;
             }
-            qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
             const learned = Array.isArray(data?.learnings) ? data.learnings.length : 0;
             toast({
               title: verdict === "rejected" ? "Rejected" : "Archived",
@@ -311,10 +312,10 @@ export function ContentIdeasTab({
             });
           }}
           onToggleSelected={(iterationId, nextSelected) => {
-            supabase
+            void sendQuietly(() => supabase
               .from("post_iterations")
               .update({ is_selected: nextSelected } as any)
-              .eq("id", iterationId)
+              .eq("id", iterationId), { again: writeResendable })
               .then(() => {
                 qc.invalidateQueries({ queryKey: ["post-iterations", clientId] });
               });

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Section } from "@/components/ui/section";
 import { Loading } from "@/components/ui/loading";
+import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey, type ApiKey, type CreatedKey } from "@/hooks/useApiKeys";
 import { cn } from "@/lib/utils";
+import { sendQuietly } from "@/lib/quietSend";
 
 const SCOPES: Array<{ id: "read" | "demo" | "admin"; label: string; hint: string }> = [
   { id: "read", label: "read", hint: "Every client, report, competitor set, post, schedule and alert the key may see." },
@@ -96,21 +98,25 @@ function CreateKeyDialog({ open, onOpenChange, clientSlugs, onCreated }: { open:
   const [scopes, setScopes] = useState<string[]>(["read"]);
   const [slugs, setSlugs] = useState<string[]>([]);
   const [expires, setExpires] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  /** A key that has not been made yet; the dialog keeps everything chosen. */
+  const [notCreated, setNotCreated] = useState(false);
   const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   const submit = async () => {
-    setError(null);
-    try {
-      const created = await create.mutateAsync({ name: name.trim(), scopes: SCOPES.map((s) => s.id).filter((s) => scopes.includes(s)), company_slugs: slugs, expires_at: expires ? new Date(expires).toISOString() : null });
-      setName("");
-      setScopes(["read"]);
-      setSlugs([]);
-      setExpires("");
-      onCreated(created);
-      onOpenChange(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "The key could not be created.");
+    setNotCreated(false);
+    const input = { name: name.trim(), scopes: SCOPES.map((s) => s.id).filter((s) => scopes.includes(s)), company_slugs: slugs, expires_at: expires ? new Date(expires).toISOString() : null };
+    // A new key each time, so it is sent again only when it never reached the server.
+    const { data: created, error } = await sendQuietly(() => create.mutateAsync(input).then((data) => ({ data, error: null }), (e: unknown) => ({ data: null, error: e })));
+    if (error || !created) {
+      console.warn("[api key] not created yet", error);
+      setNotCreated(true);
+      return;
     }
+    setName("");
+    setScopes(["read"]);
+    setSlugs([]);
+    setExpires("");
+    onCreated(created);
+    onOpenChange(false);
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -162,7 +168,7 @@ function CreateKeyDialog({ open, onOpenChange, clientSlugs, onCreated }: { open:
             <Label htmlFor="api-key-expires">Expires (optional)</Label>
             <Input id="api-key-expires" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} className="max-w-[200px]" />
           </div>
-          {error && <p className="text-[13px] text-red-400">{error}</p>}
+          {notCreated && <p role="status" className="t-secondary">No key yet. Everything above is kept as it is.</p>}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={submit} disabled={!name.trim() || scopes.length === 0 || create.isPending}>Create</Button>
@@ -176,7 +182,7 @@ function CreateKeyDialog({ open, onOpenChange, clientSlugs, onCreated }: { open:
 /** Keys for gOS and other Moburst tools: who holds one, what it may do, and a way to make or revoke one. Admins only. */
 export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
   const { isAdmin } = useAuth();
-  const { data: keys = [], isLoading, error } = useApiKeys(isAdmin);
+  const { data: keys = [], isLoading, isError, error, refetch } = useApiKeys(isAdmin);
   const revoke = useRevokeApiKey();
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreatedKey | null>(null);
@@ -205,8 +211,9 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
         {created && <OneTimeKey created={created} onDone={() => setCreated(null)} />}
         {isLoading ? (
           <Loading label="Loading keys" />
-        ) : error ? (
-          <p className="t-secondary !text-red-400" role="alert">The keys could not be loaded: {error instanceof Error ? error.message : "the API did not answer."}</p>
+        ) : isError ? (
+          // Not the same as having no keys: it keeps loading and tries again on its own.
+          <LoadRetry context="api keys" error={error} label="Loading keys" onRetry={() => refetch()} />
         ) : keys.length === 0 ? (
           <EmptyState compact icon={KeyRound} title="No keys yet" description="Keys for gOS and other Moburst tools are made here." />
         ) : (

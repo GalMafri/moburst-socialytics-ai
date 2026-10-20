@@ -23,7 +23,7 @@ import { clipText } from "@/lib/clipText";
 import { displayCompanyName } from "@/lib/companyName";
 import { useToast } from "@/hooks/use-toast";
 import { PostVisual, usePostPreviews, normalizePlatform, platformLabel } from "@/components/competitive/PostVisual";
-import { describeInvokeError, withQuietRetry } from "@/lib/invokeError";
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { cleanText, formatDate, formatDateTime, formatRange } from "@/lib/display";
 import { fetchOpenTopics } from "@/lib/openTopics";
 import { ChangeCards } from "@/components/competitive/ChangeCards";
@@ -56,6 +56,8 @@ export default function CompetitiveFeed() {
   // So does drafting a post: the draft waits here until it is confirmed.
   /** topic: what the writer is asked to respond to. reason: the plain label the calendar shows for the post. */
   const [pendingDraft, setPendingDraft] = useState<{ topic: string; reason: string; platform: string; alertId?: string; about: string } | null>(null);
+  /** A draft that has not reached the calendar yet; the dialog stays up with it. */
+  const [notDrafted, setNotDrafted] = useState(false);
 
   const { data: client } = useQuery({
     queryKey: ["client", id],
@@ -96,33 +98,42 @@ export default function CompetitiveFeed() {
     enabled: !!id,
   });
 
+  // A refresh spends a RivalIQ request, so it is sent again only when it
+  // never reached the server. The feed is read again either way and shows
+  // the newest pull it has, with its time.
   const refresh = useMutation({
     mutationFn: async () => {
-      const { data, error } = await withQuietRetry(() => supabase.functions.invoke("refresh-competitor-feed", { body: { client_id: id } }));
-      if (error || (data as any)?.error) throw new Error(await describeInvokeError(error, data));
+      const { data, error } = await sendQuietly(() => supabase.functions.invoke("refresh-competitor-feed", { body: { client_id: id } }));
+      if (error || (data as any)?.error) throw error ?? new Error(String((data as any).error));
       return data as any;
     },
     onSuccess: (d: any) => {
-      qc.invalidateQueries({ queryKey: ["competitor-feed", id] });
-      qc.invalidateQueries({ queryKey: ["competitive-alerts", id] });
       toast({ title: "Feed refreshed", description: `${d.posts} posts from the last week, ${d.alerts} shared topic${d.alerts === 1 ? "" : "s"} detected.` });
     },
-    onError: (e: any) => toast({ title: "Could not refresh the feed", description: e.message, variant: "destructive" }),
+    onError: (e: any) => console.warn("[feed refresh] not refreshed yet", e),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["competitor-feed", id] });
+      qc.invalidateQueries({ queryKey: ["competitive-alerts", id] });
+    },
   });
 
   const draft = useMutation({
     mutationFn: async ({ topic, reason, platform, alertId }: { topic: string; reason: string; platform: string; alertId?: string }) => {
-      const { data, error } = await withQuietRetry(() => supabase.functions.invoke("generate-ad-hoc-post", { body: { client_id: id, platform, topic } }));
-      if (error) throw new Error(await describeInvokeError(error, data));
+      // A new post each time, so it is sent again only when it never reached the server.
+      const { data, error } = await sendQuietly(() => supabase.functions.invoke("generate-ad-hoc-post", { body: { client_id: id, platform, topic } }));
       const post = (data as any)?.post;
-      if (!post) throw new Error("The post was not written. Nothing was added to the calendar.");
+      if (error || !post) throw error ?? new Error("generate-ad-hoc-post returned no post");
       const hashtags = Array.isArray(post.hashtags) ? post.hashtags : typeof post.hashtags === "string" ? post.hashtags.split(/[\s,]+/).filter(Boolean) : null;
       // Drafts go to the client's Calendar (today, to be moved), with the topic as the reason.
+      // The row's id is made here, once, so sending the insert again can never add the post twice.
+      const rowId = crypto.randomUUID();
+      const postDate = new Date().toISOString().slice(0, 10);
       // calendar_posts is not in the generated types yet.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: row, error: insErr } = await (supabase.from("calendar_posts" as never) as any).insert({
+      const { error: insErr } = await sendQuietly(() => (supabase.from("calendar_posts" as never) as any).insert({
+        id: rowId,
         client_id: id!,
-        post_date: new Date().toISOString().slice(0, 10),
+        post_date: postDate,
         platform: post.platform || platform,
         format: post.format || null,
         pillar: post.pillar || null,
@@ -134,34 +145,32 @@ export default function CompetitiveFeed() {
         reasons: [{ type: "competitor", label: clipText(reason, 200) }],
         source: "insight",
         raw: post,
-      }).select("id, post_date").single();
-      if (insErr) {
-        console.error("[draft] calendar insert", insErr);
-        throw new Error("The post was written but could not be added to the calendar. Try again.");
-      }
-      if (alertId) await supabase.from("competitive_alerts").update({ status: "drafted" }).eq("id", alertId);
-      return row as { id: string; post_date: string };
+      }), { again: writeResendable });
+      // A second insert of the same id is refused as already there (23505), which means it was added.
+      if (insErr && (insErr as { code?: string }).code !== "23505") throw insErr;
+      if (alertId) await sendQuietly(() => supabase.from("competitive_alerts").update({ status: "drafted" }).eq("id", alertId), { again: writeResendable });
+      return { id: rowId, post_date: postDate };
     },
     onSuccess: (row) => {
-      qc.invalidateQueries({ queryKey: ["competitive-alerts", id] });
-      qc.invalidateQueries({ queryKey: ["calendar-posts", id] });
       const open = () => navigate(`/clients/${id}/calendar?week=${mondayOf(row.post_date)}&post=${row.id}`);
       sonnerToast.success(`Added to ${clientName}'s calendar for today`, { description: "Open it to read the post, move it to its date or change it.", action: { label: "Open the post", onClick: open }, duration: 12000 });
     },
-    onError: (e: any) => toast({ title: "Could not draft the post", description: e.message, variant: "destructive" }),
+    onError: (e: any) => console.warn("[draft] not on the calendar yet", e),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["competitive-alerts", id] });
+      qc.invalidateQueries({ queryKey: ["calendar-posts", id] });
+    },
   });
 
+  // Dismissing repeats safely. The topics are read again either way, so one
+  // that was not dismissed stays on the feed.
   const dismiss = useMutation({
     mutationFn: async (alertId: string) => {
-      const { error } = await supabase.from("competitive_alerts").update({ status: "dismissed" }).eq("id", alertId);
-      if (error) {
-        console.error("[dismiss topic]", error);
-        throw new Error("The topic is still on the feed. Try again in a minute.");
-      }
+      const { error } = await sendQuietly(() => supabase.from("competitive_alerts").update({ status: "dismissed" }).eq("id", alertId), { again: writeResendable });
+      if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["competitive-alerts", id] }),
-    onError: (e: any) =>
-      toast({ title: "Could not dismiss the topic", description: e.message, variant: "destructive" }),
+    onError: (e: any) => console.warn("[dismiss topic] not dismissed yet", e),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["competitive-alerts", id] }),
   });
 
   const payload: any = snapshot?.payload || {};
@@ -221,7 +230,7 @@ export default function CompetitiveFeed() {
         {isLoading ? (
           <Loading label="Loading the feed" />
         ) : feedFailed ? (
-          <LoadRetry context="Could not load the feed" error={feedError} onRetry={() => refetchFeed()} />
+          <LoadRetry context="competitor feed" error={feedError} label="Loading the feed" onRetry={() => refetchFeed()} />
         ) : !snapshot ? (
           <EmptyState
             icon={Rss}
@@ -370,7 +379,7 @@ export default function CompetitiveFeed() {
       />
       <ConfirmDialog
         open={!!pendingDraft}
-        onOpenChange={(o) => !o && setPendingDraft(null)}
+        onOpenChange={(o) => { if (!o) { setPendingDraft(null); setNotDrafted(false); } }}
         title="Draft our take?"
         description={
           <>
@@ -379,13 +388,18 @@ export default function CompetitiveFeed() {
               added to {clientName}'s calendar for today, where it can be moved to its date.
             </p>
             <p>Nothing is published or scheduled.{pendingDraft?.alertId ? " The topic is marked as drafted." : ""}</p>
+            {notDrafted && <p role="status" className="t-secondary">No post yet. Nothing was added to the calendar.</p>}
           </>
         }
         confirmLabel="Draft the post"
         destructive={false}
-        onConfirm={() => {
-          if (pendingDraft) draft.mutate({ topic: pendingDraft.topic, reason: pendingDraft.reason, platform: pendingDraft.platform, alertId: pendingDraft.alertId });
-          setPendingDraft(null);
+        onConfirm={async () => {
+          if (!pendingDraft) return;
+          setNotDrafted(false);
+          // The dialog stays up while the post is written, and stays up if it does not reach the calendar.
+          const added = await draft.mutateAsync({ topic: pendingDraft.topic, reason: pendingDraft.reason, platform: pendingDraft.platform, alertId: pendingDraft.alertId }).then(() => true, () => false);
+          if (added) setPendingDraft(null);
+          else setNotDrafted(true);
         }}
       />
       <ConfirmDialog

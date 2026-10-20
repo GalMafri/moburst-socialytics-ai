@@ -3,10 +3,10 @@ import { formatDate } from "@/lib/display";
 import { useQuery } from "@tanstack/react-query";
 import { Section } from "@/components/ui/section";
 import { Loading } from "@/components/ui/loading";
+import { LoadRetry } from "@/components/ui/load-error";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { describeInvokeError } from "@/lib/invokeError";
-import { useToast } from "@/hooks/use-toast";
+import { invokeResendable, sendQuietly } from "@/lib/quietSend";
 import { CheckCircle2, Loader2, LinkIcon, AlertTriangle } from "lucide-react";
 
 /** The one account the team links, so a person can check they signed in as the right one. */
@@ -25,34 +25,36 @@ type Status = { linked: boolean; account_email: string | null; linked_at: string
  * developer with a console.
  */
 export function HiggsfieldConnection() {
-  const { toast } = useToast();
   const [busy, setBusy] = useState(false);
+  /** A sign-in that has not opened yet; the connection below is as it was. */
+  const [notStarted, setNotStarted] = useState(false);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["higgsfield-status"],
     queryFn: async (): Promise<Status> => {
       const { data, error } = await supabase.functions.invoke("higgsfield-auth", { body: { action: "status" } });
-      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
+      if (error || data?.error) throw error ?? new Error(String(data.error));
       return data as Status;
     },
   });
 
   const connect = async () => {
     setBusy(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("higgsfield-auth", { body: { action: "start" } });
-      if (error || data?.error) throw new Error(await describeInvokeError(error, data));
-      if (!data?.authorize_url) throw new Error("The server did not return a sign-in link.");
-      // Leaves the app. Higgsfield sends the browser back to /settings.
-      window.location.href = data.authorize_url as string;
-    } catch (err) {
+    setNotStarted(false);
+    // Each start replaces the one before, and the browser follows the last
+    // link, so asking again is harmless.
+    const { data, error } = await sendQuietly(
+      () => supabase.functions.invoke("higgsfield-auth", { body: { action: "start" } }),
+      { again: (e) => invokeResendable(e, { idempotent: true }) },
+    );
+    if (error || data?.error || !data?.authorize_url) {
+      console.warn("[higgsfield sign-in] not started yet", error ?? data?.error ?? "no authorize_url");
       setBusy(false);
-      toast({
-        title: "Could not start the sign-in",
-        description: err instanceof Error ? err.message : String(err),
-        variant: "destructive",
-      });
+      setNotStarted(true);
+      return;
     }
+    // Leaves the app. Higgsfield sends the browser back to /settings.
+    window.location.href = data.authorize_url as string;
   };
 
   const linked = !!data?.linked;
@@ -75,11 +77,8 @@ export function HiggsfieldConnection() {
           <Loading label="Checking the saved connection" />
         ) : isError ? (
           // Not the same thing as "not connected": saying so would send
-          // someone to re-link an account that is fine.
-          <p className="t-body flex items-start gap-2 !text-[rgb(248,113,113)]">
-            <AlertTriangle className="h-4 w-4 mt-1 shrink-0" aria-hidden="true" />
-            Could not check the connection. Try again in a moment.
-          </p>
+          // someone to re-link an account that is fine. It keeps checking.
+          <LoadRetry context="higgsfield connection" error={error} label="Checking the saved connection" onRetry={() => refetch()} />
         ) : linked ? (
           <div className="glass-inner p-inner space-y-1.5">
             <p className="t-h4 flex items-center gap-2">
@@ -103,9 +102,11 @@ export function HiggsfieldConnection() {
             <p className="t-secondary">Generation cannot run until someone signs in as {EXPECTED_ACCOUNT}.</p>
           </div>
         )}
+        {notStarted && <p role="status" className="t-secondary">The sign-in has not opened yet. The connection above is unchanged.</p>}
         <p className="t-label">
-          Sign in to higgsfield.ai as {EXPECTED_ACCOUNT} first, in this browser. The sign-in link is good for 15
-          minutes, and signing in again keeps the current connection working until the new one succeeds.
+          Sign in to higgsfield.ai as {EXPECTED_ACCOUNT} first, in this browser, and leave every permission ticked. The
+          sign-in link is good for 15 minutes, and signing in again keeps the current connection working until the new
+          one succeeds.
         </p>
     </Section>
   );

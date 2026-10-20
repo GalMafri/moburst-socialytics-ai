@@ -4,6 +4,7 @@
 // source, like copyWritersUseVoice.test.ts, and fails the build when one
 // prints a raw report status, a raw platform key, an ISO date, a bare
 // browser date, or one of the developer strings that used to reach a screen.
+// It also fails the build when any screen reports a failure (rule 7 below).
 
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "fs";
@@ -17,37 +18,54 @@ const OWNED_ELSEWHERE = [
 ];
 
 /**
- * Screens rebuilt so nothing fails visibly (self-serve design, rule 7, 19 Oct
- * 2026): a request that does not get through is sent again quietly and the
- * screen shows the true state. None of these may report a failure with an
- * error toast, a destructive toast or an alert.
+ * Nothing fails visibly, on any screen (self-serve design, rule 7, 19 Oct
+ * 2026: "i don't want you building anything that will fail and flag the user
+ * it failed"). A person's own request that does not get through is sent
+ * again quietly (src/lib/quietSend.ts) and the screen shows the true state;
+ * a read that did not answer keeps loading and tries again (LoadRetry). No
+ * screen reports a failure with an error toast, a destructive toast, an
+ * alert, or failure copy in anything a person reads. Comments and console
+ * calls are for the team and are not scanned.
  */
-const NOTHING_FAILS_VISIBLY = [
-  "pages/ClientSetup.tsx",
-  "pages/CompetitorReview.tsx",
-  "pages/CompetitiveRun.tsx",
-  "pages/CompetitiveIndex.tsx",
-  "pages/CompetitiveReportView.tsx",
-  "pages/CompetitiveReportHistory.tsx",
-  "pages/RunAnalysis.tsx",
-  "pages/ReportHistory.tsx",
-  "pages/AllReports.tsx",
-  "components/onboarding/",
-  "components/reports/ReportRunStatus.tsx",
-  "components/reports/SchedulePostModal.tsx",
-  "components/reports/CreatePostDesignButton.tsx",
-  "components/reports/CreatePostVideoButton.tsx",
-  "components/reports/CreateAdHocPost.tsx",
-  "components/reports/calendar/CopyEditor.tsx",
-  "components/reports/calendar/PostPanel.tsx",
-  "components/editor/DesignEditor.tsx",
-];
-
 const FAILURE_RULES: Array<[string, RegExp]> = [
   ["an error toast", /\b(?:sonnerToast|toast)\.(?:error|warning)\(/g],
-  ["a destructive toast", /toast\(\{[^}]*variant:\s*["']destructive["']/g],
+  // The toast's object may hold one level of braces (a template's ${...}).
+  ["a destructive toast", /toast\(\{(?:[^{}]|\{[^{}]*\})*variant:\s*["']destructive["']/g],
   ["an alert", /role=["']alert["']/g],
+  ["failure copy", /did not load|Could not load|Try again|Refresh the page|Not available/g],
 ];
+
+/**
+ * The source with its comments and console calls blanked out, kept the same
+ * length and lines so a hit still points at its line. What is left is code,
+ * JSX text and string literals: what can reach a person.
+ */
+function shown(text: string): string {
+  const blank = (s: string) => s.replace(/[^\n]/g, " ");
+  const out = text
+    // Block and JSX comments. Not a glob such as accept="image/*".
+    .replace(/(?<![\w"'`/*])\/\*[\s\S]*?\*\//g, blank)
+    // Line comments. Not the "//" of a URL (after a colon) or of a quoted "//".
+    .replace(/(^|[^:"'`\w/])\/\/[^\n]*/g, (m, lead: string) => lead + blank(m.slice(lead.length)));
+  // console.x( ... ) up to its matching parenthesis, stepping over quoted text.
+  const chars = out.split("");
+  for (const m of out.matchAll(/\bconsole\.\w+\(/g)) {
+    let i = m.index! + m[0].length;
+    let depth = 1;
+    let quote: string | null = null;
+    for (; i < out.length && depth > 0; i++) {
+      const c = out[i];
+      if (quote) {
+        if (c === "\\") i++;
+        else if (c === quote) quote = null;
+      } else if (c === '"' || c === "'" || c === "`") quote = c;
+      else if (c === "(") depth++;
+      else if (c === ")") depth--;
+    }
+    for (let j = m.index!; j < i; j++) if (chars[j] !== "\n") chars[j] = " ";
+  }
+  return chars.join("");
+}
 
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -103,15 +121,41 @@ describe("screens print stored values through the display layer", () => {
     });
   }
 
-  describe("nothing fails visibly on the screens rebuilt for it", () => {
-    const guarded = screens.filter((f) => NOTHING_FAILS_VISIBLY.some((p) => f.path.startsWith(p)));
-    it("guards every one of them", () => {
-      for (const p of NOTHING_FAILS_VISIBLY) expect(guarded.some((f) => f.path.startsWith(p)), p).toBe(true);
+  describe("nothing fails visibly on any screen", () => {
+    const guarded = screens.map((f) => ({ path: f.path, text: shown(f.text) }));
+    it("catches what it guards against, and leaves comments and console calls alone", () => {
+      const caught = (text: string) => FAILURE_RULES.some(([, rule]) => { rule.lastIndex = 0; const hit = rule.test(shown(text)); rule.lastIndex = 0; return hit; });
+      for (const bad of [
+        'toast.error("Upload failed")',
+        'sonnerToast.error(`Failed to save`)',
+        'toast({ title: "Import failed", description: e.message, variant: "destructive" })',
+        'toast({ title: `Not saved: ${name}`, variant: "destructive" })',
+        '<p role="alert">x</p>',
+        '<p>The report did not load.</p>',
+        'description: "Nothing changed. Try again in a minute."',
+        '<EmptyState title="Could not load the feed" />',
+        '"Refresh the page to see its latest status."',
+        '<Badge>Not available</Badge>',
+        // Neither a URL nor a file glob hides what follows it.
+        '<a href="https://example.test/a">Open</a><p>Try again</p>',
+        '<input accept="image/*" />\n<p>Try again</p>\n{/* a note */}',
+      ]) expect(caught(bad), bad).toBe(true);
+      for (const fine of [
+        'toast.success("Saved")',
+        '<p role="status">Not saved yet.</p>',
+        '<Button variant="destructive">',
+        'console.warn("[feed] did not load", e)',
+        'console.error(`Could not load ${what}`, (e as Error).message, { why: "Try again" })',
+        '// Try again quietly; the screen never says it failed',
+        '{/* Refresh the page is never asked of anyone */}',
+        '/* Could not load: LoadRetry keeps loading */',
+      ]) expect(caught(fine), fine).toBe(false);
     });
-    it("catches what it guards against", () => {
-      const caught = (text: string) => FAILURE_RULES.some(([, rule]) => { rule.lastIndex = 0; const hit = rule.test(text); rule.lastIndex = 0; return hit; });
-      for (const bad of ['toast.error("Upload failed")', 'sonnerToast.error(`Failed to save`)', 'toast({ title: "Import failed", description: e.message, variant: "destructive" })', '<p role="alert">x</p>']) expect(caught(bad), bad).toBe(true);
-      for (const fine of ['toast.success("Saved")', '<p role="status">Not saved yet.</p>', '<Button variant="destructive">']) expect(caught(fine), fine).toBe(false);
+    it("blanks comments and console calls without moving a line", () => {
+      const text = 'a // Try again\nconsole.warn("x\n(y")\n<p>z</p>';
+      expect(shown(text).split("\n").length).toBe(text.split("\n").length);
+      expect(shown(text).length).toBe(text.length);
+      expect(shown(text)).toContain("<p>z</p>");
     });
     for (const [what, rule] of FAILURE_RULES) {
       it(`shows no ${what}`, () => {

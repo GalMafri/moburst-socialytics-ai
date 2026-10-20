@@ -9,7 +9,7 @@ import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { describeInvokeError } from "@/lib/invokeError";
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -50,26 +50,33 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
   const [format, setFormat] = useState("auto");
   const [idea, setIdea] = useState(initialIdea ?? "");
   const [busy, setBusy] = useState(false);
+  /** A post that has not reached the calendar yet; the date, platform and idea stay as they are. */
+  const [notAdded, setNotAdded] = useState(false);
+  const ready = !!date && !!platform && !!idea.trim();
 
-  const reset = () => { setDate(defaultDate); setPlatform(""); setFormat("auto"); setIdea(initialIdea ?? ""); };
+  const reset = () => { setDate(defaultDate); setPlatform(""); setFormat("auto"); setIdea(initialIdea ?? ""); setNotAdded(false); };
 
   const create = async () => {
-    if (!date || !platform || !idea.trim()) {
-      toast.error("Choose a date and platform, and describe the idea.");
-      return;
-    }
+    // The button waits for a date, a platform and the idea.
+    if (!ready) return;
     setBusy(true);
+    setNotAdded(false);
     try {
-      const { data, error } = await supabase.functions.invoke("generate-ad-hoc-post", {
+      // A new post each time, so it is sent again only when it never reached the server.
+      const { data, error } = await sendQuietly(() => supabase.functions.invoke("generate-ad-hoc-post", {
         body: { client_id: clientId, platform, topic: idea.trim(), creative_type: format === "auto" ? undefined : format },
-      });
-      if (error || !data?.post) throw new Error(await describeInvokeError(error, data));
+      }));
+      if (error || !data?.post) throw error ?? new Error("generate-ad-hoc-post returned no post");
       const p = data.post;
       const hashtags = Array.isArray(p.hashtags) ? p.hashtags.map(String) : typeof p.hashtags === "string" ? p.hashtags.split(/[\s,]+/).filter(Boolean) : [];
       const { data: auth } = await supabase.auth.getUser();
+      // The row's id is made here, once, so sending the insert again can never add the post twice:
+      // a second insert of the same id is refused as already there (23505), which means it was added.
+      const id = crypto.randomUUID();
       // calendar_posts is not in the generated types yet.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: insertError } = await (supabase.from("calendar_posts" as never) as any).insert({
+      const { error: insertError } = await sendQuietly(() => (supabase.from("calendar_posts" as never) as any).insert({
+        id,
         client_id: clientId,
         post_date: date,
         platform: p.platform || platform,
@@ -85,15 +92,17 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
         report_id: reportId ?? null,
         raw: p,
         created_by: auth?.user?.id ?? null,
-      });
-      if (insertError) throw insertError;
+      }), { again: writeResendable });
+      if (insertError && (insertError as { code?: string }).code !== "23505") throw insertError;
       await qc.invalidateQueries({ queryKey: ["calendar-posts", clientId] });
       toast.success("Post added to the calendar", { action: { label: "Open", onClick: () => window.location.assign(`/clients/${clientId}/calendar?week=${weekOf(date)}`) } });
       setOpen(false);
       reset();
       onCreated?.(date);
     } catch (e) {
-      toast.error("Could not add the post", { description: e instanceof Error ? e.message : "Try again." });
+      // The dialog stays open with everything the person chose.
+      console.warn("[new post] not added yet", e);
+      setNotAdded(true);
     } finally {
       setBusy(false);
     }
@@ -138,10 +147,12 @@ export function NewPostDialog({ clientId, platforms, defaultDate, onCreated, ini
             <Label htmlFor="new-post-idea">Idea</Label>
             <Textarea id="new-post-idea" rows={4} value={idea} onChange={(e) => setIdea(e.target.value)} placeholder="For example: our new guide on measuring visibility in AI answers" />
           </div>
-          <Button className="w-full" onClick={create} disabled={busy}>
+          <Button className="w-full" onClick={create} disabled={busy || !ready}>
             {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
             {busy ? "Writing the post…" : "Add to calendar"}
           </Button>
+          {!ready && !busy && <p className="t-secondary">A date, a platform and the idea are needed to write the post.</p>}
+          {notAdded && <p role="status" className="t-secondary">Not on the calendar yet. The date, platform and idea are kept here.</p>}
         </div>
       </DialogContent>
     </Dialog>

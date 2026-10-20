@@ -25,6 +25,7 @@ import { isActiveClient } from "@/lib/activeClients";
 import { formatDate } from "@/lib/display";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
 import { useAuth } from "@/hooks/useAuth";
 import {
   AlertDialog,
@@ -49,49 +50,47 @@ export function AdminDashboard() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
+  // Each of these repeats safely, so one that does not get through is sent
+  // again quietly. The list is read again either way, so it shows where each
+  // client stands: archived or still active, deleted or still there.
   const archiveMutation = useMutation({
     mutationFn: async (clientId: string) => {
-      const { error } = await supabase
+      const { error } = await sendQuietly(() => supabase
         .from("clients")
         .update({ archived_at: new Date().toISOString() } as any)
-        .eq("id", clientId);
+        .eq("id", clientId), { again: writeResendable });
       if (error) throw error;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
-      toast.success("Client archived");
-    },
-    onError: (err: any) => { console.error("[archive client]", err); toast.error("The client was not archived. Try again in a minute."); },
+    onSuccess: () => toast.success("Client archived"),
+    onError: (err: any) => console.warn("[archive client] not archived yet", err),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 
   const restoreMutation = useMutation({
     mutationFn: async (clientId: string) => {
-      const { error } = await supabase
+      const { error } = await sendQuietly(() => supabase
         .from("clients")
         .update({ archived_at: null } as any)
-        .eq("id", clientId);
+        .eq("id", clientId), { again: writeResendable });
       if (error) throw error;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
-      toast.success("Client restored");
-    },
-    onError: (err: any) => { console.error("[restore client]", err); toast.error("The client was not restored. Try again in a minute."); },
+    onSuccess: () => toast.success("Client restored"),
+    onError: (err: any) => console.warn("[restore client] not restored yet", err),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 
+  // delete-client deletes whatever is left of the client, so asking twice deletes it once.
   const deleteMutation = useMutation({
     mutationFn: async (clientId: string) => {
-      const { data, error } = await supabase.functions.invoke("delete-client", {
+      const { data, error } = await sendQuietly(() => supabase.functions.invoke("delete-client", {
         body: { client_id: clientId },
-      });
+      }), { again: (e) => invokeResendable(e, { idempotent: true }) });
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
-      toast.success("Client permanently deleted");
-    },
-    onError: (err: any) => { console.error("[delete client]", err); toast.error("The client was not deleted. Try again in a minute."); },
+    onSuccess: () => toast.success("Client permanently deleted"),
+    onError: (err: any) => console.warn("[delete client] not deleted yet", err),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 
   // Realtime: listen for any report changes to refresh dashboard
@@ -142,7 +141,7 @@ export function AdminDashboard() {
         title="Clients"
         description={
           clientsFailed
-            ? "The client list could not be loaded, so nothing below is the real roster."
+            ? "Loading the client list."
             : `${active.length} active ${active.length === 1 ? "client" : "clients"}, each with its setup, competitors and reports.`
         }
         actions={
@@ -178,7 +177,7 @@ export function AdminDashboard() {
 
       {clientsFailed ? (
         <LoadRetry
-          context="Could not load the clients"
+          context="clients"
           error={clientsError}
           onRetry={() => refetchClients()}
         />

@@ -20,6 +20,7 @@ import {
 import { Save, Type, Download, Play, Pause, Plus, Trash2, GripVertical, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeResendable, sendQuietly, uploadQuietly } from "@/lib/quietSend";
 
 export interface VideoEditData {
   overlays: TextOverlay[];
@@ -196,6 +197,8 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
   const selectedOv = overlays.find((o) => o.id === selectedOverlay);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processStatus, setProcessStatus] = useState("");
+  /** An edited video that has not been made and stored yet; the trim and text stay as they are. */
+  const [notSaved, setNotSaved] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const fmt = (sec: number) => {
@@ -229,7 +232,13 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
     }
   };
 
-  // Process video: download as blob → canvas+MediaRecorder → upload
+  // Process video: download as blob → canvas+MediaRecorder → upload.
+  // An edited video that is not made and stored is not saved: the trimmer
+  // stays open with the edits, and the post keeps the video it had.
+  const notSavedYet = (why: string, detail?: unknown) => {
+    console.warn(`[video edit] not saved yet: ${why}`, detail ?? "");
+    setNotSaved(true);
+  };
   const handleSave = async () => {
     const edits: VideoEditData = { overlays, trimStart, trimEnd };
     const hasOverlays = overlays.some((o) => o.text.trim());
@@ -242,6 +251,7 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
     }
 
     setIsProcessing(true);
+    setNotSaved(false);
 
     try {
       // Step 1: Get a CORS-free video blob
@@ -254,12 +264,12 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
         if (res.ok) videoBlob = await res.blob();
       } catch {}
 
-      // Try proxy
+      // Try proxy. Fetching the same file again is harmless, so it is asked again quietly.
       if (!videoBlob) {
         try {
-          const { data } = await supabase.functions.invoke("proxy-media", {
+          const { data } = await sendQuietly(() => supabase.functions.invoke("proxy-media", {
             body: { url: videoUrl },
-          });
+          }), { again: (e) => invokeResendable(e, { idempotent: true }) });
           if (data?.data_url) {
             const res = await fetch(data.data_url);
             videoBlob = await res.blob();
@@ -268,8 +278,7 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
       }
 
       if (!videoBlob) {
-        toast.error("Couldn't download video for processing. Saving edits as metadata only.");
-        onSave(videoUrl, edits);
+        notSavedYet("the video could not be downloaded for processing");
         return;
       }
 
@@ -325,10 +334,9 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
       try {
         ctx.drawImage(processingVideo, 0, 0, vw, vh);
         canvas.toDataURL();
-      } catch {
+      } catch (e) {
         URL.revokeObjectURL(blobUrl);
-        toast.error("Browser blocked video processing. Saving edits as metadata only.");
-        onSave(videoUrl, edits);
+        notSavedYet("the browser blocked drawing the video", e);
         return;
       }
 
@@ -356,40 +364,32 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
       URL.revokeObjectURL(blobUrl);
 
       if (outputBlob.size < 100) {
-        toast.error("Processing produced empty video. Saving edits as metadata only.");
-        onSave(videoUrl, edits);
+        notSavedYet("processing produced an empty video", outputBlob.size);
         return;
       }
 
-      // Step 5: Upload directly to Supabase storage (no edge function, no size limits)
+      // Step 5: Upload directly to Supabase storage (no edge function, no size limits).
+      // The path is made once, with upsert, so sending the same file again writes the same object.
       setProcessStatus("Uploading...");
-      let finalUrl: string;
       const storagePath = `${clientId || "unknown"}/${Date.now()}-edited-video.webm`;
-      try {
-        const { error: uploadErr } = await supabase.storage
-          .from("generated-media")
-          .upload(storagePath, outputBlob, { contentType: "video/webm", upsert: true });
-
-        if (uploadErr) throw uploadErr;
-
-        const { data: urlData } = supabase.storage
-          .from("generated-media")
-          .getPublicUrl(storagePath);
-
-        finalUrl = urlData.publicUrl;
-        console.log("Edited video uploaded:", finalUrl);
-      } catch (uploadErr: any) {
-        console.error("Direct storage upload failed:", uploadErr);
-        // Last resort: blob URL (won't persist but works for this session)
-        finalUrl = URL.createObjectURL(outputBlob);
+      const { error: uploadErr } = await uploadQuietly(() => supabase.storage
+        .from("generated-media")
+        .upload(storagePath, outputBlob, { contentType: "video/webm", upsert: true }));
+      if (uploadErr) {
+        // A video kept only in this browser is not saved; the edits stay here instead.
+        notSavedYet("the edited video was not uploaded", uploadErr);
+        return;
       }
+      const { data: urlData } = supabase.storage
+        .from("generated-media")
+        .getPublicUrl(storagePath);
+      const finalUrl = urlData.publicUrl;
+      console.log("Edited video uploaded:", finalUrl);
 
       toast.success(`Video processed! (${(outputBlob.size / 1024 / 1024).toFixed(1)}MB)`);
       onSave(finalUrl, edits);
     } catch (err: any) {
-      console.error("Video save error:", err);
-      toast.error("Processing failed. Saving edits as metadata only.");
-      onSave(videoUrl, { overlays, trimStart, trimEnd });
+      notSavedYet("processing stopped", err);
     } finally {
       setIsProcessing(false);
       setProcessStatus("");
@@ -647,6 +647,9 @@ export function VideoTrimmer({ videoUrl, clientId, initialEdits, onSave, onClose
               <Loader2 className="h-4 w-4 animate-spin text-primary" />
               <span className="text-sm text-primary">{processStatus}</span>
             </div>
+          )}
+          {notSaved && !isProcessing && (
+            <p role="status" className="t-secondary">The edited video is not saved yet. Your trim and text are kept here, and the post keeps its current video.</p>
           )}
         </div>
 

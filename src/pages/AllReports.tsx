@@ -139,7 +139,7 @@ export default function AllReports() {
                 {isLoading ? (
                   <Loading label="Loading reports" />
                 ) : isError ? (
-                  <LoadRetry context="Could not load the reports" error={error} onRetry={() => refetch()} />
+                  <LoadRetry context="reports" error={error} onRetry={() => refetch()} />
                 ) : listedRuns("monthly", reports?.slice(0, 50), viewer).length > 0 ? (
                   <Table>
                     <TableHeader>
@@ -210,7 +210,7 @@ export default function AllReports() {
                 {competitiveLoading ? (
                   <Loading label="Loading competitive analyses" />
                 ) : competitiveFailed ? (
-                  <LoadRetry context="Could not load competitive analyses" error={competitiveError} onRetry={() => refetchCompetitive()} />
+                  <LoadRetry context="competitive analyses" error={competitiveError} onRetry={() => refetchCompetitive()} />
                 ) : listedRuns("competitive", competitive?.slice(0, 50), viewer).length > 0 ? (
                   <Table>
                     <TableHeader>

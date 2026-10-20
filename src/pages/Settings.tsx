@@ -14,21 +14,7 @@ import { HubCompanySync } from "@/components/HubCompanySync";
 import { HiggsfieldConnection } from "@/components/settings/HiggsfieldConnection";
 import { ApiAccessCard } from "@/components/settings/ApiAccessCard";
 import { fetchActiveClients } from "@/lib/activeClients";
-
-/**
- * Why a sign-in did not take. Higgsfield's callback cannot render a page of
- * its own — Supabase serves html from *.supabase.co as plain text — so it
- * redirects here with a short code and this is where it becomes a sentence.
- */
-const HIGGSFIELD_REASONS: Record<string, string> = {
-  refused: "Higgsfield refused the sign-in. Nothing was saved.",
-  bad_state: "That sign-in link was not the one this app started. Start again from here.",
-  expired: "That sign-in link had expired. They last 15 minutes; start again from here.",
-  no_refresh_token:
-    "Higgsfield returned a session but no way to stay signed in, so nothing was saved. Start again and leave every permission ticked.",
-  exchange_failed: "Higgsfield would not complete the sign-in. Nothing was saved. Start again from here.",
-  not_saved: "The sign-in worked but the connection could not be stored. Start again from here.",
-};
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 
 export default function Settings() {
   const { isAdmin } = useAuth();
@@ -37,20 +23,18 @@ export default function Settings() {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Higgsfield's callback lands back here with the outcome of a sign-in.
+  // Higgsfield's callback lands back here with the outcome of a sign-in
+  // (its own page cannot render: Supabase serves html from *.supabase.co as
+  // plain text). Either way the Higgsfield panel is read again and shows the
+  // connection as it is; why a sign-in did not take is for the team's logs.
   const higgsfieldResult = searchParams.get("higgsfield");
   useEffect(() => {
     if (!higgsfieldResult) return;
+    queryClient.invalidateQueries({ queryKey: ["higgsfield-status"] });
     if (higgsfieldResult === "linked") {
-      queryClient.invalidateQueries({ queryKey: ["higgsfield-status"] });
       toast({ title: "Higgsfield connected" });
     } else {
-      const reason = searchParams.get("reason") || "";
-      toast({
-        title: "Higgsfield is not connected",
-        description: HIGGSFIELD_REASONS[reason] || "The sign-in did not finish. Nothing was saved.",
-        variant: "destructive",
-      });
+      console.warn("[higgsfield sign-in] not linked", searchParams.get("reason") || "no reason given");
     }
     // Clear it so a refresh does not repeat the message.
     const next = new URLSearchParams(searchParams);
@@ -86,25 +70,22 @@ export default function Settings() {
     }
   }, [settings]);
 
+  // One row per key, written as an upsert on the key, so a save that does
+  // not get through is sent again quietly and can never be stored twice.
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const existing = settings?.find((s: { key: string; value: string }) => s.key === "n8n_webhook_url");
-      if (existing) {
-        const { error } = await supabase.from("app_settings").update({ value: webhookUrl }).eq("key", "n8n_webhook_url");
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("app_settings").insert({ key: "n8n_webhook_url", value: webhookUrl });
-        if (error) throw error;
-      }
+      const { error } = await sendQuietly(
+        () => supabase.from("app_settings").upsert({ key: "n8n_webhook_url", value: webhookUrl }, { onConflict: "key" }),
+        { again: writeResendable },
+      );
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["app-settings"] });
       toast({ title: "Settings saved" });
     },
-    onError: (err: Error) => {
-      console.error("[settings save]", err);
-      toast({ title: "The settings were not saved", description: "Nothing changed. Try again in a minute.", variant: "destructive" });
-    },
+    // The field keeps what was typed and says it is not saved yet.
+    onError: (err: Error) => console.warn("[settings save] not saved yet", err),
   });
 
   if (!isAdmin) return <Navigate to="/" replace />;
@@ -133,6 +114,7 @@ export default function Settings() {
           {saveMutation.isPending ? <Loader2 className="animate-spin" /> : <Save />}
           Save settings
         </Button>
+        {saveMutation.isError && <p role="status" className="t-secondary">Not saved yet. The URL is kept here.</p>}
       </Section>
 
       <HubCompanySync />

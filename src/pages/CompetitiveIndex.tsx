@@ -75,7 +75,7 @@ export default function CompetitiveIndex() {
         ) : isError ? (
           // A failed read used to render as "No clients yet", which reads as a
           // fact about the account rather than a connection problem.
-          <LoadRetry context="Could not load the competitive overview" error={error} onRetry={() => refetch()} />
+          <LoadRetry context="competitive overview" error={error} onRetry={() => refetch()} />
         ) : !data?.length ? (
           <EmptyState icon={Crosshair} title="No clients yet" />
         ) : (

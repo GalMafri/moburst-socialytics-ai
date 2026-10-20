@@ -34,7 +34,10 @@ export function ExportPdfButton({
         description: "Save as PDF from the print dialog, then close the tab when done.",
       });
     } catch (err: any) {
-      toast({ title: "Export failed", description: err.message, variant: "destructive" });
+      // The print tab did not open (most often a blocked pop-up, which the
+      // browser itself points out). The button is ready again; the error's
+      // own text is for the team.
+      console.warn("[export pdf] not opened", err);
     } finally {
       setExporting(false);
     }

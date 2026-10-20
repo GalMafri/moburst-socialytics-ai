@@ -108,12 +108,14 @@ it('a report that did not load keeps loading quietly and tries again, instead of
   expect(document.body.textContent).not.toMatch(/permission denied|42501/);
 });
 
-it('stops polling a run past the watch limit and says so plainly', async () => {
+it('past the watch limit checks a run once a minute and never asks for a reload', async () => {
   fixture.staff = true; fixture.status = 'running'; fixture.data = {};
   fixture.createdAt = new Date(Date.now() - (WATCH_LIMIT_MINUTES + 1) * 60000).toISOString();
   mount(<CompetitiveReportView />); await tick(20);
-  expect(screen.getByText(/stopped checking on its own/)).toBeInTheDocument();
+  expect(screen.getByText(/taking longer than usual\. This page keeps checking/)).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(/refresh|reload|stopped checking/i);
   const reads = fixture.reads; await tick(30000); expect(fixture.reads).toBe(reads);
+  await tick(31000); expect(fixture.reads).toBeGreaterThan(reads);
 });
 
 it('keeps polling a run inside the limit', async () => {

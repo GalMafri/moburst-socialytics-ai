@@ -69,7 +69,7 @@ export function CompetitiveSnapshot({
   const nextRun = useNextRun(clientId, "competitive", !isLoading && !latest);
 
   if (isLoading) return <Loading label="Loading competitive analysis" />;
-  if (isError) return <LoadRetry context="The competitive analysis did not load" error={error} onRetry={() => refetch()} />;
+  if (isError) return <LoadRetry context="competitive snapshot" error={error} onRetry={() => refetch()} />;
 
   if (!latest) {
     // What exists: when the first analysis runs, if one is scheduled. Never a setup step.

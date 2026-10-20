@@ -635,7 +635,7 @@ export default function CompetitorReview() {
   if (setsFailed) {
     return (
       <AppLayout title={`Competitors: ${client.name}`} description="The three closest competitors, chosen automatically. Change them any time.">
-        <LoadRetry context="Could not load the competitor selection" error={setsError} onRetry={() => refetchSets()} />
+        <LoadRetry context="competitor selection" error={setsError} onRetry={() => refetchSets()} />
       </AppLayout>
     );
   }
@@ -1039,7 +1039,7 @@ export default function CompetitorReview() {
               })}
           </Section>
         ) : competitorsFailed ? (
-          <LoadRetry context="Could not load the competitors" error={competitorsError} onRetry={() => refetchCompetitors()} />
+          <LoadRetry context="competitors" error={competitorsError} onRetry={() => refetchCompetitors()} />
         ) : currentSet && competitorsLoading ? (
           // A set exists and its competitors are still arriving. Saying "no
           // competitor set yet" here told people to start over on a set that

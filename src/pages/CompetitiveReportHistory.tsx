@@ -78,7 +78,7 @@ export default function CompetitiveReportHistory() {
               // Not an empty state. "No competitive analyses yet" asserts
               // something about the data on the strength of a request that
               // never answered, and the runs are almost certainly still there.
-              <LoadRetry context="Could not load the run history" error={error} onRetry={() => refetch()} />
+              <LoadRetry context="competitive run history" error={error} onRetry={() => refetch()} />
             ) : listedRuns("competitive", reports, { isStaff: isMoburstStaff }).length > 0 ? (
               <Table>
                 <TableHeader>

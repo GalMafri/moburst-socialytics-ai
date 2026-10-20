@@ -58,7 +58,7 @@ export default function ReportHistory() {
               // Never the empty state here. "No reports yet" tells a client
               // their work does not exist, on the strength of a request that
               // never answered.
-              <LoadRetry context="Could not load the reports" error={error} onRetry={() => refetch()} />
+              <LoadRetry context="reports" error={error} onRetry={() => refetch()} />
             ) : listedRuns("monthly", reports, { isStaff: isMoburstStaff }).length > 0 ? (
               <Table>
                 <TableHeader>

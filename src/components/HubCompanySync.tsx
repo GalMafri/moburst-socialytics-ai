@@ -5,11 +5,13 @@ import { getHubToken } from "@/utils/hubAuth";
 import { fetchActiveClients } from "@/lib/activeClients";
 import { Section } from "@/components/ui/section";
 import { Loading } from "@/components/ui/loading";
+import { LoadRetry } from "@/components/ui/load-error";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { Copy, Check, Pencil, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
 
 // Admin-only panel. Shows both sides of the mapping:
@@ -35,6 +37,9 @@ export function HubCompanySync() {
   const [editingValue, setEditingValue] = useState("");
   const [copied, setCopied] = useState(false);
 
+  // The portal hands its sign-in over only when Socialytics is opened from it.
+  const hubToken = getHubToken();
+
   const { data: clients, isLoading: clientsLoading } = useQuery({
     queryKey: ["clients-hub-sync"],
     queryFn: async () => {
@@ -44,33 +49,34 @@ export function HubCompanySync() {
   });
 
   const {
-    data: hubCompanies,
+    data: hub,
     isLoading: hubLoading,
+    isError: hubFailed,
     error: hubError,
     refetch: refetchHub,
   } = useQuery({
     queryKey: ["hub-companies"],
-    queryFn: async () => {
-      const token = getHubToken();
-      if (!token) throw new Error("Open Socialytics from the Moburst portal to see the portal's company list.");
+    enabled: !!hubToken,
+    queryFn: async (): Promise<{ companies: HubCompany[]; adminOnly: boolean }> => {
       const res = await fetch(`${HUB_BACKEND_URL}/api/companies`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${getHubToken()}` },
       });
-      if (!res.ok) {
-        console.error("[hub companies]", res.status);
-        throw new Error(res.status === 401 || res.status === 403 ? "The portal's company list is open to portal admins only." : "The portal's company list did not load. Reload the page to try again.");
-      }
-      return (await res.json()) as HubCompany[];
+      // The list is open to portal admins only; for everyone else that is the answer, not a load to try again.
+      if (res.status === 401 || res.status === 403) return { companies: [], adminOnly: true };
+      if (!res.ok) throw new Error(`hub companies ${res.status}`);
+      return { companies: (await res.json()) as HubCompany[], adminOnly: false };
     },
     retry: false,
   });
+  const hubCompanies = hub && !hub.adminOnly ? hub.companies : undefined;
 
+  // Setting a name repeats safely, so a save that does not get through is sent again quietly.
   const updateMutation = useMutation({
     mutationFn: async ({ id, hub_company_name }: { id: string; hub_company_name: string }) => {
-      const { error } = await supabase
+      const { error } = await sendQuietly(() => supabase
         .from("clients")
         .update({ hub_company_name: hub_company_name || null })
-        .eq("id", id);
+        .eq("id", id), { again: writeResendable });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -78,10 +84,8 @@ export function HubCompanySync() {
       setEditingId(null);
       toast({ title: "Hub company name updated" });
     },
-    onError: (err: Error) => {
-      console.error("[hub company name]", err);
-      toast({ title: "The company name was not saved", description: "Nothing changed. Try again in a minute.", variant: "destructive" });
-    },
+    // The editor stays open with the typed name and says it is not saved yet.
+    onError: (err: Error) => console.warn("[hub company name] not saved yet", err),
   });
 
   const hubCompanySet = useMemo(
@@ -119,7 +123,7 @@ export function HubCompanySync() {
       title="Hub company mapping"
       description="Client users see the clients whose Hub company matches their own."
       action={
-        <Button variant="outline" size="sm" onClick={() => refetchHub()} disabled={hubLoading}>
+        <Button variant="outline" size="sm" onClick={() => refetchHub()} disabled={!hubToken || hubLoading}>
           <RefreshCw className={hubLoading ? "animate-spin" : ""} />
           Reload Hub companies
         </Button>
@@ -133,11 +137,12 @@ export function HubCompanySync() {
               {hubCompanies?.length ?? 0} from Hub
             </Badge>
           </div>
-          {hubError ? (
-            <p className="t-label !text-[rgb(248,113,113)] flex items-center gap-1.5">
-              <AlertCircle className="h-3.5 w-3.5" aria-hidden />
-              {(hubError as Error).message}
-            </p>
+          {!hubToken ? (
+            <p className="t-secondary">The portal's company list shows here when Socialytics is opened from the Moburst portal.</p>
+          ) : hub?.adminOnly ? (
+            <p className="t-secondary">The portal's company list is open to portal admins only.</p>
+          ) : hubFailed ? (
+            <LoadRetry context="hub companies" error={hubError} label="Loading from the Hub" onRetry={() => refetchHub()} />
           ) : hubLoading ? (
             <Loading label="Loading from the Hub" />
           ) : (
@@ -225,9 +230,12 @@ export function HubCompanySync() {
                           >
                             Save
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
+                          <Button size="sm" variant="ghost" onClick={() => { updateMutation.reset(); setEditingId(null); }}>
                             Cancel
                           </Button>
+                          {updateMutation.isError && updateMutation.variables?.id === c.id && (
+                            <span role="status" className="t-secondary">Not saved yet. The name is kept here.</span>
+                          )}
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
@@ -251,6 +259,7 @@ export function HubCompanySync() {
                             className="shrink-0"
                             aria-label={`Edit the hub company name for ${c.name}`}
                             onClick={() => {
+                              updateMutation.reset();
                               setEditingId(c.id);
                               setEditingValue(c.hub_company_name || c.name);
                             }}

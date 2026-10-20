@@ -122,7 +122,7 @@ export default function ClientCalendar() {
       {client.isLoading || posts.isLoading || plans.isLoading ? (
         <Loading label="Loading the calendar" />
       ) : client.isError || posts.isError || plans.isError ? (
-        <LoadRetry context="Could not load the calendar" error={client.error || posts.error || plans.error} onRetry={() => { void client.refetch(); refresh(); }} />
+        <LoadRetry context="calendar" error={client.error || posts.error || plans.error} onRetry={() => { void client.refetch(); refresh(); }} />
       ) : (
         <div className="space-y-section">
           <WeekNav week={week} thisWeek={thisWeek} count={inWeek.length} onGo={goTo}>

@@ -78,7 +78,7 @@ export default function CalendarIndex() {
       {clients.isLoading || posts.isLoading ? (
         <Loading label="Loading the calendar" />
       ) : clients.isError || posts.isError ? (
-        <LoadRetry context="Could not load the calendar" error={clients.error || posts.error} onRetry={() => { void clients.refetch(); void posts.refetch(); }} />
+        <LoadRetry context="calendar" error={clients.error || posts.error} onRetry={() => { void clients.refetch(); void posts.refetch(); }} />
       ) : (
         <div className="space-y-section">
           <WeekNav week={week} thisWeek={thisWeek} count={weekPosts.length} onGo={goTo} />

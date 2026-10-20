@@ -90,6 +90,8 @@ type Company = Bucket & {
 
 const EMPTY: Bucket = { post_count: 0, cadence_per_week: 0, engagement_avg: 0, engagement_rate_avg: 0, impressions_avg: 0, views_total: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, top_hashtags: [], media_type_mix: [], top_posts: [] };
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+/** How often a run past the watch limit is checked: it should be closed by now, so once a minute is plenty. */
+const LATE_RUN_CHECK_MS = 60_000;
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i));
 /** Heat and bar colors come from the theme tokens: the lime accent, and the second chart color for recommendations. */
 const ACCENT = "--primary";
@@ -245,9 +247,14 @@ export default function CompetitiveReportView() {
       return data;
     },
     enabled: !!reportId,
-    // Polls a running report, but not for ever: past the watch limit the
-    // abandoned-run sweep should have closed it, and the page says so.
-    refetchInterval: (query) => watchInterval(query.state.data?.status === "running", query.state.data?.created_at, 5000),
+    // Polls a running report every 5 seconds inside the watch limit. Past it
+    // the abandoned-run sweep should have closed the run, so the page checks
+    // once a minute and shows where the run stands when the sweep has acted;
+    // a person is never asked to reload.
+    refetchInterval: (query) => {
+      const running = query.state.data?.status === "running";
+      return watchInterval(running, query.state.data?.created_at, 5000) || (running ? LATE_RUN_CHECK_MS : false);
+    },
     refetchIntervalInBackground: true,
   });
 
@@ -327,7 +334,7 @@ export default function CompetitiveReportView() {
   if (isError) {
     return (
       <AppLayout>
-        <LoadRetry context="This report did not load" error={reportError} onRetry={() => refetch()} />
+        <LoadRetry context="competitive report" error={reportError} onRetry={() => refetch()} />
       </AppLayout>
     );
   }
@@ -349,7 +356,7 @@ export default function CompetitiveReportView() {
     <Card><CardContent className="space-y-3">
     <Loading label="Competitive analysis in progress" />
     {watchExpired(report.created_at, now) ? (
-      <p className="t-secondary" role="status">This analysis is taking longer than usual, so this page has stopped checking on its own. Refresh the page to see its latest status.</p>
+      <p className="t-secondary" role="status">This analysis is taking longer than usual. This page keeps checking and shows it here when it is ready.</p>
     ) : (
       <p className="t-secondary">Allow up to 90 minutes. This page updates automatically when the report is ready.</p>
     )}

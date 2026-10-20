@@ -106,7 +106,9 @@ export default function Analytics() {
     queryKey: ["sprout-analytics", id, viewWindow?.start, viewWindow?.end],
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke("sprout-analytics", { body: { client_id: id, start: viewWindow!.start, end: viewWindow!.end } });
-      if (error) throw new Error((error as any)?.message || "Could not load Sprout data");
+      // A client with no Sprout profiles has no live figures: that is its state, not a load to try again.
+      if (noSproutProfiles(error)) return null;
+      if (error) throw error;
       if ((data as any)?.error) throw new Error((data as any).error);
       return data as any;
     },
@@ -132,7 +134,8 @@ export default function Analytics() {
       const chunks: any[] = [];
       for (const w of chunkWindow(allTimeWindow!)) {
         const { data, error } = await supabase.functions.invoke("sprout-analytics", { body: { client_id: id, start: w.start, end: w.end } });
-        if (error) throw new Error((error as any)?.message || "Could not load Sprout data");
+        if (noSproutProfiles(error)) return null;
+        if (error) throw error;
         if ((data as any)?.error) throw new Error((data as any).error);
         chunks.push(data);
       }
@@ -387,7 +390,7 @@ export default function Analytics() {
           // "No completed reports yet" would be a claim about this client's
           // history made on the strength of a request that never answered.
           <LoadRetry
-            context="Could not load this client's reports"
+            context="client reports"
             error={reportsError}
             onRetry={() => refetchReports()}
           />
@@ -420,6 +423,7 @@ export default function Analytics() {
                     data={liveData}
                     isLoading={liveQuery.isLoading}
                     error={liveQuery.error as Error | null}
+                    onRetry={() => liveQuery.refetch()}
                     rangeLabel={rangeLabel}
                     fmtVal={fmtVal}
                     idPrefix="live"
@@ -430,6 +434,7 @@ export default function Analytics() {
                     data={allTimeQuery.data}
                     isLoading={allTimeQuery.isLoading}
                     error={allTimeQuery.error as Error | null}
+                    onRetry={() => allTimeQuery.refetch()}
                     rangeLabel={`All time · ${formatRange(allTimeWindow)}`}
                     fmtVal={fmtVal}
                   />
@@ -842,6 +847,10 @@ export default function Analytics() {
 
 /* ─── All-time helpers: split a long window into ≤366-day chunks and add the answers up ─── */
 const SPROUT_METRIC_KEYS = ["impressions", "reactions", "post_link_clicks", "video_views", "comments", "shares"] as const;
+/** sprout-analytics answers 422 when no Sprout profile is assigned to the client (it has no live figures). */
+function noSproutProfiles(error: unknown): boolean {
+  return (error as { context?: { status?: unknown } } | null)?.context?.status === 422;
+}
 function chunkWindow(w: DateRange, maxDays = 366): DateRange[] {
   const out: DateRange[] = [];
   let s = new Date(`${w.start}T00:00:00Z`);
@@ -922,6 +931,7 @@ function LiveSproutSection({
   data,
   isLoading,
   error,
+  onRetry,
   rangeLabel,
   fmtVal,
   idPrefix,
@@ -929,6 +939,8 @@ function LiveSproutSection({
   data: any;
   isLoading: boolean;
   error: Error | null;
+  /** Asks Sprout again; a load that did not answer keeps loading and tries again on its own. */
+  onRetry: () => unknown;
   rangeLabel: string;
   fmtVal: (v: number) => string;
   /** This block renders twice on the page (window and all-time), so its
@@ -938,16 +950,7 @@ function LiveSproutSection({
   const posts: any[] = data?.top_posts || [];
   const { previews } = usePostPreviews(posts.map((p) => p.permalink));
   if (isLoading) return <Loading label={`Loading Sprout data for ${rangeLabel}`} />;
-  if (error) {
-    return (
-      <EmptyState
-        compact
-        icon={BarChart3}
-        title="Live figures for this window did not load"
-        description="The report figures below are unaffected."
-      />
-    );
-  }
+  if (error) return <LoadRetry context="live Sprout figures" error={error} label={`Loading Sprout data for ${rangeLabel}`} onRetry={onRetry} />;
   if (!data) return null;
   const t = data.totals || {};
   const ch = data.changes || {};

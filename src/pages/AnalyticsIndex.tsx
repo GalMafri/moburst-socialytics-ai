@@ -37,7 +37,7 @@ export default function AnalyticsIndex() {
         {isLoading ? (
           <Loading label="Loading clients" />
         ) : isError ? (
-          <LoadRetry context="Could not load the clients" error={error} onRetry={() => refetch()} />
+          <LoadRetry context="clients" error={error} onRetry={() => refetch()} />
         ) : !clients?.length ? (
           <EmptyState icon={BarChart3} title="No clients yet" />
         ) : (

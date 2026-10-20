@@ -11,7 +11,7 @@ import { useState } from "react";
 import { Loader2, Pencil, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { describeInvokeError } from "@/lib/invokeError";
+import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -28,7 +28,9 @@ export function SuggestionEditor({ reportId, originalGap, shown, edited, onSave,
   /** The suggestion as it is shown now (with any earlier edit). */
   shown: Fields;
   edited: boolean;
+  /** Writes the edit to the suggestion's row; the write repeats safely, so one that does not get through is sent again. */
   onSave: (edit: SuggestionEdit, feedback: string | null) => Promise<void>;
+  /** Takes the edit off the suggestion's row; repeats safely too. */
   onReset: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -37,53 +39,64 @@ export function SuggestionEditor({ reportId, originalGap, shown, edited, onSave,
   const [usedFeedback, setUsedFeedback] = useState<string | null>(null);
   const [rewriting, setRewriting] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** What has not gone through yet; the fields keep what the person has. */
+  const [pending, setPending] = useState<"rewrite" | "save" | "reset" | null>(null);
 
-  const start = () => { setFields(shown); setFeedback(""); setUsedFeedback(null); setOpen(true); };
+  const start = () => { setFields(shown); setFeedback(""); setUsedFeedback(null); setPending(null); setOpen(true); };
   const set = (k: keyof Fields) => (v: string) => setFields((f) => ({ ...f, [k]: v }));
+  /** The suggestion and the proposed test both need text; Save waits for them. */
+  const complete = !!fields.gap.trim() && !!fields.suggested_play.trim();
+
+  // A write the editor was handed, as a reply sendQuietly can send again.
+  const asReply = (write: () => Promise<void>) => () => write().then(() => ({ error: null }), (error: unknown) => ({ error }));
 
   const rewrite = async () => {
-    if (!feedback.trim()) { toast.error("Write what should change first."); return; }
+    // The button waits for feedback.
+    if (!feedback.trim()) return;
     setRewriting(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("revise-suggestion", {
-        body: { report_id: reportId, original_gap: originalGap, current: fields, feedback: feedback.trim() },
-      });
-      if (error || !data?.revision) throw new Error(await describeInvokeError(error, data));
-      setFields(data.revision);
-      setUsedFeedback(feedback.trim());
-      toast.success("Rewritten from your feedback. Review it, then save.");
-    } catch (e) {
-      toast.error("Could not rewrite it", { description: e instanceof Error ? e.message : "Try again, or edit it by hand." });
-    } finally {
-      setRewriting(false);
+    setPending(null);
+    // A new rewrite each time, so it is sent again only when it never reached the server.
+    const { data, error } = await sendQuietly(() => supabase.functions.invoke("revise-suggestion", {
+      body: { report_id: reportId, original_gap: originalGap, current: fields, feedback: feedback.trim() },
+    }));
+    setRewriting(false);
+    if (error || !data?.revision) {
+      console.warn("[suggestion rewrite] not rewritten yet", error ?? data?.error);
+      setPending("rewrite");
+      return;
     }
+    setFields(data.revision);
+    setUsedFeedback(feedback.trim());
+    toast.success("Rewritten from your feedback. Review it, then save.");
   };
 
   const save = async () => {
-    if (!fields.gap.trim() || !fields.suggested_play.trim()) { toast.error("The suggestion and the proposed test both need text."); return; }
+    if (!complete) return;
     setSaving(true);
-    try {
-      await onSave({ gap: fields.gap.trim(), why_it_matters: fields.why_it_matters.trim(), suggested_play: fields.suggested_play.trim() }, usedFeedback);
-      toast.success("Suggestion updated", { description: "It is shown this way everywhere, and the team's preferences are updated from it." });
-      setOpen(false);
-    } catch (e) {
-      toast.error("Could not save the edit", { description: e instanceof Error ? e.message : "Try again." });
-    } finally {
-      setSaving(false);
+    setPending(null);
+    const { error } = await sendQuietly(asReply(() => onSave({ gap: fields.gap.trim(), why_it_matters: fields.why_it_matters.trim(), suggested_play: fields.suggested_play.trim() }, usedFeedback)), { again: writeResendable });
+    setSaving(false);
+    if (error) {
+      console.warn("[suggestion edit] not saved yet", error);
+      setPending("save");
+      return;
     }
+    toast.success("Suggestion updated", { description: "It is shown this way everywhere, and the team's preferences are updated from it." });
+    setOpen(false);
   };
 
   const reset = async () => {
     setSaving(true);
-    try {
-      await onReset();
-      toast.success("Back to the report's wording");
-      setOpen(false);
-    } catch (e) {
-      toast.error("Could not undo the edit", { description: e instanceof Error ? e.message : "Try again." });
-    } finally {
-      setSaving(false);
+    setPending(null);
+    const { error } = await sendQuietly(asReply(onReset), { again: writeResendable });
+    setSaving(false);
+    if (error) {
+      console.warn("[suggestion edit] not undone yet", error);
+      setPending("reset");
+      return;
     }
+    toast.success("Back to the report's wording");
+    setOpen(false);
   };
 
   return (
@@ -114,6 +127,7 @@ export function SuggestionEditor({ reportId, originalGap, shown, edited, onSave,
                 {rewriting ? <Loader2 className="animate-spin" /> : <Sparkles />}
                 {rewriting ? "Rewriting…" : "Rewrite with this feedback"}
               </Button>
+              {pending === "rewrite" && <p role="status" className="t-secondary">Not rewritten yet. Your feedback and the fields below are kept as they are.</p>}
             </div>
 
             <div className="space-y-1.5">
@@ -128,6 +142,9 @@ export function SuggestionEditor({ reportId, originalGap, shown, edited, onSave,
               <Label htmlFor="suggestion-play">Proposed test</Label>
               <Textarea id="suggestion-play" rows={3} value={fields.suggested_play} maxLength={SUGGESTION_LIMITS.suggested_play} onChange={(e) => set("suggested_play")(e.target.value)} />
             </div>
+            {!complete && <p className="t-secondary">Save needs text in both the suggestion and the proposed test.</p>}
+            {pending === "save" && <p role="status" className="t-secondary">Not saved yet. Your edit is kept here.</p>}
+            {pending === "reset" && <p role="status" className="t-secondary">Still showing your edited wording. The report's wording is not back yet.</p>}
           </div>
 
           <DialogFooter className="gap-2 sm:justify-between">
@@ -138,7 +155,7 @@ export function SuggestionEditor({ reportId, originalGap, shown, edited, onSave,
             ) : <span />}
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setOpen(false)} disabled={saving || rewriting}>Cancel</Button>
-              <Button onClick={save} disabled={saving || rewriting}>
+              <Button onClick={save} disabled={saving || rewriting || !complete}>
                 {saving && <Loader2 className="animate-spin" />} Save
               </Button>
             </div>

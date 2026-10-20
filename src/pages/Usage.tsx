@@ -203,7 +203,7 @@ export default function Usage() {
   if (users.error) {
     return (
       <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature.">
-        <LoadRetry context="Usage did not load" onRetry={() => void users.refetch()} />
+        <LoadRetry context="usage" onRetry={() => void users.refetch()} />
       </AppLayout>
     );
   }
