@@ -130,7 +130,7 @@ export default function CompetitiveRun() {
 
   if (clientLoading || setLoading) {
     return (
-      <AppLayout title="Competitive analysis" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
+      <AppLayout title="Competitive analysis" description="The confirmed competitors across their tracked social profiles, over any period.">
         <Loading label="Loading" />
       </AppLayout>
     );
@@ -138,7 +138,7 @@ export default function CompetitiveRun() {
 
   if (clientFailed || !client) {
     return (
-      <AppLayout title="Competitive analysis" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
+      <AppLayout title="Competitive analysis" description="The confirmed competitors across their tracked social profiles, over any period.">
         <LoadError
           title={clientFailed ? "Could not load this client" : "That client is not available"}
           error={clientFailed ? clientError : "It may have been deleted, or your account may not have access to it."}
@@ -149,14 +149,14 @@ export default function CompetitiveRun() {
   }
 
   if (setsFailed) {
-    return <AppLayout title={`Competitive: ${client.name}`} description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
+    return <AppLayout title={`Competitive: ${client.name}`} description="The confirmed competitors across their tracked social profiles, over any period.">
       <LoadError title="Could not load the competitor selection" error={setsError} onRetry={() => refetchSets()} />
     </AppLayout>;
   }
 
   if (!confirmedSet) {
     return (
-      <AppLayout title={`Competitive: ${client.name}`} description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
+      <AppLayout title={`Competitive: ${client.name}`} description="The confirmed competitors across their tracked social profiles, over any period.">
         <EmptyState
           icon={Crosshair}
           title="No confirmed competitors yet"
@@ -173,7 +173,7 @@ export default function CompetitiveRun() {
   return (
     <AppLayout
       title={`Competitive: ${client.name}`}
-      description="Analyze the confirmed competitors across their tracked social profiles over the period you choose."
+      description="The confirmed competitors across their tracked social profiles, over any period."
       actions={
         <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive/reports`)}>
           <History /> All runs
@@ -216,7 +216,7 @@ export default function CompetitiveRun() {
         <Section
           layout="split"
           eyebrow="Period"
-          title="Choose the period and run"
+          title="Period analyzed"
           description={rangeOk ? <>{formatRange(range)} · {rangeDays(range)} days of posts from every company in the landscape.</> : rangeError}
         >
           <div className="flex gap-2 flex-wrap">

@@ -305,7 +305,7 @@ export default function CompetitiveFeed() {
 
             {/* Posts */}
             {visible.length === 0 ? (
-              <EmptyState icon={Rss} title="No posts match these filters" description="Choose another company or platform." />
+              <EmptyState icon={Rss} title="No posts match these filters" description="No post in this window is from that company on that platform." />
             ) : (
               <div className="grid gap-inner grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start">
                 {visible.map((p, i) => (

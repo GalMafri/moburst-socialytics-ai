@@ -794,7 +794,7 @@ export default function Analytics() {
             </Tabs>
 
             {/* Recent reports table */}
-            <Section id="history" title="Report history" meta={`${filtered.length} report${filtered.length !== 1 ? "s" : ""}`} description="In the selected period. Open any report for its full detail.">
+            <Section id="history" title="Report history" meta={`${filtered.length} report${filtered.length !== 1 ? "s" : ""}`} description="Every report in the selected period, each with its full detail.">
             <Card>
               <CardContent>
                 <div className="space-y-2">

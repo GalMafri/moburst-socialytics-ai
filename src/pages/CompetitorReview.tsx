@@ -614,7 +614,7 @@ export default function CompetitorReview() {
   // spinner that never resolved.
   if (clientLoading || setLoading) {
     return (
-      <AppLayout title="Competitors" description="Review the proposed competitors, confirm the top three, then run the analysis.">
+      <AppLayout title="Competitors" description="The three closest competitors, chosen automatically. Change them any time.">
         <Loading label="Loading" />
       </AppLayout>
     );
@@ -622,7 +622,7 @@ export default function CompetitorReview() {
 
   if (clientFailed || !client) {
     return (
-      <AppLayout title="Competitors" description="Review the proposed competitors, confirm the top three, then run the analysis.">
+      <AppLayout title="Competitors" description="The three closest competitors, chosen automatically. Change them any time.">
         <LoadError
           title={clientFailed ? "Could not load this client" : "That client is not available"}
           error={clientFailed ? clientError : "It may have been deleted, or your account may not have access to it."}
@@ -636,14 +636,14 @@ export default function CompetitorReview() {
   // and starting one on top of a set that merely failed to load duplicates it.
   if (setsFailed) {
     return (
-      <AppLayout title={`Competitors: ${client.name}`} description="Review the proposed competitors, confirm the top three, then run the analysis.">
+      <AppLayout title={`Competitors: ${client.name}`} description="The three closest competitors, chosen automatically. Change them any time.">
         <LoadError title="Could not load the competitor selection" error={setsError} onRetry={() => refetchSets()} />
       </AppLayout>
     );
   }
 
   return (
-    <AppLayout title={`Competitors: ${client.name}`} description="Review the proposed competitors, confirm the top three, then run the analysis.">
+    <AppLayout title={`Competitors: ${client.name}`} description="The three closest competitors, chosen automatically. Change them any time.">
         <Dialog open={importOpen} onOpenChange={setImportOpen}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
@@ -737,7 +737,7 @@ export default function CompetitorReview() {
             // Connected by the lifecycle on its own; says when, or nothing while it is being connected.
             { title: "Tracking", ...trackingState },
             {
-              title: "Choose period and run",
+              title: "Analysis",
               // A run waits for tracking on its own while the lifecycle connects it.
               headline: selectionState.ready ? "Ready to run" : "",
               ready: false,
@@ -745,7 +745,7 @@ export default function CompetitorReview() {
               linkLabel: "Open the run page",
             },
             {
-              title: "Open the result",
+              title: "Results",
               headline: "Reports stay in history",
               ready: false,
               href: `/clients/${clientId}/competitive/reports`,
@@ -817,7 +817,7 @@ export default function CompetitorReview() {
                 return (
                   <li key={`open-${slot}`} className="rounded-[12px] border border-dashed border-white/10 p-inner flex items-center gap-2 min-w-0">
                     <Badge variant="outline" className="shrink-0">#{slot + 1}</Badge>
-                    <span className="t-secondary">{isDraft ? "Select one from the candidates" : "Not selected"}</span>
+                    <span className="t-secondary">{isDraft ? "Open slot" : "Not selected"}</span>
                   </li>
                 );
               }
@@ -897,7 +897,7 @@ export default function CompetitorReview() {
             layout="split"
             eyebrow="Candidates"
             title={`${competitors!.length} proposed`}
-            description={isDraft ? "Select three and rank them by the order you select them in." : "Reopen the selection to change it."}
+            description={isDraft ? "The first three selected, in the order selected, are the ones analyzed." : "The confirmed selection, locked until it is reopened."}
             meta={unverifiedCount > 0 ? (
               <p>{unverifiedCount} suggestions could not be verified and are excluded from selection. Your confirmed competitors have not changed.</p>
             ) : undefined}

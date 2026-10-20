@@ -72,7 +72,7 @@ export default function CalendarIndex() {
   return (
     <AppLayout
       title="Calendar"
-      description="Every client's planned posts on their dates. Choose a client to work on its posts."
+      description="Every client's planned posts on their dates."
       actions={<ClientPicker value={ALL_CLIENTS} week={week} />}
     >
       {clients.isLoading || posts.isLoading ? (

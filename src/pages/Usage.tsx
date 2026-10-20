@@ -219,7 +219,7 @@ export default function Usage() {
   const idlePct = summary.total ? Math.round((summary.idle / summary.total) * 100) : 0;
 
   return (
-    <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature. Select anyone to see their full history.">
+    <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature, with each person's full history.">
         <StatGrid>
           <Tile label="Provisioned" value={summary.total} hint={`${summary.producing} have done work in the product`} icon={Users} />
           <Tile label="Regular users" value={summary.habit} hint="3 or more finished reports" icon={Zap} />

@@ -141,7 +141,7 @@ export default function RunAnalysis() {
 
   if (!client)
     return (
-      <AppLayout title="Run analysis" description="Check the configuration, choose the period and start the monthly report.">
+      <AppLayout title="Run analysis" description="The configuration the monthly report uses and the period it covers.">
         <Loading label="Loading the client" />
       </AppLayout>
     );
@@ -157,7 +157,7 @@ export default function RunAnalysis() {
   ];
 
   return (
-    <AppLayout title={`Analyze: ${client.name}`} description="Check the configuration, choose the period and start the monthly report.">
+    <AppLayout title={`Analyze: ${client.name}`} description="The configuration the monthly report uses and the period it covers.">
         {/* The same flow panels as the competitive run: what the report
             uses, the period and options, the run, then past runs. It was five
             stacked cards in an 896px column with a centered run button. */}

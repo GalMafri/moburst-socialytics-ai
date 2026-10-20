@@ -69,7 +69,7 @@ export default function CompetitiveIndex() {
   const chooseClient = (id: string) => setParams(prev => { prev.set("client", id); return prev; }, { replace: true });
 
   return (
-    <AppLayout title="Competitive analysis" description="Choose a client to edit its competitors, run a report, or open previous results.">
+    <AppLayout title="Competitive analysis" description="Each client's competitors, tracking and competitive reports.">
         {isLoading ? (
           <Loading label="Loading clients" />
         ) : isError ? (
@@ -82,7 +82,7 @@ export default function CompetitiveIndex() {
           <div className="grid gap-section lg:grid-cols-[260px_minmax(0,1fr)] items-start">
             <ClientPicker clients={visibleClients} selectedId={selectedClient?.id} onSelect={chooseClient} search={search} onSearch={setSearch} />
             <div className="min-w-0">
-            {!selectedClient && <EmptyState icon={Crosshair} title="No client by that name" description="Try another client name." />}
+            {!selectedClient && <EmptyState icon={Crosshair} title="No client by that name" description="No client name contains that text." />}
             {(selectedClient ? [selectedClient] : []).map((c) => (
               // The selected client as one split panel: its name and the
               // things to do on the left, where it stands on the right. The

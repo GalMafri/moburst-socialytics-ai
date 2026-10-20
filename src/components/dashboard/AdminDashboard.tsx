@@ -143,7 +143,7 @@ export function AdminDashboard() {
         description={
           clientsFailed
             ? "The client list could not be loaded, so nothing below is the real roster."
-            : `${active.length} active ${active.length === 1 ? "client" : "clients"}. Choose a client below to edit its setup, manage competitors or run a report.`
+            : `${active.length} active ${active.length === 1 ? "client" : "clients"}, each with its setup, competitors and reports.`
         }
         actions={
           <>
@@ -199,7 +199,7 @@ export function AdminDashboard() {
         <div className="grid gap-section lg:grid-cols-[260px_minmax(0,1fr)] items-start">
           <ClientPicker clients={filtered || []} selectedId={selectedClient?.id} onSelect={chooseClient} search={search} onSearch={setSearch} />
           <div className="min-w-0">
-          {!selectedClient && <EmptyState icon={Users} title={search ? "No client by that name" : showArchived ? "No archived clients" : "No active clients"} description={search ? "Try another client name." : undefined} />}
+          {!selectedClient && <EmptyState icon={Users} title={search ? "No client by that name" : showArchived ? "No archived clients" : "No active clients"} description={search ? "No client name contains that text." : undefined} />}
           {(selectedClient ? [selectedClient] : []).map((client: any) => {
             // PostgREST returns an embedded resource in no particular order, so
             // pick the newest row here rather than trusting reports[0].

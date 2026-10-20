@@ -33,7 +33,7 @@ export default function AnalyticsIndex() {
 
   return (
     <AppLayout title="Analytics"
-      description="Choose a client to open its analytics: live performance, trends and the competitive view.">
+      description="Each client's live performance, trends and competitive view.">
         {isLoading ? (
           <Loading label="Loading clients" />
         ) : isError ? (

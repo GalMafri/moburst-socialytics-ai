@@ -208,7 +208,7 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
         ) : error ? (
           <p className="t-secondary !text-red-400" role="alert">The keys could not be loaded: {error instanceof Error ? error.message : "the API did not answer."}</p>
         ) : keys.length === 0 ? (
-          <EmptyState compact icon={KeyRound} title="No keys yet" description="Create one for gOS or another Moburst tool." />
+          <EmptyState compact icon={KeyRound} title="No keys yet" description="Keys for gOS and other Moburst tools are made here." />
         ) : (
           <ul className="space-y-2">
             {keys.map((k) => (

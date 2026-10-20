@@ -110,7 +110,7 @@ export default function ClientCalendar() {
   return (
     <AppLayout
       title="Calendar"
-      description="Every planned post on its date. Open a post to edit its copy, see its design or schedule it."
+      description="Every planned post on its date, with its copy, design and schedule."
       actions={id ? (
         <>
           {isMoburstStaff && <ClientPicker value={id} week={week} />}
