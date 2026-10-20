@@ -12,6 +12,10 @@
 //                              "at" (ISO) previews a later tick, such as tomorrow's.
 //
 // Authenticated with the operational secret (X-Socialytics-Secret or X-Cron-Secret).
+//
+// In-app report pipelines (_shared/pipelines): each tick also runs due
+// report_pipeline steps in a lane of their own (worker.ts), and the daily
+// sweep removes expired pipeline payloads and old pipeline runs.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
@@ -23,7 +27,12 @@ import { makePoster, runDispatch, type DispatchDeps } from "./dispatch.ts";
 import { runFeedJob } from "./feed.ts";
 import { runVoiceProfile, runWeekPlan, runWeekRevise } from "../_shared/calendar/runWeek.ts";
 import { runLifecycle, runLifecycleStep, type LifecycleJob } from "../_shared/lifecycle/run.ts";
-import { LEASE_SECONDS, repairsFor, summarize, workerTick, type TickResult } from "./worker.ts";
+import { LEASE_SECONDS, PIPELINE_CONCURRENCY, repairsFor, summarize, workerTick, type TickResult } from "./worker.ts";
+import { readEngine } from "../_shared/pipelines/engine.ts";
+import { REGISTRY } from "../_shared/pipelines/registry.ts";
+import { runPipelineJob, type RunnerDeps } from "../_shared/pipelines/runner.ts";
+import { startReportPipeline } from "../_shared/pipelines/shadow.ts";
+import { appRunView, expirePayloads, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
 import type { ScheduledJob } from "./types.ts";
 
@@ -39,6 +48,7 @@ const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
   voice_profile: "voice profile",
   lifecycle: "client lifecycle",
   lifecycle_step: "client lifecycle step",
+  report_pipeline: "report pipeline step",
 };
 
 Deno.serve(async (req) => {
@@ -56,6 +66,7 @@ Deno.serve(async (req) => {
     const store = makeDispatchStore(db);
     const post = makePoster(secret);
     const rivaliqKey = Deno.env.get("RIVALIQ_API_KEY");
+    const env = (name: string) => Deno.env.get(name);
     // A dry run may preview a later tick; nothing else ever moves the clock.
     const at = mode === "dry_run" && typeof body.at === "string" && !Number.isNaN(Date.parse(body.at)) ? new Date(body.at) : null;
     const dispatchDeps = (job: ScheduledJob, dryRun: boolean): DispatchDeps => ({
@@ -76,7 +87,18 @@ Deno.serve(async (req) => {
       },
       saveJob: (patch) => (dryRun ? Promise.resolve() : jobs.saveJob(job.id, patch)),
       dryRun,
+      // The engine switch (report_engines). With every switch on n8n, nothing above changes.
+      engine: (kind, clientId) => readEngine(db, kind, clientId, { registry: REGISTRY, env }),
+      startPipeline: (a) => startReportPipeline(db, a),
+      pipelineRun: (reportId) => appRunView(db, reportId),
     });
+    const pipelineDeps: RunnerDeps = {
+      now: () => new Date(),
+      registry: REGISTRY,
+      runs: makeRunStore(db),
+      log: makeStepLog(db),
+      services: makeStepServices(db, env),
+    };
     const refreshFeed = (clientId: string) => refreshCompetitorFeed(db, clientId, {
       rivaliqKey,
       anthropicKey: Deno.env.get("ANTHROPIC_API_KEY"),
@@ -96,12 +118,18 @@ Deno.serve(async (req) => {
           case "voice_profile": return runVoiceProfile(db, job);
           case "lifecycle": return runLifecycle(db, job as unknown as LifecycleJob);
           case "lifecycle_step": return runLifecycleStep(db, job as unknown as LifecycleJob);
+          case "report_pipeline": return runPipelineJob(job, pipelineDeps);
           default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
         }
       },
       finish: (job, outcome) => jobs.finish(job, outcome),
       closeAbandoned: () => closeAbandonedRuns(db, new Date(), false),
       releaseReady: () => jobs.releaseReady(),
+      pipelines: {
+        lease: () => jobs.leasePipelines(LEASE_SECONDS, PIPELINE_CONCURRENCY),
+        run: (job) => runPipelineJob(job, pipelineDeps),
+        finish: (job, outcome) => jobs.finish(job, outcome),
+      },
     });
 
     if (mode === "status") {
@@ -123,6 +151,13 @@ Deno.serve(async (req) => {
       const requeued = repairs.requeue.length ? await attempt("put stopped jobs back in the queue", () => jobs.requeue(repairs.requeue, now), 0) : 0;
       const enqueued = repairs.enqueue ? await attempt("queue due work", async () => (await jobs.enqueue(false)).enqueued.length, 0) : 0;
       const ran = repairs.work || requeued || enqueued ? await attempt("run the queue", async () => (await tick()).results, [] as TickResult["results"]) : [];
+      // In-between pipeline data past its keep date, then pipeline runs past theirs.
+      const payloadsExpired = await attempt("expire pipeline payloads", () => expirePayloads(db, now), 0);
+      const pipelineRetention = await attempt("expire pipeline runs", async () => {
+        const { data, error } = await db.rpc("report_pipeline_retention", { p_now: now.toISOString() });
+        if (error) throw new Error(error.message);
+        return data as Record<string, number> | null;
+      }, null);
       // The rows carry the client's name and the schedule's kind (embedded by statusRows) so the answer reads plainly.
       type Named = ScheduledJob & { clients?: { name?: string } | null; report_schedules?: { report_kind?: string } | null };
       const brief = (rows: ScheduledJob[]) => (rows as Named[]).map((r) => ({
@@ -132,6 +167,7 @@ Deno.serve(async (req) => {
       return json({
         at: now.toISOString(), counts: summary.counts,
         repaired: { requeued, enqueued, ran },
+        pipelines: { payloads_expired: payloadsExpired, retention: pipelineRetention },
         failed: brief(summary.failed), blocked: brief(summary.blocked), stuck: brief(summary.stuck), overdue: brief(summary.overdue),
         unscheduled: summary.unscheduled.map((g) => ({ client: g.client_name ?? g.client_id, job: `${g.report_kind} dispatch`, reason: `due ${g.next_run_at} and never queued` })),
         notes,

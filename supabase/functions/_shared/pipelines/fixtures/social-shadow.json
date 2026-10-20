@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "client_name": "Fixture Co",
+  "generated_at": "2026-11-07T08:03:00.000Z",
+  "report_period": { "current_month": { "start": "2026-10-01", "end": "2026-10-31" } },
+  "data_counts": { "total_recommendations": 12, "content_calendar_days": 7, "sprout_top_posts": "3" },
+  "metrics_summary": { "impressions_change": -20.1, "reactions_change": 0.30000000000000004 },
+  "sprout_performance": {
+    "overall_totals": { "impressions": 120000, "engagements": 1452, "engagement_rate": 0.0121 },
+    "top_posts": [
+      { "post_id": "p-3", "network": "tiktok", "text": "Day in the life.", "impressions": 2500, "engagements": 61 },
+      { "post_id": "p-1", "network": "instagram", "text": "Know your rights after a crash.", "impressions": 5000, "engagements": 90 },
+      { "post_id": "p-4", "network": "facebook", "text": "Office opening.", "impressions": 900, "engagements": 12 }
+    ]
+  },
+  "ai_analysis": {
+    "sprout_performance_analysis": { "month_over_month_summary": "Reach dropped about 20% and engagement stayed level.", "key_insights": ["Reels outperformed.", "LinkedIn grew."] },
+    "competitive_takeaways": ["Post more Reels."]
+  },
+  "warnings": ["TikTok trends thin"],
+  "deck": { "url": "https://gamma.app/docs/fixture-oct-shadow" }
+}

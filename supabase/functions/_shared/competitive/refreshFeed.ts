@@ -14,6 +14,8 @@ import { checkClientLandscape, isTrackingProblem, recordTrackingCheck } from "./
 import { selectedFeedSources, collectLinkedInSource } from "./linkedinSource.ts";
 import { rivalIqFetch } from "./rivaliqFetch.ts";
 import { harvestedPaths, type HarvestedRef } from "../design-prompts/designRefs.ts";
+import { pipelineEngineDeps, readEngine } from "../pipelines/engine.ts";
+import { shadowLinkedInSource } from "../pipelines/shadow.ts";
 
 /** A refresh that stopped with an answer for the caller: an HTTP status and, for a known case, a code. */
 export class FeedRefreshError extends Error {
@@ -307,7 +309,14 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   const plan = selectedFeedSources(match.companies, match.client_company_id, selected || [], []);
   const {data: setting, error: settingError} = await admin.from("app_settings").select("value").eq("key","competitive_linkedin_webhook_url").maybeSingle();
   if (settingError) throw new Error('Could not load the LinkedIn source connection.');
+  // The LinkedIn source's engine switch (report_engines). On shadow an in-app
+  // run is queued after n8n answers; reading it never throws and never delays
+  // the n8n call. The app engine is wired here once an app-capable LinkedIn
+  // pipeline exists; until then the switch cannot reach app (engine.ts and
+  // report_engines_guard), and n8n answers the feed.
+  const linkedinEngine = readEngine(admin, "linkedin_source", clientId, pipelineEngineDeps());
   const [linkedin,owned] = await Promise.all([collectLinkedInSource(plan.sources, window, env.secret || '', setting?.value || ''),collectOwnedCompetitive(admin,client,window)]);
+  await shadowLinkedInSource(admin, await linkedinEngine, { clientId, sources: plan.sources, period: window, real: linkedin });
   const selectedIds = new Set(plan.companyIds);
   const socialPosts = mergeOwnedCompetitivePosts([...rivalPosts.filter(p=>selectedIds.has(String(p.companyId))), ...linkedin.socialPosts],owned,{id:match.client_company_id,name:client.name});
 
