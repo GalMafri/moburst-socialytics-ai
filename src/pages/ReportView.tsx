@@ -1,6 +1,6 @@
 import { COMPARED_RATE_LABEL, SPROUT_RATE_LABEL } from "@/lib/rateLabels";
 import { useNavigate, useParams } from "react-router-dom";
-import { cleanText, countryNames, formatDate, formatDateTime, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
+import { cleanText, countryNames, formatDate, formatDateTime, formatNumbersInText, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
 import { reportsMeasure } from "@/lib/platformMeasures";
 import { reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
@@ -935,10 +935,6 @@ function getScoreExplanation(platform: string): string {
     return "Score = likes + (comments \u00d7 2) + (shares \u00d7 3) + (views \u00f7 1,000)";
   }
   return "Score = likes + (comments \u00d7 2) + (views \u00f7 1,000)";
-}
-
-function formatNumbersInText(text: string): string {
-  return text.replace(/(?<![,.\d])(\d{4,})(?![,.\d])/g, (match) => Number(match).toLocaleString());
 }
 
 /* ─── Trends Section (Redesigned) ─── */

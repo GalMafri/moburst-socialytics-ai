@@ -1,6 +1,6 @@
 import { SPROUT_RATE_LABEL, SPROUT_RATE_NOTE } from "@/lib/rateLabels";
 import { DateRange, isValidRange, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate } from "@/lib/dateRange";
-import { cleanText, countryNames, firstRunSentence, formatDate, formatDateTime, formatRange, languageNames } from "@/lib/display";
+import { cleanText, countryNames, firstRunSentence, formatDate, formatDateTime, formatNumbersInText, formatRange, languageNames } from "@/lib/display";
 import { useNextRun } from "@/lib/nextRun";
 import { sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
@@ -282,13 +282,6 @@ export default function Analytics() {
     if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
     if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
     return v.toLocaleString();
-  };
-
-  // Format numbers embedded in text strings (e.g., "5000 impressions" → "5,000 impressions")
-  const formatNumbersInText = (text: string): string => {
-    return text.replace(/\b(\d{4,})\b/g, (match) => {
-      return Number(match).toLocaleString();
-    });
   };
 
   const exportRef = useRef<HTMLDivElement>(null);

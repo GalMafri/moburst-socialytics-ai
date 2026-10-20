@@ -364,6 +364,20 @@ export function cleanText(value: string | null | undefined): string {
   return String(value).replace(RUN, decodeRun).replace(/[\u2028\u2029]/g, "\n");
 }
 
+/**
+ * Long numbers inside stored report text, written the way a person reads
+ * them: "climbed to 1581992, making it" becomes "climbed to 1,581,992,
+ * making it". A year on its own (1900 to 2099), a number already grouped or
+ * with decimals, and digits inside a handle, hashtag, date, time or link stay
+ * as they are.
+ */
+export function formatNumbersInText(text: string): string {
+  return String(text ?? "").replace(/(?<![\w.,:/#@-])(\d{4,})(?![\w:/-]|[.,]\d)/g, (m) => {
+    const n = Number(m);
+    return m.length === 4 && n >= 1900 && n <= 2099 ? m : n.toLocaleString("en-US");
+  });
+}
+
 // ── Schedules ──────────────────────────────────────────────────────────────
 
 /**
