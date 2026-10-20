@@ -1887,6 +1887,33 @@ export type Database = {
           },
         ]
       }
+      pipeline_payloads: {
+        Row: {
+          bytes: number
+          created_at: string
+          expires_at: string
+          key: string
+          run_id: string
+          storage_path: string
+        }
+        Insert: {
+          bytes: number
+          created_at?: string
+          expires_at: string
+          key: string
+          run_id: string
+          storage_path: string
+        }
+        Update: {
+          bytes?: number
+          created_at?: string
+          expires_at?: string
+          key?: string
+          run_id?: string
+          storage_path?: string
+        }
+        Relationships: []
+      }
       post_iterations: {
         Row: {
           approved_at: string | null
@@ -2084,6 +2111,159 @@ export type Database = {
           key?: string
         }
         Relationships: []
+      }
+      report_engines: {
+        Row: {
+          client_id: string | null
+          engine: string
+          id: string
+          kind: string
+          note: string | null
+          updated_at: string
+        }
+        Insert: {
+          client_id?: string | null
+          engine?: string
+          id?: string
+          kind: string
+          note?: string | null
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string | null
+          engine?: string
+          id?: string
+          kind?: string
+          note?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_engines_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_pipeline_runs: {
+        Row: {
+          app_capable: boolean
+          client_id: string
+          dedupe_key: string
+          finished_at: string | null
+          heartbeat_at: string
+          id: string
+          input: Json
+          job_id: string | null
+          kind: string
+          mode: string
+          outcome: string | null
+          pipeline: string
+          real_id: string | null
+          real_ref: Json | null
+          real_table: string | null
+          started_at: string
+          status: string
+          step: string | null
+          steps_done: number
+        }
+        Insert: {
+          app_capable?: boolean
+          client_id: string
+          dedupe_key: string
+          finished_at?: string | null
+          heartbeat_at?: string
+          id?: string
+          input?: Json
+          job_id?: string | null
+          kind: string
+          mode: string
+          outcome?: string | null
+          pipeline: string
+          real_id?: string | null
+          real_ref?: Json | null
+          real_table?: string | null
+          started_at?: string
+          status?: string
+          step?: string | null
+          steps_done?: number
+        }
+        Update: {
+          app_capable?: boolean
+          client_id?: string
+          dedupe_key?: string
+          finished_at?: string | null
+          heartbeat_at?: string
+          id?: string
+          input?: Json
+          job_id?: string | null
+          kind?: string
+          mode?: string
+          outcome?: string | null
+          pipeline?: string
+          real_id?: string | null
+          real_ref?: Json | null
+          real_table?: string | null
+          started_at?: string
+          status?: string
+          step?: string | null
+          steps_done?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_pipeline_runs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_pipeline_steps: {
+        Row: {
+          attempt: number
+          detail: Json | null
+          finished_at: string | null
+          id: number
+          job_id: string | null
+          outcome: string | null
+          run_id: string
+          started_at: string
+          step: string
+        }
+        Insert: {
+          attempt: number
+          detail?: Json | null
+          finished_at?: string | null
+          id?: never
+          job_id?: string | null
+          outcome?: string | null
+          run_id: string
+          started_at?: string
+          step: string
+        }
+        Update: {
+          attempt?: number
+          detail?: Json | null
+          finished_at?: string | null
+          id?: never
+          job_id?: string | null
+          outcome?: string | null
+          run_id?: string
+          started_at?: string
+          step?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_pipeline_steps_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "report_pipeline_runs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       report_schedules: {
         Row: {
@@ -2513,6 +2693,156 @@ export type Database = {
             columns: ["report_id"]
             isOneToOne: false
             referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shadow_competitive_reports: {
+        Row: {
+          client_id: string
+          created_at: string
+          date_range_end: string | null
+          date_range_start: string | null
+          real_report_id: string | null
+          report_data: Json
+          run_id: string
+          set_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          date_range_end?: string | null
+          date_range_start?: string | null
+          real_report_id?: string | null
+          report_data?: Json
+          run_id: string
+          set_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          date_range_end?: string | null
+          date_range_start?: string | null
+          real_report_id?: string | null
+          report_data?: Json
+          run_id?: string
+          set_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shadow_competitive_reports_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shadow_competitive_reports_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: true
+            referencedRelation: "report_pipeline_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shadow_linkedin_sources: {
+        Row: {
+          client_id: string
+          created_at: string
+          period_end: string | null
+          period_start: string | null
+          real_ref: Json | null
+          result: Json
+          run_id: string
+          sources: Json
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          period_end?: string | null
+          period_start?: string | null
+          real_ref?: Json | null
+          result?: Json
+          run_id: string
+          sources?: Json
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          period_end?: string | null
+          period_start?: string | null
+          real_ref?: Json | null
+          result?: Json
+          run_id?: string
+          sources?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shadow_linkedin_sources_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shadow_linkedin_sources_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: true
+            referencedRelation: "report_pipeline_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shadow_social_reports: {
+        Row: {
+          client_id: string
+          created_at: string
+          date_range_end: string | null
+          date_range_start: string | null
+          real_report_id: string | null
+          report_data: Json
+          run_id: string
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          date_range_end?: string | null
+          date_range_start?: string | null
+          real_report_id?: string | null
+          report_data?: Json
+          run_id: string
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          date_range_end?: string | null
+          date_range_start?: string | null
+          real_report_id?: string | null
+          report_data?: Json
+          run_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shadow_social_reports_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shadow_social_reports_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: true
+            referencedRelation: "report_pipeline_runs"
             referencedColumns: ["id"]
           },
         ]
@@ -3020,6 +3350,23 @@ export type Database = {
         Args: { p_holder: string; p_name: string }
         Returns: undefined
       }
+      report_pipeline_retention: { Args: { p_now?: string }; Returns: Json }
+      report_pipeline_start: {
+        Args: {
+          p_app_capable: boolean
+          p_client: string
+          p_dedupe: string
+          p_first_step: string
+          p_input: Json
+          p_kind: string
+          p_mode: string
+          p_pipeline: string
+          p_real_id: string
+          p_real_ref: Json
+          p_real_table: string
+        }
+        Returns: Json
+      }
       report_run_request: {
         Args: { p_client: string; p_kind: string }
         Returns: {
@@ -3040,6 +3387,39 @@ export type Database = {
       }
       scheduled_jobs_lease: {
         Args: { p_lease_seconds?: number }
+        Returns: {
+          attempts: number
+          available_at: string
+          client_id: string
+          created_at: string
+          dedupe_key: string
+          finished_at: string | null
+          id: string
+          kind: string
+          lease_until: string | null
+          max_attempts: number
+          occurrence: string | null
+          payload: Json | null
+          phase: string | null
+          priority: number
+          reason: string | null
+          report_id: string | null
+          result: Json | null
+          schedule_id: string | null
+          stagger_seconds: number
+          started_at: string | null
+          status: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "scheduled_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      scheduled_jobs_lease_pipelines: {
+        Args: { p_lease_seconds?: number; p_max_running?: number }
         Returns: {
           attempts: number
           available_at: string
