@@ -4,6 +4,7 @@
 
 import { competitivePipeline } from "./definitions/competitive.ts";
 import { linkedInSourcePipeline } from "./definitions/linkedinSource.ts";
+import { socialPipeline } from "./definitions/social.ts";
 import { PLACEHOLDER_PIPELINES } from "./definitions/placeholder.ts";
 import { missingSecrets } from "./secrets.ts";
 import { REAL_WRITERS } from "./store.ts";
@@ -49,9 +50,10 @@ export function makeRegistry(defs: readonly PipelineDefinition[], canWriteReal: 
 }
 
 /**
- * What this deployment registers: the in-app LinkedIn source and competitive
- * pipelines (app-capable: each has its real writer, and the switch still
- * refuses app for a kind until one of them has finished a shadow run), and
- * a placeholder per kind (social has only its placeholder until it is built).
+ * What this deployment registers: the in-app LinkedIn source, competitive and
+ * social pipelines (app-capable: each has its real writer, and the switch
+ * still refuses app for a kind until one of them has finished a shadow run
+ * that is not a replay), and a placeholder per kind, which shadows only while
+ * the real pipeline's secrets are missing.
  */
-export const REGISTRY: Registry = makeRegistry([linkedInSourcePipeline(), competitivePipeline(), ...PLACEHOLDER_PIPELINES], (kind) => Boolean(REAL_WRITERS[kind]?.report));
+export const REGISTRY: Registry = makeRegistry([linkedInSourcePipeline(), competitivePipeline(), socialPipeline(), ...PLACEHOLDER_PIPELINES], (kind) => Boolean(REAL_WRITERS[kind]?.report));

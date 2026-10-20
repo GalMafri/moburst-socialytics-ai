@@ -23,9 +23,16 @@
 //                              RivalIQ answers only (no RivalIQ, Apify or
 //                              Sprout call; with reuse_analysis no Claude
 //                              call either). Its steps run on the next ticks.
+// POST {"mode":"replay_social","report_id":"<id>"|"run_id":"<id>"[,"reuse_analysis":true]}
+//                              starts a shadow run of the in-app social
+//                              pipeline made again from the provider answers
+//                              an earlier in-app run of that report kept (no
+//                              Sprout, Apify or Gamma call; with
+//                              reuse_analysis no Claude call either).
 // POST {"mode":"compare_pipeline","run_id":"<id>"}
 //                              a finished shadow run next to the real result
-//                              it shadows (compareResults), as JSON and as
+//                              it shadows (compareResults; for a report, the
+//                              figures a screen shows first), as JSON and as
 //                              plain lines.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -45,6 +52,8 @@ import { runPipelineJob, type RunnerDeps } from "../_shared/pipelines/runner.ts"
 import { startReportPipeline } from "../_shared/pipelines/shadow.ts";
 import { compareCompetitiveRun, startCompetitiveReplay } from "../_shared/pipelines/competitive/harness.ts";
 import { COMPETITIVE_PIPELINE } from "../_shared/pipelines/definitions/competitive.ts";
+import { SOCIAL_PIPELINE } from "../_shared/pipelines/definitions/social.ts";
+import { compareSocialRun, startSocialReplay } from "../_shared/pipelines/social/harness.ts";
 import { compareResults, formatComparison } from "../_shared/pipelines/compare.ts";
 import { appRunView, expirePayloads, loadShadowPair, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
@@ -211,6 +220,19 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (mode === "replay_social") {
+      const reportId = typeof body.report_id === "string" ? body.report_id : undefined;
+      const runId = typeof body.run_id === "string" ? body.run_id : undefined;
+      if (!reportId && !runId) return json({ error: "report_id or run_id is required" }, 400);
+      const pipeline = REGISTRY.get(SOCIAL_PIPELINE);
+      if (!pipeline) return json({ error: `${SOCIAL_PIPELINE} is not in this deployment` }, 500);
+      try {
+        return json(await startSocialReplay(db, pipeline, { reportId, runId, reuseAnalysis: body.reuse_analysis === true }));
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : String(e) }, 422);
+      }
+    }
+
     if (mode === "compare_pipeline") {
       const runId = typeof body.run_id === "string" ? body.run_id : "";
       if (!runId) return json({ error: "run_id is required" }, 400);
@@ -218,6 +240,7 @@ Deno.serve(async (req) => {
         const { data: run } = await db.from("report_pipeline_runs").select("kind").eq("id", runId).maybeSingle();
         if (!run) return json({ error: "No pipeline run has that id." }, 404);
         if (run.kind === "competitive") return json(await compareCompetitiveRun(db, runId));
+        if (run.kind === "social") return json(await compareSocialRun(db, runId));
         const pair = await loadShadowPair(db, runId);
         if (!pair) return json({ error: "No pipeline run has that id." }, 404);
         const comparison = compareResults(pair.real, pair.shadow, { keyBy: { socialPosts: "postId" } });

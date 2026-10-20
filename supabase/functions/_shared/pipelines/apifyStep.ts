@@ -29,10 +29,13 @@ export type ActorStep =
   | { type: "rows"; rows: unknown[]; runId: string };
 
 export interface ActorRequest {
-  actor: { id: string; name: string; timeoutSecs: number; memoryMbytes: number };
+  /** A timeout or memory left out is the actor's own default (as n8n's Apify node runs the social scrapers). */
+  actor: { id: string; name: string; timeoutSecs?: number; memoryMbytes?: number };
   input: unknown;
   /** Where the raw dataset is kept in the run's payload store. */
   datasetKey: string;
+  /** How long to keep the dataset (the payload store's default when left out). */
+  keepDays?: number;
   apify?: ApifyFactory;
 }
 
@@ -67,7 +70,7 @@ export async function runActorStep(ctx: StepContext, r: ActorRequest): Promise<A
     }
     if (run.status !== "SUCCEEDED") throw new StepRestart(`Apify run ${runId} ended ${run.status}.`);
     const rows = await client.datasetItems(run.defaultDatasetId);
-    await ctx.payloads.put(r.datasetKey, rows);
+    await ctx.payloads.put(r.datasetKey, rows, r.keepDays ? { keepDays: r.keepDays } : undefined);
     return { type: "rows", rows, runId };
   } catch (e) {
     // The token went away between the check above and a call.

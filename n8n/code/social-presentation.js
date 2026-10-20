@@ -21,6 +21,8 @@ const sproutTopPosts = clientData.sprout?.top_posts || [];
 const overallTotals = clientData.sprout?.overall_totals || {};
 const platformBreakdown = clientData.sprout?.platform_breakdown || [];
 const topPostsByPlatform = clientData.sprout?.top_posts_by_platform || {};
+// A brand with no Sprout profile connected has no performance data: say so once instead of showing zeros.
+const hasSprout = (Array.isArray(clientData.sprout?.profiles) && clientData.sprout.profiles.length > 0) || sproutTopPosts.length > 0 || Object.keys(overallTotals).length > 0;
 
 // Build the platform-by-platform performance slide (only when data exists)
 let platformBreakdownBlock = '';
@@ -140,7 +142,9 @@ prompt += `
 
 PLATFORMS ANALYZED: ${clientData.context?.primary_platforms?.join(', ') || 'LinkedIn, Instagram, Facebook'}
 CONTENT PILLARS: ${contentPillars.slice(0, 4).join(', ') || 'See pillar analysis'}
-
+`;
+if (hasSprout) {
+prompt += `
 ---
 
 SLIDE 3: PERFORMANCE DASHBOARD
@@ -179,9 +183,21 @@ KEY FINDINGS:
   prompt += `${i + 1}. ${insight}\n\n`;
 });
 
+} else {
+prompt += `
+---
+
+SLIDE 3: PERFORMANCE DATA
+
+${clientName} has no social accounts connected for performance tracking yet, so this report carries no performance figures. Make this one short slide that says performance tracking starts once the brand's accounts are connected, and that this report is built from trend research, the competitive picture and the content plan. Do not show zeros, KPI tiles or charts here.
+
+`;
+}
+
 // ============================================
 // SPROUT SOCIAL TOP POSTS (CLIENT'S OWN CONTENT)
 // ============================================
+if (hasSprout) {
 prompt += `
 ---
 
@@ -212,6 +228,7 @@ if (tppKeys.length > 0) {
   });
 } else {
   prompt += `No top posts data available for this period. This may indicate limited posting activity.\n`;
+}
 }
 
 // ============================================
@@ -478,7 +495,7 @@ prompt += `
 SLIDE ${slideNum + 2}: DATA SOURCES & METHODOLOGY
 
 📊 DATA SOURCES:
-• Sprout Social API - ${sproutTopPosts.length} top posts analyzed, full performance metrics
+${hasSprout ? '• Sprout Social API - ' + sproutTopPosts.length + ' top posts analyzed, full performance metrics' : '• Sprout Social - not connected for this brand yet; no performance data in this report'}
 • TikTok Trend Scraper - ${tiktokPosts.length} top posts by engagement (filtered by target languages)
 • Instagram Trend Scraper - ${instagramPosts.length} top posts by engagement (filtered by target languages)
 

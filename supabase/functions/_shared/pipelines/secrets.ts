@@ -34,16 +34,16 @@ export const PIPELINE_SECRETS: Record<ReportKind, SecretNeed[]> = {
     { name: ANTHROPIC_API_KEY, set: true, why: "the brief analysis and the report synthesis (n8n uses OpenAI and Gemini nodes for these)" },
     { name: SPROUT_CLIENT_ID, set: true, why: "Sprout analytics for the month and the month before" },
     { name: SPROUT_CLIENT_SECRET, set: true, why: "Sprout analytics for the month and the month before" },
-    { name: APIFY_API_TOKEN, set: false, why: "the TikTok and Instagram trend scrapers" },
-    { name: GAMMA_API_KEY, set: false, why: "the report deck, generated from the existing Gamma template and polled until ready" },
+    { name: APIFY_API_TOKEN, set: true, why: "the TikTok and Instagram trend scrapers" },
+    { name: GAMMA_API_KEY, set: true, why: "the report deck, generated from the existing Gamma template and polled until ready" },
   ],
   competitive: [
     { name: RIVALIQ_API_KEY, set: true, why: "landscape status, companies, social posts and metrics" },
     { name: ANTHROPIC_API_KEY, set: true, why: "the competitive analysis (n8n uses an OpenAI node for it)" },
-    { name: APIFY_API_TOKEN, set: false, why: "the LinkedIn company posts the analysis adds to RivalIQ's" },
+    { name: APIFY_API_TOKEN, set: true, why: "the LinkedIn company posts the analysis adds to RivalIQ's" },
   ],
   linkedin_source: [
-    { name: APIFY_API_TOKEN, set: false, why: "the LinkedIn company-posts actor the n8n workflow runs" },
+    { name: APIFY_API_TOKEN, set: true, why: "the LinkedIn company-posts actor the n8n workflow runs" },
   ],
 };
 

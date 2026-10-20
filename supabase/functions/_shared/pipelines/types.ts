@@ -79,7 +79,8 @@ export interface PipelineJobPayload {
  * outside the job and the run so neither grows. Expires on its own.
  */
 export interface PayloadStore {
-  put(key: string, value: unknown): Promise<{ key: string; bytes: number }>;
+  /** keepDays: how long to keep it (default PAYLOAD_TTL_DAYS); a provider's answer is kept SOURCE_KEEP_DAYS. */
+  put(key: string, value: unknown, opts?: { keepDays?: number }): Promise<{ key: string; bytes: number }>;
   get<T = unknown>(key: string): Promise<T | null>;
 }
 

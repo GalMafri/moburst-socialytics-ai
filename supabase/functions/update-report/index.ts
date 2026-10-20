@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { secretEquals } from "../_shared/auth/secretEquals.ts";
+import { handleSocialWrite } from "../_shared/reports/socialWriter.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,66 +24,17 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { report_id, status, report_data, gamma_url, duration_minutes } =
-      await req.json();
-
-    if (!report_id) {
-      return new Response(
-        JSON.stringify({ error: "report_id is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
+    const body = await req.json();
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const updates: Record<string, unknown> = {};
-    if (status !== undefined) updates.status = status;
-    if (report_data !== undefined) updates.report_data = report_data;
-    if (gamma_url !== undefined) updates.gamma_url = gamma_url;
-    if (duration_minutes !== undefined) updates.duration_minutes = duration_minutes;
-
-    // Every one of the 69 reports stored duration_minutes = 0, including a run
-    // that took 34 minutes. The workflow's summary node reads a start time that
-    // nothing ever writes, so it falls back to "now" at the moment the LAST
-    // node runs and subtracts it from itself.
-    //
-    // Computing it here instead fixes both pipelines at once and uses the only
-    // authoritative start there is: reports.created_at, which is set when the
-    // row is created and reset on every re-run. A workflow that sends a real
-    // number still wins; this only fills in the zero.
-    if (!Number(duration_minutes)) {
-      const { data: row } = await supabase
-        .from("reports")
-        .select("created_at")
-        .eq("id", report_id)
-        .maybeSingle();
-      if (row?.created_at) {
-        const minutes = Math.round((Date.now() - new Date(row.created_at).getTime()) / 60000);
-        // A clock skew or a re-used id could produce a negative or absurd
-        // figure; better to leave it unset than to print a lie on the report.
-        if (minutes >= 0 && minutes < 24 * 60) updates.duration_minutes = minutes;
-      }
-    }
-
-    let query = supabase.from("reports").update(updates).eq("id", report_id);
-    if (status === "failed") query = query.neq("status", "completed");
-    const { data, error } = await query.select();
-
-    if (error) throw error;
-
-    // No row: a scheduled run that stopped answering was taken away and its
-    // occurrence started again (run-scheduled-jobs/dispatch.ts). A late
-    // writeback from it is answered as done, so the workflow does not stop
-    // with an error over a run nobody is waiting for.
-    if (!data || data.length === 0) {
-      const skipped = status === "failed" ? "No unfinished report to fail" : "This run was replaced by a newer one";
-      return new Response(JSON.stringify({ ok: true, skipped }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-
-    return new Response(JSON.stringify(data[0]), {
+    // The write itself is shared with the in-app social pipeline
+    // (_shared/reports/socialWriter.ts), so both store a report the same way.
+    const result = await handleSocialWrite(supabase, body);
+    return new Response(JSON.stringify(result.body), {
+      status: result.status,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {

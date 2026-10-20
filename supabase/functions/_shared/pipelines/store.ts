@@ -9,11 +9,17 @@
 
 import type { RunStore, StepLog, StepServices } from "./runner.ts";
 import type { OutputWriter, PayloadStore, PipelineDefinition, PipelineRun, RealTable, ReportKind, RunMode } from "./types.ts";
-import { COMPETITIVE_WRITERS } from "./writers.ts";
+import { COMPETITIVE_WRITERS, SOCIAL_WRITERS } from "./writers.ts";
 
 export const PAYLOAD_BUCKET = "pipeline-payloads";
 /** How long in-between data is kept. */
 export const PAYLOAD_TTL_DAYS = 30;
+/**
+ * How long a provider's answer a run read is kept (put with keepDays): as
+ * long as the run itself (report_pipeline_retention removes runs after 90
+ * days), so a run can be replayed from what it really read.
+ */
+export const SOURCE_KEEP_DAYS = 90;
 /** Expired payloads removed per sweep. */
 export const PAYLOAD_EXPIRY_BATCH = 500;
 
@@ -48,7 +54,12 @@ export class PipelineWriteRefused extends Error {
   }
 }
 
-/** A database a step can read and never write: from(table).select(...) only. */
+/**
+ * A database a step can read and never write: from(table).select(...), and
+ * downloads from the pipeline-payloads bucket (a replay reads the answers
+ * another run kept, through makePayloadStore(ctx.db, thatRun).get). Any
+ * write, function call or other bucket is refused.
+ */
 export function readOnlyDb(db: Db) {
   const refuse = (what: string) => () => { throw new PipelineWriteRefused(what); };
   return {
@@ -62,7 +73,16 @@ export function readOnlyDb(db: Db) {
       };
     },
     rpc: refuse("a database function"),
-    storage: { from: refuse("storage") },
+    storage: {
+      from(bucket: string) {
+        if (bucket !== PAYLOAD_BUCKET) throw new PipelineWriteRefused(`storage outside ${PAYLOAD_BUCKET}`);
+        return {
+          download: (path: string) => db.storage.from(bucket).download(path),
+          upload: refuse(`an upload to ${bucket}`),
+          remove: refuse(`a removal from ${bucket}`),
+        };
+      },
+    },
   };
 }
 
@@ -107,7 +127,7 @@ export function makePayloadStore(db: Db, runId: string, opts: { now?: () => Date
   const path = (key: string) => `runs/${runId}/${key}.json`;
   const check = (key: string) => { if (!KEY.test(key)) throw new Error(`Payload key ${JSON.stringify(key)} is not a plain name.`); };
   return {
-    async put(key, value) {
+    async put(key, value, putOpts = {}) {
       check(key);
       const body = JSON.stringify(value ?? null);
       const bytes = new TextEncoder().encode(body);
@@ -116,7 +136,7 @@ export function makePayloadStore(db: Db, runId: string, opts: { now?: () => Date
       const at = now();
       await must(db.from("pipeline_payloads").upsert({
         run_id: runId, key, storage_path: path(key), bytes: bytes.byteLength,
-        created_at: at.toISOString(), expires_at: new Date(at.getTime() + (opts.ttlDays ?? PAYLOAD_TTL_DAYS) * DAY).toISOString(),
+        created_at: at.toISOString(), expires_at: new Date(at.getTime() + (putOpts.keepDays ?? opts.ttlDays ?? PAYLOAD_TTL_DAYS) * DAY).toISOString(),
       }, { onConflict: "run_id,key" }));
       return { key, bytes: bytes.byteLength };
     },
@@ -187,11 +207,12 @@ export function makeShadowOutput(db: Db, run: PipelineRun, payloads: PayloadStor
  *   linkedin_source  the answer, kept with the run: the feed refresh that
  *                    runs it in-process (inline.ts) uses it, as it used the
  *                    n8n workflow's answer, and saves the feed itself.
- *   social           none yet.
+ *   social           the report, through the writer update-report uses
+ *                    (writers.ts).
  */
 export type RealWriter = (db: Db, run: PipelineRun, data: Record<string, unknown>) => Promise<void>;
 export const REAL_WRITERS: Record<ReportKind, Record<string, RealWriter>> = {
-  social: {},
+  social: SOCIAL_WRITERS,
   competitive: COMPETITIVE_WRITERS,
   linkedin_source: {
     report: async (db, run, data) => { await makePayloadStore(db, run.id).put("result", data); },

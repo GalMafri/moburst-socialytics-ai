@@ -26,15 +26,27 @@ export interface ReportPipelineStart {
   request: Record<string, unknown>;
 }
 
-/** Queues a report's in-app run. Throws when it could not be queued (the dispatch decides what that means). */
+/**
+ * Queues a report's in-app run. Throws when it could not be queued (the
+ * dispatch decides what that means). A social run carries its report's
+ * attempt (created_at): the social writer writes only that attempt, as the
+ * competitive writer writes only the request's attempt_started_at.
+ */
 export async function startReportPipeline(db: Db, a: ReportPipelineStart): Promise<{ run_id: string; started: boolean }> {
+  let attempt: Record<string, unknown> = {};
+  if (a.kind === "social") {
+    const { data, error } = await db.from("reports").select("created_at").eq("id", a.reportId).maybeSingle();
+    if (error) throw new Error(`The report could not be read: ${error.message}`);
+    if (!data?.created_at) throw new Error("The report is gone.");
+    attempt = { attempt_started_at: data.created_at };
+  }
   return await startPipelineRun(db, {
     mode: a.mode,
     pipeline: a.pipeline,
     clientId: a.clientId,
     realTable: a.kind === "competitive" ? "competitive_reports" : "reports",
     realId: a.reportId,
-    input: { range: a.range, ...(a.setId ? { set_id: a.setId } : {}), request: a.request },
+    input: { range: a.range, ...(a.setId ? { set_id: a.setId } : {}), ...attempt, request: a.request },
     dedupe: `${a.mode}:${a.kind}:${a.reportId}`,
   });
 }

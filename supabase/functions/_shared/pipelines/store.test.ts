@@ -53,6 +53,15 @@ describe("readOnlyDb", () => {
     expect(() => ro.storage.from("design-references")).toThrow(PipelineWriteRefused);
     expect(d.tables.reports).toEqual([{ id: "report-1", status: "running" }]);
   });
+
+  it("reads another run's kept payloads, and writes none", async () => {
+    const d = db();
+    await makePayloadStore(d, "run-0").put("source.analysis", { kept: true }, { keepDays: 90 });
+    const ro = readOnlyDb(d);
+    expect(await makePayloadStore(ro, "run-0").get("source.analysis")).toEqual({ kept: true });
+    await expect(makePayloadStore(ro, "run-0").put("x", 1)).rejects.toThrow(PipelineWriteRefused);
+    expect(() => ro.storage.from(PAYLOAD_BUCKET).remove(["runs/run-0/source.analysis.json"])).toThrow(PipelineWriteRefused);
+  });
 });
 
 describe("payload store", () => {
@@ -126,9 +135,19 @@ describe("outputs", () => {
     })]);
   });
 
-  it("has no writer for a real report yet, so an app run cannot write one", async () => {
-    const d = db();
-    await expect(makeAppOutput(d, run({ mode: "app" })).write("report", {})).rejects.toThrow("No writer for the social report");
+  it("writes a social report through update-report's writer, only for the run's attempt and only while it runs", async () => {
+    const at = "2026-11-07T07:15:02.000Z";
+    const d = db({ reports: [{ id: "report-1", created_at: at, status: "running", report_data: {} }] });
+    const app = (over: Partial<PipelineRun> = {}) => makeAppOutput(d, run({ mode: "app", input: { attempt_started_at: at }, ...over }));
+    // Another attempt (the dispatch made the report again): skipped, nothing written.
+    await app({ input: { attempt_started_at: "2026-11-07T06:00:00.000Z" } }).write("report", { status: "completed", report_data: { a: 1 }, gamma_url: "", duration_minutes: 3 });
+    expect(d.tables.reports[0].status).toBe("running");
+    await app().write("report", { status: "completed", report_data: { a: 1 }, gamma_url: "https://gamma.app/docs/x", duration_minutes: 3 });
+    expect(d.tables.reports[0]).toMatchObject({ status: "completed", report_data: { a: 1 }, gamma_url: "https://gamma.app/docs/x", duration_minutes: 3 });
+    // Finished: a late write is skipped.
+    await app().write("report", { status: "completed", report_data: { b: 2 } });
+    expect(d.tables.reports[0].report_data).toEqual({ a: 1 });
+    await expect(makeAppOutput(d, run({ mode: "app", kind: "linkedin_source" }), { social: {}, competitive: {}, linkedin_source: {} }).write("report", {})).rejects.toThrow("No writer for the linkedin_source report");
     const seen: unknown[] = [];
     await makeAppOutput(d, run({ mode: "app" }), { social: { report: async (_db, _r, data) => { seen.push(data); } }, competitive: {}, linkedin_source: {} }).write("report", { ok: 1 });
     expect(seen).toEqual([{ ok: 1 }]);
@@ -141,8 +160,9 @@ describe("outputs", () => {
     expect(() => shadow.db.from("reports").insert({})).toThrow(PipelineWriteRefused);
     await shadow.output.write("report", { x: 1 });
     expect(d.tables.shadow_social_reports).toHaveLength(1);
+    // An app run with no attempt to fence to writes nothing.
     const app = services(run({ mode: "app" }), REGISTRY.all()[0]);
-    await expect(app.output.write("report", {})).rejects.toThrow("No writer");
+    await expect(app.output.write("report", {})).rejects.toThrow("was not written (400)");
   });
 });
 
@@ -150,14 +170,17 @@ describe("starting runs", () => {
   const placeholder = REGISTRY.get("placeholder_social")!;
   it("starts a report's shadow once per report, with the request n8n got", async () => {
     const calls: Array<Record<string, unknown>> = [];
-    const d = db({}, { report_pipeline_start: (args) => { calls.push(args); return { run_id: "run-1", started: calls.length === 1 }; } });
+    const d = db({ reports: [{ id: "report-1", created_at: "2026-11-07T07:15:02.000Z", status: "running" }] }, { report_pipeline_start: (args) => { calls.push(args); return { run_id: "run-1", started: calls.length === 1 }; } });
     const a = { mode: "shadow" as const, kind: "social" as const, pipeline: placeholder, clientId: "client-1", reportId: "report-1", range: { start: "2026-10-01", end: "2026-10-31" }, request: { report_id: "report-1" } };
     expect(await startReportPipeline(d, a)).toEqual({ run_id: "run-1", started: true });
     expect(calls[0]).toMatchObject({
       p_kind: "social", p_mode: "shadow", p_pipeline: "placeholder_social", p_app_capable: false, p_client: "client-1",
       p_real_table: "reports", p_real_id: "report-1", p_first_step: "record", p_dedupe: "shadow:social:report-1",
-      p_input: { range: { start: "2026-10-01", end: "2026-10-31" }, request: { report_id: "report-1" } },
+      // The attempt the social writer is fenced to: the report's created_at.
+      p_input: { range: { start: "2026-10-01", end: "2026-10-31" }, attempt_started_at: "2026-11-07T07:15:02.000Z", request: { report_id: "report-1" } },
     });
+    // A report that is gone is not started.
+    await expect(startReportPipeline(db({}, {}), { ...a, reportId: "gone" })).rejects.toThrow("The report is gone.");
   });
 
   it("refuses to start a placeholder in app mode", async () => {
