@@ -129,7 +129,7 @@ The API demo becomes a caller of this same lifecycle, so there is one onboarding
 
 ### 4. One definition per number
 
-- **Engagement rate (Lital's decision, 19 Oct: per impression).** Every screen uses one definition: engagements divided by impressions (views on video platforms). Comparisons read every company, the client included, from RivalIQ; the client's own performance reads Sprout with the same definition. Where a source has no impressions for a platform, the screen shows nothing for it, never another formula. Per-follower rates leave the product. Proof on 19 Oct: Bader 0.12% against competitors from about 1.3% to 2.9%, where it showed 28.58% against 0.15%.
+- **Engagement rate (Lital's decision, 19 Oct: per impression).** Every screen uses one definition: engagements divided by impressions (views on video platforms). The client's own figures come from Sprout, its most accurate source and the one the team works with (Lital, 20 Oct); competitors come from RivalIQ, their only source; a client platform Sprout does not cover falls back to RivalIQ. Where a source has no impressions for a platform, the screen shows nothing for it, never another formula. Per-follower rates leave the product. Proof on 19 Oct: Bader 0.12% against competitors from about 1.3% to 2.9%, where it showed 28.58% against 0.15%.
 - **Post counts** exclude ads and dark posts using Sprout's own fields (to be identified in the proof on Bader's 29 zero-impression posts).
 - **Labels match their fields:** posts analyzed is the real count, recommendations is the number of actions, the calendar count gets its own name.
 - **Top posts** show the number they are ranked by.
@@ -168,7 +168,7 @@ The readiness gate, "Your calendar is being set up", the staff note linking to s
 
 1. **RivalIQ tracking connects automatically** when a client's competitor set is confirmed, using paid company slots for the client and its three competitors.
 2. **Design settings are derived automatically** (logo from the site, placement measured from the client's own posts, brand colors). Staff can change them. This replaces the 12 Oct one-time staff confirmation.
-3. **Every planned post gets a design automatically.** On hold (Lital, 19 Oct 16:40): automatic designs stay off for every client until the Higgsfield workspace's spend since 14 Oct is explained (Socialytics made no Higgsfield call since 14 Oct 11:51 Israel time).
+3. **Automatic designs are off for good** (Lital, 20 Oct): the social team asks for a design when it needs one; no tokens are spent on designs nobody asked for. The switch is removed.
 4. **Staff keep scheduling each post to Sprout.** Publishing stays a staff action; the product prepares everything up to it.
 
 ## Proof before building
