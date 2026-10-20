@@ -9,6 +9,12 @@
 //   app     only the in-app pipeline runs, and writes the real report.
 // The tables are in supabase/migrations/20261020110000_inhouse_groundwork.sql.
 
+/**
+ * In-app runs of one report (or of one LinkedIn source window) that may stop
+ * before n8n, the backup, makes it instead.
+ */
+export const APP_STOPS_BEFORE_N8N = 2;
+
 /** The three report workflows that serve Socialytics today. */
 export type ReportKind = "social" | "competitive" | "linkedin_source";
 export const REPORT_KINDS: readonly ReportKind[] = ["social", "competitive", "linkedin_source"];
@@ -110,6 +116,19 @@ export interface StepContext<S extends Record<string, unknown> = Record<string, 
   env(name: string): string | undefined;
 }
 
+/**
+ * Thrown by a step whose external job (an Apify run, a Claude message batch)
+ * ended without its result: the try fails as any throw does, and the runner
+ * forgets the job it was looking at, so the next try starts a new one rather
+ * than looking at the dead one again.
+ */
+export class StepRestart extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StepRestart";
+  }
+}
+
 /** What a step came to. A step that cannot go on throws; the runner retries it quietly. */
 export type StepResult<S extends Record<string, unknown> = Record<string, unknown>> =
   | { type: "next"; step: string; state?: S; detail?: Record<string, unknown> }
@@ -139,6 +158,13 @@ export interface PipelineDefinition<S extends Record<string, unknown> = Record<s
   appCapable: boolean;
   /** The secrets it reads (secrets.ts); a pipeline whose secrets are not all set is never chosen. */
   secrets: readonly string[];
+  /**
+   * Secrets a run waits for, quietly, while they are not set (APIFY_API_TOKEN
+   * before the owner adds it): a shadow is still chosen and its step waits
+   * and looks again, saying so in its step log. App mode needs them set, so
+   * a real report never waits on a missing secret: the kind stays on n8n.
+   */
+  awaitedSecrets?: readonly string[];
   first: string;
   steps: Record<string, Step<S>>;
   /** Tries of one step before the run stops (default MAX_STEP_ATTEMPTS). */

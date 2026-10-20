@@ -53,7 +53,7 @@ import { isTrackingProblem, LANDSCAPE_MISSING, type LandscapeCheck } from "../_s
 import { HELD_REDOS } from "../_shared/competitive/reportEvidence.ts";
 import type { JobOutcome, ScheduledJob } from "./types.ts";
 import { RETRY_MINUTES } from "./worker.ts";
-import type { Engine, PipelineDefinition } from "../_shared/pipelines/types.ts";
+import { APP_STOPS_BEFORE_N8N, type Engine, type PipelineDefinition } from "../_shared/pipelines/types.ts";
 import type { ReportPipelineStart } from "../_shared/pipelines/shadow.ts";
 import type { AppRunView } from "../_shared/pipelines/store.ts";
 
@@ -74,8 +74,8 @@ export const LAST_RUN_LEAD_MINUTES = 180;
 export const MANUAL_RUN_DAYS = 7;
 /** The wait before a held competitive analysis is made again. */
 export const HELD_REDO_MINUTES = 24 * 60;
-/** In-app runs of one occurrence that may stop before its next run goes to n8n, the backup. */
-export const APP_STOPS_BEFORE_N8N = 2;
+/** In-app runs of one occurrence that may stop before its next run goes to n8n, the backup (one rule with the LinkedIn source). */
+export { APP_STOPS_BEFORE_N8N };
 
 /** A run a person asked for, with no schedule behind it (scheduled_jobs.payload). */
 export interface ManualRun {

@@ -12,7 +12,7 @@
 // state, so a long answer never grows the queue row.
 
 import { anthropicMessages } from "../anthropic.ts";
-import type { Step, StepContext, StepResult } from "./types.ts";
+import { StepRestart, type Step, type StepContext, type StepResult } from "./types.ts";
 
 /**
  * The most output an inline call may ask for. Conservative for a 110 s step;
@@ -86,8 +86,8 @@ export async function claudeBatchRead(ctx: StepContext, a: { apiKey: string; bat
  * request, is called back every CLAUDE_BATCH_POLL_SECONDS until the answer is
  * saved as saveAs, then goes on to next (or finishes the run when next is
  * null). A batch that ends without an answer is submitted again, up to
- * CLAUDE_BATCH_RESUBMITS times; after that the step throws and the runner's
- * quiet retries take over.
+ * CLAUDE_BATCH_RESUBMITS times; after that the step throws StepRestart and
+ * the runner's quiet retries take over, each submitting a new batch.
  */
 export function claudeBatchStep(o: {
   /** The request and the key, built from the run and the payload store. */
@@ -111,7 +111,8 @@ export function claudeBatchStep(o: {
     if (read.state === "pending") return { type: "poll", waitSeconds: CLAUDE_BATCH_POLL_SECONDS, handle: { claude_batch_id: batchId } };
     if (read.state === "failed") {
       const resubmits = Number(ctx.state[counter] ?? 0);
-      if (resubmits >= CLAUDE_BATCH_RESUBMITS) throw new Error(`Claude batch ${batchId}: ${read.reason}`);
+      // The try fails, and the next one submits a new batch rather than reading this one again.
+      if (resubmits >= CLAUDE_BATCH_RESUBMITS) throw new StepRestart(`Claude batch ${batchId}: ${read.reason}`);
       return submit(resubmits + 1);
     }
     const detail = { saved: read.key, bytes: read.bytes, stop_reason: read.stopReason };

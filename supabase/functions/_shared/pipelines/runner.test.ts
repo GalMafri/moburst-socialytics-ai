@@ -9,7 +9,7 @@ import {
   MAX_POLL_MINUTES, MAX_RUN_HOURS, MAX_STEP_ATTEMPTS, POLL_MAX_SECONDS, POLL_MIN_SECONDS, runPipelineJob, retryWaitMinutes, smallDetail,
   STATE_MAX_BYTES, type RunnerDeps, type StepOutcome,
 } from "./runner";
-import type { PipelineDefinition, PipelineRun } from "./types";
+import { StepRestart, type PipelineDefinition, type PipelineRun } from "./types";
 
 const T0 = new Date("2026-11-07T07:20:00Z");
 const at = (minutes: number) => new Date(T0.getTime() + minutes * 60_000);
@@ -227,6 +227,22 @@ describe("runPipelineJob: limits", () => {
     expect((r.payload as { poll: unknown }).poll).toBeNull();
     const again = await h.next(r.available_at ? new Date(r.available_at) : T0);
     expect(again.payload).toMatchObject({ poll: { handle: { started_again: true }, polls: 1 } });
+  });
+
+  it("forgets the external job a step gave up on (StepRestart), so the next try starts a new one; any other failure keeps it", async () => {
+    const h = harness(def(async (ctx) => {
+      if (ctx.poll) throw new StepRestart("the job ended without its result");
+      return { type: "poll", waitSeconds: 60, handle: { job: "new" } };
+    }));
+    h.job.payload = { ...h.job.payload, poll: { handle: { job: "dead" }, polls: 3, since: T0.toISOString() } };
+    const r = await h.lease();
+    expect(r).toMatchObject({ status: "queued", reason: expect.stringContaining("the job ended without its result") });
+    expect((r.payload as { poll: unknown }).poll).toBeNull();
+    const again = await h.next(r.available_at ? new Date(r.available_at) : T0);
+    expect(again.payload).toMatchObject({ poll: { handle: { job: "new" }, polls: 1 } });
+    const plain = harness(def(async () => { throw new Error("provider 503"); }));
+    plain.job.payload = { ...plain.job.payload, poll: { handle: { job: "kept" }, polls: 1, since: T0.toISOString() } };
+    expect(((await plain.lease()).payload as { poll: unknown }).poll).toMatchObject({ handle: { job: "kept" } });
   });
 
   it("stops a run that has gone on longer than MAX_RUN_HOURS", async () => {

@@ -16,6 +16,7 @@ import { rivalIqFetch } from "./rivaliqFetch.ts";
 import { harvestedPaths, type HarvestedRef } from "../design-prompts/designRefs.ts";
 import { pipelineEngineDeps, readEngine } from "../pipelines/engine.ts";
 import { shadowLinkedInSource } from "../pipelines/shadow.ts";
+import { feedLinkedInAnswer } from "../pipelines/feedLinkedIn.ts";
 
 /** A refresh that stopped with an answer for the caller: an HTTP status and, for a known case, a code. */
 export class FeedRefreshError extends Error {
@@ -309,13 +310,16 @@ export async function refreshCompetitorFeed(admin: any, clientId: string, env: F
   const plan = selectedFeedSources(match.companies, match.client_company_id, selected || [], []);
   const {data: setting, error: settingError} = await admin.from("app_settings").select("value").eq("key","competitive_linkedin_webhook_url").maybeSingle();
   if (settingError) throw new Error('Could not load the LinkedIn source connection.');
-  // The LinkedIn source's engine switch (report_engines). On shadow an in-app
-  // run is queued after n8n answers; reading it never throws and never delays
-  // the n8n call. The app engine is wired here once an app-capable LinkedIn
-  // pipeline exists; until then the switch cannot reach app (engine.ts and
-  // report_engines_guard), and n8n answers the feed.
+  // The LinkedIn source's engine switch (report_engines; reading it never
+  // throws, anything in doubt is n8n). n8n: the n8n workflow, as before.
+  // shadow: the n8n workflow, as before, and an in-app run queued after it
+  // answered. app: the in-app pipeline, in this refresh, with n8n as the
+  // backup after failures (_shared/pipelines/feedLinkedIn.ts). The database
+  // refuses app until an in-app LinkedIn run has finished a shadow.
   const linkedinEngine = readEngine(admin, "linkedin_source", clientId, pipelineEngineDeps());
-  const [linkedin,owned] = await Promise.all([collectLinkedInSource(plan.sources, window, env.secret || '', setting?.value || ''),collectOwnedCompetitive(admin,client,window)]);
+  const collectLinkedIn = async () => feedLinkedInAnswer(admin, await linkedinEngine, { clientId, sources: plan.sources, period: window },
+    () => collectLinkedInSource(plan.sources, window, env.secret || '', setting?.value || ''));
+  const [linkedin,owned] = await Promise.all([collectLinkedIn(),collectOwnedCompetitive(admin,client,window)]);
   await shadowLinkedInSource(admin, await linkedinEngine, { clientId, sources: plan.sources, period: window, real: linkedin });
   const selectedIds = new Set(plan.companyIds);
   const socialPosts = mergeOwnedCompetitivePosts([...rivalPosts.filter(p=>selectedIds.has(String(p.companyId))), ...linkedin.socialPosts],owned,{id:match.client_company_id,name:client.name});

@@ -55,7 +55,7 @@ describe("resolveEngine", () => {
     expect(r.pipeline?.name).toBe("placeholder_competitive");
   });
 
-  it("refuses app while only placeholders exist: n8n runs it", () => {
+  it("refuses app while no app-capable pipeline of the kind has all its secrets set: n8n runs it", () => {
     for (const kind of ["social", "competitive", "linkedin_source"] as const) {
       const r = resolveEngine("app", kind, REGISTRY, noEnv);
       expect(r.engine).toBe("n8n");
@@ -84,6 +84,22 @@ describe("resolveEngine", () => {
     expect(resolveEngine("shadow", "social", registry, env).pipeline?.name).toBe("placeholder_social");
   });
 
+  it("shadows the LinkedIn source with the in-app pipeline while APIFY_API_TOKEN is missing (it waits), and takes app only once the token is set", () => {
+    expect(resolveEngine("shadow", "linkedin_source", REGISTRY, noEnv)).toMatchObject({ engine: "shadow", pipeline: { name: "linkedin_source_v1" } });
+    expect(resolveEngine("app", "linkedin_source", REGISTRY, noEnv).engine).toBe("n8n");
+    const withToken = (n: string) => (n === "APIFY_API_TOKEN" ? "apify-token" : undefined);
+    expect(resolveEngine("app", "linkedin_source", REGISTRY, withToken)).toMatchObject({ engine: "app", pipeline: { name: "linkedin_source_v1" } });
+  });
+
+  it("shadows the competitive analysis in-app once RivalIQ and Claude are set, and takes app only with the Apify token too", () => {
+    const keys = (names: string[]) => (n: string) => (names.includes(n) ? "set" : undefined);
+    expect(resolveEngine("shadow", "competitive", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY"]))).toMatchObject({ engine: "shadow", pipeline: { name: "competitive_v1" } });
+    expect(resolveEngine("app", "competitive", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY"])).engine).toBe("n8n");
+    expect(resolveEngine("app", "competitive", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY", "APIFY_API_TOKEN"]))).toMatchObject({ engine: "app", pipeline: { name: "competitive_v1" } });
+    // Social has no real pipeline yet: only its placeholder shadows, and app stays on n8n.
+    expect(resolveEngine("app", "social", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY", "APIFY_API_TOKEN"])).engine).toBe("n8n");
+  });
+
   it("runs n8n for n8n", () => {
     expect(resolveEngine("n8n", "social", REGISTRY, noEnv)).toEqual({ engine: "n8n" });
   });
@@ -106,17 +122,19 @@ describe("readEngine", () => {
 });
 
 describe("registry", () => {
-  it("registers one shadow-only placeholder per kind, needing no secret", () => {
-    expect(REGISTRY.all().map((d) => d.name).sort()).toEqual(["placeholder_competitive", "placeholder_linkedin_source", "placeholder_social"]);
-    for (const d of REGISTRY.all()) {
+  it("registers the in-app LinkedIn source and competitive pipelines, and one shadow-only placeholder per kind, needing no secret", () => {
+    expect(REGISTRY.all().map((d) => d.name).sort()).toEqual(["competitive_v1", "linkedin_source_v1", "placeholder_competitive", "placeholder_linkedin_source", "placeholder_social"]);
+    for (const d of REGISTRY.all().filter((x) => x.name.startsWith("placeholder_"))) {
       expect(d.modes).toEqual(["shadow"]);
       expect(d.appCapable).toBe(false);
       expect(d.secrets).toEqual([]);
     }
+    expect(REGISTRY.get("linkedin_source_v1")).toMatchObject({ kind: "linkedin_source", modes: ["shadow", "app"], appCapable: true, secrets: [], awaitedSecrets: ["APIFY_API_TOKEN"] });
+    expect(REGISTRY.get("competitive_v1")).toMatchObject({ kind: "competitive", modes: ["shadow", "app"], appCapable: true, secrets: ["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY"], awaitedSecrets: ["APIFY_API_TOKEN"] });
   });
 
   it("refuses two pipelines with one name, a missing first step, and an app-capable pipeline without app mode", () => {
-    const one = REGISTRY.all()[0];
+    const one = REGISTRY.get("placeholder_social")!;
     expect(() => makeRegistry([one, one])).toThrow("Two pipelines");
     expect(() => makeRegistry([{ ...one, first: "nope" }])).toThrow("does not define");
     expect(() => makeRegistry([{ ...one, appCapable: true }])).toThrow("does not allow app mode");

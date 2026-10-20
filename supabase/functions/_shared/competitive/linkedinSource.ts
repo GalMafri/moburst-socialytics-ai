@@ -37,8 +37,16 @@ export async function collectLinkedInSource(sources: LinkedInSource[], period: {
     body:JSON.stringify({sources,period}), signal:AbortSignal.timeout(100000),
   });
   if (!response.ok) throw new Error('LinkedIn source collection failed ['+response.status+']. The previous feed was preserved.');
-  const result = await response.json();
-  if (!Array.isArray(result.socialPosts) || !result.additional_metrics) throw new Error('LinkedIn source response was incomplete.');
+  return checkLinkedInAnswer(await response.json(), sources, period);
+}
+
+/**
+ * The checks every LinkedIn source answer passes before a feed uses it,
+ * whichever engine made it (the n8n workflow, or the in-app pipeline):
+ * complete coverage of each requested page, for exactly the requested days.
+ */
+export function checkLinkedInAnswer(result: any, sources: LinkedInSource[], period: {start:string;end:string}) {
+  if (!result || !Array.isArray(result.socialPosts) || !result.additional_metrics) throw new Error('LinkedIn source response was incomplete.');
   for (const s of sources) {
     const m = result.additional_metrics[s.company_id];
     if (m?.coverage !== 'complete' || m.profile_url !== s.profile_url || m.period?.start !== period.start || m.period?.end !== period.end) throw new Error('LinkedIn source coverage did not match the requested feed.');

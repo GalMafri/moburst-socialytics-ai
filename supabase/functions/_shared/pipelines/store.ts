@@ -9,6 +9,7 @@
 
 import type { RunStore, StepLog, StepServices } from "./runner.ts";
 import type { OutputWriter, PayloadStore, PipelineDefinition, PipelineRun, RealTable, ReportKind, RunMode } from "./types.ts";
+import { COMPETITIVE_WRITERS } from "./writers.ts";
 
 export const PAYLOAD_BUCKET = "pipeline-payloads";
 /** How long in-between data is kept. */
@@ -176,14 +177,26 @@ export function makeShadowOutput(db: Db, run: PipelineRun, payloads: PayloadStor
 }
 
 /**
- * Writes one target of a real report. None are registered yet: no pipeline
- * can make a real report, and the registry refuses app mode for a kind with no
- * "report" writer. A writer writes only while the report is still running (the
- * dispatch may have taken it away and started another), as n8n's callbacks are
- * fenced today.
+ * Writes one target of a real report. The registry refuses app mode for a
+ * kind with no "report" writer. A writer writes only while the report is
+ * still running (the dispatch may have taken it away and started another),
+ * as n8n's callbacks are fenced today.
+ *
+ *   competitive      the report and its RivalIQ snapshots, through the
+ *                    writer update-competitive-report uses (writers.ts).
+ *   linkedin_source  the answer, kept with the run: the feed refresh that
+ *                    runs it in-process (inline.ts) uses it, as it used the
+ *                    n8n workflow's answer, and saves the feed itself.
+ *   social           none yet.
  */
 export type RealWriter = (db: Db, run: PipelineRun, data: Record<string, unknown>) => Promise<void>;
-export const REAL_WRITERS: Record<ReportKind, Record<string, RealWriter>> = { social: {}, competitive: {}, linkedin_source: {} };
+export const REAL_WRITERS: Record<ReportKind, Record<string, RealWriter>> = {
+  social: {},
+  competitive: COMPETITIVE_WRITERS,
+  linkedin_source: {
+    report: async (db, run, data) => { await makePayloadStore(db, run.id).put("result", data); },
+  },
+};
 
 export function makeAppOutput(db: Db, run: PipelineRun, writers: Record<ReportKind, Record<string, RealWriter>> = REAL_WRITERS): OutputWriter {
   return {
@@ -220,6 +233,15 @@ export interface StartRun {
   input: Record<string, unknown>;
   /** One run per key: asking again returns the run already made. */
   dedupe: string;
+}
+
+/**
+ * Makes the row of a run a caller takes in-process (inline.ts): no job is
+ * queued for it, its caller runs the steps. Mode app only.
+ */
+export async function createInlineRun(db: Db, row: Record<string, unknown>): Promise<PipelineRun> {
+  if (row.mode !== "app") throw new Error("Only an app run is taken in-process.");
+  return (await must(db.from("report_pipeline_runs").insert(row).select("*").single())) as PipelineRun;
 }
 
 /** Makes the run and its first job in one transaction (report_pipeline_start). */
