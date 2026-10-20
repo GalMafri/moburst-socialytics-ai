@@ -81,7 +81,8 @@ function gamma(calls: string[], o: { refuse?: boolean } = {}): SocialDeps["gamma
 }
 
 /** The two trend scrapers as they answered (execution 583953). */
-function apify(calls: string[], o: { fail?: "tiktok" } = {}) {
+function apify(calls: string[], o: { fail?: "tiktok"; emptyTikTokRuns?: number } = {}) {
+  let tiktokRuns = 0;
   const runs: Record<string, string> = {};
   const client: ApifyClient = {
     async startRun(actorId, input, opts) {
@@ -96,17 +97,21 @@ function apify(calls: string[], o: { fail?: "tiktok" } = {}) {
       return { id: runId, status: failed ? "FAILED" : "SUCCEEDED", defaultDatasetId: `ds-${actor}` };
     },
     async datasetPage() { return []; },
-    async datasetItems(datasetId) { return datasetId === `ds-${TREND_ACTORS.tiktok.id}` ? TRENDS.tiktok_items : TRENDS.instagram_items; },
+    async datasetItems(datasetId) {
+      if (datasetId !== `ds-${TREND_ACTORS.tiktok.id}`) return TRENDS.instagram_items;
+      tiktokRuns += 1;
+      return tiktokRuns <= (o.emptyTikTokRuns ?? 0) ? [] : TRENDS.tiktok_items;
+    },
   };
   return () => client;
 }
 
-function deps(o: { calls?: Record<string, string[]>; requests?: Any[]; failBrief?: boolean; refuseDeck?: boolean; failTikTok?: boolean } = {}): SocialDeps {
+function deps(o: { calls?: Record<string, string[]>; requests?: Any[]; failBrief?: boolean; refuseDeck?: boolean; failTikTok?: boolean; emptyTikTokRuns?: number } = {}): SocialDeps {
   const calls = o.calls ?? { sprout: [], gamma: [], apify: [] };
   return {
     sprout: sprout(calls.sprout),
     gamma: gamma(calls.gamma, { refuse: o.refuseDeck }),
-    apify: apify(calls.apify, { fail: o.failTikTok ? "tiktok" : undefined }),
+    apify: apify(calls.apify, { fail: o.failTikTok ? "tiktok" : undefined, emptyTikTokRuns: o.emptyTikTokRuns }),
     claudeFetch: claude({ brief: MOBURST.brief_analysis.output, synthesis: MOBURST.ai.output }, o.requests ?? [], { failBrief: o.failBrief }),
   };
 }
@@ -202,6 +207,21 @@ describe("social_v1, live, on what the providers answered n8n for fd501cba", () 
     const store = makePayloadStore(db, run_id);
     expect(await store.get(KEPT.dataset("tiktok"))).toHaveLength(203);
     expect(await store.get(KEPT.dataset("instagram"))).toHaveLength(346);
+  });
+
+  it("starts a new scraper run when a search brings back nothing, and lets an empty last try stand", async () => {
+    const c = TRENDS.client;
+    const request = { ...moburstRequest(), skip_trends: false, social_keywords: c.social_keywords, trends_keywords: c.trends_keywords, languages: c.languages, geo: c.geo };
+    const once = { sprout: [] as string[], gamma: [] as string[], apify: [] as string[] };
+    const recovered = await run({ mode: "shadow", request, deps: deps({ calls: once, emptyTikTokRuns: 1 }) });
+    expect(recovered.driven.outcome.status).toBe("done");
+    expect(once.apify.filter((l) => l.startsWith(`start ${TREND_ACTORS.tiktok.id}`))).toHaveLength(2);
+    expect(recovered.db.tables.shadow_social_reports[0].report_data.tiktok_trends.posts).toEqual(TRENDS.tiktok_normalized);
+    const twice = { sprout: [] as string[], gamma: [] as string[], apify: [] as string[] };
+    const empty = await run({ mode: "shadow", request, deps: deps({ calls: twice, emptyTikTokRuns: 2 }) });
+    expect(empty.driven.outcome.status).toBe("done");
+    expect(twice.apify.filter((l) => l.startsWith(`start ${TREND_ACTORS.tiktok.id}`))).toHaveLength(2);
+    expect(empty.db.tables.shadow_social_reports[0].report_data.data_counts).toMatchObject({ tiktok_trends: 0, instagram_trends: 15 });
   });
 
   it("goes on as n8n does when a scraper fails, the brief cannot be analyzed, or Gamma refuses the deck", async () => {

@@ -40,7 +40,7 @@
 import { runActorStep, type ApifyFactory } from "../apifyStep.ts";
 import { claudeBatchStep } from "../claude.ts";
 import { ANTHROPIC_API_KEY, APIFY_API_TOKEN, GAMMA_API_KEY, SPROUT_CLIENT_ID, SPROUT_CLIENT_SECRET } from "../secrets.ts";
-import type { PipelineDefinition, StepContext, StepResult } from "../types.ts";
+import { StepRestart, type PipelineDefinition, type StepContext, type StepResult } from "../types.ts";
 import { briefAnswer, briefRequest, parseAnswer, repairRequest, synthesisProblems, synthesisRequest } from "../social/analysis.ts";
 import {
   aggregateSprout, attachCompetitiveContext, attachPostThumbnails, buildNormalizedClient, buildPresentationContent, checkGammaState, combineBrief,
@@ -128,6 +128,11 @@ export function socialPipeline(deps: SocialDeps = {}): PipelineDefinition {
       try {
         const actor = await runActorStep(ctx, { actor: TREND_ACTORS[source], input: actorInput, datasetKey: KEPT.dataset(source), keepDays: KEEP.keepDays, apify: deps.apify });
         if (actor.type === "wait") return actor.result;
+        // A search that brought back nothing at all did not really run (20 Oct
+        // 2026: TikTok turned away all 8 of a run's searches, and the same
+        // search answered minutes later). It gets the new run a failed one gets;
+        // after the last try an empty answer stands, as n8n reads it.
+        if (!actor.rows.length && ctx.attempt < TREND_TRIES) throw new StepRestart(`The ${source} scraper brought back nothing (run ${actor.runId}).`);
         items = normalize(actor.rows, combined);
         detail = { apify_run_id: actor.runId, items: actor.rows.length };
       } catch (e) {
