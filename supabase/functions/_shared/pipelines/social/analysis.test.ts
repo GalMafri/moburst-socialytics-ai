@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { MOBURST, TRENDS } from "../fixtures/social";
 import { BRIEF_SCHEMA, briefAnswer, briefRequest, repairRequest, SYNTHESIS_SCHEMA, synthesisProblems, synthesisRequest } from "./analysis";
 import { gammaClient, GAMMA_TEMPLATE_ID, sproutReader } from "./providers";
+import { COMPARED_RATE, SPROUT_RATE, synthesisText } from "./prompt";
+import { COMPARED_RATE_LABEL, SPROUT_RATE_LABEL } from "../../../../../src/lib/rateLabels";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -46,6 +48,15 @@ describe("the synthesis", () => {
       "sprout_performance_analysis.key_insights must be a list of strings", "tiktok_trends_analysis must be an object or null", "competitive_takeaways must be a list of strings",
     ]);
     expect(synthesisProblems({ sprout_performance_analysis: { platform_breakdown: [{ platform: "LinkedIn", insights: "x" }] } })).toEqual(["sprout_performance_analysis.platform_breakdown[0].insights must be a list of strings"]);
+  });
+
+  it("names the competitors' rate as the app labels it, apart from the client's Sprout rate", () => {
+    expect(COMPARED_RATE).toBe(COMPARED_RATE_LABEL.toLowerCase());
+    expect(SPROUT_RATE).toBe(SPROUT_RATE_LABEL);
+    const text = synthesisText(json);
+    expect(text).toContain(`call that rate the ${COMPARED_RATE_LABEL.toLowerCase()}, and never give it the bare name of the client's ${SPROUT_RATE_LABEL}`);
+    // Without a competitive context there is no comparison to name.
+    expect(synthesisText({ ...json, competitive_context: null })).not.toContain(COMPARED_RATE);
   });
 
   it("repairs with the autofix prompt n8n's parser uses, at low effort", () => {

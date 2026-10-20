@@ -10,6 +10,16 @@
 // deno-lint-ignore no-explicit-any
 type Any = any;
 
+/**
+ * How the two engagement rates are named (src/lib/rateLabels.ts, owner's
+ * decision of 20 Oct 2026; a test checks the wording is the app's): the
+ * competitors' figures are compared on likes, comments and shares, the
+ * client's own are Sprout's.
+ */
+export const COMPARED_RATE = "engagement rate, compared on likes, comments and shares";
+export const SPROUT_RATE = "Sprout engagement rate";
+const RATE_NAMING = `The competitive context's engagement rates count likes, comments and shares the same way for every company: call that rate the ${COMPARED_RATE}, and never give it the bare name of the client's ${SPROUT_RATE}, which counts clicks and is reported separately.`;
+
 /** Every change from n8n's prompt text, [n8n's text, the port's text]. */
 export const PROMPT_EDITS: ReadonlyArray<readonly [string, string]> = [
   ["in alignment with these patterns \u2014 composition, typography", "in alignment with these patterns: composition, typography"],
@@ -18,6 +28,7 @@ export const PROMPT_EDITS: ReadonlyArray<readonly [string, string]> = [
   ["This is the platform-by-platform truth \u2014 use it for the platform analysis below.", "This is the platform-by-platform truth: use it for the platform analysis below."],
   ["performed individually \u2014 what each platform is best at", "performed individually: what each platform is best at"],
   ["(PRE-CALCULATED - use these values directly)", "(PRE-CALCULATED: use these values directly)"],
+  ["compare the client against the competitive set where the data supports it (cadence, engagement rate, channel mix, share of voice). (2)", `compare the client against the competitive set where the data supports it (cadence, engagement rate, channel mix, share of voice). ${RATE_NAMING} (2)`],
   [
     "- One claim per field. No preamble, no \"the data shows\", no repeating the client name in every sentence.\n",
     "- One claim per field. No preamble, no \"the data shows\", no repeating the client name in every sentence.\n- Where you write in English, write American English. Never use an em dash or an en dash.\n",
@@ -141,7 +152,7 @@ export function synthesisText(json: Any): string {
   const cc = json.competitive_context;
   const competitive = cc
     ? "COMPETITIVE CONTEXT (from the latest competitor analysis of " + (cc.landscape || "the RivalIQ landscape") + ", analyzed " + (cc.analyzed_at || "") + "):\n" + JSON.stringify(cc)
-      + "\n\nUSE IT: (1) In sprout_performance_analysis.key_insights, compare the client against the competitive set where the data supports it (cadence, engagement rate, channel mix, share of voice). (2) pillar_alignment.recommendations and the trend opportunities MUST respond to the competitive picture: the empty posting windows, the winner patterns (in the client's own voice), and the hashtag, format and copy-angle gaps. (3) endorsed_gaps (if present) were approved by the account team: treat each as a requirement the recommendations must visibly answer at least once, and name it there. suppressed_gaps (if present) were rejected by the team: never propose them or anything equivalent. (4) Add a top-level array \"competitive_takeaways\" with 3-5 short, specific sentences (each citing a number or a named competitor) describing how this report responds to the competitive picture, including which endorsed gaps it answers. Do not invent competitor data beyond what is provided.\n\n---\n\n"
+      + "\n\nUSE IT: (1) In sprout_performance_analysis.key_insights, compare the client against the competitive set where the data supports it (cadence, engagement rate, channel mix, share of voice). " + RATE_NAMING + " (2) pillar_alignment.recommendations and the trend opportunities MUST respond to the competitive picture: the empty posting windows, the winner patterns (in the client's own voice), and the hashtag, format and copy-angle gaps. (3) endorsed_gaps (if present) were approved by the account team: treat each as a requirement the recommendations must visibly answer at least once, and name it there. suppressed_gaps (if present) were rejected by the team: never propose them or anything equivalent. (4) Add a top-level array \"competitive_takeaways\" with 3-5 short, specific sentences (each citing a number or a named competitor) describing how this report responds to the competitive picture, including which endorsed gaps it answers. Do not invent competitor data beyond what is provided.\n\n---\n\n"
     : "";
   const noSprout = Array.isArray(json.sprout?.profiles) && json.sprout.profiles.length
     ? ""
