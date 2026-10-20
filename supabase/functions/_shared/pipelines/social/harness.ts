@@ -6,8 +6,11 @@
 //   {"mode":"replay_social","report_id":"<id>"}                 a replay of the newest finished in-app run of that report
 //   {"mode":"replay_social","run_id":"<run id>"}                a replay of that run
 //   ... "reuse_analysis":true                                   figures only, no paid call
+//   {"mode":"shadow_now","kind":"social","report_id":"<id>"}   a live shadow of a past report:
+//                                                               every provider called now
 //   {"mode":"compare_pipeline","run_id":"<run id>"}             the comparison
 
+import { buildSocialPayload } from "../../reports/payloads.ts";
 import { socialFigures } from "../../reports/reportText.ts";
 import { compareResults, formatComparison, type CompareOptions, type Comparison } from "../compare.ts";
 import { loadShadowPair, startPipelineRun } from "../store.ts";
@@ -95,6 +98,45 @@ export async function compareSocialRun(db: Db, runId: string): Promise<{ run_id:
   if (pair.real == null) throw new Error("The report it shadows is gone.");
   const c = compareSocial(pair.real, pair.shadow);
   return { run_id: runId, real_id: pair.run.real_id, ...c, text: formatSocialComparison(c) };
+}
+
+/**
+ * Starts a live shadow social run for a past report: the run n8n made, made
+ * again now with every provider called (Sprout, the trend scrapers, Claude,
+ * Gamma), from the request the dispatch builds, tied to the competitive
+ * report that run was sent with. Like every shadow it writes only shadow
+ * tables, and it keeps the answers it read, so it can be replayed. It is
+ * paid, so it starts only for a client whose social switch is on shadow or
+ * app. Trends are scraped as they are now, so they differ from n8n's.
+ */
+export async function startSocialShadow(db: Db, pipeline: PipelineDefinition, reportId: string, o: { now?: () => Date } = {}): Promise<{ run_id: string; started: boolean; report_id: string; competitive_report_id: string | null }> {
+  if (pipeline.kind !== "social") throw new Error(`Pipeline ${pipeline.name} is not a social pipeline.`);
+  const now = (o.now ?? (() => new Date()))();
+  const { data: report, error } = await db.from("reports").select("id, client_id, created_at, date_range_start, date_range_end, report_data").eq("id", reportId).maybeSingle();
+  if (error) throw new Error(`The report could not be read: ${error.message}`);
+  if (!report) throw new Error("No social report has that id.");
+  if (!report.report_data || !Object.keys(report.report_data).length) throw new Error("The report holds no finished analysis to compare with.");
+  if (!report.date_range_start || !report.date_range_end) throw new Error("The report has no reporting period.");
+  const { data: engines } = await db.from("report_engines").select("kind, client_id, engine").eq("kind", "social");
+  const own = (engines ?? []).find((r: Any) => r.client_id === report.client_id);
+  if (own?.engine !== "shadow" && own?.engine !== "app") throw new Error("A live shadow runs only for a client whose social switch is on shadow.");
+  const { data: client } = await db.from("clients").select("*").eq("id", report.client_id).maybeSingle();
+  if (!client) throw new Error("The report's client is gone.");
+  // The competitive report the dispatch sent this report with (its job's memory), if any.
+  const { data: jobs } = await db.from("scheduled_jobs").select("result, created_at").eq("report_id", report.id).order("created_at", { ascending: false }).limit(5);
+  const sentWith = ((jobs ?? []) as Any[]).map((j) => j?.result?.competitive_report_id).find((id) => typeof id === "string") ?? null;
+  const range = { start: String(report.date_range_start).slice(0, 10), end: String(report.date_range_end).slice(0, 10) };
+  const request = await buildSocialPayload({ supabase: db, client, reportId: report.id, range, scheduled: false, staggerSeconds: 0, ...(sentWith ? { competitiveReportId: sentWith } : {}) });
+  const started = await startPipelineRun(db, {
+    mode: "shadow",
+    pipeline,
+    clientId: report.client_id,
+    realTable: "reports",
+    realId: report.id,
+    input: { range, attempt_started_at: report.created_at, request },
+    dedupe: `live:social:${report.id}:${now.toISOString()}`,
+  });
+  return { ...started, report_id: report.id, competitive_report_id: sentWith };
 }
 
 /**

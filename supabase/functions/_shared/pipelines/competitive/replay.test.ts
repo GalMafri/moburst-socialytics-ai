@@ -16,7 +16,7 @@ import { makeRegistry } from "../registry";
 import { drivePipeline, pipelineDb, testClock } from "../testDriver";
 import { ANALYSIS_MODEL } from "./analysis";
 import { ANALYSIS_SYSTEM_PROMPT } from "./prompt";
-import { compareCompetitive, compareCompetitiveRun, competitiveFigures, shownCompetitiveReport, startCompetitiveReplay } from "./harness";
+import { compareCompetitive, compareCompetitiveRun, competitiveFigures, shownCompetitiveReport, startCompetitiveReplay, startCompetitiveShadow } from "./harness";
 import { pickReplaySnapshots, replayAttempt } from "./replay";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -158,6 +158,20 @@ describe("replay of a past competitive report from its saved snapshots", () => {
     const free = await startCompetitiveReplay(db, competitivePipeline(), REPORT, { reuseAnalysis: true, now: clock.now });
     expect(free).toMatchObject({ started: true, attempt_started_at: FX.report.created_at });
     await expect(startCompetitiveReplay(db, competitivePipeline(), "missing", { reuseAnalysis: true })).rejects.toThrow("No competitive report has that id");
+  });
+
+  it("a live shadow of a past report runs only on shadow, carries no replay and n8n's request, and goes to the live steps", async () => {
+    const clock = testClock("2026-10-20T09:00:00Z");
+    const db = pipelineDb(tables(), clock.now);
+    await expect(startCompetitiveShadow(db, competitivePipeline(), REPORT, { now: clock.now })).rejects.toThrow("A live shadow runs only for a client whose competitive switch is on shadow.");
+    const shadowDb = pipelineDb(tables({ report_engines: [{ kind: "competitive", client_id: MOBURST, engine: "shadow" }] }), clock.now);
+    const started = await startCompetitiveShadow(shadowDb, competitivePipeline(), REPORT, { now: clock.now });
+    expect(started).toMatchObject({ started: true, attempt_started_at: FX.report.created_at });
+    const run = shadowDb.tables.report_pipeline_runs.find((r) => r.id === started.run_id) as Record<string, any>;
+    expect(run).toMatchObject({ mode: "shadow", kind: "competitive", real_table: "competitive_reports", real_id: REPORT });
+    expect(run.input.replay).toBeUndefined();
+    expect(run.input.request).toMatchObject({ report_id: REPORT });
+    expect(String(run.dedupe_key)).toMatch(/^live:competitive:/);
   });
 
   it("compares as a screen shows both reports, listing each number that differs", async () => {

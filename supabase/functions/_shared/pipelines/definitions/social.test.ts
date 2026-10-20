@@ -17,7 +17,7 @@ import { makeRegistry } from "../registry";
 import { startReportPipeline } from "../shadow";
 import { makePayloadStore } from "../store";
 import { drivePipeline, pipelineDb, testClock } from "../testDriver";
-import { compareSocial, compareSocialRun, startSocialReplay } from "../social/harness";
+import { compareSocial, compareSocialRun, startSocialReplay, startSocialShadow } from "../social/harness";
 import { sproutRequests, type GammaClient, type SproutReader } from "../social/providers";
 import { KEPT } from "../social/replay";
 import { socialFigures } from "../../reports/reportText";
@@ -266,6 +266,27 @@ describe("the September replay: fd501cba from the answers a run kept", () => {
     expect(compared!.comparison.numbers.differences).toEqual([]);
     expect(compared!.comparison.text.filter((t) => !t.same)).toEqual([]);
     expect(compared!.text).toContain("Figures a screen shows:");
+  });
+
+  it("a live shadow of a past report runs only on shadow, from the dispatch's request, tied to the competitive report the run was sent with", async () => {
+    const clock = testClock("2026-10-20T10:00:00Z");
+    const rows = (engine: string) => ({
+      reports: [{ id: REPORT.id, client_id: CLIENT, status: "completed", created_at: REPORT.created_at, date_range_start: "2026-09-01", date_range_end: "2026-09-30", report_data: REPORT.report_data }],
+      clients: [{ id: CLIENT, name: "Moburst", primary_platforms: ["linkedin", "instagram"] }],
+      scheduled_jobs: [{ id: "job-1", kind: "dispatch", report_id: REPORT.id, created_at: "2026-10-16T20:59:00Z", result: { competitive_report_id: "comp-1", runs: [{ report_id: REPORT.id }] } }],
+      competitive_reports: [{ id: "comp-1", client_id: CLIENT, status: "complete", created_at: "2026-10-07T07:15:04Z", report_data: {} }],
+      report_engines: [{ kind: "social", client_id: CLIENT, engine }],
+    });
+    const pipeline = socialPipeline(deps());
+    await expect(startSocialShadow(pipelineDb(rows("n8n"), () => clock.now()), pipeline, REPORT.id)).rejects.toThrow("A live shadow runs only for a client whose social switch is on shadow.");
+    const db = pipelineDb(rows("shadow"), () => clock.now());
+    const started = await startSocialShadow(db, pipeline, REPORT.id, { now: () => clock.now() });
+    expect(started).toMatchObject({ started: true, report_id: REPORT.id, competitive_report_id: "comp-1" });
+    const runRow = db.tables.report_pipeline_runs.find((r) => r.id === started.run_id) as Any;
+    expect(runRow).toMatchObject({ mode: "shadow", kind: "social", real_table: "reports", real_id: REPORT.id });
+    expect(runRow.input).toMatchObject({ range: { start: "2026-09-01", end: "2026-09-30" }, attempt_started_at: REPORT.created_at, request: { client_name: "Moburst" } });
+    expect(runRow.input.replay).toBeUndefined();
+    expect(String(runRow.dedupe_key)).toMatch(/^live:social:/);
   });
 
   it("a replay that would ask Claude starts only for a client whose social switch is on shadow", async () => {

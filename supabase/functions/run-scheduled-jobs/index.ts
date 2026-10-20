@@ -29,6 +29,11 @@
 //                              an earlier in-app run of that report kept (no
 //                              Sprout, Apify or Gamma call; with
 //                              reuse_analysis no Claude call either).
+// POST {"mode":"shadow_now","kind":"competitive"|"social","report_id":"<id>"}
+//                              starts a live shadow of a past report: the
+//                              in-app pipeline made again now with every
+//                              provider called, written only to shadow
+//                              tables; paid, so only for a client on shadow.
 // POST {"mode":"compare_pipeline","run_id":"<id>"}
 //                              a finished shadow run next to the real result
 //                              it shadows (compareResults; for a report, the
@@ -50,10 +55,10 @@ import { readEngine } from "../_shared/pipelines/engine.ts";
 import { REGISTRY } from "../_shared/pipelines/registry.ts";
 import { runPipelineJob, type RunnerDeps } from "../_shared/pipelines/runner.ts";
 import { startReportPipeline } from "../_shared/pipelines/shadow.ts";
-import { compareCompetitiveRun, startCompetitiveReplay } from "../_shared/pipelines/competitive/harness.ts";
+import { compareCompetitiveRun, startCompetitiveReplay, startCompetitiveShadow } from "../_shared/pipelines/competitive/harness.ts";
 import { COMPETITIVE_PIPELINE } from "../_shared/pipelines/definitions/competitive.ts";
 import { SOCIAL_PIPELINE } from "../_shared/pipelines/definitions/social.ts";
-import { compareSocialRun, startSocialReplay } from "../_shared/pipelines/social/harness.ts";
+import { compareSocialRun, startSocialReplay, startSocialShadow } from "../_shared/pipelines/social/harness.ts";
 import { compareResults, formatComparison } from "../_shared/pipelines/compare.ts";
 import { appRunView, expirePayloads, loadShadowPair, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
@@ -228,6 +233,20 @@ Deno.serve(async (req) => {
       if (!pipeline) return json({ error: `${SOCIAL_PIPELINE} is not in this deployment` }, 500);
       try {
         return json(await startSocialReplay(db, pipeline, { reportId, runId, reuseAnalysis: body.reuse_analysis === true }));
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : String(e) }, 422);
+      }
+    }
+
+    if (mode === "shadow_now") {
+      const reportId = typeof body.report_id === "string" ? body.report_id : "";
+      const kind = body.kind === "competitive" || body.kind === "social" ? body.kind : null;
+      if (!reportId || !kind) return json({ error: "kind (competitive or social) and report_id are required" }, 400);
+      const name = kind === "competitive" ? COMPETITIVE_PIPELINE : SOCIAL_PIPELINE;
+      const pipeline = REGISTRY.get(name);
+      if (!pipeline) return json({ error: `${name} is not in this deployment` }, 500);
+      try {
+        return json(kind === "competitive" ? await startCompetitiveShadow(db, pipeline, reportId) : await startSocialShadow(db, pipeline, reportId));
       } catch (e) {
         return json({ error: e instanceof Error ? e.message : String(e) }, 422);
       }
