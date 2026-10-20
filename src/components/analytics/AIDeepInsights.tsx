@@ -17,6 +17,9 @@ interface Props {
     link_clicks: number;
     video_views: number;
     engagements: number;
+    /** Views on TikTok and YouTube, impressions elsewhere, and the engagements on those platforms. */
+    reach: number;
+    rate_engagements: number;
     engagement_rate: number;
   }[];
 }
@@ -88,11 +91,9 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       });
     }
 
-    // Cumulative totals
-    const totalImpr = chartData.reduce((s, d) => s + d.impressions, 0);
-    const totalEng = chartData.reduce((s, d) => s + d.engagements, 0);
-    // The one definition: engagements divided by impressions.
-    const avgEngRate = (engagementRate(totalEng, totalImpr) ?? 0) * 100;
+    // Cumulative totals. The one definition: engagements divided by
+    // impressions, with views on TikTok and YouTube.
+    const avgEngRate = (engagementRate(chartData.reduce((s, d) => s + d.rate_engagements, 0), chartData.reduce((s, d) => s + d.reach, 0)) ?? 0) * 100;
     if (avgEngRate > 0) {
       result.push({ text: `Average engagement rate across all reports: ${avgEngRate.toFixed(2)}%`, type: "neutral" });
     }
@@ -129,8 +130,8 @@ export function AIDeepInsights({ reports, chartData }: Props) {
     if (chartData.length === 0) return null;
     const bestImpr = chartData.reduce((b, d) => (d.impressions > b.impressions ? d : b));
     const bestEng = chartData.reduce((b, d) => (d.engagements > b.engagements ? d : b));
-    const totalImpr = chartData.reduce((t, d) => t + d.impressions, 0);
-    const totalEng = chartData.reduce((t, d) => t + d.engagements, 0);
+    const totalReach = chartData.reduce((t, d) => t + d.reach, 0);
+    const totalRated = chartData.reduce((t, d) => t + d.rate_engagements, 0);
     let recs = 0, tiktok = 0, ig = 0;
     for (const r of reports) {
       const rd = Array.isArray(r.report_data) ? r.report_data[0] : r.report_data;
@@ -139,7 +140,7 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       if (rd?.ai_analysis?.tiktok_trends_analysis) tiktok++;
       if (rd?.ai_analysis?.instagram_trends_analysis) ig++;
     }
-    return { bestImpr, bestEng, avgRate: (engagementRate(totalEng, totalImpr) ?? 0) * 100, recs, tiktok, ig };
+    return { bestImpr, bestEng, avgRate: (engagementRate(totalRated, totalReach) ?? 0) * 100, recs, tiktok, ig };
   }, [reports, chartData]);
   const compact = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 10_000 ? `${(v / 1_000).toFixed(1)}K` : v.toLocaleString());
   const trends = insights.filter((x) => x.type !== "neutral").map((x) => x.text);

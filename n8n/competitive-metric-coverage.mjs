@@ -10,9 +10,12 @@ export function metricCoveragePatch(workflow) {
     return nodes[0];
   };
   const read = name => readFileSync(new URL(`code/${name}.js`, import.meta.url),'utf8');
-  const helpers = ts.transpileModule(readFileSync(new URL('../supabase/functions/_shared/competitive/reportMetrics.ts',import.meta.url),'utf8'),{
+  // The shared metric rules and the shared post sample, as plain functions in
+  // the node's scope (their imports of each other are the same scope there).
+  const transpile = rel => ts.transpileModule(readFileSync(new URL(rel,import.meta.url),'utf8'),{
     compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,removeComments:true},
-  }).outputText.replace(/^export /gm,'');
+  }).outputText.replace(/^import .*$/gm,'').replace(/^export /gm,'');
+  const helpers = transpile('../supabase/functions/_shared/competitive/reportMetrics.ts')+'\n'+transpile('../supabase/functions/_shared/competitive/postSample.ts');
   const source = find('Landscape Metrics Summary');
   const snapshot = {
     name:'Landscape Audience Snapshot', type:source.type, typeVersion:source.typeVersion,
@@ -60,7 +63,7 @@ export function metricCoveragePatch(workflow) {
   );
   const agent = structuredClone(find('Competitive Analysis Agent').parameters);
   agent.options.systemMessage = readFileSync(new URL('code/competitive-analysis-prompt.txt',import.meta.url),'utf8');
-  agent.text = '=Analyze this aggregated competitor data for the client and produce the exact JSON the schema requires.\n\ncomparison_metrics come from the same sources for every company, the client included: RivalIQ and verified public LinkedIn posts. owned_metrics are the client's own Sprout figures and are never compared. Public engagement excludes private clicks, saves, Instagram shares and YouTube shares. Audience and engagement rates in the cross-network benchmark exclude LinkedIn. Current audience snapshots carry audience_as_of and must never be described as historical growth. estimated_impressions are RivalIQ estimates.\n\n{{ JSON.stringify($json) }}';
+  agent.text = '=Analyze this aggregated competitor data for the client and produce the exact JSON the schema requires.\n\ncomparison_metrics hold every company\'s figures. The client\'s come from its own Sprout profiles (measured, ads left out) on every platform Sprout covers, and from RivalIQ on a platform it does not; competitors\' come from RivalIQ and verified public LinkedIn posts. Engagements are reactions or likes, comments and shares (not on Instagram or YouTube) for every company: never clicks, saves or views. The engagement rate is engagements divided by impressions (views on TikTok and YouTube); across networks it leaves out LinkedIn. Audience in the cross-network benchmark excludes LinkedIn. Current audience snapshots carry audience_as_of and must never be described as historical growth. A competitor\'s impressions are RivalIQ estimates; the client\'s are measured.\n\n{{ JSON.stringify($json) }}';
   operations.push({type:'updateNodeParameters',nodeName:'Competitive Analysis Agent',parameters:agent,replace:true});
   return operations;
 }

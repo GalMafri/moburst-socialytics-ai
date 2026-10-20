@@ -1,6 +1,6 @@
 // Shapes shared by the scheduled-jobs worker, its store and its tests.
 
-export type JobKind = "feed_refresh" | "dispatch" | "week_plan" | "week_revise" | "voice_profile" | "lifecycle" | "lifecycle_step";
+export type JobKind = "feed_refresh" | "dispatch" | "week_plan" | "week_revise" | "voice_profile" | "lifecycle" | "lifecycle_step" | "report_text";
 export type JobStatus = "queued" | "running" | "waiting" | "blocked" | "done" | "skipped" | "failed";
 
 /** A row of public.scheduled_jobs. */

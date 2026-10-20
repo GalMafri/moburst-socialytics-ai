@@ -1,7 +1,7 @@
 import { DateRange, isValidRange, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate } from "@/lib/dateRange";
 import { cleanText, countryNames, firstRunSentence, formatDate, formatDateTime, formatRange, languageNames } from "@/lib/display";
 import { useNextRun } from "@/lib/nextRun";
-import { sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
+import { socialPeriodFigures } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { Section, SectionNav } from "@/components/ui/section";
 import { PostVisual, usePostPreviews } from "@/components/competitive/PostVisual";
@@ -179,10 +179,11 @@ export default function Analytics() {
       const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
       const sp = rd?.sprout_performance || {};
       const totals = extractTotals(sp);
-      // The one definition: engagements divided by impressions (reportFigures.ts).
-      const raw = sp?.overall_totals || sp?.totals || sp?.summary || sp?.month_comparison?.current_month || {};
-      const totalEngagements = sproutEngagements(raw) ?? 0;
-      const engRate = (sproutEngagementRate(raw) ?? 0) * 100;
+      // The one definition (reportFigures.ts): engagements without clicks,
+      // divided by impressions, with views on TikTok and YouTube.
+      const figures = socialPeriodFigures(sp);
+      const totalEngagements = figures.engagements.current ?? 0;
+      const engRate = (figures.engagement_rate.current ?? 0) * 100;
       return {
         date: formatDate(r.created_at, { year: false }),
         fullDate: r.created_at,
@@ -193,6 +194,8 @@ export default function Analytics() {
         shares: totals.shares,
         video_views: totals.video_views,
         engagements: totalEngagements,
+        reach: figures.reach.current ?? 0,
+        rate_engagements: figures.rate_engagements.current ?? 0,
         engagement_rate: Math.round(engRate * 100) / 100,
       };
     });
@@ -806,7 +809,7 @@ export default function Analytics() {
                     const sp = rd?.sprout_performance;
                     const totals = extractTotals(sp);
                     const hasMetrics = totals.impressions > 0 || totals.reactions > 0;
-                    const totalEng = sproutEngagements(sp?.overall_totals || sp?.totals || sp?.summary || sp?.month_comparison?.current_month) ?? 0;
+                    const totalEng = socialPeriodFigures(sp).engagements.current ?? 0;
                     return (
                       <button
                         key={r.id}

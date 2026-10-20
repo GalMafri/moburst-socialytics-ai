@@ -3,43 +3,18 @@
  * screen reads: the report page, Analytics and its insight tiles.
  */
 
-import { engagementRate } from "@/lib/competitiveMetrics";
-
-type Totals = Record<string, unknown> | null | undefined;
+// Engagements, reach and the engagement rate of the client's Sprout figures
+// have one definition, shared with the server, the public API and the report
+// text (supabase/functions/_shared/reports/socialFigures.ts).
+export {
+  normalizedSocialReport, socialPeriodFigures, sproutEngagementRate, sproutEngagements, sproutReach, type SocialPeriodFigures,
+} from "../../supabase/functions/_shared/reports/socialFigures";
 
 const num = (v: unknown): number | null => {
   if (v == null || v === "") return null;
   const n = typeof v === "string" ? Number(v.replace(/,/g, "")) : Number(v);
   return Number.isFinite(n) ? n : null;
 };
-
-/**
- * Engagements for a post, a platform or a period: Sprout's own engagements
- * total when the report stored it, otherwise reactions, comments, shares and
- * link clicks added up (reports written before the total was collected).
- */
-export function sproutEngagements(m: Totals): number | null {
-  if (!m) return null;
-  const total = num(m.engagements) ?? num(m.engagement);
-  if (total != null) return total;
-  const parts = [num(m.reactions) ?? num(m.likes), num(m.comments), num(m.shares), num(m.link_clicks)];
-  return parts.some((p) => p != null) ? parts.reduce<number>((sum, p) => sum + (p ?? 0), 0) : null;
-}
-
-/** Impressions for a post, a platform or a period, with views standing in where no impressions were reported. */
-export function sproutImpressions(m: Totals): number | null {
-  if (!m) return null;
-  return num(m.impressions) ?? num(m.views) ?? num(m.video_views);
-}
-
-/**
- * The client's own engagement rate: engagements divided by impressions, the
- * definition every competitive figure uses too (engagementRate in
- * reportMetrics.ts). Null when there are no impressions.
- */
-export function sproutEngagementRate(m: Totals): number | null {
-  return engagementRate(sproutEngagements(m), sproutImpressions(m));
-}
 
 type ReportData = Record<string, any> | null | undefined;
 

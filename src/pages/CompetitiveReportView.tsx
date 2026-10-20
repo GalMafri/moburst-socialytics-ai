@@ -54,13 +54,20 @@ type TopPost = {
 };
 /** A RivalIQ period total with the previous equal-length period beside it. */
 type Both = { current: number | null; previous: number | null };
-/** A company's comparison figures: RivalIQ and the public LinkedIn source, the same for every company, the client included. */
+/**
+ * A company's comparison figures: the client's from Sprout on every platform
+ * Sprout covers (RivalIQ on one it does not), competitors' from RivalIQ and
+ * the public LinkedIn source. `impressions` is what the engagement rate
+ * divides by; metric_scopes.impressions says whether Sprout measured it.
+ */
 type RivalIQMetrics = {
+  impressions?: Both;
+  metric_scopes?: { impressions?: string };
   audience_as_of?: string;
   period?: { start: string; end: string };
   previous_period?: { start: string; end: string } | null;
   audience?: Both; engagement?: Both; estimated_impressions?: Both; posts?: Both; engagement_rate?: Both; likely_boosted_facebook_posts?: Both;
-  by_network?: Record<string, { audience_as_of?: string; followers?: Both; posts?: Both; engagement?: Both; impressions?: Both; views?: Both; engagement_rate?: Both; likely_boosted?: Both }>;
+  by_network?: Record<string, { audience_as_of?: string; followers?: Both; posts?: Both; engagement?: Both; impressions?: Both; views?: Both; engagement_rate?: Both; likely_boosted?: Both; source?: string }>;
   daily?: Array<{ date: string; posts: number; engagement: number; audience: number }>;
 };
 type Bucket = {
@@ -395,13 +402,17 @@ export default function CompetitiveReportView() {
   // RivalIQ's own period totals (runs from 2026-09-06 onward), for the whole
   // landscape or for the filtered network.
   const netKey = effectivePlat === "x" ? "twitter" : effectivePlat;
+  // Whether a company's impressions here were measured (the client's Sprout figures) rather than estimated.
+  const measuredImpressions = (c: Company) => effectivePlat === "all"
+    ? c.comparison_metrics?.metric_scopes?.impressions === "sprout"
+    : c.comparison_metrics?.by_network?.[netKey]?.source === "sprout";
   const metricsFor = (c: Company) => {
     const m = c.comparison_metrics || c.rivaliq_metrics;
     if (!m) return null;
-    if (effectivePlat === "all") return { audience: m.audience, audience_as_of:m.audience_as_of, engagement: m.engagement, impressions: m.estimated_impressions, posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
+    if (effectivePlat === "all") return { audience: m.audience, audience_as_of:m.audience_as_of, engagement: m.engagement, impressions: m.impressions ?? m.estimated_impressions, measured: measuredImpressions(c), posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
     const n = m.by_network?.[netKey];
     if (!n) return null;
-    return { audience: n.followers, audience_as_of:n.audience_as_of, engagement: n.engagement, impressions: n.impressions, posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
+    return { audience: n.followers, audience_as_of:n.audience_as_of, engagement: n.engagement, impressions: n.impressions, measured: measuredImpressions(c), posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
   };
   const withMetrics = ordered.map((c) => ({ c, m: metricsFor(c) })).filter((x) => x.m) as { c: Company; m: NonNullable<ReturnType<typeof metricsFor>> }[];
   const hasMetrics = withMetrics.length > 0;
@@ -804,7 +815,7 @@ export default function CompetitiveReportView() {
                           <TileStat
                             value={b.impressions_avg == null ? "Not available" : compactNumber(b.impressions_avg)}
                             exact={fmt(b.impressions_avg)}
-                            label={effectivePlat === "all" ? vendor("Est. impressions / RivalIQ post", "Est. impressions / tracked post") : "Est. impressions / post"}
+                            label={measuredImpressions(c) ? "Impressions / post" : effectivePlat === "all" ? vendor("Est. impressions / RivalIQ post", "Est. impressions / tracked post") : "Est. impressions / post"}
                           />
                           <TileStat value={b.views_total == null ? "Not available" : compactNumber(b.views_total)} exact={b.views_total == null ? undefined : fmt(b.views_total)} label="Reported video views" />
                         </div>
@@ -906,7 +917,7 @@ export default function CompetitiveReportView() {
                         <div className="grid grid-cols-2 gap-x-3 gap-y-3">
                           <MetricRow label={effectivePlat === "all" && (m.by_network?.linkedin?.followers?.current ?? 0) > 0 ? "Followers excl. LinkedIn" : "Followers"} value={m.audience} signed={c.is_client} />
                           <MetricRow label="Engagement" value={m.engagement} signed={c.is_client} />
-                          {m.impressions && <MetricRow label={vendor("Est. impressions (RivalIQ)", "Est. impressions")} value={m.impressions} signed={c.is_client} />}
+                          {m.impressions && <MetricRow label={m.measured ? "Impressions" : vendor("Est. impressions (RivalIQ)", "Est. impressions")} value={m.impressions} signed={c.is_client} />}
                           <MetricRow label="Posts" value={m.posts} format={(v) => String(Math.round(v))} signed={c.is_client} />
                         </div>
                         {m.audience_as_of && <p className="t-secondary">Audience measured {asOf(m.audience_as_of)}. Activity above covers the selected report dates.</p>}

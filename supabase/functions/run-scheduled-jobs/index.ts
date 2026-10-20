@@ -26,6 +26,7 @@ import { runLifecycle, runLifecycleStep, type LifecycleJob } from "../_shared/li
 import { LEASE_SECONDS, repairsFor, summarize, workerTick, type TickResult } from "./worker.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
 import type { ScheduledJob } from "./types.ts";
+import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -33,6 +34,7 @@ const corsHeaders = {
 };
 
 const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
+  report_text: "report figures and text",
   feed_refresh: "feed refresh",
   week_plan: "week plan",
   week_revise: "week revision",
@@ -89,6 +91,15 @@ Deno.serve(async (req) => {
       lease: () => jobs.lease(LEASE_SECONDS),
       run: (job) => {
         switch (job.kind) {
+          // One stored report's figures and text (_shared/reports/correctText.ts).
+          case "report_text": return runReportText(db, job, {
+            now: () => new Date(),
+            complete: (system, message) => {
+              const key = Deno.env.get("ANTHROPIC_API_KEY");
+              if (!key) throw new Error("ANTHROPIC_API_KEY is not configured.");
+              return sonnetCompletion(key)(system, message);
+            },
+          });
           case "dispatch": return runDispatch(job, dispatchDeps(job, false));
           case "feed_refresh": return runFeedJob(job, { now: () => new Date(), refreshFeed });
           case "week_plan": return runWeekPlan(db, job);

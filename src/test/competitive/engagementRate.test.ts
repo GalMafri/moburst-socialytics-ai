@@ -1,10 +1,12 @@
-// Engagement rate per impression everywhere (Lital, 19 Oct 2026). The figures
-// are RivalIQ's stored period totals from the Bader Law and LegaBot reports
-// of September 2026 (1c4f4805, e993884a), the proof the decision was made on.
+// Engagement rate per impression everywhere (Lital, 19 Oct 2026), and the
+// client's own figures from Sprout (Lital, 20 Oct 2026). The figures are the
+// stored period totals from the Bader Law and LegaBot reports of September
+// 2026 (1c4f4805, e993884a): RivalIQ's for every company, Sprout's for the
+// client, counted from the report's own stored posts with ads left out.
 
 import { describe, expect, it } from "vitest";
-import { engagementRate, normalizedCompetitiveMetrics, postEngagementRate, postReach } from "@/lib/competitiveMetrics";
-import { sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
+import { engagementRate, engagementsOf, normalizedCompetitiveMetrics, postEngagementRate, postReach } from "@/lib/competitiveMetrics";
+import { normalizedSocialReport, socialPeriodFigures, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 
 const period = { start: "2026-09-01", end: "2026-09-30" };
 const both = (current: number, previous = 0) => ({ current, previous });
@@ -26,7 +28,7 @@ describe("one engagement rate: engagements divided by impressions", () => {
     expect(engagementRate(null, 100)).toBeNull();
   });
 
-  it("reads every company from RivalIQ, the client included: Bader 0.12% against peers at 1.28% to 2.89%", () => {
+  it("rates the client from Sprout where Sprout measures it and every competitor from RivalIQ, with one definition", () => {
     const report = {
       period,
       aggregates: {
@@ -38,10 +40,10 @@ describe("one engagement rate: engagements divided by impressions", () => {
             tiktok: network(12, 511, 90170, { views: both(90170) }),
             youtube: network(16, 908, 1759590, { views: both(1759590) }),
           }, {
-            // Sprout's own figures for the client: they must not replace the comparison rate.
+            // Sprout's own Facebook figures for the client replace RivalIQ's on that platform.
             owned_metrics: {
               coverage: "complete", period,
-              by_network: { facebook: { posts: both(42), engagement: both(755), impressions: both(235735), rate: both(0.002155), profiles: [{ id: "1", name: "Bader Law" }] } },
+              by_network: { facebook: { posts: both(13), engagement: both(755), impressions: both(235735), rate: both(0.002155), profiles: [{ id: "1", name: "Bader Law" }] } },
             },
           }),
           company("TopDog Law", false, 11538, 900620, {}),
@@ -54,18 +56,24 @@ describe("one engagement rate: engagements divided by impressions", () => {
     const pct = (n: number) => (n * 100).toFixed(2) + "%";
     expect(companies.map((c) => pct(c.engagement_rate_avg))).toEqual(["0.12%", "1.28%", "2.89%", "1.62%"]);
     const bader = companies[0];
-    expect(bader.comparison_metrics.engagement_rate.current).toBe(2533 / 2097537);
-    expect(bader.by_channel.facebook.engagement_rate_avg).toBe(677 / 230566);
+    // Sprout's Facebook, RivalIQ's other platforms, views on TikTok and YouTube.
+    expect(bader.comparison_metrics.engagement_rate.current).toBe((755 + 437 + 511 + 908) / (235735 + 17211 + 90170 + 1759590));
+    expect(bader.comparison_metrics.metric_scopes.engagement_rate).toBe("sprout_and_rivaliq");
+    expect(bader.by_channel.facebook.engagement_rate_avg).toBe(755 / 235735);
+    expect(bader.by_channel.instagram.engagement_rate_avg).toBe(437 / 17211);
     expect(bader.by_channel.tiktok.engagement_rate_avg).toBe(511 / 90170);
     expect(bader.by_channel.youtube.engagement_rate_avg).toBe(908 / 1759590);
+    expect(companies[1].comparison_metrics.engagement_rate.current).toBe(11538 / 900620);
+    expect(companies[1].comparison_metrics.metric_scopes.engagement_rate).toBe("rivaliq");
     expect(JSON.stringify(bader.comparison_metrics)).not.toMatch(/"rate":|engagement_rate_per_post/);
   });
 
-  it("reads the client's posts, engagement, audience, share of voice and cadence from RivalIQ like its peers (Bader 1c4f4805)", () => {
+  it("reads the client's posts, engagement, audience, share of voice and cadence from Sprout, ads left out (Bader 1c4f4805)", () => {
     const rq = (posts: number, audience: number, engagement: number, impressions: number, by_network: Record<string, unknown>) => ({
       period, posts: both(posts), audience: both(audience), engagement: both(engagement), estimated_impressions: both(impressions), by_network,
     });
     const sample = (keys: string[]) => Object.fromEntries(keys.map((k) => [k, { post_count: 99 }]));
+    const sprout = (posts: number, engagement: number, followers: number, impressions: number) => ({ posts: both(posts), engagement: both(engagement), followers: both(followers), impressions: both(impressions), source: "sprout", profiles: [{ id: "1", name: "Bader Law" }] });
     const report = {
       period: { ...period, days: 30 },
       aggregates: {
@@ -73,10 +81,11 @@ describe("one engagement rate: engagements divided by impressions", () => {
         companies: [
           { name: "Bader Law", is_client: true, post_count: 94, by_channel: sample(["facebook", "instagram", "linkedin", "tiktok", "twitter", "youtube"]),
             rivaliq_metrics: rq(54, 15056, 2533, 2097537, { facebook: network(13, 677, 230566), instagram: network(13, 437, 17211), tiktok: network(12, 511, 90170, { views: both(90170) }), twitter: network(0, 0, 0), youtube: network(16, 908, 1759590, { views: both(1759590) }) }),
-            // Sprout's figures for Bader: 42 Facebook posts (29 of them ads), 8 LinkedIn posts, 13,809 followers.
-            owned_metrics: { coverage: "complete", period, by_network: {
-              facebook: { posts: both(42), engagement: both(755), followers: both(8367), impressions: both(235735), profiles: [{ id: "1", name: "Bader Law" }] },
-              linkedin: { posts: both(8), engagement: both(62), followers: both(3646), impressions: both(2705), profiles: [{ id: "2", name: "Bader Law" }] },
+            // Sprout's figures for Bader in September 2026, counted from the report's stored
+            // posts: 13 published Facebook posts (the 29 ad rows left out), YouTube's views as its impressions.
+            owned_metrics: { coverage: "complete", period, published_posts_only: true, by_network: {
+              facebook: sprout(13, 755, 8367, 235735), instagram: sprout(13, 437, 5169, 21477), tiktok: sprout(12, 511, 42, 90167),
+              youtube: sprout(19, 908, 231, 1747356), linkedin: sprout(8, 62, 3646, 2705),
             } } },
           { name: "TopDog Law", is_client: false, post_count: 50, by_channel: sample(["facebook", "instagram"]), rivaliq_metrics: rq(50, 683428, 11538, 900620, { facebook: network(22, 1027, 302809), instagram: network(28, 10511, 597811) }) },
           { name: "Morgan & Morgan P.A.", is_client: false, post_count: 51, by_channel: sample(["facebook"]), rivaliq_metrics: rq(51, 385867, 11459, 396194, { facebook: network(16, 1039, 96943) }) },
@@ -86,20 +95,27 @@ describe("one engagement rate: engagements divided by impressions", () => {
     };
     const companies = normalizedCompetitiveMetrics(report).aggregates.companies as any[];
     const bader = companies[0];
-    expect(bader.post_count).toBe(54);
-    expect(bader.comparison_metrics.audience.current).toBe(15056);
-    expect(bader.comparison_metrics.engagement.current).toBe(2533);
-    expect(bader.cadence_per_week).toBe(12.6);
+    // 13 + 13 + 12 + 19 + 8 from Sprout, and X's 0 from RivalIQ, the platform Sprout does not cover.
+    expect(bader.post_count).toBe(65);
+    expect(bader.comparison_metrics.audience.current).toBe(8367 + 5169 + 42 + 231);
+    expect(bader.comparison_metrics.engagement.current).toBe(755 + 437 + 511 + 908 + 62);
+    expect(bader.cadence_per_week).toBe(15.2);
     expect(bader.by_channel.facebook.post_count).toBe(13);
-    // RivalIQ has no LinkedIn: Bader's 8 Sprout LinkedIn posts show nothing in the comparison.
-    expect(bader.by_channel.linkedin).toBeUndefined();
+    expect(bader.by_channel.linkedin.post_count).toBe(8);
+    expect(bader.by_channel.linkedin.engagement_rate_avg).toBe(62 / 2705);
+    expect(bader.by_channel.twitter.post_count).toBe(0);
+    // Across platforms LinkedIn is left out for every company: no competitor has LinkedIn impressions.
+    expect(bader.engagement_rate_avg).toBe((755 + 437 + 511 + 908) / (235735 + 21477 + 90167 + 1747356));
+    // X had no posts: it is not one of the networks the rate covers.
+    expect([...bader.comparison_metrics.engagement_rate_networks].sort()).toEqual(["facebook", "instagram", "tiktok", "youtube"]);
+    expect(bader.comparison_metrics.metric_scopes.impressions).toBe("sprout");
     const total = companies.reduce((n, c) => n + c.post_count, 0);
-    expect(Math.round((bader.post_count / total) * 100)).toBe(29);
+    expect(Math.round((bader.post_count / total) * 100)).toBe(33);
     const dims = Object.fromEntries((normalizedCompetitiveMetrics(report).ai_analysis.benchmark_scorecard as any).dimensions.map((d: any) => [d.dimension, d.client]));
-    expect(dims).toMatchObject({ Audience: 15056, Engagement: 2533 });
+    expect(dims).toMatchObject({ Audience: 13809, Engagement: 2673, Impressions: 235735 + 21477 + 90167 + 1747356 });
   });
 
-  it("leaves a platform RivalIQ has no impressions for without a rate (LegaBot Facebook showed 304.19%)", () => {
+  it("leaves a platform without impressions without a rate (LegaBot Facebook showed 304.19%)", () => {
     const report = {
       period,
       aggregates: {
@@ -118,8 +134,9 @@ describe("one engagement rate: engagements divided by impressions", () => {
       },
     };
     const legabot = normalizedCompetitiveMetrics(report).aggregates.companies[0] as any;
-    // RivalIQ has no Facebook figures for LegaBot: the comparison shows nothing there.
-    expect(legabot.by_channel.facebook).toBeUndefined();
+    // Sprout's Facebook has no impressions: its posts count, its rate is none, never 304.19%.
+    expect(legabot.by_channel.facebook.post_count).toBe(43);
+    expect(legabot.by_channel.facebook.engagement_rate_avg).toBeNull();
     expect(legabot.by_channel.instagram.engagement_rate_avg).toBe(8133 / 186562);
     expect(legabot.by_channel.twitter.engagement_rate_avg).toBeNull();
   });
@@ -138,12 +155,41 @@ describe("one engagement rate: engagements divided by impressions", () => {
     expect(posts.map((p: any) => p.engagement_rate)).toEqual([null, 0.03]);
   });
 
-  it("uses the same definition for the client's own Sprout performance", () => {
-    const totals = { engagements: 3341, impressions: 996405, reactions: 1987, comments: 109, shares: 632, link_clicks: 223 };
-    expect(sproutEngagements(totals)).toBe(3341);
-    expect(sproutEngagementRate(totals)).toBe(engagementRate(3341, 996405));
-    // Reports written before Sprout's total was stored add up the parts.
-    expect(sproutEngagements({ reactions: 5, comments: 2, shares: 1, link_clicks: 2 })).toBe(10);
+  it("counts the same actions for every company: no clicks, saves or views, and no shares where the network hides them", () => {
+    expect(engagementsOf("facebook", { applause: 469, conversation: 47, amplification: 24 })).toBe(540);
+    expect(engagementsOf("instagram", { applause: 412, conversation: 43, amplification: 556 })).toBe(455);
+    expect(engagementsOf("youtube", { applause: 708, conversation: 5, amplification: 10 })).toBe(713);
+    expect(engagementsOf("linkedin", { applause: 57, conversation: 1 })).toBe(58);
+    expect(engagementsOf("tiktok", {})).toBeNull();
+  });
+
+  it("uses the same definitions for the client's own Sprout performance (Bader Law, September 2026)", () => {
+    // Sprout's engagements total adds clicks: 963 on Facebook where reactions, comments and shares are 540.
+    expect(sproutEngagements({ engagements: 963, reactions: 469, comments: 47, shares: 24, link_clicks: 49 }, "Facebook")).toBe(540);
+    expect(sproutEngagements({ engagements: 1027, reactions: 412, comments: 43, shares: 556, saves: 12 }, "Instagram")).toBe(455);
+    // Views are YouTube's reach.
+    expect(sproutEngagementRate({ reactions: 708, comments: 5, shares: 10, impressions: 0, video_views: 1581992 }, "YouTube")).toBe(713 / 1581992);
     expect(sproutEngagementRate({ reactions: 5, impressions: 0 })).toBeNull();
+    const current = (shares: number, comments: number, reactions: number, engagements: number, impressions: number, video_views: number, link_clicks = 0) => ({ shares, comments, reactions, engagements, impressions, video_views, link_clicks });
+    const rd = { sprout_performance: {
+      overall_totals: { engagements: 3341, impressions: 996405, reactions: 1987, comments: 109, shares: 632, link_clicks: 223, video_views: 1851832 },
+      platform_breakdown: [
+        { network: "Facebook", post_count: 13, current: current(24, 47, 469, 963, 846738, 205032, 49) },
+        { network: "Instagram", post_count: 15, current: current(556, 43, 412, 1027, 102229, 19679) },
+        { network: "TikTok", post_count: 12, current: current(42, 13, 341, 396, 44167, 44167) },
+        { network: "LinkedIn", post_count: 8, current: current(0, 1, 57, 232, 3271, 962, 174) },
+        { network: "YouTube", post_count: 19, current: current(10, 5, 708, 723, 0, 1581992) },
+      ],
+      top_posts: [{ platform: "LINKEDIN", reactions: 10, comments: 2, shares: 1, link_clicks: 210, engagements: 223, impressions: 900 }],
+    } };
+    const figures = socialPeriodFigures(rd.sprout_performance);
+    expect(figures.engagements.current).toBe(540 + 455 + 396 + 58 + 713);
+    expect(figures.reach.current).toBe(846738 + 102229 + 44167 + 3271 + 1581992);
+    expect(figures.engagement_rate.current).toBe(2162 / 2578397);
+    const shown = normalizedSocialReport(rd).sprout_performance as any;
+    expect(shown.overall_totals.engagements).toBe(2162);
+    expect(shown.platform_breakdown[0].current.engagements).toBe(540);
+    // A 210-click post is 13 engagements, the count the card shows and ranks by.
+    expect(shown.top_posts[0].engagement).toBe(13);
   });
 });

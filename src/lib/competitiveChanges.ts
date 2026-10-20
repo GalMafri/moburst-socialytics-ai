@@ -4,7 +4,7 @@
 // Cadence is per week so periods of different lengths compare fairly.
 
 import { normalizePlatform, platformLabel } from "@/lib/platform";
-import { engagementRate, normalizedCompetitiveMetrics, postReach } from "@/lib/competitiveMetrics";
+import { engagementRate, isPublishedReportPost, normalizedCompetitiveMetrics, postReach } from "@/lib/competitiveMetrics";
 
 export type MixEntry = { key: string; count: number };
 export type CompanyStats = {
@@ -78,7 +78,7 @@ export function pickComparableFeed<T extends FeedSnapshot>(current: T, candidate
     .sort((a, b) => Date.parse(b.payload.window.start) - Date.parse(a.payload.window.start))[0] || null;
 }
 
-type RawPost = { companyId?: string | number; companyName?: string; channel?: string; type?: string; engagementTotal?: number | string; estimatedImpressions?: number | string | null; ownedImpressions?: number | string | null; views?: number | string | null; tiktokViews?: number | string | null; youtubeViews?: number | string | null };
+type RawPost = { postId?: string; source?: string; companyId?: string | number; companyName?: string; channel?: string; type?: string; engagementTotal?: number | string; estimatedImpressions?: number | string | null; ownedImpressions?: number | string | null; views?: number | string | null; tiktokViews?: number | string | null; youtubeViews?: number | string | null };
 
 /** Per-company stats from raw RivalIQ posts (the feed snapshots), on the same fields the report aggregates carry. */
 /**
@@ -104,6 +104,8 @@ export function aggregatePosts(posts: RawPost[], days: number, clientName?: stri
   const by = new Map<string, Acc>();
   const needle = lower(clientName || "");
   for (const p of posts || []) {
+    // Ads are not posts (an older feed stored Sprout's ad rows): the rule every report count follows.
+    if (!isPublishedReportPost(p)) continue;
     const name = String(p.companyName || p.companyId || "Unknown");
     let c = by.get(name);
     if (!c) {

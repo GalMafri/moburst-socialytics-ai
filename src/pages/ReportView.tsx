@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { cleanText, countryNames, formatDate, formatDateTime, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
-import { reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
+import { normalizedSocialReport, reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -160,7 +160,8 @@ export default function ReportView() {
     );
 
   const rawRd = report.report_data as any;
-  const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
+  // The client's figures counted by the one rule (engagements without clicks, views as reach on video).
+  const rd = normalizedSocialReport(Array.isArray(rawRd) ? rawRd[0] : rawRd);
   const clientName = (report as any).clients?.name || "Client";
 
   // Build the full client context once, pass down via props.

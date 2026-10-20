@@ -65,30 +65,8 @@ const allowedIds = landscape.selected_company_ids ? new Set([landscape.client_co
 const companies = (fromEndpoint.length > 0 ? fromEndpoint : (landscape.companies || [])).filter(c => !allowedIds || allowedIds.has(String(c.id)));
 const rawPosts = postsResp.socialPosts || postsResp.posts || postsResp.data || postsResp.items || (Array.isArray(postsResp) ? postsResp : []);
 if (Number(postsResp.failed_windows) > 0 || Number(postsResp.truncated_pages) > 0) throw new Error('RivalIQ post coverage is incomplete. The report cannot be presented as a complete period.');
-const seenPosts = new Set();
-// X omits publishedAt in RivalIQ. Its native post ID encodes the creation
-// timestamp: Twitter's published Snowflake implementation uses a 22-bit shift
-// and epoch 1288834974657. Never infer dates from RivalIQ's own decimal postId.
-// https://github.com/twitter-archive/snowflake/blob/snowflake-2010/src/main/scala/com/twitter/service/snowflake/IdWorker.scala
-const datedPost = post => {
-  if (post.publishedAt || post.published_at || post.created || post.created_at || post.date) return post;
-  if (!['twitter', 'x'].includes(String(post.channel || post.network || post.platform || '').toLowerCase())) return post;
-  const id = post.postNativeId || post.nativeId;
-  if (typeof id !== 'string' || !/^[1-9]\d{14,18}$/.test(id)) return post;
-  const value = BigInt(id);
-  if (value > 9223372036854775807n) return post;
-  const timestamp = Number((value >> 22n) + 1288834974657n);
-  if (timestamp > Date.now()) return post;
-  return { ...post, publishedAt: new Date(timestamp).toISOString(), publication_date_source: 'x_native_post_id' };
-};
-const posts = rawPosts.map(datedPost).filter(post => {
-  if (allowedIds && !allowedIds.has(String(post.companyId))) return false;
-  const date = day(post.publishedAt || post.published_at || post.created || post.created_at || post.date);
-  if (!date || date < cfg.range_start || date > cfg.range_end) return false;
-  const key = String(post.postId || post.postLink || JSON.stringify([post.companyId, date, post.message]));
-  if (seenPosts.has(key)) return false;
-  seenPosts.add(key); return true;
-});
+// Posts dated in the period, each once, X dates read from native ids (postSample.ts postsInPeriod).
+const posts = postsInPeriod(rawPosts, cfg.range_start, cfg.range_end, allowedIds);
 const truncatedPages = Number(postsResp.truncated_pages) || 0;
 let selected = []; try { selected = JSON.parse(cfg.competitors_json || "[]"); } catch (e) { selected = []; }
 let suppressed = []; try { suppressed = JSON.parse(cfg.suppressed_insights_json || "[]"); } catch (e) { suppressed = []; }
@@ -104,11 +82,9 @@ const clientMatches = companies.filter(c => {
 if (clientMatches.length !== 1) throw new Error('CLIENT_IDENTITY_UNVERIFIED — the RivalIQ landscape must track exactly one company matching ' + cfg.client_name + '. A focus company is not automatically the client.');
 const verifiedClientId = String(clientMatches[0].id ?? clientMatches[0].company_id);
 const clean = (s) => String(s || "").replace(/[\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim();
-const num = (v) => (typeof v === "number" && isFinite(v) ? v : (typeof v === "string" && v.trim() !== "" && isFinite(Number(v)) ? Number(v) : 0));
-// RivalIQ's paid signal on Facebook posts is a string: "Likely Boosted", "Not Likely Boosted" or "No Prediction".
-const isBoosted = (v) => (typeof v === "string" ? v.trim().toLowerCase() === "likely boosted" : v === true);
-const bucket = () => ({ post_count: 0, likely_boosted_posts: 0, engagement_sum: 0, views_total: 0, views_observed: 0, impressions_total: 0, by_weekday: {}, by_hour: {}, hashtags: {}, media_types: {}, top_posts: [] });
-const blank = (key, name, url) => ({ company_id: key, name, url: url || null, is_client: false, in_confirmed_top3: false, ...bucket(), channels: {}, by_channel: {} });
+// The post sample (counts by weekday and hour, hashtags, formats, top posts)
+// is postSample.ts, shared with the app; this node's code follows it.
+const blank = (key, name, url) => ({ company_id: key, name, url: url || null, is_client: false, in_confirmed_top3: false, ...emptyPostSample(), channels: {}, by_channel: {} });
 const byCompany = {};
 for (const c of companies) {
   const key = String(c.id ?? c.company_id ?? c.name);
@@ -119,56 +95,19 @@ for (const c of companies) {
   agg.in_confirmed_top3 = selected.some((s) => { const sn = String(s.name || "").toLowerCase(); return !!sn && (lower.includes(sn) || sn.includes(lower)); });
   byCompany[key] = agg;
 }
-const addPost = (agg, p) => {
-  agg.post_count += 1;
-  const boosted = isBoosted(p.facebookLikelyBoosted);
-  if (boosted) agg.likely_boosted_posts += 1;
-  const engagement = num(p.engagementTotal) || num(p.engagement_total) || (num(p.applause) + num(p.conversation) + num(p.amplification));
-  const views = pick(p, "views") ?? pick(p, "youtubeViews") ?? pick(p, "tiktokViews") ?? pick(p, "facebookPostViews");
-  const impressions = pick(p, "estimatedImpressions");
-  // RivalIQ presenceReach is follower count near publication, not post reach.
-  const followers_at_publication = pick(p, "presenceReach");
-  agg.engagement_sum += engagement; agg.views_total += views || 0; if (views != null) agg.views_observed += 1; agg.impressions_total += impressions;
-  const created = p.publishedAt || p.published_at || p.created || p.created_at || p.date;
-  if (created) { const d = new Date(created); if (!isNaN(d)) { const wd = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getUTCDay()]; agg.by_weekday[wd] = (agg.by_weekday[wd] || 0) + 1; const hr = String(d.getUTCHours()); agg.by_hour[hr] = (agg.by_hour[hr] || 0) + 1; } }
-  const text = clean(p.message || p.text || p.caption || p.content || "");
-  for (const t of (text.match(/#[\p{L}0-9_]+/gu) || [])) { agg.hashtags[t.toLowerCase()] = (agg.hashtags[t.toLowerCase()] || 0) + 1; }
-  const mtype = p.type || p.post_type || p.media_type || "unknown";
-  agg.media_types[mtype] = (agg.media_types[mtype] || 0) + 1;
-  const channel = p.channel || p.network || p.platform || "unknown";
-  if (agg.channels) agg.channels[channel] = (agg.channels[channel] || 0) + 1;
-  // One rate definition (reportMetrics.ts engagementRate): per impression, or per view on video, else none.
-  const post = { source:p.source || "rivaliq", source_profile_name:p.source_profile_name || null, actual_impressions:pick(p,"ownedImpressions"), authorship: p.authorship || null, engagement, est_impressions: impressions, followers_at_publication, views, applause: pick(p, "applause"), conversation: pick(p, "conversation"), amplification: pick(p, "amplification"), text: text.slice(0, 220), url: p.postLink || p.permalink || p.url || p.link || null, image: p.image || p.imageLarge || null, created: created || null, media_type: mtype, channel, likely_boosted: boosted, boosted_prediction: typeof p.facebookLikelyBoosted === "string" ? p.facebookLikelyBoosted : null };
-  agg.top_posts.push({ ...post, engagement_rate: postEngagementRate(post) });
-  return channel;
-};
 for (const p of posts) {
   const key = String(p.companyId ?? p.company_id ?? (p.company && p.company.id) ?? "unknown");
   if (!byCompany[key]) byCompany[key] = blank(key, clean(p.companyName || p.company_name || "Unknown " + key), null);
   const agg = byCompany[key];
-  const channel = addPost(agg, p);
-  if (!agg.by_channel[channel]) agg.by_channel[channel] = bucket();
-  addPost(agg.by_channel[channel], p);
+  const channel = addPostToSample(agg, p);
+  if (!agg.by_channel[channel]) agg.by_channel[channel] = emptyPostSample();
+  addPostToSample(agg.by_channel[channel], p);
 }
-const topN = (obj, n) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => ({ key: k, count: v }));
 const days = Math.max(1, Math.round((new Date(cfg.range_end) - new Date(cfg.range_start)) / 86400000) + 1);
-const finalize = (b) => {
-  if (!b.views_observed) b.views_total = null;
-  delete b.views_observed;
-  b.engagement_avg = b.post_count ? Math.round((b.engagement_sum / b.post_count) * 10) / 10 : 0;
-  // Rates come from RivalIQ's period totals below; a post sample has no rate of its own.
-  b.engagement_rate_avg = null;
-  b.impressions_avg = b.post_count ? Math.round(b.impressions_total / b.post_count) : 0;
-  b.cadence_per_week = Math.round(((b.post_count / days) * 7) * 10) / 10;
-  b.top_hashtags = topN(b.hashtags, 10);
-  b.media_type_mix = topN(b.media_types, 8);
-  b.top_posts = b.top_posts.sort((x, y) => y.engagement - x.engagement).slice(0, 5);
-  delete b.hashtags; delete b.media_types; delete b.engagement_sum;
-  return b;
-};
+const finalize = (b) => finalizePostSample(b, days);
 const companiesOut = Object.values(byCompany).map((c) => {
   finalize(c);
-  c.channel_mix = topN(c.channels, 8); delete c.channels;
+  c.channel_mix = topCounts(c.channels, 8); delete c.channels;
   for (const ch of Object.keys(c.by_channel)) finalize(c.by_channel[ch]);
   c.rivaliq_metrics = metricsFor(String(c.company_id));
   const audience = (audienceResp.metrics || []).find(row => String(row.companyId) === String(c.company_id));
@@ -199,7 +138,7 @@ const companiesOut = Object.values(byCompany).map((c) => {
     applyProvider(c, { ...c.rivaliq_metrics, impressions: c.rivaliq_metrics.estimated_impressions }, null);
     for (const network of Object.keys(c.rivaliq_metrics.by_network)) {
       const key = network === 'twitter' && c.by_channel.x ? 'x' : network;
-      if (!c.by_channel[key]) c.by_channel[key] = finalize(bucket());
+      if (!c.by_channel[key]) c.by_channel[key] = finalize(emptyPostSample());
     }
     for (const [channel, b] of Object.entries(c.by_channel)) applyProvider(b, c.rivaliq_metrics.by_network[channel === 'x' ? 'twitter' : channel], channel);
   }

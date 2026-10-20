@@ -4,6 +4,7 @@
 // gaps must be addressed, hidden gaps must not be proposed, everything else is
 // context. Returns "" when the client has no competitive analysis yet.
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from './reportEvidence.ts';
+import { normalizedCompetitiveMetrics } from './reportMetrics.ts';
 import { type CompetitiveLearning, editedSuggestion, learningLines } from './suggestionEdits.ts';
 
 // deno-lint-ignore no-explicit-any
@@ -36,7 +37,8 @@ export async function competitiveBrief(supabase: AnyClient, clientId: string, pl
   // The team's edits replace the report's wording; verdicts stay keyed on the original.
   const edits = new Map<string, unknown>((feedback || []).map((f: any) => [f.insight_key, f.edited]));
 
-  const rd: any = withCompetitiveEvidenceLimits(report.report_data || {});
+  // The summary is written from the figures every screen shows, never the stored ones.
+  const rd: any = withCompetitiveEvidenceLimits(normalizedCompetitiveMetrics(report.report_data || {}));
   const ai = rd.ai_analysis || {};
   const plat = String(platform || "").toLowerCase();
   const gaps: any[] = Array.isArray(ai.gaps_for_client) ? ai.gaps_for_client : [];
