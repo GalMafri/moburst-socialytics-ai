@@ -12,13 +12,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Play, Plus, RefreshCw, Save, X, CalendarClock } from "lucide-react";
+import { Loader2, Play, Plus, RefreshCw, Save, X, CalendarClock, Users } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Section } from "@/components/ui/section";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -112,7 +113,7 @@ interface SproutProfile { id: string | number; name?: string; native_name?: stri
 
 /** A plain line saying where a value came from; nothing when nobody set it yet. */
 function Origin({ children }: { children: React.ReactNode }) {
-  return children ? <p className="t-label text-muted-foreground">{children}</p> : null;
+  return children ? <p className="t-label">{children}</p> : null;
 }
 
 /** A quiet "Refresh" for one lifecycle step, with a plain line while it runs. */
@@ -307,26 +308,25 @@ export default function ClientSetup() {
 
   return (
     <AppLayout
-      title={isNew ? "New Client" : `${form.name || "Client"} Setup`}
-      description="Client details, social profiles, brand assets, competitors and report schedules."
-      width="max-w-5xl"
+      title={isNew ? "New client" : `${form.name || "Client"} setup`}
+      description={isNew
+        ? "A name and a website are all a new client needs. The rest is read from the website once the client is created, and every value can be changed here."
+        : "Client details, social profiles, brand assets, competitors and report schedules."}
+      meta={notSaved ? <p role="status" className="t-label">Your changes are kept here and are not saved yet.</p> : undefined}
       actions={
         <>
           {!isNew && (
             <Button onClick={() => navigate(`/clients/${id}/analyze`)}>
-              <Play className="h-4 w-4 mr-2" /> Run Report
+              <Play /> Run report
             </Button>
           )}
           <Button variant="outline" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name.trim() || (!isNew && !dirty)}>
-            {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+            {saveMutation.isPending ? <Loader2 className="animate-spin" /> : <Save />}
             Save
           </Button>
         </>
       }
     >
-      <div className="max-w-5xl mx-auto space-y-6">
-        {notSaved && <p role="status" className="t-secondary">Your changes are kept here and are not saved yet.</p>}
-        {isNew && <p className="t-secondary">A name and a website are all a new client needs. The rest is read from the website once the client is created, and every value can be changed here.</p>}
 
         <AutomaticBrandReferences
           clientId={clientId && client ? clientId : undefined}
@@ -336,7 +336,7 @@ export default function ClientSetup() {
         />
         <Tabs defaultValue={setupTab}>
           {/* On mobile (<sm), tabs scroll horizontally to keep labels readable. */}
-          <TabsList className="w-full overflow-x-auto sm:grid sm:grid-cols-7 flex sm:flex-none gap-1 sm:gap-0 justify-start">
+          <TabsList className={`w-full overflow-x-auto sm:grid ${isNew ? "sm:grid-cols-6" : "sm:grid-cols-7"} flex sm:flex-none gap-1 sm:gap-0 justify-start`}>
             <TabsTrigger value="info" className="flex-shrink-0">Client info</TabsTrigger>
             <TabsTrigger value="sprout" className="flex-shrink-0">Sprout Social</TabsTrigger>
             <TabsTrigger value="strategy" className="flex-shrink-0">Content strategy</TabsTrigger>
@@ -346,14 +346,10 @@ export default function ClientSetup() {
             {!isNew && <TabsTrigger value="designs" className="flex-shrink-0">Designs</TabsTrigger>}
           </TabsList>
 
-          <TabsContent value="info" className="space-y-4 mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="t-h3">Basic information</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
+          <TabsContent value="info" className="space-y-section mt-section">
+            <Section layout="split" eyebrow="Client" title="Basic information" description="The website is where the brand, logo, location, time zone and language are read from.">
                 <div className="space-y-2">
-                  <Label htmlFor="client-name">Client Name *</Label>
+                  <Label htmlFor="client-name">Client name *</Label>
                   <Input id="client-name" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g., Acme Corp" />
                 </div>
                 <div className="space-y-2">
@@ -370,7 +366,7 @@ export default function ClientSetup() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="client-timezone">Client Timezone</Label>
+                  <Label htmlFor="client-timezone">Client time zone</Label>
                   <Select value={form.timezone || undefined} onValueChange={(value) => set("timezone", value)}>
                     <SelectTrigger id="client-timezone" className="w-full">
                       <SelectValue placeholder="Worked out from the website" />
@@ -399,51 +395,54 @@ export default function ClientSetup() {
                       <SelectItem value="higgsfield">Higgsfield (sharper type, team credits)</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="t-secondary">Higgsfield renders headline type far more cleanly and spends the team's shared Higgsfield credits: roughly 2 per design.</p>
+                  <p className="t-label">Higgsfield renders headline type far more cleanly and uses the team's shared Higgsfield credits.</p>
                 </div>
 
+            </Section>
                 {form.brand_identity && (
-                  <div className="space-y-4 rounded-lg border p-4 bg-[rgba(255,255,255,0.02)]">
-                    <div className="space-y-1">
-                      <Label className="t-body font-semibold">Brand identity</Label>
-                      <Origin>
-                        {by("brand_identity") === "person"
-                          ? "Set by your team. The product keeps it as it is."
-                          : by("brand_identity") === "lifecycle"
-                            ? `Read from the website${brandReadOn ? ` on ${brandReadOn}` : ""}. You can change any of it here.`
-                            : ""}
-                      </Origin>
-                    </div>
-                    <div className="grid grid-cols-3 gap-3">
+                  <Section
+                    layout="split"
+                    eyebrow="Brand"
+                    title="Brand identity"
+                    description={
+                      by("brand_identity") === "person"
+                        ? "Set by your team. The product keeps it as it is."
+                        : by("brand_identity") === "lifecycle"
+                          ? `Read from the website${brandReadOn ? ` on ${brandReadOn}` : ""}. You can change any of it here.`
+                          : "The colors, type and style the posts are written and designed in."
+                    }
+                  >
+                    <div className="grid gap-3 sm:grid-cols-3">
                       {([["primary_color", "Primary color"], ["secondary_color", "Secondary color"], ["accent_color", "Accent color"]] as const).map(([key, label]) => (
                         <div key={key} className="space-y-1">
                           <Label className="t-label">{label}</Label>
                           <div className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded border shrink-0" style={{ backgroundColor: form.brand_identity?.[key] || "#ccc" }} />
-                            <Input value={form.brand_identity?.[key] || ""} onChange={(e) => set("brand_identity", { ...form.brand_identity, [key]: e.target.value })} placeholder="#000000" className="h-8 t-label font-mono" />
+                            <div className="h-10 w-10 rounded-[8px] border border-white/10 shrink-0" style={{ backgroundColor: form.brand_identity?.[key] || "#ccc" }} />
+                            <Input aria-label={label} value={form.brand_identity?.[key] || ""} onChange={(e) => set("brand_identity", { ...form.brand_identity, [key]: e.target.value })} placeholder="#000000" className="font-mono" />
                           </div>
                         </div>
                       ))}
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      {([["font_family", "Font Family", "Inter, sans-serif"], ["visual_style", "Visual Style", "Modern, clean, minimalist"], ["tone_of_voice", "Tone of Voice", "Warm, approachable, health-conscious"], ["background_style", "Background Style", "Soft gradients, lifestyle photography"]] as const).map(([key, label, placeholder]) => (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {([["font_family", "Font family", "Inter, sans-serif"], ["visual_style", "Visual style", "Modern, clean, minimalist"], ["tone_of_voice", "Tone of voice", "Warm, approachable, health-conscious"], ["background_style", "Background style", "Soft gradients, lifestyle photography"]] as const).map(([key, label, placeholder]) => (
                         <div key={key} className="space-y-1">
                           <Label htmlFor={`brand-${key}`} className="t-label">{label}</Label>
-                          <Input id={`brand-${key}`} value={form.brand_identity?.[key] || ""} onChange={(e) => set("brand_identity", { ...form.brand_identity, [key]: e.target.value })} placeholder={placeholder} className="h-8 text-sm" />
+                          <Input id={`brand-${key}`} value={form.brand_identity?.[key] || ""} onChange={(e) => set("brand_identity", { ...form.brand_identity, [key]: e.target.value })} placeholder={placeholder} />
                         </div>
                       ))}
                     </div>
-                    {([["design_elements", "Design Elements", "Rounded shapes, lifestyle photography, organic textures"], ["logo_description", "Logo Description", "Rounded wordmark in green with leaf icon"]] as const).map(([key, label, placeholder]) => (
+                    {([["design_elements", "Design elements", "Rounded shapes, lifestyle photography, organic textures"], ["logo_description", "Logo description", "Rounded wordmark in green with leaf icon"]] as const).map(([key, label, placeholder]) => (
                       <div key={key} className="space-y-1">
                         <Label htmlFor={`brand-${key}`} className="t-label">{label}</Label>
-                        <Input id={`brand-${key}`} value={form.brand_identity?.[key] || ""} onChange={(e) => set("brand_identity", { ...form.brand_identity, [key]: e.target.value })} placeholder={placeholder} className="h-8 text-sm" />
+                        <Input id={`brand-${key}`} value={form.brand_identity?.[key] || ""} onChange={(e) => set("brand_identity", { ...form.brand_identity, [key]: e.target.value })} placeholder={placeholder} />
                       </div>
                     ))}
-                  </div>
+                  </Section>
                 )}
 
+            <Section layout="split" eyebrow="Audience" title="Platforms, regions and languages" description="What the content recommendations and calendar posts are written for.">
                 <div className="space-y-2">
-                  <Label>Primary Platforms</Label>
+                  <Label>Primary platforms</Label>
                   <Origin>
                     {by("primary_platforms") === "person"
                       ? "Set by your team. These platforms get content recommendations and calendar posts."
@@ -464,7 +463,7 @@ export default function ClientSetup() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Geographic Focus (select multiple)</Label>
+                  <Label>Geographic focus (select any)</Label>
                   <Origin>{by("geo") === "lifecycle" ? "Read from the website. You can change it here." : ""}</Origin>
                   <div className="flex flex-wrap gap-2">
                     {geoOptions.map((g) => {
@@ -479,7 +478,7 @@ export default function ClientSetup() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Content Languages (select multiple)</Label>
+                  <Label>Content languages (select any)</Label>
                   <div className="flex flex-wrap gap-2">
                     {languageOptions.map((l) => {
                       const active = form.language.includes(l.value);
@@ -495,19 +494,16 @@ export default function ClientSetup() {
                     {by("language") === "lifecycle" ? "Read from the website. " : ""}AI-generated copy targets these languages, and trends include posts in any of them.
                   </p>
                 </div>
-              </CardContent>
-            </Card>
+            </Section>
           </TabsContent>
 
-          <TabsContent value="sprout" className="space-y-4 mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="t-h3">Sprout Social Profiles</CardTitle>
-                <CardDescription>
-                  Matched automatically from Sprout's brand names and the profiles the client's website links to, and looked at again every day. Add or remove any here; a profile you remove stays removed.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+          <TabsContent value="sprout" className="space-y-section mt-section">
+            <Section
+              layout="split"
+              eyebrow="Accounts"
+              title="Sprout Social profiles"
+              description="Matched automatically from Sprout's brand names and the profiles the client's website links to, and looked at again every day. Add or remove any here; a profile you remove stays removed."
+            >
                 {clientId ? (
                   <SproutProfileSelector
                     assigned={assignedProfiles ?? null}
@@ -517,16 +513,11 @@ export default function ClientSetup() {
                 ) : (
                   <p className="t-secondary">The client's accounts are matched once it is created.</p>
                 )}
-              </CardContent>
-            </Card>
+            </Section>
           </TabsContent>
 
-          <TabsContent value="strategy" className="space-y-4 mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="t-h3">Content strategy</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
+          <TabsContent value="strategy" className="space-y-section mt-section">
+            <Section layout="split" eyebrow="Strategy" title="Content strategy" description="The strategy document, the content pillars, the keywords trends are searched for, and how often the client posts.">
                 <StrategyDocUpload
                   clientId={clientId}
                   clientName={form.name}
@@ -549,11 +540,11 @@ export default function ClientSetup() {
                   </div>
                   <div className="space-y-3">
                     {form.content_pillars.map((pillar, index) => (
-                      <div key={index} className="p-3 rounded-md border bg-card space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium t-body">{pillar.name}</span>
-                          <Button variant="ghost" size="sm" onClick={() => set("content_pillars", form.content_pillars.filter((_, i) => i !== index))} aria-label={`Remove pillar ${pillar.name}`}>
-                            <X className="h-3.5 w-3.5" />
+                      <div key={index} className="glass-inner p-inner space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="t-h4">{pillar.name}</span>
+                          <Button variant="ghost" size="icon-sm" onClick={() => set("content_pillars", form.content_pillars.filter((_, i) => i !== index))} aria-label={`Remove pillar ${pillar.name}`}>
+                            <X />
                           </Button>
                         </div>
                         <Textarea
@@ -568,14 +559,14 @@ export default function ClientSetup() {
                   </div>
                   <div className="flex gap-2">
                     <Input value={newPillarName} onChange={(e) => setNewPillarName(e.target.value)} placeholder="Add a content pillar" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPillar())} />
-                    <Button variant="outline" size="sm" onClick={addPillar} aria-label="Add content pillar">
-                      <Plus className="h-4 w-4" aria-hidden="true" />
+                    <Button variant="outline" size="icon" onClick={addPillar} aria-label="Add content pillar">
+                      <Plus aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Social Keywords</Label>
+                  <Label>Social keywords</Label>
                   <p className="t-secondary">
                     Phrases used for TikTok and Instagram trend search, such as "AI content strategy" or "performance marketing tips".
                     {by("social_keywords") === "lifecycle" ? " Read with the pillars; you can change any of them here." : ""}
@@ -593,8 +584,8 @@ export default function ClientSetup() {
                   </div>
                   <div className="flex gap-2">
                     <Input value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)} placeholder="Add keyword phrases (press Enter)" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())} />
-                    <Button variant="outline" size="sm" onClick={addKeyword} aria-label="Add keyword phrase">
-                      <Plus className="h-4 w-4" aria-hidden="true" />
+                    <Button variant="outline" size="icon" onClick={addKeyword} aria-label="Add keyword phrase">
+                      <Plus aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
@@ -606,19 +597,21 @@ export default function ClientSetup() {
                   sources={planRhythm?.sources ?? null}
                   onChange={(posting_rhythm) => set("posting_rhythm", posting_rhythm)}
                 />
-              </CardContent>
-            </Card>
+            </Section>
           </TabsContent>
 
-          <TabsContent value="competitors" className="space-y-4 mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="t-h3">Competitive context</CardTitle>
-                <CardDescription>
-                  The three closest competitors with a website are chosen automatically. Notes from the account team are weighed heavily when they are.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+          <TabsContent value="competitors" className="space-y-section mt-section">
+            <Section
+              layout="split"
+              eyebrow="Competitors"
+              title="Competitive context"
+              description="The three closest competitors with a website are chosen automatically. Notes from the account team are weighed heavily when they are."
+              action={clientId ? (
+                <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive`)}>
+                  Open competitors
+                </Button>
+              ) : undefined}
+            >
                 <div className="space-y-2">
                   <Label htmlFor="competitor-notes">Competitor notes</Label>
                   <Textarea id="competitor-notes" rows={5}
@@ -627,24 +620,13 @@ export default function ClientSetup() {
                     onChange={(e) => set("competitor_seed_notes", e.target.value)}
                   />
                 </div>
-                {clientId && (
-                  <Button variant="outline" onClick={() => navigate(`/clients/${id}/competitive`)}>
-                    Open competitors
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+            </Section>
           </TabsContent>
 
-          <TabsContent value="brief" className="space-y-4 mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="t-h3">Client brief</CardTitle>
-                <CardDescription>Brand voice, target audience, campaign objectives, and content restrictions</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+          <TabsContent value="brief" className="space-y-section mt-section">
+            <Section layout="split" eyebrow="Brief" title="Client brief" description="Brand voice, target audience, campaign objectives and content restrictions.">
                 <div className="space-y-2">
-                  <Label>Brand Voice Preset</Label>
+                  <Label>Brand voice preset</Label>
                   <p className="t-secondary">The tone that best matches this client's brand voice.</p>
                   <div className="flex flex-wrap gap-2">
                     {BRAND_VOICE_PRESETS.map((preset) => (
@@ -656,7 +638,7 @@ export default function ClientSetup() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="brand-notes">Brand Notes</Label>
+                  <Label htmlFor="brand-notes">Brand notes</Label>
                   <Textarea id="brand-notes" value={form.brand_notes} onChange={(e) => set("brand_notes", e.target.value)} placeholder="Brand voice, positioning, key messaging..." rows={3} />
                 </div>
                 <LogoFileField clientId={clientId} clientName={form.name} logoUrl={form.logo_url} onChange={(url) => set("logo_url", url)} />
@@ -680,7 +662,7 @@ export default function ClientSetup() {
                   <DesignSynthesisCard existingSynthesis={client?.design_style_synthesis ?? null} />
                 </details>
                 <div className="space-y-2">
-                  <Label htmlFor="brief-text">Brief Text</Label>
+                  <Label htmlFor="brief-text">Brief text</Label>
                   <Origin>
                     {by("brief_text") === "lifecycle"
                       ? `Written by the product from ${client?.strategy_doc_file_path ? "the strategy document" : "the website"}. You can rewrite it; the product never replaces your version.`
@@ -690,24 +672,21 @@ export default function ClientSetup() {
                     placeholder={`Brand Voice: Professional yet approachable\nTarget Audience: B2B SaaS decision-makers\nCampaign Objectives: Increase brand awareness and thought leadership\nContent Restrictions: No competitor mentions\nCompetitive Positioning: Market leader in AI-powered analytics`}
                   />
                 </div>
-              </CardContent>
-            </Card>
+            </Section>
 
             {voiceLearnings && voiceLearnings.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="t-h3">Learned writing preferences</CardTitle>
-                  <CardDescription>
-                    Learned from copy edits and "Revise this week" notes. Every post written for this client follows these first, then the voice of its own published posts.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
+              <Section
+                layout="split"
+                eyebrow="Voice"
+                title="Learned writing preferences"
+                description={'Learned from copy edits and "Revise this week" notes. Every post written for this client follows these first, then the voice of its own published posts.'}
+              >
                   <div className="space-y-3">
                     {voiceLearnings.map((learning) => (
-                      <div key={learning.id} className="flex items-start justify-between gap-3 p-3 rounded-md border bg-card">
+                      <div key={learning.id} className="glass-inner flex items-start justify-between gap-3 p-inner">
                         <div className="flex-1 space-y-1">
                           <div className="flex items-center gap-2">
-                            <Badge variant="secondary" className="t-label">{PATTERN_LABELS[learning.pattern_type] ?? "Other"}</Badge>
+                            <Badge variant="secondary">{PATTERN_LABELS[learning.pattern_type] ?? "Other"}</Badge>
                             <span className="t-secondary">
                               {learning.times_confirmed > 1 ? `Confirmed ${learning.times_confirmed} times` : "Seen once"}
                               {" · "}
@@ -716,41 +695,39 @@ export default function ClientSetup() {
                           </div>
                           <p className="t-body">{learning.pattern_description}</p>
                         </div>
-                        <Button variant="ghost" size="sm" className="shrink-0 h-8 px-2" aria-label="Remove brand voice learning"
+                        <Button variant="ghost" size="icon-sm" className="shrink-0" aria-label="Remove brand voice learning"
                           onClick={async () => {
                             await sendQuietly(() => supabase.from("brand_voice_learnings").delete().eq("id", learning.id), { again: writeResendable });
                             // The list shows what the database has.
                             void queryClient.invalidateQueries({ queryKey: ["brand-voice-learnings", id] });
                           }}>
-                          <X className="h-3.5 w-3.5" />
+                          <X />
                         </Button>
                       </div>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
+              </Section>
             )}
           </TabsContent>
 
           {clientId && (
-            <TabsContent value="designs" className="space-y-4 mt-4">
+            <TabsContent value="designs" className="space-y-section mt-section">
               <DesignSettingsCard clientId={clientId} />
             </TabsContent>
           )}
 
-          <TabsContent value="schedule" className="space-y-4 mt-4">
+          <TabsContent value="schedule" className="space-y-section mt-section">
             {clientId ? (
               <ReportScheduleManager clientId={clientId} timeZone={client?.timezone || undefined} />
             ) : (
-              <Card>
-                <CardContent className="py-8 text-center text-muted-foreground">
-                  Both monthly reports are scheduled for the 7th of each month when the client is created.
-                </CardContent>
-              </Card>
+              <EmptyState
+                icon={CalendarClock}
+                title="Scheduled once the client is created"
+                description="Both monthly reports are scheduled for the 7th of each month when the client is created."
+              />
             )}
           </TabsContent>
         </Tabs>
-      </div>
     </AppLayout>
   );
 }
@@ -804,14 +781,12 @@ function ReportScheduleManager({ clientId, timeZone }: { clientId: string; timeZ
   if (isLoading) return <Loading label="Loading schedules" />;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="t-h3 flex items-center gap-2">
-          <CalendarClock className="h-4 w-4" /> Monthly schedules
-        </CardTitle>
-        <CardDescription>Both reports run on the 7th of each month and cover the previous calendar month.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <Section
+      layout="split"
+      eyebrow="Schedule"
+      title={<><CalendarClock className="h-4 w-4 text-[#b9e045]" aria-hidden /> Monthly schedules</>}
+      description="Both reports run on the 7th of each month and cover the previous calendar month."
+    >
         {KINDS.map(({ kind, noun, label, description }) => {
           const row = (data?.schedules || []).find((s) => (s.report_kind || "social") === kind);
           const active = !!row?.is_active;
@@ -822,18 +797,17 @@ function ReportScheduleManager({ clientId, timeZone }: { clientId: string; timeZ
             timeZone,
           });
           return (
-            <div key={kind} className="flex items-start justify-between gap-4 glass-inner p-4">
-              <div className="space-y-1">
-                <Label>{label}</Label>
+            <div key={kind} className="flex items-start gap-4 glass-inner p-inner">
+              <Switch className="mt-0.5" checked={active} disabled={toggle.isPending} onCheckedChange={(v) => toggle.mutate({ kind, active: v })} aria-label={`${label} on or off`} />
+              <div className="space-y-1 min-w-0">
+                <p className="t-h4">{label}</p>
                 <p className="t-secondary">{description}</p>
-                {lines.map((line) => <p key={line} className="t-secondary">{line}</p>)}
+                {lines.map((line) => <p key={line} className="t-label">{line}</p>)}
               </div>
-              <Switch checked={active} disabled={toggle.isPending} onCheckedChange={(v) => toggle.mutate({ kind, active: v })} aria-label={`${label} on or off`} />
             </div>
           );
         })}
-      </CardContent>
-    </Card>
+    </Section>
   );
 }
 
@@ -881,15 +855,15 @@ function SproutProfileSelector({ assigned, selected, onChange }: {
   return (
     <div className="space-y-4">
       {current.length > 0 ? (
-        <div className="glass-inner p-3 space-y-2">
+        <div className="glass-inner p-inner space-y-2">
           <p className="t-subhead">Connected</p>
           <ul className="space-y-1.5">
             {current.map((profile) => (
               <li key={String(profile.id)} className="flex items-center gap-2 min-w-0">
                 <PlatformIcon platform={profile.network_type || profile.network_display} className="h-4 w-4 shrink-0" />
                 <span className="t-body truncate">{profile.name}</span>
-                {profile.native_name && <span className="t-label text-muted-foreground truncate">@{profile.native_name}</span>}
-                {profile.missing && <span className="t-label text-muted-foreground shrink-0">No longer listed in Sprout</span>}
+                {profile.native_name && <span className="t-label truncate">@{profile.native_name}</span>}
+                {profile.missing && <span className="t-label shrink-0">No longer listed in Sprout</span>}
                 {profile.native_link && (
                   <a href={profile.native_link} target="_blank" rel="noopener noreferrer" className="t-label text-primary ml-auto shrink-0">Open</a>
                 )}
@@ -898,35 +872,33 @@ function SproutProfileSelector({ assigned, selected, onChange }: {
           </ul>
         </div>
       ) : (
-        <p className="t-secondary">No accounts are matched to this client yet. Accounts added to Moburst's Sprout account are picked up within a day.</p>
+        <EmptyState compact icon={Users} title="No accounts matched yet" description="Accounts added to Moburst's Sprout account are picked up within a day." />
       )}
 
       {allProfiles === null ? (
-        <div className="flex items-center gap-2 t-secondary py-2">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading Sprout Social profiles...
-        </div>
+        <Loading label="Loading Sprout Social profiles" />
       ) : (
         <>
-          <div className="flex items-center justify-between gap-2">
-            <p className="t-secondary">{current.length} of {allProfiles.length} profiles in Sprout are assigned to this client</p>
-            <Button variant="ghost" size="sm" onClick={() => void fetchProfiles()}>
-              <RefreshCw className="h-4 w-4 mr-1" /> Refresh
+          <div className="flex flex-wrap items-center gap-2">
+            <Input className="min-w-0 flex-1" placeholder="Search by name…" aria-label="Search Sprout profiles" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+            <Button variant="outline" onClick={() => void fetchProfiles()}>
+              <RefreshCw /> Refresh
             </Button>
           </div>
-          <Input placeholder="Search by name..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <p className="t-label">{current.length} of {allProfiles.length} profiles in Sprout are assigned to this client.</p>
           <div className="max-h-96 overflow-y-auto space-y-1.5 pr-1">
             {filtered.map((profile) => {
               const on = isSelected(profile);
               return (
                 <div key={String(profile.id)}
-                  className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${on ? "bg-primary/10 border-primary/30" : "bg-card hover:bg-accent/30"}`}
+                  className={`glass-inner flex items-center gap-3 px-3 py-2.5 cursor-pointer ${on ? "is-selected" : ""}`}
                   onClick={() => toggleProfile(profile)}>
                   <Checkbox checked={on} onCheckedChange={() => toggleProfile(profile)} aria-label={`Assign ${profile.name}`} />
                   <div className="flex-1 min-w-0">
                     <span className="font-medium t-body">{profile.name}</span>
-                    {profile.native_name && <span className="text-muted-foreground t-label ml-1.5">@{profile.native_name}</span>}
+                    {profile.native_name && <span className="t-label ml-1.5">@{profile.native_name}</span>}
                   </div>
-                  <Badge variant={on ? "default" : "secondary"} className="t-label shrink-0 gap-1">
+                  <Badge variant={on ? "default" : "secondary"} className="shrink-0 gap-1">
                     <PlatformIcon platform={profile.network_type || profile.network_display} className="h-3 w-3" /> {platformName(profile.network_type || profile.network_display)}
                   </Badge>
                 </div>

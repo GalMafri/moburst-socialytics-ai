@@ -4,11 +4,11 @@ import { useNextRun } from "@/lib/nextRun";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Eye, Loader2, ExternalLink } from "lucide-react";
+import { Eye, Loader2, ExternalLink, FileText } from "lucide-react";
 import { useRealtimeReports } from "@/hooks/useRealtimeReport";
 import { ReportActions } from "@/components/reports/ReportActions";
 import { useAuth } from "@/hooks/useAuth";
@@ -50,11 +50,7 @@ export default function ReportHistory() {
   return (
     <AppLayout title={`Reports: ${client?.name ?? "Client"}`}
       description="All monthly reports for this client, newest first.">
-      <div className="w-full space-y-6">
         <Card>
-          <CardHeader>
-            <CardTitle className="t-h3">Report history</CardTitle>
-          </CardHeader>
           <CardContent>
             {isLoading ? (
               <Loading label="Loading reports" />
@@ -96,19 +92,21 @@ export default function ReportHistory() {
                         {!isClient && (
                           <TableCell>
                             {r.gamma_url ? (
-                              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
-                                <ExternalLink className="h-3.5 w-3.5" /> View
+                              <Button size="sm" variant="outline" onClick={() => window.open(r.gamma_url, "_blank")}>
+                                <ExternalLink /> Open
                               </Button>
                             ) : null}
                           </TableCell>
                         )}
-                        <TableCell className="text-right flex items-center justify-end gap-1">
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
                           {r.display.state === "ready" && (
                             <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}>
-                              <Eye className="h-4 w-4 mr-1" /> View
+                              <Eye /> View
                             </Button>
                           )}
                           <ReportActions report={r} />
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -116,11 +114,10 @@ export default function ReportHistory() {
                 </TableBody>
               </Table>
             ) : (
-              <EmptyState title="No reports yet" description={firstRunSentence("monthly", nextRun.data) || undefined} />
+              <EmptyState framed={false} icon={FileText} title="No reports yet" description={firstRunSentence("monthly", nextRun.data) || undefined} />
             )}
           </CardContent>
         </Card>
-      </div>
     </AppLayout>
   );
 }

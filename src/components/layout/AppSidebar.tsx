@@ -16,6 +16,10 @@ import {
 import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Crosshair, CalendarDays } from "lucide-react";
 import { PORTAL_URL } from "@/utils/gosAuth";
 
+// One nav row, written once (the Intercept nav spec: 52px rows, 24px icons).
+const NAV_ITEM = "h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] transition-all";
+const NAV_IDLE = "text-[#b1b7c1] opacity-80 hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]";
+
 export function AppSidebar() {
   const location = useLocation();
   const { isAdmin, isMoburstStaff, isClient, user, isGosSession } = useAuth();
@@ -30,13 +34,13 @@ export function AppSidebar() {
     // Competitive analysis: staff review competitor sets and run the RivalIQ
     // deep analysis here; clients reach finished reports from their dashboard.
     ...(isMoburstStaff ? [{ icon: Crosshair, label: "Competitive", href: "/competitive" }] : []),
-    ...(isAdmin ? [{ icon: Gauge, label: "User Analytics", href: "/usage" }] : []),
+    ...(isAdmin ? [{ icon: Gauge, label: "User analytics", href: "/usage" }] : []),
     ...(isAdmin ? [{ icon: Settings, label: "Settings", href: "/settings" }] : []),
   ];
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="flex items-center justify-center h-[90px] border-b border-[rgba(255,255,255,0.05)] px-4 py-5 group-data-[collapsible=icon]:px-2">
+      <SidebarHeader className="flex items-center justify-center h-16 md:h-[80px] border-b border-[rgba(255,255,255,0.05)] px-4 py-3 group-data-[collapsible=icon]:px-2">
         <Link className="transition-opacity hover:opacity-80 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" to="/" aria-label="Socialytics home">
           <img
             src="/images/logo-dark.png"
@@ -59,12 +63,12 @@ export function AppSidebar() {
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
-                    tooltip="Switch Tool"
-                    className="h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] text-[#b1b7c1] opacity-80 transition-all hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]"
+                    tooltip="Switch tool"
+                    className={`${NAV_ITEM} ${NAV_IDLE}`}
                   >
                     <a href={PORTAL_URL}>
                       <ExternalLink className="h-[24px] w-[24px]" />
-                      <span>Switch Tool</span>
+                      <span>Switch tool</span>
                     </a>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -79,11 +83,7 @@ export function AppSidebar() {
                       isActive={isActive}
                       asChild
                       tooltip={item.label}
-                      className={`h-[52px] rounded-[12px] px-[12px] gap-[16px] text-[16px] font-medium tracking-[-0.5px] transition-all ${
-                        isActive
-                          ? "nav-active text-white"
-                          : "text-[#b1b7c1] opacity-80 hover:opacity-100 hover:text-white hover:bg-[rgba(255,255,255,0.03)]"
-                      }`}
+                      className={`${NAV_ITEM} ${isActive ? "nav-active text-white" : NAV_IDLE}`}
                     >
                       <Link to={item.href} aria-current={isActive ? "page" : undefined}>
                         <item.icon className="h-[24px] w-[24px]" />
@@ -102,7 +102,7 @@ export function AppSidebar() {
         {user && (
           <div className="glass-inner px-3 py-2.5 flex items-center gap-3 group-data-[collapsible=icon]:px-1 group-data-[collapsible=icon]:justify-center" title={`${user.name || ""} ${user.email || ""}`.trim()}>
             <div className="relative">
-              <div className="h-8 w-8 rounded-full bg-[#b9e045] flex items-center justify-center text-black text-sm font-bold">
+              <div className="h-8 w-8 rounded-full bg-[#b9e045] flex items-center justify-center text-black t-badge">
                 {user.name?.charAt(0)?.toUpperCase() || "U"}
               </div>
               <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#10b981] border-2 border-[#1a1d23]" />

@@ -6,6 +6,10 @@ import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { StatGrid } from "@/components/ui/stat-card";
+import { PageHeader } from "@/components/ui/page-header";
+import { PlatformSegment, Segment, SegmentedGroup } from "@/components/ui/segmented";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,6 +38,7 @@ import {
   Rss,
   ChevronDown,
   CalendarPlus,
+  FileText,
 } from "lucide-react";
 import { PlatformBadge, PlatformIcon, getPlatformColor } from "@/lib/platform-config";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -148,14 +153,14 @@ export default function ReportView() {
   if (!report || status?.hidden)
     return (
       <AppLayout>
-        <p className="text-muted-foreground">This report is not available.</p>
+        <EmptyState icon={FileText} title="This report is not available" description="It may still be running, or your account may not have access to it." />
       </AppLayout>
     );
   if (status && status.state !== "ready")
     return (
       <AppLayout>
         {status.state === "running" ? <Loading label="This report is being written. It appears here when it is ready." /> : (
-          <p className="t-body">This report is scheduled to run again. It appears here when it is ready.</p>
+          <EmptyState icon={FileText} title="This report runs again soon" description="It appears here when it is ready." />
         )}
       </AppLayout>
     );
@@ -389,31 +394,34 @@ export default function ReportView() {
 
   return (
     <AppLayout nav={<SectionNav items={navItems} />}>
-      <div className="w-full space-y-6" ref={reportContentRef}>
-        {/* Header */}
-        <div className="glass p-5 flex items-start justify-between gap-4 flex-wrap">
-          <div className="space-y-1.5">
-            <h1 className="t-h1">{clientName}: monthly report</h1>
-            <p className="t-secondary flex items-center gap-2 flex-wrap">
+      <div className="space-y-section" ref={reportContentRef}>
+        {/* The shared page header, kept inside the exported area so the PDF
+            still opens with the title and period. */}
+        <PageHeader
+          title={`${clientName}: monthly report`}
+          description={
+            <span className="flex items-center gap-2 flex-wrap">
               <span>{formatRange(rd?.report_period?.current_month) || formatRange({ start: report.date_range_start, end: report.date_range_end })}</span>
               <span className="opacity-50">·</span>
               <span>Generated {formatDate(report.created_at)}</span>
               {countryNames(rd?.context?.geo) && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Globe className="h-3.5 w-3.5" />{countryNames(rd.context.geo)}</span></>)}
               {languageNames(rd?.context?.languages) && (<><span className="opacity-50">·</span><span className="flex items-center gap-1"><Languages className="h-3.5 w-3.5" />{languageNames(rd.context.languages)}</span></>)}
-            </p>
-          </div>
+            </span>
+          }
+          actions={
           <div data-print="hide" className="flex items-center gap-2 flex-wrap">
             {!isClient && gammaUrl && (
-              <Button onClick={() => window.open(gammaUrl, "_blank")}>
-                <ExternalLink className="h-4 w-4 mr-2" /> Open presentation
+              <Button size="sm" onClick={() => window.open(gammaUrl, "_blank")}>
+                <ExternalLink /> Open presentation
               </Button>
             )}
             <ExportPdfButton contentRef={reportContentRef} filename={`${clientName}-report-${new Date(report.created_at).toISOString().slice(0, 10)}`} />
             <ReportActions report={report} />
           </div>
-        </div>
+          }
+        />
 
-        <Tabs value={tab} onValueChange={setTab} className="space-y-6">
+        <Tabs value={tab} onValueChange={setTab} className="space-y-section">
           <TabsList className="h-auto flex-wrap justify-start">
             <TabsTrigger value="overview" className="gap-1.5 flex-shrink-0"><BarChart3 className="h-4 w-4" /> Overview</TabsTrigger>
             {hasContent && <TabsTrigger value="content" className="gap-1.5 flex-shrink-0"><Sparkles className="h-4 w-4" /> Content ideas</TabsTrigger>}
@@ -423,7 +431,7 @@ export default function ReportView() {
 
           {/* ── OVERVIEW ── every original section, in its original order, plus the
               competitive strip and the actions list near the top. */}
-          <TabsContent value="overview" className="space-y-8">
+          <TabsContent value="overview" className="space-y-section">
             {/* Reading order follows the report convention: numbers, the story, the field,
                 then detail, and the recommendations to close. The nav jumps to any of them. */}
 
@@ -435,7 +443,7 @@ export default function ReportView() {
 
             {(insights.length > 0 || summary) && (
               <Section id="highlights" index={2} title="Highlights" description="What happened this period and why, written from the numbers.">
-                <Card><CardContent className="pt-5 space-y-5">
+                <Card><CardContent className="space-y-5">
                     {(hero || summary) && (
                       <div className="grid gap-6 md:grid-cols-[auto_1fr] items-start">
                         {hero && (
@@ -454,7 +462,7 @@ export default function ReportView() {
                     <InsightGrid items={insights.map((t) => formatNumbersInText(t))} />
                     )}
                     {aiAnalysis?.sprout_performance_analysis?.top_performing_content?.length > 0 && (
-                      <div className="pt-4 border-t space-y-2">
+                      <div className="pt-4 border-t border-white/[0.06] space-y-2">
                         <h3 className="t-subhead">Top performing content types</h3>
                         <InsightGrid items={aiAnalysis.sprout_performance_analysis.top_performing_content} numbered={false} />
                       </div>
@@ -465,7 +473,7 @@ export default function ReportView() {
 
             {actions.length > 0 && (
               <Section id="actions" index={3} title="Where to act next" description={`${actions.length < totalRecommendations ? `${actions.length} of ${totalRecommendations}` : actions.length} recommendation${totalRecommendations === 1 ? "" : "s"}${(() => { const c: Record<string, number> = {}; for (const a of actions) c[a.source] = (c[a.source] || 0) + 1; const parts = Object.entries(c).map(([k, n]) => `${n} from ${k === "Competitors" ? "the competitive analysis" : k === "Trends" ? "the trends" : "performance"}`); return parts.length ? `: ${parts.join(", ")}` : ""; })()}. Each one opens its evidence.`}>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-inner md:grid-cols-2 xl:grid-cols-3">
                   {actions.map((a, i) => (
                     <ActionCard
                       key={i}
@@ -479,7 +487,7 @@ export default function ReportView() {
                           initialIdea={[a.title, a.detail].filter(Boolean).join(". ")}
                           reason={{ type: a.source === "Competitors" ? "competitor" : a.source === "Trends" ? "trend" : "performance", label: a.title, report_id: reportId }}
                           reportId={reportId}
-                          trigger={<Button size="sm" variant="ghost" className="self-start h-8 px-2"><CalendarPlus className="h-3.5 w-3.5 mr-1.5" />Plan a post from this</Button>}
+                          trigger={<Button size="sm" variant="ghost" className="self-start"><CalendarPlus />Plan a post from this</Button>}
                         />
                       ) : undefined}
                     />
@@ -489,15 +497,22 @@ export default function ReportView() {
             )}
 
             {latestCompetitive && compMe && (
-              <Section id="field" index={4} title="Against the field" description="The latest competitive analysis, in three numbers.">
+              <Section
+                id="field"
+                index={4}
+                title="Against the field"
+                description="The latest competitive analysis, in three numbers."
+                action={<Button variant="outline" size="sm" data-print="hide" onClick={() => setTab("competitive")}>Open the competitive view <ArrowRight /></Button>}
+              >
+                {/* The figures share the card's width instead of sitting at
+                    its left with the button at the far right. */}
                 <Card className="glass-accent">
-                  <CardContent className="pt-5 flex items-center justify-between gap-6 flex-wrap">
-                    <dl className="flex items-center gap-10 flex-wrap">
+                  <CardContent>
+                    <dl className="grid gap-inner [grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))]">
                       {compRate != null && <div><dt className="t-subhead">{COMPARED_RATE_LABEL}</dt><dd className="t-stat tabular-nums">{(compRate * 100).toFixed(2)}%</dd></div>}
                       {compTotal ? <div><dt className="t-subhead">Share of voice</dt><dd className="t-stat tabular-nums">{Math.round((compMe.post_count / compTotal) * 100)}%</dd></div> : null}
                       {compMe.cadence_per_week != null && <div><dt className="t-subhead">Posts a week</dt><dd className="t-stat tabular-nums">{compMe.cadence_per_week}</dd></div>}
                     </dl>
-                    <Button variant="outline" onClick={() => setTab("competitive")}>Open the competitive view <ArrowRight className="h-4 w-4 ml-1" /></Button>
                   </CardContent>
                 </Card>
               </Section>
@@ -505,15 +520,14 @@ export default function ReportView() {
 
             {monthComparison?.current_month && (
               <Section id="period" index={5} title="Period-over-period performance" description={periodLine}>
-                <Card><CardContent className="pt-5"><PerformanceChart comparison={monthComparison} /></CardContent></Card>
+                <Card><CardContent><PerformanceChart comparison={monthComparison} /></CardContent></Card>
               </Section>
             )}
 
             {platformBreakdown.length > 0 && (
-              <Section id="platforms" index={6} className="[&>*:not(:first-child)]:mt-4" title="Performance by platform" description={platformLine || "How each connected account performed this period."}>
-                <p className="t-secondary">Snapshot collected {formatDateTime(report.created_at)}. Profile figures cover the selected reporting period; Facebook and Instagram impressions represent views. LinkedIn clicks include all post clicks. Providers may revise historical data after collection.</p>
+              <Section id="platforms" index={6} title="Performance by platform" description={platformLine || "How each connected account performed this period."}>
                 <Card>
-                  <CardContent className="pt-5 grid gap-8 lg:grid-cols-2">
+                  <CardContent className="grid gap-8 lg:grid-cols-2">
                     <div className="space-y-3">
                       <p className="t-subhead">Impressions by platform</p>
                       <RankedBars rows={platformBreakdown.map((p: any, i: number) => ({ key: `${p.network}-${i}`, name: platformLabelOf(p.network), label: <><PlatformBadge platform={p.network} size="sm" /></>, value: Number(p.current?.impressions ?? 0) }))} />
@@ -522,9 +536,13 @@ export default function ReportView() {
                       <p className="t-subhead">{platformBreakdown.every(p => p.current?.engagements != null) ? "Engagements by platform" : "Reactions, comments and shares by platform"}</p>
                       <RankedBars rows={platformBreakdown.map((p: any, i: number) => ({ key: `${p.network}-${i}`, name: platformLabelOf(p.network), label: <><PlatformBadge platform={p.network} size="sm" /></>, value: Number(p.current?.engagements ?? ((p.current?.reactions ?? 0) + (p.current?.comments ?? 0) + (p.current?.shares ?? 0))) }))} />
                     </div>
+                    {/* How the figures were collected: a note on the chart it
+                        qualifies, not a loose paragraph between the band and
+                        the card. */}
+                    <p className="t-label lg:col-span-2">Snapshot collected {formatDateTime(report.created_at)}. Profile figures cover the selected reporting period; Facebook and Instagram impressions represent views. LinkedIn clicks include all post clicks. Providers may revise historical data after collection.</p>
                   </CardContent>
                 </Card>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-inner">
                   {platformBreakdown.map((p, i) => <PlatformPerformanceCard key={`${p.network}-${i}`} platform={p} />)}
                 </div>
               </Section>
@@ -532,30 +550,30 @@ export default function ReportView() {
 
             {sproutPerformance?.top_posts?.length > 0 && (
               <Section id="posts" index={7} title="Top posts" description={postsLine || "By impressions and by engagement, with a platform filter."}>
-                <Card><CardContent className="pt-5"><TopPostsSection posts={sproutPerformance.top_posts} /></CardContent></Card>
+                <Card><CardContent><TopPostsSection posts={sproutPerformance.top_posts} /></CardContent></Card>
               </Section>
             )}
 
             {pillars && (
               <div id="report-pillars">
                 <Section id="pillars" index={8} title="Content pillar alignment" description={pillarsLine}>
-                  <Card><CardContent className="pt-5 space-y-5">
+                  <Card><CardContent className="space-y-5">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {pillars.well_represented?.length > 0 && (
                           <div className="space-y-2">
                             <p className="t-subhead flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-success" /> Well represented</p>
-                            <div className="flex flex-wrap gap-1.5">{pillars.well_represented.map((p: string) => <Badge key={p} variant="secondary" className="t-label">{p}</Badge>)}</div>
+                            <div className="flex flex-wrap gap-1.5">{pillars.well_represented.map((p: string) => <Badge key={p} variant="secondary">{p}</Badge>)}</div>
                           </div>
                         )}
                         {pillars.underrepresented?.length > 0 && (
                           <div className="space-y-2">
                             <p className="t-subhead flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5 text-warning" /> Needs attention</p>
-                            <div className="flex flex-wrap gap-1.5">{pillars.underrepresented.map((p: string) => <Badge key={p} variant="outline" className="t-label">{p}</Badge>)}</div>
+                            <div className="flex flex-wrap gap-1.5">{pillars.underrepresented.map((p: string) => <Badge key={p} variant="outline">{p}</Badge>)}</div>
                           </div>
                         )}
                       </div>
                       {pillarRecs.length > 0 && (
-                        <div className="pt-4 border-t space-y-2">
+                        <div className="pt-4 border-t border-white/[0.06] space-y-2">
                           <p className="t-subhead">Recommendations</p>
                           <ul className="space-y-2">
                             {pillarRecs.map((r, i) => <li key={i} className="t-body flex gap-2"><span className="text-primary">•</span><span>{r}</span></li>)}
@@ -569,9 +587,9 @@ export default function ReportView() {
 
             {rd?.data_counts && (
               <Card>
-                <CardContent className="pt-5 flex items-center gap-8 flex-wrap">
+                <CardContent className="flex items-center gap-x-8 gap-y-3 flex-wrap">
                   <p className="t-subhead">In this report</p>
-                  <ul className="flex items-center gap-6 flex-wrap t-body">
+                  <ul className="flex items-center gap-x-6 gap-y-2 flex-wrap t-body">
                     {counts.postsAnalyzed != null && <li className="flex items-center gap-2"><span>Posts analyzed</span><span className="font-semibold tabular-nums">{counts.postsAnalyzed}</span></li>}
                     <li className="flex items-center gap-2"><span>TikTok trends</span><span className="font-semibold tabular-nums">{counts.tiktokTrends}</span></li>
                     <li className="flex items-center gap-2"><span>Instagram trends</span><span className="font-semibold tabular-nums">{counts.instagramTrends}</span></li>
@@ -586,7 +604,7 @@ export default function ReportView() {
 
           {/* ── CONTENT IDEAS ── */}
           {hasContent && (
-            <TabsContent value="content" className="space-y-4">
+            <TabsContent value="content" className="space-y-section">
               <ReportCalendarLink clientId={id!} reportId={reportId!} hasBoard={contentCalendar.length > 0}>
                 <ContentIdeasTab
                   contentCalendar={contentCalendar}
@@ -605,15 +623,15 @@ export default function ReportView() {
 
           {/* ── TRENDS ── */}
           {hasTrends && (
-            <TabsContent value="trends" className="space-y-10">
+            <TabsContent value="trends" className="space-y-section">
               <TrendsSection title="TikTok trends" analysis={aiAnalysis?.tiktok_trends_analysis} posts={tiktokTrends?.posts} platform="tiktok" clientName={clientName} />
               <TrendsSection title="Instagram trends" analysis={aiAnalysis?.instagram_trends_analysis} posts={instagramTrends?.posts} platform="instagram" clientName={clientName} />
             </TabsContent>
           )}
 
           {/* ── COMPETITIVE ── */}
-          <TabsContent value="competitive" className="space-y-6">
-            <Section id="field-compare" title="How the field compares" description="The latest competitive analysis for this client. Endorsed gaps feed the weekly calendar plans.">
+          <TabsContent value="competitive" className="space-y-section">
+            <Section id="field-compare" title="How the field compares" description="The latest competitive analysis for this client.">
               <CompetitiveSnapshot clientId={report.client_id} takeaways={aiAnalysis?.competitive_takeaways} />
             </Section>
           </TabsContent>
@@ -628,12 +646,12 @@ export default function ReportView() {
 function ActionCard({ action, onOpen, extra }: { action: { source: string; title: string; detail?: string; href?: string }; onOpen: () => void; extra?: React.ReactNode }) {
   const icon = action.source === "Competitors" ? <Crosshair className="h-3.5 w-3.5" /> : action.source === "Trends" ? <TrendingUp className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />;
   return (
-    <div className="glass-inner p-4 pl-5 space-y-2.5 border-l-2 border-l-[#b9e045] flex flex-col">
+    <div className="glass p-card space-y-3 flex flex-col hover-lift">
       <button type="button" onClick={onOpen} className="text-left space-y-2.5 group flex flex-col flex-1">
         <span className="inline-flex items-center gap-1.5 t-subhead">{icon} Recommendation · {action.source}</span>
         <p className="t-h3 leading-snug">{action.title}</p>
         {action.detail && <p className="t-body">{action.detail}</p>}
-        <span className="mt-auto inline-flex items-center gap-1 t-label !text-white rounded-full border border-[rgba(255,255,255,0.16)] px-3 py-1 group-hover:bg-[rgba(255,255,255,0.08)] self-start">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open Trends" : "Open Competitive"} <ArrowRight className="h-3.5 w-3.5" /></span>
+        <span className="mt-auto inline-flex items-center gap-1 t-link group-hover:underline self-start">{action.href ? "Open the competitive report" : action.source === "Performance" ? "See the pillar detail" : action.source === "Trends" ? "Open Trends" : "Open Competitive"} <ArrowRight className="h-3.5 w-3.5" /></span>
       </button>
       {extra}
     </div>
@@ -652,7 +670,7 @@ function MetricsCards({ changes, previousMonth }: { changes: Record<string, any>
   ];
   const fmt = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 10_000 ? `${(v / 1_000).toFixed(1)}K` : v.toLocaleString());
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4 stagger-children">
+    <StatGrid>
       {metrics.map(({ key, label, icon: Icon }) => {
         const d = changes[key];
         if (!d) return null;
@@ -668,7 +686,7 @@ function MetricsCards({ changes, previousMonth }: { changes: Record<string, any>
           />
         );
       })}
-    </div>
+    </StatGrid>
   );
 }
 
@@ -716,7 +734,7 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
           {(sproutEngagements(post) ?? 0).toLocaleString()} engagements
           {sproutEngagementRate(post) != null && ` · ${(sproutEngagementRate(post)! * 100).toFixed(2)}% ${SPROUT_RATE_LABEL}`}
         </p>
-        <div className="flex items-center gap-4 t-secondary pt-1">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 t-secondary pt-1">
           <span className="flex items-center gap-1">
             <Eye className="h-3 w-3" />
             {(post.impressions ?? 0).toLocaleString()}
@@ -739,7 +757,7 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
             href={post.permalink || post.url}
             target="_blank"
             rel="noopener"
-            className="t-label text-primary hover:underline inline-flex items-center gap-1 min-h-[24px] pt-1"
+            className="t-link inline-flex items-center gap-1 min-h-[24px] pt-1"
           >
             View original <ExternalLink className="h-3 w-3" />
           </a>
@@ -871,84 +889,26 @@ function TopPostsSection({ posts }: { posts: any[] }) {
   return (
     <div className="space-y-8">
       {platforms.length > 1 && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="t-subhead">Platform</span>
-          <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)]">
-            <FilterChip active={effective === "all"} onClick={() => setActive("all")}>All</FilterChip>
-            {platforms.map((k) => <PlatformFilterChip key={k} platform={platformName(k)} active={effective === k} onClick={() => setActive(k)} />)}
-          </div>
-        </div>
+        <SegmentedGroup label="Platform">
+          <Segment active={effective === "all"} onClick={() => setActive("all")}>All</Segment>
+          {platforms.map((k) => <PlatformSegment key={k} platform={platformName(k)} active={effective === k} onClick={() => setActive(k)} />)}
+        </SegmentedGroup>
       )}
       <div className="space-y-4">
         <h3 className="t-h3 flex items-center gap-2"><Eye className="h-4 w-4 text-[#b1b7c1]" /> Top posts by impressions</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {/* Two across: a post card is a thumbnail beside its copy and figures,
+            and at three across the copy column was too narrow to read. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-inner">
           {byImpressions.map((post: any, i: number) => <PostCard key={`imp-${i}`} post={post} preview={previews[post.permalink || post.url]} />)}
         </div>
       </div>
       <div className="space-y-4">
         <h3 className="t-h3 flex items-center gap-2"><Heart className="h-4 w-4 text-[#b1b7c1]" /> Top posts by engagement</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-inner">
           {byEngagement.map((post: any, i: number) => <PostCard key={`eng-${i}`} post={post} preview={previews[post.permalink || post.url]} />)}
         </div>
       </div>
     </div>
-  );
-}
-
-/* Chip primitives matching the calendar's Intercept "Segment" spec (subtle-white
-   elevated active state — the lime primary accent is reserved for action buttons). */
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`px-3 py-1.5 rounded-[8px] t-label font-medium tracking-[-0.2px] transition-all
-        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
-        ${
-          active
-            ? "bg-[rgba(255,255,255,0.08)] text-white backdrop-blur-sm shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06),0_2px_8px_rgba(0,0,0,0.2)]"
-            : "text-[#b1b7c1] hover:text-white"
-        }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function PlatformFilterChip({
-  active,
-  platform,
-  onClick,
-}: {
-  active: boolean;
-  platform: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      aria-label={platform}
-      className={`px-2.5 py-1 rounded-[8px] transition-all
-        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background
-        ${
-          active
-            ? "bg-[rgba(255,255,255,0.08)] backdrop-blur-sm shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06),0_2px_8px_rgba(0,0,0,0.2)]"
-            : ""
-        }`}
-    >
-      <PlatformBadge platform={platform} size="sm" className={active ? "" : "opacity-60"} />
-    </button>
   );
 }
 

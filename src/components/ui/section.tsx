@@ -2,16 +2,32 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Page-level section: a slim glass band carrying the title and one line of
- * context, with the content (cards, grids) standing below it. Every screen
- * uses this for its sections so the reading rhythm is the same everywhere.
+ * Page-level section. Two layouts, one component, so every screen reads the
+ * same way:
+ *
+ * - "band" (default): a slim glass band carrying the title and one line of
+ *   context, with the content (cards, grids) standing below it. For long
+ *   report pages where each section holds several cards.
+ * - "split": one glass panel with the title, its context, its state and its
+ *   actions in a column on the left and the content on the right. For a step
+ *   of a flow, a group of settings or a form: the heading and the buttons sit
+ *   beside what they act on instead of a short text block on the left of a
+ *   1,400px card with its buttons floating at the far right. Below lg the two
+ *   columns stack.
+ *
+ * `eyebrow` names the step ("Step 1") or the group above the title; `index`
+ * numbers a report chapter (01, 02, …); `meta` holds short facts that belong
+ * with the heading (a count, a tracking state).
  */
 export function Section({
   id,
   index,
+  eyebrow,
   title,
   description,
+  meta,
   action,
+  layout = "band",
   children,
   className,
   style,
@@ -19,18 +35,53 @@ export function Section({
   id?: string;
   /** Chapter number shown before the title (01, 02, …). */
   index?: number;
+  /** A short label above the title, such as "Step 1". */
+  eyebrow?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
+  /** Short facts that belong with the heading: a count, a state line. */
+  meta?: ReactNode;
   action?: ReactNode;
-  children: ReactNode;
+  layout?: "band" | "split";
+  children?: ReactNode;
   className?: string;
   /** For a page that reorders its sections: flex `order` cannot be a Tailwind
    *  class here, because a class composed at runtime is never generated. */
   style?: React.CSSProperties;
 }) {
+  if (layout === "split") {
+    return (
+      <section
+        id={id}
+        style={style}
+        className={cn(
+          // overflow: clip rather than .glass's hidden, so the heading column
+          // can stay in view (sticky) beside a long list; it still clips to
+          // the rounded corners.
+          "glass !overflow-clip scroll-mt-[156px] grid lg:grid-cols-[minmax(260px,1fr)_minmax(0,2fr)]",
+          className,
+        )}
+      >
+        <div className="min-w-0 border-b border-[rgba(255,255,255,0.06)] lg:border-b-0 lg:border-r bg-[rgba(255,255,255,0.015)]">
+          <div data-pdf-heading className="p-card space-y-3 lg:sticky lg:top-6">
+            {(eyebrow || index != null) && (
+              <p className="t-subhead !text-[#b9e045] tabular-nums">
+                {eyebrow ?? String(index).padStart(2, "0")}
+              </p>
+            )}
+            <h2 className="t-h3 flex items-center gap-2">{title}</h2>
+            {description && <div className="t-secondary">{description}</div>}
+            {meta && <div className="space-y-1.5 t-label">{meta}</div>}
+            {action && <div className="flex flex-wrap items-center gap-2 pt-1">{action}</div>}
+          </div>
+        </div>
+        <div className="p-card min-w-0 space-y-4">{children}</div>
+      </section>
+    );
+  }
   return (
     <section id={id} style={style} className={cn("space-y-4 scroll-mt-[156px]", className)}>
-      <div data-pdf-heading className="glass px-5 py-4 flex items-start justify-between gap-4 flex-wrap">
+      <div data-pdf-heading className="glass px-card py-4 flex items-start justify-between gap-4 flex-wrap">
         {/* The line of context sits beside the title on a wide band rather than
             under it. Body text is capped at 72ch, so stacked it wrapped after
             half the band and left the header looking cut short with a field of
@@ -38,14 +89,16 @@ export function Section({
         <div className="min-w-0 flex flex-col gap-1 lg:flex-row lg:items-baseline lg:gap-6">
           <h2 className="t-h2 flex items-center gap-3 lg:shrink-0">
             {index != null && <span className="t-label !text-[#b9e045] tabular-nums tracking-[0.2em]">{String(index).padStart(2, "0")}</span>}
+            {eyebrow && index == null && <span className="t-subhead !text-[#b9e045]">{eyebrow}</span>}
             <span className="flex items-center gap-2">{title}</span>
+            {meta && <span className="t-label font-normal">{meta}</span>}
           </h2>
           {/* The 72ch cap that keeps body copy readable makes a one-line caption
               wrap in the middle of a 1,400px band and read as cut off. A line of
               context beside a title is a caption, not copy: it gets the width. */}
           {description && <p className="t-secondary min-w-0 !max-w-[120ch]">{description}</p>}
         </div>
-        {action && <div className="flex items-center gap-2 shrink-0">{action}</div>}
+        {action && <div className="flex flex-wrap items-center gap-2 max-w-full min-w-0">{action}</div>}
       </div>
       {children}
     </section>

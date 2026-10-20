@@ -80,7 +80,7 @@ it('shows where the derived values came from, offers no setup step, and starts n
 
 it('saves only the field the person changed', async () => {
   mount();
-  const name = await screen.findByLabelText('Client Name *');
+  const name = await screen.findByLabelText('Client name *');
   await waitFor(() => expect(name).toHaveValue('Bader Law'));
   fireEvent.change(name, { target: { value: 'Bader Law Firm' } });
   fireEvent.click(screen.getByRole('button', { name: /Save/ }));

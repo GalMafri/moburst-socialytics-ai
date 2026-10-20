@@ -42,18 +42,18 @@ export function LoadError({
     <div
       role="alert"
       className={cn(
-        "flex flex-col items-center justify-center text-center py-10 px-6 rounded-lg border border-dashed border-[rgba(239,68,68,0.25)] bg-[rgba(239,68,68,0.06)]",
+        "flex flex-col items-center justify-center text-center py-10 px-6 rounded-[12px] border border-dashed border-[rgba(239,68,68,0.25)] bg-[rgba(239,68,68,0.06)]",
         className,
       )}
     >
       <div className="h-12 w-12 rounded-full bg-[rgba(239,68,68,0.10)] flex items-center justify-center mb-3">
         <AlertTriangle className="h-6 w-6 text-[rgb(248,113,113)]" aria-hidden="true" />
       </div>
-      <h3 className="text-base font-semibold text-foreground">{title}</h3>
-      <p className="text-sm text-muted-foreground mt-1.5 max-w-md leading-relaxed">{message}</p>
+      <h3 className="t-h4">{title}</h3>
+      <p className="t-secondary mt-1.5 max-w-md">{message}</p>
       {onRetry && (
-        <Button variant="outline" size="sm" className="mt-4 gap-2" onClick={onRetry}>
-          <RefreshCw className="h-3.5 w-3.5" /> Try again
+        <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>
+          <RefreshCw /> Try again
         </Button>
       )}
     </div>

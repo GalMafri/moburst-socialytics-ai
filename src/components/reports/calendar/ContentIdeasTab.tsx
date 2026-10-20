@@ -5,6 +5,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useRealtimePostIterations } from "@/hooks/useRealtimePostIterations";
 import { CalendarFilters, type CalendarFilterState } from "./CalendarFilters";
 import { CalendarKanban, findLatestSelectedIteration } from "./CalendarKanban";
+import { LoadError } from "@/components/ui/load-error";
+import { Loading } from "@/components/ui/loading";
 import { PostPanel } from "./PostPanel";
 import { WeeklyHighlights } from "./WeeklyHighlights";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
@@ -220,7 +222,7 @@ export function ContentIdeasTab({
         }
       }}
     >
-      <div className="space-y-4">
+      <div className="space-y-section">
         {/* A post added here goes to the Calendar, where every post now lives. */}
         {mode === "report" && isMoburstStaff && availablePlatforms.length > 0 && clientId && (
           <div className="flex justify-end">
@@ -250,20 +252,14 @@ export function ContentIdeasTab({
         />
 
         {scheduledPostsFailed && (
-          <div
-            role="alert"
-            className="glass-inner p-4 border-[rgba(239,68,68,0.25)] bg-[rgba(239,68,68,0.06)]"
-          >
-            <p className="t-body">
-              The schedule could not be loaded, so a post already queued in Sprout will show here as
-              approved rather than scheduled. Reload before scheduling anything, or you may queue it
-              twice.
-            </p>
-          </div>
+          <LoadError
+            title="The schedule did not load"
+            error="A post already queued in Sprout will show here as approved rather than scheduled. Reload before scheduling anything, or you may queue it twice."
+          />
         )}
 
         <div id="ideas-calendar" className="scroll-mt-[156px]">
-          {iterationsFailed ? <div role="alert" className="glass p-4 space-y-2"><p>Saved post changes could not be loaded. Reload them before editing or scheduling.</p><button className="underline" onClick={() => reloadIterations()}>Reload saved changes</button></div> : iterationsLoading ? <p role="status">Loading saved post changes…</p> : <CalendarKanban
+          {iterationsFailed ? <LoadError title="Saved post changes could not be loaded" error="Reload them before editing or scheduling." onRetry={() => reloadIterations()} /> : iterationsLoading ? <Loading label="Loading saved post changes" /> : <CalendarKanban
             contentCalendar={revisedCalendar}
             postIterations={postIterations as any}
             scheduledPosts={scheduledPosts as any}

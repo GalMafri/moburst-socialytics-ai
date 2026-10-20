@@ -12,12 +12,14 @@ import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../s
 import { useEffect, useMemo, useRef, useState } from "react";
 import { competitiveRecovery } from "@/lib/competitiveFlow";
 import { cleanText, competitiveRunStatus, formatDate, formatDateTime } from "@/lib/display";
-import { StatCard, formatPercentChange } from "@/components/ui/stat-card";
+import { StatCard, StatGrid, formatPercentChange } from "@/components/ui/stat-card";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { PageHeader } from "@/components/ui/page-header";
+import { Segment, SegmentedGroup } from "@/components/ui/segmented";
 import { displayCompanyName, nameifyDomains } from "@/lib/companyName";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -152,18 +154,7 @@ function Chip({ children }: { children: React.ReactNode }) {
   return <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-[rgba(255,255,255,0.06)] t-body">{children}</span>;
 }
 
-function Seg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`px-3 py-1.5 rounded-[9px] t-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(185,224,69,0.45)] ${active ? "bg-[rgba(255,255,255,0.12)] text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-    >
-      {children}
-    </button>
-  );
-}
+const Seg = Segment;
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -354,33 +345,35 @@ export default function CompetitiveReportView() {
   if (runStatus.hidden) return <AppLayout>
     <EmptyState icon={Crosshair} title="Report not available" description="It appears here when it is ready." />
   </AppLayout>;
-  if (runStatus.state === "running") return <AppLayout>
+  if (runStatus.state === "running") return <AppLayout title="Competitive analysis" description="This analysis is still being written.">
+    <Card><CardContent className="space-y-3">
     <Loading label="Competitive analysis in progress" />
     {watchExpired(report.created_at, now) ? (
       <p className="t-secondary" role="status">This analysis is taking longer than usual, so this page has stopped checking on its own. Refresh the page to see its latest status.</p>
     ) : (
-      <p className="text-muted-foreground">Allow up to 90 minutes. This page updates automatically when the report is ready.</p>
+      <p className="t-secondary">Allow up to 90 minutes. This page updates automatically when the report is ready.</p>
     )}
-    <div className="flex gap-2 mt-4">
-      <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
-    </div>
+    <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
+    </CardContent></Card>
   </AppLayout>;
   if (runStatus.state === "held") {
     // The checks' own reasons are for the logs, never the page.
     console.info("[competitive report held]", competitiveReportQuality(report.report_data).reasons);
     return <AppLayout title={recovery.title} description="This analysis is not shared with the client.">
-      <Card><CardContent className="pt-6 space-y-4">
+      <Card><CardContent className="space-y-4">
         <p className="t-body">{recovery.detail}</p>
         {report.date_range_start && report.date_range_end && <p className="t-secondary">Period: {formatRange({start: report.date_range_start, end: report.date_range_end})}</p>}
-        <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to reports</Button>
+        <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to reports</Button>
       </CardContent></Card>
     </AppLayout>;
   }
   if (runStatus.state === "scheduled") return <AppLayout>
-    <EmptyState icon={Crosshair} title="Report not available" description="It appears here when it is ready." />
-    <div className="flex gap-2 mt-4">
-      <Button variant="outline" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>
-    </div>
+    <EmptyState
+      icon={Crosshair}
+      title="Report not available"
+      description="It appears here when it is ready."
+      action={<Button variant="outline" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}>Back to report history</Button>}
+    />
   </AppLayout>;
   const me = companies.find((c) => c.is_client) || null;
   const rivals = companies.filter((c) => !c.is_client).sort((a, b) => b.post_count - a.post_count);
@@ -600,7 +593,7 @@ export default function CompetitiveReportView() {
 
   return (
     <AppLayout nav={<SectionNav items={navItems} />}>
-      <div ref={printRef} className="w-full flex flex-col gap-8">
+      <div ref={printRef} className="flex flex-col gap-section">
 
         {/* The line where the filtered half of the report ends. Everything above
             it is the platform you picked; everything below is written once for
@@ -618,13 +611,17 @@ export default function CompetitiveReportView() {
           </div>
         )}
 
-        {/* Hero */}
-        <div className="glass p-5 flex items-start justify-between gap-4 flex-wrap">
-          <div className="space-y-2">
-            <Button data-print="hide" variant="ghost" size="sm" className="-ml-2" onClick={() => navigate(isMoburstStaff ? `/clients/${clientId}/competitive/run` : "/")}>
-              <ArrowLeft className="h-4 w-4 mr-1" /> Back
+        {/* Hero: the shared page header, kept inside the exported area so the
+            PDF opens with it. */}
+        <PageHeader
+          back={
+            <Button data-print="hide" variant="ghost" size="sm" className="-ml-2 border-0 bg-transparent" onClick={() => navigate(isMoburstStaff ? `/clients/${clientId}/competitive/run` : "/")}>
+              <ArrowLeft /> Back
             </Button>
-            <h1 className="t-h1">{clientName} vs. the field</h1>
+          }
+          title={`${clientName} vs. the field`}
+          meta={
+          <div className="w-full space-y-2">
             <div className="flex items-center gap-2 flex-wrap t-secondary">
               <Badge variant={runStatus.variant}>{runStatus.label}</Badge>
               {period && <Chip>{period}{rd.period?.days ? ` · ${rd.period.days} days` : ""}</Chip>}
@@ -651,12 +648,14 @@ export default function CompetitiveReportView() {
                 ))}
               </div>
             )}
-            <p className="t-secondary">Snapshot from the report run started {formatDateTime(report.created_at)}. Posts were published within the selected UTC dates; their performance reflects the collected source snapshots, not only interactions made within those dates. Client impressions from connected profiles are measured; competitor impressions are estimates.</p>
+            <p className="t-label">Snapshot from the report run started {formatDateTime(report.created_at)}. Posts were published within the selected UTC dates; their performance reflects the collected source snapshots, not only interactions made within those dates. Client impressions from connected profiles are measured; competitor impressions are estimates.</p>
           </div>
+          }
+          actions={
           <div data-print="hide" className="flex gap-2 flex-wrap">
-            <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}><History className="h-4 w-4 mr-2" /> All runs</Button>
+            <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}><History /> All runs</Button>
             {isMoburstStaff && (
-              <Button variant="ghost" onClick={() => navigate(`/clients/${clientId}/competitive/feed`)}><Rss className="h-4 w-4 mr-2" /> Latest posts</Button>
+              <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive/feed`)}><Rss /> Latest posts</Button>
             )}
             <ExportPdfButton contentRef={printRef} filename={`${clientName.replace(/[^a-z0-9]+/gi, "_")}_competitive_${period ? period.replace(/[^a-z0-9]+/gi, "_") : report.id.slice(0, 8)}`} title={`${clientName} vs. the field${period ? ` (${period})` : ""}`} />
             <ReportActions
@@ -665,16 +664,16 @@ export default function CompetitiveReportView() {
               onDeleted={() => navigate(`/clients/${clientId}/competitive/reports`)}
             />
           </div>
-        </div>
+          }
+        />
 
         {/* Platform filter */}
         {hasChannels && (
-          <div data-print="hide" className="glass px-5 py-3 flex items-center gap-3 flex-wrap">
-            <span className="t-subhead">Platform</span>
-            <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)]">
+          <div data-print="hide" className="glass px-card py-3 flex items-center gap-3 flex-wrap">
+            <SegmentedGroup label="Platform">
               <Seg active={effectivePlat === "all"} onClick={() => setPlat("all")}>All platforms</Seg>
               {platforms.map((k) => <Seg key={k} active={effectivePlat === k} onClick={() => setPlat(k)}>{platformLabel(k)}</Seg>)}
-            </div>
+            </SegmentedGroup>
             {effectivePlat !== "all" && (
               <span className="t-secondary">
                 Every section below says which it is: <span className="!text-[#b9e045]">{platformLabel(effectivePlat)} only</span> where the
@@ -693,7 +692,8 @@ export default function CompetitiveReportView() {
 
         {/* KPI tiles */}
         {meB && (
-          <div className={`grid gap-4 grid-cols-2 md:grid-cols-3 ${meM?.audience ? "2xl:grid-cols-6" : "2xl:grid-cols-5"}`}>
+          // Columns follow the number of tiles (five or six), so none is left as a hole.
+          <StatGrid>
             <Kpi
               accent
               label="Companies compared"
@@ -708,7 +708,7 @@ export default function CompetitiveReportView() {
             {/* Engagements divided by impressions (views on video), the same for every company. No impressions figure, no tile. */}
             {meB.post_count > 0 && meB.engagement_rate_avg != null && <Kpi label={COMPARED_RATE_LABEL} value={pct(meB.engagement_rate_avg)} sub={`${effectivePlat === "all" ? "Excluding LinkedIn · " : ""}${avg((b) => b.engagement_rate_avg) == null ? "engagements per impression" : `active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`}`} />}
             <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`active peers avg ${fmt(avg((b) => b.engagement_avg))}`} />
-          </div>
+          </StatGrid>
         )}
 
         {(report.report_data as { period?: { days?: number } })?.period?.days && (report.report_data as { period?: { days?: number } }).period.days !== rd.period?.days && <p className="t-secondary">Cadence figures have been corrected to include both dates in the period. The written commentary below may still quote the earlier figures.</p>}
@@ -721,7 +721,7 @@ export default function CompetitiveReportView() {
                 things that float (the user chip, the progress card), and it
                 read as a different material next to every other section. */}
             <Card>
-              <CardContent className="pt-5"><Prose text={ai.executive_summary} /></CardContent>
+              <CardContent><Prose text={ai.executive_summary} /></CardContent>
             </Card>
             </Section>
         )}
@@ -739,7 +739,7 @@ export default function CompetitiveReportView() {
             {changes.length > 0 ? (
               <ChangeCards changes={changes} />
             ) : (
-              <div className="glass-inner p-4"><p className="t-body">No notable movement: cadence, engagement, channels and formats all held for every company.</p></div>
+              <EmptyState compact icon={Crosshair} title="No notable movement" description="Cadence, engagement, channels and formats all held for every company." />
             )}
           </Section>
         )}
@@ -905,12 +905,12 @@ export default function CompetitiveReportView() {
                     <RankedBars rows={followersRows} emphasis legend={{ subject: clientName, others: "Competitors" }} />
                   </div>
                 )}
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-inner grid-cols-[repeat(auto-fit,minmax(min(100%,240px),1fr))]">
                   {withMetrics.map(({ c, m }) => {
                     const nets = Object.entries(m.by_network).filter(([, n]) => n.followers && n.followers.current > 0);
                     const boosted = m.boosted?.current || 0;
                     return (
-                      <article key={c.company_id} data-pdf-unit className={`glass-inner p-4 space-y-3 min-w-0 ${c.is_client ? "border-[rgba(185,224,69,0.35)]" : ""}`}>
+                      <article key={c.company_id} data-pdf-unit className={`glass-inner p-4 space-y-3 min-w-0 ${c.is_client ? "is-selected" : ""}`}>
                         <p className="t-h3 pb-3 border-b border-[rgba(255,255,255,0.08)]" title={c.name}>
                           {displayCompanyName(c.name)}
                           {c.is_client && <span className="t-label !text-[#b9e045] ml-2 align-middle">client</span>}
@@ -1038,7 +1038,7 @@ export default function CompetitiveReportView() {
               </>
             }
           >
-            {gaps.length === 0 && <div className="glass-inner p-4"><p className="t-body">Every suggestion for this view has been hidden by the team.</p></div>}
+            {gaps.length === 0 && <EmptyState compact icon={Crosshair} title="No suggestions shown" description="Every suggestion for this view has been hidden by the team." />}
             <div className="grid gap-4 md:grid-cols-2">
               {gaps.map((g: any, i: number) => {
                 const v = verdictFor(g.gap);
@@ -1060,7 +1060,7 @@ export default function CompetitiveReportView() {
                       </div>
                       {shown.why_it_matters && <p className="t-body">{nameifyDomains(shown.why_it_matters)}</p>}
                       {shown.suggested_play && (
-                        <div className="glass-accent p-3 t-body">
+                        <div className="glass-accent p-inner t-body">
                           <span className="font-semibold">Proposed test: </span>{nameifyDomains(shown.suggested_play)}
                         </div>
                       )}
@@ -1156,7 +1156,7 @@ export default function CompetitiveReportView() {
                               href={ex.url}
                               target="_blank"
                               rel="noreferrer"
-                              className="group flex gap-3 rounded-[10px] p-1.5 -m-1.5 hover:bg-[rgba(255,255,255,0.04)] transition-colors"
+                              className="group flex gap-3 rounded-[12px] p-1.5 -m-1.5 hover:bg-[rgba(255,255,255,0.04)] transition-colors"
                             >
                               <PostVisual
                                 url={null}
@@ -1225,7 +1225,7 @@ export default function CompetitiveReportView() {
             <Card>
               <CardContent className="pt-5 space-y-8">
                 {ordered.map((c) => ({ c, b: bucketFor(c, effectivePlat) })).filter((x) => x.b.top_posts?.length).map(({ c, b }) => (
-                  <div key={c.company_id} data-pdf-company id={`company-posts-${c.company_id}`} className="space-y-3 scroll-mt-24" tabIndex={-1}>
+                  <div key={c.company_id} data-pdf-company id={`company-posts-${c.company_id}`} className="space-y-3 scroll-mt-[156px]" tabIndex={-1}>
                     <p data-pdf-heading className="t-h3 flex items-center gap-2 flex-wrap" title={c.name}>{displayCompanyName(c.name)}{c.is_client && <Badge>client</Badge>}</p>
                     <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] items-start">
                       {b.top_posts.filter(hasContent).slice(0, 5).map((p, i) => postCard(p, `${c.company_id}-${i}`))}

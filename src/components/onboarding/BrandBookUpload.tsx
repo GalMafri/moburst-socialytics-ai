@@ -2,7 +2,6 @@ import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
 import { Upload, Link, Loader2, FileText, X, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -82,8 +81,7 @@ export function BrandBookUpload({
   };
 
   return (
-    <Card>
-      <CardContent className="pt-5 space-y-4">
+    <div className="glass-inner p-inner space-y-4">
         <Label className="t-body font-semibold">Brand Book / Style Guide</Label>
 
         <div className="space-y-2">
@@ -102,7 +100,7 @@ export function BrandBookUpload({
             </div>
           ) : (
             <label className="block">
-              <div className="flex items-center gap-2 p-3 border-2 border-dashed rounded-md cursor-pointer hover:border-primary/50 transition-colors">
+              <div className="flex items-center gap-2 p-3 border border-dashed border-white/15 rounded-[12px] cursor-pointer hover:border-primary/50 transition-colors">
                 {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4 text-muted-foreground" />}
                 <span className="t-secondary">{uploading ? "Uploading..." : "Click to upload brand book"}</span>
               </div>
@@ -137,7 +135,6 @@ export function BrandBookUpload({
           </div>
         </div>
         {notRead && <p className="t-secondary" role="status">{notRead}</p>}
-      </CardContent>
-    </Card>
+    </div>
   );
 }

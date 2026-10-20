@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, CalendarDays } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { mondayOf, todayIn } from "@/lib/calendarPosts";
 
 /**
@@ -34,17 +35,15 @@ export function ReportCalendarLink({ clientId, reportId, hasBoard, children }: {
   // A report from before the calendar tab, whose week was never imported, keeps its own board.
   if (!imported && hasBoard) return <>{children}</>;
   return (
-    <div className="glass p-5 flex items-start justify-between gap-3 flex-wrap">
-      <div className="flex items-start gap-3 min-w-0">
-        <div className="shrink-0 rounded-full p-2 bg-[rgba(185,224,69,0.10)] text-[#b9e045]"><CalendarDays className="h-4 w-4" aria-hidden /></div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-white">Posts are planned a week at a time</p>
-          <p className="t-secondary">Each week's posts are written the Monday before, from the latest results, competitors and trends, including this report's findings. They're in the Calendar, where each post's copy, design and schedule are managed.</p>
-        </div>
-      </div>
-      <Button asChild size="sm">
-        <Link to={`/clients/${clientId}/calendar?week=${mondayOf(todayIn("UTC"))}`}>Open the calendar<ArrowRight className="h-3.5 w-3.5 ml-1.5" /></Link>
-      </Button>
-    </div>
+    <EmptyState
+      icon={CalendarDays}
+      title="Posts are planned a week at a time"
+      description="Each week's posts are written the Monday before, from the latest results, competitors and trends, including this report's findings. They're in the Calendar, where each post's copy, design and schedule are managed."
+      action={
+        <Button asChild size="sm">
+          <Link to={`/clients/${clientId}/calendar?week=${mondayOf(todayIn("UTC"))}`}>Open the calendar <ArrowRight /></Link>
+        </Button>
+      }
+    />
   );
 }

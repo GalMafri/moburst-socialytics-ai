@@ -41,7 +41,7 @@ export function DesignProgressCard({ request, replacing = false }: { request: De
     <div role="status" aria-live="polite" className="glass-inner p-4 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-white tracking-[-0.2px]">
+          <p className="t-h4">
             {replacing ? `Making a new ${noun}` : `Preparing your ${noun}`}
           </p>
           <p className="t-secondary mt-0.5">

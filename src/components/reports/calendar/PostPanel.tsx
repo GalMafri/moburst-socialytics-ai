@@ -246,7 +246,7 @@ export function PostPanel({
           className="w-full sm:max-w-2xl overflow-y-auto print:hidden bg-[rgba(11,12,16,0.92)] backdrop-blur-[60px] border-l border-white/[0.08]"
         >
           <SheetHeader>
-            <SheetTitle className="flex items-center gap-2 flex-wrap text-[18px] font-semibold tracking-[-0.5px]">
+            <SheetTitle className="flex items-center gap-2 flex-wrap t-h3">
               {post.platform && <PlatformBadge platform={post.platform} size="sm" />}
               {post.format && (
                 <Badge
@@ -257,7 +257,7 @@ export function PostPanel({
                 </Badge>
               )}
               {post.posting_time && (
-                <span className="text-sm font-normal text-muted-foreground tracking-[-0.5px]">
+                <span className="t-label">
                   {post.posting_time}
                 </span>
               )}
@@ -296,13 +296,13 @@ export function PostPanel({
             <TabsContent value="design" className="mt-4 space-y-4">
               {clipNote && <p role="status" className="t-secondary">{clipNote}</p>}
               {pendingClip && !uploadingClip && (
-                <div className="glass-inner p-3 flex items-center justify-between gap-3" role="status">
+                <div className="glass-inner p-inner flex items-center justify-between gap-3" role="status">
                   <p className="t-secondary min-w-0 truncate">{pendingClip.name} is not uploaded yet.</p>
                   <Button size="sm" variant="outline" className="shrink-0" onClick={() => void uploadClip(pendingClip)}>Upload</Button>
                 </div>
               )}
               {plannedVideo && !designsReady && (
-                <div className="glass-inner p-4 flex items-start justify-between gap-3 flex-wrap">
+                <div className="glass-inner p-inner flex items-start justify-between gap-3 flex-wrap">
                   <p className="t-body min-w-0">
                     This post is planned as a <span className="font-semibold text-white">{post.format}</span>. Designs here are stills, useful as a cover frame; the clip itself is generated on the Video tab.
                   </p>
@@ -314,7 +314,7 @@ export function PostPanel({
               {designsReady ? (
                 <>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold">{videoDesigns ? "Video" : isCarouselPost ? "Carousel" : "Design"}</p>
+                    <p className="t-h4">{videoDesigns ? "Video" : isCarouselPost ? "Carousel" : "Design"}</p>
                     {(!filmedReason || versions.length > 0) && (
                       <p className="t-secondary">{!videoDesigns
                         ? "Made in your brand's style, with your logo and the post's words."
@@ -369,7 +369,7 @@ export function PostPanel({
                 <>
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold">
+                      <p className="t-h4">
                         {imageTiles.length > 0
                           ? `${imageTiles.length} design${imageTiles.length === 1 ? "" : "s"}`
                           : designRun?.status === "running"
@@ -381,7 +381,9 @@ export function PostPanel({
                           ? "Click a design to see it at full size."
                           : designRun?.status === "running"
                             ? "The run continues while this panel is closed. Open Design to follow it."
-                            : "The design for this post will appear here."}
+                            : isMoburstStaff
+                              ? "Make one when this post needs it."
+                              : "Designs the team makes for this post appear here."}
                       </p>
                     </div>
                     {!designSettingsLoading && isMoburstStaff && <CreatePostDesignButton
@@ -423,7 +425,7 @@ export function PostPanel({
             <TabsContent value="video" className="mt-4 space-y-4">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="text-sm font-semibold">
+                  <p className="t-h4">
                     {videoTiles.length > 0
                       ? `${videoTiles.length} video${videoTiles.length === 1 ? "" : "s"}`
                       : "No videos yet"}
@@ -551,7 +553,7 @@ interface TileCardProps {
 }
 
 const REJECT_REASONS: Array<{ value: string; label: string }> = [
-  { value: "off_brand_colours", label: "Off-brand colours" },
+  { value: "off_brand_colours", label: "Off-brand colors" },
   { value: "wrong_style", label: "Wrong style or layout" },
   { value: "text_errors", label: "Text is wrong or garbled" },
   { value: "logo_or_mark", label: "Shows a logo or mark it shouldn't" },
@@ -636,8 +638,7 @@ function MediaTileCard({
           {canToggle && (
             <Button
               variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-sm"
+              size="icon-sm"
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleSelected!(tile.iterationId!, !tile.isSelected);
@@ -651,25 +652,25 @@ function MediaTileCard({
           )}
           {canReview && (
             <>
-              <Button variant="ghost" size="sm" className="h-9 px-2" title="Reject and teach the app why" aria-label="Reject this design" onClick={() => setRejecting(true)} disabled={busy}>
+              <Button variant="ghost" size="icon-sm" title="Reject and teach the app why" aria-label="Reject this design" onClick={() => setRejecting(true)} disabled={busy}>
                 <ThumbsDown className="h-3.5 w-3.5" />
               </Button>
-              <Button variant="ghost" size="sm" className="h-9 px-2" title="Archive without feedback" aria-label="Archive this design" onClick={() => setArchiveOpen(true)} disabled={busy}>
+              <Button variant="ghost" size="icon-sm" title="Archive without feedback" aria-label="Archive this design" onClick={() => setArchiveOpen(true)} disabled={busy}>
                 <Archive className="h-3.5 w-3.5" />
               </Button>
             </>
           )}
-          <a
-            href={tile.url}
-            download={`${filenameStub}-${index + 1}.${isVideo ? "mp4" : "png"}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Button variant="ghost" size="sm" className="h-9 px-2">
-              <Download className="h-3 w-3 mr-1" /> Download
-            </Button>
-          </a>
+          <Button asChild variant="ghost" size="sm">
+            <a
+              href={tile.url}
+              download={`${filenameStub}-${index + 1}.${isVideo ? "mp4" : "png"}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Download /> Download
+            </a>
+          </Button>
           <ConfirmDialog
             open={archiveOpen}
             onOpenChange={setArchiveOpen}

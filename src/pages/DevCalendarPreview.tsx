@@ -280,8 +280,8 @@ export default function DevCalendarPreview() {
     : [];
 
   return (
-    <AppLayout title="Calendar UI Preview (DEV)">
-      <div className="space-y-4">
+    <AppLayout title="Calendar preview" description="Development only: the calendar board with sample posts.">
+      <div className="space-y-section">
         <WeeklyHighlights
           aiAnalysis={MOCK_AI_ANALYSIS}
           sproutMonthSummary="Engagement up 28% MoM, impressions up 41%."

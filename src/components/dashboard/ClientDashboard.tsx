@@ -7,7 +7,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClickableCard } from "@/components/ui/clickable-card";
 import { PageHeader } from "@/components/ui/page-header";
-import { FileText, TrendingUp, BarChart3, AlertCircle, Crosshair } from "lucide-react";
+import { FileText, TrendingUp, BarChart3, Clock, Crosshair } from "lucide-react";
+import { Loading } from "@/components/ui/loading";
+import { LoadError } from "@/components/ui/load-error";
+import { EmptyState } from "@/components/ui/empty-state";
 
 // Defense-in-depth: even when RLS returns extra/stale clients (e.g. client_users
 // cache not yet cleaned, or migration to computed is_client_member not applied
@@ -68,29 +71,20 @@ export function ClientDashboard() {
   });
 
   if (isLoading) {
-    return (
-      <Card className="p-12 text-center">
-        <p className="t-secondary">Loading your dashboard…</p>
-      </Card>
-    );
+    return <Loading variant="page" label="Loading your dashboard" />;
   }
 
   if (error) {
-    return (
-      <Card className="p-12 text-center">
-        <AlertCircle className="h-10 w-10 mx-auto text-destructive mb-3" />
-        <h3 className="font-semibold mb-2">Your dashboard did not load</h3>
-        <p className="t-secondary mb-4">Refresh the page to try again.</p>
-      </Card>
-    );
+    return <LoadError title="Your dashboard did not load" error="Refresh the page to try again." />;
   }
 
   if (matchingClients.length === 0) {
     return (
-      <Card className="p-12 text-center">
-        <h3 className="font-semibold mb-2">Your dashboard is being set up</h3>
-        <p className="t-secondary">Your Moburst account team is connecting your account. Contact them if this does not change soon.</p>
-      </Card>
+      <EmptyState
+        icon={Clock}
+        title="Your dashboard is being set up"
+        description="Your Moburst account team is connecting your account. Contact them if this does not change soon."
+      />
     );
   }
 
@@ -98,19 +92,25 @@ export function ClientDashboard() {
     firstClient.hub_company_name || firstClient.name || user?.company;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-section">
       <PageHeader title={displayName} description="Your social media intelligence dashboard" />
-      <ClientOverview clientId={firstClient.id} isStaff={false} />
+      <Card>
+        <CardContent>
+          <ClientOverview clientId={firstClient.id} isStaff={false} />
+        </CardContent>
+      </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Four destinations in one row on a wide screen: two columns of
+          700px tiles carried a single short line each. */}
+      <div className="grid gap-inner sm:grid-cols-2 xl:grid-cols-4 stagger-children">
         <ClickableCard
-          className="hover-lift transition-shadow"
+          className="hover-lift"
           disabled={!latestReport}
           ariaLabel="Open the latest report"
           onClick={() => latestReport && navigate(`/clients/${clientId}/reports/${latestReport.id}`)}
         >
           <CardHeader>
-            <CardTitle className="t-h3 flex items-center gap-2">
+            <CardTitle className="t-h3 flex items-center gap-2 [&_svg]:text-[#b9e045]">
               <TrendingUp className="h-4 w-4 text-accent" />
               Latest report
             </CardTitle>
@@ -127,12 +127,12 @@ export function ClientDashboard() {
         </ClickableCard>
 
         <ClickableCard
-          className="hover-lift transition-shadow"
+          className="hover-lift"
           ariaLabel="Open report history"
           onClick={() => navigate(`/clients/${clientId}/reports`)}
         >
           <CardHeader>
-            <CardTitle className="t-h3 flex items-center gap-2">
+            <CardTitle className="t-h3 flex items-center gap-2 [&_svg]:text-[#b9e045]">
               <FileText className="h-4 w-4 text-accent" />
               Report history
             </CardTitle>
@@ -143,12 +143,12 @@ export function ClientDashboard() {
         </ClickableCard>
 
         <ClickableCard
-          className="hover-lift transition-shadow"
+          className="hover-lift"
           ariaLabel="Open competitive analyses"
           onClick={() => navigate(`/clients/${clientId}/competitive/reports`)}
         >
           <CardHeader>
-            <CardTitle className="t-h3 flex items-center gap-2">
+            <CardTitle className="t-h3 flex items-center gap-2 [&_svg]:text-[#b9e045]">
               <Crosshair className="h-4 w-4 text-accent" />
               Competitive analyses
             </CardTitle>
@@ -159,12 +159,12 @@ export function ClientDashboard() {
         </ClickableCard>
 
         <ClickableCard
-          className="hover-lift transition-shadow"
+          className="hover-lift"
           ariaLabel="Open analytics"
           onClick={() => navigate(`/clients/${clientId}/analytics`)}
         >
           <CardHeader>
-            <CardTitle className="t-h3 flex items-center gap-2">
+            <CardTitle className="t-h3 flex items-center gap-2 [&_svg]:text-[#b9e045]">
               <BarChart3 className="h-4 w-4 text-accent" />
               Analytics
             </CardTitle>

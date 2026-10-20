@@ -67,22 +67,22 @@ export function PostDesign({ versions, preparing, isStaff, aspect, filenameStub,
         {preparing ? (
           <DesignProgressCard request={preparing} isStaff={isStaff} />
         ) : (
-          <div className="glass-inner border-dashed border-white/10 p-8 text-center space-y-3">
+          <div className="rounded-[12px] border border-dashed border-white/10 bg-[rgba(255,255,255,0.02)] p-8 text-center space-y-3">
             <Sparkles className="h-6 w-6 mx-auto text-muted-foreground/60" aria-hidden />
             {waitingForCopy ? (
-              <p className="t-secondary">This post is written shortly before its date from what's trending then. Its design follows once it's written.</p>
+              <p className="t-secondary">This post is written shortly before its date from what's trending then. A design can be made once it's written.</p>
             ) : onCamera ? (
               // Two ways to make this video, side by side: film it, or make it from the posts.
               <div className="grid gap-3 sm:grid-cols-2 text-left">
                 <div className="glass-inner p-4 space-y-3 flex flex-col">
-                  <p className="text-sm font-semibold text-white">Film it</p>
+                  <p className="t-h4">Film it</p>
                   <p className="t-secondary flex-1">This video is filmed: {onCamera}. Upload the vertical clip and it's edited the way your own videos are.</p>
                   {isStaff && <ShotBriefCard brief={shotBrief ?? null} />}
                   {onUploadClip && <ClipUpload input={clipInput} onUploadClip={onUploadClip} uploadingClip={uploadingClip} />}
                 </div>
                 {onMakeFromPosts && (
                   <div className="glass-inner p-4 space-y-3 flex flex-col">
-                    <p className="text-sm font-semibold text-white">Make it from your posts</p>
+                    <p className="t-h4">Make it from your posts</p>
                     <p className="t-secondary flex-1">A generated video in the look of your static posts, with the post's hook, your logo and sound. Nobody needs to film.</p>
                     <Button size="sm" variant="outline" onClick={onMakeFromPosts} disabled={creating}>
                       {creating ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
@@ -464,7 +464,7 @@ function ShotBriefCard({ brief }: { brief: ShotBrief | null }) {
   return (
     <div className="rounded-[10px] border border-white/10 p-3 space-y-2">
       <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <span className="text-sm font-semibold text-white">Shot brief <span className="t-label font-normal">(Moburst only)</span></span>
+        <span className="t-h4">Shot brief <span className="t-label font-normal">(Moburst only)</span></span>
         <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
       </button>
       {open && (

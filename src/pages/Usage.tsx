@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { Loading } from "@/components/ui/loading";
+import { LoadError } from "@/components/ui/load-error";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -96,7 +99,7 @@ function Tile({ label, value, hint, icon: Icon, tone }: { label: string; value: 
     <StatCard
       label={label}
       icon={<Icon className="h-3.5 w-3.5" />}
-      value={tone === "warn" ? <span className="text-rose-400">{value}</span> : value}
+      value={tone === "warn" ? <span className="!text-[#f87171]">{value}</span> : value}
       sub={hint}
     />
   );
@@ -170,10 +173,8 @@ export default function Usage() {
 
   if (users.isLoading) {
     return (
-      <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature. Select anyone to see their full history.">
-        <div className="flex items-center justify-center py-24">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
+      <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature.">
+        <Loading variant="page" label="Loading usage" />
       </AppLayout>
     );
   }
@@ -189,42 +190,28 @@ export default function Usage() {
 
   if (notSignedIn) {
     return (
-      <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature.">
-        <Card>
-          <CardContent className="p-5">
-            <p className="t-body font-medium">Sign in to view usage</p>
-            <p className="mt-1 t-secondary">
-              Open this tool from the Moburst portal so it can sign you in, then come
-              back to this page. If you opened it directly, that sign-in has not happened yet.
-            </p>
-          </CardContent>
-        </Card>
+      <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature.">
+        <EmptyState
+          icon={Users}
+          title="Sign in to view usage"
+          description="Open this tool from the Moburst portal so it can sign you in, then come back to this page. If you opened it directly, that sign-in has not happened yet."
+        />
       </AppLayout>
     );
   }
 
   if (users.error) {
     return (
-      <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature.">
-        <Card>
-          <CardContent className="p-5">
-            <p className="t-body">Usage did not load. Reload the page to try again.</p>
-          </CardContent>
-        </Card>
+      <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature.">
+        <LoadError title="Usage did not load" onRetry={() => void users.refetch()} />
       </AppLayout>
     );
   }
 
   if (rows.length === 0) {
     return (
-      <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature.">
-        <Card>
-          <CardContent className="p-5">
-            <p className="t-secondary">
-              No usage data visible. This page is limited to admin accounts.
-            </p>
-          </CardContent>
-        </Card>
+      <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature.">
+        <EmptyState icon={Users} title="No usage to show" description="This page is limited to admin accounts." />
       </AppLayout>
     );
   }
@@ -232,9 +219,8 @@ export default function Usage() {
   const idlePct = summary.total ? Math.round((summary.idle / summary.total) * 100) : 0;
 
   return (
-    <AppLayout title="User Analytics" description="Who uses Socialytics and how: per person, over time, by behaviour and by feature.">
-      <div className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <AppLayout title="User analytics" description="Who uses Socialytics and how: per person, over time, by behavior and by feature, with each person's full history.">
+        <StatGrid>
           <Tile label="Provisioned" value={summary.total} hint={`${summary.producing} have done work in the product`} icon={Users} />
           <Tile label="Regular users" value={summary.habit} hint="3 or more finished reports" icon={Zap} />
           <Tile
@@ -246,20 +232,20 @@ export default function Usage() {
           />
           {/* Internal health, admins only: the same rows as the activity chart. */}
           <Tile label="Did not finish" value={activity.failures} hint={`of ${activity.actions} actions, all time`} icon={AlertCircle} />
-        </div>
+        </StatGrid>
 
-        <Tabs defaultValue="people" className="space-y-4">
+        <Tabs defaultValue="people" className="space-y-section">
           <TabsList>
             <TabsTrigger value="people">People</TabsTrigger>
             <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="behaviour">Behaviour</TabsTrigger>
+            <TabsTrigger value="behaviour">Behavior</TabsTrigger>
             <TabsTrigger value="features">Features</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview" className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-3">
+          <TabsContent value="overview" className="space-y-section">
+          <div className="grid gap-section lg:grid-cols-3">
             <Card className="lg:col-span-2">
-              <CardHeader className="pb-2">
+              <CardHeader>
                 <CardTitle className="t-h3">Activity over time</CardTitle>
               </CardHeader>
               <CardContent>
@@ -285,11 +271,15 @@ export default function Usage() {
                         <Tooltip
                           labelFormatter={(d) => fmtDate(String(d))}
                           contentStyle={{
-                            background: "hsl(var(--popover))",
-                            border: "1px solid hsl(var(--border))",
-                            borderRadius: 8,
-                            fontSize: 12,
+                            backgroundColor: "rgba(26, 29, 35, 0.95)",
+                            borderColor: "rgba(255, 255, 255, 0.08)",
+                            borderRadius: "12px",
+                            backdropFilter: "blur(16px)",
+                            color: "#fff",
+                            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+                            fontSize: 13,
                           }}
+                          cursor={{ stroke: "rgba(255, 255, 255, 0.12)" }}
                         />
                         <Area
                           type="monotone"
@@ -303,13 +293,13 @@ export default function Usage() {
                     </ResponsiveContainer>
                   </div>
                 ) : (
-                  <p className="py-12 text-center t-secondary">No activity recorded yet.</p>
+                  <EmptyState framed={false} icon={Users} title="No activity recorded yet" />
                 )}
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="pb-2">
+              <CardHeader>
                 <CardTitle className="t-h3">Where people stand</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -321,7 +311,7 @@ export default function Usage() {
                         <span className="t-body">{usageStateName(state)}</span>
                         <span className="t-body font-medium tabular-nums">{n}</span>
                       </div>
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-[rgba(255,255,255,0.08)]">
                         <div
                           className="h-full rounded-full bg-primary"
                           style={{ width: `${summary.total ? (n / summary.total) * 100 : 0}%` }}
@@ -334,8 +324,8 @@ export default function Usage() {
           </div>
           </TabsContent>
 
-          <TabsContent value="behaviour" className="space-y-4">
-            <div className="grid gap-4 lg:grid-cols-2">
+          <TabsContent value="behaviour" className="space-y-section">
+            <div className="grid gap-section lg:grid-cols-2">
               <FunnelCard rows={(funnel.data ?? []) as FunnelRow[]} />
               <MetricsCard
                 title="Draft quality and trust"
@@ -355,13 +345,13 @@ export default function Usage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="features" className="space-y-4">
+          <TabsContent value="features" className="space-y-section">
             <FeatureTable rows={(features.data ?? []) as FeatureRow[]} />
           </TabsContent>
 
-          <TabsContent value="people" className="space-y-4">
+          <TabsContent value="people" className="space-y-section">
           <Card>
-            <CardHeader className="pb-2">
+            <CardHeader>
               <CardTitle className="t-h3">Per user</CardTitle>
             </CardHeader>
             <CardContent className="px-0 pb-0">
@@ -384,11 +374,11 @@ export default function Usage() {
                       <TableRow
                       key={u.email}
                       onClick={() => setSelected({ email: u.email, name: u.name })}
-                      className="cursor-pointer hover:bg-muted/40"
+                      className="cursor-pointer"
                     >
                         <TableCell>
-                          <div className="font-medium">{u.name || u.email}</div>
-                          <div className="t-secondary">
+                          <div className="t-h4">{u.name || u.email}</div>
+                          <div className="t-label">
                             {u.email}
                             {u.company ? ` · ${u.company}` : ""}
                             {u.role ? ` · ${roleName(u.role)}` : ""}
@@ -405,8 +395,8 @@ export default function Usage() {
                         </TableCell>
                         <TableCell className="text-right tabular-nums">{u.posts_approved}</TableCell>
                         <TableCell className="text-right tabular-nums">{u.active_days}</TableCell>
-                        <TableCell className="text-muted-foreground">{fmtDate(u.last_action_at)}</TableCell>
-                        <TableCell className="text-muted-foreground">{fmtDate(u.last_sign_in_at)}</TableCell>
+                        <TableCell className="t-label">{fmtDate(u.last_action_at)}</TableCell>
+                        <TableCell className="t-label">{fmtDate(u.last_sign_in_at)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -423,13 +413,12 @@ export default function Usage() {
           onClose={() => setSelected(null)}
         />
 
-        <p className="glass-inner px-4 py-3 t-secondary">
+        <p className="t-label">
           Actions are the work the product recorded: reports, competitive analyses, posts, approvals,
           scheduling, designs and videos. Rows written before Aug 2026 mostly carry no author, so
           per-person figures before then understate real use; the totals were always complete. Page
           views and report opens are recorded separately and are not counted as actions.
         </p>
-      </div>
     </AppLayout>
   );
 }

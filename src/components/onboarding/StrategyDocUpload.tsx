@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { CheckCircle2, FileText, Loader2, Upload, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -68,8 +67,7 @@ export function StrategyDocUpload({
   };
 
   return (
-    <Card>
-      <CardContent className="pt-5 space-y-3">
+    <div className="glass-inner p-inner space-y-3">
         <div>
           <Label>Social strategy document</Label>
           <p className="t-secondary">
@@ -83,9 +81,9 @@ export function StrategyDocUpload({
             <span className="t-body truncate">{name}</span>
             <Button
               variant="ghost"
-              size="sm"
+              size="icon-sm"
               onClick={() => setConfirmRemove(true)}
-              className="ml-auto h-8 w-8 p-0"
+              className="ml-auto"
               aria-label="Remove the strategy document"
             >
               <X className="h-4 w-4" />
@@ -94,7 +92,7 @@ export function StrategyDocUpload({
         ) : (
           <label className="inline-flex">
             <input type="file" accept=".pdf,.txt,.md,application/pdf,text/plain" className="sr-only" onChange={choose} disabled={uploading} />
-            <span className="inline-flex items-center gap-2 rounded-[8px] border border-[rgba(255,255,255,0.1)] bg-[rgba(21,23,28,0.2)] px-4 h-9 t-body cursor-pointer hover:bg-[rgba(255,255,255,0.06)]">
+            <span className={buttonVariants({ variant: "outline", size: "sm" })}>
               {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
               {uploading ? "Uploading…" : "Upload a strategy"}
             </span>
@@ -107,7 +105,6 @@ export function StrategyDocUpload({
             <Button variant="outline" size="sm" onClick={() => void again()}>Upload</Button>
           </div>
         )}
-      </CardContent>
       <ConfirmDialog
         open={confirmRemove}
         onOpenChange={setConfirmRemove}
@@ -121,6 +118,6 @@ export function StrategyDocUpload({
         confirmLabel="Remove"
         onConfirm={remove}
       />
-    </Card>
+    </div>
   );
 }

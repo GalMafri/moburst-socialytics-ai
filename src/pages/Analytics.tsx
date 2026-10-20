@@ -11,6 +11,11 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { StatGrid } from "@/components/ui/stat-card";
+import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/empty-state";
+import { useAuth } from "@/hooks/useAuth";
+import { Segment, SegmentedGroup } from "@/components/ui/segmented";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +52,7 @@ type AnalyticsView = "performance" | "trends";
 export default function Analytics() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { isMoburstStaff } = useAuth();
   const [range, setRange] = useState<TimeRange>("30d");
   const [custom, setCustom] = useState<DateRange>(() => presetRange("30d"));
   const [view, setView] = useState<AnalyticsView>("performance");
@@ -286,40 +292,36 @@ export default function Analytics() {
 
   const toolbar = (
     <div className="flex items-center gap-2 flex-wrap">
-      <div className="flex gap-1 flex-wrap items-center">
+      {/* The period is a filter, so it is the shared segmented control, not a
+          row of lime buttons (lime is for the page's primary action). */}
+      <SegmentedGroup label="Period">
         {(["7d", "30d", "90d", "all", "custom"] as TimeRange[]).map((r) => (
-          <Button
-            key={r}
-            variant={range === r ? "default" : "outline"}
-            size="sm"
-            onClick={() => setRange(r)}
-            aria-pressed={range === r}
-          >
-            {r === "all" ? "All Time" : r === "custom" ? "Custom" : r}
-          </Button>
+          <Segment key={r} active={range === r} onClick={() => setRange(r)}>
+            {r === "all" ? "All time" : r === "custom" ? "Custom" : r}
+          </Segment>
         ))}
-        {range === "custom" && (
-          <div className="flex items-center gap-1.5 ml-1">
-            <input
-              type="date"
-              aria-label="Start date"
-              value={custom.start}
-              max={custom.end}
-              onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-            />
-            <span className="t-secondary">to</span>
-            <input
-              type="date"
-              aria-label="End date"
-              value={custom.end}
-              min={custom.start}
-              onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-            />
-          </div>
-        )}
-      </div>
+      </SegmentedGroup>
+      {range === "custom" && (
+        <div className="flex items-center gap-1.5">
+          <Input
+            type="date"
+            aria-label="Start date"
+            value={custom.start}
+            max={custom.end}
+            onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))}
+            className="h-9 w-40"
+          />
+          <span className="t-label">to</span>
+          <Input
+            type="date"
+            aria-label="End date"
+            value={custom.end}
+            min={custom.start}
+            onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))}
+            className="h-9 w-40"
+          />
+        </div>
+      )}
       <ExportPdfButton
         contentRef={exportRef}
         filename={pdfFilename}
@@ -362,8 +364,8 @@ export default function Analytics() {
       title={title}
       description="Live Sprout performance for the selected window, trends from the monthly reports, and the competitive view."
       back={
-        <Button variant="ghost" size="sm" className="-ml-2 mb-1" onClick={() => navigate(`/clients/${id}/setup`)}>
-          <ArrowLeft className="h-4 w-4 mr-1" /> Back to Client
+        <Button variant="ghost" size="sm" className="-ml-2 border-0 bg-transparent" onClick={() => navigate(`/clients/${id}/setup`)}>
+          <ArrowLeft /> Back to client
         </Button>
       }
       actions={toolbar}
@@ -376,8 +378,7 @@ export default function Analytics() {
         ) : undefined
       }
     >
-      <div className="space-y-6">
-        <div ref={exportRef} className="space-y-6">
+        <div ref={exportRef} className="space-y-section">
 
         {isLoading ? (
           <Loading label="Loading analytics" />
@@ -391,19 +392,16 @@ export default function Analytics() {
           />
         ) : filtered.length === 0 && !viewWindow ? (
           // What exists: when the first report runs, if one is scheduled. Never a setup step.
-          firstRunSentence("monthly", nextMonthly.data, client?.timezone || undefined) ? (
-            <Card className="p-12 text-center">
-              <div className="space-y-3">
-                <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto" />
-                <p className="t-body">{firstRunSentence("monthly", nextMonthly.data, client?.timezone || undefined)}</p>
-              </div>
-            </Card>
-          ) : null
+          <EmptyState
+            icon={BarChart3}
+            title="No reports yet"
+            description={firstRunSentence("monthly", nextMonthly.data, client?.timezone || undefined) || "Figures appear here once the first monthly report is ready."}
+          />
         ) : (
           <>
             {/* View segmentation */}
             <Tabs value={view} onValueChange={(v) => setView(v as AnalyticsView)}>
-              <TabsList className="grid w-full grid-cols-3 max-w-md">
+              <TabsList className="grid w-full grid-cols-3 sm:max-w-md">
                 <TabsTrigger value="performance" className="gap-1.5">
                   <BarChart3 className="h-3.5 w-3.5" /> Performance
                 </TabsTrigger>
@@ -411,11 +409,11 @@ export default function Analytics() {
                   <TrendingUp className="h-3.5 w-3.5" /> Trends
                 </TabsTrigger>
                 <TabsTrigger value="competitive" className="gap-1.5">
-                  <Crosshair className="h-4 w-4" /> Competitive
+                  <Crosshair className="h-3.5 w-3.5" /> Competitive
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="performance" className="space-y-6 mt-4">
+              <TabsContent value="performance" className="space-y-section mt-section">
                 {viewWindow && (
                   <LiveSproutSection
                     data={liveData}
@@ -442,7 +440,7 @@ export default function Analytics() {
                       <BarChart3 className="h-3 w-3" />
                       Latest report snapshot{latestReport ? ` for ${formatRange(reportPeriod(latestReport as any))}` : ""}. The all-time totals above cover every tracked day.
                     </p>
-                    <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-3">
+                    <StatGrid>
                       <SummaryCard
                         icon={<Eye className="h-3.5 w-3.5" />}
                         label="Impressions"
@@ -457,13 +455,13 @@ export default function Analytics() {
                       />
                       <SummaryCard
                         icon={<MousePointerClick className="h-3.5 w-3.5" />}
-                        label="Link Clicks"
+                        label="Link clicks"
                         value={fmtVal(latestTotals.link_clicks)}
                         change={comparison?.changes?.link_clicks?.percent}
                       />
                       <SummaryCard
                         icon={<Play className="h-3.5 w-3.5" />}
-                        label="Video Views"
+                        label="Video views"
                         value={fmtVal(latestTotals.video_views)}
                         change={comparison?.changes?.video_views?.percent}
                       />
@@ -479,34 +477,34 @@ export default function Analytics() {
                         value={fmtVal(latestTotals.shares)}
                         change={comparison?.changes?.shares?.percent}
                       />
-                    </div>
+                    </StatGrid>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <StatGrid>
                     <SummaryCard
                       icon={<BarChart3 className="h-3.5 w-3.5" />}
-                      label="Reports Analyzed"
+                      label="Reports analyzed"
                       value={filtered.length.toString()}
                     />
-                  </div>
+                  </StatGrid>
                 )}
 
                 {/* Key Takeaway — AI summary from latest report */}
                 {latestAISummary && (
-                  <Card className="border-primary/20 bg-primary/5">
-                    <CardContent className="pt-5 pb-4 px-5">
+                  <Card className="glass-accent">
+                    <CardContent>
                       <div className="flex items-start gap-3">
                         <div className="rounded-full bg-primary/10 p-2 shrink-0">
                           <Sparkles className="h-4 w-4 text-primary" />
                         </div>
                         <div className="space-y-1">
-                          <p className="t-body font-semibold text-white">Takeaway from the latest monthly report</p>
+                          <p className="t-h4">Takeaway from the latest monthly report</p>
                           {latestReport && <p className="t-label">Report period: {formatRange(reportPeriod(latestReport as any))}. This commentary describes that report, not the live Sprout window above.</p>}
                           <p className="t-secondary leading-relaxed">
                             {formatNumbersInText(latestAISummary)}
                           </p>
                           {topContentInsight && (
-                            <p className="t-secondary/80 pt-1 border-t border-[rgba(255,255,255,0.04)] mt-2">
+                            <p className="t-label pt-2 border-t border-[rgba(255,255,255,0.06)] mt-2">
                               <Lightbulb className="h-3 w-3 inline mr-1" />
                               {formatNumbersInText(topContentInsight)}
                             </p>
@@ -519,10 +517,10 @@ export default function Analytics() {
 
                 {/* Month-over-month comparison from latest report */}
                 {!viewWindow && comparison && Object.keys(comparison.changes).length > 0 && (
-                  <Section id="mom" title={<>Month over month{" "} <span className="font-normal text-muted-foreground t-body">(latest report)</span></>}>
+                  <Section id="mom" title="Month over month" meta="Latest report">
                   <Card>
                     <CardContent className="pt-5">
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      <div className="grid gap-inner [grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))]">
                         {Object.entries(comparison.changes).map(([key, val]: [string, any]) => {
                           const pct = typeof val?.percent === "number" ? val.percent : 0;
                           const isUp = pct > 0;
@@ -531,7 +529,7 @@ export default function Analytics() {
                           const current = val?.current ?? 0;
                           const previous = val?.previous ?? comparison.previous?.[key] ?? 0;
                           return (
-                            <div key={key} className="glass-inner flex items-center gap-3 p-3">
+                            <div key={key} className="glass-inner flex items-center gap-3 p-inner">
                               <div className="flex-1">
                                 <div className="t-secondary">{label}</div>
                                 <div className="t-h3">{fmtVal(current)}</div>
@@ -564,13 +562,13 @@ export default function Analytics() {
 
                 {/* Performance over time — Per-metric line charts */}
                 {chartData.length >= 1 && chartData.some((d) => d.impressions > 0 || d.reactions > 0) && (
-                  <Section id="over-time" title={<>Performance over time <span className="font-normal text-muted-foreground t-body ml-2"> ({filtered.length} report{filtered.length !== 1 ? "s" : ""}) </span></>} description={<>{chartData.length === 1 ? "The latest snapshot. Trend lines appear once there are two or more reports." : "Each data point represents one analysis run. Hover over points for exact values."}</>}>
+                  <Section id="over-time" title="Performance over time" meta={`${filtered.length} report${filtered.length !== 1 ? "s" : ""}`} description={<>{chartData.length === 1 ? "The latest snapshot. Trend lines appear once there are two or more reports." : "Each data point represents one analysis run. Hover over points for exact values."}</>}>
                   <Card>
                     <CardContent className="pt-5 space-y-6">
                       {/* Impressions chart (separate — it dominates if combined) */}
                       {chartData.some((d) => d.impressions > 0) && (
                         <div>
-                          <p className="t-label font-medium mb-2 flex items-center gap-1.5">
+                          <p className="t-subhead mb-2 flex items-center gap-1.5">
                             <Eye className="h-3 w-3" /> Impressions
                           </p>
                           {chartData.length === 1 ? (
@@ -606,8 +604,8 @@ export default function Analytics() {
                       {/* Engagement metrics (all on same scale) */}
                       {chartData.some((d) => d.reactions > 0 || d.link_clicks > 0 || d.comments > 0) && (
                         <div>
-                          <p className="t-label font-medium mb-2 flex items-center gap-1.5">
-                            <Heart className="h-3 w-3" /> Engagement Metrics
+                          <p className="t-subhead mb-2 flex items-center gap-1.5">
+                            <Heart className="h-3 w-3" /> Engagement metrics
                           </p>
                           {chartData.length === 1 ? (
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -618,7 +616,7 @@ export default function Analytics() {
                                 color="#3987e5"
                               />
                               <MetricBarSingle
-                                label="Link Clicks"
+                                label="Link clicks"
                                 value={chartData[0].link_clicks}
                                 fmtVal={fmtVal}
                                 color="#d95926"
@@ -659,7 +657,7 @@ export default function Analytics() {
                                     stroke="#d95926"
                                     strokeWidth={2}
                                     dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
-                                    name="Link Clicks"
+                                    name="Link clicks"
                                   />
                                   <Line
                                     type="monotone"
@@ -687,12 +685,12 @@ export default function Analytics() {
                       {/* Video Views (separate if significant) */}
                       {chartData.some((d) => d.video_views > 0) && (
                         <div>
-                          <p className="t-label font-medium mb-2 flex items-center gap-1.5">
+                          <p className="t-subhead mb-2 flex items-center gap-1.5">
                             <Play className="h-3 w-3" /> Video Views
                           </p>
                           {chartData.length === 1 ? (
                             <MetricBarSingle
-                              label="Video Views"
+                              label="Video views"
                               value={chartData[0].video_views}
                               fmtVal={fmtVal}
                               color="#199e70"
@@ -704,14 +702,14 @@ export default function Analytics() {
                                   <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.08)" />
                                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => fmtVal(v)} />
-                                  <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any) => [Number(v).toLocaleString(), "Video Views"]} />
+                                  <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any) => [Number(v).toLocaleString(), "Video views"]} />
                                   <Line
                                     type="monotone"
                                     dataKey="video_views"
                                     stroke="#199e70"
                                     strokeWidth={2}
                                     dot={{ r: 4, strokeWidth: 2, stroke: "#0b0c10" }}
-                                    name="Video Views"
+                                    name="Video views"
                                   />
                                 </LineChart>
                               </ResponsiveContainer>
@@ -783,13 +781,13 @@ export default function Analytics() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="trends" className="space-y-6 mt-4">
+              <TabsContent value="trends" className="space-y-section mt-section">
                 {/* Trend analysis (TikTok + Instagram) */}
                 <div id="trends" className="scroll-mt-[156px]">
                   <TrendInsightsSection reports={filtered} />
                 </div>
               </TabsContent>
-              <TabsContent value="competitive" className="space-y-6 mt-4">
+              <TabsContent value="competitive" className="space-y-section mt-section">
                 <div id="competitive" className="scroll-mt-[156px]">
                   <CompetitiveSnapshot clientId={id!} />
                 </div>
@@ -797,9 +795,9 @@ export default function Analytics() {
             </Tabs>
 
             {/* Recent reports table */}
-            <Section id="history" title={<>Report history</>} description={<>{filtered.length} report{filtered.length !== 1 ? "s" : ""} in selected time range. Click any report to view full details.</>}>
+            <Section id="history" title="Report history" meta={`${filtered.length} report${filtered.length !== 1 ? "s" : ""}`} description="Every report in the selected period, each with its full detail.">
             <Card>
-              <CardContent className="pt-5">
+              <CardContent>
                 <div className="space-y-2">
                   {[...filtered].reverse().map((r: any) => {
                     const rawRd = r.report_data;
@@ -812,19 +810,21 @@ export default function Analytics() {
                       <button
                         key={r.id}
                         type="button"
-                        className="glass-inner w-full text-left flex items-center justify-between p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        className="glass-inner w-full text-left flex flex-wrap items-center gap-x-3 gap-y-1 p-inner focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                         onClick={() => navigate(`/clients/${id}/reports/${r.id}`)}
                         aria-label={`Open report from ${formatDateTime(r.created_at)}`}
                       >
-                        <div className="flex items-center gap-3">
                           <span className="t-body">{formatDateTime(r.created_at)}</span>
                           {hasMetrics && (
-                            <span className="t-secondary">
-                              {fmtVal(totals.impressions)} impr · {fmtVal(totalEng)} eng
+                            <span className="t-label">
+                              {fmtVal(totals.impressions)} impressions · {fmtVal(totalEng)} engagements
                             </span>
                           )}
-                        </div>
-                        {r.duration_minutes ? <span className="t-secondary">{r.duration_minutes}m</span> : null}
+                        {/* How long a run took is for the team, not the client. */}
+                        <span className="ml-auto flex items-center gap-3">
+                          {isMoburstStaff && r.duration_minutes ? <span className="t-label">{r.duration_minutes} min</span> : null}
+                          <span className="t-link">Open report</span>
+                        </span>
                       </button>
                     );
                   })}
@@ -835,7 +835,6 @@ export default function Analytics() {
           </>
         )}
         </div>
-      </div>
     </AppLayout>
   );
 }
@@ -909,7 +908,7 @@ function MetricBarSingle({
   color: string;
 }) {
   return (
-    <div className="glass-inner p-4 pl-5 space-y-1 border-l-2" style={{ borderLeftColor: color }}>
+    <div className="glass-inner p-inner space-y-1 border-l-2" style={{ borderLeftColor: color }}>
       <p className="t-subhead">{label}</p>
       <p className="t-h3">{fmtVal(value)}</p>
     </div>
@@ -940,11 +939,12 @@ function LiveSproutSection({
   if (isLoading) return <Loading label={`Loading Sprout data for ${rangeLabel}`} />;
   if (error) {
     return (
-      <Card>
-        <CardContent className="pt-5 t-secondary">
-          Live Sprout figures for this window did not load. The report figures below are unaffected.
-        </CardContent>
-      </Card>
+      <EmptyState
+        compact
+        icon={BarChart3}
+        title="Live figures for this window did not load"
+        description="The report figures below are unaffected."
+      />
     );
   }
   if (!data) return null;
@@ -953,39 +953,39 @@ function LiveSproutSection({
   const metric = (key: string) => fmtVal(Number(t[key] || 0));
   const pct = (key: string) => (typeof ch[key]?.percent === "number" ? ch[key].percent : undefined);
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="glass-inner px-4 py-2 mb-3 inline-flex items-center gap-2 t-body">
-          <BarChart3 className="h-4 w-4" />
+    <div className="space-y-section">
+      <div className="space-y-3">
+        <p className="t-secondary flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-[#b1b7c1]" aria-hidden />
           {data.previous_range
             ? <>Sprout data for {rangeLabel} · compared with the {data.previous_range.days} days before ({formatRange(data.previous_range)})</>
-            : <>Live Sprout totals, {rangeLabel}: every day in the window added up{data.chunks > 1 ? ` across ${data.chunks} requests` : ""}</>}
+            : <>Live Sprout totals, {rangeLabel}: every day in the window added up</>}
         </p>
-        <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-3">
+        <StatGrid>
           <SummaryCard icon={<Eye className="h-3.5 w-3.5" />} label="Impressions" value={metric("impressions")} change={pct("impressions")} />
           <SummaryCard icon={<Heart className="h-3.5 w-3.5" />} label="Reactions" value={metric("reactions")} change={pct("reactions")} />
-          <SummaryCard icon={<MousePointerClick className="h-3.5 w-3.5" />} label="Link Clicks" value={metric("post_link_clicks")} change={pct("post_link_clicks")} />
-          <SummaryCard icon={<Play className="h-3.5 w-3.5" />} label="Video Views" value={metric("video_views")} change={pct("video_views")} />
+          <SummaryCard icon={<MousePointerClick className="h-3.5 w-3.5" />} label="Link clicks" value={metric("post_link_clicks")} change={pct("post_link_clicks")} />
+          <SummaryCard icon={<Play className="h-3.5 w-3.5" />} label="Video views" value={metric("video_views")} change={pct("video_views")} />
           <SummaryCard icon={<MessageCircle className="h-3.5 w-3.5" />} label="Comments" value={metric("comments")} change={pct("comments")} />
           <SummaryCard icon={<Share2 className="h-3.5 w-3.5" />} label="Shares" value={metric("shares")} change={pct("shares")} />
-        </div>
+        </StatGrid>
       </div>
 
       {Array.isArray(data.by_profile) && data.by_profile.length > 0 && (
-        <Section id={idPrefix ? `${idPrefix}-by-profile` : undefined} title={<>By profile <span className="font-normal text-muted-foreground t-body">({rangeLabel})</span></>}>
+        <Section id={idPrefix ? `${idPrefix}-by-profile` : undefined} title="By profile" meta={rangeLabel}>
         <Card>
-          <CardContent className="pt-5">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <CardContent>
+            <div className="grid gap-inner [grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))]">
               {data.by_profile.map((p: any) => (
-                <div key={p.profile_id} className="glass-inner p-4 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium truncate">{p.name}</span>
+                <div key={p.profile_id} className="glass-inner p-inner space-y-2">
+                  <div className="flex items-center gap-2">
                     {p.network && <PlatformBadge platform={p.network} size="sm" />}
+                    <span className="t-h4 truncate">{p.name}</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 t-body">
-                    <div><p className="font-semibold">{fmtVal(p.impressions || 0)}</p><p className="t-subhead">Impr.</p></div>
-                    <div><p className="font-semibold">{fmtVal(p.reactions || 0)}</p><p className="t-subhead">Reactions</p></div>
-                    <div><p className="font-semibold">{fmtVal(p.video_views || 0)}</p><p className="t-subhead">Views</p></div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div><p className="t-h3 tabular-nums">{fmtVal(p.impressions || 0)}</p><p className="t-label">Impressions</p></div>
+                    <div><p className="t-h3 tabular-nums">{fmtVal(p.reactions || 0)}</p><p className="t-label">Reactions</p></div>
+                    <div><p className="t-h3 tabular-nums">{fmtVal(p.video_views || 0)}</p><p className="t-label">Views</p></div>
                   </div>
                 </div>
               ))}
@@ -996,12 +996,12 @@ function LiveSproutSection({
       )}
 
       {posts.length > 0 && (
-        <Section id={idPrefix ? `${idPrefix}-top-posts` : undefined} title={<>Top posts <span className="font-normal text-muted-foreground t-body">({rangeLabel}, by impressions)</span></>}>
+        <Section id={idPrefix ? `${idPrefix}-top-posts` : undefined} title="Top posts" meta={`${rangeLabel}, by impressions`}>
         <Card>
-          <CardContent className="pt-5">
-            <div className="grid gap-4 md:grid-cols-2">
+          <CardContent>
+            <div className="grid gap-inner md:grid-cols-2">
               {posts.slice(0, 6).map((p: any, i: number) => (
-                <div key={i} className="flex gap-4 glass-inner p-4">
+                <div key={i} className="flex gap-4 glass-inner p-inner">
                   <PostVisual url={p.permalink} preview={p.permalink ? previews[p.permalink] : null} mediaType={p.post_type} platform={p.network_type} className="w-28 shrink-0 self-start" compact />
                   <div className="flex-1 min-w-0 space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -1016,7 +1016,7 @@ function LiveSproutSection({
                       <span className="flex items-center gap-1"><Share2 className="h-3 w-3" />{fmtVal(p.shares || 0)}</span>
                     </div>
                     {p.permalink && (
-                      <a href={p.permalink} target="_blank" rel="noopener" className="t-label text-primary hover:underline flex items-center gap-1 inline-flex items-center min-h-[24px]">
+                      <a href={p.permalink} target="_blank" rel="noopener" className="t-link inline-flex items-center gap-1 min-h-[24px]">
                         View original <ExternalLink className="h-3 w-3" />
                       </a>
                     )}

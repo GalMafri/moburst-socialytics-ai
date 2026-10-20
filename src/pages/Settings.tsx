@@ -3,13 +3,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Section } from "@/components/ui/section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Navigate, useSearchParams } from "react-router-dom";
-import { Save, Loader2 } from "lucide-react";
+import { CheckCircle2, Save, Loader2 } from "lucide-react";
 import { HubCompanySync } from "@/components/HubCompanySync";
 import { HiggsfieldConnection } from "@/components/settings/HiggsfieldConnection";
 import { ApiAccessCard } from "@/components/settings/ApiAccessCard";
@@ -110,50 +110,43 @@ export default function Settings() {
   if (!isAdmin) return <Navigate to="/" replace />;
 
   return (
-    <AppLayout title="Settings" width="max-w-4xl"
-      description="Workspace integrations and the webhook that runs the monthly analysis.">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="t-h3">Integration settings</CardTitle>
-            <CardDescription>Configure external service connections</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>n8n Webhook URL</Label>
-              <Input
-                value={webhookUrl}
-                onChange={(e) => setWebhookUrl(e.target.value)}
-                placeholder="https://your-n8n-instance.com/webhook/socialytics-report"
-              />
-              <p className="t-secondary">The full URL of your n8n webhook that handles report generation</p>
-            </div>
-            <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
-              {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-              Save Settings
-            </Button>
-          </CardContent>
-        </Card>
+    <AppLayout title="Settings" description="Workspace connections, portal access and API keys.">
+      {/* Every group is one split panel: what it is on the left, its fields
+          and list on the right. Settings used to be a separate 896px column
+          of cards with three different header patterns. */}
+      <Section
+        layout="split"
+        eyebrow="Reports"
+        title="Report webhook"
+        description="Where a monthly analysis is sent when a report runs."
+      >
+        <div className="space-y-2">
+          <Label htmlFor="webhook-url">n8n webhook URL</Label>
+          <Input
+            id="webhook-url"
+            value={webhookUrl}
+            onChange={(e) => setWebhookUrl(e.target.value)}
+            placeholder="https://your-n8n-instance.com/webhook/socialytics-report"
+          />
+        </div>
+        <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+          {saveMutation.isPending ? <Loader2 className="animate-spin" /> : <Save />}
+          Save settings
+        </Button>
+      </Section>
 
-        <HubCompanySync />
+      <HubCompanySync />
 
-        <HiggsfieldConnection />
+      <HiggsfieldConnection />
 
-        <ApiAccessCard clientSlugs={clientSlugs} />
+      <ApiAccessCard clientSlugs={clientSlugs} />
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="t-h3">Sprout Social</CardTitle>
-            <CardDescription>Connected for the whole workspace</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="t-secondary">
-              Sprout Social is connected once for every client. Its sign-in is stored securely on the server and
-              renews on its own.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      <Section layout="split" eyebrow="Data" title="Sprout Social" description="Connected once for the whole workspace.">
+        <div className="glass-inner p-inner flex items-start gap-3">
+          <CheckCircle2 className="h-4 w-4 mt-1 shrink-0 text-[#b9e045]" aria-hidden />
+          <p className="t-secondary">Every client's figures come from Sprout Social. Its sign-in is stored securely on the server and renews on its own.</p>
+        </div>
+      </Section>
     </AppLayout>
   );
 }

@@ -70,7 +70,7 @@ export function GenerationProgress() {
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold tracking-[-0.2px] text-white">
+                <p className="t-h4">
                   {isDone
                     ? `${successCount} ${g.type === "design" ? "design" : "video"}${successCount === 1 ? "" : "s"} ready`
                     : isFail

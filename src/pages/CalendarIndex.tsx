@@ -72,7 +72,7 @@ export default function CalendarIndex() {
   return (
     <AppLayout
       title="Calendar"
-      description="Every client's planned posts on their dates. Choose a client to work on its posts."
+      description="Every client's planned posts on their dates."
       actions={<ClientPicker value={ALL_CLIENTS} week={week} />}
     >
       {clients.isLoading || posts.isLoading ? (
@@ -80,13 +80,13 @@ export default function CalendarIndex() {
       ) : clients.isError || posts.isError ? (
         <LoadError title="Could not load the calendar" error={clients.error || posts.error} onRetry={() => { void clients.refetch(); void posts.refetch(); }} />
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-section">
           <WeekNav week={week} thisWeek={thisWeek} count={weekPosts.length} onGo={goTo} />
           {weekPosts.length === 0 ? (
             <EmptyState
               icon={CalendarDays}
               title="No posts planned for this week"
-              description={nextPlanned.data ? "The next planned posts are in a later week." : "Posts appear here when a monthly report plans them, or when one is added to a client's calendar."}
+              description={nextPlanned.data ? "The next planned posts are in a later week." : "Each client's week is planned on the Monday before it, and posts can be added to a client's calendar at any time."}
               action={nextPlanned.data ? (
                 <Button size="sm" variant="outline" onClick={() => goTo(mondayOf(nextPlanned.data!))}>Go to the week of {shortDate(mondayOf(nextPlanned.data!))}</Button>
               ) : undefined}

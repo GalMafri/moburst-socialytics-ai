@@ -23,9 +23,9 @@ export function Loading({ label = "Loading", variant = "inline", className }: Pr
         aria-live="polite"
         className={cn("flex min-h-[40vh] items-center justify-center", className)}
       >
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm">{label}…</span>
+        <div className="flex items-center gap-3 t-secondary">
+          <Loader2 className="h-5 w-5 animate-spin text-[#b1b7c1]" aria-hidden="true" />
+          <span>{label}…</span>
         </div>
       </div>
     );
@@ -35,10 +35,10 @@ export function Loading({ label = "Loading", variant = "inline", className }: Pr
     <div
       role="status"
       aria-live="polite"
-      className={cn("flex items-center gap-2 text-muted-foreground", className)}
+      className={cn("flex items-center gap-2 t-secondary", className)}
     >
-      <Loader2 className="h-4 w-4 animate-spin" />
-      <span className="text-sm">{label}…</span>
+      <Loader2 className="h-4 w-4 animate-spin text-[#b1b7c1]" aria-hidden="true" />
+      <span>{label}…</span>
     </div>
   );
 }

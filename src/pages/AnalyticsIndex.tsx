@@ -8,7 +8,7 @@ import { ClickableCard } from "@/components/ui/clickable-card";
 import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/ui/load-error";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, ArrowRight } from "lucide-react";
 
 export default function AnalyticsIndex() {
   const navigate = useNavigate();
@@ -33,11 +33,7 @@ export default function AnalyticsIndex() {
 
   return (
     <AppLayout title="Analytics"
-      description="Choose a client to open its analytics: live Sprout numbers, trends and the competitive view.">
-      <div className="space-y-6">
-        <div>
-        </div>
-
+      description="Each client's live performance, trends and competitive view.">
         {isLoading ? (
           <Loading label="Loading clients" />
         ) : isError ? (
@@ -45,32 +41,31 @@ export default function AnalyticsIndex() {
         ) : !clients?.length ? (
           <EmptyState icon={BarChart3} title="No clients yet" />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid gap-inner sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 stagger-children">
             {clients.map((c) => (
               <ClickableCard
                 key={c.id}
-                className="hover-lift transition-shadow"
+                className="hover-lift"
                 onClick={() => navigate(`/clients/${c.id}/analytics`)}
                 ariaLabel={`View analytics for ${c.name}`}
               >
-                <CardContent className="pt-5 flex items-center gap-3">
+                <CardContent className="flex items-center gap-3">
                   {c.logo_url ? (
-                    <img src={c.logo_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+                    <img src={c.logo_url} alt="" className="h-10 w-10 rounded-[8px] object-cover" />
                   ) : (
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-                      {c.name.charAt(0)}
+                    <div className="h-10 w-10 rounded-[8px] bg-white/10 flex items-center justify-center t-badge text-white">
+                      {c.name.slice(0, 2).toUpperCase()}
                     </div>
                   )}
-                  <div>
-                    <div className="font-medium">{c.name}</div>
-                    <div className="t-secondary">View analytics →</div>
+                  <div className="min-w-0">
+                    <div className="t-h4 truncate">{c.name}</div>
+                    <div className="t-link inline-flex items-center gap-1">View analytics <ArrowRight className="h-3 w-3" aria-hidden /></div>
                   </div>
                 </CardContent>
               </ClickableCard>
             ))}
           </div>
         )}
-      </div>
     </AppLayout>
   );
 }

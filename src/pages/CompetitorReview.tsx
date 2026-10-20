@@ -29,7 +29,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { track } from "@/lib/telemetry";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Section } from "@/components/ui/section";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -143,7 +145,7 @@ function LandscapeRow({
         title={!landscape.is_match ? "This landscape does not uniquely track this client" : empty ? "This set has no competitors to import" : undefined}
         className="shrink-0"
       >
-        {importingId === landscape.id ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
+        {importingId === landscape.id ? <Loader2 className="animate-spin" /> : <Download />}
         Import {empty ? "" : rivals.length}
       </Button>
     </div>
@@ -612,8 +614,7 @@ export default function CompetitorReview() {
   // spinner that never resolved.
   if (clientLoading || setLoading) {
     return (
-      <AppLayout title="Competitive Analysis"
-      description="Review the proposed competitors, confirm the top three, then run the analysis.">
+      <AppLayout title="Competitors" description="The three closest competitors, chosen automatically. Change them any time.">
         <Loading label="Loading" />
       </AppLayout>
     );
@@ -621,8 +622,7 @@ export default function CompetitorReview() {
 
   if (clientFailed || !client) {
     return (
-      <AppLayout title="Competitive Analysis"
-      description="Review the proposed competitors, confirm the top three, then run the analysis.">
+      <AppLayout title="Competitors" description="The three closest competitors, chosen automatically. Change them any time.">
         <LoadError
           title={clientFailed ? "Could not load this client" : "That client is not available"}
           error={clientFailed ? clientError : "It may have been deleted, or your account may not have access to it."}
@@ -636,15 +636,14 @@ export default function CompetitorReview() {
   // and starting one on top of a set that merely failed to load duplicates it.
   if (setsFailed) {
     return (
-      <AppLayout title={`Competitors: ${client.name}`}>
+      <AppLayout title={`Competitors: ${client.name}`} description="The three closest competitors, chosen automatically. Change them any time.">
         <LoadError title="Could not load the competitor selection" error={setsError} onRetry={() => refetchSets()} />
       </AppLayout>
     );
   }
 
   return (
-    <AppLayout title={`Competitors: ${client.name}`}>
-      <div className="w-full space-y-6">
+    <AppLayout title={`Competitors: ${client.name}`} description="The three closest competitors, chosen automatically. Change them any time.">
         <Dialog open={importOpen} onOpenChange={setImportOpen}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
@@ -694,7 +693,7 @@ export default function CompetitorReview() {
                         }}
                         disabled={identifying}
                       >
-                        <Search className="h-3.5 w-3.5 mr-1" /> Propose competitors instead
+                        <Search /> Propose competitors instead
                       </Button>
                     </div>
                   )}
@@ -738,7 +737,7 @@ export default function CompetitorReview() {
             // Connected by the lifecycle on its own; says when, or nothing while it is being connected.
             { title: "Tracking", ...trackingState },
             {
-              title: "Choose period and run",
+              title: "Analysis",
               // A run waits for tracking on its own while the lifecycle connects it.
               headline: selectionState.ready ? "Ready to run" : "",
               ready: false,
@@ -746,7 +745,7 @@ export default function CompetitorReview() {
               linkLabel: "Open the run page",
             },
             {
-              title: "Open the result",
+              title: "Results",
               headline: "Reports stay in history",
               ready: false,
               href: `/clients/${clientId}/competitive/reports`,
@@ -755,158 +754,169 @@ export default function CompetitorReview() {
           ]}
         />
 
-        {/* Status / primary actions */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <CardTitle className="t-h3 flex items-center gap-2">
-                  <Crosshair className="h-4 w-4" /> Step 1 · The three competitors
-                </CardTitle>
-                <CardDescription className="mt-1">
-                  {stateLine(selectionState)}
-                </CardDescription>
-              </div>
-              <div className="flex gap-2 flex-wrap">
-                <Button variant="outline" size="sm" onClick={() => setConfirmList(true)} disabled={identifying || detecting}>
-                  <Download className="h-3.5 w-3.5 mr-1" /> Import from RivalIQ
+        {/* Step 1 as one panel: the step's heading, its state and its two
+            actions on the left, the three chosen competitors and what to do
+            with them on the right. It was a card holding only a heading and
+            a few short lines, with the buttons at the far right of 1,400px of
+            glass, and the chosen three in a second card below it. */}
+        <Section
+          layout="split"
+          eyebrow="Step 1"
+          title={<><Crosshair className="h-4 w-4 text-[#b9e045]" aria-hidden /> The three competitors</>}
+          description={stateLine(selectionState)}
+          meta={
+            <>
+              {/* Tracking is its own fact: a confirmed selection is not a
+                  connected one, and neither says anything about a report. */}
+              {viewingDraftBesideRun ? (
+                <p>
+                  <span className="font-medium text-white">RivalIQ tracking:</span> Reports use the confirmed selection
+                  {trackingState.headline ? ` (${trackingState.headline.toLowerCase()})` : ""}.
+                  {" "}This draft is tracked once it is confirmed.
+                </p>
+              ) : trackingState.headline && (
+                <p>
+                  <span className="font-medium text-white">RivalIQ tracking:</span> {stateLine(trackingState)}
+                </p>
+              )}
+              {notSaved && <p role="status">{notSaved}</p>}
+              {client.competitor_seed_notes ? (
+                <p>
+                  <span className="font-medium text-white">Account team notes fed to the AI:</span> {client.competitor_seed_notes}
+                </p>
+              ) : null}
+            </>
+          }
+          action={
+            <>
+              <Button size="sm" onClick={() => setConfirmIdentify(true)} disabled={identifying || detecting}>
+                {identifying ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                {currentSet ? "Re-identify (new draft)" : "Identify competitors"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setConfirmList(true)} disabled={identifying || detecting}>
+                <Download /> Import from RivalIQ
+              </Button>
+            </>
+          }
+        >
+          {detecting && detectProgress && (
+            <p role="status" className="t-secondary flex items-center gap-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Finding profiles automatically · {detectProgress.done}/{detectProgress.total}
+            </p>
+          )}
+          <p className="t-subhead flex items-center gap-2">
+            <Trophy className="h-3.5 w-3.5 text-[#b9e045]" aria-hidden /> Top 3 for deep analysis
+          </p>
+          {/* Three slots, always: an open slot says so, so the row never
+              leaves a hole and the rule (three, ranked) is visible. */}
+          <ol className="grid gap-inner md:grid-cols-3">
+            {[0, 1, 2].map((slot) => {
+              const c = selected[slot];
+              if (!c) {
+                return (
+                  <li key={`open-${slot}`} className="rounded-[12px] border border-dashed border-white/10 p-inner flex items-center gap-2 min-w-0">
+                    <Badge variant="outline" className="shrink-0">#{slot + 1}</Badge>
+                    <span className="t-secondary">{isDraft ? "Open slot" : "Not selected"}</span>
+                  </li>
+                );
+              }
+              const platforms = (handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active);
+              return (
+                <li key={c.id} className="glass-inner is-selected p-inner space-y-3 min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Badge className="shrink-0">#{c.selected_rank}</Badge>
+                    <span className="t-h4 truncate" title={c.name}>{displayCompanyName(c.name)}</span>
+                  </div>
+                  {platforms.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {platforms.map((h) => (
+                        <PlatformBadge key={h.id} platform={h.platform} size="sm" />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="t-label">No profiles yet</p>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+          {selected.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {isDraft && (
+                <Button
+                  onClick={() => confirmSet.mutate()}
+                  // Three ranked competitors are the whole rule (the lifecycle's own); RivalIQ tracks them by website.
+                  disabled={selected.length !== 3 || confirmSet.isPending}
+                >
+                  <ShieldCheck />
+                  Confirm top 3 {selected.length !== 3 ? `(${selected.length}/3 selected)` : ""}
                 </Button>
-                {detecting && detectProgress && (
-                  <p role="status" className="t-secondary flex items-center gap-2">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Finding profiles automatically · {detectProgress.done}/{detectProgress.total}
-                  </p>
-                )}
-                <Button size="sm" onClick={() => setConfirmIdentify(true)} disabled={identifying || detecting}>
-                  {identifying ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
-                  {currentSet ? "Re-identify (new draft)" : "Identify competitors"}
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0 space-y-2">
-            {/* Tracking is its own fact: a confirmed selection is not a
-                connected one, and neither says anything about a report. */}
-            {viewingDraftBesideRun ? (
-              <p className="t-secondary">
-                <span className="font-medium">RivalIQ tracking:</span> Reports use the confirmed selection
-                {trackingState.headline ? ` (${trackingState.headline.toLowerCase()})` : ""}.
-                {" "}This draft is tracked once it is confirmed.
-              </p>
-            ) : trackingState.headline && (
-              <p className="t-secondary">
-                <span className="font-medium">RivalIQ tracking:</span> {stateLine(trackingState)}
-              </p>
-            )}
-            {notSaved && <p role="status" className="t-secondary">{notSaved}</p>}
-            {client.competitor_seed_notes ? (
-              <p className="t-secondary">
-                <span className="font-medium">Account team notes fed to the AI:</span> {client.competitor_seed_notes}
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
-
-
-        {needsPortalSession && (
-          <div role="status" className="glass-inner p-4 space-y-2">
-            <p className="t-secondary">Profile lookups continue once you are signed in again from the Moburst portal.</p>
-            <a className="inline-flex underline text-sm" href={isGosSession ? "https://moburst.ai" : "https://tools.moburst.com/dashboard"}>Open Moburst portal</a>
-          </div>
-        )}
-
-        {/* Selected top 3 */}
-        {selected.length > 0 && (
-          <Card className="border-[#b9e045]/30">
-            <CardHeader className="pb-3">
-              <CardTitle className="t-h3 flex items-center gap-2">
-                <Trophy className="h-4 w-4 text-[#b9e045]" /> Top 3 for deep analysis
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {selected.map((c) => (
-                <div key={c.id} className="glass-inner flex items-center gap-3 p-3">
-                  <Badge className="shrink-0">#{c.selected_rank}</Badge>
-                  <span className="font-medium t-body" title={c.name}>{displayCompanyName(c.name)}</span>
-                  <span className="flex gap-1 ml-auto">
-                    {(handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active).map((h) => (
-                      <PlatformBadge key={h.id} platform={h.platform} size="sm" />
-                    ))}
-                  </span>
-                </div>
-              ))}
-              <div className="flex gap-2 pt-2">
-                {isDraft && (
+              )}
+              {!isDraft && (
+                <>
                   <Button
-                    onClick={() => confirmSet.mutate()}
-                    // Three ranked competitors are the whole rule (the lifecycle's own); RivalIQ tracks them by website.
-                    disabled={selected.length !== 3 || confirmSet.isPending}
-                    className="gap-2"
+                    onClick={() => navigate(`/clients/${clientId}/competitive/run`)}
+                    disabled={currentSet?.id !== runnableSet?.id}
                   >
-                    <ShieldCheck className="h-4 w-4" />
-                    Confirm top 3 {selected.length !== 3 ? `(${selected.length}/3 selected)` : ""}
+                    <Play /> Run deep analysis
                   </Button>
-                )}
-                {!isDraft && (
-                  <>
-                    <Button
-                      className="gap-2"
-                      onClick={() => navigate(`/clients/${clientId}/competitive/run`)}
-                      disabled={currentSet?.id !== runnableSet?.id}
-                    >
-                      <Play className="h-4 w-4" /> Run deep analysis
-                    </Button>
-                    {/* Offered for every non-draft status, not just
-                        'confirmed'. A run moves the set to 'analyzing' and
-                        then 'complete' or 'failed', and while it sat in one
-                        of those the whole page was read-only with no way
-                        back: every edit control is gated on draft and this
-                        was the only door. Two clients were already stranded
-                        that way. */}
-                    <Button variant="outline" onClick={() => reopenSet.mutate()} disabled={reopenSet.isPending || currentSet?.status === "analyzing"}>
-                      Reopen for edits
-                    </Button>
-                  </>
-                )}
-              </div>
-              {isDraft && selected.length < 3 && (
-                <p className="t-secondary">{selected.length} of 3 selected.</p>
+                  {/* Offered for every non-draft status, not just
+                      'confirmed'. A run moves the set to 'analyzing' and
+                      then 'complete' or 'failed', and while it sat in one
+                      of those the whole page was read-only with no way
+                      back: every edit control is gated on draft and this
+                      was the only door. Two clients were already stranded
+                      that way. */}
+                  <Button variant="outline" onClick={() => reopenSet.mutate()} disabled={reopenSet.isPending || currentSet?.status === "analyzing"}>
+                    Reopen for edits
+                  </Button>
+                </>
               )}
               {currentSet?.status === "analyzing" && (
                 <p className="t-secondary">A report is running on this selection.</p>
               )}
+            </div>
+          )}
+        </Section>
+
+        {needsPortalSession && (
+          <Card role="status">
+            <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <p className="t-secondary">Profile lookups continue once you are signed in again from the Moburst portal.</p>
+              <Button asChild variant="outline" size="sm">
+                <a href={isGosSession ? "https://moburst.ai" : "https://tools.moburst.com/dashboard"}>Open Moburst portal</a>
+              </Button>
             </CardContent>
           </Card>
         )}
 
         {/* Candidate list */}
         {currentSet && (competitors?.length ?? 0) > 0 ? (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="t-h3">Candidates</CardTitle>
-              <CardDescription>
-                {competitors!.length} proposed
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {unverifiedCount > 0 && <div className="rounded-lg border border-white/10 p-3 space-y-2">
-                <p className="t-secondary">{unverifiedCount} suggestions could not be verified and are excluded from selection. Your confirmed competitors have not changed.</p>
-                <Button variant="outline" size="sm" onClick={() => setShowUnverified(v => !v)}>{showUnverified ? "Hide unverified suggestions" : "Show unverified suggestions"}</Button>
-              </div>}
+          <Section
+            layout="split"
+            eyebrow="Candidates"
+            title={`${competitors!.length} proposed`}
+            description={isDraft ? "The first three selected, in the order selected, are the ones analyzed." : "The confirmed selection, locked until it is reopened."}
+            meta={unverifiedCount > 0 ? (
+              <p>{unverifiedCount} suggestions could not be verified and are excluded from selection. Your confirmed competitors have not changed.</p>
+            ) : undefined}
+            action={unverifiedCount > 0 ? (
+              <Button variant="outline" size="sm" onClick={() => setShowUnverified(v => !v)}>{showUnverified ? "Hide unverified suggestions" : "Show unverified suggestions"}</Button>
+            ) : undefined}
+          >
               {competitors!.filter(c => showUnverified || !isUnverified(c)).map((c) => {
                 const profileCheck = profileChecks[c.id] || (c.profile_detection ? { state: c.profile_detection.status === "running" ? (liveProfileCheck(c) ? "searching" : "stalled") : c.profile_detection.status, detail: c.profile_detection.detail } : undefined);
                 const compHandles = (handlesByCompetitor.get(c.id) || []).filter((h) => h.is_active);
                 return (
                   <div
                     key={c.id}
-                    className={`p-3 rounded-md border ${
-                      c.is_selected ? "border-[#b9e045]/40 bg-[#b9e045]/5" : "border-white/[0.06] bg-[rgba(255,255,255,0.03)]"
-                    }`}
+                    className={cn("glass-inner p-inner", c.is_selected && "is-selected")}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium t-body" title={c.name}>{displayCompanyName(c.name)}</span>
+                          <span className="t-h4" title={c.name}>{displayCompanyName(c.name)}</span>
                           {c.source === "manual" && <Badge variant="outline">Added by hand</Badge>}
                           {isUnverified(c) ? <Badge variant="outline">Unverified suggestion</Badge> : typeof c.similarity_score === "number" && (
                             <Badge variant="secondary">{Math.round(c.similarity_score * 100)}% match</Badge>
@@ -917,91 +927,15 @@ export default function CompetitorReview() {
                             href={c.website_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="t-secondary hover:text-foreground underline-offset-2 hover:underline inline-flex items-center min-h-[24px]"
+                            className="t-label hover:text-white underline-offset-2 hover:underline inline-flex items-center min-h-[24px]"
                           >
                             {c.website_url.replace(/^https?:\/\/(www\.)?/, "")}
                           </a>
                         )}
                         {c.rationale && <p className="t-secondary mt-1">{c.rationale}</p>}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 mt-3">
-                          {compHandles.map((h) => (
-                            <div key={h.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2">
-                              <a href={h.profile_url || undefined} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-start gap-2" title={`${prettyPlatformName(h.platform)}: ${profileName(h, c.name)}`}>
-                                <PlatformBadge platform={h.platform} size="sm" />
-                                <span className="min-w-0 break-words text-sm leading-5">{profileName(h, c.name)}</span>
-                              </a>
-                              {isDraft && (
-                                <button
-                                  type="button"
-                                  aria-label={`Remove the ${prettyPlatformName(h.platform)} profile ${profileName(h, c.name)}`}
-                                  title={`Remove ${profileName(h, c.name)}`}
-                                  onClick={() => setRemovingHandle(h)}
-                                  className="shrink-0 rounded p-2 text-muted-foreground hover:text-destructive hover:bg-white/5"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                          {compHandles.length === 0 && (
-                            <span className="t-label text-muted-foreground inline-flex items-center gap-1.5">
-                              {profileCheck?.state === "searching" || handlesLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
-                              {handlesLoading || handlesFailed ? "Loading saved profiles…" :
-                                profileCheck?.state === "session_required" ? "Waiting for portal sign-in" :
-                                profileCheck?.state === "queued" ? "Profile search queued" :
-                                profileCheck?.state === "searching" ? "Searching company pages…" :
-                                ["stalled", "failed", "partial"].includes(profileCheck?.state || "") ? "Profiles are looked up again later" :
-                                profileCheck?.state === "unverified" ? "Company could not be verified" :
-                                profileCheck?.state === "missing_website" ? "No website on file for this company" :
-                                profileCheck?.state === "not_found" ? "No profiles found on checked pages" : "Profile lookup will start automatically"}
-                            </span>
-                          )}
-                          {isDraft && (
-                            <button
-                              type="button"
-                              onClick={() => setAddingHandleFor(addingHandleFor === c.id ? null : c.id)}
-                              className="t-label text-muted-foreground hover:text-white inline-flex items-center gap-1 min-h-[24px]"
-                            >
-                              <Plus className="h-3 w-3" /> Add profile
-                            </button>
-                          )}
-                        </div>
-                        {addingHandleFor === c.id && isDraft && (
-                          <div className="flex items-center gap-2 mt-2 flex-wrap">
-                            <select
-                              aria-label="Platform"
-                              value={newHandlePlatform}
-                              onChange={(e) => setNewHandlePlatform(e.target.value)}
-                              className="input-glass rounded-md h-9 px-2 t-label"
-                            >
-                              {["instagram", "facebook", "tiktok", "linkedin", "youtube", "x"].map((p) => (
-                                <option key={p} value={p}>{prettyPlatformName(p)}</option>
-                              ))}
-                            </select>
-                            <Input
-                              aria-label="Handle"
-                              value={newHandle}
-                              onChange={(e) => setNewHandle(e.target.value)}
-                              placeholder="handle, or paste the profile URL"
-                              className="h-9 w-64"
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  addHandle.mutate({ competitorId: c.id });
-                                }
-                              }}
-                            />
-                            <Button size="sm" onClick={() => addHandle.mutate({ competitorId: c.id })} disabled={addHandle.isPending || !readTypedHandle(newHandle, newHandlePlatform)}>
-                              Save profile
-                            </Button>
-                            {newHandle.trim() && !readTypedHandle(newHandle, newHandlePlatform) && (
-                              <p className="t-secondary w-full">That address is a post or a page, not a profile.</p>
-                            )}
-                          </div>
-                        )}
                       </div>
                       {isDraft && (
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-2 shrink-0">
                           <Button
                             size="sm"
                             variant={c.is_selected ? "default" : "outline"}
@@ -1011,21 +945,101 @@ export default function CompetitorReview() {
                             {c.is_selected ? `#${c.selected_rank}` : "Select"}
                           </Button>
                           <Button
-                            size="sm"
+                            size="icon-sm"
                             variant="ghost"
-                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                            className="text-[#b1b7c1] hover:text-destructive"
+                            aria-label={`Remove ${displayCompanyName(c.name)}`}
                             onClick={() => setRemoving({ id: c.id, name: displayCompanyName(c.name) })}
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
+                            <Trash2 />
                           </Button>
                         </div>
                       )}
                     </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 mt-3">
+                      {compHandles.map((h) => (
+                        <div key={h.id} className="glass-inner flex min-w-0 items-center gap-2 pl-3 pr-1 py-1">
+                          <a href={h.profile_url || undefined} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-2 py-1" title={`${prettyPlatformName(h.platform)}: ${profileName(h, c.name)}`}>
+                            <PlatformBadge platform={h.platform} size="sm" />
+                            <span className="min-w-0 break-words t-label !text-white">{profileName(h, c.name)}</span>
+                          </a>
+                          {isDraft && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Remove the ${prettyPlatformName(h.platform)} profile ${profileName(h, c.name)}`}
+                              title={`Remove ${profileName(h, c.name)}`}
+                              onClick={() => setRemovingHandle(h)}
+                              className="shrink-0 border-0 bg-transparent text-[#b1b7c1] hover:text-destructive"
+                            >
+                              <Trash2 />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                      {compHandles.length === 0 && (
+                        <span className="t-label inline-flex items-center gap-1.5">
+                          {profileCheck?.state === "searching" || handlesLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
+                          {handlesLoading || handlesFailed ? "Loading saved profiles…" :
+                            profileCheck?.state === "session_required" ? "Waiting for portal sign-in" :
+                            profileCheck?.state === "queued" ? "Profile search queued" :
+                            profileCheck?.state === "searching" ? "Searching company pages…" :
+                            ["stalled", "failed", "partial"].includes(profileCheck?.state || "") ? "Profiles are looked up again later" :
+                            profileCheck?.state === "unverified" ? "Company could not be verified" :
+                            profileCheck?.state === "missing_website" ? "No website on file for this company" :
+                            profileCheck?.state === "not_found" ? "No profiles found on checked pages" : "Profile lookup will start automatically"}
+                        </span>
+                      )}
+                      {isDraft && (
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          onClick={() => setAddingHandleFor(addingHandleFor === c.id ? null : c.id)}
+                          className="justify-start px-0 h-auto min-h-[24px] t-label"
+                        >
+                          <Plus /> Add profile
+                        </Button>
+                      )}
+                    </div>
+                    {addingHandleFor === c.id && isDraft && (
+                      <div className="flex items-center gap-2 mt-3 flex-wrap">
+                        <select
+                          aria-label="Platform"
+                          value={newHandlePlatform}
+                          onChange={(e) => setNewHandlePlatform(e.target.value)}
+                          className="input-glass rounded-xl h-9 px-3 t-label !text-white"
+                        >
+                          {["instagram", "facebook", "tiktok", "linkedin", "youtube", "x"].map((p) => (
+                            <option key={p} value={p}>{prettyPlatformName(p)}</option>
+                          ))}
+                        </select>
+                        <Input
+                          aria-label="Handle"
+                          value={newHandle}
+                          onChange={(e) => setNewHandle(e.target.value)}
+                          placeholder="handle, or paste the profile URL"
+                          className="h-9 w-full sm:w-64"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              addHandle.mutate({ competitorId: c.id });
+                            }
+                          }}
+                        />
+                        <Button size="sm" onClick={() => addHandle.mutate({ competitorId: c.id })} disabled={addHandle.isPending || !readTypedHandle(newHandle, newHandlePlatform)}>
+                          Save profile
+                        </Button>
+                        {newHandle.trim() && !readTypedHandle(newHandle, newHandlePlatform) && (
+                          <p className="t-secondary w-full">That address is a post or a page, not a profile.</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
-            </CardContent>
-          </Card>
+          </Section>
         ) : competitorsFailed ? (
           <LoadError title="Could not load the competitors" error={competitorsError} onRetry={() => refetchCompetitors()} />
         ) : currentSet && competitorsLoading ? (
@@ -1045,33 +1059,31 @@ export default function CompetitorReview() {
 
         {/* Manual add */}
         {(isDraft || !currentSet) && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="t-h3">Add manually</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-                <div className="space-y-1.5">
-                  <Label>Name</Label>
-                  <Input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Competitor name" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Website (optional, used for handle detection)</Label>
-                  <Input value={manualUrl} onChange={(e) => setManualUrl(e.target.value)} placeholder="https://…" />
-                </div>
-                <Button
-                  onClick={() => addManual.mutate()}
-                  disabled={!manualName.trim() || addManual.isPending}
-                  className="gap-1"
-                >
-                  {addManual.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                  Add
-                </Button>
+          <Section
+            layout="split"
+            eyebrow="Add"
+            title="A competitor by hand"
+            description="For a company the proposals missed. Its website is used to find its social profiles."
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+              <div className="space-y-1.5">
+                <Label htmlFor="manual-competitor-name">Name</Label>
+                <Input id="manual-competitor-name" value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Competitor name" />
               </div>
-            </CardContent>
-          </Card>
+              <div className="space-y-1.5">
+                <Label htmlFor="manual-competitor-url">Website (optional)</Label>
+                <Input id="manual-competitor-url" value={manualUrl} onChange={(e) => setManualUrl(e.target.value)} placeholder="https://…" />
+              </div>
+              <Button
+                onClick={() => addManual.mutate()}
+                disabled={!manualName.trim() || addManual.isPending}
+              >
+                {addManual.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+                Add
+              </Button>
+            </div>
+          </Section>
         )}
-      </div>
       <ConfirmDialog
         open={confirmList}
         onOpenChange={setConfirmList}

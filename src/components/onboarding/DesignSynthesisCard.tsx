@@ -1,4 +1,3 @@
-import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { CheckCircle2, Sparkles } from "lucide-react";
 import { formatDate } from "@/lib/display";
@@ -20,8 +19,7 @@ export function DesignSynthesisCard({
   const learnedOn = formatDate(existingSynthesis?.synthesized_at);
   const sources = Number(existingSynthesis?.source_count ?? 0);
   return (
-    <Card>
-      <CardContent className="pt-5 space-y-3">
+    <div className="glass-inner p-inner space-y-3">
         <Label className="t-body font-semibold flex items-center gap-2">
           <Sparkles className="h-4 w-4" /> Brand design language
         </Label>
@@ -33,7 +31,6 @@ export function DesignSynthesisCard({
         ) : (
           <p className="t-secondary">Learned from the client's own posts, and from any references and brand book here.</p>
         )}
-      </CardContent>
-    </Card>
+    </div>
   );
 }

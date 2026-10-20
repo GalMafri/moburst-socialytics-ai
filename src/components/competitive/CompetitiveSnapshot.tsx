@@ -7,7 +7,7 @@
 
 import { COMPARED_RATE_LABEL } from "@/lib/rateLabels";
 import { useNavigate } from "react-router-dom";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -95,8 +95,11 @@ export function CompetitiveSnapshot({
   const period = rd.period?.start ? formatRange(rd.period) : latest.date_range_start ? formatRange({ start: latest.date_range_start, end: latest.date_range_end }) : "";
 
   return (
-    <div className="space-y-5">
-      <div className="glass px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
+    <div className="space-y-section">
+      {/* What this is and where to go from it, in one line with its two
+          links right after it. It was a second glass band under the
+          section's own band, with the links at the far edge. */}
+      <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
         <p className="t-secondary">
           {rivals.length} competitors
           {/* The tracking setup's name is for staff, and stays out of an exported PDF. */}
@@ -106,11 +109,11 @@ export function CompetitiveSnapshot({
         <div className="flex gap-2 flex-wrap">
           {isMoburstStaff && (
             <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive/feed`)}>
-              <Rss className="h-4 w-4 mr-1" /> Latest competitor posts
+              <Rss /> Latest competitor posts
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${clientId}/competitive/reports/${latest.id}`)}>
-            Full competitive report <ArrowRight className="h-4 w-4 ml-1" />
+            Full competitive report <ArrowRight />
           </Button>
         </div>
       </div>
@@ -118,14 +121,14 @@ export function CompetitiveSnapshot({
       {/* Ids so the page rail can jump here: this block is the whole
           Competitive tab on both the monthly report and Analytics. */}
       {me && (
-        <div id="snapshot-numbers" className="grid gap-3 grid-cols-2 lg:grid-cols-4 scroll-mt-[156px]">
+        <div id="snapshot-numbers" className="scroll-mt-[156px]"><StatGrid>
           {/* Measured figures only, each against the competitors' average, as on the full report. */}
           <Tile accent label="Avg engagement" value={me.post_count ? whole(me.engagement_avg) : "–"} sub={`competitor average ${whole(avg((c) => c.engagement_avg))}`} />
           <Tile label="Share of voice" value={share == null ? "–" : `${share}%`} sub={`${me.post_count} of ${totalPosts} posts`} />
           <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`competitor average ${(rivals.length ? (rivals.reduce((sum, c) => sum + c.cadence_per_week, 0) / rivals.length).toFixed(1) : "–")}/wk`} />
           {/* Engagements divided by impressions, the same definition for every company. No impressions figure, no tile. */}
           {me.engagement_rate_avg != null && <Tile label={COMPARED_RATE_LABEL} value={pct(me.engagement_rate_avg)} sub={avg((c) => c.engagement_rate_avg) == null ? "engagements per impression" : `competitor average ${pct(avg((c) => c.engagement_rate_avg))}`} />}
-        </div>
+        </StatGrid></div>
       )}
 
       {ai.executive_summary && (
@@ -133,7 +136,7 @@ export function CompetitiveSnapshot({
       )}
 
       {Array.isArray(takeaways) && takeaways.length > 0 && (
-        <div id="snapshot-takeaways" className="glass-accent p-5 space-y-3 scroll-mt-[156px]">
+        <div id="snapshot-takeaways" className="glass glass-accent p-card space-y-3 scroll-mt-[156px]">
           <div>
             <h3 className="t-h3">How this report used the competitive picture</h3>
             <p className="t-secondary">Drawn from the latest competitor analysis.</p>
@@ -145,12 +148,12 @@ export function CompetitiveSnapshot({
       {gaps.length > 0 && (
         <Card id="snapshot-gaps" className="scroll-mt-[156px]"><CardContent className="pt-5 space-y-3">
           <p className="t-subhead flex items-center gap-1.5"><Lightbulb className="h-3.5 w-3.5" /> Gaps to fill</p>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-inner grid-cols-[repeat(auto-fit,minmax(min(100%,240px),1fr))]">
             {gaps.map((g, i) => (
-              <div key={i} className="glass-inner p-4 space-y-2">
+              <div key={i} className="glass-inner p-inner space-y-2">
                 <div className="flex gap-1.5 flex-wrap">
-                  {g.platform && g.platform !== "all" && <Badge variant="outline" className="t-label">{platformName(g.platform)}</Badge>}
-                  {verdictFor(g.gap) === "up" && <Badge className="t-label gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
+                  {g.platform && g.platform !== "all" && <Badge variant="outline">{platformName(g.platform)}</Badge>}
+                  {verdictFor(g.gap) === "up" && <Badge className="gap-1"><ThumbsUp className="h-3 w-3" /> in the calendar brief</Badge>}
                 </div>
                 <p className="t-body font-medium">{editedSuggestion(g, editFor(g.gap)).gap}</p>
                 {editedSuggestion(g, editFor(g.gap)).suggested_play && <p className="t-body"><span className="text-[#b9e045] font-semibold">Play: </span>{editedSuggestion(g, editFor(g.gap)).suggested_play}</p>}

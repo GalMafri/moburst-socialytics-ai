@@ -5,7 +5,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/ui/load-error";
@@ -143,14 +143,24 @@ export function AdminDashboard() {
         description={
           clientsFailed
             ? "The client list could not be loaded, so nothing below is the real roster."
-            : `${active.length} active ${active.length === 1 ? "client" : "clients"}. Choose a client below to edit its setup, manage competitors or run a report.`
+            : `${active.length} active ${active.length === 1 ? "client" : "clients"}, each with its setup, competitors and reports.`
         }
         actions={
-          canManageClients ? (
-            <Button onClick={() => navigate("/clients/new/setup")}>
-              <Plus className="h-4 w-4 mr-2" /> Add client
+          <>
+            <Button
+              variant={showArchived ? "secondary" : "outline"}
+              onClick={() => setShowArchived(!showArchived)}
+              aria-pressed={showArchived}
+            >
+              <Archive />
+              {showArchived ? "Show active" : "Show archived"}
             </Button>
-          ) : undefined
+            {canManageClients && (
+              <Button onClick={() => navigate("/clients/new/setup")}>
+                <Plus /> Add client
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -158,24 +168,13 @@ export function AdminDashboard() {
           off it. Rendering them would put four confident zeros on the staff
           landing page for an agency with a full roster. */}
       {!isLoading && !clientsFailed && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 stagger-children">
-          <StatCard label="Active clients" value={active.length} icon={<Users className="h-3.5 w-3.5" />} />
-          <StatCard label="Completed reports" value={completedReports} icon={<BarChart3 className="h-3.5 w-3.5" />} />
-          <StatCard label="Reports this month" value={reportsThisMonth} icon={<Calendar className="h-3.5 w-3.5" />} />
-          <StatCard label="Running now" value={runningNow} icon={<Play className="h-3.5 w-3.5" />} sub={runningNow ? "analysis in progress" : undefined} />
-        </div>
+        <StatGrid>
+          <StatCard label="Active clients" value={active.length} icon={<Users />} />
+          <StatCard label="Completed reports" value={completedReports} icon={<BarChart3 />} />
+          <StatCard label="Reports this month" value={reportsThisMonth} icon={<Calendar />} />
+          <StatCard label="Running now" value={runningNow} icon={<Play />} sub={runningNow ? "analysis in progress" : undefined} />
+        </StatGrid>
       )}
-
-      <div className="flex items-center gap-3">
-        <Button
-          variant={showArchived ? "secondary" : "outline"}
-          size="sm"
-          onClick={() => setShowArchived(!showArchived)}
-        >
-          <Archive className="h-3 w-3 mr-1" />
-          {showArchived ? "Show Active" : "Show archived"}
-        </Button>
-      </div>
 
       {clientsFailed ? (
         <LoadError
@@ -184,24 +183,23 @@ export function AdminDashboard() {
           onRetry={() => refetchClients()}
         />
       ) : isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
+        // The same two columns the loaded page has, so nothing jumps when it lands.
+        <div className="grid gap-section lg:grid-cols-[260px_minmax(0,1fr)]">
+          {[0, 1].map((i) => (
             <Card key={i} className="animate-pulse">
-              <CardHeader className="pb-3">
+              <CardContent className="space-y-3">
                 <div className="h-5 bg-[rgba(255,255,255,0.04)] rounded w-1/2" />
-              </CardHeader>
-              <CardContent>
-                <div className="h-4 bg-[rgba(255,255,255,0.04)] rounded w-3/4 mb-2" />
+                <div className="h-4 bg-[rgba(255,255,255,0.04)] rounded w-3/4" />
                 <div className="h-4 bg-[rgba(255,255,255,0.04)] rounded w-1/2" />
               </CardContent>
             </Card>
           ))}
         </div>
       ) : clients && clients.length > 0 ? (
-        <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <div className="grid gap-section lg:grid-cols-[260px_minmax(0,1fr)] items-start">
           <ClientPicker clients={filtered || []} selectedId={selectedClient?.id} onSelect={chooseClient} search={search} onSearch={setSearch} />
           <div className="min-w-0">
-          {!selectedClient && <p className="t-secondary py-6">{search ? "Try another client name." : showArchived ? "No archived clients." : "No active clients."}</p>}
+          {!selectedClient && <EmptyState icon={Users} title={search ? "No client by that name" : showArchived ? "No archived clients" : "No active clients"} description={search ? "No client name contains that text." : undefined} />}
           {(selectedClient ? [selectedClient] : []).map((client: any) => {
             // PostgREST returns an embedded resource in no particular order, so
             // pick the newest row here rather than trusting reports[0].
@@ -211,11 +209,12 @@ export function AdminDashboard() {
             );
             const reportCount = client.reports?.length ?? 0;
             return (
-              <Card key={client.id} className="border-white/15">
-                <CardHeader className="pb-4 border-b border-white/10">
-                  <p className="t-label uppercase tracking-wider">Selected client</p>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+              <Card key={client.id}>
+                <CardHeader className="border-b border-white/10">
+                  <p className="t-subhead">Selected client</p>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    {client.logo_url && <img src={client.logo_url} alt="" className="h-10 w-10 rounded-[8px] object-cover shrink-0" />}
+                    <div className="flex flex-wrap items-center gap-2 min-w-[12rem] flex-1">
                       {/* The name opens setup. The card itself is no longer a
                           control: a button wrapping five other buttons is a
                           control inside a control, and screen readers and the
@@ -231,18 +230,22 @@ export function AdminDashboard() {
                         </button>
                       </CardTitle>
                       {(client as any).archived_at && (
-                        <Badge variant="secondary" className="t-label">Archived</Badge>
+                        <Badge variant="secondary">Archived</Badge>
                       )}
                       {(client as any).demo_job_id && (
-                        <Badge variant="outline" className="t-label" title="Created by an API demo; it can be removed from the demo job">Demo</Badge>
+                        <Badge variant="outline" title="Created by an API demo; it can be removed from the demo job">Demo</Badge>
                       )}
                     </div>
-                    <div className="flex items-center gap-1">
-                      {client.logo_url && <img src={client.logo_url} alt="" className="h-8 w-8 rounded object-cover" />}
+                    <div className="flex items-center gap-2">
+                      {canRunAnalysis && !client.archived_at && (
+                        <Button size="sm" onClick={() => navigate(`/clients/${client.id}/analyze`)}>
+                          <Play /> Run monthly report
+                        </Button>
+                      )}
                       <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-9 w-9 p-0" aria-label="More actions">
-                              <MoreVertical className="h-4 w-4" />
+                            <Button variant="ghost" size="icon-sm" aria-label="More actions">
+                              <MoreVertical />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
@@ -266,12 +269,12 @@ export function AdminDashboard() {
                                     setDeleteConfirmText("");
                                   }}
                                 >
-                                  <Trash2 className="h-4 w-4 mr-2" /> Permanently Delete
+                                  <Trash2 className="h-4 w-4 mr-2" /> Permanently delete
                                 </DropdownMenuItem>
                               </>
                             ) : (
                               <DropdownMenuItem onClick={() => setArchiving({ id: client.id, name: client.name })}>
-                                <Archive className="h-4 w-4 mr-2" /> Archive Client
+                                <Archive className="h-4 w-4 mr-2" /> Archive client
                               </DropdownMenuItem>
                             ))}
                           </DropdownMenuContent>
@@ -279,81 +282,31 @@ export function AdminDashboard() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-4 pt-5">
+                <CardContent className="space-y-4 pt-card">
                   {/* The client's status at a glance, with what needs doing. */}
                   {!client.archived_at && <ClientOverview clientId={client.id} isStaff />}
-                  <div className="flex items-center gap-2 t-secondary">
-                    <Calendar className="h-3.5 w-3.5" />
-                    {lastReport
-                      ? `Last report: ${formatDate(lastReport.created_at)}`
-                      : "No reports yet"}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 t-label">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Calendar className="h-3.5 w-3.5" aria-hidden />
+                      {lastReport ? `Last report ${formatDate(lastReport.created_at)}` : "No reports yet"}
+                      {reportCount > 0 ? ` · ${reportCount} report${reportCount === 1 ? "" : "s"}` : ""}
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      {client.primary_platforms?.slice(0, 3).map((p: string) => (
+                        <PlatformBadge key={p} platform={p} size="sm" />
+                      ))}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-2 t-secondary">
-                    {client.primary_platforms?.slice(0, 3).map((p: string) => (
-                      <PlatformBadge key={p} platform={p} size="sm" />
-                    ))}
-                  </div>
-                  <div className="space-y-2 pt-2">
-                    <span className="t-secondary whitespace-nowrap">{reportCount} report{reportCount === 1 ? "" : "s"}</span>
-                    {/* Straight to this client's work: the two report shelves,
-                        the analytics view, and a new run. */}
-                    <div className="flex gap-2 flex-wrap">
-                      <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/setup`)}><Settings className="h-3.5 w-3.5 mr-1.5" /> Edit client</Button>
-                      {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive`)}><Crosshair className="h-3.5 w-3.5 mr-1.5" /> Edit competitors</Button>}
-                      {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive/run`)}><Play className="h-3.5 w-3.5 mr-1.5" /> Run competitive report</Button>}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-9 px-3"
-                        title="Monthly reports"
-                        aria-label="Monthly reports"
-                        onClick={() => {
-                          navigate(`/clients/${client.id}/reports`);
-                        }}
-                      >
-                        <FileText className="h-3.5 w-3.5" /><span className="ml-1.5">Reports</span>
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-9 px-3"
-                        title="Competitive analyses"
-                        aria-label="Competitive analyses"
-                        onClick={() => {
-                          navigate(`/clients/${client.id}/competitive/reports`);
-                        }}
-                      >
-                        <Crosshair className="h-3.5 w-3.5" /><span className="ml-1.5">Competitive reports</span>
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-9 px-3"
-                        title="Analytics"
-                        aria-label="Analytics"
-                        onClick={() => {
-                          navigate(`/clients/${client.id}/analytics`);
-                        }}
-                      >
-                        <BarChart3 className="h-3.5 w-3.5" /><span className="ml-1.5">Analytics</span>
-                      </Button>
-                      {canRunAnalysis && (
-                        <>
-                          <Button
-                            size="sm"
-                            className="h-9 px-3"
-                            title="Run monthly report"
-                            aria-label="Run monthly report"
-                            onClick={() => {
-                              navigate(`/clients/${client.id}/analyze`);
-                            }}
-                          >
-                            <Play className="h-3.5 w-3.5" /><span className="ml-1.5">Run monthly report</span>
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </div>
+                  {/* Straight to this client's work, as one even row of
+                      equal buttons rather than a ragged wrap of seven. */}
+                  <nav aria-label={`${client.name} pages`} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/setup`)}><Settings /> Edit client</Button>
+                    {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive`)}><Crosshair /> Edit competitors</Button>}
+                    {canRunAnalysis && !client.archived_at && <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/competitive/run`)}><Play /> Run competitive report</Button>}
+                    <Button size="sm" variant="outline" aria-label="Monthly reports" onClick={() => navigate(`/clients/${client.id}/reports`)}><FileText /> Reports</Button>
+                    <Button size="sm" variant="outline" aria-label="Competitive analyses" onClick={() => navigate(`/clients/${client.id}/competitive/reports`)}><Crosshair /> Competitive reports</Button>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${client.id}/analytics`)}><BarChart3 /> Analytics</Button>
+                  </nav>
                 </CardContent>
               </Card>
             );
@@ -368,7 +321,7 @@ export function AdminDashboard() {
           action={
             canManageClients ? (
               <Button onClick={() => navigate("/clients/new/setup")}>
-                <Plus className="h-4 w-4 mr-2" /> Add client
+                <Plus /> Add client
               </Button>
             ) : undefined
           }
@@ -390,7 +343,7 @@ export function AdminDashboard() {
             <AlertDialogTitle>Permanently delete this client?</AlertDialogTitle>
             <AlertDialogDescription>
               This cannot be undone. The client, all of its reports, scheduled
-              posts, and uploaded files will be deleted from Supabase. Type the
+              posts, and uploaded files will be deleted. Type the
               client name below to confirm.
             </AlertDialogDescription>
           </AlertDialogHeader>

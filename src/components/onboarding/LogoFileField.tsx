@@ -40,9 +40,9 @@ export function LogoFileField({ clientId, clientName, logoUrl, onChange }: { cli
   return (
     <div className="space-y-2">
       <Label className="t-secondary">Logo file</Label>
-      <p className="t-tertiary">PNG, JPG or WebP under 5 MB; PNG with a transparent background is best. Designs place this file as it is. The product takes the logo from the client's website when none is here.</p>
+      <p className="t-label">PNG, JPG or WebP under 5 MB; PNG with a transparent background is best. Designs place this file as it is. The product takes the logo from the client's website when none is here.</p>
       {logoUrl ? (
-        <div className="flex items-center gap-3 p-3 rounded-md border glass-inner">
+        <div className="flex items-center gap-3 p-inner glass-inner">
           <div className="h-12 w-28 rounded bg-[#0A1016] flex items-center justify-center overflow-hidden">
             <img src={logoUrl} alt={`${clientName} logo`} className="max-h-10 max-w-24 object-contain" />
           </div>
@@ -56,7 +56,7 @@ export function LogoFileField({ clientId, clientName, logoUrl, onChange }: { cli
         </div>
       ) : (
         <button type="button" className="w-full text-left" onClick={() => input.current?.click()} disabled={uploading}>
-          <div className="flex items-center gap-2 p-3 border-2 border-dashed rounded-md cursor-pointer hover:border-primary/50 transition-colors">
+          <div className="flex items-center gap-2 p-3 border border-dashed border-white/15 rounded-[12px] cursor-pointer hover:border-primary/50 transition-colors">
             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4 text-muted-foreground" />}
             <span className="t-secondary">{uploading ? "Uploading..." : "Click to upload the logo file"}</span>
           </div>

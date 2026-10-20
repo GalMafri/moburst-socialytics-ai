@@ -3,7 +3,9 @@ import { Check, Copy, KeyRound, Plus } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Section } from "@/components/ui/section";
+import { Loading } from "@/components/ui/loading";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -25,7 +27,7 @@ function ScopeChips({ scopes }: { scopes: string[] }) {
   return (
     <span className="flex flex-wrap gap-1">
       {scopes.map((s) => (
-        <Badge key={s} variant={s === "admin" ? "default" : "secondary"} className="text-[11px] font-bold tracking-[-0.2px]">
+        <Badge key={s} variant={s === "admin" ? "default" : "secondary"}>
           {s}
         </Badge>
       ))}
@@ -36,22 +38,22 @@ function ScopeChips({ scopes }: { scopes: string[] }) {
 function KeyRow({ k, onRevoke }: { k: ApiKey; onRevoke: (k: ApiKey) => void }) {
   const reach = k.company_slugs?.length ? k.company_slugs : k.client_ids?.length ? [`${k.client_ids.length} client${k.client_ids.length === 1 ? "" : "s"}`] : null;
   return (
-    <li className={cn("glass-inner flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3", k.revoked_at && "opacity-50")}>
+    <li className={cn("glass-inner flex flex-wrap items-center gap-x-4 gap-y-2 p-inner", k.revoked_at && "opacity-50")}>
       <div className="min-w-[140px] flex-1">
-        <p className="text-[14px] font-medium tracking-[-0.5px] text-white">{k.name}</p>
-        <p className="mt-0.5 font-mono text-[12px] text-white/50">{k.key_prefix}…</p>
+        <p className="t-h4">{k.name}</p>
+        <p className="mt-0.5 font-mono t-label">{k.key_prefix}…</p>
       </div>
       <ScopeChips scopes={k.scopes} />
       <span className="flex flex-wrap gap-1">
         {reach ? reach.map((r) => (
-          <Badge key={r} variant="outline" className="text-[11px] font-medium">
+          <Badge key={r} variant="outline">
             {r}
           </Badge>
         )) : (
-          <Badge variant="outline" className="text-[11px] font-medium">All clients</Badge>
+          <Badge variant="outline">All clients</Badge>
         )}
       </span>
-      <p className="min-w-[120px] text-[12px] text-[#9ca3af]">
+      <p className="min-w-[120px] t-label">
         {k.revoked_at ? `Revoked ${relative(k.revoked_at)}` : k.last_used_at ? `Last used ${relative(k.last_used_at)}` : "Never used"}
       </p>
       {!k.revoked_at && (
@@ -75,14 +77,14 @@ function OneTimeKey({ created, onDone }: { created: CreatedKey; onDone: () => vo
   };
   return (
     <div className="glass-accent space-y-3 p-4" data-testid="api-key-created">
-      <p className="text-[14px] font-medium tracking-[-0.5px] text-white">{created.name} is ready.</p>
+      <p className="t-h4">{created.name} is ready.</p>
       <div className="flex items-center gap-2">
         <code className="input-glass flex-1 truncate rounded-xl px-3 py-2 font-mono text-[13px] text-[#d7f07a]">{created.key}</code>
         <Button size="sm" variant="outline" onClick={copy} aria-label="Copy key">
           {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
         </Button>
       </div>
-      <p className="text-[12px] text-[#9ca3af]">Copy it now; it is not shown again.</p>
+      <p className="t-label">Copy it now; it is not shown again.</p>
       <Button size="sm" variant="secondary" onClick={onDone}>Done</Button>
     </div>
   );
@@ -123,22 +125,22 @@ function CreateKeyDialog({ open, onOpenChange, clientSlugs, onCreated }: { open:
             <Input id="api-key-name" placeholder="e.g. gOS production" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <p className="text-[12px] font-medium tracking-[0.1px] text-[#9ca3af]">What the key may do</p>
+            <p className="t-label font-medium">What the key may do</p>
             <ul className="space-y-2">
               {SCOPES.map((s) => (
                 <li key={s.id} className="glass-inner flex items-start gap-3 px-3 py-2">
                   <Checkbox id={`api-scope-${s.id}`} checked={scopes.includes(s.id)} onCheckedChange={() => setScopes(toggle(scopes, s.id))} className="mt-0.5" />
                   <div>
                     <Label htmlFor={`api-scope-${s.id}`} className="text-[13px] font-medium">{s.label}</Label>
-                    <p className="text-[12px] text-[#9ca3af]">{s.hint}</p>
+                    <p className="t-label">{s.hint}</p>
                   </div>
                 </li>
               ))}
             </ul>
           </div>
           <div className="space-y-2">
-            <p className="text-[12px] font-medium tracking-[0.1px] text-[#9ca3af]">Which clients it may see</p>
-            <p className="text-[12px] text-white/60">{slugs.length ? `${slugs.length} selected` : "All clients, unless you pick some."}</p>
+            <p className="t-label font-medium">Which clients it may see</p>
+            <p className="t-label">{slugs.length ? `${slugs.length} selected` : "All clients, unless you pick some."}</p>
             <div className="flex flex-wrap gap-1.5">
               {clientSlugs.map((slug) => {
                 const on = slugs.includes(slug);
@@ -148,7 +150,7 @@ function CreateKeyDialog({ open, onOpenChange, clientSlugs, onCreated }: { open:
                     type="button"
                     aria-pressed={on}
                     onClick={() => setSlugs(toggle(slugs, slug))}
-                    className={cn("rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors", on ? "border-[rgba(185,224,69,0.45)] bg-[rgba(185,224,69,0.14)] text-[#d7f07a]" : "border-white/[0.12] text-white/70 hover:bg-white/[0.06]")}
+                    className={cn("rounded-full border px-2.5 py-0.5 t-label font-medium transition-colors", on ? "border-[rgba(185,224,69,0.45)] bg-[rgba(185,224,69,0.14)] text-[#d7f07a]" : "border-white/[0.12] text-white/70 hover:bg-white/[0.06]")}
                   >
                     {slug}
                   </button>
@@ -182,33 +184,31 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
   if (!isAdmin) return null;
   const live = keys.filter((k) => !k.revoked_at);
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="glass-inner flex h-[64px] min-w-[72px] flex-col items-center justify-center px-3" aria-label={`${live.length} keys in use`}>
-              <span className="text-[30px] font-bold leading-[36px] tracking-[-0.5px] text-white" data-testid="api-keys-count">{live.length}</span>
-              <span className="text-[11px] uppercase tracking-wider text-[#9ca3af]">in use</span>
-            </div>
-            <div>
-              <CardTitle className="flex items-center gap-2"><KeyRound className="h-4 w-4 text-[#b9e045]" aria-hidden />API access</CardTitle>
-              <CardDescription>Keys let gOS and other Moburst tools read this workspace and start demos.</CardDescription>
-            </div>
-          </div>
-          <Button size="sm" onClick={() => setCreating(true)}>
-            <Plus className="mr-2 h-4 w-4" aria-hidden />
-            Create key
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <Section
+      layout="split"
+      eyebrow="Integrations"
+      title={<><KeyRound className="h-4 w-4 text-[#b9e045]" aria-hidden />API access</>}
+      description="Keys let gOS and other Moburst tools read this workspace and start demos."
+      meta={
+        <p aria-label={`${live.length} keys in use`}>
+          <span className="t-h2 tabular-nums mr-1.5" data-testid="api-keys-count">{live.length}</span>
+          in use
+        </p>
+      }
+      action={
+        <Button size="sm" onClick={() => setCreating(true)}>
+          <Plus aria-hidden />
+          Create key
+        </Button>
+      }
+    >
         {created && <OneTimeKey created={created} onDone={() => setCreated(null)} />}
         {isLoading ? (
-          <p className="text-[13px] text-[#9ca3af]">Loading keys…</p>
+          <Loading label="Loading keys" />
         ) : error ? (
-          <p className="text-[13px] text-red-400" role="alert">The keys could not be loaded: {error instanceof Error ? error.message : "the API did not answer."}</p>
+          <p className="t-secondary !text-red-400" role="alert">The keys could not be loaded: {error instanceof Error ? error.message : "the API did not answer."}</p>
         ) : keys.length === 0 ? (
-          <p className="text-[13px] text-[#9ca3af]">No keys yet. Create one for gOS or another Moburst tool.</p>
+          <EmptyState compact icon={KeyRound} title="No keys yet" description="Keys for gOS and other Moburst tools are made here." />
         ) : (
           <ul className="space-y-2">
             {keys.map((k) => (
@@ -216,7 +216,6 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
             ))}
           </ul>
         )}
-      </CardContent>
       <CreateKeyDialog open={creating} onOpenChange={setCreating} clientSlugs={clientSlugs} onCreated={setCreated} />
       <AlertDialog open={!!toRevoke} onOpenChange={(o) => !o && setToRevoke(null)}>
         <AlertDialogContent>
@@ -230,6 +229,6 @@ export function ApiAccessCard({ clientSlugs }: { clientSlugs: string[] }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </Section>
   );
 }

@@ -109,7 +109,7 @@ export function ReportActions({ report, kind = "monthly", onDeleted }: ReportAct
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button aria-label="Report actions" variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={(e) => e.stopPropagation()}>
+          <Button aria-label="Report actions" variant="ghost" size="icon-sm" onClick={(e) => e.stopPropagation()}>
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { formatDate } from "@/lib/display";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Section } from "@/components/ui/section";
+import { Loading } from "@/components/ui/loading";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { describeInvokeError } from "@/lib/invokeError";
@@ -27,7 +28,7 @@ export function HiggsfieldConnection() {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["higgsfield-status"],
     queryFn: async (): Promise<Status> => {
       const { data, error } = await supabase.functions.invoke("higgsfield-auth", { body: { action: "status" } });
@@ -58,64 +59,54 @@ export function HiggsfieldConnection() {
   const wrongAccount = linked && !!data?.account_email && data.account_email !== EXPECTED_ACCOUNT;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="t-h3">Higgsfield</CardTitle>
-        <CardDescription>
-          Image and video generation runs through the team's Higgsfield account, not an API key.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <Section
+      layout="split"
+      eyebrow="Generation"
+      title="Higgsfield"
+      description="Image and video generation runs through the team's Higgsfield account."
+      action={
+        <Button onClick={connect} disabled={busy} variant={linked ? "outline" : "default"} size="sm">
+          {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : <LinkIcon aria-hidden="true" />}
+          {linked ? "Sign in again" : "Connect Higgsfield"}
+        </Button>
+      }
+    >
         {isLoading ? (
-          <p className="t-secondary flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Checking the saved connection
-          </p>
+          <Loading label="Checking the saved connection" />
         ) : isError ? (
           // Not the same thing as "not connected": saying so would send
           // someone to re-link an account that is fine.
-          <p className="t-body flex items-start gap-2 text-[rgb(248,113,113)]">
-            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
-            Could not check the connection. {error instanceof Error ? error.message : "Try again in a moment."}
+          <p className="t-body flex items-start gap-2 !text-[rgb(248,113,113)]">
+            <AlertTriangle className="h-4 w-4 mt-1 shrink-0" aria-hidden="true" />
+            Could not check the connection. Try again in a moment.
           </p>
         ) : linked ? (
-          <div className="space-y-2">
-            <p className="t-body flex items-center gap-2">
+          <div className="glass-inner p-inner space-y-1.5">
+            <p className="t-h4 flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-[#b9e045]" aria-hidden="true" />
               Account linked as {data?.account_email ?? "an unnamed account"}
             </p>
-            <p className="t-secondary">This is the saved account link. If generation reports an expired session, sign in again below.</p>
+            <p className="t-secondary">This is the saved account link. If generation reports an expired session, sign in again.</p>
             {data?.linked_at && (
-              <p className="t-secondary">Signed in on {formatDate(data.linked_at)}.</p>
+              <p className="t-label">Signed in on {formatDate(data.linked_at)}.</p>
             )}
             {wrongAccount && (
-              <p className="t-secondary flex items-start gap-2 text-[rgb(248,113,113)]">
-                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
+              <p className="t-secondary flex items-start gap-2 !text-[rgb(248,113,113)]">
+                <AlertTriangle className="h-4 w-4 mt-1 shrink-0" aria-hidden="true" />
                 Generation will be charged to this account rather than {EXPECTED_ACCOUNT}. Sign in again to change it.
               </p>
             )}
           </div>
         ) : (
-          <p className="t-body">
-            Not connected. Generation cannot run until someone signs in as {EXPECTED_ACCOUNT}.
-          </p>
+          <div className="glass-inner p-inner">
+            <p className="t-h4">Not connected</p>
+            <p className="t-secondary">Generation cannot run until someone signs in as {EXPECTED_ACCOUNT}.</p>
+          </div>
         )}
-
-        <div className="space-y-2">
-          <Button onClick={connect} disabled={busy} variant={linked ? "outline" : "default"}>
-            {busy ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
-            ) : (
-              <LinkIcon className="h-4 w-4 mr-2" aria-hidden="true" />
-            )}
-            {linked ? "Sign in again" : "Connect Higgsfield"}
-          </Button>
-          <p className="t-secondary">
-            Sign in to higgsfield.ai as {EXPECTED_ACCOUNT} first, in this browser. The sign-in link is good for 15
-            minutes, and signing in again keeps the current connection working until the new one succeeds.
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+        <p className="t-label">
+          Sign in to higgsfield.ai as {EXPECTED_ACCOUNT} first, in this browser. The sign-in link is good for 15
+          minutes, and signing in again keeps the current connection working until the new one succeeds.
+        </p>
+    </Section>
   );
 }

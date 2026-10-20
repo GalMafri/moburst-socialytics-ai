@@ -65,7 +65,7 @@ for(const kind of ['social','competitive']) describe(kind+' run screen',()=>{
  it('asks quietly, and says only that it has not started when the request is not taken',async()=>{
   f.invokes.mockResolvedValue({data:null,error:{message:'Edge Function returned a non-2xx status code',context:{status:409}}});
   mount(kind);await tick();await tick();
-  fireEvent.click(screen.getByRole('button',{name:kind==='social'?'Run Full Analysis':'Run competitive analysis'}));await tick();await tick();
+  fireEvent.click(screen.getByRole('button',{name:kind==='social'?'Run full analysis':'Run competitive analysis'}));await tick();await tick();
   expect(screen.getByText('The analysis has not started yet.')).toBeInTheDocument();expect(screen.queryByRole('alert')).toBeNull();
  });
 });
