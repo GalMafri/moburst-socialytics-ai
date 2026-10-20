@@ -6,20 +6,19 @@
 //
 // While APIFY_API_TOKEN is not set the step waits quietly and looks again
 // every TOKEN_WAIT_SECONDS, and its step log says what it is waiting for.
-// A run that ends without succeeding (failed, timed out, aborted) is started
-// again, up to APIFY_RESTARTS times per pipeline run; after that the step
-// fails its try and the runner's quiet retries take over. A timed-out run
-// may hold part of the period, so it never counts as complete coverage.
+// A run that ends without succeeding (failed, timed out, aborted) fails the
+// try with StepRestart: the runner's quiet retry (after 2, 4, 8, 16 minutes)
+// starts a new run, so a pipeline run starts at most as many actor runs as a
+// step has tries (MAX_STEP_ATTEMPTS). A timed-out run may hold part of the
+// period, so it never counts as complete coverage.
 
 import { apifyClient, ApifyTokenMissing, APIFY_TOKEN_ENV, isFinalRunStatus, type ApifyClient, type ApifyClientOptions } from "../apify/client.ts";
-import type { StepContext, StepResult } from "./types.ts";
+import { StepRestart, type StepContext, type StepResult } from "./types.ts";
 
 /** How long a step waits before it looks for the token again. */
 export const TOKEN_WAIT_SECONDS = 600;
 /** How long a step waits before it looks at a run that is still going. */
 export const RUN_POLL_SECONDS = 20;
-/** New runs started after one ended without succeeding, per pipeline run. */
-export const APIFY_RESTARTS = 2;
 /** Time kept back in a step for reading the dataset and what follows it. */
 export const DATASET_RESERVE_SECONDS = 30;
 
@@ -40,8 +39,6 @@ export interface ActorRequest {
 const secondsLeft = (ctx: StepContext) => Math.floor((ctx.deadline.getTime() - ctx.now().getTime()) / 1000);
 
 export async function runActorStep(ctx: StepContext, r: ActorRequest): Promise<ActorStep> {
-  const counter = "apify_restarts";
-  const restarts = Number(ctx.state[counter] ?? 0);
   const waitForToken = (): ActorStep => ({
     type: "wait",
     result: {
@@ -53,28 +50,22 @@ export async function runActorStep(ctx: StepContext, r: ActorRequest): Promise<A
   if (!String(token ?? "").trim()) return waitForToken();
   const client = (r.apify ?? apifyClient)({ token, signal: ctx.signal });
 
-  const start = async (n: number, why?: string): Promise<ActorStep> => {
+  const start = async (): Promise<ActorStep> => {
     const run = await client.startRun(r.actor.id, r.input, { timeoutSecs: r.actor.timeoutSecs, memoryMbytes: r.actor.memoryMbytes });
     return {
       type: "wait",
-      result: {
-        type: "poll", waitSeconds: RUN_POLL_SECONDS, handle: { apify_run_id: run.id }, state: { ...ctx.state, [counter]: n },
-        detail: { actor: r.actor.name, apify_run_id: run.id, started: true, ...(why ? { restarted_after: why } : {}) },
-      },
+      result: { type: "poll", waitSeconds: RUN_POLL_SECONDS, handle: { apify_run_id: run.id }, detail: { actor: r.actor.name, apify_run_id: run.id, started: true, try: ctx.attempt } },
     };
   };
 
   try {
     const runId = typeof ctx.poll?.handle?.apify_run_id === "string" ? ctx.poll.handle.apify_run_id : null;
-    if (!runId) return await start(restarts);
+    if (!runId) return await start();
     const run = await client.getRun(runId, { waitSecs: Math.max(0, Math.min(60, secondsLeft(ctx) - DATASET_RESERVE_SECONDS)) });
     if (!isFinalRunStatus(run.status)) {
       return { type: "wait", result: { type: "poll", waitSeconds: RUN_POLL_SECONDS, handle: { apify_run_id: runId }, detail: { apify_run_id: runId, status: run.status } } };
     }
-    if (run.status !== "SUCCEEDED") {
-      if (restarts < APIFY_RESTARTS) return await start(restarts + 1, `${runId} ${run.status}`);
-      throw new Error(`Apify run ${runId} ended ${run.status}, and ${APIFY_RESTARTS} new runs were already tried.`);
-    }
+    if (run.status !== "SUCCEEDED") throw new StepRestart(`Apify run ${runId} ended ${run.status}.`);
     const rows = await client.datasetItems(run.defaultDatasetId);
     await ctx.payloads.put(r.datasetKey, rows);
     return { type: "rows", rows, runId };

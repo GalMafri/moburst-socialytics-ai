@@ -116,6 +116,19 @@ export interface StepContext<S extends Record<string, unknown> = Record<string, 
   env(name: string): string | undefined;
 }
 
+/**
+ * Thrown by a step whose external job (an Apify run, a Claude message batch)
+ * ended without its result: the try fails as any throw does, and the runner
+ * forgets the job it was looking at, so the next try starts a new one rather
+ * than looking at the dead one again.
+ */
+export class StepRestart extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StepRestart";
+  }
+}
+
 /** What a step came to. A step that cannot go on throws; the runner retries it quietly. */
 export type StepResult<S extends Record<string, unknown> = Record<string, unknown>> =
   | { type: "next"; step: string; state?: S; detail?: Record<string, unknown> }

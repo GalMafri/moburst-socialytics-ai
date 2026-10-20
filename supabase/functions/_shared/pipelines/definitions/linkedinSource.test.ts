@@ -65,16 +65,20 @@ describe("the LinkedIn source pipeline, shadowing n8n", () => {
     expect(r.result.calls.every((c) => c.outcome.status === "queued" ? c.outcome.deferred || c.outcome.resetAttempts : true)).toBe(true);
   });
 
-  it("starts the actor again after a run that failed or timed out, and never counts a timed-out run as complete", async () => {
+  it("starts a new actor run on the next try after a run that failed or timed out, and never counts a timed-out run as complete", async () => {
     const r = await shadowRun({ statuses: ["FAILED", "TIMED-OUT", "SUCCEEDED"] });
     expect(r.result.outcome.status).toBe("done");
     expect(r.calls.filter((c) => c.startsWith("start"))).toHaveLength(3);
+    expect(r.calls.filter((c) => c.startsWith("look"))).toEqual(["look apify-1 FAILED", "look apify-2 TIMED-OUT", "look apify-3 SUCCEEDED"]);
     expect(r.calls.filter((c) => c.startsWith("dataset"))).toEqual(["dataset ds-3"]);
+    // The tries are the runner's quiet retries, 2 and then 4 minutes apart.
+    expect(r.result.calls.filter((c) => c.outcome.reason?.includes("tried again")).map((c) => c.outcome.reason?.match(/in (\d+) minutes/)?.[1])).toEqual(["2", "4"]);
   });
 
-  it("stops quietly after the restarts are used up", async () => {
+  it("stops quietly when every try's run fails, having started one run per try", async () => {
     const r = await shadowRun({ statuses: ["FAILED"] });
     expect(r.result.outcome.status).toBe("failed");
+    expect(r.calls.filter((c) => c.startsWith("start"))).toHaveLength(5);
     expect(r.db.tables.report_pipeline_runs[0]).toMatchObject({ status: "stopped" });
     expect(r.db.tables.report_pipeline_runs[0].outcome).toContain("ended FAILED");
     expect(r.db.tables.shadow_linkedin_sources ?? []).toEqual([]);

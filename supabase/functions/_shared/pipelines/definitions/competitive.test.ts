@@ -164,6 +164,12 @@ describe("the in-app competitive pipeline, live", () => {
     expect(r.result.calls.every((c) => !c.outcome.reason?.includes("tried again"))).toBe(true);
   });
 
+  it("staggers a scheduled run for its whole stagger, past the longest single wait", async () => {
+    const r = await run({ mode: "shadow", staggerSeconds: 2700 });
+    expect(r.result.outcome.status).toBe("done");
+    expect(r.result.calls.slice(0, 3).map((c) => c.outcome.reason)).toEqual(["Step start looks again in 1800 s.", "Step start looks again in 900 s.", "Step start done; landscape is next."]);
+  });
+
   it("waits for the Apify token, saying so in its step log, and goes on once it is set", async () => {
     // The token arrives half an hour after the run starts.
     const start = Date.parse("2026-10-07T07:15:04.906Z");

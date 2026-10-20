@@ -20,7 +20,7 @@
 
 import type { JobOutcome, ScheduledJob } from "../../run-scheduled-jobs/types.ts";
 import type { Registry } from "./registry.ts";
-import type { OutputWriter, PayloadStore, PipelineDefinition, PipelineJobPayload, PipelineRun, PollState, StepContext, StepResult } from "./types.ts";
+import { StepRestart, type OutputWriter, type PayloadStore, type PipelineDefinition, type PipelineJobPayload, type PipelineRun, type PollState, type StepContext, type StepResult } from "./types.ts";
 
 /** One step's time, inside the 120 s every step must stay under. */
 export const STEP_BUDGET_MS = 110_000;
@@ -185,7 +185,8 @@ export async function runPipelineJob(job: ScheduledJob, d: RunnerDeps): Promise<
     work.catch(() => {});
     result = await Promise.race([work, timeUp]);
   } catch (e) {
-    return failedTry(message(e), p);
+    // An external job that ended without its result is started again on the next try.
+    return failedTry(message(e), e instanceof StepRestart ? { ...p, poll: null } : p);
   } finally {
     clearTimeout(timer);
   }

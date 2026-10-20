@@ -38,22 +38,28 @@ export interface FeedLinkedInArgs {
   inline?: Partial<InlineDeps>;
 }
 
-/** In-app runs of this client's window that stopped. */
-export async function stoppedAppRuns(db: Db, clientId: string, period: { start: string; end: string }): Promise<number> {
-  const { data, error } = await db.from("report_pipeline_runs").select("status, input")
-    .eq("kind", "linkedin_source").eq("mode", "app").eq("client_id", clientId).eq("status", "stopped")
+/** An in-app run still marked running after this long was cut off with its refresh: it counts as stopped. */
+export const INLINE_RUN_CUT_OFF_MS = 5 * 60_000;
+
+/** In-app runs of this client's window that stopped, or that their refresh was cut off in. */
+export async function stoppedAppRuns(db: Db, clientId: string, period: { start: string; end: string }, now: Date = new Date()): Promise<number> {
+  const { data, error } = await db.from("report_pipeline_runs").select("status, input, heartbeat_at")
+    .eq("kind", "linkedin_source").eq("mode", "app").eq("client_id", clientId).in("status", ["stopped", "running"])
     .order("started_at", { ascending: false }).limit(50);
   if (error) throw new Error(`The in-app LinkedIn runs could not be read: ${error.message}`);
-  return (data ?? []).filter((r: { input?: { period?: { start?: string; end?: string } } }) => r.input?.period?.start === period.start && r.input?.period?.end === period.end).length;
+  type Row = { status: string; heartbeat_at?: string | null; input?: { period?: { start?: string; end?: string } } };
+  const cutOff = (r: Row) => r.status === "running" && now.getTime() - Date.parse(String(r.heartbeat_at ?? "")) > INLINE_RUN_CUT_OFF_MS;
+  return (data ?? []).filter((r: Row) => (r.status === "stopped" || cutOff(r)) && r.input?.period?.start === period.start && r.input?.period?.end === period.end).length;
 }
 
 /** The LinkedIn source's answer for a feed refresh, from the engine the switch picked. n8n() is the n8n workflow call. */
 export async function feedLinkedInAnswer(db: Db, engine: ResolvedEngine, a: FeedLinkedInArgs, n8n: () => Promise<Answer>): Promise<Answer> {
   if (engine.engine !== "app" || !engine.pipeline) return await n8n();
   if (!a.sources.length) return { socialPosts: [], additional_metrics: {} };
+  const now = a.now ?? (() => new Date());
   let stops = 0;
   try {
-    stops = await stoppedAppRuns(db, a.clientId, a.period);
+    stops = await stoppedAppRuns(db, a.clientId, a.period, now());
   } catch (e) {
     // The run history cannot be read: n8n, the backup, answers this refresh.
     console.warn(`[feed] ${a.clientId}: ${e instanceof Error ? e.message : String(e)}; n8n collects LinkedIn.`);
@@ -63,7 +69,6 @@ export async function feedLinkedInAnswer(db: Db, engine: ResolvedEngine, a: Feed
     console.warn(`[feed] ${a.clientId}: ${stops} in-app LinkedIn runs for ${a.period.start} to ${a.period.end} stopped; n8n collects this window.`);
     return await n8n();
   }
-  const now = a.now ?? (() => new Date());
   // deno-lint-ignore no-explicit-any
   const env = a.env ?? ((name: string) => (globalThis as any).Deno?.env?.get(name));
   const at = now();

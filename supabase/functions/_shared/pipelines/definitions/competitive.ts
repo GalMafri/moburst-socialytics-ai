@@ -122,8 +122,10 @@ export function competitivePipeline(deps: CompetitiveDeps = {}): PipelineDefinit
     steps: {
       async start(ctx) {
         if (input(ctx).replay) return { type: "next", step: "replay_sources", detail: { replay: input(ctx).replay!.report_id } };
+        // The whole stagger, even past the longest single wait a poll may ask for (POLL_MAX_SECONDS).
         const stagger = Number(requestOf(ctx).stagger_seconds) || 0;
-        if (stagger > 0 && !ctx.poll) return { type: "poll", waitSeconds: stagger, handle: { stagger_seconds: stagger }, detail: { stagger_seconds: stagger } };
+        const waited = ctx.poll ? Math.floor((ctx.now().getTime() - Date.parse(ctx.poll.since)) / 1000) : 0;
+        if (stagger > 0 && waited < stagger) return { type: "poll", waitSeconds: stagger - waited, handle: { stagger_seconds: stagger }, detail: { stagger_seconds: stagger, waited_seconds: waited } };
         return { type: "next", step: "landscape" };
       },
 

@@ -67,6 +67,16 @@ describe("feedLinkedInAnswer", () => {
     expect(next.n8n).not.toHaveBeenCalled();
   });
 
+  it("on app, counts a run its refresh was cut off in (still marked running long after) as stopped", async () => {
+    const cut = (minutesAgo: number) => ({ id: `cut-${minutesAgo}`, kind: "linkedin_source", mode: "app", client_id: MOBURST, status: "running", input: { sources: SOURCES, period: PERIOD }, heartbeat_at: new Date(Date.parse("2026-09-29T06:00:00Z") - minutesAgo * 60_000).toISOString(), started_at: "2026-09-29T05:00:00Z" });
+    const s = setup(["SUCCEEDED"], [cut(30), cut(20)]);
+    expect(await feedLinkedInAnswer(s.db, { engine: "app", pipeline: s.pipeline }, s.args, s.n8n)).toBe(N8N_ANSWER);
+    // One cut off long ago and one still within its time: the second is not counted, so the app runs it.
+    const t = setup(["SUCCEEDED"], [cut(30), cut(1)]);
+    await feedLinkedInAnswer(t.db, { engine: "app", pipeline: t.pipeline }, t.args, t.n8n);
+    expect(t.n8n).not.toHaveBeenCalled();
+  });
+
   it("on app, stops a run that does not finish in the time the n8n call had", async () => {
     const s = setup(["RUNNING"]);
     await expect(feedLinkedInAnswer(s.db, { engine: "app", pipeline: s.pipeline }, s.args, s.n8n)).rejects.toThrow(`did not finish in ${LINKEDIN_INLINE_BUDGET_MS / 1000} s`);
