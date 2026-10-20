@@ -1,0 +1,12 @@
+{
+  "source": "rivaliq",
+  "period": { "start": "2026-10-01", "end": "2026-10-31", "days": 31 },
+  "totals": { "posts_analyzed": 412, "post_windows": 3 },
+  "aggregates": {
+    "companies": [
+      { "company_id": "RC0", "name": "Fixture Co", "post_count": 67, "engagement_rate_avg": 0.0012, "is_client": true },
+      { "company_id": "RC1", "name": "Peer One", "post_count": 120, "engagement_rate_avg": 0.012, "is_client": false }
+    ]
+  },
+  "ai_analysis": { "executive_summary": "Competitors post daily.", "benchmark_scorecard": { "client_score": 42 } }
+}

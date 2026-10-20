@@ -36,6 +36,16 @@
 //             attempt_started_at), so a repeat never makes a second report.
 //   sent      the workflow accepted the request. From here the job only
 //             watches its report.
+//
+// Which engine makes the report is the engine switch (report_engines, read
+// through _shared/pipelines/engine.ts) at the moment the request is sent;
+// without the switch, or with it on n8n, everything above is exactly as it
+// was. shadow: the request goes to n8n as above, and once n8n has it an
+// in-app pipeline run is queued that writes only to shadow tables. app: no
+// request goes to n8n; the in-app run makes the report, and the job watches
+// that run instead of the 90-minute clock: a run the worker is still taking
+// step by step is not stuck however long it takes, and a run that stopped,
+// or that nothing has touched for 90 minutes, ends this run of the report.
 
 import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/schedule.ts";
 import { STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
@@ -43,6 +53,9 @@ import { isTrackingProblem, LANDSCAPE_MISSING, type LandscapeCheck } from "../_s
 import { HELD_REDOS } from "../_shared/competitive/reportEvidence.ts";
 import type { JobOutcome, ScheduledJob } from "./types.ts";
 import { RETRY_MINUTES } from "./worker.ts";
+import type { Engine, PipelineDefinition } from "../_shared/pipelines/types.ts";
+import type { ReportPipelineStart } from "../_shared/pipelines/shadow.ts";
+import type { AppRunView } from "../_shared/pipelines/store.ts";
 
 /**
  * How a competitive schedule records that RivalIQ does not track the client
@@ -61,6 +74,8 @@ export const LAST_RUN_LEAD_MINUTES = 180;
 export const MANUAL_RUN_DAYS = 7;
 /** The wait before a held competitive analysis is made again. */
 export const HELD_REDO_MINUTES = 24 * 60;
+/** In-app runs of one occurrence that may stop before its next run goes to n8n, the backup. */
+export const APP_STOPS_BEFORE_N8N = 2;
 
 /** A run a person asked for, with no schedule behind it (scheduled_jobs.payload). */
 export interface ManualRun {
@@ -181,6 +196,12 @@ export interface DispatchDeps {
   saveJob(patch: Partial<Pick<ScheduledJob, "phase" | "report_id" | "result">>): Promise<void>;
   /** Read and build everything, write nothing, send nothing. */
   dryRun?: boolean;
+  /** The engine switch for this report kind and client. Absent, or anything in doubt: n8n. */
+  engine?(kind: "social" | "competitive", clientId: string): Promise<{ engine: Engine; pipeline?: PipelineDefinition }>;
+  /** Queue the report's in-app pipeline run (_shared/pipelines/shadow.ts). Throws when it could not be queued. */
+  startPipeline?(args: ReportPipelineStart): Promise<{ run_id: string }>;
+  /** The in-app run that makes a report (app engine), or null. */
+  pipelineRun?(reportId: string): Promise<AppRunView | null>;
 }
 
 /** One run of an occurrence, kept on the job for the logs. */
@@ -191,6 +212,8 @@ export interface DispatchRun {
   /** held: it finished, did not pass its checks, and is made again. */
   outcome?: "ran" | "stopped" | "held";
   note?: string;
+  /** Set only on a run the in-app pipeline made (the app engine). */
+  engine?: "app";
 }
 
 /** What a dispatch job keeps between its leases (scheduled_jobs.result). */
@@ -202,6 +225,9 @@ export interface DispatchMemory {
   competitive_report_id?: string | null;
   competitive_report_skipped?: string;
   runs?: DispatchRun[];
+  /** Set only when the in-app pipeline makes the report (the app engine); an n8n run never carries it. */
+  engine?: "app";
+  pipeline_run_id?: string;
   [key: string]: unknown;
 }
 
@@ -317,6 +343,18 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       if (!d.dryRun && schedule) await d.store.advance(schedule, moved ? schedule.next_run_at : followingRun(schedule, occurrence, now), "The report ran.");
       return { status: "done", result: { ...memory, runs, report_id: reportId } };
     }
+    if (memory.engine === "app" && d.pipelineRun) {
+      // Made in the app: the run's own heartbeat, not the report's age, says whether it is stuck.
+      const app = await d.pipelineRun(reportId);
+      const seen = Date.parse(app?.heartbeat_at ?? "");
+      const alive = app?.status === "running" && Number.isFinite(seen) && now.getTime() - seen < STUCK_AFTER_MINUTES * MINUTE;
+      if (run && inProgress(run.status) && alive) return { status: "waiting", reason: "The report is running.", result: { ...memory, runs } };
+      return runAgain(reportId, !run ? "the report was removed"
+        : !app ? "the in-app pipeline run is gone"
+        : app.status === "stopped" ? `the in-app pipeline stopped (${app.outcome ?? "no reason recorded"})`
+        : app.status === "done" ? "the in-app pipeline finished without completing the report"
+        : "the in-app pipeline stopped answering", run);
+    }
     const started = Date.parse(run?.created_at ?? "");
     const stale = !Number.isFinite(started) || now.getTime() - started >= STUCK_AFTER_MINUTES * MINUTE;
     if (run && inProgress(run.status) && !stale) return { status: "waiting", reason: "The report is running.", result: { ...memory, runs } };
@@ -367,8 +405,67 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
     }
   }
 
+  /** The engine switch, read once, when the request is about to go out. Anything in doubt is n8n. */
+  type Route = { engine: Engine; pipeline?: PipelineDefinition };
+  let route: Route | null = null;
+  const routeOf = async (): Promise<Route> => {
+    if (route) return route;
+    let r: Route = { engine: "n8n" };
+    if (d.engine && d.startPipeline) {
+      try {
+        r = await d.engine(competitive ? "competitive" : "social", client.id);
+      } catch (e) {
+        console.warn(`[dispatch] engine switch unreadable, n8n runs it: ${message(e)}`);
+      }
+    }
+    if (r.engine !== "n8n" && !r.pipeline) r = { engine: "n8n" };
+    if (r.engine === "app" && !d.pipelineRun) r = { engine: "n8n" };
+    // n8n is the backup: an occurrence whose in-app runs keep stopping is made by n8n.
+    if (r.engine === "app" && runs.filter((x) => x.engine === "app" && x.outcome === "stopped").length >= APP_STOPS_BEFORE_N8N) {
+      console.warn(`[dispatch] ${APP_STOPS_BEFORE_N8N} in-app runs of this report stopped; n8n makes it.`);
+      r = { engine: "n8n" };
+    }
+    return (route = r);
+  };
+
+  /** What the in-app run is given: the report, its range and the request n8n gets. */
+  const pipelineStart = (mode: "shadow" | "app", pipeline: PipelineDefinition, payload: Record<string, unknown>, result: DispatchMemory): ReportPipelineStart => ({
+    mode, kind: competitive ? "competitive" : "social", pipeline, clientId: client.id, reportId: reportId!,
+    range: result.range as ReportRange, setId: competitive ? (result.set_id ?? null) : null, request: payload,
+  });
+
+  /** The app engine: no request to n8n; the in-app run makes the report and the job watches that run. */
+  const startApp = async (pipeline: PipelineDefinition, payload: Record<string, unknown>, result: DispatchMemory): Promise<JobOutcome> => {
+    let runId: string;
+    try {
+      runId = (await d.startPipeline!(pipelineStart("app", pipeline, payload, result))).run_id;
+    } catch (e) {
+      // Nothing started: this run ends and the occurrence runs again.
+      Object.assign(memory, result);
+      return runAgain(reportId, `the in-app pipeline could not be queued (${message(e)})`);
+    }
+    const open = runs.find((x) => x.report_id === reportId && !x.ended_at);
+    if (open) open.engine = "app";
+    const started: DispatchMemory = { ...result, runs, engine: "app", pipeline_run_id: runId };
+    await d.saveJob({ phase: "sent", result: started });
+    await note("The report is running.");
+    return { status: "waiting", reason: "The report is running.", result: started };
+  };
+
+  /** The shadow: queued once n8n has the request. It never changes this job's outcome. */
+  const startShadow = async (pipeline: PipelineDefinition, payload: Record<string, unknown>, result: DispatchMemory) => {
+    try {
+      await d.startPipeline!(pipelineStart("shadow", pipeline, payload, result));
+    } catch (e) {
+      console.warn(`[dispatch] shadow run not queued for ${reportId}: ${message(e)}`);
+    }
+  };
+
   /** Send the request; a confirmed answer moves the job to watching its report. */
   const send = async (url: string, payload: Record<string, unknown>, result: DispatchMemory): Promise<JobOutcome> => {
+    const { engine, pipeline } = await routeOf();
+    // A repeated request may already be with n8n, so it stays with n8n.
+    if (engine === "app" && pipeline && !repeat) return startApp(pipeline, payload, result);
     await d.saveJob({ phase: "posting", result });
     let r: { ok: boolean; status: number };
     try {
@@ -384,6 +481,7 @@ export async function runDispatch(job: ScheduledJob, d: DispatchDeps): Promise<J
       return runAgain(reportId, `the workflow refused the request (${r.status})`);
     }
     await d.saveJob({ phase: "sent", result });
+    if (engine === "shadow" && pipeline) await startShadow(pipeline, payload, result);
     await note("The report is running.");
     return { status: "waiting", reason: "The report is running.", result };
   };

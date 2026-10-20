@@ -20,6 +20,8 @@ async function must<T>(p: PromiseLike<Result<T>>): Promise<T> {
 
 export interface JobStore {
   lease(leaseSeconds: number): Promise<ScheduledJob | null>;
+  /** Report pipeline jobs, as many as are free of maxRunning across every worker (scheduled_jobs_lease_pipelines). */
+  leasePipelines(leaseSeconds: number, maxRunning: number): Promise<ScheduledJob[]>;
   saveJob(id: string, patch: Partial<Pick<ScheduledJob, "phase" | "report_id" | "result">>): Promise<void>;
   finish(job: ScheduledJob, outcome: JobOutcome): Promise<void>;
   /** Jobs the daily check looks at: everything open, and everything finished in the last day and a half. */
@@ -39,6 +41,9 @@ export function makeJobStore(db: SupabaseClient): JobStore {
       const rows = await must(db.rpc("scheduled_jobs_lease", { p_lease_seconds: leaseSeconds }) as unknown as PromiseLike<Result<ScheduledJob[] | null>>);
       return rows?.[0] ?? null;
     },
+    async leasePipelines(leaseSeconds, maxRunning) {
+      return (await must(db.rpc("scheduled_jobs_lease_pipelines", { p_lease_seconds: leaseSeconds, p_max_running: maxRunning }) as unknown as PromiseLike<Result<ScheduledJob[] | null>>)) ?? [];
+    },
     async saveJob(id, patch) {
       await must(db.from("scheduled_jobs").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id));
     },
@@ -57,6 +62,9 @@ export function makeJobStore(db: SupabaseClient): JobStore {
       // dependency starts counting again when it is released.
       if (outcome.status === "waiting" || outcome.status === "blocked") patch.attempts = 0;
       else if (outcome.deferred) patch.attempts = Math.max(0, job.attempts - 1);
+      // A pipeline job carries its next step in its payload, and starts its tries again on a new step.
+      if (outcome.payload !== undefined) patch.payload = outcome.payload;
+      if (outcome.resetAttempts) patch.attempts = 0;
       await must(db.from("scheduled_jobs").update(patch).eq("id", job.id));
     },
     async statusRows(now) {

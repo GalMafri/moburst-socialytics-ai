@@ -75,6 +75,8 @@ export function fakeDb(tables: Record<string, Row[]> = {}, rpcs: Record<string, 
     or() { return this; }
     lt(c: string, v: string) { this.filters.push((r) => String(r[c]) < v); return this; }
     gte(c: string, v: string) { this.filters.push((r) => String(r[c]) >= v); return this; }
+    lte(c: string, v: string) { this.filters.push((r) => String(r[c]) <= v); return this; }
+    gt(c: string, v: string) { this.filters.push((r) => String(r[c]) > v); return this; }
     order(c: string, o?: { ascending?: boolean }) { this.sorts.push([c, o?.ascending !== false]); return this; }
     limit(n: number) { this.max = n; return this; }
     maybeSingle() { this.one = "maybe"; return this; }

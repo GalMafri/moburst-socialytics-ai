@@ -84,6 +84,8 @@ export async function anthropicMessages(args: {
   body: Record<string, unknown>;
   /** Called when a parameter is dropped, so the caller can log it. */
   onDropped?: (param: string) => void;
+  /** Ends the call when it fires (a pipeline step's time running out). */
+  signal?: AbortSignal;
 }): Promise<AnthropicResult> {
   const body: Record<string, unknown> = { ...args.body };
 
@@ -96,6 +98,7 @@ export async function anthropicMessages(args: {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(body),
+      ...(args.signal ? { signal: args.signal } : {}),
     });
 
     if (resp.ok) {

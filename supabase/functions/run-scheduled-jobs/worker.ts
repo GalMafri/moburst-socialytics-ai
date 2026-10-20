@@ -6,12 +6,28 @@
 // minute or more) never runs into the edge runtime's wall clock. A worker
 // that dies anyway leaves the job's lease to expire, and the next call
 // picks it up with the attempt counted.
+//
+// Report pipeline steps (report_pipeline jobs) run in a lane of their own,
+// alongside that loop: up to PIPELINE_CONCURRENCY at once across every
+// worker, so the reports that start together on the 7th never queue behind
+// each other or behind the calendar, and the main loop is unchanged. The
+// main lease never hands out a pipeline job (scheduled_jobs_lease).
 
 import type { JobOutcome, ScheduledJob } from "./types.ts";
 
 export const LEASE_SECONDS = 300;
 export const START_WINDOW_MS = 20_000;
 export const RETRY_MINUTES = 10;
+/** Report pipeline steps running at once, across every worker. */
+export const PIPELINE_CONCURRENCY = 4;
+
+/** The report pipeline lane. */
+export interface PipelineLane {
+  /** Pipeline jobs that are due, as many as the lane has room for across every worker. */
+  lease(): Promise<ScheduledJob[]>;
+  run(job: ScheduledJob): Promise<JobOutcome>;
+  finish(job: ScheduledJob, outcome: JobOutcome): Promise<void>;
+}
 
 export interface WorkerDeps {
   now(): Date;
@@ -21,6 +37,8 @@ export interface WorkerDeps {
   closeAbandoned(): Promise<Array<{ table: string; id: string }>>;
   /** release_ready_dispatches: held social jobs whose competitive report finished. */
   releaseReady(): Promise<number>;
+  /** The report pipeline lane; without it the tick runs the main loop alone. */
+  pipelines?: PipelineLane;
 }
 
 export interface TickResult {
@@ -43,6 +61,9 @@ export async function workerTick(d: WorkerDeps): Promise<TickResult> {
   } catch (e) {
     console.warn("[scheduled-jobs] release sweep failed:", e instanceof Error ? e.message : String(e));
   }
+  // The pipeline lane runs alongside the loop below; it never throws.
+  const laneResults: TickResult["results"] = [];
+  const lane = d.pipelines ? pipelineLane(d.pipelines, d.now, t0, laneResults) : null;
   const results: TickResult["results"] = [];
   for (;;) {
     if (results.length > 0 && d.now().getTime() - t0 >= START_WINDOW_MS) break;
@@ -64,7 +85,57 @@ export async function workerTick(d: WorkerDeps): Promise<TickResult> {
     await d.finish(job, outcome);
     results.push({ id: job.id, kind: job.kind, status: outcome.status, reason: outcome.reason ?? null });
   }
+  if (lane) {
+    await lane;
+    results.push(...laneResults);
+  }
   return { abandoned, released, results };
+}
+
+/**
+ * Leases pipeline jobs while the lane has room and the start window is open,
+ * and runs each as soon as it is leased; a step that finishes early frees its
+ * room for the next. Never throws: a lane that cannot lease (its database
+ * function not there yet) leaves the main loop untouched.
+ */
+async function pipelineLane(lane: PipelineLane, now: () => Date, t0: number, out: TickResult["results"]): Promise<void> {
+  const inFlight = new Set<Promise<void>>();
+  const runOne = async (job: ScheduledJob) => {
+    let outcome: JobOutcome;
+    try {
+      outcome = await lane.run(job);
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      console.error(`[scheduled-jobs] ${job.kind} ${job.id} threw:`, reason);
+      outcome = job.attempts < job.max_attempts
+        ? { status: "queued", reason, available_at: new Date(now().getTime() + RETRY_MINUTES * 60000).toISOString() }
+        : { status: "failed", reason };
+    }
+    try {
+      await lane.finish(job, outcome);
+    } catch (e) {
+      // The lease runs out and the step is run again.
+      console.warn(`[scheduled-jobs] ${job.kind} ${job.id} finish:`, e instanceof Error ? e.message : String(e));
+    }
+    out.push({ id: job.id, kind: job.kind, status: outcome.status, reason: outcome.reason ?? null });
+  };
+  try {
+    for (;;) {
+      if (now().getTime() - t0 >= START_WINDOW_MS) break;
+      if (inFlight.size < PIPELINE_CONCURRENCY) {
+        const jobs = await lane.lease();
+        for (const job of jobs) {
+          const p: Promise<void> = runOne(job).finally(() => { inFlight.delete(p); });
+          inFlight.add(p);
+        }
+        if (!jobs.length && !inFlight.size) break;
+      }
+      if (inFlight.size) await Promise.race(inFlight);
+    }
+  } catch (e) {
+    console.warn("[scheduled-jobs] pipeline lane:", e instanceof Error ? e.message : String(e));
+  }
+  await Promise.all(inFlight);
 }
 
 /** Grace before a dead lease or an undrained queue counts as a problem. */

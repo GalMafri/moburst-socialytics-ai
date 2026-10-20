@@ -3,10 +3,13 @@
 export type JobKind = "feed_refresh" | "dispatch" | "week_plan" | "week_revise" | "voice_profile" | "lifecycle" | "lifecycle_step";
 export type JobStatus = "queued" | "running" | "waiting" | "blocked" | "done" | "skipped" | "failed";
 
+/** One step of an in-app report pipeline (_shared/pipelines/runner.ts), run in its own lane of the worker. */
+export type PipelineJobKind = "report_pipeline";
+
 /** A row of public.scheduled_jobs. */
 export interface ScheduledJob {
   id: string;
-  kind: JobKind;
+  kind: JobKind | PipelineJobKind;
   client_id: string;
   schedule_id: string | null;
   occurrence: string | null;
@@ -37,6 +40,10 @@ export interface JobOutcome {
   available_at?: string;
   /** Waiting on another job (a week plan waits for the voice profile): the lease doesn't count as an attempt. */
   deferred?: boolean;
+  /** A report_pipeline job's next payload (the step it runs next, its state). Left as is when absent. */
+  payload?: Record<string, unknown> | null;
+  /** The job moved on to new work (a pipeline's next step): its attempts start again from none. */
+  resetAttempts?: boolean;
 }
 
 /** Terminal states: the job is finished and finished_at is set. */
