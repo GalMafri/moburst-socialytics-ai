@@ -1,10 +1,11 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { cleanText, countryNames, formatDate, formatDateTime, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
 import { reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { StatGrid } from "@/components/ui/stat-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { PlatformSegment, Segment, SegmentedGroup } from "@/components/ui/segmented";
 import { EmptyState } from "@/components/ui/empty-state";
