@@ -24,6 +24,10 @@ verify_jwt = false
 [functions.run-scheduled-jobs]
 verify_jwt = false
 
+# Long Claude calls for pipeline steps: called by the worker with the operational secret.
+[functions.claude-direct]
+verify_jwt = false
+
 # Canva finishing: the minute worker presents the operational secret, and Canva's
 # OAuth redirect lands here with no JWT, so the function checks its callers itself.
 [functions.canva-finish]
