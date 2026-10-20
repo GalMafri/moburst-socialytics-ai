@@ -55,7 +55,7 @@ function aggregate(start,end,count){
  const source=fs.readFileSync(path.join(repo,'n8n/code/competitive-aggregate.js'),'utf8');
  const nodes={'Run Config':{range_start:start,range_end:end,client_name:'Fixture'},'Resolve Landscape':{focus_company_id:1},'Landscape Companies':{companies:[{id:1,name:'Fixture'}]}};
  nodes['Merge Owned Posts']={socialPosts:Array.from({length:count},(_,i)=>({companyId:1,channel:'instagram',message:'Fixture '+i,publishedAt:start+'T12:00:00Z'}))};
- return vm.runInNewContext('(function(){'+source+'})()', {...moduleFrom('supabase/functions/_shared/competitive/reportMetrics.ts'),$:name=>({first:()=>({json:nodes[name]||{}})}),console:silent})[0].json;
+ return vm.runInNewContext('(function(){'+source+'})()', {...moduleFrom('supabase/functions/_shared/competitive/reportMetrics.ts'),...moduleFrom('supabase/functions/_shared/competitive/postSample.ts',{'./reportMetrics.ts':moduleFrom('supabase/functions/_shared/competitive/reportMetrics.ts')}),$:name=>({first:()=>({json:nodes[name]||{}})}),console:silent})[0].json;
 }
 
 function database({order=['competitive','social'],due=true,feedError=false}={}){

@@ -1,3 +1,4 @@
+import { SPROUT_RATE_LABEL, SPROUT_RATE_NOTE } from "@/lib/rateLabels";
 import { DateRange, isValidRange, PRESET_LABELS, presetRange, rangeDays, rangesOverlap, reportPeriod, toISODate } from "@/lib/dateRange";
 import { cleanText, countryNames, firstRunSentence, formatDate, formatDateTime, formatRange, languageNames } from "@/lib/display";
 import { useNextRun } from "@/lib/nextRun";
@@ -335,7 +336,7 @@ export default function Analytics() {
           { id: "live-top-posts", label: "Top posts" },
           { id: "mom", label: "Month-over-month" },
           { id: "over-time", label: "Performance over time" },
-          { id: "engagement-rate", label: "Engagement rate" },
+          { id: "engagement-rate", label: SPROUT_RATE_LABEL },
           { id: "profiles", label: "Connected profiles" },
           { id: "insights", label: "AI insights" },
           { id: "history", label: "Report history" },
@@ -725,7 +726,7 @@ export default function Analytics() {
 
                 {/* Engagement rate trend */}
                 {chartData.length > 1 && chartData.some((d) => d.engagement_rate > 0) && (
-                  <Section id="engagement-rate" title={<>Engagement rate trend</>} description={<>Engagements divided by impressions, the same definition the competitive view uses.</>}>
+                  <Section id="engagement-rate" title={<>{SPROUT_RATE_LABEL} trend</>} description={<>{SPROUT_RATE_NOTE}.</>}>
                   <Card>
                     <CardContent className="pt-5">
                       <div className="h-56">
@@ -754,14 +755,14 @@ export default function Analytics() {
                                 fill: "hsl(var(--muted-foreground))",
                               }}
                             />
-                            <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any) => [`${Number(v).toFixed(2)}%`, "Engagement Rate"]} />
+                            <Tooltip contentStyle={{ backgroundColor: "rgba(26, 29, 35, 0.95)", borderColor: "rgba(255, 255, 255, 0.08)", borderRadius: "12px", backdropFilter: "blur(16px)", color: "#fff", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} cursor={{ fill: "rgba(255, 255, 255, 0.03)" }} formatter={(v: any) => [`${Number(v).toFixed(2)}%`, SPROUT_RATE_LABEL]} />
                             <Line
                               type="monotone"
                               dataKey="engagement_rate"
                               stroke="#d95926"
                               strokeWidth={2}
                               dot={{ r: 3 }}
-                              name="Engagement Rate"
+                              name={SPROUT_RATE_LABEL}
                             />
                           </LineChart>
                         </ResponsiveContainer>

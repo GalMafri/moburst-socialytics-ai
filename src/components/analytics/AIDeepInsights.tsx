@@ -1,3 +1,4 @@
+import { SPROUT_RATE_NOTE } from "@/lib/rateLabels";
 import { useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
@@ -60,12 +61,12 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       // Engagement rate
       if (last.engagement_rate > first.engagement_rate) {
         result.push({
-          text: `Engagement rate improved from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
+          text: `Sprout engagement rate improved from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
           type: "up",
         });
       } else if (last.engagement_rate < first.engagement_rate && first.engagement_rate > 0) {
         result.push({
-          text: `Engagement rate decreased from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
+          text: `Sprout engagement rate decreased from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
           type: "down",
         });
       }
@@ -94,7 +95,7 @@ export function AIDeepInsights({ reports, chartData }: Props) {
     // The one definition: engagements divided by impressions.
     const avgEngRate = (engagementRate(totalEng, totalImpr) ?? 0) * 100;
     if (avgEngRate > 0) {
-      result.push({ text: `Average engagement rate across all reports: ${avgEngRate.toFixed(2)}%`, type: "neutral" });
+      result.push({ text: `Average Sprout engagement rate across all reports: ${avgEngRate.toFixed(2)}%`, type: "neutral" });
     }
 
     // What the reports produced, counted as the report page counts it.
@@ -148,12 +149,12 @@ export function AIDeepInsights({ reports, chartData }: Props) {
   return (
     <Section
       title="Across the reports in this window"
-      description={`Computed from ${n} ${n === 1 ? "report" : "reports"}: peaks, the average engagement rate, and how much the reports produced.`}
+      description={`Computed from ${n} ${n === 1 ? "report" : "reports"}: peaks, the average Sprout engagement rate, and how much the reports produced.`}
     >
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Peak impressions" icon={<Eye className="h-3.5 w-3.5" />} value={compact(facts.bestImpr.impressions)} sub={`on ${facts.bestImpr.date}`} />
         <StatCard label="Peak engagement" icon={<Heart className="h-3.5 w-3.5" />} value={compact(facts.bestEng.engagements)} sub={`on ${facts.bestEng.date}`} />
-        <StatCard label="Avg engagement rate" icon={<Percent className="h-3.5 w-3.5" />} value={`${facts.avgRate.toFixed(2)}%`} sub="engagements divided by impressions" />
+        <StatCard label="Avg Sprout engagement rate" icon={<Percent className="h-3.5 w-3.5" />} value={`${facts.avgRate.toFixed(2)}%`} sub={SPROUT_RATE_NOTE} />
         <StatCard label="Recommendations" icon={<ListChecks className="h-3.5 w-3.5" />} value={facts.recs} sub={`across ${n} ${n === 1 ? "report" : "reports"}`} />
       </div>
       {(trends.length > 0 || facts.tiktok > 0 || facts.ig > 0) && (

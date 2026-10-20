@@ -1,1 +1,1 @@
-export { inclusiveDays, factualDimensions, comparisonScale, normalizedCompetitiveMetrics, engagementRate, postEngagementRate, postReach, isVideoNetwork, type ReachKind } from "../../supabase/functions/_shared/competitive/reportMetrics";
+export { inclusiveDays, factualDimensions, comparisonScale, normalizedCompetitiveMetrics, engagementRate, engagementsOf, sharesArePublic, isPublishedPost, isPublishedReportPost, postEngagementRate, postReach, isVideoNetwork, type ReachKind } from "../../supabase/functions/_shared/competitive/reportMetrics";

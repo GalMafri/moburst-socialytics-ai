@@ -16,8 +16,13 @@ export function sourceCompetitiveSummary(report: Record<string, any>): string | 
   const lines: string[] = [];
   if (valid(m.posts?.current)) lines.push(`Publishing: ${fmt(m.posts.current)} tracked posts from ${client.name} in this period${valid(m.posts.previous) ? `, compared with ${fmt(m.posts.previous)} in the previous equal-length period` : ""}.`);
   // The one rate definition: engagements divided by impressions (views on
-  // video networks), from the same totals for every company.
-  if (valid(m.engagement_rate?.current)) lines.push(`Engagement: ${client.name}'s engagement rate was ${rate(m.engagement_rate.current)}, engagements divided by impressions on tracked networks (excluding LinkedIn)${valid(m.engagement_rate.previous) ? `, against ${rate(m.engagement_rate.previous)} in the previous period` : ""}.`);
+  // video networks). Written when the report is read, from the figures the
+  // page shows (Sprout's for the client), so it can never quote an old rate.
+  const names: Record<string, string> = { facebook: "Facebook", instagram: "Instagram", tiktok: "TikTok", youtube: "YouTube", twitter: "X", x: "X" };
+  const networks = (Array.isArray(m.engagement_rate_networks) ? m.engagement_rate_networks : []).map((n: string) => names[n] || n);
+  const across = networks.length > 1 ? `across ${networks.slice(0, -1).join(", ")} and ${networks[networks.length - 1]}` : networks.length ? `on ${networks[0]}` : "on tracked networks (excluding LinkedIn)";
+  // Named as the comparison rate: the same actions for every company, never the client's Sprout rate.
+  if (valid(m.engagement_rate?.current)) lines.push(`Engagement: ${client.name}'s engagement rate, compared on likes, comments and shares, was ${rate(m.engagement_rate.current)} ${across}${valid(m.engagement_rate.previous) ? `, against ${rate(m.engagement_rate.previous)} in the previous period` : ""}.`);
   if (valid(m.audience?.current)) lines.push(`Audience: ${fmt(m.audience.current)} followers across tracked networks (excluding LinkedIn)${m.audience_as_of ? ` as of ${m.audience_as_of}` : ''}${valid(m.audience.previous) ? `, ${m.audience.current >= m.audience.previous ? "up" : "down"} ${fmt(Math.abs(m.audience.current - m.audience.previous))} from the previous period` : ""}.`);
   const rivals = companies.filter((c: any) => !c.is_client && valid(metricsOf(c)?.posts?.current));
   const leader = [...rivals].sort((a: any, b: any) => metricsOf(b).posts.current - metricsOf(a).posts.current)[0];

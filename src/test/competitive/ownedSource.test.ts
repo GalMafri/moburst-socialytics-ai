@@ -57,26 +57,34 @@ describe('owned competitive sources',()=>{
   expect(merged[2].image).toBe('original-image');expect(merged[3].source_profile_name).toBe('Brand Nation');
   expect(mergeOwnedCompetitivePosts(existing,{coverage:'not_connected'},{id:'client',name:'Brand'})).toBe(existing);
  });
- // Comparisons read every company, the client included, from RivalIQ and the
- // public LinkedIn source (self-serve design, 19 Oct 2026). The client's own
- // Sprout figures stay on its own performance screens.
- it('never lets the client\'s Sprout figures into its comparison figures',()=>{
+ // The client's own figures come from Sprout on every platform it covers
+ // (Lital, 20 Oct 2026); a platform Sprout does not cover keeps RivalIQ's.
+ it('uses the client\'s Sprout figures platform by platform, and RivalIQ where Sprout has none',()=>{
   const owned=normalize([post(1,'2026-08-02'),post(2,'2026-08-03'),post(3,'2026-08-04')]);
-  const r={period,posts:{current:1,previous:0},engagement:{current:12,previous:0},audience:{current:1000,previous:1000},estimated_impressions:{current:400,previous:0},by_network:{instagram:{posts:{current:1,previous:0},engagement:{current:12,previous:0},followers:{current:1000,previous:1000},impressions:{current:400,previous:0}}}};
+  const r={period,posts:{current:4,previous:0},engagement:{current:30,previous:0},audience:{current:1500,previous:1500},estimated_impressions:{current:900,previous:0},by_network:{
+   instagram:{posts:{current:1,previous:0},engagement:{current:12,previous:0},followers:{current:1000,previous:1000},impressions:{current:400,previous:0}},
+   twitter:{posts:{current:3,previous:0},engagement:{current:18,previous:0},followers:{current:500,previous:500},impressions:{current:500,previous:0}}}};
   const result=competitiveCompanyMetrics({rivaliq_metrics:r,owned_metrics:owned.metrics,linkedin_metrics:{coverage:'complete',posts:1,engagement:17}} as any);
-  // RivalIQ's one post plus the public LinkedIn post; Sprout's three posts and 3,000 followers are not counted.
-  expect(result.posts.current).toBe(2);expect(result.engagement.current).toBe(29);expect(result.audience.current).toBe(1000);
-  expect(result.by_network.instagram.posts.current).toBe(1);
-  expect(result.actual_impressions).toBeUndefined();expect(result.owned_profile_scope).toBeUndefined();
-  expect(JSON.stringify(result)).not.toContain('sprout');
+  // Sprout: two Instagram posts and one LinkedIn post (Sprout's LinkedIn replaces the public copy); RivalIQ: three on X.
+  expect(result.posts.current).toBe(6);expect(result.engagement.current).toBe(12+12+17+18);
+  expect(result.by_network.instagram).toMatchObject({posts:{current:2,previous:0},source:'sprout'});
+  expect(result.by_network.twitter.posts.current).toBe(3);expect(result.by_network.twitter.source).toBeUndefined();
+  // Followers across platforms leave LinkedIn out, as for every company: Sprout's Instagram 3,000 and RivalIQ's X 500.
+  expect(result.audience.current).toBe(3500);
+  // The rate: Sprout's Instagram (24 over 200) with RivalIQ's X (18 over 500), LinkedIn left out.
+  expect(result.engagement_rate.current).toBe((24+18)/(200+500));
+  expect(result.by_network.linkedin.engagement_rate.current).toBe(17/100);
+  expect(result.owned_profile_scope.map((p:any)=>p.network)).toEqual(['instagram','instagram','linkedin']);
+  expect(()=>competitiveCompanyMetrics({rivaliq_metrics:r,owned_metrics:{...owned.metrics,period:{...period,start:'2026-08-02'}}})).toThrow('period');
  });
- it('shows nothing for a platform the comparison sources have no figures for, even with the client\'s own posts there',()=>{
+ it('shows the client\'s platforms that only Sprout covers, from Sprout',()=>{
   const owned=normalize([post(1,'2026-08-02'),post(3,'2026-08-04')]);
   const r={period,posts:{current:2,previous:0},engagement:{current:9,previous:0},audience:{current:1000,previous:1000},estimated_impressions:{current:300,previous:0},by_network:{instagram:{posts:{current:2,previous:0},engagement:{current:9,previous:0},impressions:{current:300,previous:0}}}};
-  const out:any=normalizedCompetitiveMetrics({period,aggregates:{metric_semantics_version:4,period,companies:[{name:'Brand',is_client:true,post_count:4,rivaliq_metrics:r,owned_metrics:owned.metrics,by_channel:{instagram:{post_count:3},linkedin:{post_count:1}},comparison_metrics:{actual_impressions:{current:200,previous:null}}}]}});
+  const out:any=normalizedCompetitiveMetrics({period,aggregates:{metric_semantics_version:4,period,companies:[{name:'Brand',is_client:true,post_count:4,rivaliq_metrics:r,owned_metrics:owned.metrics,by_channel:{instagram:{post_count:1},linkedin:{post_count:1}}}]}});
   const c=out.aggregates.companies[0];
-  expect(c.post_count).toBe(2);expect(Object.keys(c.by_channel)).toEqual(['instagram']);expect(c.by_channel.instagram.post_count).toBe(2);
-  expect(c.comparison_metrics.actual_impressions).toBeUndefined();
+  expect(c.post_count).toBe(2);expect(Object.keys(c.by_channel).sort()).toEqual(['instagram','linkedin']);
+  expect(c.by_channel.instagram.post_count).toBe(1);expect(c.by_channel.linkedin.post_count).toBe(1);
+  expect(c.by_channel.linkedin.engagement_rate_avg).toBe(17/100);
  });
  it('blocks delivery when observed posts do not reconcile with owned totals',()=>{
   const owned=normalize([post(1,'2026-08-02'),post(2,'2026-08-03')]);

@@ -5,6 +5,7 @@
 // their own company; staff see everything. Gaps the team has voted down are
 // hidden here too; endorsed gaps are listed first.
 
+import { COMPARED_RATE_LABEL } from "@/lib/rateLabels";
 import { useNavigate } from "react-router-dom";
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
@@ -123,7 +124,7 @@ export function CompetitiveSnapshot({
           <Tile label="Share of voice" value={share == null ? "–" : `${share}%`} sub={`${me.post_count} of ${totalPosts} posts`} />
           <Tile label="Cadence" value={`${me.cadence_per_week}/wk`} sub={`competitor average ${(rivals.length ? (rivals.reduce((sum, c) => sum + c.cadence_per_week, 0) / rivals.length).toFixed(1) : "–")}/wk`} />
           {/* Engagements divided by impressions, the same definition for every company. No impressions figure, no tile. */}
-          {me.engagement_rate_avg != null && <Tile label="Engagement rate" value={pct(me.engagement_rate_avg)} sub={avg((c) => c.engagement_rate_avg) == null ? "engagements per impression" : `competitor average ${pct(avg((c) => c.engagement_rate_avg))}`} />}
+          {me.engagement_rate_avg != null && <Tile label={COMPARED_RATE_LABEL} value={pct(me.engagement_rate_avg)} sub={avg((c) => c.engagement_rate_avg) == null ? "engagements per impression" : `competitor average ${pct(avg((c) => c.engagement_rate_avg))}`} />}
         </div>
       )}
 

@@ -6,6 +6,7 @@ const DAY=86400000;
 const day=(value:unknown)=>String(value || '').slice(0,10);
 const number=(value:unknown):number|null=>value!==null && value!==undefined && value!=='' && Number.isFinite(Number(value)) && Number(value)>=0 ? Number(value) : null;
 import {ownedNetwork} from './ownedMerge.ts';
+import {engagementsOf,isPublishedPost} from './reportMetrics.ts';
 export {mergeOwnedCompetitivePosts} from './ownedMerge.ts';
 const metric=(row:any,...keys:string[])=>keys.map(key=>number(row.metrics?.[key])).find(n=>n!==null) ?? null;
 const sum=(values:(number|null)[])=>values.length && values.every(n=>n!==null) ? values.reduce<number>((a,b)=>a+b!,0) : null;
@@ -16,26 +17,31 @@ const previousPeriod=(period:Period)=>{
   return {start:new Date(Date.parse(period.start)-days*DAY).toISOString().slice(0,10),end:new Date(Date.parse(period.start)-DAY).toISOString().slice(0,10)};
 };
 
+// Ads are not posts (isPublishedPost), and engagements are the one public
+// count (engagementsOf): both shared with every screen in reportMetrics.ts.
+export { isPublishedPost } from './reportMetrics.ts';
+
+/** A Sprout post's reach: its impressions, or on YouTube, where Sprout has none, its views. */
+export function ownedPostReach(p:{channel?:unknown;ownedImpressions?:unknown;views?:unknown}):number|null {
+  return number(p?.ownedImpressions) ?? (String(p?.channel||'').toLowerCase()==='youtube' ? number(p?.views) : null);
+}
+
 /**
- * Ads are not posts. Sprout's post types name every ad (FACEBOOK_AD,
- * TIKTOK_AD, FB_INSTAGRAM_AD_POST, and the comments on them), and its ad rows
- * carry a guid starting "fa:". On Bader Law in September 2026 all 34 stored
- * "fa:" rows had no impressions and no engagement: copies of one caption
- * seconds apart. Counting them inflated post counts, share of voice and
- * cadence; without them the client's 13 Facebook posts equal RivalIQ's 13.
- * Stories, messages, comments, replies and dark posts are not posts either.
+ * A platform's period totals from its published Sprout posts: the posts, their
+ * engagements, and their reach. A post Sprout reports no reach for (a YouTube
+ * video with no view count yet) counts as none observed, as a missing action
+ * does; a platform none of whose posts reports one has no impressions.
  */
-export function isPublishedPost(row: { post_type?: unknown; guid?: unknown }): boolean {
-  const type = String(row?.post_type || '').toUpperCase();
-  if (/(^|_)ADS?(_|$)/.test(type)) return false;
-  if (/STORY|DIRECT_MESSAGE|MESSENGER|COMMENT|REPLY|DARK|MENTION|RATING|PHOTO_TAG|FOLLOWER_ALERT/.test(type)) return false;
-  if (/^fa:/i.test(String(row?.guid || ''))) return false;
-  return true;
+export function ownedPostTotals(posts:Array<{channel?:unknown;engagementTotal?:unknown;ownedImpressions?:unknown;views?:unknown}>) {
+  const reach=posts.map(ownedPostReach);
+  return {posts:posts.length,
+    engagement:posts.reduce((n,p)=>n+(number(p.engagementTotal)??0),0),
+    impressions:!posts.length?0:reach.some(r=>r!==null)?reach.reduce<number>((n,r)=>n+(r??0),0):null};
 }
 
 /** Normalize all assigned owned profiles, never an agency-wide name search.
- * Public actions exclude private clicks, saves, IG shares, and YouTube shares
- * so the benchmark uses the same action definitions as competitor sources. */
+ * Engagements are the one public count (engagementsOf): no clicks, saves,
+ * Instagram or YouTube shares, the same actions competitor sources count. */
 export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,postRows:any[],profileRows:any[],collectedAt:string) {
   const previous=previousPeriod(period);
   const ids=new Map(profiles.map(p=>[String(p.sprout_profile_id),p]));
@@ -74,8 +80,9 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
     // monthly Sprout report applies.
     const applause=(network==='instagram'||network==='youtube'||network==='twitter' ? metric(row,'lifetime.likes','lifetime.reactions') : metric(row,'lifetime.reactions','lifetime.likes')) ?? 0;
     const conversation=metric(row,'lifetime.comments_count') ?? 0;
-    const amplification=['instagram','youtube'].includes(network)?0:(metric(row,'lifetime.shares_count','lifetime.post_shares_count') ?? 0);
-    const engagement=applause+conversation+amplification;
+    const shares=metric(row,'lifetime.shares_count','lifetime.post_shares_count') ?? 0;
+    const engagement=engagementsOf(network,{applause,conversation,amplification:shares}) ?? 0;
+    const amplification=engagement-applause-conversation;
     const audience=followers(id,previous.start,date);
     const media=(row.visual_media||[]).find((m:any)=>m.thumbnail_url||m.media_url);
     const category=String(row.content_category||'').toLowerCase();
@@ -94,9 +101,8 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
   const summarize=(network:string,range:Period)=>{
     const selected=profiles.filter(p=>ownedNetwork(p.network_type)===network);
     const posts=all.filter(p=>p.channel===network&&day(p.publishedAt)>=range.start&&day(p.publishedAt)<=range.end);
-    return {posts:posts.length,engagement:posts.reduce((n,p)=>n+p.engagementTotal,0),
-      followers:sum(selected.map(p=>followers(String(p.sprout_profile_id),range.start,range.end)?.followers??null)),
-      impressions:posts.length?sum(posts.map(p=>p.ownedImpressions)):0};
+    return {...ownedPostTotals(posts),
+      followers:sum(selected.map(p=>followers(String(p.sprout_profile_id),range.start,range.end)?.followers??null))};
   };
   const by_network:Record<string,any>=Object.fromEntries(networks.map(network=>{
     const current=summarize(network,period),before=summarize(network,previous);
@@ -113,7 +119,8 @@ export function normalizeOwnedCompetitive(profiles:OwnedProfile[],period:Period,
   }))};
   return {provider:'sprout',coverage:'complete',period,previous_period:previous,collected_at:collectedAt,
     profiles:profiles.map(p=>({id:String(p.sprout_profile_id),name:p.profile_name||p.native_name,network:ownedNetwork(p.network_type)})),
-    posts:all.filter(p=>day(p.publishedAt)>=period.start),metrics:{provider:'sprout',coverage:'complete',period,previous_period:previous,by_network,audience_snapshot}};
+    // published_posts_only: counted under the rules above (no ads), so a stored report never needs them counted again.
+    posts:all.filter(p=>day(p.publishedAt)>=period.start),metrics:{provider:'sprout',coverage:'complete',published_posts_only:true,period,previous_period:previous,by_network,audience_snapshot}};
 }
 
 /** opts.fields: extra Sprout post fields to request (the weekly calendar asks for is_boosted). */

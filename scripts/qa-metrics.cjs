@@ -1,7 +1,9 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const read=name=>fs.readFileSync('n8n/code/'+name+'.js','utf8');
 const ts=require('typescript');
-const metricsCode=ts.transpileModule(fs.readFileSync('supabase/functions/_shared/competitive/reportMetrics.ts','utf8').replace(/export /g,''),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.None}}).outputText;
+// The node's code follows the shared metric rules and post sample, as in n8n/competitive-metric-coverage.mjs.
+const helper=rel=>ts.transpileModule(fs.readFileSync(rel,'utf8').replace(/^import .*$/gm,'').replace(/export /g,''),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.None}}).outputText;
+const metricsCode=helper('supabase/functions/_shared/competitive/reportMetrics.ts')+'\n'+helper('supabase/functions/_shared/competitive/postSample.ts');
 const output=[];function check(name,fn){fn();output.push(name)}
 const profiles=[{id:5034995,network:'facebook'},{id:5489335,network:'fb_instagram_account'},{id:5719052,network:'linkedin_company'}];
 const august=[{impressions:961,reactions:5,likes:5,comments_count:0,shares_count:0,post_link_clicks:1,post_content_clicks:14,post_content_clicks_other:13,video_views:120,posts_sent_count:3},{impressions:783,reactions:6,likes:6,comments_count:1,shares_count:0,video_views:15,posts_sent_count:1},{impressions:7929,reactions:110,comments_count:4,shares_count:2,post_link_clicks:599,post_content_clicks:599,video_views:446,posts_sent_count:14}];

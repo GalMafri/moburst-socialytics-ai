@@ -1,3 +1,4 @@
+import { COMPARED_RATE_LABEL, COMPARED_RATE_SHORT } from "@/lib/rateLabels";
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
 // Renders one competitive_reports row (project step 11's in-app half).
 //
@@ -54,13 +55,20 @@ type TopPost = {
 };
 /** A RivalIQ period total with the previous equal-length period beside it. */
 type Both = { current: number | null; previous: number | null };
-/** A company's comparison figures: RivalIQ and the public LinkedIn source, the same for every company, the client included. */
+/**
+ * A company's comparison figures: the client's from Sprout on every platform
+ * Sprout covers (RivalIQ on one it does not), competitors' from RivalIQ and
+ * the public LinkedIn source. `impressions` is what the engagement rate
+ * divides by; metric_scopes.impressions says whether Sprout measured it.
+ */
 type RivalIQMetrics = {
+  impressions?: Both;
+  metric_scopes?: { impressions?: string };
   audience_as_of?: string;
   period?: { start: string; end: string };
   previous_period?: { start: string; end: string } | null;
   audience?: Both; engagement?: Both; estimated_impressions?: Both; posts?: Both; engagement_rate?: Both; likely_boosted_facebook_posts?: Both;
-  by_network?: Record<string, { audience_as_of?: string; followers?: Both; posts?: Both; engagement?: Both; impressions?: Both; views?: Both; engagement_rate?: Both; likely_boosted?: Both }>;
+  by_network?: Record<string, { audience_as_of?: string; followers?: Both; posts?: Both; engagement?: Both; impressions?: Both; views?: Both; engagement_rate?: Both; likely_boosted?: Both; source?: string }>;
   daily?: Array<{ date: string; posts: number; engagement: number; audience: number }>;
 };
 type Bucket = {
@@ -395,13 +403,17 @@ export default function CompetitiveReportView() {
   // RivalIQ's own period totals (runs from 2026-09-06 onward), for the whole
   // landscape or for the filtered network.
   const netKey = effectivePlat === "x" ? "twitter" : effectivePlat;
+  // Whether a company's impressions here were measured (the client's Sprout figures) rather than estimated.
+  const measuredImpressions = (c: Company) => effectivePlat === "all"
+    ? c.comparison_metrics?.metric_scopes?.impressions === "sprout"
+    : c.comparison_metrics?.by_network?.[netKey]?.source === "sprout";
   const metricsFor = (c: Company) => {
     const m = c.comparison_metrics || c.rivaliq_metrics;
     if (!m) return null;
-    if (effectivePlat === "all") return { audience: m.audience, audience_as_of:m.audience_as_of, engagement: m.engagement, impressions: m.estimated_impressions, posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
+    if (effectivePlat === "all") return { audience: m.audience, audience_as_of:m.audience_as_of, engagement: m.engagement, impressions: m.impressions ?? m.estimated_impressions, measured: measuredImpressions(c), posts: m.posts, boosted: m.likely_boosted_facebook_posts, by_network: m.by_network || {} };
     const n = m.by_network?.[netKey];
     if (!n) return null;
-    return { audience: n.followers, audience_as_of:n.audience_as_of, engagement: n.engagement, impressions: n.impressions, posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
+    return { audience: n.followers, audience_as_of:n.audience_as_of, engagement: n.engagement, impressions: n.impressions, measured: measuredImpressions(c), posts: n.posts, boosted: n.likely_boosted, by_network: {} as NonNullable<RivalIQMetrics["by_network"]> };
   };
   const withMetrics = ordered.map((c) => ({ c, m: metricsFor(c) })).filter((x) => x.m) as { c: Company; m: NonNullable<ReturnType<typeof metricsFor>> }[];
   const hasMetrics = withMetrics.length > 0;
@@ -531,7 +543,7 @@ export default function CompetitiveReportView() {
           const reach = postReach(p);
           return reach ? <Stat label={reach.kind === "views" ? "Views" : reach.kind === "impressions" ? "Impressions" : "Est. impressions"} value={fmt(reach.value)} /> : null;
         })()}
-        {p.engagement_rate != null && <Stat label="Engagement rate" value={pct(p.engagement_rate)} />}
+        {p.engagement_rate != null && <Stat label={COMPARED_RATE_SHORT} value={pct(p.engagement_rate)} />}
         {(p.followers_at_publication ?? p.reach) != null && <Stat label="Followers at publication" value={fmt((p.followers_at_publication ?? p.reach)!)} />}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 t-secondary mt-auto">
@@ -694,7 +706,7 @@ export default function CompetitiveReportView() {
             <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} tracked posts`} />
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`competitor avg ${avgCadence.toFixed(1)}/wk`} />
             {/* Engagements divided by impressions (views on video), the same for every company. No impressions figure, no tile. */}
-            {meB.post_count > 0 && meB.engagement_rate_avg != null && <Kpi label="Engagement rate" value={pct(meB.engagement_rate_avg)} sub={`${effectivePlat === "all" ? "Excluding LinkedIn · " : ""}${avg((b) => b.engagement_rate_avg) == null ? "engagements per impression" : `active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`}`} />}
+            {meB.post_count > 0 && meB.engagement_rate_avg != null && <Kpi label={COMPARED_RATE_LABEL} value={pct(meB.engagement_rate_avg)} sub={`${effectivePlat === "all" ? "Excluding LinkedIn · " : ""}${avg((b) => b.engagement_rate_avg) == null ? "engagements per impression" : `active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`}`} />}
             <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`active peers avg ${fmt(avg((b) => b.engagement_avg))}`} />
           </div>
         )}
@@ -772,7 +784,7 @@ export default function CompetitiveReportView() {
                   <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => v.toFixed(1)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).cadence_per_week || 0), emphasized: !!c.is_client }))} />
                 </div>
                 <div className="space-y-3">
-                    <p className="t-subhead">Engagement rate</p><p className="t-secondary">Engagements divided by impressions (views on video), for companies with an impressions figure.{effectivePlat === "all" ? " Tracked networks, excluding LinkedIn." : ""}</p>
+                    <p className="t-subhead">{COMPARED_RATE_LABEL}</p><p className="t-secondary">Likes, comments and shares divided by impressions (views on video), the same for every company, for companies with an impressions figure.{effectivePlat === "all" ? " Tracked networks, excluding LinkedIn." : ""}</p>
                   <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => pct(v)} rows={ordered.filter(c => { const b = bucketFor(c, effectivePlat); return b.post_count > 0 && b.engagement_rate_avg != null; }).map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).engagement_rate_avg || 0), emphasized: !!c.is_client }))} />
                 </div>
               </CardContent>
@@ -799,12 +811,12 @@ export default function CompetitiveReportView() {
                         <div className="grid grid-cols-3 gap-3">
                           <TileStat value={String(b.post_count)} label="Tracked posts" />
                           <TileStat value={String(b.cadence_per_week)} label="Posts / week" />
-                          {b.engagement_rate_avg != null && <TileStat value={pct(b.engagement_rate_avg)} label="Engagement rate" />}
+                          {b.engagement_rate_avg != null && <TileStat value={pct(b.engagement_rate_avg)} label={COMPARED_RATE_SHORT} />}
                           <TileStat value={b.engagement_avg == null ? "Not available" : compactNumber(b.engagement_avg)} exact={fmt(b.engagement_avg)} label="Engagements / post" />
                           <TileStat
                             value={b.impressions_avg == null ? "Not available" : compactNumber(b.impressions_avg)}
                             exact={fmt(b.impressions_avg)}
-                            label={effectivePlat === "all" ? vendor("Est. impressions / RivalIQ post", "Est. impressions / tracked post") : "Est. impressions / post"}
+                            label={measuredImpressions(c) ? "Impressions / post" : effectivePlat === "all" ? vendor("Est. impressions / RivalIQ post", "Est. impressions / tracked post") : "Est. impressions / post"}
                           />
                           <TileStat value={b.views_total == null ? "Not available" : compactNumber(b.views_total)} exact={b.views_total == null ? undefined : fmt(b.views_total)} label="Reported video views" />
                         </div>
@@ -906,7 +918,7 @@ export default function CompetitiveReportView() {
                         <div className="grid grid-cols-2 gap-x-3 gap-y-3">
                           <MetricRow label={effectivePlat === "all" && (m.by_network?.linkedin?.followers?.current ?? 0) > 0 ? "Followers excl. LinkedIn" : "Followers"} value={m.audience} signed={c.is_client} />
                           <MetricRow label="Engagement" value={m.engagement} signed={c.is_client} />
-                          {m.impressions && <MetricRow label={vendor("Est. impressions (RivalIQ)", "Est. impressions")} value={m.impressions} signed={c.is_client} />}
+                          {m.impressions && <MetricRow label={m.measured ? "Impressions" : vendor("Est. impressions (RivalIQ)", "Est. impressions")} value={m.impressions} signed={c.is_client} />}
                           <MetricRow label="Posts" value={m.posts} format={(v) => String(Math.round(v))} signed={c.is_client} />
                         </div>
                         {m.audience_as_of && <p className="t-secondary">Audience measured {asOf(m.audience_as_of)}. Activity above covers the selected report dates.</p>}
@@ -1159,7 +1171,7 @@ export default function CompetitiveReportView() {
                                 <span className="flex items-baseline gap-2 flex-wrap">
                                   <span className="t-body font-semibold text-white tabular-nums">{ex.post ? fmt(ex.post.engagement) : "–"}</span>
                                   <span className="t-label">engagements</span>
-                                  {ex.post?.engagement_rate != null ? <span className="t-label">· {pct(ex.post.engagement_rate)} engagement rate</span> : null}
+                                  {ex.post?.engagement_rate != null ? <span className="t-label">· {pct(ex.post.engagement_rate)} {COMPARED_RATE_SHORT.toLowerCase()}</span> : null}
                                 </span>
                                 <span className="t-label block mt-0.5">
                                   {ex.post?.channel ? platformLabel(ex.post.channel) : "Post"}
