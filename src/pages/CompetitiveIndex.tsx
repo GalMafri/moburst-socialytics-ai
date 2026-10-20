@@ -11,7 +11,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { fetchActiveClients } from "@/lib/activeClients";
 import { formatDateTime } from "@/lib/display";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent } from "@/components/ui/card";
+import { Section } from "@/components/ui/section";
+import { StatGrid } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
 import { LoadError } from "@/components/ui/load-error";
@@ -68,8 +69,7 @@ export default function CompetitiveIndex() {
   const chooseClient = (id: string) => setParams(prev => { prev.set("client", id); return prev; }, { replace: true });
 
   return (
-    <AppLayout title="Competitive Analysis" description="Choose a client to edit its competitors, run a report, or open previous results.">
-      <div className="w-full space-y-4">
+    <AppLayout title="Competitive analysis" description="Choose a client to edit its competitors, run a report, or open previous results.">
         {isLoading ? (
           <Loading label="Loading clients" />
         ) : isError ? (
@@ -79,59 +79,67 @@ export default function CompetitiveIndex() {
         ) : !data?.length ? (
           <EmptyState icon={Crosshair} title="No clients yet" />
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <div className="grid gap-section lg:grid-cols-[260px_minmax(0,1fr)] items-start">
             <ClientPicker clients={visibleClients} selectedId={selectedClient?.id} onSelect={chooseClient} search={search} onSearch={setSearch} />
             <div className="min-w-0">
-            {!selectedClient && <p className="t-secondary py-6">Try another client name.</p>}
+            {!selectedClient && <EmptyState icon={Crosshair} title="No client by that name" description="Try another client name." />}
             {(selectedClient ? [selectedClient] : []).map((c) => (
-              <Card key={c.id} className="border-white/15">
-                <CardContent className="pt-5 space-y-3">
-                  <div className="border-b border-white/10 pb-4"><p className="t-label uppercase tracking-wider">Selected client</p><h2 className="t-h2 mt-1">{c.name}</h2><p className="t-secondary mt-1">Competitors and reports for this client only.</p></div>
-                  <dl className="grid gap-4 py-2 md:grid-cols-3">
-                    <div>
-                      <dt className="t-label">Saved selection</dt>
-                      <dd className="t-body">{c.selection.headline}</dd>
-                      {c.selection.detail && <dd className="t-secondary">{c.selection.detail}</dd>}
-                    </div>
-                    {c.tracking.headline && (
-                      <div>
-                        <dt className="t-label">RivalIQ tracking</dt>
-                        <dd className="t-body">{c.tracking.headline}</dd>
-                      </div>
+              // The selected client as one split panel: its name and the
+              // things to do on the left, where it stands on the right. The
+              // card had five buttons in a row under three short facts, at
+              // the left of 1,100px of glass.
+              <Section
+                key={c.id}
+                layout="split"
+                eyebrow="Selected client"
+                title={c.name}
+                description="Competitors and reports for this client only."
+                action={
+                  <>
+                    {c.report?.status === "complete" && (
+                      <Button size="sm" onClick={() => navigate(`/clients/${c.id}/competitive/reports/${c.report.id}`)}><FileText /> Latest report</Button>
                     )}
-                    <div>
-                      <dt className="t-label">Last report</dt>
-                      <dd className="t-body">{c.outcome.headline}</dd>
-                    </div>
-                  </dl>
-                  <div className="flex gap-2 flex-wrap">
-                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${c.id}/competitive`)}><Crosshair className="h-3.5 w-3.5 mr-1" /> Edit competitors</Button>
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/clients/${c.id}/competitive`)}><Crosshair /> Edit competitors</Button>
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => navigate(`/clients/${c.id}/competitive/run`)}
                       disabled={!c.runnable}
                     >
-                      <Play className="h-3.5 w-3.5 mr-1" /> {c.report?.status === "running" ? "View running report" : "Run competitive report"}
+                      <Play /> {c.report?.status === "running" ? "View running report" : "Run competitive report"}
                     </Button>
-                    {c.report?.status === "complete" && (
-                      <Button size="sm" onClick={() => navigate(`/clients/${c.id}/competitive/reports/${c.report.id}`)}><FileText className="h-3.5 w-3.5 mr-1" /> Latest report</Button>
-                    )}
                     {c.report && (
-                      <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${c.id}/competitive/reports`)}><History className="h-3.5 w-3.5 mr-1" /> All runs</Button>
+                      <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${c.id}/competitive/reports`)}><History /> All runs</Button>
                     )}
                     {c.runnable && (
-                      <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${c.id}/competitive/feed`)}><Rss className="h-3.5 w-3.5 mr-1" /> Feed</Button>
+                      <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${c.id}/competitive/feed`)}><Rss /> Feed</Button>
                     )}
+                  </>
+                }
+              >
+                <StatGrid min={200}>
+                  <div className="glass-inner p-inner space-y-1 min-w-0">
+                    <p className="t-subhead">Saved selection</p>
+                    <p className="t-h4">{c.selection.headline}</p>
+                    {c.selection.detail && <p className="t-label">{c.selection.detail}</p>}
                   </div>
-                  {c.report && <p className="t-secondary">Last run {formatDateTime(c.report.created_at)}</p>}
-                </CardContent>
-              </Card>
+                  {c.tracking.headline && (
+                    <div className="glass-inner p-inner space-y-1 min-w-0">
+                      <p className="t-subhead">RivalIQ tracking</p>
+                      <p className="t-h4">{c.tracking.headline}</p>
+                    </div>
+                  )}
+                  <div className="glass-inner p-inner space-y-1 min-w-0">
+                    <p className="t-subhead">Last report</p>
+                    <p className="t-h4">{c.outcome.headline}</p>
+                    {c.report && <p className="t-label">Last run {formatDateTime(c.report.created_at)}</p>}
+                  </div>
+                </StatGrid>
+              </Section>
             ))}
             </div>
           </div>
         )}
-      </div>
     </AppLayout>
   );
 }

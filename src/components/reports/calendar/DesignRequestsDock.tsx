@@ -81,7 +81,7 @@ function DockCard({ request, isStaff, onOpen, onDismiss }: { request: DesignRequ
           {ready ? <CheckCircle2 className="h-4 w-4" /> : preparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold tracking-[-0.2px] text-white">
+          <p className="t-h4">
             {ready ? stageLine(request, isStaff) : preparing ? `Preparing your ${nounOf(request)}` : stageLine(request, isStaff)}
           </p>
           <p className="t-label tracking-[-0.2px] truncate mt-0.5">{postLabel(request)}</p>

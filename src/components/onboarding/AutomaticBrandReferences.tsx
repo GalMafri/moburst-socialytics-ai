@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeading } from '@/components/ui/card';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { platformLabel } from '@/lib/platform';
 
@@ -83,20 +83,22 @@ export function AutomaticBrandReferences({ clientId, savedVersion, onReady }: {
     setAsking(false);
   };
 
-  return <Card><CardContent className="pt-5 space-y-3">
-    <div className="flex items-center justify-between gap-3">
-      <h3 className="font-semibold">Brand references from social posts</h3>
-      {clientId && <Button variant="outline" size="sm" disabled={running || asking} onClick={refresh}>
-        {running || asking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+  return <Card>
+    <CardHeading
+      title="Brand references from social posts"
+      description="Branded designs from this client's published posts, and the visual style learned from them. They update on their own when the client's accounts change and every three months."
+      actions={clientId && <Button variant="outline" size="sm" disabled={running || asking} onClick={refresh}>
+        {running || asking ? <Loader2 className="animate-spin" /> : <RefreshCw />}
         Refresh references
       </Button>}
-    </div>
-    <p className="t-secondary">Branded designs from this client's published posts, and the visual style learned from them. They update on their own when the client's accounts change and every three months.</p>
+    />
+    <CardContent className="space-y-3">
     {running && <p role="status" className="t-secondary">Reviewing the client's published posts and learning its style.</p>}
-    {!running && refs.length > 0 && step?.done_at && <p role="status" className="text-sm">{refs.length} branded references, learned {longDate(step.done_at)}.</p>}
-    {refs.length > 0 && <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{refs.map((ref) => <a key={ref.path} href={ref.source_url} target="_blank" rel="noreferrer" className="space-y-1" title={ref.classification}>
-      {previews[ref.path] && <img src={previews[ref.path]} alt={`${platformLabel(ref.platform)} brand reference`} className="aspect-square w-full rounded object-contain bg-muted" />}
-      <span className="text-xs underline">View {platformLabel(ref.platform)} post</span>
+    {!running && refs.length > 0 && step?.done_at && <p role="status" className="t-label">{refs.length} branded references, learned {longDate(step.done_at)}.</p>}
+    {refs.length > 0 && <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">{refs.map((ref) => <a key={ref.path} href={ref.source_url} target="_blank" rel="noreferrer" className="space-y-1">
+      {previews[ref.path] && <img src={previews[ref.path]} alt={`${platformLabel(ref.platform)} brand reference`} className="aspect-square w-full rounded-[12px] object-contain bg-[rgba(255,255,255,0.04)]" />}
+      <span className="t-label underline">View {platformLabel(ref.platform)} post</span>
     </a>)}</div>}
-  </CardContent></Card>;
+    </CardContent>
+  </Card>;
 }

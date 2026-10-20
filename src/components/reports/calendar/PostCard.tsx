@@ -84,11 +84,11 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
       type="button"
       onClick={onOpen}
       aria-label={`Open post: ${copy.slice(0, 60) || post.platform}`}
-      className="glass-inner hover-lift w-full text-left p-5 space-y-4 group flex flex-col !rounded-[20px] relative
+      className="glass-inner hover-lift w-full text-left p-inner space-y-3 group flex flex-col relative
                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       {/* Thumbnail / empty state / generating overlay — 16:10. */}
-      <div className={`relative w-full rounded-[10px] overflow-hidden ${thumb && !isGenerating ? "aspect-[16/10]" : "h-16"}`}>
+      <div className={`relative w-full rounded-[8px] overflow-hidden ${thumb && !isGenerating ? "aspect-[16/10]" : "h-16"}`}>
         {thumb && !isGenerating ? (
           <div className="w-full h-full bg-black">
             {/* The whole design, fitted inside the card (smaller when its shape differs), never cropped. */}
@@ -119,7 +119,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         {isGenerating && (
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center gap-2 text-white">
             <Loader2 className="h-6 w-6 animate-spin text-[#b9e045]" />
-            <span className="text-sm font-semibold tracking-[-0.2px]">
+            <span className="t-h4">
               {activeGen.type === "design" ? "Generating designs" : "Generating videos"}
             </span>
             <span className="t-label tracking-[-0.2px]">
@@ -133,7 +133,7 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
         {designing && designRequest && !thumb && (
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center gap-2 text-white">
             <Loader2 className="h-4 w-4 animate-spin text-[#b9e045]" />
-            <span className="text-sm font-semibold tracking-[-0.2px]">{designRequest.kind === "carousel" ? "Preparing carousel" : "Preparing design"}</span>
+            <span className="t-h4">{designRequest.kind === "carousel" ? "Preparing carousel" : "Preparing design"}</span>
           </div>
         )}
         {designing && designRequest && thumb && (

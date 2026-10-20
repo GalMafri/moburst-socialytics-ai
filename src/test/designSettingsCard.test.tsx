@@ -6,7 +6,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DesignSettingsCard } from '@/components/onboarding/DesignSettingsCard';
 
 // Design settings are derived automatically (Lital's decision 2, 19 Oct 2026)
-// and in place from then on; automatic designs stay off (decision 3 on hold).
+// and in place from then on. Automatic designs are off for good (Lital, 20 Oct
+// 2026), so the card offers no switch for them.
 
 const f = vi.hoisted(() => ({ settings: null as any, writes: [] as any[] }));
 vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -32,14 +33,15 @@ function mount() {
   render(<QueryClientProvider client={qc}><DesignSettingsCard clientId="c" /></QueryClientProvider>);
 }
 
-it('shows derived settings as in place, editable, with automatic designs off and no confirmation step', async () => {
+it('shows derived settings as in place, editable, with no automatic designs switch and no confirmation step', async () => {
   f.settings = { client_id: 'c', source: 'lifecycle', logo_path: 'c/brand/logo.png', background: '#0B0E1A', placement: { anchor: 'center', width: 0.25, top: 0.04 }, reference_paths: ['c/a.jpg'], auto_designs: false, confirmed_at: '2026-10-19T12:00:00Z',
     derived: { at: '2026-10-19T12:00:00Z', placement_from: 'client_posts', background_from: 'brand_color' } };
   mount();
   expect(await screen.findByText("Worked out automatically on Oct 19, 2026: the logo from the client's website, its place from where the client's own posts put it, the background from a brand color. You can change any of them here.")).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /Confirm/ })).toBeNull();
   expect(screen.queryByText(/Confirm them once|not confirmed|Add some in the Brief tab/)).toBeNull();
-  expect(screen.getByRole('switch')).not.toBeChecked();
+  expect(screen.queryByRole('switch')).toBeNull();
+  expect(screen.queryByText(/automatically/i, { selector: 'label' })).toBeNull();
   // Nothing to save until a person changes something.
   expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
   fireEvent.change(screen.getByLabelText('Background behind the logo'), { target: { value: '#FFFFFF' } });

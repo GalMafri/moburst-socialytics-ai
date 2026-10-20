@@ -124,9 +124,8 @@ export default function AllReports() {
         </Select>
       }
     >
-      <div className="w-full">
-        <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
-          <TabsList className="mb-4">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="space-y-section">
+          <TabsList>
             <TabsTrigger value="social" className="gap-1.5"><FileText className="h-4 w-4" /> Monthly reports</TabsTrigger>
             <TabsTrigger value="competitive" className="gap-1.5"><Crosshair className="h-4 w-4" /> Competitive analyses</TabsTrigger>
           </TabsList>
@@ -167,8 +166,8 @@ export default function AllReports() {
                           {!isClient && (
                             <TableCell>
                               {r.gamma_url ? (
-                                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(r.gamma_url, "_blank")}>
-                                  <ExternalLink className="h-3.5 w-3.5" /> Presentation
+                                <Button size="sm" variant="outline" onClick={() => window.open(r.gamma_url, "_blank")}>
+                                  <ExternalLink /> Presentation
                                 </Button>
                               ) : r.display.state === "running" ? (
                                 <span className="t-secondary">Being made</span>
@@ -179,7 +178,7 @@ export default function AllReports() {
                             <div className="flex items-center justify-end gap-1">
                               {r.display.state === "ready" && (
                                 <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.clients?.id}/reports/${r.id}`)}>
-                                  <Eye className="h-4 w-4 mr-1" /> Open report
+                                  <Eye /> Open report
                                 </Button>
                               )}
                               <ReportActions report={r} />
@@ -191,11 +190,13 @@ export default function AllReports() {
                   </Table>
                 ) : (
                   <EmptyState
+                    framed={false}
+                    icon={FileText}
                     title={filteredClientName ? `No reports for ${filteredClientName} yet` : "No reports yet"}
                     description={firstRunSentence("monthly", nextMonthly.data) || undefined}
                   />
                 )}
-                {!isLoading && !isError && (!!reports?.length || socialLimit > 50) && <div className="flex items-center justify-between gap-3 mt-4"><p className="t-secondary">Monthly reports {reports?.length ? `${socialLimit - 49}–${socialLimit - 50 + Math.min(reports.length, 50)}` : ": no more results"}{(reports?.length || 0) > 50 ? "; more available" : ""}.</p>{socialLimit > 50 && <Button variant="outline" onClick={() => setSocialLimit((n) => n - 50)}>Previous monthly reports</Button>}{(reports?.length || 0) > 50 && <Button variant="outline" onClick={() => setSocialLimit((n) => n + 50)}>Next monthly reports</Button>}</div>}
+                {!isLoading && !isError && (!!reports?.length || socialLimit > 50) && <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-white/[0.06]"><p className="t-label mr-auto">{reports?.length ? `Monthly reports ${socialLimit - 49}–${socialLimit - 50 + Math.min(reports.length, 50)}` : "No more monthly reports"}{(reports?.length || 0) > 50 ? "; more available" : ""}.</p>{socialLimit > 50 && <Button size="sm" variant="outline" aria-label="Previous monthly reports" onClick={() => setSocialLimit((n) => n - 50)}>Previous</Button>}{(reports?.length || 0) > 50 && <Button size="sm" variant="outline" aria-label="Next monthly reports" onClick={() => setSocialLimit((n) => n + 50)}>Next</Button>}</div>}
               </CardContent>
             </Card>
           </TabsContent>
@@ -240,7 +241,7 @@ export default function AllReports() {
                                 <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.client_id}/competitive/reports`)}>All runs</Button>
                                 {r.display.state === "ready" && (
                                   <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${r.client_id}/competitive/reports/${r.id}`)}>
-                                    <Eye className="h-4 w-4 mr-1" /> Open report
+                                    <Eye /> Open report
                                   </Button>
                                 )}
                                 <ReportActions report={r} kind="competitive" />
@@ -253,17 +254,17 @@ export default function AllReports() {
                   </Table>
                 ) : (
                   <EmptyState
+                    framed={false}
                     icon={Crosshair}
                     title={filteredClientName ? `No competitive analyses for ${filteredClientName} yet` : "No competitive analyses yet"}
                     description={firstRunSentence("competitive", nextCompetitive.data) || undefined}
                   />
                 )}
-                {!competitiveLoading && !competitiveFailed && (!!competitive?.length || competitiveLimit > 50) && <div className="flex items-center justify-between gap-3 mt-4"><p className="t-secondary">Competitive analyses {competitive?.length ? `${competitiveLimit - 49}–${competitiveLimit - 50 + Math.min(competitive.length, 50)}` : ": no more results"}{(competitive?.length || 0) > 50 ? "; more available" : ""}.</p>{competitiveLimit > 50 && <Button variant="outline" onClick={() => setCompetitiveLimit((n) => n - 50)}>Previous competitive analyses</Button>}{(competitive?.length || 0) > 50 && <Button variant="outline" onClick={() => setCompetitiveLimit((n) => n + 50)}>Next competitive analyses</Button>}</div>}
+                {!competitiveLoading && !competitiveFailed && (!!competitive?.length || competitiveLimit > 50) && <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-white/[0.06]"><p className="t-label mr-auto">{competitive?.length ? `Competitive analyses ${competitiveLimit - 49}–${competitiveLimit - 50 + Math.min(competitive.length, 50)}` : "No more competitive analyses"}{(competitive?.length || 0) > 50 ? "; more available" : ""}.</p>{competitiveLimit > 50 && <Button size="sm" variant="outline" aria-label="Previous competitive analyses" onClick={() => setCompetitiveLimit((n) => n - 50)}>Previous</Button>}{(competitive?.length || 0) > 50 && <Button size="sm" variant="outline" aria-label="Next competitive analyses" onClick={() => setCompetitiveLimit((n) => n + 50)}>Next</Button>}</div>}
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
-      </div>
     </AppLayout>
   );
 }

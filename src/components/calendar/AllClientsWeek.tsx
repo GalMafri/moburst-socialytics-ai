@@ -75,14 +75,16 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
   });
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
+    // The same day columns as a client's own board, compact enough for seven
+    // across on a wide screen.
+    <div className="grid gap-3 items-start grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
       {DAYS.map((day, i) => {
         const date = addDays(week, i);
         const dayPosts = posts.filter((p) => p.post_date === date).sort((a, b) => a.client_name.localeCompare(b.client_name) || (a.posting_time || "").localeCompare(b.posting_time || ""));
         return (
-          <section key={day} className="space-y-2 min-w-0" aria-label={`${day} ${shortDate(date)}`}>
+          <section key={day} className="glass p-2.5 space-y-2 min-w-0" aria-label={`${day} ${shortDate(date)}`}>
             <header className="flex items-baseline justify-between gap-1 px-1">
-              <span className="text-sm font-semibold text-white">{day.slice(0, 3)}</span>
+              <span className="t-h4">{day.slice(0, 3)}</span>
               <span className="t-label">{shortDate(date)}</span>
             </header>
             {dayPosts.length === 0 ? (
@@ -92,7 +94,7 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                 key={p.id}
                 type="button"
                 onClick={() => navigate(`/clients/${p.client_id}/calendar?week=${week}&post=${encodeURIComponent(p.id)}`)}
-                className="w-full text-left glass-inner p-2 space-y-2 border border-white/5 hover:border-white/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="w-full text-left glass-inner p-2 space-y-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 aria-label={`Open ${p.client_name}'s ${platformName(p.platform)} post`}
               >
                 {designs[p.post_key] ? (
@@ -111,7 +113,7 @@ export function AllClientsWeek({ posts, week }: { posts: ClientPost[]; week: str
                 ) : (
                   <p className="t-label inline-flex items-center gap-1"><ImageOff className="h-3 w-3" aria-hidden />No design yet</p>
                 )}
-                <p className="text-xs font-semibold text-white truncate">{p.client_name}</p>
+                <p className="t-label font-semibold !text-white truncate">{p.client_name}</p>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <PlatformBadge platform={p.platform} size="sm" />
                   {p.posting_time && <span className="t-label inline-flex items-center gap-1"><Clock className="h-3 w-3" aria-hidden />{p.posting_time}</span>}

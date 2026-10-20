@@ -6,21 +6,21 @@ import type { Change } from "@/lib/competitiveChanges";
 export function ChangeCards({ changes, className }: { changes: Change[]; className?: string }) {
   if (!changes.length) return null;
   return (
-    <div className={cn("grid gap-3 md:grid-cols-2 xl:grid-cols-3", className)}>
+    <div className={cn("grid gap-inner grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))]", className)}>
       {changes.map((c, i) => {
         const Icon = c.direction === "up" ? ArrowUpRight : c.direction === "down" ? ArrowDownRight : Minus;
         // Theme tokens: success and destructive for the client's own movement, the label grey otherwise.
         const colour = c.tone === "good" ? "text-success" : c.tone === "bad" ? "text-destructive" : "t-label";
         return (
-          <article key={i} className={cn("glass-inner p-4 flex items-start gap-3 min-w-0", c.is_client && "border-[rgba(185,224,69,0.35)]")}>
+          <article key={i} className={cn("glass-inner p-inner flex items-start gap-3 min-w-0", c.is_client && "is-selected")}>
             <Icon className={cn("h-5 w-5 flex-shrink-0 mt-0.5", colour)} aria-hidden />
             <div className="min-w-0 space-y-1.5">
               <p className="t-subhead">
                 {c.company}
-                {c.is_client && <span className="text-[#b9e045]"> · client</span>}
+                {c.is_client && <span className="!text-[#b9e045]"> · Client</span>}
               </p>
-              <h3 className="t-body font-semibold text-white leading-snug">{c.headline}</h3>
-              <p className="t-body">{c.detail}</p>
+              <h3 className="t-h4">{c.headline}</h3>
+              <p className="t-secondary">{c.detail}</p>
             </div>
           </article>
         );

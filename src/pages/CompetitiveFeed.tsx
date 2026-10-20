@@ -10,7 +10,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Segment, SegmentedGroup } from "@/components/ui/segmented";
+import { Card, CardContent, CardHeading } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/loading";
@@ -40,13 +41,6 @@ const isBoosted = (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase(
 
 const fmt = (n: number | null | undefined) => (n == null ? "–" : Math.round(Number(n)).toLocaleString());
 
-function Seg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button type="button" onClick={onClick} aria-pressed={active} className={`px-3 py-1.5 rounded-[9px] t-body font-medium transition-colors ${active ? "bg-[rgba(255,255,255,0.12)] text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-      {children}
-    </button>
-  );
-}
 
 export default function CompetitiveFeed() {
   const { id } = useParams();
@@ -211,21 +205,19 @@ export default function CompetitiveFeed() {
       title={`Competitor feed: ${clientName}`}
       description="What the competitor set posted in the last seven days, and the topics they converged on."
       back={
-        <Button variant="ghost" size="sm" className="-ml-2 mb-1" onClick={() => navigate(`/clients/${id}/competitive/reports`)}>
-          <ArrowLeft className="h-4 w-4 mr-1" /> Competitive reports
+        <Button variant="ghost" size="sm" className="-ml-2 border-0 bg-transparent" onClick={() => navigate(`/clients/${id}/competitive/reports`)}>
+          <ArrowLeft /> Competitive reports
         </Button>
       }
       meta={snapshot ? <span className="t-label">Pulled {formatDateTime(snapshot.fetched_at)}{payload.window ? ` · ${formatRange(payload.window)}` : ""}{payload.truncated ? ` · capped at ${posts.length} posts` : ""}</span> : undefined}
       actions={
         canRunAnalysis ? (
           <Button onClick={() => setConfirmRefresh(true)} disabled={refresh.isPending}>
-            {refresh.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />} Refresh now
+            {refresh.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />} Refresh now
           </Button>
         ) : undefined
       }
     >
-      <div className="w-full space-y-8">
-
         {isLoading ? (
           <Loading label="Loading the feed" />
         ) : feedFailed ? (
@@ -240,20 +232,21 @@ export default function CompetitiveFeed() {
           <>
             {/* Trends */}
             {(alerts || []).length > 0 && (
-              <Card className="glass-elevated">
-                <CardHeader>
-                  <CardTitle className="t-h3 flex items-center gap-2"><TrendingUp className="h-5 w-5" /> Trends this week</CardTitle>
-                  <CardDescription>Topics two or more companies posted about inside the window. Confidence rises with more companies, more posts and tighter timing.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-2">
+              <Card>
+                <CardHeading
+                  icon={<TrendingUp />}
+                  title="Trends this week"
+                  description="Topics two or more companies posted about inside the window. Confidence rises with more companies, more posts and tighter timing."
+                />
+                <CardContent className="grid gap-inner grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))]">
                   {(alerts || []).map((a: any) => {
                     const examples: FeedPost[] = (a.post_urls || []).map((u: string) => byUrl.get(u)).filter(Boolean).slice(0, 3);
                     const conf = Math.round(Number(a.confidence) * 100);
                     return (
-                      <div key={a.id} className="glass-inner p-4 space-y-3">
+                      <div key={a.id} className="glass-inner p-inner space-y-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="space-y-1 min-w-0">
-                            <p className="font-semibold leading-snug">{a.topic}</p>
+                            <p className="t-h4">{a.topic}</p>
                             <div className="flex gap-1.5 flex-wrap">
                               <Badge variant={conf >= 75 ? "default" : "secondary"}>{conf}% confidence</Badge>
                               {(a.companies || []).map((c: string) => <Badge key={c} variant="outline">{c}</Badge>)}
@@ -262,18 +255,18 @@ export default function CompetitiveFeed() {
                             </div>
                           </div>
                           {canRunAnalysis && (
-                            <Button size="sm" variant="ghost" className="shrink-0" onClick={() => setDismissing(a.id)} aria-label="Dismiss"><X className="h-4 w-4" /></Button>
+                            <Button size="icon-sm" variant="ghost" className="shrink-0" onClick={() => setDismissing(a.id)} aria-label="Dismiss"><X /></Button>
                           )}
                         </div>
                         {a.summary && <p className="t-secondary">{a.summary}</p>}
                         {examples.length > 0 && (
-                          <div className="grid grid-cols-3 gap-2 items-start">
+                          <div className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2 items-start">
                             {examples.map((p, i) => <PostVisual key={i} url={p.postLink} image={p.image} preview={p.postLink ? previews[p.postLink] : null} mediaType={p.type} platform={p.channel} compact />)}
                           </div>
                         )}
                         {canRunAnalysis && (
                           <Button size="sm" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: `${a.topic}. ${a.summary || ""} Competitors ${(a.companies || []).join(", ")} are posting about this now; give ${clientName} its own angle.`, reason: `Competitors are posting about ${a.topic}`, platform: (a.platforms || [])[0] ? platformLabel((a.platforms || [])[0]) : "Instagram", alertId: a.id, about: `the shared topic "${a.topic}"` })}>
-                            {draft.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1.5" />} Draft our take
+                            {draft.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} Draft our take
                           </Button>
                         )}
                       </div>
@@ -286,40 +279,40 @@ export default function CompetitiveFeed() {
             {/* Since last week */}
             {changes && prevSnapshot && (
               <Card>
-                <CardHeader>
-                  <CardTitle className="t-h3 flex items-center gap-2"><History className="h-5 w-5" /> Since last week</CardTitle>
-                  <CardDescription>Against the pull of {formatDate(prevSnapshot.fetched_at)}{prevWindow ? ` covering ${formatRange(prevWindow)}` : ""}.</CardDescription>
-                </CardHeader>
+                <CardHeading
+                  icon={<History />}
+                  title="Since last week"
+                  description={<>Against the pull of {formatDate(prevSnapshot.fetched_at)}{prevWindow ? ` covering ${formatRange(prevWindow)}` : ""}.</>}
+                />
                 <CardContent>
-                  {changes.length > 0 ? <ChangeCards changes={changes} /> : <p className="t-body">No notable movement: cadence, engagement, channels and formats all held.</p>}
+                  {changes.length > 0 ? <ChangeCards changes={changes} /> : <EmptyState compact framed={false} icon={History} title="No notable movement" description="Cadence, engagement, channels and formats all held." />}
                 </CardContent>
               </Card>
             )}
 
             {/* Filters */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="t-subhead">Company</span>
-              <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)] flex-wrap">
-                <Seg active={company === "all"} onClick={() => setCompany("all")}>All</Seg>
-                {companies.map((c) => <Seg key={c} active={company === c} onClick={() => setCompany(c)}>{c}</Seg>)}
-              </div>
-              <span className="t-subhead ml-2">Platform</span>
-              <div className="flex items-center gap-0.5 p-1 rounded-[12px] bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.07)] flex-wrap">
-                <Seg active={plat === "all"} onClick={() => setPlat("all")}>All</Seg>
-                {platforms.map((p) => <Seg key={p} active={plat === p} onClick={() => setPlat(p)}>{platformLabel(p)}</Seg>)}
-              </div>
+            {/* The filters on their own glass band, as on the calendar and the reports. */}
+            <div className="glass px-card py-3 flex flex-wrap items-center gap-x-6 gap-y-3">
+              <SegmentedGroup label="Company">
+                <Segment active={company === "all"} onClick={() => setCompany("all")}>All</Segment>
+                {companies.map((c) => <Segment key={c} active={company === c} onClick={() => setCompany(c)}>{c}</Segment>)}
+              </SegmentedGroup>
+              <SegmentedGroup label="Platform">
+                <Segment active={plat === "all"} onClick={() => setPlat("all")}>All</Segment>
+                {platforms.map((p) => <Segment key={p} active={plat === p} onClick={() => setPlat(p)}>{platformLabel(p)}</Segment>)}
+              </SegmentedGroup>
             </div>
 
             {/* Posts */}
             {visible.length === 0 ? (
-              <div className="glass-inner p-4"><p className="t-body">No posts match these filters.</p></div>
+              <EmptyState icon={Rss} title="No posts match these filters" description="Choose another company or platform." />
             ) : (
-              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start">
+              <div className="grid gap-inner grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start">
                 {visible.map((p, i) => (
-                  <div key={`${p.postLink || i}`} className="glass p-3 space-y-2.5">
+                  <div key={`${p.postLink || i}`} className="glass p-inner space-y-2.5">
                     <PostVisual url={p.postLink} image={p.image} preview={p.postLink ? previews[p.postLink] : null} mediaType={p.type} platform={p.channel} />
                     <div className="flex items-center justify-between gap-2 t-secondary">
-                      <span className="font-medium text-foreground truncate">{p.companyName}</span>
+                      <span className="t-h4 truncate">{p.companyName}</span>
                       <span className="flex items-center gap-2 shrink-0">
                         {isBoosted(p.facebookLikelyBoosted) && <Badge variant="secondary" title="RivalIQ estimates this Facebook post was paid promotion">Likely boosted</Badge>}
                         {formatDate(p.publishedAt)}
@@ -334,11 +327,11 @@ export default function CompetitiveFeed() {
                     </div>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       {p.postLink ? (
-                        <a href={p.postLink} target="_blank" rel="noreferrer" className="t-label text-primary hover:underline inline-flex items-center gap-1">Open <ExternalLink className="h-3 w-3" /></a>
+                        <a href={p.postLink} target="_blank" rel="noreferrer" className="t-link inline-flex items-center gap-1">Open <ExternalLink className="h-3 w-3" /></a>
                       ) : <span />}
                       {canRunAnalysis && !isOwnPost(p) && (
-                        <Button size="sm" variant="outline" className="min-h-10 h-auto t-label whitespace-normal" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: topicFor(p), reason: reasonFor(p), platform: platformLabel(p.channel), about: `this post by ${p.companyName || "a competitor"}` })}>
-                          <Sparkles className="h-3 w-3 mr-1" /> Draft our take
+                        <Button size="sm" variant="outline" disabled={draft.isPending} onClick={() => setPendingDraft({ topic: topicFor(p), reason: reasonFor(p), platform: platformLabel(p.channel), about: `this post by ${p.companyName || "a competitor"}` })}>
+                          <Sparkles /> Draft our take
                         </Button>
                       )}
                     </div>
@@ -356,7 +349,6 @@ export default function CompetitiveFeed() {
             )}
           </>
         )}
-      </div>
       <ConfirmDialog
         open={confirmRefresh}
         onOpenChange={setConfirmRefresh}

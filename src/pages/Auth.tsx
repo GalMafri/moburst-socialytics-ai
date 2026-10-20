@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Loading } from "@/components/ui/loading";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -30,19 +32,25 @@ export default function Auth() {
     return () => { cancelled = true; };
   }, []);
 
-  if (isLoading) return null;
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0b0c10] intercept-bg">
+        <div className="relative z-10"><Loading variant="page" label="Signing you in" /></div>
+      </div>
+    );
+  }
   if (isAuthenticated) return <Navigate to="/" />;
 
   const hasError = !!authError;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-[#0b0c10] intercept-bg p-6">
-      <div className="max-w-md w-full space-y-8 text-center relative z-10">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[#0b0c10] intercept-bg p-page">
+      <div className="max-w-md w-full space-y-section text-center relative z-10">
         <div className="flex justify-center">
-          <img src="/images/logo-dark.png" alt="Socialytics by Moburst" className="h-10 w-auto object-contain brightness-0 invert" />
+          <img src="/images/logo-dark.png" alt="Socialytics by Moburst" className="h-10 w-auto object-contain" />
         </div>
 
-        <div className="space-y-3">
+        <div className="glass p-card space-y-3">
           {hasError ? (
             <>
               <div className="flex justify-center">
@@ -51,35 +59,32 @@ export default function Auth() {
                 </div>
               </div>
               <h2 className="t-h1 text-white">Sign-in failed</h2>
-              <p className="text-[#b1b7c1]">{authError}</p>
-              <p className="t-label text-[#b1b7c1] pt-2">
-                Open this tool from the Moburst Hub Dashboard. If you're already there,
-                ask a Hub admin to confirm your tool assignment.
+              <p className="t-secondary">{authError}</p>
+              <p className="t-label pt-2">
+                Open this tool from the Moburst portal. If you're already there,
+                ask a portal admin to confirm your access to it.
               </p>
             </>
           ) : (
             <>
               <h2 className="t-h1 text-white">Sign in to continue</h2>
-              <p className="text-[#b1b7c1]">
+              <p className="t-secondary">
                 This tool signs you in through the Moburst portal. Open it there and you
                 will come straight back to the page you were trying to reach.
               </p>
               <div className="pt-2">
-                <a
-                  href={PORTAL_URL}
-                  className="inline-flex items-center justify-center rounded-lg bg-[#b9e045] px-4 py-2 t-body font-semibold text-black transition-opacity hover:opacity-90"
-                >
-                  Open the Moburst portal
-                </a>
+                <Button asChild>
+                  <a href={PORTAL_URL}>Open the Moburst portal</a>
+                </Button>
               </div>
             {reason === "no-role" && (
-              <p className="t-label text-amber-500 pt-2">
+              <p className="t-label !text-warning pt-2">
                 You are signed in, but this tool has no role assigned to your account.
                 A portal admin needs to grant you access to it.
               </p>
             )}
             {reason === "ready" && (
-              <p className="t-label text-amber-500 pt-2">
+              <p className="t-label !text-warning pt-2">
                 A session was found but could not be restored. Reload the page, and if
                 it persists, open the tool from the portal once.
               </p>
@@ -89,21 +94,21 @@ export default function Auth() {
         </div>
 
         {!hasError && (
-          <div className="pt-6 space-y-4 text-left">
+          <div className="space-y-3 text-left">
             {[
               // Say what the product does. "in real-time" described a feature
               // that does not exist: trends come from a completed monthly
               // report, not from anything that polls or streams.
               { icon: TrendingUp, title: "Trend analysis", desc: "TikTok and Instagram trends, read out in each monthly report" },
               { icon: BarChart3, title: "Performance analytics", desc: "Every connected platform's numbers in one place" },
-              { icon: Zap, title: "Content recommendations", desc: "A month of post ideas, written from the client's own brand and results" },
+              { icon: Zap, title: "Content calendar", desc: "A week of posts at a time, written from the client's own brand and results" },
             ].map((f) => (
-              <div key={f.title} className="flex items-start gap-3 glass-inner p-4">
-                <div className="mt-1 p-2 rounded-lg bg-[rgba(185,224,69,0.1)]">
-                  <f.icon className="h-4 w-4 text-[#b9e045]" />
+              <div key={f.title} className="flex items-start gap-3 glass-inner p-inner">
+                <div className="mt-0.5 p-2 rounded-[8px] bg-[rgba(185,224,69,0.1)]">
+                  <f.icon className="h-4 w-4 text-[#b9e045]" aria-hidden />
                 </div>
                 <div>
-                  <p className="font-medium text-white">{f.title}</p>
+                  <p className="t-h4">{f.title}</p>
                   <p className="t-secondary">{f.desc}</p>
                 </div>
               </div>
@@ -111,7 +116,7 @@ export default function Auth() {
           </div>
         )}
 
-        <p className="t-label text-[#b1b7c1] pt-4">Powered by Moburst</p>
+        <p className="t-label">Powered by Moburst</p>
       </div>
     </div>
   );

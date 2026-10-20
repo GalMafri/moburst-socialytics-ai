@@ -4,6 +4,11 @@ import { cn } from "@/lib/utils";
 /**
  * The intro block every page opens with: title (24px), one line of context,
  * optional meta chips (platforms, period) and the page's actions on the right.
+ *
+ * Pages reach it through AppLayout's title / description / meta / actions /
+ * back props, never by drawing their own: a page that built its own hero
+ * (glass p-5, its own h1) drifted from every other screen in padding,
+ * alignment and button sizes.
  */
 export function PageHeader({
   title,
@@ -21,14 +26,17 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("glass p-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-4", className)}>
+    <div className={cn("glass p-card flex flex-wrap items-end justify-between gap-x-6 gap-y-4", className)}>
       <div className="min-w-0 space-y-1.5">
         {back}
         <h1 className="t-h1">{title}</h1>
         {description && <p className="t-secondary max-w-3xl">{description}</p>}
         {meta && <div className="flex flex-wrap items-center gap-2 pt-1">{meta}</div>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
+      {/* max-w-full, not shrink-0: on a phone the actions take their own
+          line and wrap inside it, instead of running past the card's edge
+          where the glass clips them. */}
+      {actions && <div className="flex flex-wrap items-center gap-2 max-w-full min-w-0">{actions}</div>}
     </div>
   );
 }

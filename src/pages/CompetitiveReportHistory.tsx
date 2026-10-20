@@ -10,7 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -54,26 +54,23 @@ export default function CompetitiveReportHistory() {
   });
 
   return (
-    <AppLayout title={`Competitive reports: ${client?.name ?? "Client"}`}
-      description="Every competitive analysis run for this client, newest first.">
-      <div className="w-full space-y-6">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <Button variant="ghost" size="sm" onClick={() => navigate(isMoburstStaff ? "/competitive" : "/")}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> Back
-          </Button>
-          {isMoburstStaff && (
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive/feed`)}><Rss className="h-4 w-4 mr-1" /> Competitor feed</Button>
-              <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive`)}><Crosshair className="h-4 w-4 mr-1" /> Competitor set</Button>
-              <Button size="sm" onClick={() => navigate(`/clients/${id}/competitive/run`)}><Play className="h-4 w-4 mr-1" /> New analysis</Button>
-            </div>
-          )}
-        </div>
-
+    <AppLayout
+      title={`Competitive reports: ${client?.name ?? "Client"}`}
+      description="Every competitive analysis run for this client, newest first."
+      back={
+        <Button variant="ghost" size="sm" className="-ml-2 border-0 bg-transparent" onClick={() => navigate(isMoburstStaff ? "/competitive" : "/")}>
+          <ArrowLeft /> Back
+        </Button>
+      }
+      actions={isMoburstStaff ? (
+        <>
+          <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive/feed`)}><Rss /> Competitor feed</Button>
+          <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive`)}><Crosshair /> Competitor set</Button>
+          <Button size="sm" onClick={() => navigate(`/clients/${id}/competitive/run`)}><Play /> New analysis</Button>
+        </>
+      ) : undefined}
+    >
         <Card>
-          <CardHeader>
-            <CardTitle className="t-h3">Competitive analysis history</CardTitle>
-          </CardHeader>
           <CardContent>
             {isLoading ? (
               <Loading label="Loading competitive reports" />
@@ -115,7 +112,7 @@ export default function CompetitiveReportHistory() {
                           <div className="flex items-center justify-end gap-1">
                             {(r.display.state === "ready" || r.display.state === "held") && (
                               <Button size="sm" variant="ghost" onClick={() => navigate(`/clients/${id}/competitive/reports/${r.id}`)}>
-                                <Eye className="h-4 w-4 mr-1" /> View
+                                <Eye /> View
                               </Button>
                             )}
                             <ReportActions report={r} kind="competitive" />
@@ -127,11 +124,10 @@ export default function CompetitiveReportHistory() {
                 </TableBody>
               </Table>
             ) : (
-              <EmptyState icon={Crosshair} title="No competitive analyses yet" description={firstRunSentence("competitive", nextRun.data) || undefined} />
+              <EmptyState framed={false} icon={Crosshair} title="No competitive analyses yet" description={firstRunSentence("competitive", nextRun.data) || undefined} />
             )}
           </CardContent>
         </Card>
-      </div>
     </AppLayout>
   );
 }

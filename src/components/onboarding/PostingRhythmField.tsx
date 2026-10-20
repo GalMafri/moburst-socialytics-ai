@@ -37,7 +37,7 @@ export function PostingRhythmField({ platforms, value, resolved, sources, onChan
         {names.map((platform) => {
           const line = byPlatform.get(platform.toLowerCase());
           return (
-            <div key={platform} className="flex items-center justify-between gap-3 rounded-md border border-white/[0.06] px-3 py-2">
+            <div key={platform} className="glass-inner flex items-center justify-between gap-3 px-3 py-2">
               <div className="min-w-0">
                 <p className="t-body">{platform}</p>
                 {line ? (

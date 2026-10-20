@@ -65,6 +65,24 @@
   }
 }
 
+/* ── Layout tokens ──
+   One page gutter, one gap between blocks, one card padding, one inner
+   padding, used through the Tailwind spacing keys page / section / card /
+   inner (tailwind.config.ts). The gutter narrows on small screens so a phone
+   keeps its width for content. */
+:root {
+  --space-page: 16px;
+  --space-section: 24px;
+  --space-card: 20px;
+  --space-inner: 16px;
+}
+@media (min-width: 768px) {
+  :root { --space-page: 24px; }
+}
+@media (min-width: 1280px) {
+  :root { --space-page: 32px; }
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -169,6 +187,23 @@
   box-shadow: 0 0 60px rgba(185, 224, 69, 0.1), inset 0 1px 0 0 rgba(185, 224, 69, 0.18);
 }
 
+/* A card that is also an accent card keeps the card radius, so it lines up
+   with the cards beside it (the accent's own 16px is for standalone callouts). */
+.glass.glass-accent { border-radius: 20px; }
+
+/* The one "this is the chosen / current / the client's own" treatment for any
+   surface: a lime edge and a faint lime wash. It replaces the hand-set
+   border-[#b9e045]/30 and /40 classes, which lost to .glass and .glass-inner
+   (they come later in the cascade) and so drew nothing on most cards. */
+.glass.is-selected,
+.glass-inner.is-selected,
+.glass.is-selected:hover,
+.glass-inner.is-selected:hover {
+  border-color: rgba(185, 224, 69, 0.40);
+  border-top-color: rgba(185, 224, 69, 0.50);
+  background: rgba(185, 224, 69, 0.05);
+}
+
 /* Level 4 — Elevated Surface */
 .glass-elevated {
   background: rgba(26, 29, 35, 0.85);
@@ -236,6 +271,10 @@
   .t-h1 { font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.5px; }
   .t-h2 { font-size: 20px; line-height: 26px; font-weight: 700; letter-spacing: -0.5px; }
   .t-h3 { font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.3px; }
+  /* The heading of a block inside a card or panel (a list, a form group, a
+     tile): body size, semibold. Replaces the text-sm font-semibold and
+     t-body font-medium headings that each page made up for itself. */
+  .t-h4 { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: -0.2px; }
   .t-body { font-size: 15px; line-height: 24px; letter-spacing: -0.2px; }
   .t-secondary { font-size: 15px; line-height: 24px; letter-spacing: -0.2px; }
   p.t-body:not(.flex):not(.truncate), p.t-secondary:not(.flex):not(.truncate), li.t-body { max-width: 72ch; }
@@ -244,11 +283,16 @@
      week"). It was `t-label`, the same dim grey as a caption, so the thing that
      tells you what you are looking at was the quietest text on the card. */
   .t-subhead { font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; }
+  /* An inline link to where something is done ("Open the report"): label
+     size, lime, underlined on hover. One style for every such link, where
+     pages had underlined white, underlined gray and lime versions. */
+  .t-link { font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: 0.1px; color: #b9e045; text-underline-offset: 3px; }
+  .t-link:hover { text-decoration: underline; }
   .t-badge { font-size: 13px; line-height: 18px; font-weight: 700; letter-spacing: -0.2px; }
   /* Long-form AI passages: bigger, looser, capped at a readable measure. */
   .t-prose { font-size: 15px; line-height: 25px; letter-spacing: -0.1px; }
   :where(.t-prose) { max-width: 72ch; }
-  :where(.t-stat, .t-h1, .t-h2, .t-h3, .t-prose) { color: #ffffff; }
+  :where(.t-stat, .t-h1, .t-h2, .t-h3, .t-h4, .t-prose) { color: #ffffff; }
   /* Secondary sentences stay light (#d1d5db, 12.6:1). Grey (#b1b7c1, 9.6:1) is for short labels only. */
   :where(.t-secondary) { color: #ffffff; }
   :where(.t-label) { color: #b1b7c1; }

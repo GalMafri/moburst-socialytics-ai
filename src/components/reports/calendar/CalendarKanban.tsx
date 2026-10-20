@@ -95,8 +95,12 @@ export function CalendarKanban({
   onCardClick,
   onToggleApproved,
 }: Props) {
+  // The week as a board: one column per day, as many columns as the width
+  // allows, each as tall as its own posts. Each day used to be a full-width
+  // band over a three-column grid, so a day with one post showed one card at
+  // a third of the width and two thirds of empty page beside it, seven times.
   return (
-    <div className="space-y-6">
+    <div className="grid gap-inner items-start [grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))]">
       {DAYS.map((dayName) => {
         // If day filter excludes this day, skip rendering entirely.
         if (filters.day !== "all" && filters.day !== dayName) return null;
@@ -104,27 +108,17 @@ export function CalendarKanban({
         const posts = dayEntry?.posts || [];
 
         return (
-          <section key={dayName} className="space-y-5 animate-slide-up">
-            {/* Day header — typography only, no chrome */}
-            <div className="glass px-5 py-3 flex items-baseline gap-3 flex-wrap">
-              <h2 className="t-h2">
-                {dayName}
-              </h2>
-              {dayEntry?.date_label && (
-                <span className="text-sm text-[#b1b7c1] tracking-[-0.5px]">
-                  {dayEntry.date_label}
-                </span>
-              )}
-              <span
-                className="t-label font-medium tracking-wider uppercase text-[#b1b7c1] ml-auto"
-                aria-live="polite"
-              >
+          <section key={dayName} className="glass p-inner space-y-3 min-w-0 animate-slide-up" aria-label={dayName}>
+            <div className="flex items-baseline gap-2 flex-wrap px-1">
+              <h2 className="t-h3">{dayName}</h2>
+              {dayEntry?.date_label && <span className="t-label">{dayEntry.date_label}</span>}
+              <span className="t-subhead ml-auto" aria-live="polite">
                 {posts.length === 0 ? "No posts" : `${posts.length} post${posts.length === 1 ? "" : "s"}`}
               </span>
             </div>
 
             {posts.length > 0 && (
-              <div className="grid gap-4 grid-cols-1 md:grid-cols-2 2xl:grid-cols-3">
+              <div className="space-y-3">
                 {posts.map((post: any, postIdx: number) => {
                   const iteration = findLatestSelectedIteration(postIterations, post);
                   const status = resolvePostStatus({

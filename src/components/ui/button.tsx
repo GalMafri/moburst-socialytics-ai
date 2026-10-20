@@ -4,8 +4,11 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
+// The gap between icon and label is the button's own (gap-2), and every icon
+// is 16px: icon margins (mr-1, ml-2) and sizes (h-3.5) written at call sites
+// are ignored on purpose, so one button looks the same on every screen.
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[8px] text-[15px] font-bold tracking-[-0.3px] leading-[20px] transition-all duration-200 ease-out press-effect cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[8px] text-[15px] font-bold tracking-[-0.3px] leading-[20px] transition-all duration-200 ease-out press-effect cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:m-0",
   {
     variants: {
       variant: {
@@ -21,6 +24,9 @@ const buttonVariants = cva(
         sm: "h-[36px] px-[12px]",
         lg: "h-[44px] px-[32px]",
         icon: "h-10 w-10",
+        // Square icon button at the height of a sm button, for rows of sm
+        // buttons (row menus, remove buttons). Replaces h-8/h-9 w-8/w-9 p-0.
+        "icon-sm": "h-9 w-9",
       },
     },
     defaultVariants: {

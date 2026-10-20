@@ -112,11 +112,11 @@ export default function ClientCalendar() {
       title="Calendar"
       description="Every planned post on its date. Open a post to edit its copy, see its design or schedule it."
       actions={id ? (
-        <div className="flex items-center gap-2 flex-wrap">
+        <>
           {isMoburstStaff && <ClientPicker value={id} week={week} />}
           {planButton}
           {isMoburstStaff && <NewPostDialog clientId={id} platforms={platforms} defaultDate={week > today ? week : today} onCreated={(d) => goTo(mondayOf(d))} />}
-        </div>
+        </>
       ) : undefined}
     >
       {client.isLoading || posts.isLoading || plans.isLoading ? (
@@ -124,15 +124,15 @@ export default function ClientCalendar() {
       ) : client.isError || posts.isError || plans.isError ? (
         <LoadError title="Could not load the calendar" error={client.error || posts.error || plans.error} onRetry={() => { void client.refetch(); refresh(); }} />
       ) : (
-        <div className="space-y-4">
-          <WeekNav week={week} thisWeek={thisWeek} count={inWeek.length} onGo={goTo} />
-
-          {showPlanBar && weekPlan && (
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <WeekPlanStatus plan={weekPlan} />
-              {revisable && <div className="ml-auto"><ReviseWeekButton plan={weekPlan} onRequested={refresh} /></div>}
-            </div>
-          )}
+        <div className="space-y-section">
+          <WeekNav week={week} thisWeek={thisWeek} count={inWeek.length} onGo={goTo}>
+            {showPlanBar && weekPlan && (
+              <>
+                <WeekPlanStatus plan={weekPlan} />
+                {revisable && <ReviseWeekButton plan={weekPlan} onRequested={refresh} />}
+              </>
+            )}
+          </WeekNav>
 
           {inWeek.length === 0 ? (
             <EmptyState

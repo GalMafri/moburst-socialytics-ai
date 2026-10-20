@@ -5,8 +5,10 @@
  * (Lital's decision 2, 19 Oct 2026: the logo from the website, its place
  * from the client's posts, the background from the brand colors) and they
  * are in place from then on. A person may change any of them here; the
- * lifecycle never replaces settings a person saved. Automatic designs stay
- * off unless a person turns them on (decision 3 is on hold).
+ * lifecycle never replaces settings a person saved.
+ *
+ * There is no switch for automatic designs: they stay off for good (Lital,
+ * 20 Oct 2026). Designs are made only when a person asks for one on a post.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -14,14 +16,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ImageUp, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Section } from "@/components/ui/section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatDate } from "@/lib/display";
+import { Loading } from "@/components/ui/loading";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
 import { fileKey, useQuietUpload } from "@/hooks/useQuietUpload";
 
@@ -136,8 +139,6 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
   const [saving, setSaving] = useState(false);
   const [notSaved, setNotSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [autoDesigns, setAutoDesigns] = useState(false);
-  const [savingAuto, setSavingAuto] = useState(false);
   const [refusedLogo, setRefusedLogo] = useState<string | null>(null);
 
   const logoUrl = useMemo(() => (logoPath ? supabase.storage.from("generated-media").getPublicUrl(logoPath).data.publicUrl : null), [logoPath]);
@@ -151,7 +152,6 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
     setLogoPath(s.logo_path);
     setBackground(s.background);
     setRefs(s.reference_paths?.length ? s.reference_paths : []);
-    setAutoDesigns(!!s.auto_designs);
     const img = new Image();
     img.onload = () => {
       const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
@@ -222,19 +222,7 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
     void qc.invalidateQueries({ queryKey: ["design-settings", clientId] });
   };
 
-  const setAuto = async (on: boolean) => {
-    setSavingAuto(true);
-    setAutoDesigns(on);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await sendQuietly(() => (supabase.from("design_brand_settings" as any) as any).update({ auto_designs: on, updated_at: new Date().toISOString() }).eq("client_id", clientId), { again: writeResendable });
-    setSavingAuto(false);
-    // The switch shows what is stored.
-    if (error) { setAutoDesigns(!on); return; }
-    toast.success(on ? "Designs will be prepared automatically" : "Automatic designs are off");
-    void qc.invalidateQueries({ queryKey: ["design-settings-full", clientId] });
-  };
-
-  if (isLoading) return <Card><CardContent className="p-6"><Loader2 className="h-4 w-4 animate-spin" /></CardContent></Card>;
+  if (isLoading) return <Card><CardContent><Loading label="Loading design settings" /></CardContent></Card>;
   const origin = originSentence(data?.settings ?? null);
 
   // Preview: the frame at 4:5 with the logo where designs will put it.
@@ -246,25 +234,28 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="t-h3">Design settings</CardTitle>
-        <CardDescription>
-          Every design for this client is built from these.
-          <span className="block mt-1">{origin || "They are worked out automatically from the client's logo and its own posts once those are read."}</span>
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-6 lg:grid-cols-[1fr_260px]">
+    <Section
+      layout="split"
+      eyebrow="Designs"
+      title="Design settings"
+      description={
+        <>
+          Every design for this client is built from these. Designs are made only when someone asks for one on a post.
+          <span className="block mt-2 t-label">{origin || "They are worked out automatically from the client's logo and its own posts once those are read."}</span>
+        </>
+      }
+    >
+      <div className="grid gap-6 xl:grid-cols-[1fr_220px]">
         <div className="space-y-6">
           <div className="space-y-2">
             <Label htmlFor="design-logo">Logo file</Label>
             <div className="flex items-center gap-3">
-              <div className="h-14 w-40 rounded-[10px] flex items-center justify-center p-2" style={{ background }}>
+              <div className="h-14 w-40 rounded-[12px] flex items-center justify-center p-2" style={{ background }}>
                 {logoUrl ? <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain" /> : <span className="t-label">No logo yet</span>}
               </div>
               <Button asChild variant="outline" size="sm" disabled={logo.uploading}>
                 <label htmlFor="design-logo" className="cursor-pointer">
-                  {logo.uploading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <ImageUp className="h-3.5 w-3.5 mr-1.5" />}
+                  {logo.uploading ? <Loader2 className="animate-spin" /> : <ImageUp />}
                   {logoPath ? "Replace" : "Upload logo"}
                 </label>
               </Button>
@@ -320,7 +311,7 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
                   const on = refs.includes(p);
                   return (
                     <button key={p} type="button" onClick={() => toggleRef(p)} aria-pressed={on} aria-label={on ? "Leave this post out" : "Use this post"}
-                      className={`relative aspect-square rounded-[10px] overflow-hidden border ${on ? "border-primary ring-1 ring-primary/50" : "border-white/10"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}>
+                      className={`relative aspect-square rounded-[12px] overflow-hidden border ${on ? "border-primary ring-1 ring-primary/50" : "border-white/10"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}>
                       {data.previews[p] ? <img src={data.previews[p]} alt="" className="w-full h-full object-cover" /> : <span className="t-label">Preview not available</span>}
                       {on && <span className="absolute top-1.5 right-1.5 bg-primary text-primary-foreground rounded-full p-1"><Check className="h-3 w-3" /></span>}
                     </button>
@@ -332,21 +323,11 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
             )}
           </div>
 
-          {data?.settings && (
-            <div className="glass-inner p-3 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <Label htmlFor="design-auto" className="text-sm font-semibold text-white">Prepare designs automatically</Label>
-                <p className="t-secondary">Each post in the calendar gets its design during the week before its date, from its copy at the time. Every design uses the team's image allowance.</p>
-              </div>
-              <Switch id="design-auto" checked={autoDesigns} disabled={savingAuto} onCheckedChange={(v) => void setAuto(v)} />
-            </div>
-          )}
-
           {(dirty || !data?.settings) && (
-            <div className="flex items-center justify-end gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               {notSaved && <span role="status" className="t-secondary">Your changes are kept here and are not saved yet.</span>}
               <Button onClick={() => void save()} disabled={!complete || saving || logo.uploading}>
-                {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Check className="h-3.5 w-3.5 mr-1.5" />}
+                {saving ? <Loader2 className="animate-spin" /> : <Check />}
                 Save changes
               </Button>
             </div>
@@ -359,7 +340,7 @@ export function DesignSettingsCard({ clientId }: { clientId: string }) {
             {logoUrl && <img src={logoUrl} alt="" style={logoStyle} />}
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </Section>
   );
 }

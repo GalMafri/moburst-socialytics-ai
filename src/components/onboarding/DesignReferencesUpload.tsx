@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, X, Image } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -67,8 +66,7 @@ export function DesignReferencesUpload({
   const getPublicUrl = (path: string) => supabase.storage.from("design-references").getPublicUrl(path).data.publicUrl;
 
   return (
-    <Card>
-      <CardContent className="pt-5 space-y-4">
+    <div className="glass-inner p-inner space-y-4">
         <Label className="t-body font-semibold">Design references</Label>
         <p className="t-secondary">
           Example social posts, ads or designs (PNG or JPG), used as visual style references beside the client's own posts.
@@ -77,7 +75,7 @@ export function DesignReferencesUpload({
         {designReferences.length > 0 && (
           <div className="grid grid-cols-3 gap-2">
             {designReferences.map((path) => (
-              <div key={path} className="relative group aspect-square rounded-md overflow-hidden border">
+              <div key={path} className="relative group aspect-square rounded-[12px] overflow-hidden border border-white/10">
                 <img src={getPublicUrl(path)} alt="Design reference" className="w-full h-full object-cover" />
                 <Button
                   variant="secondary"
@@ -94,7 +92,7 @@ export function DesignReferencesUpload({
         )}
 
         <label className="block">
-          <div className="flex items-center gap-2 p-3 border-2 border-dashed rounded-md cursor-pointer hover:border-primary/50 transition-colors">
+          <div className="flex items-center gap-2 p-3 border border-dashed border-white/15 rounded-[12px] cursor-pointer hover:border-primary/50 transition-colors">
             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Image className="h-4 w-4 text-muted-foreground" />}
             <span className="t-secondary">{uploading ? "Uploading..." : "Upload design references (PNG, JPG)"}</span>
           </div>
@@ -107,7 +105,6 @@ export function DesignReferencesUpload({
             <Button variant="outline" size="sm" onClick={() => void send(pending)}>Upload</Button>
           </div>
         )}
-      </CardContent>
-    </Card>
+    </div>
   );
 }

@@ -3,7 +3,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getHubToken } from "@/utils/hubAuth";
 import { fetchActiveClients } from "@/lib/activeClients";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Section } from "@/components/ui/section";
+import { Loading } from "@/components/ui/loading";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -111,49 +113,45 @@ export function HubCompanySync() {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="t-h3">Hub company mapping</CardTitle>
-            <CardDescription>
-              The bridge matches Client users to clients by their Hub company.
-            </CardDescription>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => refetchHub()} disabled={hubLoading}>
-            <RefreshCw className={`h-3 w-3 mr-1 ${hubLoading ? "animate-spin" : ""}`} />
-            Reload Hub companies
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
+    <Section
+      layout="split"
+      eyebrow="Portal access"
+      title="Hub company mapping"
+      description="Client users see the clients whose Hub company matches their own."
+      action={
+        <Button variant="outline" size="sm" onClick={() => refetchHub()} disabled={hubLoading}>
+          <RefreshCw className={hubLoading ? "animate-spin" : ""} />
+          Reload Hub companies
+        </Button>
+      }
+    >
         {/* ── Hub companies side ── */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <h4 className="t-body font-semibold">Hub companies</h4>
-            <Badge variant="outline" className="t-label">
+            <h3 className="t-h4">Hub companies</h3>
+            <Badge variant="outline">
               {hubCompanies?.length ?? 0} from Hub
             </Badge>
           </div>
           {hubError ? (
-            <p className="t-label text-[#ef4444] flex items-center gap-1">
-              <AlertCircle className="h-3 w-3" />
+            <p className="t-label !text-[rgb(248,113,113)] flex items-center gap-1.5">
+              <AlertCircle className="h-3.5 w-3.5" aria-hidden />
               {(hubError as Error).message}
             </p>
           ) : hubLoading ? (
-            <p className="t-secondary">Loading from Hub…</p>
+            <Loading label="Loading from the Hub" />
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {(hubCompanies || []).map((c) => (
                 <span
                   key={c._id}
-                  className="px-2 py-0.5 rounded t-label bg-[rgba(185,224,69,0.1)] text-[#b9e045] border border-[rgba(185,224,69,0.25)]"
+                  className="px-2.5 py-0.5 rounded-full t-label !text-[#b9e045] bg-[rgba(185,224,69,0.1)] border border-[rgba(185,224,69,0.25)]"
                 >
                   {c.name}
                 </span>
               ))}
               {(!hubCompanies || hubCompanies.length === 0) && (
-                <p className="t-secondary italic">
+                <p className="t-secondary">
                   No companies registered in the Hub yet.
                 </p>
               )}
@@ -163,23 +161,23 @@ export function HubCompanySync() {
 
         {/* ── Missing-in-Hub warning ── */}
         {missingInHub.length > 0 && hubCompanies && (
-          <div className="rounded-lg border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.05)] p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="t-body text-[#fbbf24] font-medium flex items-center gap-2">
-                <AlertCircle className="h-4 w-4" />
-                {missingInHub.length} tool company name{missingInHub.length === 1 ? "" : "s"} not found in Hub
+          <div className="rounded-[12px] border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.05)] p-inner space-y-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <p className="t-h4 !text-[#fbbf24] flex items-center gap-2">
+                <AlertCircle className="h-4 w-4" aria-hidden />
+                {missingInHub.length} client company name{missingInHub.length === 1 ? "" : "s"} not found in the Hub
               </p>
               <Button variant="outline" size="sm" onClick={handleCopyMissing}>
-                {copied ? <Check className="h-3 w-3 mr-1" /> : <Copy className="h-3 w-3 mr-1" />}
+                {copied ? <Check /> : <Copy />}
                 {copied ? "Copied" : "Copy list"}
               </Button>
             </div>
             <p className="t-secondary">
-              Create these in the Hub admin so Client users can be auto-mapped:
+              Create these in the Hub admin so Client users are matched to them automatically:
             </p>
             <div className="flex flex-wrap gap-1.5">
               {missingInHub.map((n) => (
-                <span key={n} className="px-2 py-0.5 rounded t-label bg-[rgba(245,158,11,0.1)] border border-[rgba(245,158,11,0.3)]">
+                <span key={n} className="px-2.5 py-0.5 rounded-full t-label bg-[rgba(245,158,11,0.1)] border border-[rgba(245,158,11,0.3)]">
                   {n}
                 </span>
               ))}
@@ -187,32 +185,30 @@ export function HubCompanySync() {
           </div>
         )}
 
-        {/* ── Tool clients side ── */}
+        {/* ── Socialytics clients side ── */}
         <div className="space-y-2">
-          <h4 className="t-body font-semibold">Tool clients</h4>
+          <h3 className="t-h4">Socialytics clients</h3>
           {clientsLoading ? (
-            <p className="t-secondary">Loading clients…</p>
+            <Loading label="Loading clients" />
           ) : (
-            <div className="rounded-lg border border-[rgba(255,255,255,0.06)] divide-y divide-[rgba(255,255,255,0.04)]">
+            <div className="glass-inner divide-y divide-[rgba(255,255,255,0.05)]">
               {(clients || []).map((c) => {
                 const matchesHub =
                   c.hub_company_name &&
                   hubCompanySet.has(c.hub_company_name.toLowerCase());
                 return (
-                  <div key={c.id} className="flex items-center gap-3 px-4 py-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="t-body font-medium text-white truncate">{c.name}</p>
-                      <p className="t-label">Tool client</p>
-                    </div>
-                    <div className="flex-1 min-w-0">
+                  <div key={c.id} className="grid gap-x-4 gap-y-2 px-inner py-3 sm:grid-cols-2 sm:items-center">
+                    <p className="t-body font-medium text-white truncate">{c.name}</p>
+                    <div className="min-w-0">
                       {editingId === c.id ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <Input
                             list={`hub-companies-${c.id}`}
                             value={editingValue}
                             onChange={(e) => setEditingValue(e.target.value)}
                             placeholder="Hub company name"
-                            className="h-8 text-sm"
+                            aria-label={`Hub company name for ${c.name}`}
+                            className="h-9 min-w-0 flex-1"
                             autoFocus
                           />
                           <datalist id={`hub-companies-${c.id}`}>
@@ -237,29 +233,29 @@ export function HubCompanySync() {
                         <div className="flex items-center gap-2">
                           {c.hub_company_name ? (
                             matchesHub ? (
-                              <CheckCircle2 className="h-3.5 w-3.5 text-[#b9e045] shrink-0" />
+                              <CheckCircle2 className="h-3.5 w-3.5 text-[#b9e045] shrink-0" aria-label="Found in the Hub" />
                             ) : hubCompanies ? (
-                              <AlertCircle className="h-3.5 w-3.5 text-[#fbbf24] shrink-0" />
+                              <AlertCircle className="h-3.5 w-3.5 text-[#fbbf24] shrink-0" aria-label="Not found in the Hub" />
                             ) : null
                           ) : null}
                           <span
                             className={`t-body ${
-                              c.hub_company_name ? "text-white" : "italic text-[#b1b7c1]"
+                              c.hub_company_name ? "text-white" : "text-[#b1b7c1]"
                             } truncate`}
                           >
                             {c.hub_company_name || "Not set"}
                           </span>
                           <Button
-                            size="icon"
+                            size="icon-sm"
                             variant="ghost"
-                            className="h-7 w-7 shrink-0"
+                            className="shrink-0"
                             aria-label={`Edit the hub company name for ${c.name}`}
                             onClick={() => {
                               setEditingId(c.id);
                               setEditingValue(c.hub_company_name || c.name);
                             }}
                           >
-                            <Pencil className="h-3 w-3" aria-hidden />
+                            <Pencil aria-hidden />
                           </Button>
                         </div>
                       )}
@@ -268,14 +264,11 @@ export function HubCompanySync() {
                 );
               })}
               {(!clients || clients.length === 0) && (
-                <div className="px-4 py-6 t-secondary text-center">
-                  No clients yet.
-                </div>
+                <EmptyState compact framed={false} className="p-inner" title="No clients yet" />
               )}
             </div>
           )}
         </div>
-      </CardContent>
-    </Card>
+    </Section>
   );
 }

@@ -101,7 +101,7 @@ export function SuggestionEditor({ reportId, originalGap, shown, edited, onSave,
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="glass-inner p-3 space-y-2">
+            <div className="glass-inner p-inner space-y-2">
               <Label htmlFor="suggestion-feedback">Feedback to apply</Label>
               <Textarea
                 id="suggestion-feedback"
@@ -111,7 +111,7 @@ export function SuggestionEditor({ reportId, originalGap, shown, edited, onSave,
                 placeholder="For example: focus on LinkedIn only, and make the target a posting cadence we can hold"
               />
               <Button size="sm" variant="outline" onClick={rewrite} disabled={rewriting || saving || !feedback.trim()}>
-                {rewriting ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1.5" />}
+                {rewriting ? <Loader2 className="animate-spin" /> : <Sparkles />}
                 {rewriting ? "Rewriting…" : "Rewrite with this feedback"}
               </Button>
             </div>
@@ -133,13 +133,13 @@ export function SuggestionEditor({ reportId, originalGap, shown, edited, onSave,
           <DialogFooter className="gap-2 sm:justify-between">
             {edited ? (
               <Button variant="ghost" onClick={reset} disabled={saving || rewriting}>
-                <RotateCcw className="h-4 w-4 mr-1.5" /> Back to the report's wording
+                <RotateCcw /> Back to the report's wording
               </Button>
             ) : <span />}
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setOpen(false)} disabled={saving || rewriting}>Cancel</Button>
               <Button onClick={save} disabled={saving || rewriting}>
-                {saving && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />} Save
+                {saving && <Loader2 className="animate-spin" />} Save
               </Button>
             </div>
           </DialogFooter>

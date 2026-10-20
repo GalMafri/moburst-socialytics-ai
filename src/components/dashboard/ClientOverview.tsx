@@ -9,7 +9,6 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, CalendarDays, CheckCircle2, CircleAlert, Crosshair, Info, TrendingUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent } from "@/components/ui/card";
 import { Loading } from "@/components/ui/loading";
 import { compactNumber } from "@/components/ui/bars";
 import { formatPercentChange } from "@/components/ui/stat-card";
@@ -75,42 +74,42 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-3">
+      {/* Three tiles on the card's own inner surface. They were cards inside
+          the client's card, glass on glass, and a tile with nothing to say
+          was left blank. */}
+      <div className="grid gap-inner md:grid-cols-3">
         {/* Performance: the last monthly report, three numbers and the direction. */}
-        <Card>
-          <CardContent className="pt-5 space-y-3">
-            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Performance</p>
+        <section className="glass-inner p-inner flex flex-col gap-3 min-w-0">
+            <p className="t-subhead flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" aria-hidden /> Performance</p>
             {headline && report ? (
               <>
                 <p className="t-secondary">{formatRange({ start: report.date_range_start, end: report.date_range_end }) || "Last month"} vs. the month before</p>
                 <div className="grid grid-cols-3 gap-2">
                   {headline.metrics.map((m) => (
                     <div key={m.key} className="min-w-0">
-                      <p className="t-h3 tabular-nums">{compactNumber(m.current)}</p>
-                      {m.percent != null && <p className={`t-label ${m.percent > 0 ? "text-success" : m.percent < 0 ? "text-[#f87171]" : ""}`}>{formatPercentChange(m.percent)}</p>}
-                      <p className="t-secondary truncate">{m.label}</p>
+                      <p className="t-h2 tabular-nums">{compactNumber(m.current)}</p>
+                      {m.percent != null && <p className={`t-label font-semibold ${m.percent > 0 ? "!text-success" : m.percent < 0 ? "!text-[#f87171]" : ""}`}>{formatPercentChange(m.percent)}</p>}
+                      <p className="t-label truncate">{m.label}</p>
                     </div>
                   ))}
                 </div>
                 {headline.total > 0 && <p className="t-body">{headline.rose} of {headline.total} measures rose.</p>}
-                <Link to={`/clients/${clientId}/reports/${report.id}`} className="t-label underline underline-offset-2 inline-flex items-center gap-1">Open the report <ArrowRight className="h-3 w-3" /></Link>
+                <Link to={`/clients/${clientId}/reports/${report.id}`} className="t-link inline-flex items-center gap-1 mt-auto">Open the report <ArrowRight className="h-3 w-3" aria-hidden /></Link>
               </>
-            ) : firstMonthly ? (
-              <p className="t-body">{firstMonthly}</p>
-            ) : null}
-          </CardContent>
-        </Card>
+            ) : (
+              <p className="t-secondary">{firstMonthly || "No monthly report yet."}</p>
+            )}
+        </section>
 
         {/* Competitors: share of voice, who, and where the client leads or trails. */}
-        <Card>
-          <CardContent className="pt-5 space-y-3">
-            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><Crosshair className="h-3.5 w-3.5" /> Competitors</p>
+        <section className="glass-inner p-inner flex flex-col gap-3 min-w-0">
+            <p className="t-subhead flex items-center gap-1.5"><Crosshair className="h-3.5 w-3.5" aria-hidden /> Competitors</p>
             {standing && competitive ? (
               <>
                 {standing.shareOfVoice != null && (
                   <div>
                     <p className="t-h2 tabular-nums">{standing.shareOfVoice}%</p>
-                    <p className="t-secondary">share of the posts in the field</p>
+                    <p className="t-label">share of the posts in the field</p>
                   </div>
                 )}
                 {standing.competitors.length > 0 && <p className="t-body">Compared with {andList(standing.competitors.map(displayCompanyName))}.</p>}
@@ -120,38 +119,34 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
                     {standing.behind.length > 0 && <>Behind on {andList(standing.behind)}.</>}
                   </p>
                 )}
-                <Link to={`/clients/${clientId}/competitive/reports/${competitive.id}`} className="t-label underline underline-offset-2 inline-flex items-center gap-1">Open the competitive report <ArrowRight className="h-3 w-3" /></Link>
+                <Link to={`/clients/${clientId}/competitive/reports/${competitive.id}`} className="t-link inline-flex items-center gap-1 mt-auto">Open the competitive report <ArrowRight className="h-3 w-3" aria-hidden /></Link>
               </>
-            ) : firstCompetitive ? (
-              <p className="t-body">{firstCompetitive}</p>
-            ) : null}
-          </CardContent>
-        </Card>
+            ) : (
+              <p className="t-secondary">{firstCompetitive || "No competitive analysis yet."}</p>
+            )}
+        </section>
 
         {/* Content: this week of the calendar, Monday to Sunday. */}
-        <Card>
-          <CardContent className="pt-5 space-y-3">
-            <p className="t-label uppercase tracking-wider flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" /> This week</p>
+        <section className="glass-inner p-inner flex flex-col gap-3 min-w-0">
+            <p className="t-subhead flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" aria-hidden /> This week</p>
             {content.planned > 0 ? (
               <div className="grid grid-cols-3 gap-2">
-                <div><p className="t-h2 tabular-nums">{content.planned}</p><p className="t-secondary">planned</p></div>
-                <div><p className="t-h2 tabular-nums">{content.designed}</p><p className="t-secondary">designed</p></div>
-                <div><p className="t-h2 tabular-nums">{content.approved}</p><p className="t-secondary">approved</p></div>
+                <div><p className="t-h2 tabular-nums">{content.planned}</p><p className="t-label">planned</p></div>
+                <div><p className="t-h2 tabular-nums">{content.designed}</p><p className="t-label">designed</p></div>
+                <div><p className="t-h2 tabular-nums">{content.approved}</p><p className="t-label">approved</p></div>
               </div>
             ) : (
-              <p className="t-body">No posts are planned for this week.</p>
+              <p className="t-secondary">No posts are planned for this week.</p>
             )}
-            <Link to={`/clients/${clientId}/calendar`} className="t-label underline underline-offset-2 inline-flex items-center gap-1">Open the calendar <ArrowRight className="h-3 w-3" /></Link>
-          </CardContent>
-        </Card>
+            <Link to={`/clients/${clientId}/calendar`} className="t-link inline-flex items-center gap-1 mt-auto">Open the calendar <ArrowRight className="h-3 w-3" aria-hidden /></Link>
+        </section>
       </div>
 
       {/* What needs doing, linked to where it is done. */}
-      <Card>
-        <CardContent className="pt-5 space-y-2">
-          <p className="t-label uppercase tracking-wider">Action items</p>
+      <section className="glass-inner p-inner space-y-2">
+          <p className="t-subhead">Action items</p>
           {actions.length === 0 ? (
-            <p className="t-body flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-success" /> Nothing needs attention right now.</p>
+            <p className="t-secondary flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-success" aria-hidden /> Nothing needs attention right now.</p>
           ) : (
             <ul className="divide-y divide-white/[0.06]">
               {actions.map((a) => (
@@ -165,8 +160,7 @@ export function ClientOverview({ clientId, isStaff }: { clientId: string; isStaf
               ))}
             </ul>
           )}
-        </CardContent>
-      </Card>
+      </section>
     </div>
   );
 }

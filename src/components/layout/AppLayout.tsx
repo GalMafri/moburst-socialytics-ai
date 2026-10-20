@@ -21,7 +21,6 @@ export function AppLayout({
   actions,
   back,
   nav,
-  width = "max-w-[1440px]",
 }: {
   children: ReactNode;
   title?: ReactNode;
@@ -36,12 +35,6 @@ export function AppLayout({
    * has it on any tab, or the whole page shifts sideways when the tab changes.
    */
   nav?: ReactNode;
-  /**
-   * Tailwind max-width class for the whole column (header and content share
-   * it). A page with a `nav` widens past this on its own, so the rail comes
-   * out of the margin rather than out of the report.
-   */
-  width?: string;
 }) {
   const { isAuthenticated, isLoading, user } = useAuth();
   const firstName = (user?.name || "").trim().split(/\s+/)[0] || "";
@@ -73,7 +66,7 @@ export function AppLayout({
           its content's min-content width — so a wide table anywhere below made the
           whole page wider than a 768px screen and it scrolled sideways. */}
       <SidebarInset className="intercept-bg min-w-0">
-        <header className="relative z-10 flex h-[80px] items-center gap-4 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(11,12,16,0.5)] backdrop-blur-[60px] px-[32px]">
+        <header className="relative z-10 flex h-16 md:h-[80px] items-center gap-4 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(11,12,16,0.5)] backdrop-blur-[60px] px-page">
           <SidebarTrigger className="text-[#b1b7c1] hover:text-white" />
           <Separator orientation="vertical" className="h-5" />
           <div className="min-w-0">
@@ -83,23 +76,29 @@ export function AppLayout({
             <p className="t-label">{today}</p>
           </div>
         </header>
-        <div className="relative z-10 flex-1 p-[32px]">
+        {/* One page shell for every screen: the same gutter (p-page), the same
+            column (1440px) and the same 24px between blocks. Pages used to
+            narrow themselves to 896 or 1024px one by one, so the content edge
+            moved from screen to screen; a form that needs less width now
+            gets a two-column layout inside the column instead (Section
+            layout="split"). */}
+        <div className="relative z-10 flex-1 p-page">
           {/* A page with a rail is allowed the rail's width on top of the usual
               column, so the report keeps the width it had. Taking it out of the
               1440 instead cost the content a fifth of its measure and left a
               tall empty column beside it, since the rail is only ever as long
               as its own list. */}
-          <div className={`mx-auto w-full ${nav ? "max-w-[1660px]" : width}`}>
+          <div className={`mx-auto w-full ${nav ? "max-w-[1660px]" : "max-w-[1440px]"}`}>
             {nav ? (
-              <div className="grid gap-5 xl:grid-cols-[180px_minmax(0,1fr)] items-start">
+              <div className="grid gap-section xl:grid-cols-[180px_minmax(0,1fr)] items-start">
                 <div className="min-w-0 xl:sticky xl:top-[112px]">{nav}</div>
-                <div className="space-y-6 min-w-0">
+                <div className="space-y-section min-w-0">
                   {title && <PageHeader title={title} description={description} meta={meta} actions={actions} back={back} />}
                   {children}
                 </div>
               </div>
             ) : (
-              <div className="space-y-6">
+              <div className="space-y-section">
                 {title && <PageHeader title={title} description={description} meta={meta} actions={actions} back={back} />}
                 {children}
               </div>

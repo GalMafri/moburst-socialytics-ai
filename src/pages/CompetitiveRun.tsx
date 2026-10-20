@@ -13,14 +13,15 @@ import { formatDate, formatDateTime, listedRuns } from "@/lib/display";
 import { useEffect, useRef, useState } from "react";
 import { describeTracking, pickRunSelection, stateLine, type SetRow } from "@/lib/competitiveFlow";
 
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { track } from "@/lib/telemetry";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { displayCompanyName } from "@/lib/companyName";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Section } from "@/components/ui/section";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loading } from "@/components/ui/loading";
@@ -129,7 +130,7 @@ export default function CompetitiveRun() {
 
   if (clientLoading || setLoading) {
     return (
-      <AppLayout title="Competitive Analysis" width="max-w-4xl" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
+      <AppLayout title="Competitive analysis" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
         <Loading label="Loading" />
       </AppLayout>
     );
@@ -137,7 +138,7 @@ export default function CompetitiveRun() {
 
   if (clientFailed || !client) {
     return (
-      <AppLayout title="Competitive Analysis" width="max-w-4xl" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
+      <AppLayout title="Competitive analysis" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
         <LoadError
           title={clientFailed ? "Could not load this client" : "That client is not available"}
           error={clientFailed ? clientError : "It may have been deleted, or your account may not have access to it."}
@@ -148,189 +149,173 @@ export default function CompetitiveRun() {
   }
 
   if (setsFailed) {
-    return <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl">
+    return <AppLayout title={`Competitive: ${client.name}`} description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
       <LoadError title="Could not load the competitor selection" error={setsError} onRetry={() => refetchSets()} />
     </AppLayout>;
   }
 
   if (!confirmedSet) {
     return (
-      <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
-        <div className="max-w-4xl mx-auto">
-          <Card>
-            <CardContent className="pt-5 text-center space-y-4">
-              <Crosshair className="h-8 w-8 mx-auto text-muted-foreground" />
-              <p className="t-secondary">This client's competitors are chosen automatically from its website. Analyses run here once they are.</p>
-              <Button variant="outline" onClick={() => navigate(`/clients/${id}/competitive`)}>Open competitors</Button>
-            </CardContent>
-          </Card>
-        </div>
+      <AppLayout title={`Competitive: ${client.name}`} description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
+        <EmptyState
+          icon={Crosshair}
+          title="No confirmed competitors yet"
+          description="This client's competitors are chosen automatically from its website. Analyses run here once they are."
+          action={<Button variant="outline" onClick={() => navigate(`/clients/${id}/competitive`)}>Open competitors</Button>}
+        />
       </AppLayout>
     );
   }
 
   const listed = listedRuns("competitive", pastRuns, { isStaff: isMoburstStaff });
+  const confirmed = selectedCompetitors || [];
 
   return (
-    <AppLayout title={`Competitive: ${client.name}`} width="max-w-4xl" description="Analyze the confirmed competitors across their tracked social profiles over the period you choose.">
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* What this run uses: the confirmed selection, also while a newer draft is open. */}
-        {newerDraft && (
-          <Card>
-            <CardContent className="pt-5 space-y-2">
-              <p className="t-body font-medium">Reports use the confirmed competitors below</p>
-              <p className="t-secondary">A newer draft is open beside them on the competitors page.</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Confirmed set summary */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="t-h3">Confirmed top 3</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {(selectedCompetitors || []).map((c: any) => (
-              <div key={c.id} className="flex items-center gap-3 t-body">
-                <Badge>#{c.selected_rank}</Badge>
-                <span className="font-medium" title={c.name}>{displayCompanyName(c.name)}</span>
-                <span className="t-secondary ml-auto">
+    <AppLayout
+      title={`Competitive: ${client.name}`}
+      description="Analyze the confirmed competitors across their tracked social profiles over the period you choose."
+      actions={
+        <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive/reports`)}>
+          <History /> All runs
+        </Button>
+      }
+    >
+        {/* The run page reads as the flow it is part of: the competitors it
+            uses, the period, the run, then the results, each a panel with its
+            heading beside its content. It was four stacked cards in a 896px
+            column, with the run button centered on its own. */}
+        <Section
+          layout="split"
+          eyebrow="Competitors"
+          title="The confirmed top 3"
+          description={<>Confirmed {formatDate(confirmedSet.confirmed_at)}.{newerDraft ? " Reports use these while a newer draft is open on the competitors page." : ""}</>}
+          meta={trackingState.headline ? (
+            <p><span className="font-medium text-white">RivalIQ tracking:</span> {stateLine(trackingState)}</p>
+          ) : undefined}
+          action={
+            <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/competitive?set=${confirmedSet.id}`)}>
+              Open this selection
+            </Button>
+          }
+        >
+          <ol className="grid gap-inner md:grid-cols-3">
+            {confirmed.map((c: any) => (
+              <li key={c.id} className="glass-inner is-selected p-inner space-y-1 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Badge className="shrink-0">#{c.selected_rank}</Badge>
+                  <span className="t-h4 truncate" title={c.name}>{displayCompanyName(c.name)}</span>
+                </div>
+                <p className="t-label">
                   {(c.competitor_handles || []).filter((h: any) => h.is_active).length} profiles
-                </span>
-              </div>
+                </p>
+              </li>
             ))}
-            {trackingState.headline && (
-              <p className="t-secondary pt-1">
-                <span className="font-medium">RivalIQ tracking:</span> {stateLine(trackingState)}
-              </p>
-            )}
-            <p className="t-secondary">
-              Confirmed {formatDate(confirmedSet.confirmed_at)}
-              {" · "}
-              <button className="underline underline-offset-2" onClick={() => navigate(`/clients/${id}/competitive?set=${confirmedSet.id}`)}>
-                Open this selection
-              </button>
-            </p>
-          </CardContent>
-        </Card>
+          </ol>
+        </Section>
 
-        {/* Period */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="t-h3">Period to analyze</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex gap-1.5 flex-wrap">
-              {(["7d", "30d", "90d", "previous_month", "custom"] as RangePreset[]).map((p) => (
-                <Button
-                  key={p}
-                  size="sm"
-                  variant={preset === p ? "default" : "outline"}
-                  aria-pressed={preset === p}
-                  disabled={active}
-                  onClick={() => { if (p === "custom") setCustom(range); setPreset(p); }}
-                >
-                  {PRESET_LABELS[p]}
-                </Button>
-              ))}
+        <Section
+          layout="split"
+          eyebrow="Period"
+          title="Choose the period and run"
+          description={rangeOk ? <>{formatRange(range)} · {rangeDays(range)} days of posts from every company in the landscape.</> : rangeError}
+        >
+          <div className="flex gap-2 flex-wrap">
+            {(["7d", "30d", "90d", "previous_month", "custom"] as RangePreset[]).map((p) => (
+              <Button
+                key={p}
+                size="sm"
+                variant={preset === p ? "default" : "outline"}
+                aria-pressed={preset === p}
+                disabled={active}
+                onClick={() => { if (p === "custom") setCustom(range); setPreset(p); }}
+              >
+                {PRESET_LABELS[p]}
+              </Button>
+            ))}
+          </div>
+          {preset === "custom" && (
+            <div className="flex items-end gap-3 flex-wrap">
+              <label className="t-label">
+                <span className="block mb-1">Start</span>
+                <Input type="date" value={custom.start} max={custom.end < presetRange("7d").end ? custom.end : presetRange("7d").end} disabled={active} onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))} className="w-44" />
+              </label>
+              <label className="t-label">
+                <span className="block mb-1">End</span>
+                <Input type="date" value={custom.end} min={custom.start} max={presetRange("7d").end} disabled={active} onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))} className="w-44" />
+              </label>
             </div>
-            {preset === "custom" && (
-              <div className="flex items-end gap-3 flex-wrap">
-                <label className="t-secondary">
-                  <span className="block mb-1">Start</span>
-                  <Input type="date" value={custom.start} max={custom.end < presetRange("7d").end ? custom.end : presetRange("7d").end} disabled={active} onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))} className="w-44" />
-                </label>
-                <label className="t-secondary">
-                  <span className="block mb-1">End</span>
-                  <Input type="date" value={custom.end} min={custom.start} max={presetRange("7d").end} disabled={active} onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))} className="w-44" />
-                </label>
-              </div>
-            )}
-            <p className="t-secondary">
-              {rangeOk ? <>{formatRange(range)} · {rangeDays(range)} days of posts from every company in the landscape.</> : rangeError}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Run */}
-        <Card>
-          <CardContent className="pt-5 text-center space-y-6">
+          )}
+          <div className="border-t border-[rgba(255,255,255,0.06)] pt-4 space-y-4">
             {run.view.state === "idle" && (
-              <>
-                <Button size="lg" onClick={runAnalysis} className="gap-2" disabled={!rangeOk || run.isLoading || run.sending}>
-                  <Play className="h-5 w-5" /> Run competitive analysis
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <Button onClick={runAnalysis} disabled={!rangeOk || run.isLoading || run.sending}>
+                  <Play /> Run competitive analysis
                 </Button>
                 <p className="t-secondary">
                   {run.notStarted
                     ? "The analysis has not started yet."
-                    : <>Pulls Rival IQ data for {rangeOk ? formatRange(range) : "the selected period"}, breaks content down by platform and finds the gaps. The finished report exports to PDF. {RUN_ESTIMATE}</>}
+                    : <>Pulls RivalIQ data for {rangeOk ? formatRange(range) : "the selected period"}, breaks content down by platform and finds the gaps. The finished report exports to PDF. {RUN_ESTIMATE}</>}
                 </p>
-              </>
+              </div>
             )}
 
             <ReportRunStatus view={run.view} kind="competitive" />
 
             {run.view.state === "ready" && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 justify-center text-success">
-                  <CheckCircle2 className="h-6 w-6" />
-                  <span className="font-medium">Analysis complete</span>
-                </div>
-                <div className="flex gap-2 justify-center">
-                  <Button onClick={() => navigate(`/clients/${id}/competitive/reports/${(run.view as { reportId: string }).reportId}`)} className="gap-2">
-                    Open the report
-                  </Button>
-                  <Button variant="outline" onClick={() => run.reset()}>
-                    Run another period
-                  </Button>
-                </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="inline-flex items-center gap-2 t-h4 !text-success">
+                  <CheckCircle2 className="h-5 w-5" aria-hidden /> Analysis complete
+                </span>
+                <Button onClick={() => navigate(`/clients/${id}/competitive/reports/${(run.view as { reportId: string }).reportId}`)}>
+                  Open the report
+                </Button>
+                <Button variant="outline" onClick={() => run.reset()}>
+                  Run another period
+                </Button>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Section>
 
         {/* Past runs */}
         {listed.length > 0 && (
-          <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0">
-              <CardTitle className="t-h3">Recent runs</CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => navigate(`/clients/${id}/competitive/reports`)}>
-                <History className="h-4 w-4 mr-1" /> All runs
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {listed.map((r) => {
-                  const opens = r.display.state === "ready" || r.display.state === "held";
-                  return (
-                  <div
-                    key={r.id}
-                    className={`glass-inner flex items-center justify-between p-3 ${opens ? "cursor-pointer" : ""}`}
-                    onClick={() => opens && navigate(`/clients/${id}/competitive/reports/${r.id}`)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Badge variant={r.display.variant}>{r.display.label}</Badge>
-                      <span className="t-body">{formatDateTime(r.created_at)}</span>
-                      {r.date_range_start && (
-                        <span className="t-secondary hidden sm:inline">{formatRange({ start: r.date_range_start, end: r.date_range_end })}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {r.display.state === "ready" && r.duration_minutes ? (
-                        <span className="t-secondary">{r.duration_minutes} min</span>
-                      ) : null}
-                      {opens && (
-                        <span className="t-body underline underline-offset-2">View report</span>
-                      )}
-                    </div>
-                  </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
+          <Section
+            layout="split"
+            eyebrow="Results"
+            title="Recent runs"
+            description="Finished reports open from here; every run stays in the history."
+          >
+            <ul className="space-y-2">
+              {listed.map((r) => {
+                const opens = r.display.state === "ready" || r.display.state === "held";
+                const body = (
+                  <>
+                    <Badge variant={r.display.variant}>{r.display.label}</Badge>
+                    <span className="t-body">{formatDateTime(r.created_at)}</span>
+                    {r.date_range_start && (
+                      <span className="t-label hidden sm:inline">{formatRange({ start: r.date_range_start, end: r.date_range_end })}</span>
+                    )}
+                    <span className="ml-auto flex items-center gap-3">
+                      {r.display.state === "ready" && r.duration_minutes ? <span className="t-label">{r.duration_minutes} min</span> : null}
+                      {opens && <span className="t-label !text-[#b9e045]">View report</span>}
+                    </span>
+                  </>
+                );
+                return (
+                  <li key={r.id}>
+                    {opens ? (
+                      <Link to={`/clients/${id}/competitive/reports/${r.id}`} className="glass-inner flex flex-wrap items-center gap-3 p-inner focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(185,224,69,0.45)]">
+                        {body}
+                      </Link>
+                    ) : (
+                      <div className="glass-inner flex flex-wrap items-center gap-3 p-inner">{body}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </Section>
         )}
-      </div>
     </AppLayout>
   );
 }

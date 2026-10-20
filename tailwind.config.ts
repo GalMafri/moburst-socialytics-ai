@@ -70,6 +70,17 @@ export default {
   				ring: 'hsl(var(--sidebar-ring))'
   			}
   		},
+  		// Layout spacing, one set for every screen (values in src/index.css):
+  		// p-page / px-page is the page gutter (16, 24, 32 by width), gap-section
+  		// and space-y-section the gap between blocks on a page (24), p-card the
+  		// padding inside a card (20), p-inner and gap-inner the padding inside an
+  		// inner surface and the gap between tiles (16).
+  		spacing: {
+  			page: 'var(--space-page)',
+  			section: 'var(--space-section)',
+  			card: 'var(--space-card)',
+  			inner: 'var(--space-inner)'
+  		},
   		borderRadius: {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',
