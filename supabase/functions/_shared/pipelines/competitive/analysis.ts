@@ -93,7 +93,7 @@ export const ANALYSIS_SCHEMA = {
     } },
     gaps_for_client: { type: "array", items: { type: "object", required: ["gap", "platform", "why_it_matters", "suggested_play"], properties: { gap: str, platform: { type: "string", enum: [...GAP_PLATFORMS] }, why_it_matters: str, suggested_play: str } } },
     benchmark_scorecard: { type: "object", required: ["client_score", "dimensions"], properties: {
-      client_score: { type: "number" },
+      client_score: { type: "number", minimum: 0, maximum: 100 },
       dimensions: { type: "array", items: { type: "object", required: ["dimension", "client", "competitor_avg", "note"], properties: { dimension: str, client: { type: "number" }, competitor_avg: { type: "number" }, note: str } } },
     } },
   },
@@ -208,7 +208,7 @@ export function analysisProblems(v: Any): string[] {
   const b = v.benchmark_scorecard;
   if (!isObj(b)) out.push("benchmark_scorecard must be an object");
   else {
-    if (b.client_score !== null && !isNum(b.client_score)) out.push("benchmark_scorecard.client_score must be a number or null");
+    if (b.client_score !== null && !(isNum(b.client_score) && b.client_score >= 0 && b.client_score <= 100)) out.push("benchmark_scorecard.client_score must be a number from 0 to 100, or null");
     if (!Array.isArray(b.dimensions)) out.push("benchmark_scorecard.dimensions must be an array");
   }
   return out;

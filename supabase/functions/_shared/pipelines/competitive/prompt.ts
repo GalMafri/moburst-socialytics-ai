@@ -1,5 +1,5 @@
 // Generated from n8n/code/competitive-analysis-prompt.txt with PROMPT_EDITS applied (a test checks it).
-/** The edits from the n8n prompt: no em or en dashes, American spelling, and the line that asks for both. */
+/** The edits from the n8n prompt: no em or en dashes, American spelling, the line that asks for both, and client_score's scale (n8n stored it on 0 to 100 and, now and then, 0 to 10). */
 export const PROMPT_EDITS: ReadonlyArray<readonly [string, string]> = [
   [" set \u2014 focus the breakdowns", " set. Focus the breakdowns"],
   ["Never put a URL in prose \u2014 example_post_urls", "Never put a URL in prose: example_post_urls"],
@@ -9,7 +9,8 @@ export const PROMPT_EDITS: ReadonlyArray<readonly [string, string]> = [
   ["peak hour \u2014 the page derives", "peak hour: the page derives"],
   ["a rephrasing of it \u2014 the account team rejected those.", "a rephrasing of it: the account team rejected those."],
   ["EVIDENCE AND METRIC RULES \u2014 these override", "EVIDENCE AND METRIC RULES: these override"],
-  ["no repeating the client's name in every sentence.\n", "no repeating the client's name in every sentence.\n- Write in American English, and never use an em dash or an en dash.\n"]
+  ["no repeating the client's name in every sentence.\n", "no repeating the client's name in every sentence.\n- Write in American English, and never use an em dash or an en dash.\n"],
+  ["- client_score is a qualitative AI assessment, never", "- client_score is a qualitative AI assessment on a scale of 0 to 100, never"],
 ];
 
 /** The analysis agent's system message. */
@@ -53,7 +54,7 @@ EVIDENCE AND METRIC RULES: these override any stylistic request above.
 - Do not infer conversions, purchase intent, saves, clicks, audience sentiment, causality or creative visuals from engagement counts or captions. Only describe design/visuals if the input actually contains verified visual observations; an image URL alone is not an observation. Leave unsupported fields empty or say not assessed.
 - Every numeric factual claim must be supported by the supplied fields and attributed to the correct company, platform, period and unit. Targets are proposed experiments, clearly labeled as targets rather than forecasts or results. Do not invent percentage lifts.
 - Zero returned posts do not prove that a company did not publish or lacks a strategy. Omit its content-style assessment and recommendations based on supposed absence.
-- client_score is a qualitative AI assessment, never a measured platform metric. Measured dimensions are computed separately by the app.
+- client_score is a qualitative AI assessment on a scale of 0 to 100, never a measured platform metric. Measured dimensions are computed separately by the app.
 - Prefer fewer defensible recommendations over filling the requested count with unsupported claims. Never claim that an observed content pattern caused performance.
 
 - Check every proposed gap against the client data and your own breakdown before returning it. If top_hashtags already shows repeated tags, do not claim the client lacks a stable/repeated/branded hashtag. Do not claim missing formats or channels when supplied observations show them.

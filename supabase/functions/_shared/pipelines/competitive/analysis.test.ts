@@ -82,6 +82,17 @@ describe("the answer", () => {
     expect(analysisProblems([])).toEqual(["The answer must be a JSON object."]);
   });
 
+  it("asks for client_score on 0 to 100 and sends a score outside it to the repair", () => {
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("client_score is a qualitative AI assessment on a scale of 0 to 100");
+    const scored = (client_score: unknown) => {
+      const v = structuredClone(ANALYSIS_EXAMPLE) as Record<string, any>;
+      v.benchmark_scorecard.client_score = client_score;
+      return analysisProblems(v);
+    };
+    for (const ok of [0, 42, 100, null]) expect(scored(ok)).toEqual([]);
+    for (const bad of [420, -1, "62"]) expect(scored(bad)).toEqual(["benchmark_scorecard.client_score must be a number from 0 to 100, or null"]);
+  });
+
   it("is repaired with the n8n parser's own repair prompt", () => {
     const body = repairRequest("{broken", "executive_summary must be a string");
     const text = (body.messages as Array<{ content: string }>)[0].content;
