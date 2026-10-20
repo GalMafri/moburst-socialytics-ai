@@ -10,7 +10,6 @@ import { fakeDb } from "../lifecycle/fakeDb";
 import { readEngine, requestedEngine, resolveEngine, type EngineRow } from "./engine";
 import { makeRegistry, REGISTRY } from "./registry";
 import { missingSecrets, PIPELINE_SECRETS } from "./secrets";
-import type { PipelineDefinition } from "./types";
 
 const MOBURST = "d00ce604-2bcc-455a-9826-f80250db75cf";
 const OTHER = "11111111-1111-1111-1111-111111111111";
@@ -21,10 +20,8 @@ const DEFAULTS: EngineRow[] = [
 ];
 const noEnv = () => undefined;
 
-const realSocial: PipelineDefinition = {
-  name: "social_v1", kind: "social", modes: ["shadow", "app"], appCapable: true, secrets: ["ANTHROPIC_API_KEY", "GAMMA_API_KEY"], first: "a",
-  steps: { a: async () => ({ type: "done" }) },
-};
+/** Every secret the in-app social pipeline reads, set. */
+const socialEnv = (n: string) => ({ ANTHROPIC_API_KEY: "k", SPROUT_CLIENT_ID: "i", SPROUT_CLIENT_SECRET: "s", GAMMA_API_KEY: "g", APIFY_API_TOKEN: "a" } as Record<string, string>)[n];
 
 describe("requestedEngine", () => {
   it("is n8n for every kind and client as shipped", () => {
@@ -63,25 +60,25 @@ describe("resolveEngine", () => {
     }
   });
 
-  it("takes app, and shadows with the real pipeline, once one is registered with its secrets set and a writer for the real report", () => {
-    const registry = makeRegistry([...REGISTRY.all(), realSocial], (kind) => kind === "social");
-    const env = (n: string) => ({ ANTHROPIC_API_KEY: "k", GAMMA_API_KEY: "g" } as Record<string, string>)[n];
-    expect(resolveEngine("app", "social", registry, env)).toMatchObject({ engine: "app", pipeline: { name: "social_v1" } });
-    expect(resolveEngine("shadow", "social", registry, env)).toMatchObject({ engine: "shadow", pipeline: { name: "social_v1" } });
+  it("takes app, and shadows with the in-app social pipeline, once its secrets are set (it has its writer)", () => {
+    expect(resolveEngine("app", "social", REGISTRY, socialEnv)).toMatchObject({ engine: "app", pipeline: { name: "social_v1" } });
+    expect(resolveEngine("shadow", "social", REGISTRY, socialEnv)).toMatchObject({ engine: "shadow", pipeline: { name: "social_v1" } });
+    // The scrapers' token is awaited: a shadow waits for it, a real report never does.
+    const noApify = (n: string) => (n === "APIFY_API_TOKEN" ? undefined : socialEnv(n));
+    expect(resolveEngine("shadow", "social", REGISTRY, noApify).pipeline?.name).toBe("social_v1");
+    expect(resolveEngine("app", "social", REGISTRY, noApify).engine).toBe("n8n");
   });
 
   it("refuses app while this deployment has no writer for the kind's real report", () => {
-    const registry = makeRegistry([...REGISTRY.all(), realSocial]);
-    const env = (n: string) => ({ ANTHROPIC_API_KEY: "k", GAMMA_API_KEY: "g" } as Record<string, string>)[n];
-    expect(resolveEngine("app", "social", registry, env).engine).toBe("n8n");
-    expect(resolveEngine("shadow", "social", registry, env).pipeline?.name).toBe("social_v1");
+    const registry = makeRegistry(REGISTRY.all());
+    expect(resolveEngine("app", "social", registry, socialEnv).engine).toBe("n8n");
+    expect(resolveEngine("shadow", "social", registry, socialEnv).pipeline?.name).toBe("social_v1");
   });
 
   it("keeps a kind on n8n, and a shadow on the placeholder, while the real pipeline's secrets are missing", () => {
-    const registry = makeRegistry([...REGISTRY.all(), realSocial], () => true);
     const env = (n: string) => (n === "ANTHROPIC_API_KEY" ? "k" : undefined);
-    expect(resolveEngine("app", "social", registry, env).engine).toBe("n8n");
-    expect(resolveEngine("shadow", "social", registry, env).pipeline?.name).toBe("placeholder_social");
+    expect(resolveEngine("app", "social", REGISTRY, env).engine).toBe("n8n");
+    expect(resolveEngine("shadow", "social", REGISTRY, env).pipeline?.name).toBe("placeholder_social");
   });
 
   it("shadows the LinkedIn source with the in-app pipeline while APIFY_API_TOKEN is missing (it waits), and takes app only once the token is set", () => {
@@ -96,7 +93,7 @@ describe("resolveEngine", () => {
     expect(resolveEngine("shadow", "competitive", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY"]))).toMatchObject({ engine: "shadow", pipeline: { name: "competitive_v1" } });
     expect(resolveEngine("app", "competitive", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY"])).engine).toBe("n8n");
     expect(resolveEngine("app", "competitive", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY", "APIFY_API_TOKEN"]))).toMatchObject({ engine: "app", pipeline: { name: "competitive_v1" } });
-    // Social has no real pipeline yet: only its placeholder shadows, and app stays on n8n.
+    // Social needs Sprout and Gamma too: without them only its placeholder shadows, and app stays on n8n.
     expect(resolveEngine("app", "social", REGISTRY, keys(["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY", "APIFY_API_TOKEN"])).engine).toBe("n8n");
   });
 
@@ -122,8 +119,8 @@ describe("readEngine", () => {
 });
 
 describe("registry", () => {
-  it("registers the in-app LinkedIn source and competitive pipelines, and one shadow-only placeholder per kind, needing no secret", () => {
-    expect(REGISTRY.all().map((d) => d.name).sort()).toEqual(["competitive_v1", "linkedin_source_v1", "placeholder_competitive", "placeholder_linkedin_source", "placeholder_social"]);
+  it("registers the in-app LinkedIn source, competitive and social pipelines, and one shadow-only placeholder per kind, needing no secret", () => {
+    expect(REGISTRY.all().map((d) => d.name).sort()).toEqual(["competitive_v1", "linkedin_source_v1", "placeholder_competitive", "placeholder_linkedin_source", "placeholder_social", "social_v1"]);
     for (const d of REGISTRY.all().filter((x) => x.name.startsWith("placeholder_"))) {
       expect(d.modes).toEqual(["shadow"]);
       expect(d.appCapable).toBe(false);
@@ -131,6 +128,7 @@ describe("registry", () => {
     }
     expect(REGISTRY.get("linkedin_source_v1")).toMatchObject({ kind: "linkedin_source", modes: ["shadow", "app"], appCapable: true, secrets: [], awaitedSecrets: ["APIFY_API_TOKEN"] });
     expect(REGISTRY.get("competitive_v1")).toMatchObject({ kind: "competitive", modes: ["shadow", "app"], appCapable: true, secrets: ["RIVALIQ_API_KEY", "ANTHROPIC_API_KEY"], awaitedSecrets: ["APIFY_API_TOKEN"] });
+    expect(REGISTRY.get("social_v1")).toMatchObject({ kind: "social", modes: ["shadow", "app"], appCapable: true, secrets: ["ANTHROPIC_API_KEY", "SPROUT_CLIENT_ID", "SPROUT_CLIENT_SECRET", "GAMMA_API_KEY"], awaitedSecrets: ["APIFY_API_TOKEN"] });
   });
 
   it("refuses two pipelines with one name, a missing first step, and an app-capable pipeline without app mode", () => {
@@ -159,7 +157,8 @@ describe("secrets", () => {
     const all = Object.values(PIPELINE_SECRETS).flat().map((s) => s.name);
     expect(new Set(all)).toEqual(new Set(["ANTHROPIC_API_KEY", "SPROUT_CLIENT_ID", "SPROUT_CLIENT_SECRET", "APIFY_API_TOKEN", "GAMMA_API_KEY", "RIVALIQ_API_KEY"]));
     expect(all.some((n) => /OPENAI/i.test(n))).toBe(false);
-    expect(PIPELINE_SECRETS.social.filter((s) => !s.set).map((s) => s.name)).toEqual(["APIFY_API_TOKEN", "GAMMA_API_KEY"]);
+    // Every one is set on the project (APIFY_API_TOKEN and GAMMA_API_KEY since 20 Oct 2026).
+    expect(Object.values(PIPELINE_SECRETS).flat().filter((s) => !s.set)).toEqual([]);
     expect(PIPELINE_SECRETS.linkedin_source.map((s) => s.name)).toEqual(["APIFY_API_TOKEN"]);
   });
 

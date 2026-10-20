@@ -77,8 +77,8 @@ export function apifyRetryWaitMs(attempt: number, retryAfter: string | null): nu
 const redact = (text: string, token: string) => (token ? text.split(token).join("[redacted]") : text);
 
 export interface ApifyClient {
-  /** POST /acts/{actor}/runs: starts a run and returns it at once (READY or RUNNING). */
-  startRun(actorId: string, input: unknown, opts: { timeoutSecs: number; memoryMbytes: number }): Promise<ApifyRun>;
+  /** POST /acts/{actor}/runs: starts a run and returns it at once (READY or RUNNING). A timeout or memory left out is the actor's own default. */
+  startRun(actorId: string, input: unknown, opts: { timeoutSecs?: number; memoryMbytes?: number }): Promise<ApifyRun>;
   /** GET /actor-runs/{run}: the run, after Apify held the answer until it ended or waitSecs passed (at most 60). */
   getRun(runId: string, opts?: { waitSecs?: number }): Promise<ApifyRun>;
   /** One page of a dataset's items. */
@@ -136,7 +136,10 @@ export function apifyClient(o: ApifyClientOptions): ApifyClient {
 
   return {
     async startRun(actorId, input, opts) {
-      return runOf(await request("POST", `/acts/${encodeURIComponent(actorId)}/runs`, { timeout: opts.timeoutSecs, memory: opts.memoryMbytes }, input ?? {}), "the start");
+      const query: Record<string, number> = {};
+      if (opts.timeoutSecs != null) query.timeout = opts.timeoutSecs;
+      if (opts.memoryMbytes != null) query.memory = opts.memoryMbytes;
+      return runOf(await request("POST", `/acts/${encodeURIComponent(actorId)}/runs`, query, input ?? {}), "the start");
     },
     async getRun(runId, opts = {}) {
       const wait = Math.max(0, Math.min(60, Math.floor(opts.waitSecs ?? 0)));

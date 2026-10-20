@@ -1,0 +1,2090 @@
+{
+  "id": "SZbRTV7yOdXTNHHf",
+  "name": "Socialytics - AI Social Media Trend Analysis + Insights Agent - Loveable - Final",
+  "versionId": "5f8d3abc-e67e-4397-b9c2-a219494f65b7",
+  "activeVersionId": "5f8d3abc-e67e-4397-b9c2-a219494f65b7",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.sproutsocial.com/v1/1676448/analytics/profiles",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"filters\": [\n    \"customer_profile_id.eq(\" + $('Code in JavaScript').item.json.profile_ids.join(\", \") + \")\",\n    \"reporting_period.in(\" + $('Code in JavaScript').item.json.previous_month_start + \"...\" + $('Code in JavaScript').item.json.previous_month_end + \")\"\n  ],\n  \"metrics\": [\"impressions\", \"reactions\", \"post_link_clicks\", \"video_views\", \"comments_count\", \"shares_count\", \"likes\", \"post_content_clicks\", \"post_content_clicks_other\", \"saves\", \"story_replies\", \"posts_sent_count\"]\n}) }}",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging || Number($response.body.paging.current_page) >= Number($response.body.paging.total_pages) }}",
+              "limitPagesFetched": true,
+              "requestInterval": 200
+            }
+          }
+        }
+      },
+      "id": "9055fa15-76dd-4665-b47c-9da80d3e5391",
+      "name": "Get Previous Month Sprout Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2368,
+        176
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "executeOnce": true,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PmyntvBiSms0aRPF",
+          "name": "Sprout Social"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "Run actor and get dataset",
+        "actorId": {
+          "__rl": true,
+          "value": "GdWCkxBtKWOsKjdch",
+          "mode": "list",
+          "cachedResultName": "TikTok Scraper (clockworks/tiktok-scraper)",
+          "cachedResultUrl": "https://console.apify.com/actors/GdWCkxBtKWOsKjdch/input"
+        },
+        "customBody": "={{ JSON.stringify($json.trend_inputs.tiktok) }}",
+        "authentication": "apifyOAuth2Api"
+      },
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "position": [
+        3040,
+        560
+      ],
+      "id": "760557f3-8296-4c29-801d-b29f5f8a2d88",
+      "name": "Run TikTok Scraper",
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "apifyOAuth2Api": {
+          "id": "UDEw5qEJhODlzTMY",
+          "name": "Apify account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "Run actor and get dataset",
+        "actorId": {
+          "__rl": true,
+          "value": "reGe1ST3OBgYZSsZJ",
+          "mode": "list",
+          "cachedResultName": "Instagram Hashtag Scraper (apify/instagram-hashtag-scraper)",
+          "cachedResultUrl": "https://console.apify.com/actors/reGe1ST3OBgYZSsZJ/input"
+        },
+        "customBody": "={{ JSON.stringify($json.trend_inputs.instagram) }}",
+        "authentication": "apifyOAuth2Api"
+      },
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "position": [
+        3040,
+        944
+      ],
+      "id": "cdfb3259-8af0-4812-bb78-075d59f49686",
+      "name": "Run IG Scraper",
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "apifyOAuth2Api": {
+          "id": "UDEw5qEJhODlzTMY",
+          "name": "Apify account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine Brief Context with Client Data - UPDATED: multi-geo, multi-language, brand_voice\n// Adds Webhook fallback when $('Workflow Configuration') fails silently\n\n// Get the brief analysis from current input (from \"Analyze Client Brief Context\")\nconst briefAnalysis = $input.first().json || {};\n\n// === RESILIENT CLIENT DATA FETCH ===\n// Try Workflow Configuration first, then fall back to raw Webhook body\nlet clientData = {};\n\n// Attempt 1: Workflow Configuration (has date math + webhook body via includeOtherFields)\ntry {\n  const wfConfig = $('Workflow Configuration').first().json;\n  // n8n Webhook wraps POST body under \"body\" key, so client_name is in wfConfig.body.client_name\n  const wfBody = wfConfig.body || wfConfig;\n  const wfClientName = wfConfig.client_name || wfBody.client_name;\n  if (wfConfig && wfClientName) {\n    // Merge body fields to top level so downstream code works\n    clientData = { ...wfBody, ...wfConfig };\n    // Ensure top-level client_name is set\n    clientData.client_name = wfClientName;\n    console.log('✅ Got client data from Workflow Configuration');\n\n    // Get the webhook body for custom date range check\n    let whBody = {};\n    try {\n      const wh = $('Webhook').first().json;\n      whBody = wh.body || wh;\n    } catch(e) {\n      whBody = wfBody;\n    }\n\n    // ALWAYS compute previous period dynamically based on current period length\n    const fmt = (d) => d.toISOString().split('T')[0];\n    const currentStart = whBody.date_range_start || clientData.date_range_start || clientData.current_month_start;\n    const currentEnd = whBody.date_range_end || clientData.date_range_end || clientData.current_month_end;\n\n    if (currentStart && currentEnd) {\n      clientData.current_month_start = currentStart;\n      clientData.current_month_end = currentEnd;\n      const customStartDate = new Date(currentStart);\n      const customEndDate = new Date(currentEnd);\n      const daysDiff = Math.ceil((customEndDate - customStartDate) / (1000 * 60 * 60 * 24));\n      const prevEnd = new Date(customStartDate);\n      prevEnd.setDate(prevEnd.getDate() - 1);\n      const prevStart = new Date(prevEnd);\n      prevStart.setDate(prevStart.getDate() - daysDiff);\n      clientData.previous_month_start = fmt(prevStart);\n      clientData.previous_month_end = fmt(prevEnd);\n      console.log('✅ Dynamic period:', currentStart, 'to', currentEnd, `(${daysDiff} days)`);\n      console.log('✅ Previous period:', clientData.previous_month_start, 'to', clientData.previous_month_end);\n    }\n  }\n} catch (e) {\n  console.log('⚠️ Workflow Configuration not accessible:', e.message);\n}\n\n// Attempt 2: Raw Webhook body (if Workflow Configuration failed or returned empty)\nif (!clientData.client_name) {\n  try {\n    const webhookData = $('Webhook').first().json;\n    const body = webhookData.body || webhookData;\n    if (body && body.client_name) {\n      clientData = { ...body };\n      console.log('✅ Got client data from Webhook (fallback)');\n\n      // Manually compute the date fields that Workflow Configuration would have added\n      const now = new Date();\n      const year = now.getFullYear();\n      const month = now.getMonth(); // 0-indexed\n\n      const currentMonthStart = new Date(year, month, 1);\n      const currentMonthEnd = now;\n      const prevMonthStart = new Date(year, month - 1, 1);\n      const prevMonthEnd = new Date(year, month, 0); // Last day of previous month\n\n      const fmt = (d) => d.toISOString().split('T')[0];\n\n      // Use custom date range from Loveable if provided, otherwise use month defaults\n      const effectiveStart = (body.date_range_start && body.date_range_start.length > 0)\n        ? body.date_range_start\n        : fmt(currentMonthStart);\n      const effectiveEnd = (body.date_range_end && body.date_range_end.length > 0)\n        ? body.date_range_end\n        : fmt(currentMonthEnd);\n\n      clientData.current_month_start = effectiveStart;\n      clientData.current_month_end = effectiveEnd;\n\n      // ALWAYS compute previous period dynamically based on current period length\n      const customStartDate = new Date(effectiveStart);\n      const customEndDate = new Date(effectiveEnd);\n      const daysDiff = Math.ceil((customEndDate - customStartDate) / (1000 * 60 * 60 * 24));\n      const prevEndDate = new Date(customStartDate);\n      prevEndDate.setDate(prevEndDate.getDate() - 1);\n      const prevStartDate = new Date(prevEndDate);\n      prevStartDate.setDate(prevStartDate.getDate() - daysDiff);\n      clientData.previous_month_start = fmt(prevStartDate);\n      clientData.previous_month_end = fmt(prevEndDate);\n\n      console.log('✅ Current period:', effectiveStart, 'to', effectiveEnd, '(' + daysDiff + ' days)');\n      console.log('✅ Previous period:', clientData.previous_month_start, 'to', clientData.previous_month_end);\n\n      const trendsEnd = new Date(now);\n      trendsEnd.setDate(trendsEnd.getDate() - 1);\n      const trendsStart = new Date(now);\n      trendsStart.setDate(trendsStart.getDate() - 8);\n      clientData.trends_start_date = fmt(trendsStart);\n      clientData.trends_end_date = fmt(trendsEnd);\n    }\n  } catch (e2) {\n    console.log('❌ Webhook fallback also failed:', e2.message);\n  }\n}\n\nif (!clientData.client_name) {\n  console.log('❌ CRITICAL: No client data found from any source!');\n}\n\nlet prepared = {};\ntry { prepared = $('Prepare Brief Text').first().json; } catch (error) {}\nclientData.brief_text = prepared.brief_text || clientData.brief_text || '';\nconst config = clientData;\n\n// Parse content pillars (could be CSV string, array of strings, or array of objects from Loveable)\nconst contentPillarsRaw = clientData.content_pillars || '';\nlet contentPillars = [];\nif (Array.isArray(contentPillarsRaw)) {\n  contentPillars = contentPillarsRaw.map(p => {\n    if (typeof p === 'string') return p;\n    if (p && typeof p === 'object' && p.name) return p.name;\n    return '';\n  }).filter(Boolean);\n} else if (typeof contentPillarsRaw === 'string' && contentPillarsRaw.trim()) {\n  contentPillars = contentPillarsRaw.split(',').map(p => p.trim()).filter(Boolean);\n}\n\n// Preserve full pillar objects (with descriptions) for richer AI context\nlet contentPillarsFull = [];\nif (Array.isArray(clientData.content_pillars)) {\n  contentPillarsFull = clientData.content_pillars.map(p => {\n    if (typeof p === 'string') return { name: p, description: '' };\n    if (p && typeof p === 'object') return { name: p.name || '', description: p.description || '' };\n    return null;\n  }).filter(Boolean);\n}\n\n// Parse social keywords\nconst socialKeywordsRaw = clientData.social_keywords || '';\nconst socialKeywords = Array.isArray(socialKeywordsRaw)\n  ? socialKeywordsRaw\n  : (typeof socialKeywordsRaw === 'string'\n    ? socialKeywordsRaw.split(',').map(k => k.trim()).filter(Boolean)\n    : []);\n\n// Parse trends keywords\nconst trendsKeywordsRaw = clientData.trends_keywords || '';\nconst trendsKeywords = typeof trendsKeywordsRaw === 'string'\n  ? trendsKeywordsRaw.trim()\n  : (Array.isArray(trendsKeywordsRaw) ? trendsKeywordsRaw.join(', ') : '');\n\n// Parse profile_ids\nlet profileIds = clientData.profile_ids || [];\nif (typeof profileIds === 'string') {\n  profileIds = profileIds.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));\n}\n\n// Get profiles array from webhook\nconst profiles = clientData.profiles || [];\n\n// === MULTI-GEO: handle as array ===\nlet geoArr = clientData.geo || ['US'];\nif (typeof geoArr === 'string') {\n  geoArr = geoArr.split(',').map(s => s.trim()).filter(Boolean);\n}\nif (!Array.isArray(geoArr)) geoArr = [geoArr];\nif (geoArr.length === 0) geoArr = ['US'];\n\n// === MULTI-LANGUAGE: handle as array ===\nlet languagesArr = clientData.languages || clientData.language || ['en'];\nif (typeof languagesArr === 'string') {\n  languagesArr = languagesArr.split(',').map(s => s.trim()).filter(Boolean);\n}\nif (!Array.isArray(languagesArr)) languagesArr = [languagesArr];\nif (languagesArr.length === 0) languagesArr = ['en'];\n\n// === BRAND VOICE ===\nconst brandVoice = clientData.brand_voice || '';\n\n// === BRAND BOOK ===\nconst brandBookText = clientData.brand_book_text || '';\n\n// === BRIEF CONTEXT HANDLING ===\n// If AI brief analysis failed (empty object), use brief_text from webhook as fallback\nlet briefContext = {\n  brand_voice: null,\n  target_audience: null,\n  content_themes: [],\n  brand_values: [],\n  competitive_positioning: null,\n  content_restrictions: [],\n  campaign_objectives: null\n};\n\nconst analyzed = briefAnalysis.output || briefAnalysis;\nconst hasBriefAnalysis = ['brand_voice', 'target_audience', 'content_themes', 'brand_values', 'competitive_positioning', 'content_restrictions', 'campaign_objectives'].some(key =>\n  Array.isArray(analyzed[key]) ? analyzed[key].length > 0 : typeof analyzed[key] === 'string' && analyzed[key].trim().length > 0\n);\nconst briefWarning = prepared.brief_warning || (!hasBriefAnalysis && clientData.brief_text ? 'The brief could not be summarized; its original text was included in the analysis.' : '');\n\nif (hasBriefAnalysis) {\n  // Use the AI-analyzed brief context\n  briefContext = {\n    brand_voice: briefAnalysis.output?.brand_voice || briefAnalysis.brand_voice || null,\n    target_audience: briefAnalysis.output?.target_audience || briefAnalysis.target_audience || null,\n    content_themes: briefAnalysis.output?.content_themes || briefAnalysis.content_themes || [],\n    brand_values: briefAnalysis.output?.brand_values || briefAnalysis.brand_values || [],\n    competitive_positioning: briefAnalysis.output?.competitive_positioning || briefAnalysis.competitive_positioning || null,\n    content_restrictions: briefAnalysis.output?.content_restrictions || briefAnalysis.content_restrictions || [],\n    campaign_objectives: briefAnalysis.output?.campaign_objectives || briefAnalysis.campaign_objectives || null\n  };\n  console.log('✅ Using AI-analyzed brief context');\n} else if (clientData.brief_text && clientData.brief_text.trim()) {\n  // Fallback: use raw brief_text from Loveable as unstructured context\n  briefContext = {\n    brand_voice: null,\n    target_audience: null,\n    content_themes: [],\n    brand_values: [],\n    competitive_positioning: null,\n    content_restrictions: [],\n    campaign_objectives: null,\n    raw_brief: clientData.brief_text\n  };\n  console.log('⚠️ Using raw brief_text as fallback (AI analysis failed)');\n} else {\n  console.log('⚠️ No brief context available (no brief_file_id and no brief_text)');\n}\n\nconsole.log('═══════════════════════════════════════════════════════════');\nconsole.log('Combining Brief Context with Client Data');\nconsole.log(`  Client: ${clientData.client_name || 'Unknown'}`);\nconsole.log(`  Sprout Customer ID: ${clientData.sprout_customer_id || 'MISSING'}`);\nconsole.log(`  Report ID: ${clientData.report_id || 'MISSING'}`);\nconsole.log(`  Profile IDs: [${profileIds.join(', ')}]`);\nconsole.log(`  Profiles: ${profiles.length}`);\nconsole.log(`  Social keywords: [${socialKeywords.join(', ')}]`);\nconsole.log(`  Content pillars: [${contentPillars.join(', ')}]`);\nconsole.log(`  Geo (array): [${geoArr.join(', ')}]`);\nconsole.log(`  Languages (array): [${languagesArr.join(', ')}]`);\nconsole.log(`  Brand Voice: ${brandVoice || 'none'}`);\nconsole.log(`  Brand Book: ${brandBookText ? brandBookText.substring(0, 50) + '...' : 'none'}`);\nconsole.log(`  Brief source: ${hasBriefAnalysis ? 'AI analysis' : (clientData.brief_text ? 'raw text' : 'none')}`);\nconsole.log('═══════════════════════════════════════════════════════════');\n\n// Merge the data\nreturn [{\n  json: {\n    // Identifiers\n    report_id: clientData.report_id || '',\n\n    // Client info from webhook\n    client_name: clientData.client_name || '',\n    sprout_customer_id: clientData.sprout_customer_id || '',\n    profile_ids: profileIds,\n    profiles: profiles,\n    keywords: clientData.keywords || '',\n    social_keywords: socialKeywords,\n    trends_keywords: trendsKeywords,\n    primary_platforms: clientData.primary_platforms || 'Instagram,TikTok,Facebook',\n    geo: geoArr,\n    languages: languagesArr,\n    timezone: clientData.timezone || 'UTC',\n    brand_voice: brandVoice,\n    brand_book_text: brandBookText,\n    brand_notes: clientData.brand_notes || '',\n    brief_file_id: clientData.brief_file_id || '',\n    brief_text: clientData.brief_text || '',\n\n    // Content Pillars\n    content_pillars: contentPillars,\n    content_pillars_full: contentPillarsFull,\n\n    // Date ranges\n    date_ranges: {\n      current_month: {\n        start: config.current_month_start,\n        end: config.current_month_end\n      },\n      previous_month: {\n        start: config.previous_month_start,\n        end: config.previous_month_end\n      }\n    },\n\n    // Skip trends flag\n    skip_trends: !!(clientData.skip_trends),\n\n    // Brief analysis\n    brief_context: briefContext,\n    brief_warning: briefWarning,\n\n    // Design language (Phase 9) - pass through from webhook for downstream normalization\n    design_style_synthesis: clientData.design_style_synthesis || null,\n    design_references: clientData.design_references || [],\n    brand_book_file_path: clientData.brand_book_file_path || null\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        1040
+      ],
+      "id": "5b52586a-8344-4245-a7cf-55fd5db7f454",
+      "name": "Combine Brief Context with Client Data",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.sproutsocial.com/v1/1676448/analytics/posts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"timezone\": $(\"Combine Brief Context with Client Data\").first().json.timezone || \"UTC\",\n  \"filters\": [\n    \"customer_profile_id.eq(\" + $('Code in JavaScript').item.json.profile_ids.join(\", \") + \")\",\n    \"created_time.in(\" + $('Code in JavaScript').item.json.current_month_start + \"T00:00:00...\" + $('Code in JavaScript').item.json.current_month_end + \"T23:59:59)\"\n  ],\n  \"metrics\": [\n    \"lifetime.impressions\",\n    \"lifetime.impressions_organic\",\n    \"lifetime.impressions_paid\",\n    \"lifetime.engagements\",\n    \"lifetime.reactions\",\n    \"lifetime.likes\",\n    \"lifetime.comments_count\",\n    \"lifetime.shares_count\",\n    \"lifetime.post_link_clicks\",\n    \"lifetime.post_content_clicks\",\n    \"lifetime.video_views\",\n    \"lifetime.video_view_time\",\n    \"lifetime.sentiment_comments_positive_count\",\n    \"lifetime.sentiment_comments_negative_count\",\n    \"lifetime.sentiment_comments_neutral_count\"\n  ],\n  \"fields\": [\n    \"created_time\",\n    \"perma_link\",\n    \"text\",\n    \"post_type\",\n    \"content_category\",\n    \"network\",\n    \"visual_media\"\n  ],\n  \"sort\": [\"lifetime.impressions:desc\"],\n  \"limit\": 50\n}) }}",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging || Number($response.body.paging.current_page) >= Number($response.body.paging.total_pages) }}",
+              "limitPagesFetched": true,
+              "requestInterval": 200
+            }
+          }
+        }
+      },
+      "id": "ebb964d5-3072-411c-a642-4b79d4ecd863",
+      "name": "Get Sprout Social Post Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2592,
+        -768
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "executeOnce": true,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PmyntvBiSms0aRPF",
+          "name": "Sprout Social"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Sprout Social profile IDs + date ranges for analytics queries\n// sprout_customer_id is always 1676448 for all clients\n// Profile IDs come from Loveable via the webhook (per-client selection)\n\nconst SPROUT_CUSTOMER_ID = '1676448';\n\n// === RESILIENT DATA FETCH ===\nlet clientData = {};\n\n// Try Combine Brief Context first (it has computed date_ranges)\ntry {\n  const combined = $('Combine Brief Context with Client Data').first().json;\n  if (combined && combined.client_name) {\n    clientData = combined;\n    console.log('✅ Got client data from Combine Brief Context');\n  }\n} catch (e) {\n  console.log('⚠️ Combine Brief Context not accessible:', e.message);\n}\n\n// Fallback: try Workflow Configuration\nif (!clientData.client_name) {\n  try {\n    const wfConfig = $('Workflow Configuration').first().json;\n    if (wfConfig && wfConfig.client_name) {\n      clientData = wfConfig;\n      console.log('✅ Got client data from Workflow Configuration (fallback)');\n    }\n  } catch (e) {\n    console.log('⚠️ Workflow Configuration not accessible:', e.message);\n  }\n}\n\n// Fallback: try raw Webhook\nif (!clientData.client_name) {\n  try {\n    const webhookData = $('Webhook').first().json;\n    const body = webhookData.body || webhookData;\n    if (body && body.client_name) {\n      clientData = body;\n      console.log('✅ Got client data from Webhook (fallback)');\n    }\n  } catch (e) {\n    console.log('❌ All data sources failed:', e.message);\n  }\n}\n\n// Get profile_ids — these are the per-client profiles selected in Loveable\nlet profileIds = clientData.profile_ids || [];\n\nif (typeof profileIds === 'string') {\n  profileIds = profileIds.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));\n}\n\n// Ensure they are numbers (Sprout API requires numeric IDs)\nprofileIds = profileIds.map(id => typeof id === 'number' ? id : parseInt(id, 10)).filter(id => !isNaN(id));\n\n// Backwards compat fallback\nif (profileIds.length === 0) {\n  const fallback = clientData.sprout_profile_ids || '';\n  if (typeof fallback === 'string' && fallback.trim()) {\n    profileIds = fallback.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));\n  }\n}\n\nconst profiles = clientData.profiles || [];\n\n// === COMPUTE DATE RANGES ===\n// Try to get from Combine Brief Context's date_ranges, else compute fresh\nlet currentMonthStart, currentMonthEnd, previousMonthStart, previousMonthEnd;\n\nif (clientData.date_ranges && clientData.date_ranges.current_month) {\n  currentMonthStart = clientData.date_ranges.current_month.start;\n  currentMonthEnd = clientData.date_ranges.current_month.end;\n  previousMonthStart = clientData.date_ranges.previous_month.start;\n  previousMonthEnd = clientData.date_ranges.previous_month.end;\n  console.log('✅ Got date ranges from Combine Brief Context');\n} else if (clientData.current_month_start) {\n  // From Workflow Configuration direct output\n  currentMonthStart = clientData.current_month_start;\n  currentMonthEnd = clientData.current_month_end;\n  previousMonthStart = clientData.previous_month_start;\n  previousMonthEnd = clientData.previous_month_end;\n  console.log('✅ Got date ranges from Workflow Configuration fields');\n} else {\n  // Compute fresh as ultimate fallback\n  const now = new Date();\n  const year = now.getFullYear();\n  const month = now.getMonth();\n  const fmt = (d) => d.toISOString().split('T')[0];\n\n  currentMonthStart = fmt(new Date(year, month, 1));\n  currentMonthEnd = fmt(now);\n  previousMonthStart = fmt(new Date(year, month - 1, 1));\n  previousMonthEnd = fmt(new Date(year, month, 0));\n  console.log('⚠️ Computed date ranges fresh (no upstream data)');\n}\n\nconsole.log('═══════════════════════════════════════════════════════');\nconsole.log('Sprout Social Profile Setup');\nconsole.log(`  Customer ID (global): ${SPROUT_CUSTOMER_ID}`);\nconsole.log(`  Profile IDs (per-client): [${profileIds.join(', ')}]`);\nconsole.log(`  Profile metadata: ${profiles.length} profiles`);\nif (profiles.length > 0) {\n  profiles.forEach(p => {\n    console.log(`    - ${p.native_name || p.name} (${p.network}) [ID: ${p.id}]`);\n  });\n}\nconsole.log(`  Current month: ${currentMonthStart} to ${currentMonthEnd}`);\nconsole.log(`  Previous month: ${previousMonthStart} to ${previousMonthEnd}`);\nconsole.log('═══════════════════════════════════════════════════════');\n\nif (profileIds.length === 0) {\n  console.log('⚠️ WARNING: No profile IDs provided! Sprout Social analytics will fail.');\n  console.log('Make sure profiles are selected in Loveable for this client.');\n}\n\nreturn [{\n  json: {\n    profile_ids: profileIds,\n    profiles: profiles,\n    sprout_customer_id: SPROUT_CUSTOMER_ID,\n    client_name: clientData.client_name || '',\n    report_id: clientData.report_id || '',\n    current_month_start: currentMonthStart,\n    current_month_end: currentMonthEnd,\n    previous_month_start: previousMonthStart,\n    previous_month_end: previousMonthEnd\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2144,
+        176
+      ],
+      "id": "842ed79c-fc78-4199-ad5a-6f2a8958b509",
+      "name": "Code in JavaScript",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.body?.brief_file_id || $json.brief_file_id || '' }}",
+          "mode": "id"
+        },
+        "options": {
+          "googleFileConversion": {
+            "conversion": {
+              "docsToFormat": "text/plain",
+              "slidesToFormat": "text/plain"
+            }
+          }
+        }
+      },
+      "id": "697ccb94-9588-4b92-b250-8496a8d9b6e2",
+      "name": "Get Client Brief from Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        448,
+        960
+      ],
+      "notesInFlow": false,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "k1PNnOUISThODPfS",
+          "name": "Lital's GDrive"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"brand_voice\": {\n      \"type\": \"string\"\n    },\n    \"target_audience\": {\n      \"type\": \"string\"\n    },\n    \"content_themes\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"brand_values\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"competitive_positioning\": {\n      \"type\": \"string\"\n    },\n    \"content_restrictions\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"campaign_objectives\": {\n      \"type\": \"string\"\n    }\n  }\n}"
+      },
+      "id": "d827524c-1967-446b-b3d0-435bd41f50a2",
+      "name": "Brief Context Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1704,
+        1128
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5.2",
+          "mode": "list",
+          "cachedResultName": "gpt-5.2"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "40ff9b3d-6606-4e32-a505-7a3b4fc66131",
+      "name": "OpenAI GPT-4 for Brief Analysis",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1576,
+        1128
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "BH1ScfLkCVkZos3C",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.brief_text }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a client brief analyst. Extract key context from unstructured client briefs.\n\nYour task:\n1. Read the provided client brief document (unstructured format)\n2. Extract key information about:\n   - Brand voice and tone\n   - Target audience demographics and psychographics\n   - Content themes and topics of interest\n   - Brand values and messaging pillars\n   - Competitive positioning\n   - Content restrictions or guidelines\n   - Campaign objectives or goals\n\nIMPORTANT:\n- Handle varying brief structures - no predetermined sections\n- Extract what is available, mark missing information as null\n- Summarize key points concisely\n- Focus on actionable context for content recommendations\n\nReturn valid JSON only."
+        }
+      },
+      "id": "b8c570cb-c2e4-4ef8-9ada-4a3f6e1fc2f0",
+      "name": "Analyze Client Brief Context",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1568,
+        912
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Report Content - FIXED: content_recommendations removed, calendar is primary\nconst aiOutput = $json?.output ?? $json;\nconst clientData = $('Build Normalized Client Object').first().json;\n\nconst listToNumbered = (arr, emptyMsg) => {\n  if (!Array.isArray(arr) || arr.length === 0) return emptyMsg;\n  return arr.map((x, i) => `${i + 1}. ${x}`).join('\\n\\n');\n};\n\nconst sections = [];\n\n// 1. Executive Summary\nconst momSummary = aiOutput.sprout_performance_analysis?.month_over_month_summary || '';\nconst topTikTokInsight = aiOutput.tiktok_trends_analysis?.key_takeaways?.[0] || '';\nconst topIGInsight = aiOutput.instagram_trends_analysis?.key_takeaways?.[0] || '';\n\nsections.push({\n  heading: \"1. Executive Summary\",\n  content: [\n    `Weekly social performance report for ${clientData.client_name || 'the client'}.`,\n    momSummary,\n    topTikTokInsight ? `TikTok Trend: ${topTikTokInsight}` : '',\n    topIGInsight ? `Instagram Trend: ${topIGInsight}` : ''\n  ].filter(Boolean).join('\\n\\n') || \"No summary available.\"\n});\n\n// 2. Month-over-Month Performance\nlet momContent = \"No data available.\";\nif (clientData.sprout?.month_comparison?.summary) {\n  const mc = clientData.sprout.month_comparison;\n  momContent = \"**Performance Changes:**\\n\\n\" + mc.summary.map(s => `• ${s}`).join('\\n');\n  \n  const changes = mc.changes || {};\n  const improving = [], declining = [];\n  for (const [metric, data] of Object.entries(changes)) {\n    if (data.percent > 10) improving.push(metric.replace('_', ' '));\n    else if (data.percent < -10) declining.push(metric.replace('_', ' '));\n  }\n  if (improving.length) momContent += `\\n\\n**Improving:** ${improving.join(', ')}`;\n  if (declining.length) momContent += `\\n\\n**Needs Attention:** ${declining.join(', ')}`;\n}\nsections.push({ heading: \"2. Month-over-Month Performance\", content: momContent });\n\n// 3. Performance Analysis\nconst perfAnalysis = aiOutput.sprout_performance_analysis || {};\nlet perfContent = listToNumbered(perfAnalysis.key_insights, \"No insights available.\");\nif (perfAnalysis.top_performing_content?.length > 0) {\n  perfContent += \"\\n\\n**Top Performing Content:**\\n\" + perfAnalysis.top_performing_content.map(c => `• ${c}`).join('\\n');\n}\nsections.push({ heading: \"3. Performance Analysis\", content: perfContent });\n\n// 4. Content Pillar Alignment\nconst pa = perfAnalysis.pillar_alignment || {};\nlet pillarContent = \"\";\nif (pa.well_represented?.length) pillarContent += \"**Well-Represented:**\\n\" + pa.well_represented.map(p => `✅ ${p}`).join('\\n');\nif (pa.underrepresented?.length) pillarContent += \"\\n\\n**Underrepresented:**\\n\" + pa.underrepresented.map(p => `⚠️ ${p}`).join('\\n');\nif (pa.recommendations?.length) pillarContent += \"\\n\\n**Recommendations:**\\n\" + pa.recommendations.map((r, i) => `${i+1}. ${r}`).join('\\n');\nsections.push({ heading: \"4. Content Pillar Alignment\", content: pillarContent || \"No analysis available.\" });\n\n// 5. TikTok Trends Analysis\nconst tiktokAnalysis = aiOutput.tiktok_trends_analysis || {};\nlet tiktokContent = tiktokAnalysis.overview || \"No analysis available.\";\nif (tiktokAnalysis.top_themes?.length) tiktokContent += \"\\n\\n**Top Themes:**\\n\" + tiktokAnalysis.top_themes.map(t => `• ${t}`).join('\\n');\nif (tiktokAnalysis.successful_formats?.length) tiktokContent += \"\\n\\n**Successful Formats:**\\n\" + tiktokAnalysis.successful_formats.map(f => `• ${f}`).join('\\n');\nif (tiktokAnalysis.top_hashtags?.length) tiktokContent += \"\\n\\n**Top Hashtags:** \" + tiktokAnalysis.top_hashtags.slice(0, 8).map(h => `#${h}`).join(', ');\nif (tiktokAnalysis.opportunities_for_client?.length) tiktokContent += \"\\n\\n**Opportunities for Your Brand:**\\n\" + tiktokAnalysis.opportunities_for_client.map((o, i) => `${i+1}. ${o}`).join('\\n');\nif (tiktokAnalysis.key_takeaways?.length) tiktokContent += \"\\n\\n**Key Takeaways:**\\n\" + tiktokAnalysis.key_takeaways.map((t, i) => `${i+1}. ${t}`).join('\\n');\n\nif (clientData.trends?.tiktok?.posts?.length > 0) {\n  tiktokContent += \"\\n\\n**Top TikTok Posts:**\\n\";\n  clientData.trends.tiktok.posts.slice(0, 5).forEach((t, i) => {\n    tiktokContent += `${i+1}. @${t.author} (Score: ${t.engagement_score?.toLocaleString()}) - ${t.url}\\n`;\n  });\n}\nsections.push({ heading: \"5. TikTok Trends Analysis\", content: tiktokContent });\n\n// 6. Instagram Trends Analysis\nconst igAnalysis = aiOutput.instagram_trends_analysis || {};\nlet igContent = igAnalysis.overview || \"No analysis available.\";\nif (igAnalysis.top_themes?.length) igContent += \"\\n\\n**Top Themes:**\\n\" + igAnalysis.top_themes.map(t => `• ${t}`).join('\\n');\nif (igAnalysis.successful_formats?.length) igContent += \"\\n\\n**Successful Formats:**\\n\" + igAnalysis.successful_formats.map(f => `• ${f}`).join('\\n');\nif (igAnalysis.top_hashtags?.length) igContent += \"\\n\\n**Top Hashtags:** \" + igAnalysis.top_hashtags.slice(0, 8).map(h => `#${h}`).join(', ');\nif (igAnalysis.opportunities_for_client?.length) igContent += \"\\n\\n**Opportunities for Your Brand:**\\n\" + igAnalysis.opportunities_for_client.map((o, i) => `${i+1}. ${o}`).join('\\n');\nif (igAnalysis.key_takeaways?.length) igContent += \"\\n\\n**Key Takeaways:**\\n\" + igAnalysis.key_takeaways.map((t, i) => `${i+1}. ${t}`).join('\\n');\n\nif (clientData.trends?.instagram?.posts?.length > 0) {\n  igContent += \"\\n\\n**Top Instagram Posts:**\\n\";\n  clientData.trends.instagram.posts.slice(0, 5).forEach((t, i) => {\n    igContent += `${i+1}. @${t.author} (Score: ${t.engagement_score?.toLocaleString()}) - ${t.url}\\n`;\n  });\n}\nsections.push({ heading: \"6. Instagram Trends Analysis\", content: igContent });\n\n// 7. Weekly Content Calendar\nlet calendarContent = \"No content calendar available.\";\nif (Array.isArray(aiOutput.content_calendar) && aiOutput.content_calendar.length > 0) {\n  calendarContent = aiOutput.content_calendar.map(day => {\n    let dayText = `**${day.day}** (${day.date_label || ''}):\\n`;\n    if (Array.isArray(day.posts)) {\n      day.posts.forEach((post, pi) => {\n        dayText += `\\n  Post ${pi + 1} — [${post.platform}] ${post.format} | Pillar: ${post.pillar || 'General'}\\n`;\n        dayText += `  Time: ${post.posting_time || 'TBD'}\\n`;\n        dayText += `  Copy:\\n  ${(post.copy || '').split('\\n').join('\\n  ')}\\n`;\n        if (post.hashtags?.length) dayText += `  Hashtags: ${post.hashtags.map(h => '#' + h).join(' ')}\\n`;\n        if (post.visual_direction) dayText += `  Visual: ${post.visual_direction}\\n`;\n        if (post.rationale) dayText += `  Rationale: ${post.rationale}\\n`;\n      });\n    }\n    return dayText;\n  }).join('\\n');\n}\nsections.push({ heading: \"7. Weekly Content Calendar\", content: calendarContent });\n\n// 8. Data Sources\nlet sourcesContent = \"**Data Sources:**\\n\\n\";\nsourcesContent += `• Sprout Social - ${clientData.sprout?.top_posts?.length || 0} top posts\\n`;\nsourcesContent += `• TikTok - ${clientData.trends?.tiktok?.posts?.length || 0} trending posts (filtered by target languages)\\n`;\nsourcesContent += `• Instagram - ${clientData.trends?.instagram?.posts?.length || 0} trending posts (filtered by target languages)\\n`;\nsourcesContent += `\\nGenerated: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`;\nsections.push({ heading: \"8. Data Sources\", content: sourcesContent });\n\nreturn [{\n  json: {\n    sections,\n    formattedReport: sections.map(s => `${s.heading}\\n\\n${s.content}\\n\\n`).join('\\n'),\n    clientName: clientData.client_name || \"Client\",\n    reportDate: new Date().toISOString().split('T')[0]\n  }\n}];"
+      },
+      "id": "d5795ff5-376e-46c2-b4d9-7ef01f0ea375",
+      "name": "Format Report Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4656,
+        -1120
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"required\": [\n    \"sprout_performance_analysis\"\n  ],\n  \"properties\": {\n    \"sprout_performance_analysis\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"month_over_month_summary\": {\n          \"type\": \"string\"\n        },\n        \"key_insights\": {\n          \"type\": \"array\",\n          \"items\": {\n            \"type\": \"string\"\n          }\n        },\n        \"top_performing_content\": {\n          \"type\": \"array\",\n          \"items\": {\n            \"type\": \"string\"\n          }\n        },\n        \"pillar_alignment\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"well_represented\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            },\n            \"underrepresented\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            },\n            \"recommendations\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            }\n          }\n        },\n        \"platform_breakdown\": {\n          \"type\": \"array\",\n          \"items\": {\n            \"type\": \"object\",\n            \"properties\": {\n              \"platform\": {\n                \"type\": \"string\"\n              },\n              \"headline\": {\n                \"type\": \"string\"\n              },\n              \"insights\": {\n                \"type\": \"array\",\n                \"items\": {\n                  \"type\": \"string\"\n                }\n              }\n            }\n          }\n        }\n      }\n    },\n    \"tiktok_trends_analysis\": {\n      \"oneOf\": [\n        {\n          \"type\": \"object\",\n          \"properties\": {\n            \"overview\": {\n              \"type\": \"string\"\n            },\n            \"top_themes\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            },\n            \"successful_formats\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            },\n            \"top_hashtags\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            },\n            \"opportunities_for_client\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            },\n            \"key_takeaways\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            }\n          }\n        },\n        {\n          \"type\": \"null\"\n        }\n      ]\n    },\n    \"instagram_trends_analysis\": {\n      \"oneOf\": [\n        {\n          \"type\": \"object\",\n          \"properties\": {\n            \"overview\": {\n              \"type\": \"string\"\n            },\n            \"top_themes\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            },\n            \"successful_formats\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            },\n            \"top_hashtags\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            },\n            \"opportunities_for_client\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            },\n            \"key_takeaways\": {\n              \"type\": \"array\",\n              \"items\": {\n                \"type\": \"string\"\n              }\n            }\n          }\n        },\n        {\n          \"type\": \"null\"\n        }\n      ]\n    },\n    \"competitive_takeaways\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    }\n  }\n}",
+        "autoFix": true
+      },
+      "id": "76976ef8-f58e-4ef6-b266-fdff8db1767f",
+      "name": "Structured JSON Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        4296,
+        -824
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5.4",
+          "mode": "list",
+          "cachedResultName": "gpt-5.4"
+        },
+        "builtInTools": {},
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "04f84e87-7a80-4629-bde2-ad81895e24bc",
+      "name": "OpenAI GPT-4",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        4168,
+        -824
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "PB2TkDTsuGy0XicG",
+          "name": "OpenAi account 8"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=HOW TO WRITE THIS REPORT\n\nThe page that renders your words already shows the numbers: six KPI tiles with their month-over-month deltas, a card per platform, the top posts with their own figures, the pillar chart. Write beside that, not over it.\n\n- Never spend a sentence restating a figure the page already shows. Use a number only when it is the point of the sentence, and at most two figures in one sentence.\n- Write every insight, takeaway and opportunity as a claim of at most 12 words, then a colon, then the evidence in one sentence. Example: \"Channel mix is the clearest gap: YouTube took 8 of 24 posts while Reels drove most of the engagement.\" The report splits on that colon to make a headline, so the claim must stand alone.\n- One claim per field. No preamble, no \"the data shows\", no repeating the client name in every sentence.\n- Name a company by its brand name. Where you only have a website, write it as a brand (\"reyeslaw.com\" becomes \"Reyes Law\"). Never put a URL in prose.\n- Every recommendation is something the team can start this week: it names the platform, the format, how often, and what to measure.\n\nLENGTH, in characters, and these are limits rather than targets:\n- month_over_month_summary: two sentences, 260 in total, leading with the biggest move.\n- key_insights: 3-5 items, 180 each, in the claim-colon-evidence shape.\n- top_performing_content: 90 each. pillar_alignment.recommendations: 160 each, each an instruction with a format and a cadence.\n- platform_breakdown: headline 90, insights 150 each, three at most.\n- trends analyses: overview 220; top_themes 60 each; successful_formats 70 each; opportunities_for_client 160 each, each naming the format, the cadence and what to measure; key_takeaways 140 each.\n- competitive_takeaways, when the competitive context is present: 200 each.\n\n---\n\n{{ $json.competitive_context ? ('COMPETITIVE CONTEXT (from the latest competitor analysis of ' + ($json.competitive_context.landscape || 'the RivalIQ landscape') + ', analyzed ' + ($json.competitive_context.analyzed_at || '') + '):\\n' + JSON.stringify($json.competitive_context) + '\\n\\nUSE IT: (1) In sprout_performance_analysis.key_insights, compare the client against the competitive set where the data supports it (cadence, engagement rate, channel mix, share of voice). (2) pillar_alignment.recommendations and the trend opportunities MUST respond to the competitive picture: the empty posting windows, the winner patterns (in the client\\'s own voice), and the hashtag, format and copy-angle gaps. (3) endorsed_gaps (if present) were approved by the account team: treat each as a requirement the recommendations must visibly answer at least once, and name it there. suppressed_gaps (if present) were rejected by the team: never propose them or anything equivalent. (4) Add a top-level array \"competitive_takeaways\" with 3-5 short, specific sentences (each citing a number or a named competitor) describing how this report responds to the competitive picture, including which endorsed gaps it answers. Do not invent competitor data beyond what is provided.\\n\\n---\\n\\n') : '' }}{{ JSON.stringify($json) }}\n\n{{ (Array.isArray($json.sprout?.profiles) && $json.sprout.profiles.length) ? '' : 'NO CONNECTED PERFORMANCE DATA. This brand has no Sprout Social profile connected yet, so there are no KPI tiles, platform cards or top posts behind this report. Do not invent, estimate or imply any performance figure. In month_over_month_summary and key_insights say in one sentence that performance analysis starts once the brand\\'s social accounts are connected, leave top_performing_content empty, and base pillar_alignment on the brief and the content pillars only. Put the weight of the report on the trend analysis and the competitive context when present.' }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are an expert social media strategist creating a comprehensive weekly performance and trend analysis report.\n\n## CLIENT CONTEXT\nClient: {{ $json.client_name }}\nTarget Languages: {{ Array.isArray($json.context.languages) ? $json.context.languages.join(', ') : ($json.context.languages || $json.context.language || 'en') }}\nGeographic Focus: {{ Array.isArray($json.context.geo) ? $json.context.geo.join(', ') : ($json.context.geo || 'US') }}\nTimezone: {{ $json.context.timezone || 'UTC' }}\nPrimary Platforms: {{ (Array.isArray($json.context.primary_platforms) ? $json.context.primary_platforms.join(', ') : $json.context.primary_platforms) || 'Instagram, TikTok, LinkedIn' }}\nBrand Voice: {{ $json.context.brand_voice || 'Not specified' }}\n\n## BRAND VOICE & TONE\n{{ $json.context.brand_voice ? 'The client\\'s brand voice is: ' + $json.context.brand_voice + '. ALL recommendations and example wording MUST match this tone. Do NOT deviate from this voice.' : 'No specific brand voice preset was provided. Use a professional, engaging tone.' }}\nAdditionally, reference the client's recent top-performing posts (in sprout.top_posts) to align with their existing content style and voice. Mirror the successful patterns, phrasing style, and energy of their best-performing content.\n\n## BRAND BOOK GUIDELINES\n{{ $json.context.brand_book_text ? 'The client has provided brand guidelines: ' + $json.context.brand_book_text + '. Use these guidelines to inform ALL visual directions and AI visual prompts. Ensure recommended visuals align with brand colors, style, typography, and any restrictions listed above.' : 'No brand book provided. Use professional, clean visual direction.' }}\n\n## BRAND DESIGN LANGUAGE\n{{ $json.context.design_style_synthesis ? 'The client\\'s extracted design language is: ' + JSON.stringify($json.context.design_style_synthesis) + '. EVERY ai_visual_prompt and visual_direction MUST be written in alignment with these patterns — composition, typography, imagery, color usage, surface, logo treatment, mood, and platform adaptations. Do NOT include hex color codes, RGB values, or any technical color notation anywhere in visual_direction or ai_visual_prompt — describe colors qualitatively (e.g., \"warm coral accent on a deep navy ground\") because hex codes leak into rendered images downstream.' : 'No extracted design language available. Use general best-practices and the brand_voice + brand_book_text above for visual direction.' }}\n\n## LANGUAGE & REGION REQUIREMENTS\nThe client targets these languages: {{ Array.isArray($json.context.languages) ? $json.context.languages.join(', ') : ($json.context.languages || $json.context.language || 'en') }}\nThe client targets these regions: {{ Array.isArray($json.context.geo) ? $json.context.geo.join(', ') : ($json.context.geo || 'US') }}\nALL recommendations and hashtags MUST be written in the PRIMARY target language (first in the list).\nFor EVERY language in the list, write all copy natively in that language — do NOT translate from English.\nUse region-appropriate cultural references, holidays, trending topics, and local expressions for ALL target regions.\nHashtag recommendations should include both local-language hashtags and relevant international ones.\nWhen multiple regions are targeted, note any regional differences in content strategy and create region-specific content variations.\n\n## INPUT DATA STRUCTURE\n- client_name: Brand name\n- context: geo (array), languages (array), brand_voice, primary_platforms, brief_context, content_pillars\n- sprout: profiles, overall_totals, top_posts, month_comparison (with current_month, previous_month, changes, summary)\n- sprout.platform_breakdown: per-platform performance array. Each entry = { network, current (impressions/reactions/link_clicks/video_views/comments/shares), previous (same), changes (per metric: current/previous/absolute/percent), post_count }. This is the platform-by-platform truth — use it for the platform analysis below.\n- trends.tiktok: { posts: [...], patterns: { top_hashtags, avg_engagement } }\n- trends.instagram: { posts: [...], patterns: { top_hashtags, avg_engagement } }\n\n## YOUR ANALYSIS TASKS\n\n### PART 1: SPROUT SOCIAL PERFORMANCE ANALYSIS\nUsing sprout.month_comparison (PRE-CALCULATED - use these values directly):\n- Report the exact percentage changes from month_comparison.summary\n- Analyze sprout.top_posts to identify what content performed best\n- Evaluate how well the top_posts align with context.content_pillars\n- Identify which pillars are well-represented vs underrepresented\n- PLATFORM-BY-PLATFORM: Using sprout.platform_breakdown, analyze how EACH connected platform performed individually — what each platform is best at (reach vs engagement vs clicks vs video) and any notable month-over-month moves. ONLY discuss platforms that appear in sprout.platform_breakdown (clients connect different accounts, so the set is dynamic). Cite real numbers.\n\n### PART 2: TIKTOK TRENDS ANALYSIS\nUsing trends.tiktok.posts (top 10 posts by engagement):\n- Identify repeating content themes and formats\n- Note common hashtags from patterns.top_hashtags\n- Analyze what makes these posts successful\n- Extract actionable insights for the client\n\n### PART 3: INSTAGRAM TRENDS ANALYSIS\nUsing trends.instagram.posts (top 10 posts by engagement):\n- Identify repeating content themes and formats\n- Note common hashtags from patterns.top_hashtags\n- Analyze successful post characteristics\n- Extract actionable insights\n\n## OUTPUT FORMAT (Return ONLY this JSON)\n{\n  \"sprout_performance_analysis\": {\n    \"month_over_month_summary\": \"String with key changes from month_comparison.summary\",\n    \"key_insights\": [\"3-5 performance insights\"],\n    \"top_performing_content\": [\"What content types performed best\"],\n    \"pillar_alignment\": {\n      \"well_represented\": [\"pillars in top posts\"],\n      \"underrepresented\": [\"pillars missing\"],\n      \"recommendations\": [\"how to improve\"]\n    },\n    \"platform_breakdown\": [\n      { \"platform\": \"Exact network name from sprout.platform_breakdown (e.g. Instagram, LinkedIn, TikTok)\", \"headline\": \"One-line takeaway for this platform\", \"insights\": [\"1-3 specific insights citing this platform's own numbers and month-over-month changes\"] }\n    ]\n  },\n  \"tiktok_trends_analysis\": {\n    \"overview\": \"Brief summary\",\n    \"top_themes\": [\"3-5 recurring themes\"],\n    \"successful_formats\": [\"formats that work\"],\n    \"top_hashtags\": [\"common hashtags\"],\n    \"opportunities_for_client\": [\"2-3 specific opportunities based on trends\"],\n    \"key_takeaways\": [\"3-5 actionable insights\"]\n  },\n  \"instagram_trends_analysis\": {\n    \"overview\": \"Brief summary\",\n    \"top_themes\": [\"3-5 recurring themes\"],\n    \"successful_formats\": [\"formats that work\"],\n    \"top_hashtags\": [\"common hashtags\"],\n    \"opportunities_for_client\": [\"2-3 specific opportunities based on trends\"],\n    \"key_takeaways\": [\"3-5 actionable insights\"]\n  }\n}\n\n{{ ($json.trends?.tiktok?.posts?.length === 0 && $json.trends?.instagram?.posts?.length === 0) || $json.skip_trends ? '\\nIMPORTANT: No trend data is available (either no keywords were configured or trend analysis was skipped). Set tiktok_trends_analysis and instagram_trends_analysis to null in your output. Focus only on Sprout performance analysis.' : '' }}\n\n\n\n\nCRITICAL OUTPUT RULES:\n1. Return ONLY raw JSON. No markdown code blocks. No /* comments */ inside the JSON.\nIf the output does not satisfy these rules, the report is invalid and will be rejected. ALL text must be in the primary target language ({{ Array.isArray($json.context.languages) ? $json.context.languages[0] : ($json.context.languages || $json.context.language || 'en') }}) and match the brand voice ({{ $json.context.brand_voice || 'professional' }})."
+        }
+      },
+      "id": "1b765107-1072-4aef-933b-c0b2363ead19",
+      "name": "AI Synthesis Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        4192,
+        -1040
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Normalized Client Object - UPDATED: multi-geo, multi-language, brand_voice\nconst allItems = $input.all();\nconst config = $('Workflow Configuration').first().json;\nconst clientData = $('Combine Brief Context with Client Data').first().json;\n\nconsole.log('');\nconsole.log('═══════════════════════════════════════════════════════');\nconsole.log('Building Normalized Client Object');\nconsole.log(`Received ${allItems.length} items from Merge node`);\nconsole.log('═══════════════════════════════════════════════════════');\n\n// Debug\nallItems.forEach((item, idx) => {\n  const json = item.json;\n  const source = json.source || (json.profiles ? 'sprout' : 'unknown');\n  console.log(`   [${idx}] source=\"${source}\" _empty=${json._empty || false}`);\n});\n\n// Find Sprout Data\nlet sproutData = {\n  profiles: [], platform_metrics: {}, platform_breakdown: [], top_posts: [],\n  top_posts_by_platform: {}, overall_totals: {}, reporting_period: {}, month_comparison: {}\n};\n\nfor (const item of allItems) {\n  const json = item.json;\n  if (json.profiles !== undefined || json.month_comparison !== undefined || json.overall_totals !== undefined) {\n    sproutData = json;\n    console.log('✅ Found Sprout data');\n    break;\n  }\n}\n\n// Find TikTok Trends - FILTER OUT empty placeholders\nconst tiktokTrends = allItems\n  .filter(item => item.json.source === 'tiktok' && !item.json._empty)\n  .map(item => item.json);\nconsole.log(`✅ Found ${tiktokTrends.length} TikTok trends`);\n\n// Find Instagram Trends - FILTER OUT empty placeholders\nconst instagramTrends = allItems\n  .filter(item => item.json.source === 'instagram' && !item.json._empty)\n  .map(item => item.json);\nconsole.log(`✅ Found ${instagramTrends.length} Instagram trends`);\n\n// Filter to client's profiles\nconst clientProfileIds = (clientData.sprout_profile_ids || '').toString().split(',')\n  .map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));\n\nlet clientProfiles = sproutData.profiles || [];\nif (clientProfileIds.length > 0) {\n  clientProfiles = clientProfiles.filter(profile => clientProfileIds.includes(profile.id));\n}\nconsole.log(`✅ Filtered to ${clientProfiles.length} client profiles`);\n\n// Analyze patterns in trends\nfunction analyzePatterns(trends) {\n  const patterns = { common_hashtags: {}, avg_engagement: 0, top_hashtags: [] };\n  if (trends.length === 0) return patterns;\n  \n  let totalEngagement = 0;\n  trends.forEach(trend => {\n    (trend.hashtags || []).forEach(tag => {\n      const cleanTag = tag.toLowerCase().replace(/^#/, '');\n      patterns.common_hashtags[cleanTag] = (patterns.common_hashtags[cleanTag] || 0) + 1;\n    });\n    totalEngagement += trend.engagement_score || 0;\n  });\n  \n  patterns.avg_engagement = Math.round(totalEngagement / trends.length);\n  patterns.top_hashtags = Object.entries(patterns.common_hashtags)\n    .sort((a, b) => b[1] - a[1]).slice(0, 10).map(([tag, count]) => ({ tag, count }));\n  \n  return patterns;\n}\n\nconst tiktokPatterns = analyzePatterns(tiktokTrends);\nconst instagramPatterns = analyzePatterns(instagramTrends);\n\n// === MULTI-GEO: ensure array ===\nlet geoArr = clientData.geo || ['US'];\nif (typeof geoArr === 'string') geoArr = geoArr.split(',').map(s => s.trim()).filter(Boolean);\nif (!Array.isArray(geoArr)) geoArr = [geoArr];\n\n// === MULTI-LANGUAGE: ensure array ===\nlet languagesArr = clientData.languages || clientData.language || ['en'];\nif (typeof languagesArr === 'string') languagesArr = languagesArr.split(',').map(s => s.trim()).filter(Boolean);\nif (!Array.isArray(languagesArr)) languagesArr = [languagesArr];\n\n// === BRAND VOICE ===\nconst brandVoice = clientData.brand_voice || '';\nconst brandBookText = clientData.brand_book_text || '';\n\n// Build output\nconst normalizedClient = {\n  client_name: clientData.client_name || 'Unknown Client',\n  report_window: {\n    current_month: clientData.date_ranges?.current_month\n      || sproutData.reporting_period?.current_month\n      || { start: config.current_month_start, end: config.current_month_end },\n    previous_month: clientData.date_ranges?.previous_month\n      || sproutData.reporting_period?.previous_month\n      || { start: config.previous_month_start, end: config.previous_month_end }\n  },\n  context: {\n    geo: geoArr,\n    languages: languagesArr,\n    timezone: clientData.timezone || 'UTC',\n    brand_voice: brandVoice,\n    brand_book_text: brandBookText,\n    primary_platforms: typeof clientData.primary_platforms === 'string'\n      ? clientData.primary_platforms.split(',').map(p => p.trim())\n      : (clientData.primary_platforms || ['Instagram', 'TikTok', 'LinkedIn']),\n    brand_notes: clientData.brand_notes || '',\n    brief_context: clientData.brief_context || {},\n    content_pillars: clientData.content_pillars || [],\n    design_style_synthesis: clientData.design_style_synthesis || null,\n    has_design_references: Array.isArray(clientData.design_references) && clientData.design_references.length > 0,\n    has_brand_book: !!clientData.brand_book_file_path,\n  },\n  skip_trends: !!(clientData.skip_trends),\n  sprout: {\n    profiles: clientProfiles,\n    platform_metrics: sproutData.platform_metrics || {},\n    overall_totals: sproutData.overall_totals || {},\n    top_posts: sproutData.top_posts || [],\n    month_comparison: sproutData.month_comparison || {},\n    platform_breakdown: sproutData.platform_breakdown || [],\n    top_posts_by_platform: sproutData.top_posts_by_platform || {}\n  },\n  trends: {\n    tiktok: { posts: tiktokTrends, patterns: tiktokPatterns },\n    instagram: { posts: instagramTrends, patterns: instagramPatterns }\n  },\n  _meta: {\n    tiktok_count: tiktokTrends.length,\n    instagram_count: instagramTrends.length,\n    profiles_count: clientProfiles.length,\n    generated_at: new Date().toISOString()\n  }\n};\n\nconsole.log('');\nconsole.log('═══════════════════════════════════════════════════════');\nconsole.log(`✅ Built for: ${normalizedClient.client_name}`);\nconsole.log(`   Geo: [${geoArr.join(', ')}] | Languages: [${languagesArr.join(', ')}]`);\nconsole.log(`   Brand Voice: ${brandVoice || 'none'}`);\nconsole.log(`   Brand Book: ${brandBookText ? 'provided (' + brandBookText.length + ' chars)' : 'none'}`);\nconsole.log(`   TikTok: ${tiktokTrends.length} | Instagram: ${instagramTrends.length}`);\nconsole.log(`   Sprout top posts: ${sproutData.top_posts?.length || 0}`);\nconsole.log(`   Sprout profiles: ${clientProfiles.length}`);\nconsole.log('═══════════════════════════════════════════════════════');\n\nreturn [{ json: normalizedClient }];"
+      },
+      "id": "88449ce6-138f-43a9-bf49-498a7f792115",
+      "name": "Build Normalized Client Object",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3712,
+        -752
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "45e07451-5302-4612-b37b-25edd64b1fe4",
+      "name": "Merge All Data Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3488,
+        -768
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Instagram Trends - FIXED: language source, relevance scoring, spam filtering, date filtering\nconst rawItems = $input.all();\n\n// ── Get target languages from Combine Brief Context (NOT Workflow Configuration!) ──\nlet targetLangs = ['en'];\nlet clientKeywords = [];\nlet trendsStartDate = '';\n\ntry {\n  const clientData = $('Combine Brief Context with Client Data').first().json;\n  \n  // Languages\n  const rawLangs = clientData.languages || clientData.language || ['en'];\n  if (Array.isArray(rawLangs)) {\n    targetLangs = rawLangs.map(l => l.toLowerCase().slice(0, 2));\n  } else {\n    targetLangs = String(rawLangs).split(',').map(l => l.trim().toLowerCase().slice(0, 2)).filter(Boolean);\n  }\n  \n  // Client keywords for relevance scoring\n  const socialArr = Array.isArray(clientData.social_keywords) ? clientData.social_keywords : [];\n  const trendsRaw = clientData.trends_keywords || '';\n  const trendsArr = typeof trendsRaw === 'string' ? trendsRaw.split(',').map(k => k.trim()) : (Array.isArray(trendsRaw) ? trendsRaw : []);\n  clientKeywords = [...new Set([...socialArr, ...trendsArr])].filter(Boolean).map(k => k.toLowerCase().replace(/^#/, ''));\n  \n  // Date range\n  trendsStartDate = clientData.date_ranges?.current_month?.start || '';\n} catch(e) {\n  console.log('⚠️ Could not get client data from Combine Brief Context:', e.message);\n}\nif (targetLangs.length === 0) targetLangs = ['en'];\n\nconsole.log('═══════════════════════════════════════════════════════');\nconsole.log('Normalizing Instagram Trends');\nconsole.log(`Target languages: [${targetLangs.join(', ')}]`);\nconsole.log(`Client keywords for relevance: [${clientKeywords.join(', ')}]`);\nconsole.log(`Raw posts received: ${rawItems.length}`);\nconsole.log('═══════════════════════════════════════════════════════');\n\n// ── Language detection ──\nconst LANG_WORDS = {\n  en: ['the','and','for','you','this','that','with','have','are','was','will','your','from','how','what','when','get','can','all','just','not','but','more','like','new','business','marketing','content','brand','social','media','digital','tips','follow'],\n  es: ['que','los','las','del','por','una','con','para','como','pero','mas','todo','esta','tiene','hay','son','fue','muy','tambien','sobre'],\n  fr: ['les','des','une','pour','dans','que','est','sur','pas','plus','avec','sont','tout','fait','mais','comme'],\n  de: ['und','der','die','das','ist','ein','fur','mit','den','von','nicht','sich','auf','dem','auch','noch'],\n  pt: ['que','para','com','uma','por','mais','como','mas','dos','das','tem','sao','foi','nao'],\n  ar: [], he: [], ja: [], ko: [], zh: [], it: [], ru: [], hi: [], th: [],\n};\n\nconst SCRIPT_PATTERNS = {\n  ar: /[\\u0600-\\u06FF\\u0750-\\u077F]/,\n  he: /[\\u0590-\\u05FF]/,\n  ja: /[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FFF]/,\n  ko: /[\\uAC00-\\uD7AF\\u1100-\\u11FF]/,\n  zh: /[\\u4E00-\\u9FFF\\u3400-\\u4DBF]/,\n  ru: /[\\u0400-\\u04FF]/,\n  hi: /[\\u0900-\\u097F]/,\n  th: /[\\u0E00-\\u0E7F]/,\n};\n\nfunction matchesTargetLanguage(text, lang) {\n  if (!text || text.length < 10) return false;\n  const cleanText = text.replace(/#\\w+/g, '').replace(/@\\w+/g, '')\n    .replace(/[\\u{1F600}-\\u{1F6FF}]/gu, '').replace(/[\\u{2600}-\\u{26FF}]/gu, '').trim();\n  if (cleanText.length < 5) return false;\n  if (SCRIPT_PATTERNS[lang]) return SCRIPT_PATTERNS[lang].test(cleanText);\n  const nonLatinPattern = /[\\u0600-\\u06FF\\u0750-\\u077F\\u0590-\\u05FF\\u4E00-\\u9FFF\\u3040-\\u309F\\u30A0-\\u30FF\\uAC00-\\uD7AF\\u0E00-\\u0E7F\\u0900-\\u097F\\u0400-\\u04FF]/;\n  if (nonLatinPattern.test(cleanText)) return false;\n  const words = LANG_WORDS[lang] || LANG_WORDS['en'];\n  if (words.length === 0) return true;\n  const lowerText = cleanText.toLowerCase();\n  return words.filter(word => lowerText.includes(word)).length >= 2;\n}\n\nfunction matchesAnyTargetLanguage(text, langs) {\n  return langs.some(lang => matchesTargetLanguage(text, lang));\n}\n\n// ── Spam/scam detection ──\nconst SPAM_SIGNALS = [\n  /\\b(crypto|bitcoin|btc|ethereum|eth|nft|airdrop|binance|coinbase|token|defi|web3|blockchain|solana|memecoin)\\b/i,\n  /\\b(casino|poker|slots?|betting|bet365|jackpot|roulette)\\b/i,\n  /\\b(f4f|l4l|follow\\s*for\\s*follow|like\\s*for\\s*like|follow\\s*back|gain\\s*followers|free\\s*followers)\\b/i,\n  /\\b(onlyfans|18\\+|nsfw|xxx|sex|nude|dating\\s*site)\\b/i,\n  /\\b(make\\s*money\\s*fast|passive\\s*income\\s*\\d|earn\\s*\\$?\\d{4,}|work\\s*from\\s*home\\s*\\$|financial\\s*freedom\\s*secret)\\b/i,\n  /\\b(link\\s*in\\s*bio.*free|dm\\s*for\\s*price|limited\\s*offer|act\\s*now)\\b/i,\n];\n\nfunction isSpam(caption, hashtags) {\n  const fullText = caption + ' ' + (hashtags || []).join(' ');\n  let spamScore = 0;\n  for (const pattern of SPAM_SIGNALS) {\n    if (pattern.test(fullText)) spamScore++;\n  }\n  if ((hashtags || []).length > 15 && caption.length < 100) spamScore += 2;\n  const emojiCount = (caption.match(/[\\u{1F600}-\\u{1F6FF}\\u{1F900}-\\u{1F9FF}\\u{2600}-\\u{26FF}\\u{2700}-\\u{27BF}]/gu) || []).length;\n  if (emojiCount > 15) spamScore++;\n  return spamScore >= 2;\n}\n\n// ── Relevance scoring against client keywords ──\nfunction getRelevanceScore(caption, hashtags) {\n  if (clientKeywords.length === 0) return 1;\n  const fullText = (caption + ' ' + (hashtags || []).join(' ')).toLowerCase();\n  let matches = 0;\n  for (const kw of clientKeywords) {\n    if (fullText.includes(kw) || fullText.includes(kw.replace(/\\s+/g, ''))) {\n      matches++;\n    }\n  }\n  return matches / Math.max(clientKeywords.length, 1);\n}\n\nconst normalizedItems = rawItems\n  .map(item => {\n    const data = item.json;\n    if (data.type === 'carousel_item') return null;\n\n    const likes = data.likesCount || data.likes || 0;\n    const comments = data.commentsCount || data.comments || 0;\n    const views = data.videoViewCount || data.views || 0;\n    const safeLikes = likes === -1 ? 0 : likes;\n    const engagementScore = (safeLikes * 1) + (comments * 2) + Math.floor(views / 1000);\n    const caption = data.caption || data.text || '';\n\n    let url = data.url || '';\n    if (!url && data.shortCode) {\n      url = `https://www.instagram.com/p/${data.shortCode}/`;\n    }\n\n    const author = data.ownerUsername || data.owner?.username || data.author || 'unknown';\n    let hashtags = [];\n    if (data.hashtags && Array.isArray(data.hashtags)) {\n      hashtags = data.hashtags.map(h => typeof h === 'string' ? h : (h.name || '')).filter(Boolean);\n    }\n    const postType = data.type || data.__typename || (data.videoUrl ? 'Video' : 'Image');\n\n    // Language check\n    const passesLangFilter = matchesAnyTargetLanguage(caption, targetLangs);\n    \n    // Spam check\n    const spamFlag = isSpam(caption, hashtags);\n    \n    // Relevance check\n    const relevance = getRelevanceScore(caption, hashtags);\n    \n    // Date check — IG scraper has no date filter, so we filter here\n    let passesDateFilter = true;\n    const postTimestamp = data.timestamp || data.takenAtTimestamp || 0;\n    if (trendsStartDate && postTimestamp) {\n      try {\n        // postTimestamp can be Unix seconds or ISO string\n        const postDate = typeof postTimestamp === 'number'\n          ? new Date(postTimestamp * 1000)\n          : new Date(postTimestamp);\n        const startDate = new Date(trendsStartDate);\n        startDate.setDate(startDate.getDate() - 30); // Allow 30 days before period start\n        if (postDate < startDate) passesDateFilter = false;\n      } catch(e) {}\n    }\n\n    return {\n      source: 'instagram', url, caption, author, hashtags,\n      engagement_score: engagementScore,\n      likes: safeLikes, comments, views,\n      type: postType,\n      created: data.timestamp || data.takenAtTimestamp || '',\n      matches_language: passesLangFilter,\n      is_spam: spamFlag,\n      relevance_score: relevance,\n      passes_date: passesDateFilter\n    };\n  })\n  .filter(item => {\n    if (!item) return false;\n    if (!item.url || item.url.length < 10) return false;\n    if (!item.matches_language) return false;\n    if (item.is_spam) return false;\n    if (!item.passes_date) return false;\n    if (clientKeywords.length > 0 && item.relevance_score === 0) return false;\n    return true;\n  })\n  // Sort by relevance first, then engagement\n  .sort((a, b) => {\n    const relDiff = b.relevance_score - a.relevance_score;\n    if (Math.abs(relDiff) > 0.2) return relDiff;\n    return b.engagement_score - a.engagement_score;\n  })\n  .slice(0, 15);\n\nconsole.log(`Filtered to ${normalizedItems.length} posts (lang: ${targetLangs.join('/')}, spam-free, relevant)`);\n\nif (normalizedItems.length > 0) {\n  console.log('Top 3 Instagram posts:');\n  normalizedItems.slice(0, 3).forEach((item, i) => {\n    console.log(`  ${i+1}. @${item.author} | Score: ${item.engagement_score.toLocaleString()} | Relevance: ${(item.relevance_score * 100).toFixed(0)}%`);\n  });\n}\n\nif (normalizedItems.length === 0) {\n  console.log(`No relevant ${targetLangs.join('/')} Instagram posts found -- returning placeholder`);\n  return [{\n    json: {\n      source: 'instagram', url: '',\n      caption: `No relevant ${targetLangs.join('/')} Instagram posts found for these keywords`,\n      author: 'none', hashtags: [], engagement_score: 0,\n      likes: 0, comments: 0, views: 0,\n      type: 'none', created: '', matches_language: true,\n      rank: 0, _empty: true\n    }\n  }];\n}\n\nreturn normalizedItems.map((item, idx) => ({ json: { ...item, rank: idx + 1 } }));"
+      },
+      "id": "cb760ffa-f101-49b0-8d3b-08fc437b234a",
+      "name": "Normalize Instagram Trends",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3264,
+        944
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize TikTok Trends - FIXED: language source, relevance scoring, spam filtering, date filtering\nconst rawItems = $input.all();\n\n// ── Get target languages from Combine Brief Context (NOT Workflow Configuration!) ──\nlet targetLangs = ['en'];\nlet clientKeywords = [];\nlet trendsStartDate = '';\nlet trendsEndDate = '';\n\ntry {\n  const clientData = $('Combine Brief Context with Client Data').first().json;\n  \n  // Languages\n  const rawLangs = clientData.languages || clientData.language || ['en'];\n  if (Array.isArray(rawLangs)) {\n    targetLangs = rawLangs.map(l => l.toLowerCase().slice(0, 2));\n  } else {\n    targetLangs = String(rawLangs).split(',').map(l => l.trim().toLowerCase().slice(0, 2)).filter(Boolean);\n  }\n  \n  // Client keywords for relevance scoring\n  const socialArr = Array.isArray(clientData.social_keywords) ? clientData.social_keywords : [];\n  const trendsRaw = clientData.trends_keywords || '';\n  const trendsArr = typeof trendsRaw === 'string' ? trendsRaw.split(',').map(k => k.trim()) : (Array.isArray(trendsRaw) ? trendsRaw : []);\n  clientKeywords = [...new Set([...socialArr, ...trendsArr])].filter(Boolean).map(k => k.toLowerCase().replace(/^#/, ''));\n  \n  // Date range for filtering\n  trendsStartDate = clientData.date_ranges?.current_month?.start || '';\n  trendsEndDate = clientData.date_ranges?.current_month?.end || '';\n} catch(e) {\n  console.log('⚠️ Could not get client data from Combine Brief Context:', e.message);\n}\nif (targetLangs.length === 0) targetLangs = ['en'];\n\nconsole.log('═══════════════════════════════════════════════════════');\nconsole.log('Normalizing TikTok Trends');\nconsole.log(`Target languages: [${targetLangs.join(', ')}]`);\nconsole.log(`Client keywords for relevance: [${clientKeywords.join(', ')}]`);\nconsole.log(`Raw posts received: ${rawItems.length}`);\nconsole.log('═══════════════════════════════════════════════════════');\n\n// ── Language detection ──\nconst LANG_WORDS = {\n  en: ['the','and','for','you','this','that','with','have','are','was','will','your','from','how','what','when','get','can','all','just','not','but','more','like','new','business','marketing','content','brand','social','media','digital','tips','follow'],\n  es: ['que','los','las','del','por','una','con','para','como','pero','mas','todo','esta','tiene','hay','son','fue','muy','tambien','sobre'],\n  fr: ['les','des','une','pour','dans','que','est','sur','pas','plus','avec','sont','tout','fait','mais','comme'],\n  de: ['und','der','die','das','ist','ein','fur','mit','den','von','nicht','sich','auf','dem','auch','noch'],\n  pt: ['que','para','com','uma','por','mais','como','mas','dos','das','tem','sao','foi','nao'],\n  ar: [], he: [], ja: [], ko: [], zh: [], it: [], ru: [], hi: [], th: [],\n};\n\nconst SCRIPT_PATTERNS = {\n  ar: /[\\u0600-\\u06FF\\u0750-\\u077F]/,\n  he: /[\\u0590-\\u05FF]/,\n  ja: /[\\u3040-\\u309F\\u30A0-\\u30FF\\u4E00-\\u9FFF]/,\n  ko: /[\\uAC00-\\uD7AF\\u1100-\\u11FF]/,\n  zh: /[\\u4E00-\\u9FFF\\u3400-\\u4DBF]/,\n  ru: /[\\u0400-\\u04FF]/,\n  hi: /[\\u0900-\\u097F]/,\n  th: /[\\u0E00-\\u0E7F]/,\n};\n\nfunction matchesTargetLanguage(text, lang) {\n  if (!text || text.length < 10) return false;\n  const cleanText = text.replace(/#\\w+/g, '').replace(/@\\w+/g, '')\n    .replace(/[\\u{1F600}-\\u{1F6FF}]/gu, '').replace(/[\\u{2600}-\\u{26FF}]/gu, '').trim();\n  if (cleanText.length < 5) return false;\n  if (SCRIPT_PATTERNS[lang]) return SCRIPT_PATTERNS[lang].test(cleanText);\n  const nonLatinPattern = /[\\u0600-\\u06FF\\u0750-\\u077F\\u0590-\\u05FF\\u4E00-\\u9FFF\\u3040-\\u309F\\u30A0-\\u30FF\\uAC00-\\uD7AF\\u0E00-\\u0E7F\\u0900-\\u097F\\u0400-\\u04FF]/;\n  if (nonLatinPattern.test(cleanText)) return false;\n  const words = LANG_WORDS[lang] || LANG_WORDS['en'];\n  if (words.length === 0) return true;\n  const lowerText = cleanText.toLowerCase();\n  return words.filter(word => lowerText.includes(word)).length >= 2;\n}\n\nfunction matchesAnyTargetLanguage(text, langs) {\n  return langs.some(lang => matchesTargetLanguage(text, lang));\n}\n\n// ── Spam/scam detection ──\nconst SPAM_SIGNALS = [\n  // Crypto/NFT scams\n  /\\b(crypto|bitcoin|btc|ethereum|eth|nft|airdrop|binance|coinbase|token|defi|web3|blockchain|solana|memecoin)\\b/i,\n  // Gambling\n  /\\b(casino|poker|slots?|betting|bet365|jackpot|roulette)\\b/i,\n  // Engagement bait / follow schemes\n  /\\b(f4f|l4l|follow\\s*for\\s*follow|like\\s*for\\s*like|follow\\s*back|gain\\s*followers|free\\s*followers)\\b/i,\n  // Adult content\n  /\\b(onlyfans|18\\+|nsfw|xxx|sex|nude|dating\\s*site)\\b/i,\n  // Get rich quick\n  /\\b(make\\s*money\\s*fast|passive\\s*income\\s*\\d|earn\\s*\\$?\\d{4,}|work\\s*from\\s*home\\s*\\$|financial\\s*freedom\\s*secret)\\b/i,\n  // Scam link patterns\n  /\\b(link\\s*in\\s*bio.*free|dm\\s*for\\s*price|limited\\s*offer|act\\s*now)\\b/i,\n];\n\nfunction isSpam(caption, hashtags) {\n  const fullText = caption + ' ' + (hashtags || []).join(' ');\n  let spamScore = 0;\n  for (const pattern of SPAM_SIGNALS) {\n    if (pattern.test(fullText)) spamScore++;\n  }\n  // Hashtag stuffing: >15 hashtags with short caption\n  if ((hashtags || []).length > 15 && caption.length < 100) spamScore += 2;\n  // Excessive emojis (>15 in caption)\n  const emojiCount = (caption.match(/[\\u{1F600}-\\u{1F6FF}\\u{1F900}-\\u{1F9FF}\\u{2600}-\\u{26FF}\\u{2700}-\\u{27BF}]/gu) || []).length;\n  if (emojiCount > 15) spamScore++;\n  return spamScore >= 2;\n}\n\n// ── Relevance scoring against client keywords ──\nfunction getRelevanceScore(caption, hashtags) {\n  if (clientKeywords.length === 0) return 1; // No keywords to check = pass all\n  const fullText = (caption + ' ' + (hashtags || []).join(' ')).toLowerCase();\n  let matches = 0;\n  for (const kw of clientKeywords) {\n    // Check both as-is and without spaces (for hashtag matching)\n    if (fullText.includes(kw) || fullText.includes(kw.replace(/\\s+/g, ''))) {\n      matches++;\n    }\n  }\n  return matches / Math.max(clientKeywords.length, 1);\n}\n\nconst normalizedItems = rawItems\n  .map(item => {\n    const data = item.json;\n    const likes = data.diggCount || data.likes || 0;\n    const comments = data.commentCount || data.comments || 0;\n    const shares = data.shareCount || data.shares || 0;\n    const views = data.playCount || data.views || 0;\n    const engagementScore = (likes * 1) + (comments * 2) + (shares * 3) + Math.floor(views / 1000);\n    const caption = data.desc || data.text || data.caption || '';\n    let url = data.webVideoUrl || data.url || '';\n    if (!url && data.authorMeta?.name && data.id) {\n      url = `https://www.tiktok.com/@${data.authorMeta.name}/video/${data.id}`;\n    }\n    const author = data.authorMeta?.name || data.author || 'unknown';\n    const hashtags = (data.hashtags || []).map(h => typeof h === 'string' ? h : (h.name || '')).filter(Boolean);\n    \n    // Language check\n    const textLang = (data.textLanguage || '').toLowerCase();\n    let passesLangFilter = false;\n    if (targetLangs.includes(textLang)) {\n      passesLangFilter = true;\n    } else {\n      passesLangFilter = matchesAnyTargetLanguage(caption, targetLangs);\n    }\n    \n    // Spam check\n    const spamFlag = isSpam(caption, hashtags);\n    \n    // Relevance check\n    const relevance = getRelevanceScore(caption, hashtags);\n    \n    // Date check\n    let passesDateFilter = true;\n    if (trendsStartDate && data.createTimeISO) {\n      try {\n        const postDate = new Date(data.createTimeISO);\n        const startDate = new Date(trendsStartDate);\n        startDate.setDate(startDate.getDate() - 30); // Allow 30 days before period start for trends\n        if (postDate < startDate) passesDateFilter = false;\n      } catch(e) {}\n    }\n    \n    return {\n      source: 'tiktok', url, caption, author, hashtags,\n      engagement_score: engagementScore,\n      views, likes, comments, shares,\n      created: data.createTimeISO || data.createTime || '',\n      matches_language: passesLangFilter,\n      is_spam: spamFlag,\n      relevance_score: relevance,\n      passes_date: passesDateFilter,\n      is_ad: data.isAd || data.isSponsored || false\n    };\n  })\n  .filter(item => {\n    if (!item.url || item.url.length < 10) return false;\n    if (!item.matches_language) return false;\n    if (item.is_ad) return false;\n    if (item.is_spam) return false;\n    if (!item.passes_date) return false;\n    // Require minimum relevance: at least 1 keyword match (if keywords exist)\n    if (clientKeywords.length > 0 && item.relevance_score === 0) return false;\n    return true;\n  })\n  // Sort by relevance first, then engagement\n  .sort((a, b) => {\n    const relDiff = b.relevance_score - a.relevance_score;\n    if (Math.abs(relDiff) > 0.2) return relDiff;\n    return b.engagement_score - a.engagement_score;\n  })\n  .slice(0, 15);\n\nconsole.log(`Filtered to ${normalizedItems.length} posts (lang: ${targetLangs.join('/')}, spam-free, relevant)`);\n\nif (normalizedItems.length > 0) {\n  console.log('Top 3 TikTok posts:');\n  normalizedItems.slice(0, 3).forEach((item, i) => {\n    console.log(`  ${i+1}. @${item.author} | Score: ${item.engagement_score.toLocaleString()} | Relevance: ${(item.relevance_score * 100).toFixed(0)}%`);\n  });\n}\n\nif (normalizedItems.length === 0) {\n  console.log(`No relevant ${targetLangs.join('/')} TikTok posts found -- returning placeholder`);\n  return [{\n    json: {\n      source: 'tiktok', url: '',\n      caption: `No relevant ${targetLangs.join('/')} TikTok posts found for these keywords`,\n      author: 'none', hashtags: [], engagement_score: 0,\n      views: 0, likes: 0, comments: 0, shares: 0,\n      created: '', matches_language: true, is_ad: false,\n      rank: 0, _empty: true\n    }\n  }];\n}\n\nreturn normalizedItems.map((item, idx) => ({ json: { ...item, rank: idx + 1 } }));"
+      },
+      "id": "431de934-3ecb-41d2-b7ce-bee5337a9319",
+      "name": "Normalize TikTok Trends",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3264,
+        560
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate Sprout Social Data — per-platform breakdown + top posts per platform (dynamic)\n// Backwards compatible: keeps all original outputs, ADDS platform_breakdown + top_posts_by_platform.\nconst inputData = $input.all();\n\n// Get date config - prefer Combine Brief Context (has correct dynamic dates)\nlet config = {};\ntry {\n  const cbc = $('Combine Brief Context with Client Data').first().json;\n  if (cbc && cbc.date_ranges) {\n    config.current_month_start = cbc.date_ranges.current_month?.start || '';\n    config.current_month_end = cbc.date_ranges.current_month?.end || '';\n    config.previous_month_start = cbc.date_ranges.previous_month?.start || '';\n    config.previous_month_end = cbc.date_ranges.previous_month?.end || '';\n    console.log('✅ Got date config from Combine Brief Context');\n  }\n} catch(e) {}\n\nif (!config.current_month_start) {\n  try {\n    const wfConfig = $('Workflow Configuration').first().json;\n    config = { ...wfConfig };\n    console.log('✅ Got date config from Workflow Configuration (fallback)');\n  } catch (e) {\n    console.log('⚠️ Could not get workflow config:', e.message);\n  }\n}\n\nconsole.log('📅 Date Configuration:');\nconsole.log('   Current period:', config.current_month_start, 'to', config.current_month_end);\nconsole.log('   Previous period:', config.previous_month_start, 'to', config.previous_month_end);\n\nlet currentMonthData = [];\nlet previousMonthData = [];\nlet postAnalyticsData = [];\nlet profileMetadata = [];\n\n// GET PROFILE METADATA\ntry {\n  const profileData = $('Code in JavaScript').first().json;\n  profileMetadata = profileData.profiles || [];\n  console.log(`✅ Profile metadata: ${profileMetadata.length} profiles`);\n} catch (e) {\n  console.log('❌ Could not get profile metadata:', e.message);\n}\n\n// Read every HTTP pagination item, reject incomplete or out-of-window data.\nfunction readRows(name, start, end, posts = false) {\n  const pages = $(name).all();\n  const rows = [];\n  const seen = new Set();\n  let expectedPages = 1;\n  for (const item of pages) {\n    const response = item.json;\n    if (response.error || !Array.isArray(response.data)) throw new Error(name + ': no valid analytics response');\n    expectedPages = Math.max(expectedPages, Number(response.paging?.total_pages || 1));\n    for (const row of response.data) {\n      const dims = row.dimensions || {};\n      const field = Object.keys(dims).find(key => key.startsWith('reporting_period'));\n      const date = posts ? String(row.created_time || '').slice(0, 10) : String(dims[field] || '').slice(0, 10);\n      if (!posts && (!date || date < start || date > end)) throw new Error(name + ': returned a date outside the requested reporting period');\n      const key = posts ? (row.guid || row.perma_link || JSON.stringify([dims.customer_profile_id, row.created_time, row.text])) : String(dims.customer_profile_id) + ':' + date;\n      if (!seen.has(key)) { seen.add(key); rows.push(row); }\n    }\n  }\n  if (pages.length < expectedPages) throw new Error(name + ': not all API pages were retrieved');\n  return rows;\n}\ncurrentMonthData = readRows('Get Sprout Social Analytics Data', config.current_month_start, config.current_month_end);\npreviousMonthData = readRows('Get Previous Month Sprout Analytics', config.previous_month_start, config.previous_month_end);\npostAnalyticsData = readRows('Get Sprout Social Post Analytics', config.current_month_start, config.current_month_end, true);\nconst prevPostAnalyticsData = readRows('Get Previous Month Post Analytics', config.previous_month_start, config.previous_month_end, true);\n\n// HELPER: Get metric - supports flat keys AND dot-notation nested access\nfunction getMetric(metricsObj, ...keys) {\n  if (!metricsObj) return 0;\n  for (const key of keys) {\n    const flatVal = metricsObj[key];\n    if (flatVal !== undefined && flatVal !== null) return Number(flatVal) || 0;\n    if (key.includes('.')) {\n      const parts = key.split('.');\n      let current = metricsObj;\n      for (const part of parts) {\n        if (current && typeof current === 'object') current = current[part];\n        else { current = undefined; break; }\n      }\n      if (current !== undefined && current !== null) return Number(current) || 0;\n    }\n  }\n  return 0;\n}\n\n// NETWORK TYPE MAPPING\nconst networkToDisplay = {\n  'twitter': 'Twitter/X', 'facebook': 'Facebook', 'instagram': 'Instagram',\n  'fb_instagram_account': 'Instagram', 'linkedin': 'LinkedIn',\n  'linkedin_company': 'LinkedIn', 'tiktok': 'TikTok', 'youtube': 'YouTube',\n  'pinterest': 'Pinterest', 'threads': 'Threads',\n};\nfunction getDisplayNetwork(s) {\n  if (!s) return 'Unknown';\n  return networkToDisplay[s.toLowerCase()] || s;\n}\n\nconst profileIdToNetwork = {};\nfor (const p of profileMetadata) {\n  const pid = String(p.id || p.customer_profile_id || '');\n  if (pid) profileIdToNetwork[pid] = getDisplayNetwork(p.network || p.network_type || '');\n}\n// Augment the profile->network map from posts (posts carry both customer_profile_id AND network).\n// This keeps per-platform attribution working even when profile metadata is incomplete (dynamic clients).\nfor (const post of postAnalyticsData.concat(prevPostAnalyticsData)) {\n  const pid = String((post.dimensions || {}).customer_profile_id || post.customer_profile_id || '');\n  const net = post.network_type || post.network || '';\n  if (pid && net && !profileIdToNetwork[pid]) profileIdToNetwork[pid] = getDisplayNetwork(net);\n}\n\nconst METRIC_KEYS = ['impressions', 'reactions', 'link_clicks', 'video_views', 'comments', 'shares', 'engagements'];\n\nfunction extractProfileMetrics(metrics, network) {\n  const reactions = getMetric(metrics, 'reactions', 'likes');\n  const comments = getMetric(metrics, 'comments_count', 'comments');\n  const shares = getMetric(metrics, 'shares_count', 'shares');\n  const engagements = network === 'Instagram'\n    ? getMetric(metrics, 'likes', 'reactions') + comments + shares + getMetric(metrics, 'saves') + getMetric(metrics, 'story_replies')\n    : network === 'LinkedIn'\n    ? reactions + comments + shares + getMetric(metrics, 'post_content_clicks', 'post_link_clicks')\n    : reactions + comments + shares + getMetric(metrics, 'post_link_clicks') + getMetric(metrics, 'post_content_clicks_other');\n  return {\n    engagements,\n    impressions: getMetric(metrics, 'impressions', 'lifetime.impressions'),\n    reactions: getMetric(metrics, 'reactions', 'lifetime.reactions', 'likes'),\n    link_clicks: getMetric(metrics, 'post_link_clicks', 'lifetime.post_link_clicks', 'link_clicks', 'clicks'),\n    video_views: getMetric(metrics, 'video_views', 'lifetime.video_views'),\n    comments: getMetric(metrics, 'comments_count', 'comments'),\n    shares: getMetric(metrics, 'shares_count', 'shares'),\n  };\n}\n\nfunction aggregateMetrics(dataArray) {\n  const totals = Object.fromEntries(METRIC_KEYS.map(key => [key, 0]));\n  for (const item of dataArray) {\n    const m = extractProfileMetrics(item.metrics || item || {}, profileIdToNetwork[String(item.dimensions?.customer_profile_id || item.customer_profile_id || \"\")]);\n    for (const k of METRIC_KEYS) totals[k] += m[k];\n  }\n  return totals;\n}\n\nconst currentTotals = aggregateMetrics(currentMonthData);\nconst previousTotals = aggregateMetrics(previousMonthData);\n\n// Period totals must never be replaced with lifetime metrics for selected posts.\nconsole.log('📈 Aggregated Totals:');\nconsole.log('   Current period:', JSON.stringify(currentTotals));\nconsole.log('   Previous period:', JSON.stringify(previousTotals));\n\nfunction calcChange(current, previous) {\n  if (previous === 0) return current > 0 ? null : 0;\n  return Math.round(((current - previous) / previous) * 1000) / 10;\n}\n\n// ── PER-PLATFORM AGGREGATION (dynamic) ───────────────────────────────────────\n// Builds a per-network metric map from a profile-analytics array + a post-analytics array.\n// Profile-level metrics (impressions/reactions/link_clicks/video_views) come from the profiles\n// endpoint; comments/shares (and post_count) come from the posts endpoint (reliable source).\nfunction buildPlatformMetrics(profileRecords, postRecords) {\n  const pm = {};\n  function ensure(dn) {\n    if (!pm[dn]) {\n      pm[dn] = {\n        impressions: 0, reactions: 0, link_clicks: 0, video_views: 0, comments: 0, shares: 0,\n        engagements: 0, post_count: 0, profile_names: [], profile_ids: [],\n      };\n    }\n    return pm[dn];\n  }\n  // Seed every selected profile's platform so it appears even with zero activity\n  for (const p of profileMetadata) {\n    const dn = getDisplayNetwork(p.network || p.network_type || '');\n    const entry = ensure(dn);\n    const nm = p.native_name || p.name || '';\n    const pid = p.id || p.customer_profile_id || '';\n    if (nm && !entry.profile_names.includes(nm)) entry.profile_names.push(nm);\n    if (pid !== '' && pid !== undefined && pid !== null && !entry.profile_ids.includes(pid)) entry.profile_ids.push(pid);\n  }\n  // Profile-level metrics\n  for (const item of profileRecords) {\n    const pid = String((item.dimensions || {}).customer_profile_id || item.customer_profile_id || '');\n    const dn = profileIdToNetwork[pid] || null;\n    if (!dn) continue;\n    const entry = ensure(dn);\n    const m = extractProfileMetrics(item.metrics || item || {}, profileIdToNetwork[String(item.dimensions?.customer_profile_id || item.customer_profile_id || \"\")]);\n    entry.impressions += m.impressions;\n    entry.reactions += m.reactions;\n    entry.link_clicks += m.link_clicks;\n    entry.video_views += m.video_views;\n    entry.engagements += m.engagements;\n    entry.post_count += getMetric(item.metrics, \"posts_sent_count\");\n    entry.comments += m.comments;\n    entry.shares += m.shares;\n  }\n  // Count posts published in the selected window; their metrics stay lifetime-scoped.\n  for (const post of postRecords) {\n    const pid = String((post.dimensions || {}).customer_profile_id || post.customer_profile_id || '');\n    const netFromPost = post.network_type || post.network || '';\n    const dn = netFromPost ? getDisplayNetwork(netFromPost) : (profileIdToNetwork[pid] || null);\n    if (!dn) continue;\n    const entry = ensure(dn);\n    const m = post.metrics || {};\n    // Published count comes from period profile analytics, not the top-post sample.\n  }\n  return pm;\n}\n\nconst currentPlatform = buildPlatformMetrics(currentMonthData, postAnalyticsData);\nconst previousPlatform = buildPlatformMetrics(previousMonthData, prevPostAnalyticsData);\n\n// platform_metrics (current-only object) — kept for backward compatibility / external consumers\nconst platformMetrics = {};\nfor (const dn of Object.keys(currentPlatform)) {\n  const e = currentPlatform[dn];\n  platformMetrics[dn] = {\n    impressions: e.impressions, reactions: e.reactions, link_clicks: e.link_clicks,\n    video_views: e.video_views, comments: e.comments, shares: e.shares, engagements: e.engagements,\n    post_count: e.post_count,\n    profile_name: (e.profile_names || [])[0] || '',\n    profile_id: (e.profile_ids || [])[0] || '',\n    profile_names: e.profile_names || [],\n    profile_ids: e.profile_ids || [],\n  };\n}\n\n// platform_breakdown (rich array with per-platform month-over-month) — primary new output\nfunction pick6(o) {\n  const out = {};\n  for (const k of METRIC_KEYS) out[k] = (o && o[k]) || 0;\n  return out;\n}\nconst allNetworks = new Set([...Object.keys(currentPlatform), ...Object.keys(previousPlatform)]);\nconst platform_breakdown = [];\nfor (const dn of allNetworks) {\n  if (dn === 'Unknown') continue; // don't surface unattributable buckets\n  const cur = currentPlatform[dn] || {};\n  const prev = previousPlatform[dn] || {};\n  const changes = {};\n  for (const metric of METRIC_KEYS) {\n    const c = cur[metric] || 0;\n    const p = prev[metric] || 0;\n    changes[metric] = { current: c, previous: p, absolute: c - p, percent: calcChange(c, p) };\n  }\n  const profile_names = (cur.profile_names && cur.profile_names.length ? cur.profile_names : (prev.profile_names || []));\n  const profile_ids = (cur.profile_ids && cur.profile_ids.length ? cur.profile_ids : (prev.profile_ids || []));\n  platform_breakdown.push({\n    network: dn,\n    profile_names,\n    profile_ids,\n    current: pick6(cur),\n    previous: pick6(prev),\n    changes,\n    post_count: cur.post_count || 0,\n    previous_post_count: prev.post_count || 0,\n    has_previous: Object.keys(prev).length > 0 && previousMonthData.length > 0,\n  });\n}\nplatform_breakdown.sort((a, b) => (b.current.impressions || 0) - (a.current.impressions || 0));\n\nconsole.log(`📊 Platform breakdown: ${platform_breakdown.length} platforms`);\nplatform_breakdown.forEach(p => console.log(`   ${p.network}: ${p.current.impressions} impr, ${p.post_count} posts`));\n\nconst monthComparison = {\n  current_month: currentTotals,\n  previous_month: previousTotals,\n  changes: {},\n  summary: [],\n  data_quality: {\n    has_previous_month: previousMonthData.length > 0,\n    current_records: currentMonthData.length,\n    previous_records: previousMonthData.length\n  }\n};\n\nfor (const metric of METRIC_KEYS) {\n  const current = currentTotals[metric] || 0;\n  const previous = previousTotals[metric] || 0;\n  const abs = current - previous;\n  const pct = calcChange(current, previous);\n  monthComparison.changes[metric] = { current, previous, absolute: abs, percent: pct };\n  const dir = pct > 0 ? '↑' : (pct < 0 ? '↓' : '→');\n  monthComparison.summary.push(`${metric.replace(/_/g, ' ')}: ${pct === null ? 'new activity (previous period was zero)' : dir + ' ' + Math.abs(pct) + '%'} (${abs >= 0 ? '+' : ''}${abs})`);\n}\n\nconsole.log('📊 MoM Summary:');\nmonthComparison.summary.forEach(s => console.log('   ' + s));\n\n// ── POST MAPPING (shared by cross-platform top_posts AND per-platform grouping) ──\nfunction mapPost(post) {\n  const m = post.metrics || {};\n  const impressions = getMetric(m, 'lifetime.impressions', 'impressions');\n  const reactions = getMetric(m, 'lifetime.reactions', 'reactions', 'likes');\n  const comments = getMetric(m, 'lifetime.comments_count', 'comments_count', 'comments', 'lifetime.comments');\n  const shares = getMetric(m, 'lifetime.shares_count', 'shares_count', 'shares', 'lifetime.shares');\n  const linkClicks = getMetric(m, 'lifetime.post_link_clicks', 'post_link_clicks', 'link_clicks');\n  const videoViews = getMetric(m, 'lifetime.video_views', 'video_views');\n  const engagements = getMetric(m, 'lifetime.engagements', 'engagements');\n  const likes = getMetric(m, 'lifetime.likes', 'likes');\n  const pid = String((post.dimensions || {}).customer_profile_id || post.customer_profile_id || '');\n  const networkFromPost = post.network_type || post.network || '';\n  const dn = networkFromPost ? getDisplayNetwork(networkFromPost) : (profileIdToNetwork[pid] || 'Unknown');\n  return {\n    permalink: post.perma_link || post.url || '',\n    url: post.perma_link || post.url || '',\n    text: post.text || post.caption || post.message || '',\n    content: post.text || post.caption || post.message || '',\n    network_type: dn.toUpperCase(),\n    platform: dn.toUpperCase(),\n    platform_display: dn,\n    post_type: post.post_type || '',\n    content_category: post.content_category || '',\n    impressions, reactions, likes, comments, shares,\n    link_clicks: linkClicks, video_views: videoViews, engagements,\n    engagement: getMetric(m, 'lifetime.engagements') || (reactions + comments + shares + linkClicks),\n    metric_scope: \"lifetime\",\n    posted_at: post.created_time || ''\n  };\n}\n\nconst allMappedPosts = postAnalyticsData.map(mapPost).filter(post => post.url);\n\n// Cross-platform top posts (unchanged shape/behavior — top 10 by engagement)\nconst topPosts = [...allMappedPosts].sort((a, b) => b.engagement - a.engagement).slice(0, 10);\n\n// NEW: top posts per platform (dynamic). Group ALL fetched posts by platform, top N each.\nconst TOP_N_PER_PLATFORM = 5;\nconst grouped = {};\nfor (const post of allMappedPosts) {\n  const dn = post.platform_display || 'Unknown';\n  if (dn === 'Unknown') continue;\n  if (!grouped[dn]) grouped[dn] = [];\n  grouped[dn].push(post);\n}\nconst top_posts_by_platform = {};\nfor (const dn of Object.keys(grouped)) {\n  top_posts_by_platform[dn] = grouped[dn]\n    .sort((a, b) => b.engagement - a.engagement)\n    .slice(0, TOP_N_PER_PLATFORM);\n}\n\nconsole.log(`✅ Top posts (cross-platform): ${topPosts.length}`);\nconsole.log(`✅ Top posts by platform: ${Object.keys(top_posts_by_platform).map(k => `${k}(${top_posts_by_platform[k].length})`).join(', ')}`);\n\nreturn [{ json: {\n  profiles: profileMetadata.map(p => ({\n    id: p.id || p.customer_profile_id,\n    name: p.native_name || p.name,\n    network: p.network || p.network_type,\n    network_display: getDisplayNetwork(p.network || p.network_type || ''),\n    url: p.native_link || ''\n  })),\n  platform_metrics: platformMetrics,\n  platform_breakdown: platform_breakdown,\n  overall_totals: currentTotals,\n  metric_scope: \"reporting_period\",\n  top_post_metric_scope: \"lifetime\",\n  top_posts: topPosts,\n  top_posts_by_platform: top_posts_by_platform,\n  reporting_period: {\n    current_month: { start: config.current_month_start, end: config.current_month_end },\n    previous_month: { start: config.previous_month_start, end: config.previous_month_end }\n  },\n  month_comparison: monthComparison\n}}];\n"
+      },
+      "id": "72c525cb-6fb4-4d15-9770-aacb533ad05f",
+      "name": "Aggregate Sprout Social Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3040,
+        -848
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.sproutsocial.com/v1/1676448/analytics/profiles",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"filters\": [\n    \"customer_profile_id.eq(\" + $json.profile_ids.join(\", \") + \")\",\n    \"reporting_period.in(\" + $json.current_month_start + \"...\" + $json.current_month_end + \")\"\n  ],\n  \"metrics\": [\"impressions\", \"reactions\", \"post_link_clicks\", \"video_views\", \"comments_count\", \"shares_count\", \"likes\", \"post_content_clicks\", \"post_content_clicks_other\", \"saves\", \"story_replies\", \"posts_sent_count\"]\n}) }}",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging || Number($response.body.paging.current_page) >= Number($response.body.paging.total_pages) }}",
+              "limitPagesFetched": true,
+              "requestInterval": 200
+            }
+          }
+        }
+      },
+      "id": "cdc67178-b8b0-45d9-b827-0f0339cd8e77",
+      "name": "Get Sprout Social Analytics Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2368,
+        -704
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "executeOnce": true,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PmyntvBiSms0aRPF",
+          "name": "Sprout Social"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "current_month_start",
+              "value": "={{ $json.body?.date_range_start || $json.date_range_start || $now.startOf('month').toFormat('yyyy-MM-dd') }}",
+              "type": "string"
+            },
+            {
+              "id": "c2",
+              "name": "current_month_end",
+              "value": "={{ $json.body?.date_range_end || $json.date_range_end || $now.toFormat('yyyy-MM-dd') }}",
+              "type": "string"
+            },
+            {
+              "id": "c3",
+              "name": "previous_month_start",
+              "value": "={{ (() => { const s = $json.body?.date_range_start || $json.date_range_start; const e = $json.body?.date_range_end || $json.date_range_end; if (s && e) { const a = DateTime.fromISO(s); const b = DateTime.fromISO(e); const days = Math.max(1, Math.round(b.diff(a, 'days').days) + 1); return a.minus({ days }).toFormat('yyyy-MM-dd'); } return $now.minus({ months: 1 }).startOf('month').toFormat('yyyy-MM-dd'); })() }}",
+              "type": "string"
+            },
+            {
+              "id": "c4",
+              "name": "previous_month_end",
+              "value": "={{ (() => { const s = $json.body?.date_range_start || $json.date_range_start; const e = $json.body?.date_range_end || $json.date_range_end; if (s && e) { return DateTime.fromISO(s).minus({ days: 1 }).toFormat('yyyy-MM-dd'); } return $now.minus({ months: 1 }).endOf('month').toFormat('yyyy-MM-dd'); })() }}",
+              "type": "string"
+            },
+            {
+              "id": "c5",
+              "name": "trends_start_date",
+              "value": "={{ $now.minus({ days: 8 }).toFormat('yyyy-MM-dd') }}",
+              "type": "string"
+            },
+            {
+              "id": "c6",
+              "name": "trends_end_date",
+              "value": "={{ $now.minus({ days: 1 }).toFormat('yyyy-MM-dd') }}",
+              "type": "string"
+            },
+            {
+              "id": "c7",
+              "name": "client_name",
+              "value": "={{ $json.body?.client_name || $json.client_name || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "c8",
+              "name": "report_id",
+              "value": "={{ $json.body?.report_id || $json.report_id || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "c9",
+              "name": "date_range_start",
+              "value": "={{ $json.body?.date_range_start || $json.date_range_start || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "c10",
+              "name": "date_range_end",
+              "value": "={{ $json.body?.date_range_end || $json.date_range_end || \"\" }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "a9d976ce-9d39-49af-a2f6-ebf8ed35e4b0",
+      "name": "Workflow Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        1200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Gamma Presentation Content - COMPREHENSIVE VERSION\n// Includes full post captions, Sprout top posts, and detailed evidence\n\nconst reportData = $('Format Report Content').first().json;\nconst clientData = $('Build Normalized Client Object').first().json;\n\nlet aiOutput = {};\ntry {\n  const aiResult = $('AI Synthesis Agent').first().json;\n  aiOutput = aiResult.output || aiResult;\n} catch (e) { console.log('Could not get AI output:', e.message); }\n\nconst clientName = clientData.client_name || 'Client';\nconst date = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\n\n// Extract all data\nconst momComparison = clientData.sprout?.month_comparison || {};\nconst changes = momComparison.changes || {};\nconst momSummary = momComparison.summary || [];\nconst sproutTopPosts = clientData.sprout?.top_posts || [];\nconst overallTotals = clientData.sprout?.overall_totals || {};\nconst platformBreakdown = clientData.sprout?.platform_breakdown || [];\nconst topPostsByPlatform = clientData.sprout?.top_posts_by_platform || {};\n// A brand with no Sprout profile connected has no performance data: say so once instead of showing zeros.\nconst hasSprout = (Array.isArray(clientData.sprout?.profiles) && clientData.sprout.profiles.length > 0) || sproutTopPosts.length > 0 || Object.keys(overallTotals).length > 0;\n\n// Build the platform-by-platform performance slide (only when data exists)\nlet platformBreakdownBlock = '';\nif (Array.isArray(platformBreakdown) && platformBreakdown.length > 0) {\n  const pctStr = (ch, k) => {\n    const v = ch && ch[k] && typeof ch[k].percent === 'number' ? ch[k].percent : null;\n    if (v === null) return '';\n    return ' (' + (v > 0 ? '+' : '') + v + '% MoM)';\n  };\n  let body = 'Profile activity within the exact report dates, compared with the preceding equal-length period:\\n\\n';\n  platformBreakdown.forEach(p => {\n    const c = p.current || {};\n    const ch = p.changes || {};\n    body += '▸ ' + (p.network || 'Platform').toUpperCase() + ' — ' + (p.post_count || 0) + ' posts\\n';\n    body += '   Impressions: ' + (c.impressions || 0).toLocaleString() + pctStr(ch, 'impressions') + '\\n';\n    body += '   Reactions: ' + (c.reactions || 0).toLocaleString() + pctStr(ch, 'reactions') + '   |   Comments: ' + (c.comments || 0).toLocaleString() + pctStr(ch, 'comments') + '   |   Shares: ' + (c.shares || 0).toLocaleString() + pctStr(ch, 'shares') + '\\n';\n    body += '   Link Clicks: ' + (c.link_clicks || 0).toLocaleString() + pctStr(ch, 'link_clicks') + '   |   Video Views: ' + (c.video_views || 0).toLocaleString() + pctStr(ch, 'video_views') + '\\n\\n';\n  });\n  platformBreakdownBlock = '\\n\\n---\\n\\nSLIDE 3B: PLATFORM-BY-PLATFORM PERFORMANCE\\n\\n' + body + 'Visualize as a comparison table or grouped bar chart — one row/group per platform.';\n}\n\nconst tiktokPosts = clientData.trends?.tiktok?.posts || [];\nconst tiktokPatterns = clientData.trends?.tiktok?.patterns || {};\nconst instagramPosts = clientData.trends?.instagram?.posts || [];\nconst instagramPatterns = clientData.trends?.instagram?.patterns || {};\nconst contentPillars = clientData.context?.content_pillars || [];\n\nconst sproutAnalysis = aiOutput.sprout_performance_analysis || {};\nconst tiktokAnalysis = aiOutput.tiktok_trends_analysis || {};\nconst igAnalysis = aiOutput.instagram_trends_analysis || {};\n\n// Helper: Truncate text but keep it meaningful\nfunction truncate(text, maxLen = 200) {\n  if (!text) return '';\n  const clean = text.replace(/\\n/g, ' ').replace(/\\s+/g, ' ').trim();\n  if (clean.length <= maxLen) return clean;\n  return clean.substring(0, maxLen) + '...';\n}\n\n// Helper: Format engagement metrics\nfunction formatMetrics(post, platform) {\n  if (platform === 'tiktok') {\n    return `Views: ${(post.views || 0).toLocaleString()} | Likes: ${(post.likes || 0).toLocaleString()} | Comments: ${(post.comments || 0).toLocaleString()} | Shares: ${(post.shares || 0).toLocaleString()}`;\n  } else {\n    return `Likes: ${(post.likes || 0).toLocaleString()} | Comments: ${(post.comments || 0).toLocaleString()}`;\n  }\n}\n\n// Count posts by platform from calendar\nconst contentCalendar = aiOutput.content_calendar || [];\nconst platformCounts = {};\ncontentCalendar.forEach(day => {\n  (day.posts || []).forEach(post => {\n    const platform = post.platform || 'Other';\n    platformCounts[platform] = (platformCounts[platform] || 0) + 1;\n  });\n});\n\n// Determine key insight based on actual data\nlet keyInsight = '';\nif (changes.impressions?.percent < -50) {\n  keyInsight = `Significant performance decline across all metrics requires immediate attention. Content volume dropped from ${momComparison.previous_month?.post_count || 'higher'} to ${momComparison.current_month?.post_count || 'fewer'} posts, directly impacting reach.`;\n} else if (changes.impressions?.percent > 20) {\n  keyInsight = `Strong growth momentum with ${changes.impressions?.percent}% increase in impressions. Top performing content themes should be expanded.`;\n} else {\n  keyInsight = sproutAnalysis.month_over_month_summary || 'See detailed analysis below.';\n}\n\n// ============================================\n// BUILD COMPREHENSIVE GAMMA PROMPT\n// ============================================\nlet prompt = `Create a professional Social Media Performance & Trend Analysis Report for ${clientName}.\n\nDESIGN INSTRUCTIONS:\n- Visually engaging executive presentation with modern, clean design\n- Use charts/graphs for all metrics sections\n- Each major section should be its own slide or slide group\n- Highlight key numbers, percentages, and quotes prominently\n- Include clickable links where URLs are provided\n- Use brand colors if known, otherwise professional blue/gray palette\n\nCRITICAL CONTENT RULES (follow exactly - do not deviate):\n- This report contains TWO distinct kinds of posts. NEVER mix them:\n  1. CLIENT OWN POSTS = posts published by ${clientName}'s OWN social accounts (their own results).\n  2. TRENDING INDUSTRY POSTS = external, third-party posts from OTHER accounts, shown only as market/trend reference.\n- The slide titled ${clientName}'S OWN TOP PERFORMING POSTS must use ONLY the posts listed in that section. Never replace, supplement, merge, or re-rank them with trending or industry posts.\n- Replace any existing sample or placeholder posts in the template with the exact posts provided here; never keep template example posts.\n- Reproduce every performance number and date EXACTLY from the supplied tables. Do not recalculate, estimate, or combine lifetime post metrics with period profile totals. Label Facebook/Instagram impressions as views and LinkedIn clicks as all post clicks. Reproduce every post account/handle, metrics, caption text and URL EXACTLY as written. Do not invent, swap, summarize away, or reorder posts. Keep the given order.\n\n---\n\nSLIDE 1: TITLE\n\n${clientName}\nSocial Performance Report\nReporting period: ${clientData.report_window?.current_month?.start} to ${clientData.report_window?.current_month?.end}\nGenerated: ${date}\n\n---\n\nSLIDE 2: EXECUTIVE SUMMARY\n\nREPORT PERIOD: ${clientData.report_window?.current_month?.start || 'Current Month'} to ${clientData.report_window?.current_month?.end || 'Present'}\n\nMETRIC SCOPE NOTE (display visibly): Profile totals cover only the report dates. Facebook/Instagram impressions use the provider's views metric. The clicks total includes LinkedIn all-post clicks, not only outbound link clicks. Top-post figures are lifetime metrics and are separate from these period totals.\n\nKEY METRICS AT A GLANCE:\n`;\n\n// Add metrics with visual indicators\nmomSummary.forEach(metric => {\n  prompt += `• ${metric}\\n`;\n});\n\nprompt += `\n⚡ KEY INSIGHT: ${keyInsight}\n\nPLATFORMS ANALYZED: ${clientData.context?.primary_platforms?.join(', ') || 'LinkedIn, Instagram, Facebook'}\nCONTENT PILLARS: ${contentPillars.slice(0, 4).join(', ') || 'See pillar analysis'}\n`;\nif (hasSprout) {\nprompt += `\n---\n\nSLIDE 3: PERFORMANCE DASHBOARD\n\nMONTH-OVER-MONTH COMPARISON (Visualize as bar chart or gauge):\n\n`;\n\nObject.entries(changes).forEach(([metric, data]) => {\n  if (data && typeof data.percent === 'number') {\n    const arrow = data.percent > 0 ? '↑' : (data.percent < 0 ? '↓' : '→');\n    const emoji = data.percent > 20 ? '🟢' : (data.percent > 0 ? '🟡' : (data.percent < -20 ? '🔴' : '⚪'));\n    const change = data.absolute >= 0 ? `+${data.absolute.toLocaleString()}` : data.absolute.toLocaleString();\n    prompt += `${emoji} ${metric.replace(/_/g, ' ').toUpperCase()}: ${arrow} ${Math.abs(data.percent)}% (${change})\\n`;\n  }\n});\n\nprompt += `\nCURRENT PERIOD TOTALS:\n• Total Impressions: ${(overallTotals.impressions || 0).toLocaleString()}\n• Total Reactions: ${(overallTotals.reactions || 0).toLocaleString()}\n• Period Engagements: ${(overallTotals.engagements || 0).toLocaleString()}\n• Period Comments: ${(overallTotals.comments || 0).toLocaleString()}\n• Period Shares: ${(overallTotals.shares || 0).toLocaleString()}\n• Total Link Clicks: ${(overallTotals.link_clicks || 0).toLocaleString()}\n• Total Video Views: ${(overallTotals.video_views || 0).toLocaleString()}${platformBreakdownBlock}\n\n---\n\nSLIDE 4: PERFORMANCE INSIGHTS\n\nKEY FINDINGS:\n`;\n\n(sproutAnalysis.key_insights || ['Analysis pending']).forEach((insight, i) => {\n  prompt += `${i + 1}. ${insight}\\n\\n`;\n});\n\n} else {\nprompt += `\n---\n\nSLIDE 3: PERFORMANCE DATA\n\n${clientName} has no social accounts connected for performance tracking yet, so this report carries no performance figures. Make this one short slide that says performance tracking starts once the brand's accounts are connected, and that this report is built from trend research, the competitive picture and the content plan. Do not show zeros, KPI tiles or charts here.\n\n`;\n}\n\n// ============================================\n// SPROUT SOCIAL TOP POSTS (CLIENT'S OWN CONTENT)\n// ============================================\nif (hasSprout) {\nprompt += `\n---\n\nSLIDE 5: ${clientName}'S OWN TOP PERFORMING POSTS (CLIENT ACCOUNTS)\n\nThese are ${clientName}'s OWN best-performing posts from their OWN social accounts this period. Reproduce these EXACT posts, in this EXACT order. Do NOT replace or supplement them with the trending or industry posts shown on later slides:\n\n`;\n\nconst tppKeys = Object.keys(topPostsByPlatform || {});\nif (tppKeys.length > 0) {\n  tppKeys.forEach(network => {\n    const posts = topPostsByPlatform[network] || [];\n    if (!posts.length) return;\n    prompt += `\\n● ${network.toUpperCase()} — TOP POSTS\\n`;\n    posts.slice(0, 3).forEach((post, i) => {\n      const metrics = `Lifetime metrics (not period totals). Impressions: ${(post.impressions || 0).toLocaleString()} | Reactions: ${(post.reactions || 0).toLocaleString()} | Comments: ${(post.comments || 0).toLocaleString()} | Shares: ${(post.shares || 0).toLocaleString()} | Clicks: ${(post.link_clicks || 0).toLocaleString()}`;\n      const postText = truncate(post.text || post.message || post.content || 'No text available', 250);\n      prompt += `\\n📌 ${network.toUpperCase()} CLIENT POST ${i + 1}\\n${metrics}\\n\"${postText}\"\\n${post.permalink || post.url || ''}\\n`;\n    });\n  });\n} else if (sproutTopPosts.length > 0) {\n  sproutTopPosts.slice(0, 5).forEach((post, i) => {\n    const platform = post.network_type || post.platform || 'Social';\n    const metrics = `Lifetime metrics (not period totals). Impressions: ${(post.impressions || 0).toLocaleString()} | Reactions: ${(post.reactions || 0).toLocaleString()} | Clicks: ${(post.link_clicks || 0).toLocaleString()}`;\n    const postText = truncate(post.text || post.message || post.content || 'No text available', 250);\n    prompt += `\\n📌 CLIENT OWN POST ${i + 1} [${platform.toUpperCase()}]\\n${metrics}\\n\"${postText}\"\\n${post.permalink || post.url || ''}\\n\\n`;\n  });\n} else {\n  prompt += `No top posts data available for this period. This may indicate limited posting activity.\\n`;\n}\n}\n\n// ============================================\n// CONTENT PILLAR ANALYSIS\n// ============================================\nprompt += `\n---\n\nSLIDE 6: CONTENT PILLAR ANALYSIS\n\nDEFINED PILLARS: ${contentPillars.join(' | ') || 'Not specified'}\n\n✅ WELL-REPRESENTED IN CURRENT CONTENT:\n`;\n\n(sproutAnalysis.pillar_alignment?.well_represented || ['See detailed analysis']).forEach(p => {\n  prompt += `• ${p}\\n`;\n});\n\nprompt += `\n⚠️ UNDERREPRESENTED (OPPORTUNITY AREAS):\n`;\n\n(sproutAnalysis.pillar_alignment?.underrepresented || ['See detailed analysis']).forEach(p => {\n  prompt += `• ${p}\\n`;\n});\n\nprompt += `\n💡 PILLAR RECOMMENDATIONS:\n`;\n\n(sproutAnalysis.pillar_alignment?.recommendations || []).slice(0, 3).forEach((rec, i) => {\n  prompt += `${i + 1}. ${rec}\\n`;\n});\n\n// ============================================\n// TIKTOK TRENDS - WITH FULL POST DATA (CONDITIONAL)\n// ============================================\nconst hasTikTokData = tiktokPosts.length > 0 || (tiktokAnalysis.overview && tiktokAnalysis.overview !== 'No analysis available.');\nconst hasInstagramData = instagramPosts.length > 0 || (igAnalysis.overview && igAnalysis.overview !== 'No analysis available.');\nconst skipTrends = clientData.skip_trends || (!hasTikTokData && !hasInstagramData);\n\nlet slideNum = 7;\n\nif (hasTikTokData) {\nprompt += `\n---\n\nSLIDE ${slideNum}: TIKTOK TRENDS OVERVIEW\n\n${tiktokAnalysis.overview || 'Analysis of top-performing TikTok content in your industry keywords.'}\n\n🔥 TOP THEMES IDENTIFIED:\n`;\n\n(tiktokAnalysis.top_themes || []).forEach(theme => {\n  prompt += `• ${theme}\\n`;\n});\n\nprompt += `\n📹 SUCCESSFUL CONTENT FORMATS:\n`;\n\n(tiktokAnalysis.successful_formats || []).forEach(format => {\n  prompt += `• ${format}\\n`;\n});\n\nprompt += `\n#️⃣ TRENDING HASHTAGS: ${(tiktokPatterns.top_hashtags || []).slice(0, 8).map(h => `#${h.tag}`).join('  ') || 'See individual posts'}\n\n---\n\nSLIDE ${slideNum + 1}: TRENDING TIKTOK CONTENT IN YOUR INDUSTRY (EXTERNAL ACCOUNTS - NOT ${clientName}'S POSTS)\n\nThese are external, third-party TikTok posts from OTHER accounts in your industry, shown for trend reference only. They are NOT ${clientName}'s posts and must never appear on the client's own top-posts slide. Study their hooks and copy:\n\n`;\n\ntiktokPosts.slice(0, 7).forEach((post, i) => {\n  const caption = truncate(post.caption, 300);\n  prompt += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📱 TRENDING TIKTOK #${i + 1} (EXTERNAL ACCOUNT): @${post.author}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nENGAGEMENT SCORE: ${post.engagement_score?.toLocaleString() || 'N/A'}\n${formatMetrics(post, 'tiktok')}\n\nCAPTION/COPY:\n\"${caption}\"\n\nHASHTAGS: ${(post.hashtags || []).slice(0, 5).map(h => `#${h}`).join(' ') || 'None'}\n\n🔗 ${post.url}\n\n`;\n});\n\nprompt += `\n💡 KEY TIKTOK TAKEAWAYS:\n`;\n\n(tiktokAnalysis.key_takeaways || []).forEach((takeaway, i) => {\n  prompt += `${i + 1}. ${takeaway}\\n`;\n});\n\nslideNum += 2;\n} // end hasTikTokData\n\n// ============================================\n// INSTAGRAM TRENDS - WITH FULL POST DATA (CONDITIONAL)\n// ============================================\nif (hasInstagramData) {\nprompt += `\n---\n\nSLIDE ${slideNum}: INSTAGRAM TRENDS OVERVIEW\n\n${igAnalysis.overview || 'Analysis of top-performing Instagram content in your industry keywords.'}\n\n🔥 TOP THEMES IDENTIFIED:\n`;\n\n(igAnalysis.top_themes || []).forEach(theme => {\n  prompt += `• ${theme}\\n`;\n});\n\nprompt += `\n📸 SUCCESSFUL CONTENT FORMATS:\n`;\n\n(igAnalysis.successful_formats || []).forEach(format => {\n  prompt += `• ${format}\\n`;\n});\n\nprompt += `\n#️⃣ TRENDING HASHTAGS: ${(instagramPatterns.top_hashtags || []).slice(0, 8).map(h => `#${h.tag}`).join('  ') || 'See individual posts'}\n\n---\n\nSLIDE ${slideNum + 1}: TRENDING INSTAGRAM CONTENT IN YOUR INDUSTRY (EXTERNAL ACCOUNTS - NOT ${clientName}'S POSTS)\n\nThese are external, third-party Instagram posts from OTHER accounts in your industry, shown for trend reference only. They are NOT ${clientName}'s posts and must never appear on the client's own top-posts slide. Study their hooks and copy:\n\n`;\n\ninstagramPosts.slice(0, 7).forEach((post, i) => {\n  const caption = truncate(post.caption, 300);\n  prompt += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📷 TRENDING INSTAGRAM #${i + 1} (EXTERNAL ACCOUNT): @${post.author}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nENGAGEMENT SCORE: ${post.engagement_score?.toLocaleString() || 'N/A'}\n${formatMetrics(post, 'instagram')}\nTYPE: ${post.type || 'Post'}\n\nCAPTION/COPY:\n\"${caption}\"\n\nHASHTAGS: ${(post.hashtags || []).slice(0, 5).map(h => `#${h}`).join(' ') || 'None'}\n\n🔗 ${post.url}\n\n`;\n});\n\nprompt += `\n💡 KEY INSTAGRAM TAKEAWAYS:\n`;\n\n(igAnalysis.key_takeaways || []).forEach((takeaway, i) => {\n  prompt += `${i + 1}. ${takeaway}\\n`;\n});\n\nslideNum += 2;\n} // end hasInstagramData\n\nif (skipTrends) {\n  prompt += `\\n---\\n\\nSLIDE ${slideNum}: TREND ANALYSIS\\n\\nTrend analysis was not included in this report. This may be because:\\n- No social keywords were configured for this client\\n- Trend analysis was explicitly skipped for this run\\n\\nTo enable trend analysis, add social keywords in the client onboarding screen.\\n`;\n  slideNum++;\n}\n\n// ============================================\n// WEEKLY CONTENT CALENDAR\n// ============================================\n// Reports since 19 Oct 2026 write no posts: the calendar is planned a week at a time in Socialytics.\nconst totalCalendarPosts = contentCalendar.reduce((sum, day) => sum + (day.posts || []).length, 0);\nif (totalCalendarPosts > 0) {\nprompt += `\n---\n\nSLIDE ${slideNum}: WEEKLY CONTENT CALENDAR\n\nA 7-day content plan with ${totalCalendarPosts} posts based on your performance data and trending content analysis.\n\nPLATFORM DISTRIBUTION: ${Object.entries(platformCounts).map(([p, c]) => `${p} (${c})`).join(' | ')}\n\n`;\n\ncontentCalendar.forEach((day, dayIdx) => {\n  prompt += `\n═══════════════════════════════════\n📅 ${day.day.toUpperCase()}${day.date_label ? ' (' + day.date_label + ')' : ''}\n═══════════════════════════════════\n`;\n  \n  (day.posts || []).forEach((post, i) => {\n    prompt += `\n${i + 1}. ${(post.platform || 'Social').toUpperCase()} - ${(post.format || 'Post').toUpperCase()}${post.language ? ' [' + post.language.toUpperCase() + ']' : ''}\n   🏷️ PILLAR: ${post.pillar || 'General'}\n   🌐 LANGUAGE: ${post.language || 'en'}\n   ⏰ POSTING TIME: ${post.posting_time || 'Flexible'}\n   \n   📝 COPY:\n   \"${truncate(post.copy, 300)}\"\n   \n   #️⃣ HASHTAGS: ${(post.hashtags || []).map(h => '#' + h).join(' ') || 'None'}\n   \n   🎨 VISUAL DIRECTION: ${post.visual_direction || 'See AI visual prompt'}\n   \n   🖼️ AI VISUAL PROMPT (Ready to paste into DALL-E/Midjourney):\n   \"${truncate(post.ai_visual_prompt, 400)}\"\n   \n   💡 RATIONALE: ${post.rationale || ''}\n\n`;\n  });\n});\n\n}\n\n// ============================================\n// ACTION ITEMS\n// ============================================\nprompt += `\n---\n\nSLIDE ${slideNum + (totalCalendarPosts > 0 ? 1 : 0)}: ACTION ITEMS & NEXT STEPS\n\n🚨 IMMEDIATE PRIORITIES (This Week):\n• Implement top 3 content recommendations\n• Address performance decline with increased posting frequency\n• Focus on underrepresented pillar: ${sproutAnalysis.pillar_alignment?.underrepresented?.[0] || 'Client Wins'}\n• Test hooks inspired by top-performing TikTok content\n\n${totalCalendarPosts > 0 ? `📅 CONTENT CALENDAR RECOMMENDATIONS:\\n• LinkedIn: ${platformCounts['LinkedIn'] || 0} posts/week\\n• Instagram: ${platformCounts['Instagram'] || 0} posts/week\\n• Facebook: ${platformCounts['Facebook'] || 0} posts/week\\n• TikTok: ${platformCounts['TikTok'] || 0} posts/week\\n` : `📅 WEEKLY POSTS:\\n• Each week's posts are planned in the Socialytics calendar the Monday before, from the latest results.\\n`}\n📈 METRICS TO PRIORITIZE:\n`;\n\n// Highlight declining metrics\nObject.entries(changes).forEach(([metric, data]) => {\n  if (data && data.percent < -20) {\n    prompt += `• ${metric.replace(/_/g, ' ')}: Currently ${data.percent}% - prioritize improvement\\n`;\n  }\n});\n\nprompt += `\n🎯 SUCCESS CRITERIA FOR NEXT REPORT:\n• Increase posting frequency by 50%+\n• Achieve engagement rate improvement on key pillars\n• Test at least 3 new content formats from trend analysis\n\n---\n\nSLIDE ${slideNum + 2}: DATA SOURCES & METHODOLOGY\n\n📊 DATA SOURCES:\n${hasSprout ? '• Sprout Social API - ' + sproutTopPosts.length + ' top posts analyzed, full performance metrics' : '• Sprout Social - not connected for this brand yet; no performance data in this report'}\n• TikTok Trend Scraper - ${tiktokPosts.length} top posts by engagement (filtered by target languages)\n• Instagram Trend Scraper - ${instagramPosts.length} top posts by engagement (filtered by target languages)\n\n🔍 METHODOLOGY:\n• Engagement Scoring: (likes × 1) + (comments × 2) + (shares × 3) + (views ÷ 1000)\n• Language Filter: Target language content for relevance (multi-language supported)\n• Performance dates: ${clientData.report_window?.current_month?.start} to ${clientData.report_window?.current_month?.end}. Top-post metrics are lifetime values for posts published in those dates; they are not period totals.\n• Hashtags Searched: ${clientData.context?.brief_context?.social_keywords?.join(', ') || 'Industry-relevant keywords'}\n\n📅 REPORT GENERATED: ${date}\n\n---\n\nEND OF PRESENTATION\n`;\n\nconsole.log('Generated comprehensive presentation');\nconsole.log(`- Sprout top posts: ${sproutTopPosts.length}`);\nconsole.log(`- TikTok posts with captions: ${tiktokPosts.length}`);\nconsole.log(`- Instagram posts with captions: ${instagramPosts.length}`);\nconsole.log(`- Calendar posts: ${totalCalendarPosts}`);\nconsole.log(`- Prompt length: ${prompt.length} characters`);\n\nreturn [{\n  json: {\n    presentation_content: prompt,\n    client_name: clientName,\n    report_date: new Date().toISOString().split('T')[0],\n    total_recommendations: totalCalendarPosts,\n    metrics_summary: {\n      impressions_change: changes.impressions?.percent || 0,\n      reactions_change: changes.reactions?.percent || 0,\n      link_clicks_change: changes.link_clicks?.percent || 0,\n      video_views_change: changes.video_views?.percent || 0\n    },\n    data_included: {\n      sprout_top_posts: sproutTopPosts.length,\n      tiktok_posts_with_captions: tiktokPosts.length,\n      instagram_posts_with_captions: instagramPosts.length,\n      content_pillars: contentPillars.length\n    },\n    trends_count: {\n      tiktok: tiktokPosts.length,\n      instagram: instagramPosts.length\n    }\n  }\n}];"
+      },
+      "id": "40416608-c0cb-4521-833c-5150321e4feb",
+      "name": "Build Presentation Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4880,
+        -1184
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://public-api.gamma.app/v1.0/generations/from-template",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"gammaId\": \"g_ix9srva6gx7iiso\",\n  \"prompt\": $json.presentation_content,\n  \"sharingOptions\": {\n    \"workspaceAccess\": \"view\"\n  }\n}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "7dd5e439-ef7c-475e-88f3-d4d96e4fc18b",
+      "name": "Create Gamma Presentation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5104,
+        -1264
+      ],
+      "retryOnFail": false,
+      "maxTries": 2,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1JS8DBwMUsWotQD6",
+          "name": "Gamma"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate Run Summary - FIXED: gammaUrl extraction + status passthrough\nconst gammaResult = $input.first().json;\nconst presentationData = $('Build Presentation Content').first().json;\n\nlet clientData = {};\nlet startTime = new Date().toISOString();\n\ntry {\n  clientData = $('Build Normalized Client Object').first().json;\n} catch(e) {\n  console.log('Could not get client data');\n}\n\n// === RESILIENT CONFIG / DATE FETCH ===\nlet config = {};\n// Priority 1: Combine Brief Context (has correct dynamic date ranges from webhook)\ntry {\n  const cbc = $('Combine Brief Context with Client Data').first().json;\n  if (cbc && cbc.date_ranges) {\n    config.current_month_start = cbc.date_ranges.current_month?.start || '';\n    config.current_month_end = cbc.date_ranges.current_month?.end || '';\n    config.previous_month_start = cbc.date_ranges.previous_month?.start || '';\n    config.previous_month_end = cbc.date_ranges.previous_month?.end || '';\n    config.client_name = cbc.client_name;\n    config.report_id = cbc.report_id;\n    console.log('✅ Config from Combine Brief Context');\n  }\n} catch(e) {}\n\n// Priority 2: Workflow Configuration (fallback)\nif (!config.current_month_start) {\n  try {\n    const wf = $('Workflow Configuration').first().json;\n    if (wf && wf.current_month_start) {\n      config = wf;\n      startTime = wf.workflow_start_time || startTime;\n      console.log('✅ Config from Workflow Configuration (fallback)');\n    }\n  } catch(e) {}\n}\n\nif (!config.current_month_start) {\n  const now = new Date();\n  const year = now.getFullYear();\n  const month = now.getMonth();\n  const fmt = (d) => d.toISOString().split('T')[0];\n  config.current_month_start = fmt(new Date(year, month, 1));\n  config.current_month_end = fmt(now);\n  config.previous_month_start = fmt(new Date(year, month - 1, 1));\n  config.previous_month_end = fmt(new Date(year, month, 0));\n  console.log('⚠️ Computed dates fresh');\n}\n\n// === RESILIENT report_id FETCH ===\nlet reportId = '';\ntry {\n  reportId = $('Combine Brief Context with Client Data').first().json.report_id;\n} catch(e) {}\nif (!reportId) {\n  try { reportId = $('Workflow Configuration').first().json.report_id; } catch(e) {}\n}\nif (!reportId) {\n  try {\n    const wh = $('Webhook').first().json;\n    reportId = wh.body?.report_id || wh.report_id || '';\n  } catch(e) {}\n}\nif (!reportId) {\n  reportId = config.report_id || '';\n}\nconsole.log(`📋 Report ID: ${reportId || 'MISSING'}`);\n\n// Get aggregated Sprout data\nlet sproutData = {};\ntry {\n  sproutData = $('Aggregate Sprout Social Data').first().json;\n} catch(e) {\n  console.log('Could not get sprout data');\n}\n\n// Get AI analysis — unwrap the agent output\nlet aiAnalysis = {};\ntry {\n  const aiRaw = $('AI Synthesis Agent').first().json;\n\n  if (aiRaw.output) {\n    try {\n      aiAnalysis = typeof aiRaw.output === 'string' ? JSON.parse(aiRaw.output) : aiRaw.output;\n    } catch(e2) {\n      aiAnalysis = aiRaw.output;\n    }\n  } else if (aiRaw.text) {\n    try {\n      aiAnalysis = typeof aiRaw.text === 'string' ? JSON.parse(aiRaw.text) : aiRaw.text;\n    } catch(e2) {\n      aiAnalysis = aiRaw.text;\n    }\n  } else if (aiRaw.sprout_performance_analysis) {\n    aiAnalysis = aiRaw;\n  } else if (typeof aiRaw === 'string') {\n    try { aiAnalysis = JSON.parse(aiRaw); } catch(e2) { aiAnalysis = {}; }\n  } else {\n    aiAnalysis = aiRaw;\n  }\n} catch(e) {\n  console.log('❌ Could not get AI analysis:', e.message);\n}\n\nconst endTime = new Date().toISOString();\nconst durationMins = Math.round((new Date(endTime) - new Date(startTime)) / 60000);\n\n// === FIX: Extract presentation URL — gammaUrl is the FIRST check ===\nconst candidateUrl =\n  gammaResult.gammaUrl ||\n  gammaResult.url ||\n  gammaResult.shareUrl ||\n  gammaResult.shareLink ||\n  gammaResult.share_url ||\n  gammaResult.share_link ||\n  gammaResult.exportUrl ||\n  gammaResult.export_url ||\n  gammaResult.viewUrl ||\n  gammaResult.view_url ||\n  (gammaResult.data?.gammaUrl) ||\n  (gammaResult.data?.url) ||\n  (gammaResult.data?.shareUrl) ||\n  (gammaResult.data?.shareLink) ||\n  (gammaResult.result?.url) ||\n  (gammaResult.result?.shareUrl) ||\n  (gammaResult.link) ||\n  (gammaResult.generatedContentUrl) ||\n  (gammaResult.data?.link) ||\n  (gammaResult.data?.generatedContentUrl) ||\n  (gammaResult.generation?.url) ||\n  (gammaResult.generation?.shareUrl) ||\n  (gammaResult.generation?.link) ||\n  (gammaResult.output?.url) ||\n  (gammaResult.output?.shareUrl) ||\n  null;\n\nconst gammaState = String(gammaResult.status || gammaResult.data?.status || '').toLowerCase();\nconst validUrl = typeof candidateUrl === 'string' && /^https:\\/\\/[^\\s]+$/i.test(candidateUrl);\nconst gammaSuccess = gammaState === 'completed' && validUrl;\nconst presentationUrl = gammaSuccess ? candidateUrl : null;\nconst isSuccess = !!aiAnalysis && typeof aiAnalysis === 'object' && !aiAnalysis.error && ['content_calendar', 'sprout_performance_analysis', 'executive_summary'].some(key => aiAnalysis[key] != null);\nconst warnings = [];\nif (!gammaSuccess) warnings.push(gammaResult._gamma_timeout\n  ? 'The analysis is available, but presentation generation timed out. No presentation link is available.'\n  : 'The analysis is available, but the presentation did not complete. No presentation link is available.');\ntry {\n  const briefWarning = $('Prepare Brief Text').first().json.brief_warning;\n  if (briefWarning) warnings.push(briefWarning);\n  const combinedWarning = $('Combine Brief Context with Client Data').first().json.brief_warning;\n  if (combinedWarning && !warnings.includes(combinedWarning)) warnings.push(combinedWarning);\n} catch (error) {}\n\n\nconsole.log('\\n🔍 GAMMA RESPONSE DEBUG:');\nconsole.log('  Full response keys:', Object.keys(gammaResult));\nconsole.log('  Response (first 500 chars):', JSON.stringify(gammaResult).substring(0, 500));\nif (gammaResult.data) console.log('  data keys:', Object.keys(gammaResult.data));\nif (gammaResult.result) console.log('  result keys:', Object.keys(gammaResult.result));\nif (gammaResult.generation) console.log('  generation keys:', Object.keys(gammaResult.generation));\nif (gammaResult.output) console.log('  output keys:', Object.keys(gammaResult.output));\nconsole.log('  Extracted presentationUrl:', presentationUrl || 'NONE');\n\nif (!presentationUrl) {\n  console.log('⚠️ WARNING: No presentation URL found from Gamma response!');\n  console.log('  Trying to construct from ID:', gammaResult.id || gammaResult.data?.id || gammaResult.generationId || 'NO ID');\n}\n\nconst tiktokTrends = clientData.trends?.tiktok?.posts || clientData.tiktok_trends || [];\nconst instagramTrends = clientData.trends?.instagram?.posts || clientData.instagram_trends || [];\n\nfunction extractTopHashtags(posts, limit = 10) {\n  const tagCounts = {};\n  for (const post of posts) {\n    const tags = post.hashtags || [];\n    for (const tag of tags) {\n      const clean = String(tag).toLowerCase().replace(/^#/, '');\n      if (clean) tagCounts[clean] = (tagCounts[clean] || 0) + 1;\n    }\n  }\n  return Object.entries(tagCounts)\n    .sort((a, b) => b[1] - a[1])\n    .slice(0, limit)\n    .map(([tag, count]) => ({ tag, count }));\n}\n\nfunction avgEngagement(posts) {\n  if (!posts.length) return 0;\n  const total = posts.reduce((sum, p) => sum + (p.engagement_score || 0), 0);\n  return Math.round(total / posts.length);\n}\n\n// === MULTI-GEO: ensure array ===\nlet geoArr = clientData.context?.geo || config.geo || ['US'];\nif (typeof geoArr === 'string') geoArr = geoArr.split(',').map(s => s.trim()).filter(Boolean);\nif (!Array.isArray(geoArr)) geoArr = [geoArr];\n\n// === MULTI-LANGUAGE: ensure array ===\nlet languagesArr = clientData.context?.languages || clientData.context?.language || config.languages || config.language || ['en'];\nif (typeof languagesArr === 'string') languagesArr = languagesArr.split(',').map(s => s.trim()).filter(Boolean);\nif (!Array.isArray(languagesArr)) languagesArr = [languagesArr];\n\n// === BRAND VOICE ===\nconst brandVoice = clientData.context?.brand_voice || config.brand_voice || '';\nconst brandBookText = clientData.context?.brand_book_text || config.brand_book_text || '';\n\nlet trendStatus = {};\ntry { trendStatus = $('Prepare Trend Inputs').first().json.trend_status || {}; } catch (error) {}\nfor (const [platform, state] of Object.entries(trendStatus)) {\n  if (state === 'missing_keywords') warnings.push(`${platform === 'tiktok' ? 'TikTok' : 'Instagram'} trend analysis could not run because there were no usable keywords. Add keywords in client setup.`);\n}\nconst fullReport = {\n  report_id: reportId,\n  status: isSuccess ? 'success' : 'failed',\n  client_name: presentationData.client_name || clientData.client_name || config.client_name || 'Unknown',\n  report_date: new Date().toISOString().split('T')[0],\n  started_at: startTime,\n  completed_at: endTime,\n  duration_minutes: durationMins,\n\n  report_period: {\n    current_month: {\n      start: (config.current_month_start || '').trim(),\n      end: (config.current_month_end || '').trim()\n    },\n    previous_month: {\n      start: (config.previous_month_start || '').trim(),\n      end: (config.previous_month_end || '').trim()\n    }\n  },\n\n  sprout_performance: {\n    metric_scope: \"reporting_period\",\n    top_post_metric_scope: \"lifetime\",\n    collected_at: new Date().toISOString(),\n    profiles: sproutData.profiles || [],\n    overall_totals: sproutData.overall_totals || {},\n    top_posts: sproutData.top_posts || [],\n    month_comparison: sproutData.month_comparison || {},\n    platform_breakdown: sproutData.platform_breakdown || [],\n    platform_metrics: sproutData.platform_metrics || {},\n    top_posts_by_platform: sproutData.top_posts_by_platform || {},\n  },\n\n  tiktok_trends: {\n    posts: tiktokTrends,\n    patterns: {\n      top_hashtags: extractTopHashtags(tiktokTrends),\n      avg_engagement: avgEngagement(tiktokTrends)\n    }\n  },\n\n  instagram_trends: {\n    posts: instagramTrends,\n    patterns: {\n      top_hashtags: extractTopHashtags(instagramTrends),\n      avg_engagement: avgEngagement(instagramTrends)\n    }\n  },\n\n  ai_analysis: aiAnalysis,\n  trend_status: trendStatus,\n\n  content_calendar: aiAnalysis.content_calendar || [],\n\n  context: {\n    timezone: clientData.context?.timezone || config.timezone || 'UTC',\n    geo: geoArr,\n    languages: languagesArr,\n    brand_voice: brandVoice,\n    brand_book_text: brandBookText,\n    primary_platforms: clientData.context?.primary_platforms || config.primary_platforms || [],\n    content_pillars: clientData.context?.content_pillars || config.content_pillars || [],\n    brief_context: clientData.context?.brief_context || clientData.brief_context || {}\n  },\n\n  report_sections: presentationData.sections || presentationData.report_sections || [],\n\n  gamma_url: presentationUrl,\n  gamma_status: gammaSuccess ? 'success' : gammaResult._gamma_timeout ? 'timed_out' : 'failed',\n  warnings,\n\n  data_counts: {\n    total_recommendations: (aiAnalysis.content_calendar || []).reduce((sum, day) => sum + (day.posts || []).length, 0) || presentationData.total_recommendations || 0,\n    content_calendar_days: (aiAnalysis.content_calendar || []).length,\n    tiktok_trends: tiktokTrends.length,\n    instagram_trends: instagramTrends.length,\n    sprout_top_posts: (sproutData.top_posts || []).length,\n    sprout_profiles: (sproutData.profiles || []).length\n  },\n\n  metrics_summary: {\n    impressions_change: sproutData.month_comparison?.changes?.impressions?.percent || 0,\n    reactions_change: sproutData.month_comparison?.changes?.reactions?.percent || 0,\n    link_clicks_change: sproutData.month_comparison?.changes?.link_clicks?.percent || 0,\n    video_views_change: sproutData.month_comparison?.changes?.video_views?.percent || 0,\n    comments_change: sproutData.month_comparison?.changes?.comments?.percent || 0,\n    shares_change: sproutData.month_comparison?.changes?.shares?.percent || 0\n  }\n};\n\nconsole.log('');\nconsole.log('═══════════════════════════════════════════════════════');\nconsole.log('Generate Run Summary');\nconsole.log(`  Report ID: ${reportId || 'MISSING!'}`);\nconsole.log(`  Status: ${fullReport.status}`);\nconsole.log(`  Period: ${config.current_month_start} to ${config.current_month_end}`);\nconsole.log(`  Geo: [${geoArr.join(', ')}] | Languages: [${languagesArr.join(', ')}]`);\nconsole.log(`  Brand Voice: ${brandVoice || 'none'}`);\nconsole.log(`  Brand Book: ${brandBookText ? 'provided' : 'none'}`);\nconsole.log(`  AI analysis keys: ${Object.keys(aiAnalysis).join(', ') || 'EMPTY'}`);\nconsole.log(`  Calendar posts: ${fullReport.data_counts.total_recommendations}`);\nconsole.log(`  Content Calendar Days: ${fullReport.data_counts.content_calendar_days}`);\nconsole.log(`  TikTok trends: ${fullReport.data_counts.tiktok_trends}`);\nconsole.log(`  Instagram trends: ${fullReport.data_counts.instagram_trends}`);\nconsole.log(`  Sprout top posts: ${fullReport.data_counts.sprout_top_posts}`);\nif (presentationUrl) console.log(`  ✅ Gamma URL: ${presentationUrl}`);\nelse console.log('  ❌ Gamma URL: NONE');\nconsole.log('═══════════════════════════════════════════════════════');\n\nreturn [{ json: fullReport }];\n"
+      },
+      "id": "bebb445b-b0c5-42e0-9119-a8c1e15dcfad",
+      "name": "Generate Run Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6224,
+        -1264
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5328,
+        -1328
+      ],
+      "id": "5f9f6bbe-0c60-4e94-b310-4920f9e165c9",
+      "name": "Wait",
+      "webhookId": "67e5d0d4-fd0e-43b2-bdd7-e5094b61c0a7"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ba29a3b9-c058-4b44-8a07-edf255866660",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -448,
+        1200
+      ],
+      "id": "cf0c9f9d-e0de-499f-a7a7-64b9a47ecd80",
+      "name": "Webhook",
+      "webhookId": "ba29a3b9-c058-4b44-8a07-edf255866660",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "eSV0BS2mZ6Jjofq5",
+          "name": "Socialytics App Webhook"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2816,
+        -848
+      ],
+      "id": "3cce552b-3638-4d6f-bd0b-98fa1c6e3914",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "url": "=https://public-api.gamma.app/v1.0/generations/{{ $('Create Gamma Presentation').first().json.id || $('Create Gamma Presentation').first().json.generationId || '' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "0b60e614-0d7c-401b-9541-fe8e5afefb5e",
+      "name": "Fetch Gamma Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        5552,
+        -1408
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1JS8DBwMUsWotQD6",
+          "name": "Gamma"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/update-report",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"report_id\": $json.report_id,\n  \"status\": $json.status === \"success\" ? \"completed\" : \"failed\",\n  \"report_data\": $json,\n  \"gamma_url\": $json.gamma_url || \"\",\n  \"duration_minutes\": $json.duration_minutes || 0\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        6448,
+        -288
+      ],
+      "id": "6bf0a458-a946-43e5-8dbc-5a6a0aadf492",
+      "name": "HTTP Request",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "eSV0BS2mZ6Jjofq5",
+          "name": "Socialytics App Webhook"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        4376,
+        -616
+      ],
+      "id": "69b2e4ed-a238-47ed-9eda-ab8e129983f4",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "GkupFafi741c4buZ",
+          "name": "Google Gemini(PaLM) ApI - Default Gemini Project"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.sproutsocial.com/v1/1676448/analytics/posts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  \"timezone\": $(\"Combine Brief Context with Client Data\").first().json.timezone || \"UTC\",\n  \"filters\": [\n    \"customer_profile_id.eq(\" + $('Code in JavaScript').item.json.profile_ids.join(\", \") + \")\",\n    \"created_time.in(\" + $('Code in JavaScript').item.json.previous_month_start + \"T00:00:00...\" + $('Code in JavaScript').item.json.previous_month_end + \"T23:59:59)\"\n  ],\n  \"metrics\": [\n    \"lifetime.impressions\",\n    \"lifetime.engagements\",\n    \"lifetime.reactions\",\n    \"lifetime.likes\",\n    \"lifetime.comments_count\",\n    \"lifetime.shares_count\",\n    \"lifetime.post_link_clicks\",\n    \"lifetime.post_content_clicks\",\n    \"lifetime.video_views\"\n  ],\n  \"fields\": [\n    \"created_time\",\n    \"perma_link\",\n    \"text\",\n    \"post_type\",\n    \"network\",\n    \"visual_media\"\n  ],\n  \"sort\": [\"lifetime.impressions:desc\"],\n  \"limit\": 50\n}) }}",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging || Number($response.body.paging.current_page) >= Number($response.body.paging.total_pages) }}",
+              "limitPagesFetched": true,
+              "requestInterval": 200
+            }
+          }
+        }
+      },
+      "id": "4372f9fa-7616-4de4-93db-b5f27ccdf28a",
+      "name": "Get Previous Month Post Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2592,
+        96
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "executeOnce": true,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "PmyntvBiSms0aRPF",
+          "name": "Sprout Social"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Socialytics sends competitive_context (latest complete competitive report,\n// compacted) with the run payload. Attach it to the normalized object so the\n// synthesis prompt can react to competitor gaps. Null when absent.\nconst item = $input.first().json;\nconst cfg = $('Workflow Configuration').first().json;\nconst cc = cfg.body?.competitive_context ?? cfg.competitive_context ?? null;\nreturn [{ json: { ...item, competitive_context: cc } }];"
+      },
+      "id": "51b750df-27d8-45fa-b5e9-1dc64d81d4d2",
+      "name": "Attach Competitive Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3936,
+        -816
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "amount": "={{ Number($('Webhook').first().json.body?.stagger_seconds) || 0 }}"
+      },
+      "id": "12bdc892-10fd-48e5-81d7-6148e2f6c686",
+      "name": "Stagger scheduled runs",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -224,
+        1200
+      ],
+      "webhookId": "cc2d58d6-4a9d-48b2-8ba3-70531deec613",
+      "notes": "trigger-scheduled-reports sends stagger_seconds (0, 180, 360, ...) per client on the monthly run day so the nine social pipelines start three minutes apart instead of all at once (Apify actor memory, Sprout and Gamma quotas). Runs from the app carry no stagger and continue immediately."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sprout DOES carry post media. analytics/posts returns visual_media[] with\n// thumbnail_url and media_type (verified live against a Bader Law TikTok post);\n// the request simply never asked for it. Without it every monthly top post\n// reached the report with no image, and the app fell back to scraping the\n// permalink, which Instagram and TikTok mostly refuse.\n//\n// The thumbnail is re-attached here by joining on the permalink, rather than\n// inside the aggregation above, so that 18KB of working code is left alone.\n// The urls are signed and expire after roughly two months, which is fine for a\n// report that is read in the weeks after it is generated.\nconst raw = [];\nfor (const name of ['Get Sprout Social Post Analytics', 'Get Previous Month Post Analytics']) {\n  try {\n    for (const item of $(name).all()) {\n      const list = item.json && Array.isArray(item.json.data) ? item.json.data : [];\n      for (const p of list) raw.push(p);\n    }\n  } catch (e) { /* that call did not run on this execution */ }\n}\nconst byLink = new Map();\nfor (const p of raw) {\n  // One empty row in Sprout's data[] would otherwise throw here and take the\n  // entire monthly report with it. A missing thumbnail is worth nothing; a\n  // failed report costs the whole run.\n  if (!p || typeof p !== 'object') continue;\n  const link = String(p.perma_link || p.url || '');\n  const media = Array.isArray(p.visual_media) ? p.visual_media[0] : null;\n  if (link && media && media.thumbnail_url) byLink.set(link, media);\n}\nconst stamp = (post) => {\n  const m = byLink.get(String(post.permalink || post.url || ''));\n  if (!m) return;\n  if (!post.thumbnail_url) post.thumbnail_url = m.thumbnail_url;\n  if (!post.media_type) post.media_type = m.media_type || '';\n};\nconst walk = (v, depth) => {\n  if (depth > 8 || !v || typeof v !== 'object') return;\n  if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }\n  if (v.permalink || v.url) stamp(v);\n  for (const k of Object.keys(v)) walk(v[k], depth + 1);\n};\nreturn $input.all().map((item) => { walk(item.json, 0); return { json: item.json }; });"
+      },
+      "id": "0c800442-0691-4884-95e8-099c0d99c4f8",
+      "name": "Attach Post Thumbnails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3264,
+        -496
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "qa-condition",
+              "leftValue": "={{ !!($json.body?.brief_file_id || $json.brief_file_id) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "qa-has-brief-file",
+      "name": "Has Brief File",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "qa-condition",
+              "leftValue": "={{ $binary.data?.mimeType === 'application/pdf' || $binary.data?.fileExtension === 'pdf' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "qa-brief-is-pdf",
+      "name": "Brief Is PDF",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {
+          "joinPages": true,
+          "keepSource": "both"
+        }
+      },
+      "id": "qa-extract-brief-pdf",
+      "name": "Extract Brief PDF",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        896,
+        896
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first();\nconst config = $('Workflow Configuration').first().json;\nconst body = config.body || config;\nconst fallback = String(body.brief_text || config.brief_text || '').trim();\nconst hasFile = !!(body.brief_file_id || config.brief_file_id);\nlet text = typeof input.json.text === 'string' ? input.json.text.trim() : '';\nlet warning = '';\nif (!text && input.binary?.data && /^text\\//i.test(input.binary.data.mimeType || '')) {\n  try {\n    const buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\n    text = buffer.toString('utf8').trim();\n  } catch (error) {\n    warning = 'The linked brief could not be read.';\n  }\n}\nif (hasFile && !text) warning ||= 'The linked brief could not be read. Use a Google Doc, text file or text-based PDF, or paste the brief into client setup.';\nreturn [{ json: {\n  brief_text: text || fallback,\n  brief_source: text ? 'file' : fallback ? 'client_setup' : 'none',\n  brief_warning: warning ? warning + (fallback ? ' The saved brief text was used instead.' : ' This analysis has no text from that brief.') : '',\n} }];\n"
+      },
+      "id": "qa-prepare-brief-text",
+      "name": "Prepare Brief Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "qa-condition",
+              "leftValue": "={{ !!$json.brief_text }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "qa-has-brief-text",
+      "name": "Has Brief Text",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $input.first().json;\nconst list = value => (Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [])\n  .filter(value => typeof value === 'string').map(value => value.trim()).filter(Boolean);\nconst keywords = [...new Set([...list(client.social_keywords), ...list(client.trends_keywords)])]\n  .filter(keyword => /[\\p{L}\\p{N}]/u.test(keyword));\nconst regions = list(client.geo || ['US']);\nconst skipped = client.skip_trends === true;\nconst queries = [...new Set([...keywords.slice(0, 5), ...keywords.slice(0, 3).flatMap(keyword => regions.slice(0, 2).map(region => keyword + ' ' + region))])].slice(0, 8);\nconst nonLatin = /[\\u0590-\\u05FF\\u0600-\\u06FF\\u4E00-\\u9FFF\\u3040-\\u309F\\u30A0-\\u30FF\\uAC00-\\uD7AF\\u0E00-\\u0E7F\\u0900-\\u097F\\u0400-\\u04FF]/;\nconst cleanTag = value => value.replace(/[^\\p{L}\\p{N}_]/gu, '').toLowerCase();\nconst baseTags = keywords.flatMap(keyword => nonLatin.test(keyword)\n  ? keyword.split(/\\s+/).map(cleanTag).filter(tag => tag.length > 1)\n  : [cleanTag(keyword)]).filter(Boolean);\nconst regionalTags = keywords.filter(keyword => !nonLatin.test(keyword)).slice(0, 2)\n  .flatMap(keyword => regions.slice(0, 2).map(region => cleanTag(keyword + region))).filter(Boolean);\nconst hashtags = [...new Set([...baseTags, ...regionalTags])].slice(0, 12);\nlet searchDatePosted = '2';\nconst start = client.date_ranges?.current_month?.start;\nconst end = client.date_ranges?.current_month?.end;\nif (start && end) {\n  const days = Math.ceil((new Date(end) - new Date(start)) / 86400000);\n  if (Number.isFinite(days)) searchDatePosted = days <= 1 ? '1' : days <= 7 ? '2' : days <= 30 ? '3' : days <= 90 ? '4' : '5';\n}\nreturn [{ json: { ...client,\n  trend_status: {\n    tiktok: skipped ? 'skipped' : queries.length ? 'requested' : 'missing_keywords',\n    instagram: skipped ? 'skipped' : hashtags.length ? 'requested' : 'missing_keywords',\n  },\n  trend_inputs: {\n    tiktok: !skipped && queries.length ? {searchQueries:queries,resultsPerPage:50,searchSection:'/video',searchSorting:'1',searchDatePosted,excludePinnedPosts:true,excludeVideosWithoutText:true,shouldDownloadVideos:false,shouldDownloadCovers:false,shouldDownloadSubtitles:false} : null,\n    instagram: !skipped && hashtags.length ? {hashtags,keywordSearch:false,resultsLimit:80,resultsType:'posts'} : null,\n  },\n} }];\n"
+      },
+      "id": "qa-prepare-trend-inputs",
+      "name": "Prepare Trend Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2592,
+        1040
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "qa-condition",
+              "leftValue": "={{ $json.trend_inputs.tiktok !== null }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "qa-run-tiktok-trends",
+      "name": "Run TikTok Trends",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2816,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "qa-condition",
+              "leftValue": "={{ $json.trend_inputs.instagram !== null }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "qa-run-instagram-trends",
+      "name": "Run Instagram Trends",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2816,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{source:'tiktok',_empty:true,_skipped:true,reason:$json.trend_status.tiktok}}];"
+      },
+      "id": "qa-skip-tiktok-trends",
+      "name": "Skip TikTok Trends",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3264,
+        752
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{source:'instagram',_empty:true,_skipped:true,reason:$json.trend_status.instagram}}];"
+      },
+      "id": "qa-skip-instagram-trends",
+      "name": "Skip Instagram Trends",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3264,
+        1136
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst state = String(result.status || result.data?.status || '').toLowerCase();\nconst attempt = $runIndex + 1;\nconst pending = ['pending', 'queued', 'processing', 'running', 'in_progress'].includes(state);\nreturn [{ json: { ...result, _gamma_attempt: attempt, _gamma_poll_again: pending && attempt < 20, _gamma_timeout: pending && attempt >= 20 } }];\n"
+      },
+      "id": "qa-check-gamma-state",
+      "name": "Check Gamma State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5776,
+        -1408
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "qa-condition",
+              "leftValue": "={{ $json._gamma_poll_again === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "qa-poll-gamma-again",
+      "name": "Poll Gamma Again",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6000,
+        -1328
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://rwouwxqggjjacbpbhqsn.supabase.co/functions/v1/update-report",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const w = $('Webhook').first().json; const j = $json || {}; const err = j.error; const detail = err ? (typeof err === 'string' ? err : (err.message || err.error || err.description || JSON.stringify(err))) : ''; const step = $prevNode.name; const reason = j.failure_reason || ('The analysis workflow stopped at \"' + step + '\"' + (detail ? ': ' + String(detail).slice(0, 400) : '.') + ' Review the failed n8n execution before retrying.'); return JSON.stringify({ report_id: (w.body || {}).report_id || w.report_id, status: 'failed', report_data: { error: reason, failed_step: step, detail: String(detail).slice(0, 800) } }); })() }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "qa-mark-social-report-failed",
+      "name": "Mark Social Report Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        6448,
+        -560
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "eSV0BS2mZ6Jjofq5",
+          "name": "Socialytics App Webhook"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "errorMessage": "Social report failed. Its status was written back to the app."
+      },
+      "id": "qa-stop-failed-social-run",
+      "name": "Stop Failed Social Run",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        6672,
+        -560
+      ]
+    },
+    {
+      "id": "f0b3479c-a592-417d-8291-0b9796b1e799",
+      "name": "Has Sprout Profiles",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        7904,
+        -1312
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-sprout-profiles",
+              "leftValue": "={{ Array.isArray($json.profile_ids) && $json.profile_ids.length > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "8abc562b-ace3-4c5d-bf37-1ffb51dc3782",
+      "name": "Skip Sprout Analytics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8352,
+        -1120
+      ],
+      "parameters": {
+        "jsCode": "// A brand with no Sprout Social profile connected (an API demo client, or a client before\n// its accounts are linked). The Sprout requests cannot run without a profile, so this stands in\n// for \"Aggregate Sprout Social Data\" with the same shape and nothing in it. Downstream nodes\n// already default every Sprout field, so the report is built from the trends, the brief and the\n// competitive context, and says that performance data is not connected yet.\nconst cfg = $input.first().json;\nreturn [{ json: {\n  profiles: [],\n  platform_metrics: {},\n  platform_breakdown: [],\n  overall_totals: {},\n  metric_scope: 'reporting_period',\n  top_post_metric_scope: 'lifetime',\n  top_posts: [],\n  top_posts_by_platform: {},\n  reporting_period: {\n    current_month: { start: cfg.current_month_start || '', end: cfg.current_month_end || '' },\n    previous_month: { start: cfg.previous_month_start || '', end: cfg.previous_month_end || '' }\n  },\n  month_comparison: {},\n  _empty: true,\n  _skipped: true,\n  reason: 'no_sprout_profiles',\n  performance_note: 'No Sprout Social profile is connected for this brand yet, so there is no performance data in this report. Performance sections fill in once the brand\\'s social accounts are connected.'\n} }];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "qa-tiktok-trends-failed",
+      "name": "TikTok Trends Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        980
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const e = $input.first().json.error; const msg = e ? (e.message || e.error || e.description || JSON.stringify(e)) : 'unknown error';\nreturn [{json:{source:'tiktok',_empty:true,_skipped:true,reason:'scraper_failed: ' + String(msg).slice(0, 300)}}];"
+      }
+    },
+    {
+      "id": "qa-instagram-trends-failed",
+      "name": "Instagram Trends Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        1180
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const e = $input.first().json.error; const msg = e ? (e.message || e.error || e.description || JSON.stringify(e)) : 'unknown error';\nreturn [{json:{source:'instagram',_empty:true,_skipped:true,reason:'scraper_failed: ' + String(msg).slice(0, 300)}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Combine Brief Context with Client Data": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Trend Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Has Sprout Profiles",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Previous Month Sprout Analytics": {
+      "main": [
+        [
+          {
+            "node": "Get Previous Month Post Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Sprout Social Post Analytics": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Client Brief Context": {
+      "main": [
+        [
+          {
+            "node": "Combine Brief Context with Client Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brief Context Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Analyze Client Brief Context",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI GPT-4 for Brief Analysis": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Analyze Client Brief Context",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Report Content": {
+      "main": [
+        [
+          {
+            "node": "Build Presentation Content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Synthesis Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Report Content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured JSON Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Synthesis Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI GPT-4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Synthesis Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run TikTok Scraper": {
+      "main": [
+        [
+          {
+            "node": "Normalize TikTok Trends",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TikTok Trends Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run IG Scraper": {
+      "main": [
+        [
+          {
+            "node": "Normalize Instagram Trends",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Instagram Trends Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge All Data Sources": {
+      "main": [
+        [
+          {
+            "node": "Build Normalized Client Object",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Instagram Trends": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 2
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize TikTok Trends": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Sprout Social Analytics Data": {
+      "main": [
+        [
+          {
+            "node": "Get Sprout Social Post Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Presentation Content": {
+      "main": [
+        [
+          {
+            "node": "Create Gamma Presentation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Gamma Presentation": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Run Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Run Summary": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Fetch Gamma Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Sprout Social Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured JSON Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Previous Month Post Analytics": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Normalized Client Object": {
+      "main": [
+        [
+          {
+            "node": "Attach Competitive Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Competitive Context": {
+      "main": [
+        [
+          {
+            "node": "AI Synthesis Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Stagger scheduled runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stagger scheduled runs": {
+      "main": [
+        [
+          {
+            "node": "Workflow Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Sprout Social Data": {
+      "main": [
+        [
+          {
+            "node": "Attach Post Thumbnails",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Post Thumbnails": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brief Is PDF": {
+      "main": [
+        [
+          {
+            "node": "Extract Brief PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Brief Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Gamma State": {
+      "main": [
+        [
+          {
+            "node": "Poll Gamma Again",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Brief PDF": {
+      "main": [
+        [
+          {
+            "node": "Prepare Brief Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Gamma Result": {
+      "main": [
+        [
+          {
+            "node": "Check Gamma State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Client Brief from Drive": {
+      "main": [
+        [
+          {
+            "node": "Brief Is PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Brief File": {
+      "main": [
+        [
+          {
+            "node": "Get Client Brief from Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Brief Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Brief Text": {
+      "main": [
+        [
+          {
+            "node": "Analyze Client Brief Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Combine Brief Context with Client Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Social Report Failed": {
+      "main": [
+        [
+          {
+            "node": "Stop Failed Social Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Gamma Again": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Run Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Brief Text": {
+      "main": [
+        [
+          {
+            "node": "Has Brief Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Trend Inputs": {
+      "main": [
+        [
+          {
+            "node": "Run Instagram Trends",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Run TikTok Trends",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Instagram Trends": {
+      "main": [
+        [
+          {
+            "node": "Run IG Scraper",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Instagram Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run TikTok Trends": {
+      "main": [
+        [
+          {
+            "node": "Run TikTok Scraper",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip TikTok Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Instagram Trends": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 2
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip TikTok Trends": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Configuration": {
+      "main": [
+        [
+          {
+            "node": "Has Brief File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Sprout Profiles": {
+      "main": [
+        [
+          {
+            "node": "Get Sprout Social Analytics Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Previous Month Sprout Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Sprout Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Sprout Analytics": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Social Report Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TikTok Trends Failed": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Instagram Trends Failed": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data Sources",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    }
+  }
+}

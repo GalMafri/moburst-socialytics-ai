@@ -59,7 +59,7 @@ export async function claudeBatchSubmit(ctx: StepContext, a: { apiKey: string; b
 export type BatchRead = { state: "pending" } | ({ state: "done" } & SavedAnswer) | { state: "failed"; reason: string };
 
 /** Looks at a batch; once it ended, saves its answer as saveAs. */
-export async function claudeBatchRead(ctx: StepContext, a: { apiKey: string; batchId: string; customId: string; saveAs: string; fetchImpl?: Fetch }): Promise<BatchRead> {
+export async function claudeBatchRead(ctx: StepContext, a: { apiKey: string; batchId: string; customId: string; saveAs: string; keepDays?: number; fetchImpl?: Fetch }): Promise<BatchRead> {
   const f = a.fetchImpl ?? fetch;
   const r = await f(`${BATCHES}/${encodeURIComponent(a.batchId)}`, { headers: headers(a.apiKey), signal: ctx.signal });
   if (!r.ok) throw new Error(`Claude batch could not be read [${r.status}].`);
@@ -75,7 +75,7 @@ export async function claudeBatchRead(ctx: StepContext, a: { apiKey: string; bat
     if (row.custom_id !== a.customId) continue;
     if (row.result?.type !== "succeeded") return { state: "failed", reason: `the request ${row.result?.type ?? "had no result"}` };
     const stopReason = String(row.result.message?.stop_reason ?? "");
-    const saved = await ctx.payloads.put(a.saveAs, { text: answerText(row.result.message), stop_reason: stopReason });
+    const saved = await ctx.payloads.put(a.saveAs, { text: answerText(row.result.message), stop_reason: stopReason }, a.keepDays ? { keepDays: a.keepDays } : undefined);
     return { state: "done", ...saved, stopReason };
   }
   return { state: "failed", reason: "the batch has no result for this request" };
@@ -93,6 +93,8 @@ export function claudeBatchStep(o: {
   /** The request and the key, built from the run and the payload store. */
   build(ctx: StepContext): Promise<{ apiKey: string; body: Record<string, unknown> }>;
   saveAs: string;
+  /** How long to keep the answer (the payload store's default when left out). */
+  keepDays?: number;
   next: string | null;
   fetchImpl?: Fetch;
 }): Step {
@@ -107,7 +109,7 @@ export function claudeBatchStep(o: {
     };
     const batchId = typeof ctx.poll?.handle?.claude_batch_id === "string" ? ctx.poll.handle.claude_batch_id : null;
     if (!batchId) return submit(Number(ctx.state[counter] ?? 0));
-    const read = await claudeBatchRead(ctx, { apiKey, batchId, customId, saveAs: o.saveAs, fetchImpl: o.fetchImpl });
+    const read = await claudeBatchRead(ctx, { apiKey, batchId, customId, saveAs: o.saveAs, keepDays: o.keepDays, fetchImpl: o.fetchImpl });
     if (read.state === "pending") return { type: "poll", waitSeconds: CLAUDE_BATCH_POLL_SECONDS, handle: { claude_batch_id: batchId } };
     if (read.state === "failed") {
       const resubmits = Number(ctx.state[counter] ?? 0);
