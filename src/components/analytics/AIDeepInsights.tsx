@@ -1,3 +1,4 @@
+import { SPROUT_RATE_NOTE } from "@/lib/rateLabels";
 import { useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
@@ -17,9 +18,6 @@ interface Props {
     link_clicks: number;
     video_views: number;
     engagements: number;
-    /** Views on TikTok and YouTube, impressions elsewhere, and the engagements on those platforms. */
-    reach: number;
-    rate_engagements: number;
     engagement_rate: number;
   }[];
 }
@@ -63,12 +61,12 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       // Engagement rate
       if (last.engagement_rate > first.engagement_rate) {
         result.push({
-          text: `Engagement rate improved from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
+          text: `Sprout engagement rate improved from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
           type: "up",
         });
       } else if (last.engagement_rate < first.engagement_rate && first.engagement_rate > 0) {
         result.push({
-          text: `Engagement rate decreased from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
+          text: `Sprout engagement rate decreased from ${first.engagement_rate.toFixed(2)}% to ${last.engagement_rate.toFixed(2)}%`,
           type: "down",
         });
       }
@@ -91,11 +89,13 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       });
     }
 
-    // Cumulative totals. The one definition: engagements divided by
-    // impressions, with views on TikTok and YouTube.
-    const avgEngRate = (engagementRate(chartData.reduce((s, d) => s + d.rate_engagements, 0), chartData.reduce((s, d) => s + d.reach, 0)) ?? 0) * 100;
+    // Cumulative totals
+    const totalImpr = chartData.reduce((s, d) => s + d.impressions, 0);
+    const totalEng = chartData.reduce((s, d) => s + d.engagements, 0);
+    // The one definition: engagements divided by impressions.
+    const avgEngRate = (engagementRate(totalEng, totalImpr) ?? 0) * 100;
     if (avgEngRate > 0) {
-      result.push({ text: `Average engagement rate across all reports: ${avgEngRate.toFixed(2)}%`, type: "neutral" });
+      result.push({ text: `Average Sprout engagement rate across all reports: ${avgEngRate.toFixed(2)}%`, type: "neutral" });
     }
 
     // What the reports produced, counted as the report page counts it.
@@ -130,8 +130,8 @@ export function AIDeepInsights({ reports, chartData }: Props) {
     if (chartData.length === 0) return null;
     const bestImpr = chartData.reduce((b, d) => (d.impressions > b.impressions ? d : b));
     const bestEng = chartData.reduce((b, d) => (d.engagements > b.engagements ? d : b));
-    const totalReach = chartData.reduce((t, d) => t + d.reach, 0);
-    const totalRated = chartData.reduce((t, d) => t + d.rate_engagements, 0);
+    const totalImpr = chartData.reduce((t, d) => t + d.impressions, 0);
+    const totalEng = chartData.reduce((t, d) => t + d.engagements, 0);
     let recs = 0, tiktok = 0, ig = 0;
     for (const r of reports) {
       const rd = Array.isArray(r.report_data) ? r.report_data[0] : r.report_data;
@@ -140,7 +140,7 @@ export function AIDeepInsights({ reports, chartData }: Props) {
       if (rd?.ai_analysis?.tiktok_trends_analysis) tiktok++;
       if (rd?.ai_analysis?.instagram_trends_analysis) ig++;
     }
-    return { bestImpr, bestEng, avgRate: (engagementRate(totalRated, totalReach) ?? 0) * 100, recs, tiktok, ig };
+    return { bestImpr, bestEng, avgRate: (engagementRate(totalEng, totalImpr) ?? 0) * 100, recs, tiktok, ig };
   }, [reports, chartData]);
   const compact = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 10_000 ? `${(v / 1_000).toFixed(1)}K` : v.toLocaleString());
   const trends = insights.filter((x) => x.type !== "neutral").map((x) => x.text);
@@ -149,12 +149,12 @@ export function AIDeepInsights({ reports, chartData }: Props) {
   return (
     <Section
       title="Across the reports in this window"
-      description={`Computed from ${n} ${n === 1 ? "report" : "reports"}: peaks, the average engagement rate, and how much the reports produced.`}
+      description={`Computed from ${n} ${n === 1 ? "report" : "reports"}: peaks, the average Sprout engagement rate, and how much the reports produced.`}
     >
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Peak impressions" icon={<Eye className="h-3.5 w-3.5" />} value={compact(facts.bestImpr.impressions)} sub={`on ${facts.bestImpr.date}`} />
         <StatCard label="Peak engagement" icon={<Heart className="h-3.5 w-3.5" />} value={compact(facts.bestEng.engagements)} sub={`on ${facts.bestEng.date}`} />
-        <StatCard label="Avg engagement rate" icon={<Percent className="h-3.5 w-3.5" />} value={`${facts.avgRate.toFixed(2)}%`} sub="engagements divided by impressions" />
+        <StatCard label="Avg Sprout engagement rate" icon={<Percent className="h-3.5 w-3.5" />} value={`${facts.avgRate.toFixed(2)}%`} sub={SPROUT_RATE_NOTE} />
         <StatCard label="Recommendations" icon={<ListChecks className="h-3.5 w-3.5" />} value={facts.recs} sub={`across ${n} ${n === 1 ? "report" : "reports"}`} />
       </div>
       {(trends.length > 0 || facts.tiktok > 0 || facts.ig > 0) && (

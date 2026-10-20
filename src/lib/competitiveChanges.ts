@@ -226,7 +226,7 @@ export function diffCompanies(prev: CompanyStats[], curr: CompanyStats[], max = 
       const rel = rated && a > 0 ? (b - a) / a : 0;
       if (rated && Math.abs(rel) >= 0.3 && Math.abs(b - a) >= 0.003) {
         const up = b > a;
-        out.push({ company: who, is_client: mine, kind: "engagement_rate", headline: `${who}'s engagement rate ${up ? "rose" : "fell"} to ${rateText(b)}`, detail: `From ${rateText(a)} in the previous period, across ${c.post_count} posts.`, magnitude: Math.abs(rel), direction: up ? "up" : "down", tone: mine ? (up ? "good" : "bad") : "neutral" });
+        out.push({ company: who, is_client: mine, kind: "engagement_rate", headline: `${who}'s engagement rate on likes, comments and shares ${up ? "rose" : "fell"} to ${rateText(b)}`, detail: `From ${rateText(a)} in the previous period, across ${c.post_count} posts.`, magnitude: Math.abs(rel), direction: up ? "up" : "down", tone: mine ? (up ? "good" : "bad") : "neutral" });
       } else {
         const ea = p.engagement_avg, eb = c.engagement_avg;
         const erel = ea > 0 ? (eb - ea) / ea : 0;

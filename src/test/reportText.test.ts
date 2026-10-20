@@ -20,6 +20,7 @@ describe("numbers a text quotes as figures", () => {
     expect(claims.map((c) => [c.text, c.kind])).toEqual([["28.6%", "percent"], ["94", "posts"], ["21.9", "cadence"], ["13,809", "audience"], ["1.7M", "impressions"], ["2,533", "engagement"]]);
     expect(quotedFigures("TikTok rate is high on a 42-follower base")[0]).toMatchObject({ value: 42, kind: "audience" });
     expect(quotedFigures("Post 3 Reels/week and test 12:00 and 18:00 UTC for 4 weeks.").map((c) => [c.value, c.kind])).toEqual([[3, "cadence"]]);
+    expect(quotedFigures("Moburst posts 3.3 times weekly versus 4.5 across competitors.").map((c) => [c.value, c.kind])).toEqual([[3.3, "cadence"]]);
   });
 
   it("splits sentences without breaking a decimal or an abbreviation", () => {
@@ -33,7 +34,7 @@ describe("Bader Law's competitive report, September 2026", () => {
     const found = stale();
     expect(found.map((s) => s.numbers.map((n) => n.text).join(" "))).toEqual(["28.6%", "94", "42", "0.07%", "0.23%", "0.14%", "94"]);
     expect(found[0]).toMatchObject({ path: ["competitor_breakdowns", 0, "engagement_level"], sentence: "Engagement rate per post at 28.6% is inflated by small-follower TikTok; Facebook and Instagram rates are much lower." });
-    expect(found[0].numbers[0].now.map((f) => f.label)).toContain("Bader Law, all platforms, engagement rate");
+    expect(found[0].numbers[0].now.map((f) => f.label)).toContain("Bader Law, all platforms, compared engagement rate");
     // The summary is written from the shown figures when the report is read; "13 posts", "19 YouTube uploads" and the 42-follower TikTok still hold.
     expect(found.some((s) => s.path[0] === "executive_summary")).toBe(false);
     expect(found.some((s) => /19 YouTube uploads|42-follower|13 posts/.test(s.sentence))).toBe(false);
@@ -42,7 +43,8 @@ describe("Bader Law's competitive report, September 2026", () => {
   it("tells the model only those sentences, what each number was, and the figures shown now", () => {
     const prompt = correctionPrompt({ client: "Bader Law", kind: "competitive", period: "2026-09-01 to 2026-09-30" }, stale(), competitiveFigures(repaired, "shown"));
     expect(prompt).toContain('s1 (competitor breakdowns / Bader Law / engagement level): Engagement rate per post at 28.6%');
-    expect(prompt).toContain("Bader Law, all platforms, engagement rate: 0.12%");
+    expect(prompt).toContain("Bader Law, all platforms, compared engagement rate: 0.12%");
+    expect(prompt).toContain("compared on likes, comments and shares");
     expect(prompt).toContain("Bader Law, all platforms, posts: 65");
     expect(CORRECTION_SYSTEM).toMatch(/change only the words whose claim depends on those numbers/);
     expect(CORRECTION_SYSTEM).toMatch(/Never add an em dash or an en dash/);
@@ -66,25 +68,32 @@ describe("Bader Law's competitive report, September 2026", () => {
   });
 });
 
-describe("a monthly report counted with clicks", () => {
+describe("a monthly report: Sprout's own figures, and the competitive figures beside them", () => {
   const rd = { sprout_performance: {
     overall_totals: { engagements: 3341, impressions: 996405, reactions: 1987, comments: 109, shares: 632, link_clicks: 223, video_views: 1851832 },
     platform_breakdown: [
       { network: "Facebook", post_count: 13, current: { shares: 24, comments: 47, reactions: 469, engagements: 963, impressions: 846738, video_views: 205032, link_clicks: 49 } },
       { network: "Instagram", post_count: 15, current: { shares: 556, comments: 43, reactions: 412, engagements: 1027, impressions: 102229, video_views: 19679 } },
-      { network: "YouTube", post_count: 19, current: { shares: 10, comments: 5, reactions: 708, engagements: 723, impressions: 0, video_views: 1581992 } },
     ],
-  }, ai_analysis: { sprout_performance_analysis: { key_insights: ["Facebook drove 963 engagements from 13 posts.", "Impressions reached 996,405."] }, content_calendar: [{ posts: [{ copy: "963 engagements" }] }] } };
+  }, ai_analysis: {
+    sprout_performance_analysis: { key_insights: ["Facebook drove 963 engagements from 13 posts at a 0.34% engagement rate.", "Impressions reached 996,405."] },
+    competitive_takeaways: ["Share of voice is 41% on 94 posts, ahead of Morgan & Morgan's 51.", "Engagement rate per post at 28.6% leads the field."],
+    content_calendar: [{ posts: [{ copy: "94 posts" }] }],
+  } };
+  // The competitive report the monthly report shows: Bader's September report, as written and as shown now.
+  const beside = { stored: competitiveFigures(BADER_REPORT, "stored", "competitive|"), shown: competitiveFigures(repaired, "shown", "competitive|") };
 
-  it("finds the quoted Sprout engagements total and leaves post copy alone", () => {
-    const found = staleReportText("social", rd, socialFigures(rd, "stored"), socialFigures(rd, "shown"));
-    expect(found).toHaveLength(1);
-    expect(found[0]).toMatchObject({ path: ["sprout_performance_analysis", "key_insights", 0], numbers: [{ text: "963", kind: "engagement" }] });
-    expect(found[0].numbers[0].now.map((f) => f.value)).toEqual([540]);
+  it("never flags the report's own Sprout figures, and finds the competitive figures that changed", () => {
+    const own = socialFigures(rd);
+    const found = staleReportText("social", rd, [...own, ...beside.stored], [...own, ...beside.shown]);
+    expect(found.map((s) => [s.path.join("."), s.numbers.map((n) => n.text)])).toEqual([
+      ["competitive_takeaways.0", ["41%", "94"]],
+      ["competitive_takeaways.1", ["28.6%"]],
+    ]);
   });
 });
 
-describe("Moburst's monthly report of 16 Oct 2026 (fd501cba), counted with clicks", () => {
+describe("Moburst's monthly report of 16 Oct 2026 (fd501cba)", () => {
   // The stored figures and text of the report, as read from the database on 20 Oct 2026.
   const change = (current: number, previous: number, percent: number) => ({ current, previous, percent, absolute: current - previous });
   const rd = {
@@ -110,15 +119,8 @@ describe("Moburst's monthly report of 16 Oct 2026 (fd501cba), counted with click
     } },
   };
 
-  it("finds the two sentences that quote engagements with clicks, and keeps the ones about views, impressions and posts", () => {
-    const found = staleReportText("social", rd, socialFigures(rd, "stored"), socialFigures(rd, "shown"));
-    expect(found.map((s) => [s.field, s.numbers.map((n) => n.text)])).toEqual([
-      ["sprout performance analysis / platform breakdown / LinkedIn / insights", ["521"]],
-      ["sprout performance analysis / platform breakdown / Instagram / insights", ["300%"]],
-    ]);
-    // LinkedIn's engagements are 54 reactions and 3 comments; Instagram's rose from 5 to 18.
-    expect(found[0].numbers[0].now.map((f) => f.value)).toEqual([57]);
-    expect(found[1].numbers[0].now.map((f) => f.value)).toEqual([260]);
+  it("finds nothing stale: the report shows Sprout's figures as stored, clicks included as Sprout counts them", () => {
+    expect(staleReportText("social", rd, socialFigures(rd), socialFigures(rd))).toEqual([]);
   });
 });
 

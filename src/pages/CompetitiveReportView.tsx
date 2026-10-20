@@ -1,3 +1,4 @@
+import { COMPARED_RATE_LABEL, COMPARED_RATE_SHORT } from "@/lib/rateLabels";
 import { competitiveReportQuality, withCompetitiveEvidenceLimits } from "../../supabase/functions/_shared/competitive/reportEvidence";
 // Renders one competitive_reports row (project step 11's in-app half).
 //
@@ -542,7 +543,7 @@ export default function CompetitiveReportView() {
           const reach = postReach(p);
           return reach ? <Stat label={reach.kind === "views" ? "Views" : reach.kind === "impressions" ? "Impressions" : "Est. impressions"} value={fmt(reach.value)} /> : null;
         })()}
-        {p.engagement_rate != null && <Stat label="Engagement rate" value={pct(p.engagement_rate)} />}
+        {p.engagement_rate != null && <Stat label={COMPARED_RATE_SHORT} value={pct(p.engagement_rate)} />}
         {(p.followers_at_publication ?? p.reach) != null && <Stat label="Followers at publication" value={fmt((p.followers_at_publication ?? p.reach)!)} />}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 t-secondary mt-auto">
@@ -705,7 +706,7 @@ export default function CompetitiveReportView() {
             <Kpi label="Share of voice" value={shareOfVoice == null ? "–" : `${shareOfVoice.toFixed(0)}%`} sub={`${meB.post_count} of ${totalPosts} tracked posts`} />
             <Kpi label="Cadence" value={`${meB.cadence_per_week}/wk`} sub={`competitor avg ${avgCadence.toFixed(1)}/wk`} />
             {/* Engagements divided by impressions (views on video), the same for every company. No impressions figure, no tile. */}
-            {meB.post_count > 0 && meB.engagement_rate_avg != null && <Kpi label="Engagement rate" value={pct(meB.engagement_rate_avg)} sub={`${effectivePlat === "all" ? "Excluding LinkedIn · " : ""}${avg((b) => b.engagement_rate_avg) == null ? "engagements per impression" : `active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`}`} />}
+            {meB.post_count > 0 && meB.engagement_rate_avg != null && <Kpi label={COMPARED_RATE_LABEL} value={pct(meB.engagement_rate_avg)} sub={`${effectivePlat === "all" ? "Excluding LinkedIn · " : ""}${avg((b) => b.engagement_rate_avg) == null ? "engagements per impression" : `active peers avg ${pct(avg((b) => b.engagement_rate_avg))}`}`} />}
             <Kpi label="Avg engagement" value={meB.post_count ? fmt(meB.engagement_avg) : "Not available"} sub={`active peers avg ${fmt(avg((b) => b.engagement_avg))}`} />
           </div>
         )}
@@ -783,7 +784,7 @@ export default function CompetitiveReportView() {
                   <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => v.toFixed(1)} rows={ordered.map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).cadence_per_week || 0), emphasized: !!c.is_client }))} />
                 </div>
                 <div className="space-y-3">
-                    <p className="t-subhead">Engagement rate</p><p className="t-secondary">Engagements divided by impressions (views on video), for companies with an impressions figure.{effectivePlat === "all" ? " Tracked networks, excluding LinkedIn." : ""}</p>
+                    <p className="t-subhead">{COMPARED_RATE_LABEL}</p><p className="t-secondary">Likes, comments and shares divided by impressions (views on video), the same for every company, for companies with an impressions figure.{effectivePlat === "all" ? " Tracked networks, excluding LinkedIn." : ""}</p>
                   <RankedBars emphasis legend={{ subject: clientName, others: "Competitors" }} format={(v) => pct(v)} rows={ordered.filter(c => { const b = bucketFor(c, effectivePlat); return b.post_count > 0 && b.engagement_rate_avg != null; }).map((c) => ({ key: c.company_id, name: c.name, label: displayCompanyName(c.name), value: Number(bucketFor(c, effectivePlat).engagement_rate_avg || 0), emphasized: !!c.is_client }))} />
                 </div>
               </CardContent>
@@ -810,7 +811,7 @@ export default function CompetitiveReportView() {
                         <div className="grid grid-cols-3 gap-3">
                           <TileStat value={String(b.post_count)} label="Tracked posts" />
                           <TileStat value={String(b.cadence_per_week)} label="Posts / week" />
-                          {b.engagement_rate_avg != null && <TileStat value={pct(b.engagement_rate_avg)} label="Engagement rate" />}
+                          {b.engagement_rate_avg != null && <TileStat value={pct(b.engagement_rate_avg)} label={COMPARED_RATE_SHORT} />}
                           <TileStat value={b.engagement_avg == null ? "Not available" : compactNumber(b.engagement_avg)} exact={fmt(b.engagement_avg)} label="Engagements / post" />
                           <TileStat
                             value={b.impressions_avg == null ? "Not available" : compactNumber(b.impressions_avg)}
@@ -1170,7 +1171,7 @@ export default function CompetitiveReportView() {
                                 <span className="flex items-baseline gap-2 flex-wrap">
                                   <span className="t-body font-semibold text-white tabular-nums">{ex.post ? fmt(ex.post.engagement) : "–"}</span>
                                   <span className="t-label">engagements</span>
-                                  {ex.post?.engagement_rate != null ? <span className="t-label">· {pct(ex.post.engagement_rate)} engagement rate</span> : null}
+                                  {ex.post?.engagement_rate != null ? <span className="t-label">· {pct(ex.post.engagement_rate)} {COMPARED_RATE_SHORT.toLowerCase()}</span> : null}
                                 </span>
                                 <span className="t-label block mt-0.5">
                                   {ex.post?.channel ? platformLabel(ex.post.channel) : "Post"}

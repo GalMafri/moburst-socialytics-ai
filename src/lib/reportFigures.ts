@@ -3,12 +3,9 @@
  * screen reads: the report page, Analytics and its insight tiles.
  */
 
-// Engagements, reach and the engagement rate of the client's Sprout figures
-// have one definition, shared with the server, the public API and the report
-// text (supabase/functions/_shared/reports/socialFigures.ts).
-export {
-  normalizedSocialReport, socialPeriodFigures, sproutEngagementRate, sproutEngagements, sproutReach, type SocialPeriodFigures,
-} from "../../supabase/functions/_shared/reports/socialFigures";
+// The client's own Sprout figures, one definition shared with the server and
+// the report-text check (supabase/functions/_shared/reports/socialFigures.ts).
+export { sproutEngagementRate, sproutEngagements, sproutImpressions } from "../../supabase/functions/_shared/reports/socialFigures";
 
 const num = (v: unknown): number | null => {
   if (v == null || v === "") return null;

@@ -107,8 +107,10 @@ export async function reportTextCheck(db: Db, table: string, reportId: string): 
     shown = competitiveFigures(rd, "shown");
   } else {
     const beside = await competitiveBeside(db, row.client_id, row.created_at);
-    stored = [...socialFigures(rd, "stored"), ...beside.stored];
-    shown = [...socialFigures(rd, "shown"), ...beside.shown];
+    // The report's own Sprout figures are shown as stored: only the competitive figures beside them can have changed.
+    const own = socialFigures(rd);
+    stored = [...own, ...beside.stored];
+    shown = [...own, ...beside.shown];
   }
   return { kind, row, stale: staleReportText(kind, rd, stored, shown), shown };
 }

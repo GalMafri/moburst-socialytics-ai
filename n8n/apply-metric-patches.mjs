@@ -1,19 +1,14 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
 const code = name => readFileSync(new URL(`./code/${name}.js`, import.meta.url), 'utf8');
-// The shared metric rules (engagementsOf, isPublishedPost), as plain functions ahead of a node's code.
-const metricRules = () => ts.transpileModule(readFileSync(new URL('../supabase/functions/_shared/competitive/reportMetrics.ts', import.meta.url), 'utf8'), {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, removeComments: true },
-}).outputText.replace(/^import .*$/gm, '').replace(/^export /gm, '');
 export function metricOperations(kind, workflow) {
   const expected = kind === 'social' ? 'a84772c8-721a-4027-9176-9e2ac7b395c7' : 'f849730d-8fc5-4ca4-a17d-8286484690a7';
   if (workflow.versionId !== expected) throw new Error('Workflow changed; rebase the metric patch before applying.');
   const ops=[];
   const update=(nodeName,parameters)=>ops.push({type:'updateNodeParameters',nodeName,parameters,replace:false});
   if(kind==='social') {
-    update('Aggregate Sprout Social Data',{jsCode:metricRules()+'\n'+code('social-aggregate')});
+    update('Aggregate Sprout Social Data',{jsCode:code('social-aggregate')});
     update('Build Presentation Content',{jsCode:code('social-presentation')});
     update('Generate Run Summary',{jsCode:code('social-summary')});
     for(const name of ['Get Sprout Social Analytics Data','Get Previous Month Sprout Analytics','Get Sprout Social Post Analytics','Get Previous Month Post Analytics']) {

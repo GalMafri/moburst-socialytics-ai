@@ -1,6 +1,7 @@
+import { COMPARED_RATE_LABEL, SPROUT_RATE_LABEL } from "@/lib/rateLabels";
 import { useNavigate, useParams } from "react-router-dom";
 import { cleanText, countryNames, formatDate, formatDateTime, formatRange, languageNames, monthlyReportStatus, platformKey, platformName } from "@/lib/display";
-import { normalizedSocialReport, reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
+import { reportCounts, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 import { StatCard } from "@/components/ui/stat-card";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -160,8 +161,7 @@ export default function ReportView() {
     );
 
   const rawRd = report.report_data as any;
-  // The client's figures counted by the one rule (engagements without clicks, views as reach on video).
-  const rd = normalizedSocialReport(Array.isArray(rawRd) ? rawRd[0] : rawRd);
+  const rd = Array.isArray(rawRd) ? rawRd[0] : rawRd;
   const clientName = (report as any).clients?.name || "Client";
 
   // Build the full client context once, pass down via props.
@@ -493,7 +493,7 @@ export default function ReportView() {
                 <Card className="glass-accent">
                   <CardContent className="pt-5 flex items-center justify-between gap-6 flex-wrap">
                     <dl className="flex items-center gap-10 flex-wrap">
-                      {compRate != null && <div><dt className="t-subhead">Engagement rate</dt><dd className="t-stat tabular-nums">{(compRate * 100).toFixed(2)}%</dd></div>}
+                      {compRate != null && <div><dt className="t-subhead">{COMPARED_RATE_LABEL}</dt><dd className="t-stat tabular-nums">{(compRate * 100).toFixed(2)}%</dd></div>}
                       {compTotal ? <div><dt className="t-subhead">Share of voice</dt><dd className="t-stat tabular-nums">{Math.round((compMe.post_count / compTotal) * 100)}%</dd></div> : null}
                       {compMe.cadence_per_week != null && <div><dt className="t-subhead">Posts a week</dt><dd className="t-stat tabular-nums">{compMe.cadence_per_week}</dd></div>}
                     </dl>
@@ -711,10 +711,10 @@ function PostCard({ post, preview }: { post: any; preview?: PostPreview | null }
           </span>
         </div>
         <p className="t-body line-clamp-3 whitespace-pre-line">{cleanText(post.text || post.content)}</p>
-        {/* The figure the post is ranked by, and the one rate definition: engagements divided by impressions. */}
+        {/* The figure the post is ranked by, and the client's Sprout rate: Sprout engagements divided by Sprout impressions. */}
         <p className="t-label tabular-nums">
           {(sproutEngagements(post) ?? 0).toLocaleString()} engagements
-          {sproutEngagementRate(post) != null && ` · ${(sproutEngagementRate(post)! * 100).toFixed(2)}% engagement rate`}
+          {sproutEngagementRate(post) != null && ` · ${(sproutEngagementRate(post)! * 100).toFixed(2)}% ${SPROUT_RATE_LABEL}`}
         </p>
         <div className="flex items-center gap-4 t-secondary pt-1">
           <span className="flex items-center gap-1">

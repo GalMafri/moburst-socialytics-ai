@@ -11,7 +11,10 @@
 // every number the text quotes as a rate, a share or a count with two lists
 // of figures, worked out by the same harvest:
 //   stored  what the report held when it was written (and what the model saw)
-//   shown   what the report shows now (the screens' own normalization)
+//   shown   what the report shows now: a competitive report through the
+//           screens' normalization (Sprout's comparable figures for the
+//           client, RivalIQ's for competitors); a monthly report its own
+//           Sprout figures as stored, with the competitive report beside it
 // A number is stale when it is one of the stored figures of its kind and
 // none of the shown ones, at the precision the text wrote it; in a sentence
 // about one company (or platform), of that company's figures only. A target ("aim
@@ -23,7 +26,7 @@
 
 import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
 import { sourceCompetitiveSummary, withCompetitiveEvidenceLimits } from "../competitive/reportEvidence.ts";
-import { normalizedSocialReport, sproutEngagementRate, sproutReach } from "./socialFigures.ts";
+import { sproutEngagementRate, sproutEngagements, sproutImpressions } from "./socialFigures.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -66,7 +69,7 @@ export function competitiveFigures(reportData: Any, mode: "stored" | "shown", pr
     const id = `${prefix}${company}|${channel}|post:${p?.url || i}`;
     const label = `${prefix ? "Competitive report: " : ""}${company}, a top ${platformName(p?.channel || channel)} post`;
     h.add(`${id}|engagements`, `${label}, engagements`, "engagement", p?.engagement);
-    h.add(`${id}|engagement_rate`, `${label}, engagement rate`, "percent", p?.engagement_rate, RATE);
+    h.add(`${id}|engagement_rate`, `${label}, compared engagement rate`, "percent", p?.engagement_rate, RATE);
     h.add(`${id}|views`, `${label}, views`, "impressions", p?.views);
     h.add(`${id}|impressions`, `${label}, impressions`, "impressions", p?.actual_impressions ?? p?.est_impressions);
   };
@@ -76,7 +79,7 @@ export function competitiveFigures(reportData: Any, mode: "stored" | "shown", pr
     h.add(`${key}|posts|current`, `${label}, posts`, "posts", b?.post_count);
     h.add(`${key}|observed_posts`, `${label}, posts in the sample`, "posts", b?.observed_post_count);
     h.add(`${key}|cadence`, `${label}, posts a week`, "cadence", b?.cadence_per_week);
-    h.add(`${key}|engagement_rate|current`, `${label}, engagement rate`, "percent", b?.engagement_rate_avg, RATE);
+    h.add(`${key}|engagement_rate|current`, `${label}, compared engagement rate`, "percent", b?.engagement_rate_avg, RATE);
     h.add(`${key}|engagements_per_post`, `${label}, engagements per post`, "engagement", b?.engagement_avg);
     h.add(`${key}|impressions_per_post`, `${label}, impressions per post`, "impressions", b?.impressions_avg);
     h.add(`${key}|impressions|current`, `${label}, impressions`, "impressions", b?.impressions_total);
@@ -94,11 +97,11 @@ export function competitiveFigures(reportData: Any, mode: "stored" | "shown", pr
     h.both(`${key}|impressions`, `${label}, impressions`, "impressions", channel === "all" ? (m.impressions ?? m.estimated_impressions) : m.impressions);
     if (channel === "all" && m.impressions && m.estimated_impressions) h.both(`${key}|estimated_impressions`, `${label}, estimated impressions`, "impressions", m.estimated_impressions);
     h.both(`${key}|views`, `${label}, views`, "impressions", m.views);
-    h.both(`${key}|engagement_rate`, `${label}, engagement rate`, "percent", m.engagement_rate, RATE);
+    h.both(`${key}|engagement_rate`, `${label}, compared engagement rate`, "percent", m.engagement_rate, RATE);
     // Rates stored by older workflows (per follower, averaged per post): the text may quote them.
     if (mode === "stored") {
-      h.both(`${key}|engagement_rate`, `${label}, engagement rate`, "percent", m.rate, RATE);
-      h.both(`${key}|engagement_rate`, `${label}, engagement rate`, "percent", m.engagement_rate_per_post, RATE);
+      h.both(`${key}|engagement_rate`, `${label}, compared engagement rate`, "percent", m.rate, RATE);
+      h.both(`${key}|engagement_rate`, `${label}, compared engagement rate`, "percent", m.engagement_rate_per_post, RATE);
     }
     for (const [network, n] of Object.entries(m.by_network || {})) metrics(company, network, n);
   };
@@ -124,23 +127,21 @@ export function competitiveFigures(reportData: Any, mode: "stored" | "shown", pr
 }
 
 /**
- * The figures of a monthly report. "stored" reads Sprout's stored totals and
- * the rate the screens used to show (Sprout's engagements total, which adds
- * clicks, over impressions); "shown" reads them through normalizedSocialReport.
+ * The figures of a monthly report: the client's Sprout figures as Sprout
+ * reports them (socialFigures.ts), which the report shows as stored. Its own
+ * figures never change under it, so a monthly report's text goes stale only
+ * where it quotes the competitive report shown beside it.
  */
-export function socialFigures(reportData: Any, mode: "stored" | "shown"): Figure[] {
+export function socialFigures(reportData: Any): Figure[] {
   const h = new Harvest();
-  const raw = Array.isArray(reportData) ? reportData[0] : reportData;
-  const rd = mode === "shown" ? normalizedSocialReport(raw || {}) : (raw || {});
+  const rd = (Array.isArray(reportData) ? reportData[0] : reportData) || {};
   const sp = rd?.sprout_performance || {};
-  const oldRate = (m: Any) => (valid(Number(m?.engagements)) && Number(m?.impressions) > 0 ? Number(m.engagements) / Number(m.impressions) : null);
-  const set = (key: string, label: string, m: Any, network?: string) => {
+  const set = (key: string, label: string, m: Any) => {
     if (!m || typeof m !== "object") return;
-    h.add(`${key}|engagements`, `${label}, engagements`, "engagement", num(m.engagements));
-    h.add(`${key}|impressions`, `${label}, impressions`, "impressions", num(m.impressions));
+    h.add(`${key}|engagements`, `${label}, engagements`, "engagement", sproutEngagements(m));
+    h.add(`${key}|impressions`, `${label}, impressions`, "impressions", sproutImpressions(m));
     h.add(`${key}|views`, `${label}, video views`, "impressions", num(m.video_views));
-    h.add(`${key}|reach`, `${label}, reach`, "impressions", sproutReach(m, network));
-    h.add(`${key}|engagement_rate`, `${label}, engagement rate`, "percent", mode === "shown" ? sproutEngagementRate(m, network) : oldRate(m), RATE);
+    h.add(`${key}|engagement_rate`, `${label}, Sprout engagement rate`, "percent", sproutEngagementRate(m), RATE);
   };
   const changes = (key: string, label: string, ch: Any) => {
     // Text writes a fall as "down 28%": a change is matched by its size.
@@ -151,32 +152,21 @@ export function socialFigures(reportData: Any, mode: "stored" | "shown"): Figure
   };
   for (const p of Array.isArray(sp.platform_breakdown) ? sp.platform_breakdown : []) {
     const net = String(p?.network || "");
-    set(`${net}|current`, platformName(net), p?.current, net);
-    set(`${net}|previous`, `${platformName(net)}, previous period`, p?.previous, net);
+    set(`${net}|current`, platformName(net), p?.current);
+    set(`${net}|previous`, `${platformName(net)}, previous period`, p?.previous);
     h.add(`${net}|posts`, `${platformName(net)}, posts`, "posts", num(p?.post_count));
     h.add(`${net}|posts_previous`, `${platformName(net)}, posts, previous period`, "posts", num(p?.previous_post_count));
     changes(net, platformName(net), p?.changes);
   }
   for (const [net, m] of Object.entries(sp.platform_metrics || {}) as [string, Any][]) {
-    set(`${net}|current`, platformName(net), m, net);
+    set(`${net}|current`, platformName(net), m);
     h.add(`${net}|posts`, `${platformName(net)}, posts`, "posts", num(m?.post_count));
   }
   set("all|current", "All platforms", sp.overall_totals || sp.month_comparison?.current_month);
   set("all|previous", "All platforms, previous period", sp.month_comparison?.previous_month);
   changes("all", "All platforms", sp.month_comparison?.changes);
-  if (mode === "shown" && sp.engagement_rate) {
-    h.add("all|current|engagement_rate", "All platforms, engagement rate", "percent", sp.engagement_rate.current, RATE);
-    h.add("all|previous|engagement_rate", "All platforms, previous period, engagement rate", "percent", sp.engagement_rate.previous, RATE);
-  }
   const posts: Any[] = [...(Array.isArray(sp.top_posts) ? sp.top_posts : []), ...Object.values(sp.top_posts_by_platform || {}).flat() as Any[]];
-  posts.forEach((p, i) => {
-    const id = `post:${p?.url || p?.permalink || i}`;
-    const label = `A top ${platformName(String(p?.platform_display || p?.platform || "").toLowerCase())} post`;
-    h.add(`${id}|engagements`, `${label}, engagements`, "engagement", num(p?.engagements ?? p?.engagement));
-    h.add(`${id}|impressions`, `${label}, impressions`, "impressions", num(p?.impressions));
-    h.add(`${id}|views`, `${label}, video views`, "impressions", num(p?.video_views));
-    h.add(`${id}|engagement_rate`, `${label}, engagement rate`, "percent", mode === "shown" ? sproutEngagementRate(p) : oldRate(p), RATE);
-  });
+  posts.forEach((p, i) => set(`post:${p?.url || p?.permalink || i}`, `A top ${platformName(String(p?.platform_display || p?.platform || "").toLowerCase())} post`, p));
   return h.figures;
 }
 
@@ -207,7 +197,7 @@ function numbersIn(text: string): Array<{ text: string; value: number; tolerance
 }
 
 const UNIT_AFTER: Array<[FigureKind, RegExp]> = [
-  ["cadence", /^[\s-]*(?:[A-Za-z]+\s*){0,2}(?:\/\s?(?:wk|week)\b|(?:a|per|each|every)\s+week\b)/i],
+  ["cadence", /^[\s-]*(?:[A-Za-z]+\s*){0,2}(?:\/\s?(?:wk|week)\b|(?:a|per|each|every)\s+week\b|weekly\b)/i],
   ["posts", /^[\s-]*(?:[A-Za-z]+\s+)?(?:posts?|uploads?|videos?|reels|shorts|tiktoks)\b/i],
   ["audience", /^[\s-]*(?:[A-Za-z]+\s+)?(?:followers?|subscribers?|fans)\b/i],
   ["engagement", /^[\s-]*(?:[A-Za-z]+\s+)?(?:engagements?|interactions)\b/i],
@@ -379,6 +369,7 @@ export const CORRECTION_SYSTEM = [
   "The report's figures were counted again under the product's current definitions, and these sentences still quote the old figures.",
   "For each sentence: change the numbers that quote the report's figures to the figures the report shows now, and change only the words whose claim depends on those numbers (for example \"inflated by\", \"higher than\", \"the highest\", \"up\", \"down\").",
   "Keep every other word, the word order and the punctuation exactly as written. Keep a number that is a target or a recommendation.",
+  "Where a sentence names how a rate was worked out (\"per post\", \"per follower\"), name it as the figure list does instead.",
   "Use only the figures listed. Do not add a number, a comparison, a cause or any claim that is not already in the sentence or the list.",
   "If a claim no longer holds and the list has no figure for it, drop just that clause and keep the rest of the sentence.",
   "Write numbers the way the sentence already does (1.08%, 12.6 a week, 683K). American English. Never add an em dash or an en dash.",
@@ -389,7 +380,7 @@ export const CORRECTION_SYSTEM = [
 export function correctionPrompt(context: { client: string; kind: ReportKind; period?: string | null }, stale: StaleSentence[], shown: Figure[]): string {
   const lines = [
     `Report: ${context.kind === "competitive" ? "competitive analysis" : "monthly social report"} for ${context.client}${context.period ? `, ${context.period}` : ""}.`,
-    "Engagements count reactions or likes, comments and shares (not on Instagram or YouTube), never clicks, saves or views. The engagement rate is engagements divided by impressions, with views on TikTok and YouTube. The client's figures come from Sprout; competitors' from RivalIQ.",
+    "Comparisons with competitors count the same actions for every company: likes, comments and shares (not on Instagram or YouTube), divided by impressions, with views on TikTok and YouTube. That is the engagement rate compared on likes, comments and shares. The client's comparison figures come from its Sprout posts with ads left out; competitors' from RivalIQ. The client's own monthly figures are Sprout's as Sprout reports them, and the Sprout engagement rate is Sprout's engagements over Sprout's impressions.",
     "",
     "Figures the report shows now:",
     ...figureList(stale, shown).map((l) => `- ${l}`),

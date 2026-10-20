@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { engagementRate, engagementsOf, normalizedCompetitiveMetrics, postEngagementRate, postReach } from "@/lib/competitiveMetrics";
-import { normalizedSocialReport, socialPeriodFigures, sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
+import { sproutEngagementRate, sproutEngagements } from "@/lib/reportFigures";
 
 const period = { start: "2026-09-01", end: "2026-09-30" };
 const both = (current: number, previous = 0) => ({ current, previous });
@@ -163,33 +163,13 @@ describe("one engagement rate: engagements divided by impressions", () => {
     expect(engagementsOf("tiktok", {})).toBeNull();
   });
 
-  it("uses the same definitions for the client's own Sprout performance (Bader Law, September 2026)", () => {
-    // Sprout's engagements total adds clicks: 963 on Facebook where reactions, comments and shares are 540.
-    expect(sproutEngagements({ engagements: 963, reactions: 469, comments: 47, shares: 24, link_clicks: 49 }, "Facebook")).toBe(540);
-    expect(sproutEngagements({ engagements: 1027, reactions: 412, comments: 43, shares: 556, saves: 12 }, "Instagram")).toBe(455);
-    // Views are YouTube's reach.
-    expect(sproutEngagementRate({ reactions: 708, comments: 5, shares: 10, impressions: 0, video_views: 1581992 }, "YouTube")).toBe(713 / 1581992);
+  it("keeps the client's own performance on Sprout's figures as Sprout reports them (Bader Law, September 2026)", () => {
+    // The monthly report's own figures: Sprout's engagements total (clicks included where Sprout counts them) over Sprout's impressions.
+    const totals = { engagements: 3341, impressions: 996405, reactions: 1987, comments: 109, shares: 632, link_clicks: 223 };
+    expect(sproutEngagements(totals)).toBe(3341);
+    expect((sproutEngagementRate(totals)! * 100).toFixed(2)).toBe("0.34");
+    // Reports written before Sprout's total was stored add up the parts, link clicks included.
+    expect(sproutEngagements({ reactions: 5, comments: 2, shares: 1, link_clicks: 2 })).toBe(10);
     expect(sproutEngagementRate({ reactions: 5, impressions: 0 })).toBeNull();
-    const current = (shares: number, comments: number, reactions: number, engagements: number, impressions: number, video_views: number, link_clicks = 0) => ({ shares, comments, reactions, engagements, impressions, video_views, link_clicks });
-    const rd = { sprout_performance: {
-      overall_totals: { engagements: 3341, impressions: 996405, reactions: 1987, comments: 109, shares: 632, link_clicks: 223, video_views: 1851832 },
-      platform_breakdown: [
-        { network: "Facebook", post_count: 13, current: current(24, 47, 469, 963, 846738, 205032, 49) },
-        { network: "Instagram", post_count: 15, current: current(556, 43, 412, 1027, 102229, 19679) },
-        { network: "TikTok", post_count: 12, current: current(42, 13, 341, 396, 44167, 44167) },
-        { network: "LinkedIn", post_count: 8, current: current(0, 1, 57, 232, 3271, 962, 174) },
-        { network: "YouTube", post_count: 19, current: current(10, 5, 708, 723, 0, 1581992) },
-      ],
-      top_posts: [{ platform: "LINKEDIN", reactions: 10, comments: 2, shares: 1, link_clicks: 210, engagements: 223, impressions: 900 }],
-    } };
-    const figures = socialPeriodFigures(rd.sprout_performance);
-    expect(figures.engagements.current).toBe(540 + 455 + 396 + 58 + 713);
-    expect(figures.reach.current).toBe(846738 + 102229 + 44167 + 3271 + 1581992);
-    expect(figures.engagement_rate.current).toBe(2162 / 2578397);
-    const shown = normalizedSocialReport(rd).sprout_performance as any;
-    expect(shown.overall_totals.engagements).toBe(2162);
-    expect(shown.platform_breakdown[0].current.engagements).toBe(540);
-    // A 210-click post is 13 engagements, the count the card shows and ranks by.
-    expect(shown.top_posts[0].engagement).toBe(13);
   });
 });

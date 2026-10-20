@@ -6,7 +6,6 @@
  */
 import { normalizedCompetitiveMetrics } from "../_shared/competitive/reportMetrics.ts";
 import { withCompetitiveEvidenceLimits } from "../_shared/competitive/reportEvidence.ts";
-import { normalizedSocialReport } from "../_shared/reports/socialFigures.ts";
 declare const Deno: { env: { get(k: string): string | undefined } } | undefined;
 /**
  * The host the API puts in `links.app`. gOS users reach the tool through its branded
@@ -180,8 +179,7 @@ export function competitorSetOut(set: SetWithCompetitors): CompetitorSetOut {
 const trendOut = (v: unknown): TrendOut => ({ posts: Array.isArray(obj(v).posts) ? (obj(v).posts as unknown[]).length : 0, patterns: obj(v).patterns ?? null });
 
 export function reportOut(row: ReportRow, opts: { detail?: boolean } = {}): ReportOut {
-  // The figures every screen shows: engagements by the one rule, views as reach on video.
-  const rd = obj(normalizedSocialReport(obj(row.report_data)));
+  const rd = obj(row.report_data);
   const period = obj(rd.report_period);
   const cur = obj(period.current_month), prev = obj(period.previous_month);
   const counts = rd.data_counts && typeof rd.data_counts === "object" ? (rd.data_counts as Record<string, unknown>) : null;

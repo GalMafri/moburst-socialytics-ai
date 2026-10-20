@@ -116,16 +116,15 @@ for (const post of postAnalyticsData.concat(prevPostAnalyticsData)) {
 
 const METRIC_KEYS = ['impressions', 'reactions', 'link_clicks', 'video_views', 'comments', 'shares', 'engagements'];
 
-// Engagements are the one count every company is measured by (reportMetrics.ts
-// engagementsOf, which this node's code follows): reactions or likes, comments,
-// and shares where the network shows them (not Instagram or YouTube). Clicks,
-// saves and story replies are private to the account and stay their own figures.
 function extractProfileMetrics(metrics, network) {
   const reactions = getMetric(metrics, 'reactions', 'likes');
   const comments = getMetric(metrics, 'comments_count', 'comments');
   const shares = getMetric(metrics, 'shares_count', 'shares');
-  const applause = network === 'Instagram' ? getMetric(metrics, 'likes', 'reactions') : reactions;
-  const engagements = engagementsOf(network, { applause, conversation: comments, amplification: shares }) || 0;
+  const engagements = network === 'Instagram'
+    ? getMetric(metrics, 'likes', 'reactions') + comments + shares + getMetric(metrics, 'saves') + getMetric(metrics, 'story_replies')
+    : network === 'LinkedIn'
+    ? reactions + comments + shares + getMetric(metrics, 'post_content_clicks', 'post_link_clicks')
+    : reactions + comments + shares + getMetric(metrics, 'post_link_clicks') + getMetric(metrics, 'post_content_clicks_other');
   return {
     engagements,
     impressions: getMetric(metrics, 'impressions', 'lifetime.impressions'),
@@ -301,12 +300,11 @@ function mapPost(post) {
   const shares = getMetric(m, 'lifetime.shares_count', 'shares_count', 'shares', 'lifetime.shares');
   const linkClicks = getMetric(m, 'lifetime.post_link_clicks', 'post_link_clicks', 'link_clicks');
   const videoViews = getMetric(m, 'lifetime.video_views', 'video_views');
+  const engagements = getMetric(m, 'lifetime.engagements', 'engagements');
   const likes = getMetric(m, 'lifetime.likes', 'likes');
   const pid = String((post.dimensions || {}).customer_profile_id || post.customer_profile_id || '');
   const networkFromPost = post.network_type || post.network || '';
   const dn = networkFromPost ? getDisplayNetwork(networkFromPost) : (profileIdToNetwork[pid] || 'Unknown');
-  // The one count of engagements (engagementsOf); the ranking and the card use it.
-  const engagements = engagementsOf(dn, { applause: reactions || likes, conversation: comments, amplification: shares }) || 0;
   return {
     permalink: post.perma_link || post.url || '',
     url: post.perma_link || post.url || '',
@@ -319,14 +317,13 @@ function mapPost(post) {
     content_category: post.content_category || '',
     impressions, reactions, likes, comments, shares,
     link_clicks: linkClicks, video_views: videoViews, engagements,
-    engagement: engagements,
+    engagement: getMetric(m, 'lifetime.engagements') || (reactions + comments + shares + linkClicks),
     metric_scope: "lifetime",
     posted_at: post.created_time || ''
   };
 }
 
-// Ads and other rows that are not posts are never ranked (reportMetrics.ts isPublishedPost).
-const allMappedPosts = postAnalyticsData.filter(post => isPublishedPost(post)).map(mapPost).filter(post => post.url);
+const allMappedPosts = postAnalyticsData.map(mapPost).filter(post => post.url);
 
 // Cross-platform top posts (unchanged shape/behavior — top 10 by engagement)
 const topPosts = [...allMappedPosts].sort((a, b) => b.engagement - a.engagement).slice(0, 10);
