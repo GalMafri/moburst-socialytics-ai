@@ -1057,6 +1057,7 @@ export type Database = {
       competitive_reports: {
         Row: {
           client_id: string
+          correction_audit: Json | null
           created_at: string
           created_by: string | null
           date_range_end: string | null
@@ -1071,6 +1072,7 @@ export type Database = {
         }
         Insert: {
           client_id: string
+          correction_audit?: Json | null
           created_at?: string
           created_by?: string | null
           date_range_end?: string | null
@@ -1085,6 +1087,7 @@ export type Database = {
         }
         Update: {
           client_id?: string
+          correction_audit?: Json | null
           created_at?: string
           created_by?: string | null
           date_range_end?: string | null
@@ -2346,6 +2349,7 @@ export type Database = {
       reports: {
         Row: {
           client_id: string
+          correction_audit: Json | null
           created_at: string | null
           created_by: string | null
           date_range_end: string | null
@@ -2360,6 +2364,7 @@ export type Database = {
         }
         Insert: {
           client_id: string
+          correction_audit?: Json | null
           created_at?: string | null
           created_by?: string | null
           date_range_end?: string | null
@@ -2374,6 +2379,7 @@ export type Database = {
         }
         Update: {
           client_id?: string
+          correction_audit?: Json | null
           created_at?: string | null
           created_by?: string | null
           date_range_end?: string | null
@@ -3384,6 +3390,15 @@ export type Database = {
       report_schedule_first_run: {
         Args: { p_frequency: string; p_from: string; p_run_day: number }
         Returns: string
+      }
+      report_text_enqueue: {
+        Args: {
+          p_delay?: string
+          p_key: string
+          p_report: string
+          p_table: string
+        }
+        Returns: undefined
       }
       scheduled_jobs_lease: {
         Args: { p_lease_seconds?: number }
