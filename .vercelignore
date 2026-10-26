@@ -1,0 +1,4 @@
+# The site is the static build only, as on the server (serve -s dist).
+# api/ holds a client library and its tests; Vercel would otherwise
+# deploy every .ts file in it as a server function.
+/api
