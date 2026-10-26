@@ -32,3 +32,6 @@ dist-ssr
 .env.*
 !.env.example
 *.tsbuildinfo
+
+# Vercel CLI link and build output (the deploy workflow makes them on the runner)
+.vercel
