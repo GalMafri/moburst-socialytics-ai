@@ -36,6 +36,46 @@ jobs:
       - name: Build
         run: npm run build
 
+  # Vercel (team "Moburst", vercel.com/moburst-ai), beside the server deploy
+  # until socialytics.moburst.com moves there. The Vercel CLI uploads the build
+  # with the VERCEL_TOKEN secret (a token of ai@moburst.com), so no Vercel
+  # GitHub app is installed on the account that owns this repository. The
+  # settings the static server had (SPA fallback, cache headers) are in
+  # vercel.json. Until the secret exists the job does nothing.
+  vercel:
+    needs: build
+    runs-on: ubuntu-latest
+    # One production deploy at a time, in push order; a newer push waits.
+    concurrency:
+      group: vercel-production
+      cancel-in-progress: false
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_CLI: vercel@63.1.2
+      VERCEL_SCOPE: moburst-ai
+      VERCEL_PROJECT: moburst-socialytics
+    steps:
+      - name: Checkout
+        if: env.VERCEL_TOKEN != ''
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        if: env.VERCEL_TOKEN != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Deploy to Vercel
+        if: env.VERCEL_TOKEN != ''
+        run: |
+          # The project is made on the first run and found on every run after.
+          npx --yes "$VERCEL_CLI" project add "$VERCEL_PROJECT" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN" || true
+          npx --yes "$VERCEL_CLI" link --yes --project "$VERCEL_PROJECT" --scope "$VERCEL_SCOPE" --token "$VERCEL_TOKEN"
+          npx --yes "$VERCEL_CLI" pull --yes --environment=production --token "$VERCEL_TOKEN"
+          npx --yes "$VERCEL_CLI" build --prod --token "$VERCEL_TOKEN"
+          npx --yes "$VERCEL_CLI" deploy --prebuilt --prod --token "$VERCEL_TOKEN"
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
