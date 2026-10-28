@@ -12,7 +12,7 @@
 // the same report, figure for figure.
 import { describe, expect, it } from "vitest";
 import type { ApifyClient } from "../../apify/client";
-import { MOBURST, moburstPages, moburstRequest, TRENDS } from "../fixtures/social";
+import { apidojoSearchFor, MOBURST, moburstPages, moburstRequest, TRENDS } from "../fixtures/social";
 import { makeRegistry } from "../registry";
 import { startReportPipeline } from "../shadow";
 import { makePayloadStore } from "../store";
@@ -188,14 +188,14 @@ describe("social_v1, live, on what the providers answered n8n for fd501cba", () 
     expect(db.tables.reports[0]).toMatchObject({ status: "running", report_data: {} });
   });
 
-  it("with trends: runs both scrapers with n8n's inputs and the actors' own settings, and normalizes as n8n did", async () => {
+  it("with trends: runs both scrapers with n8n's searches (TikTok's on apidojo) and the actors' own settings, and normalizes as n8n did", async () => {
     const calls = { sprout: [] as string[], gamma: [] as string[], apify: [] as string[] };
     const c = TRENDS.client;
     const request = { ...moburstRequest(), skip_trends: false, social_keywords: c.social_keywords, trends_keywords: c.trends_keywords, languages: c.languages, geo: c.geo };
     const { db, run_id, driven } = await run({ mode: "shadow", request, deps: deps({ calls }) });
     expect(driven.outcome.status).toBe("done");
     expect(calls.apify).toEqual([
-      `start ${TREND_ACTORS.tiktok.id} ${JSON.stringify(TRENDS.trend_inputs.trend_inputs.tiktok)} default/default`,
+      `start ${TREND_ACTORS.tiktok.id} ${JSON.stringify(apidojoSearchFor(TRENDS.trend_inputs.trend_inputs.tiktok, "US"))} default/default`,
       `start ${TREND_ACTORS.instagram.id} ${JSON.stringify(TRENDS.trend_inputs.trend_inputs.instagram)} default/default`,
     ]);
     const report = db.tables.shadow_social_reports[0].report_data;

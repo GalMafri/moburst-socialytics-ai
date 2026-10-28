@@ -63,9 +63,13 @@ export const TREND_TRIES = 2;
 /** Fresh analyses asked for after a repaired answer still did not match its format. */
 export const ANALYSIS_ROUNDS = 1;
 
-/** The two trend scrapers, as n8n's Apify nodes run them: the actors' own timeout and memory. */
+/**
+ * The two trend scrapers, as n8n's Apify nodes run them: the actors' own
+ * timeout and memory. TikTok is apidojo's scraper since 28 Oct 2026, where
+ * n8n's is clockworks' (social/nodes.ts, Prepare Trend Inputs, says why).
+ */
 export const TREND_ACTORS = {
-  tiktok: { id: "GdWCkxBtKWOsKjdch", name: "clockworks/tiktok-scraper" },
+  tiktok: { id: "5K30i8aFccKNF5ICs", name: "apidojo/tiktok-scraper" },
   instagram: { id: "reGe1ST3OBgYZSsZJ", name: "apify/instagram-hashtag-scraper" },
 } as const;
 

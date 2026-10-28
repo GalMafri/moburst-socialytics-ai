@@ -608,6 +608,29 @@ export function attachPostThumbnails(aggregate: Any, postPages: Any[]): Any {
 
 // ── Prepare Trend Inputs ───────────────────────────────────────────────────
 
+// The TikTok search runs on apidojo/tiktok-scraper. n8n's scraper,
+// clockworks/tiktok-scraper, stopped answering date-filtered video searches
+// around 20 Oct 2026 (device registration fails, every search comes back with
+// nothing; its open issue "Video search with date filter fails"), and its
+// searches without a date filter bring back mostly old, little-seen posts.
+// The searches, the date window and the sort are n8n's; only the actor and its
+// input's shape differ. n8n's workflow still uses clockworks.
+
+/** TikTok's search date filters, by n8n's searchDatePosted code. */
+const TIKTOK_DATE_RANGE: Record<string, string> = { "1": "YESTERDAY", "2": "THIS_WEEK", "3": "THIS_MONTH", "4": "LAST_THREE_MONTHS", "5": "LAST_SIX_MONTHS" };
+/** Posts asked for per search, n8n's resultsPerPage. apidojo's maxItems counts across all searches. */
+export const TIKTOK_POSTS_PER_SEARCH = 50;
+
+/** The first region that is a country code, for TikTok's search region; none searches everywhere. */
+function tiktokLocation(regions: string[]): string | undefined {
+  for (const region of regions) {
+    const code = region.trim().toUpperCase();
+    const iso = code === "UK" ? "GB" : code;
+    if (/^[A-Z]{2}$/.test(iso)) return iso;
+  }
+  return undefined;
+}
+
 /** The TikTok and Instagram actor inputs (null when that scraper does not run) and why. */
 export function prepareTrendInputs(client: Any): Any {
   const list = (value: Any): string[] => (Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [])
@@ -630,6 +653,7 @@ export function prepareTrendInputs(client: Any): Any {
     const days = Math.ceil((Date.parse(end) - Date.parse(start)) / 86400000);
     if (Number.isFinite(days)) searchDatePosted = days <= 1 ? "1" : days <= 7 ? "2" : days <= 30 ? "3" : days <= 90 ? "4" : "5";
   }
+  const location = tiktokLocation(regions);
   return {
     ...client,
     trend_status: {
@@ -637,7 +661,11 @@ export function prepareTrendInputs(client: Any): Any {
       instagram: skipped ? "skipped" : hashtags.length ? "requested" : "missing_keywords",
     },
     trend_inputs: {
-      tiktok: !skipped && queries.length ? { searchQueries: queries, resultsPerPage: 50, searchSection: "/video", searchSorting: "1", searchDatePosted, excludePinnedPosts: true, excludeVideosWithoutText: true, shouldDownloadVideos: false, shouldDownloadCovers: false, shouldDownloadSubtitles: false } : null,
+      // n8n's search, most liked first (its searchSorting "1"), in its date window.
+      tiktok: !skipped && queries.length ? {
+        keywords: queries, dateRange: TIKTOK_DATE_RANGE[searchDatePosted], sortType: "MOST_LIKED", ...(location ? { location } : {}),
+        maxItems: queries.length * TIKTOK_POSTS_PER_SEARCH, includeSearchKeywords: true,
+      } : null,
       instagram: !skipped && hashtags.length ? { hashtags, keywordSearch: false, resultsLimit: 80, resultsType: "posts" } : null,
     },
   };
@@ -725,29 +753,36 @@ const byRelevanceThenEngagement = (a: Any, b: Any) => {
   return b.engagement_score - a.engagement_score;
 };
 
-/** The 15 most relevant TikTok posts in the client's languages, or one empty placeholder. items: the actor's dataset. */
+/**
+ * The 15 most relevant TikTok posts in the client's languages, or one empty
+ * placeholder. items: the actor's dataset, apidojo's (title, postPage,
+ * uploadedAtFormatted, channel) or clockworks' as n8n reads it (a replay of an
+ * earlier run keeps clockworks rows). A post found by two searches counts once.
+ */
 export function normalizeTikTok(items: Any[], clientData: Any): Any[] {
   const { targetLangs, clientKeywords, trendsStartDate } = trendTargets(clientData);
+  const seen = new Set<string>();
   const normalized = (items ?? []).map((data: Any) => {
     const likes = data.diggCount || data.likes || 0;
     const comments = data.commentCount || data.comments || 0;
     const shares = data.shareCount || data.shares || 0;
     const views = data.playCount || data.views || 0;
     const engagementScore = likes * 1 + comments * 2 + shares * 3 + Math.floor(views / 1000);
-    const caption = data.desc || data.text || data.caption || "";
-    let url = data.webVideoUrl || data.url || "";
+    const caption = data.desc || data.text || data.caption || data.title || "";
+    let url = data.webVideoUrl || data.url || data.postPage || "";
     if (!url && data.authorMeta?.name && data.id) url = `https://www.tiktok.com/@${data.authorMeta.name}/video/${data.id}`;
-    const author = data.authorMeta?.name || data.author || "unknown";
+    const author = data.authorMeta?.name || data.author || data.channel?.username || "unknown";
     const hashtags = (data.hashtags || []).map((h: Any) => (typeof h === "string" ? h : h.name || "")).filter(Boolean);
     const textLang = (data.textLanguage || "").toLowerCase();
     const passesLangFilter = targetLangs.includes(textLang) ? true : matchesAnyTargetLanguage(caption, targetLangs);
+    const createdIso = data.createTimeISO || data.uploadedAtFormatted || "";
     let passesDateFilter = true;
-    if (trendsStartDate && data.createTimeISO) passesDateFilter = passesDate(trendsStartDate, new Date(data.createTimeISO));
+    if (trendsStartDate && createdIso) passesDateFilter = passesDate(trendsStartDate, new Date(createdIso));
     return {
       source: "tiktok", url, caption, author, hashtags,
       engagement_score: engagementScore,
       views, likes, comments, shares,
-      created: data.createTimeISO || data.createTime || "",
+      created: createdIso || data.createTime || "",
       matches_language: passesLangFilter,
       is_spam: isSpam(caption, hashtags),
       relevance_score: relevanceOf(clientKeywords, caption, hashtags),
@@ -761,6 +796,8 @@ export function normalizeTikTok(items: Any[], clientData: Any): Any[] {
     if (item.is_spam) return false;
     if (!item.passes_date) return false;
     if (clientKeywords.length > 0 && item.relevance_score === 0) return false;
+    if (seen.has(item.url)) return false;
+    seen.add(item.url);
     return true;
   }).sort(byRelevanceThenEngagement).slice(0, 15);
   if (normalized.length === 0) {

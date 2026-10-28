@@ -8,7 +8,7 @@
 // research (execution 583953).
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
-import { MOBURST, mirror, moburstPages, moburstRequest, nodeCode, nodeOf, TRENDS } from "../fixtures/social";
+import { apidojoSearchFor, MOBURST, mirror, moburstPages, moburstRequest, nodeCode, nodeOf, TRENDS } from "../fixtures/social";
 import { BRIEF_SYSTEM, PROMPT_EDITS, synthesisSystem, synthesisText } from "./prompt";
 import { sproutRequests } from "./providers";
 import {
@@ -201,13 +201,51 @@ describe("Sprout", () => {
 describe("trends", () => {
   const client = TRENDS.client;
 
-  it("Prepare Trend Inputs, with keywords, skipped, and without keywords", async () => {
-    for (const c of [client, combined, { ...client, social_keywords: [], trends_keywords: "" }, { ...client, geo: ["IL", "US"], social_keywords: ["שיווק דיגיטלי", "app growth"] }]) {
-      const n8n = await runNode(nodeCode("Prepare Trend Inputs"), {}, [c]);
-      expect(plain(prepareTrendInputs(c))).toEqual(n8n[0]);
+  it("Prepare Trend Inputs, with keywords, skipped, and without keywords; TikTok's search as n8n's, on apidojo", async () => {
+    // Everything as n8n's node, except the TikTok actor's input: n8n's search on apidojo (social/nodes.ts says why).
+    const cases: [Any, string | undefined][] = [
+      [client, "US"], [combined, "US"], [{ ...client, social_keywords: [], trends_keywords: "" }, "US"],
+      [{ ...client, geo: ["IL", "US"], social_keywords: ["שיווק דיגיטלי", "app growth"] }, "IL"],
+      [{ ...client, geo: "UK,Global" }, "GB"], [{ ...client, geo: "Global" }, undefined],
+    ];
+    for (const [c, location] of cases) {
+      const n8n = (await runNode(nodeCode("Prepare Trend Inputs"), {}, [c]))[0];
+      const port = plain(prepareTrendInputs(c));
+      expect({ ...port, trend_inputs: { ...port.trend_inputs, tiktok: null } }).toEqual({ ...n8n, trend_inputs: { ...n8n.trend_inputs, tiktok: null } });
+      expect(port.trend_inputs.tiktok).toEqual(apidojoSearchFor(n8n.trend_inputs.tiktok, location));
     }
-    const port = prepareTrendInputs(client);
-    expect(plain({ trend_status: port.trend_status, trend_inputs: port.trend_inputs })).toEqual({ trend_status: TRENDS.trend_inputs.trend_status, trend_inputs: TRENDS.trend_inputs.trend_inputs });
+    const port = plain(prepareTrendInputs(client));
+    expect(port.trend_status).toEqual(TRENDS.trend_inputs.trend_status);
+    expect(port.trend_inputs).toEqual({ ...TRENDS.trend_inputs.trend_inputs, tiktok: apidojoSearchFor(TRENDS.trend_inputs.trend_inputs.tiktok, "US") });
+    expect(port.trend_inputs.tiktok).toEqual({
+      keywords: ["beer league", "adult rec hockey", "captain life", "stop chasing start playing", "hockey captain", "beer league US", "adult rec hockey US", "captain life US"],
+      dateRange: "THIS_MONTH", sortType: "MOST_LIKED", location: "US", maxItems: 400, includeSearchKeywords: true,
+    });
+  });
+
+  it("Normalize TikTok Trends, on apidojo's rows: its fields read, a post two searches found counted once", () => {
+    // Rows as apidojo/tiktok-scraper returns them (28 Oct 2026), trimmed to what the normalizer reads.
+    const row = (o: Any) => ({ id: "0", title: "", views: 0, likes: 0, comments: 0, shares: 0, hashtags: [], keyword: "content strategy", ...o });
+    const machine = row({
+      id: "7563", title: "This is how to use Claude as a viral content machine #marketing #socialmedia #contentcreator #contentstrategy #video",
+      views: 26915, likes: 1746, comments: 170, shares: 473, uploadedAtFormatted: "2026-10-20T12:52:02.000Z",
+      postPage: "https://www.tiktok.com/@kallaway.marketing/video/7563", channel: { username: "kallaway.marketing" },
+      hashtags: ["marketing", "socialmedia", "contentcreator", "contentstrategy", "video"],
+    });
+    const better = row({
+      id: "7561", title: "How to Use AI to Make Better Content, and help you create videos people actually want to watch #ContentStrategy",
+      views: 1623, likes: 68, comments: 11, shares: 7, uploadedAtFormatted: "2026-10-14T04:27:03.000Z",
+      postPage: "https://www.tiktok.com/@benkimball.ai/video/7561", channel: { username: "benkimball.ai" }, hashtags: ["aitools", "contentstrategy"],
+    });
+    const old = row({ ...better, id: "7400", uploadedAtFormatted: "2026-08-01T10:00:00.000Z", postPage: "https://www.tiktok.com/@benkimball.ai/video/7400" });
+    const unrelated = row({ id: "7562", title: "This is my morning routine with you all", likes: 90000, uploadedAtFormatted: "2026-10-15T10:00:00.000Z", postPage: "https://www.tiktok.com/@someone/video/7562", channel: { username: "someone" } });
+    const c = { ...client, social_keywords: ["content strategy"], trends_keywords: "", languages: ["en"], date_ranges: { current_month: { start: "2026-10-01", end: "2026-10-31" } } };
+    const out = plain(normalizeTikTok([machine, better, machine, old, unrelated], c));
+    expect(out.map((p: Any) => [p.rank, p.url, p.author, p.created])).toEqual([
+      [1, "https://www.tiktok.com/@kallaway.marketing/video/7563", "kallaway.marketing", "2026-10-20T12:52:02.000Z"],
+      [2, "https://www.tiktok.com/@benkimball.ai/video/7561", "benkimball.ai", "2026-10-14T04:27:03.000Z"],
+    ]);
+    expect(out[0]).toMatchObject({ caption: machine.title, views: 26915, likes: 1746, comments: 170, shares: 473, hashtags: machine.hashtags, is_ad: false });
   });
 
   it("Normalize TikTok Trends, on the 203 posts the scraper returned", async () => {
