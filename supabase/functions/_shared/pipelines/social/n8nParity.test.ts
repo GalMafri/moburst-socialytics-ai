@@ -235,17 +235,21 @@ describe("trends", () => {
     const better = row({
       id: "7561", title: "How to Use AI to Make Better Content, and help you create videos people actually want to watch #ContentStrategy",
       views: 1623, likes: 68, comments: 11, shares: 7, uploadedAtFormatted: "2026-10-14T04:27:03.000Z",
-      postPage: "https://www.tiktok.com/@benkimball.ai/video/7561", channel: { username: "benkimball.ai" }, hashtags: ["aitools", "contentstrategy"],
+      // apidojo lists a hashtag it could not read as null (28 Oct 2026, run Sah0mdLXffUz4YgEV).
+      postPage: "https://www.tiktok.com/@benkimball.ai/video/7561", channel: { username: "benkimball.ai" }, hashtags: [null, "aitools", null, "contentstrategy"],
     });
     const old = row({ ...better, id: "7400", uploadedAtFormatted: "2026-08-01T10:00:00.000Z", postPage: "https://www.tiktok.com/@benkimball.ai/video/7400" });
     const unrelated = row({ id: "7562", title: "This is my morning routine with you all", likes: 90000, uploadedAtFormatted: "2026-10-15T10:00:00.000Z", postPage: "https://www.tiktok.com/@someone/video/7562", channel: { username: "someone" } });
     const c = { ...client, social_keywords: ["content strategy"], trends_keywords: "", languages: ["en"], date_ranges: { current_month: { start: "2026-10-01", end: "2026-10-31" } } };
-    const out = plain(normalizeTikTok([machine, better, machine, old, unrelated], c));
+    // A row with every field it reads empty is passed over, not a failed step.
+    const blank = { id: null, title: null, views: null, likes: null, comments: null, shares: null, postPage: null, uploadedAtFormatted: null, channel: null, hashtags: null, keyword: null };
+    const out = plain(normalizeTikTok([machine, blank, better, machine, old, unrelated], c));
     expect(out.map((p: Any) => [p.rank, p.url, p.author, p.created])).toEqual([
       [1, "https://www.tiktok.com/@kallaway.marketing/video/7563", "kallaway.marketing", "2026-10-20T12:52:02.000Z"],
       [2, "https://www.tiktok.com/@benkimball.ai/video/7561", "benkimball.ai", "2026-10-14T04:27:03.000Z"],
     ]);
     expect(out[0]).toMatchObject({ caption: machine.title, views: 26915, likes: 1746, comments: 170, shares: 473, hashtags: machine.hashtags, is_ad: false });
+    expect(out[1].hashtags).toEqual(["aitools", "contentstrategy"]);
   });
 
   it("Normalize TikTok Trends, on the 203 posts the scraper returned", async () => {

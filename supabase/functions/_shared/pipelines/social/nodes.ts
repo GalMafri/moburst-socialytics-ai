@@ -772,7 +772,8 @@ export function normalizeTikTok(items: Any[], clientData: Any): Any[] {
     let url = data.webVideoUrl || data.url || data.postPage || "";
     if (!url && data.authorMeta?.name && data.id) url = `https://www.tiktok.com/@${data.authorMeta.name}/video/${data.id}`;
     const author = data.authorMeta?.name || data.author || data.channel?.username || "unknown";
-    const hashtags = (data.hashtags || []).map((h: Any) => (typeof h === "string" ? h : h.name || "")).filter(Boolean);
+    // apidojo lists a hashtag it could not read as null.
+    const hashtags = (data.hashtags || []).map((h: Any) => (typeof h === "string" ? h : h?.name || "")).filter(Boolean);
     const textLang = (data.textLanguage || "").toLowerCase();
     const passesLangFilter = targetLangs.includes(textLang) ? true : matchesAnyTargetLanguage(caption, targetLangs);
     const createdIso = data.createTimeISO || data.uploadedAtFormatted || "";
