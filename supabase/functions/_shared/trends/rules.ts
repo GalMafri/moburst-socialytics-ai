@@ -26,8 +26,19 @@ export interface RuleOptions {
 
 const squash = (s: string): string => s.toLowerCase().replace(/[^\p{L}0-9]+/gu, "");
 
+/** Query parameters that only track a share; the rest (YouTube's v=, Facebook's story_fbid=) name the post. */
+const TRACKING = /^(utm_.*|fbclid|igshid|igsh|si|feature|ref|ref_src|mibextid)$/i;
+
+/** One key per post: host without www, the path, and the parameters that name the post, in order. */
 function urlKey(url: string): string {
-  return url.trim().toLowerCase().replace(/[?#].*$/, "").replace(/\/+$/, "");
+  try {
+    const u = new URL(url.trim());
+    const params = [...u.searchParams.entries()].filter(([k]) => !TRACKING.test(k)).sort(([a], [b]) => a.localeCompare(b));
+    const query = params.length ? `?${params.map(([k, v]) => `${k}=${v}`).join("&")}` : "";
+    return `${u.host.toLowerCase().replace(/^www\./, "")}${u.pathname.replace(/\/+$/, "")}${query}`;
+  } catch {
+    return url.trim().replace(/#.*$/, "").replace(/\/+$/, "");
+  }
 }
 
 /** The handle in a post's link, as on tiktok.com/@handle or instagram.com/handle. */

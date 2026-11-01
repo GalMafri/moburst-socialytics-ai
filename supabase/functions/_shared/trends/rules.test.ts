@@ -28,6 +28,18 @@ describe("the rules before Claude", () => {
     expect(out.dropped).toEqual([{ post: { ...a, search: "ASO tactics" }, reason: "duplicate" }]);
   });
 
+  it("tells posts apart by the ID their link carries after the ?", () => {
+    // 1 Nov 2026 trial: YouTube links (watch?v=ID) and Facebook permalinks (permalink.php?story_fbid=ID) all looked like one post.
+    const yt = (id: string) => post({ platform: "youtube", url: `https://www.youtube.com/watch?v=${id}` });
+    const fb = (id: string) => post({ platform: "facebook", url: `https://www.facebook.com/permalink.php?story_fbid=${id}&id=615` });
+    const out = ruleFilter([yt("a1"), yt("b2"), fb("111"), fb("222")], opts());
+    expect(out.candidates).toHaveLength(4);
+    expect(out.dropped).toEqual([]);
+    // The same post with tracking added is still the same post.
+    const tracked = post({ platform: "youtube", url: "https://www.youtube.com/watch?v=a1&utm_source=x#t=10" });
+    expect(ruleFilter([yt("a1"), tracked], opts()).dropped.map((d) => d.reason)).toEqual(["duplicate"]);
+  });
+
   it("drops posts outside the 7-day window, except undated pins", () => {
     const old = post({ posted_at: "2026-10-20T10:00:00.000Z" });
     const pin = post({ platform: "pinterest", url: "https://www.pinterest.com/pin/1/", posted_at: null, format: "pin" });
