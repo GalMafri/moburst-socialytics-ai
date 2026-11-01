@@ -234,6 +234,13 @@ describe("trends_v1", () => {
     expect(r.week.platforms.tiktok.status).toBe("ok");
   });
 
+  it("takes an empty answer to one narrow search as it is, with no second run", async () => {
+    // YouTube, Pinterest and Facebook run one search at a time; a narrow topic with nothing new this week is normal.
+    const r = await run({ answers: { youtube: [[]] } });
+    expect(r.calls.filter((c) => c === "youtube")).toHaveLength(2);
+    expect(r.week.platforms.youtube.status).toBe("ok");
+  });
+
   it("does not count a watched platform with nothing to search as a gap", async () => {
     const r = await run({ noInstagramTags: true });
     expect(r.week.platforms.instagram.status).toBe("no_searches");

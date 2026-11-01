@@ -141,9 +141,10 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
       } else {
         const actor = await runActorStep(ctx, { actor: TREND_SOURCES[platform].actor, input: run.input, datasetKey: key, keepDays: SOURCE_KEEP_DAYS, apify: deps.apify });
         if (actor.type === "wait") return actor.result;
-        // A source that brings back nothing at all may have been turned away
-        // (20 Oct 2026, TikTok); it gets one more run before "empty" stands.
-        if (!actor.rows.length && ctx.attempt < SCRAPE_TRIES) throw new StepRestart(`The ${platform} source brought back nothing (run ${actor.runId}).`);
+        // A run that took every search and brought back nothing at all may have
+        // been turned away (20 Oct 2026, TikTok); it gets one more run before
+        // "empty" stands. One narrow search with nothing new this week is normal.
+        if (!actor.rows.length && run.search === "" && ctx.attempt < SCRAPE_TRIES) throw new StepRestart(`The ${platform} source brought back nothing (run ${actor.runId}).`);
         rows = actor.rows;
         usd = Number(actor.usageUsd) || 0;
         detail = { ...detail, apify_run_id: actor.runId, rows: rows.length };
