@@ -100,7 +100,7 @@ export function ruleFilter(posts: TrendPost[], o: RuleOptions): { candidates: Tr
       dropped.push({ post: p, reason: "language" });
       continue;
     }
-    if (ours.has(squash(p.author)) || (handleInUrl(p.url) && ours.has(handleInUrl(p.url)))) {
+    if (ours.has(squash(p.author)) || (p.handle && ours.has(squash(p.handle))) || (handleInUrl(p.url) && ours.has(handleInUrl(p.url)))) {
       dropped.push({ post: p, reason: "own_or_competitor" });
       continue;
     }

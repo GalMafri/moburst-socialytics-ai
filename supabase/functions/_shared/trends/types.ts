@@ -37,6 +37,8 @@ export interface TrendPost {
   engagement: number;
   /** The search that found it. */
   search: string;
+  /** The author's handle, where the source gives one beside a display name; only for telling tracked accounts apart, never saved. */
+  handle?: string;
 }
 
 /** A topic, hashtag or exclusion, always with the reason it is there. */

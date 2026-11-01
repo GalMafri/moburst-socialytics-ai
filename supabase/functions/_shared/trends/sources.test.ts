@@ -37,6 +37,13 @@ describe("each source's answer in the shared post shape", () => {
     expect(read("pinterest").map((p) => p === null)).toEqual([false, false, true]);
   });
 
+  it("keeps the author's handle where the source gives one, to tell tracked accounts apart", () => {
+    expect(read("youtube")[0]).toMatchObject({ author: "BUZZ SEARCH", handle: "buzzsearch" });
+    expect(read("linkedin")[0]).toMatchObject({ author: "Neil Haley", handle: "themediagiant" });
+    expect(read("tiktok")[0]).toMatchObject({ handle: "techdropp" });
+    expect(read("pinterest")[0]).toMatchObject({ handle: "RMpincreator" });
+  });
+
   it("reads TikTok's saves and a row with an unreadable hashtag", () => {
     const p = read("tiktok")[1]!;
     expect(p).toMatchObject({ author: "monetiza_con_yanet", views: 52231, likes: 3240, comments: 210, shares: 964, saves: 2199, format: "short_video", posted_at: "2026-10-30T18:32:39.000Z", search: "app marketing" });

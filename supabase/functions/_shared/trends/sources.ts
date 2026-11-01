@@ -56,7 +56,9 @@ export function engagementOf(p: Pick<TrendPost, "likes" | "comments" | "shares" 
 
 function post(platform: TrendPlatform, fields: Omit<TrendPost, "platform" | "engagement">): TrendPost | null {
   if (!/^https:\/\//.test(fields.url)) return null;
-  const p = { platform, ...fields, engagement: 0 };
+  const { handle, ...rest } = fields;
+  const h = (handle ?? "").replace(/^@/, "");
+  const p: TrendPost = { platform, ...rest, ...(h ? { handle: h } : {}), engagement: 0 };
   p.engagement = engagementOf(p);
   return p;
 }
@@ -92,6 +94,7 @@ export const TREND_SOURCES: Record<TrendPlatform, TrendSource> = {
         text: text(r.title) || text(r.text), posted_at: iso(r.uploadedAtFormatted) ?? iso(r.createTimeISO) ?? iso(r.uploadedAt),
         format: "short_video", views: num(r.views ?? r.playCount), likes: num(r.likes ?? r.diggCount), comments: num(r.comments ?? r.commentCount),
         shares: num(r.shares ?? r.shareCount), saves: num(r.bookmarks ?? r.collectCount), search: text(r.keyword) || text(r.inputSource) || search,
+        handle: text(r.channel?.username) || text(r.authorMeta?.name),
       });
     },
   },
@@ -133,6 +136,7 @@ export const TREND_SOURCES: Record<TrendPlatform, TrendSource> = {
         url: text(r.linkedinUrl) || text(r.shareLinkedinUrl), author: text(r.author?.name), text: text(r.content),
         posted_at: iso(r.postedAt?.date) ?? iso(r.postedAt?.timestamp), format, views: 0, likes: num(r.engagement?.likes),
         comments: num(r.engagement?.comments), shares: num(r.engagement?.shares), saves: 0, search: text(r.query?.search) || search,
+        handle: text(r.author?.publicIdentifier) || text(r.author?.universalName),
       });
     },
   },
@@ -155,6 +159,7 @@ export const TREND_SOURCES: Record<TrendPlatform, TrendSource> = {
         author: text(r.channelTitle) || text(r.channelHandle), text: [text(r.title), text(r.description)].filter(Boolean).join("\n"),
         posted_at: iso(r.publishedAt) ?? iso(r.publishDate), format: short ? "short_video" : "long_video",
         views: num(r.viewCount), likes: num(r.likeCount), comments: num(r.commentCount), shares: 0, saves: 0, search,
+        handle: text(r.channelHandle),
       });
     },
   },
@@ -173,6 +178,7 @@ export const TREND_SOURCES: Record<TrendPlatform, TrendSource> = {
         // A pin's date is when it was pinned, not when its idea was posted; the spec ranks pins by saves instead.
         posted_at: null, format: "pin", views: 0, likes: num(r.like_count), comments: 0, shares: 0,
         saves: num(r.aggregated_pin_data?.aggregated_stats?.saves ?? r.repin_count), search: text(r.inputSource) || search,
+        handle: text(r.pinner?.username),
       });
     },
   },

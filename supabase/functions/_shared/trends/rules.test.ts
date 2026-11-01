@@ -81,6 +81,13 @@ describe("the rules before Claude", () => {
     expect(out.dropped.map((d) => d.reason)).toEqual(["own_or_competitor", "own_or_competitor", "own_or_competitor"]);
   });
 
+  it("knows a tracked account by its handle when the post shows only its display name", () => {
+    // A YouTube channel shows its title ("Leveling Up with Eric Siu") while the tracked handle is LevelingUpOfficial.
+    const video = post({ platform: "youtube", author: "Leveling Up with Eric Siu", handle: "@LevelingUpOfficial", url: "https://www.youtube.com/watch?v=abc" });
+    const out = ruleFilter([video, post()], opts({ competitorHandles: ["LevelingUpOfficial"] }));
+    expect(out.dropped).toEqual([{ post: video, reason: "own_or_competitor" }]);
+  });
+
   it("sends at most 60 per platform, most engaged first", () => {
     const many = Array.from({ length: 61 }, (_, i) => post({ engagement: i }));
     const other = post({ platform: "linkedin", url: "https://www.linkedin.com/posts/x-1", engagement: 0 });
