@@ -34,6 +34,12 @@
 //                              in-app pipeline made again now with every
 //                              provider called, written only to shadow
 //                              tables; paid, so only for a client on shadow.
+// POST {"mode":"trends_now","client_id":"<id>"}
+//                              this week's industry trends for one client now
+//                              (trends_v1, app mode; paid: Apify and Claude).
+// POST {"mode":"replay_trends","run_id":"<id>"}
+//                              a trends run's week again from its kept source
+//                              answers (no Apify call; Claude is asked again).
 // POST {"mode":"compare_pipeline","run_id":"<id>"}
 //                              a finished shadow run next to the real result
 //                              it shadows (compareResults; for a report, the
@@ -62,6 +68,7 @@ import { compareSocialRun, startSocialReplay, startSocialShadow } from "../_shar
 import { compareResults, formatComparison } from "../_shared/pipelines/compare.ts";
 import { appRunView, expirePayloads, loadShadowPair, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
+import { runTrendJob, startTrendWeek } from "./trends.ts";
 import type { ScheduledJob } from "./types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
 
@@ -79,6 +86,7 @@ const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
   lifecycle: "client lifecycle",
   lifecycle_step: "client lifecycle step",
   report_pipeline: "report pipeline step",
+  trend_refresh: "industry trends",
 };
 
 Deno.serve(async (req) => {
@@ -158,6 +166,7 @@ Deno.serve(async (req) => {
           case "lifecycle": return runLifecycle(db, job as unknown as LifecycleJob);
           case "lifecycle_step": return runLifecycleStep(db, job as unknown as LifecycleJob);
           case "report_pipeline": return runPipelineJob(job, pipelineDeps);
+          case "trend_refresh": return runTrendJob(db, job);
           default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
         }
       },
@@ -250,6 +259,23 @@ Deno.serve(async (req) => {
       } catch (e) {
         return json({ error: e instanceof Error ? e.message : String(e) }, 422);
       }
+    }
+
+    // POST {"mode":"trends_now","client_id":"<id>"}: this week's trends for one
+    // client now (the trial), as another run that writes the week again.
+    if (mode === "trends_now") {
+      const clientId = typeof body.client_id === "string" ? body.client_id : "";
+      if (!clientId) return json({ error: "client_id is required" }, 400);
+      return json(await startTrendWeek(db, clientId, new Date(), { suffix: `now-${Date.now()}` }));
+    }
+
+    // POST {"mode":"replay_trends","run_id":"<id>"}: the run's week again from
+    // its kept source answers, with no scraping (for tuning the filter).
+    if (mode === "replay_trends") {
+      const runId = typeof body.run_id === "string" ? body.run_id : "";
+      const { data: from } = runId ? await db.from("report_pipeline_runs").select("id, client_id, kind").eq("id", runId).maybeSingle() : { data: null };
+      if (!from || from.kind !== "trends") return json({ error: "run_id must name a trends run" }, 400);
+      return json(await startTrendWeek(db, from.client_id, new Date(), { replayFrom: from.id, suffix: `replay-${Date.now()}` }));
     }
 
     if (mode === "compare_pipeline") {
