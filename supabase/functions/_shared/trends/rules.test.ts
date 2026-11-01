@@ -88,6 +88,17 @@ describe("the rules before Claude", () => {
     expect(out.dropped).toEqual([{ post: video, reason: "own_or_competitor" }]);
   });
 
+  it("gives every search its share of the 60, so one loose search cannot crowd out the rest", () => {
+    // A loose search brings back 60 viral posts; a precise one brings back 10 quieter ones.
+    const loose = Array.from({ length: 60 }, (_, i) => post({ url: `https://www.tiktok.com/@a/video/l${i}`, search: "mobile user acquisition", engagement: 10_000 + i }));
+    const precise = Array.from({ length: 10 }, (_, i) => post({ url: `https://www.tiktok.com/@b/video/p${i}`, search: "app store optimization tips", engagement: 100 + i }));
+    const out = ruleFilter([...loose, ...precise], opts());
+    expect(out.candidates).toHaveLength(60);
+    expect(out.candidates.filter((p) => p.search === "app store optimization tips")).toHaveLength(10);
+    // Within a search, the most engaged go first; the loose search's least engaged are the ones left out.
+    expect(out.dropped.every((d) => d.reason === "over_cap" && d.post.search === "mobile user acquisition" && d.post.engagement < 10_010)).toBe(true);
+  });
+
   it("sends at most 60 per platform, most engaged first", () => {
     const many = Array.from({ length: 61 }, (_, i) => post({ engagement: i }));
     const other = post({ platform: "linkedin", url: "https://www.linkedin.com/posts/x-1", engagement: 0 });

@@ -1,8 +1,9 @@
 // The rules in code that run before Claude reads anything (spec section 4,
 // step 1). They are cheap and only cut what is plainly out: duplicates, posts
 // outside the week, posts in another language, the client's own and its
-// tracked competitors' posts, and anything past the 60 most engaged per
-// platform. Every cut keeps its reason, so each decision can be checked.
+// tracked competitors' posts, and anything past 60 per platform (each search's
+// most engaged first, taking turns). Every cut keeps its reason, so each
+// decision can be checked.
 
 import { SPAM_SIGNALS } from "../pipelines/social/nodes.ts";
 import type { RuleDrop, TrendPlatform, TrendPost } from "./types.ts";
@@ -112,7 +113,13 @@ export function ruleFilter(posts: TrendPost[], o: RuleOptions): { candidates: Tr
   for (const p of kept) byPlatform.set(p.platform, [...(byPlatform.get(p.platform) ?? []), p]);
   const candidates: TrendPost[] = [];
   for (const list of byPlatform.values()) {
-    const ranked = [...list].sort((a, b) => b.engagement - a.engagement);
+    // Each search's most engaged post first, then each one's second, and so on: a loose
+    // search that brings back many viral posts cannot take every place from the others.
+    const bySearch = new Map<string, TrendPost[]>();
+    for (const p of list) bySearch.set(p.search, [...(bySearch.get(p.search) ?? []), p]);
+    const turn = new Map<TrendPost, number>();
+    for (const group of bySearch.values()) [...group].sort((a, b) => b.engagement - a.engagement).forEach((p, i) => turn.set(p, i));
+    const ranked = [...list].sort((a, b) => turn.get(a)! - turn.get(b)! || b.engagement - a.engagement);
     candidates.push(...ranked.slice(0, cap));
     for (const p of ranked.slice(cap)) dropped.push({ post: p, reason: "over_cap" });
   }
