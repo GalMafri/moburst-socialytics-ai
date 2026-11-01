@@ -10,7 +10,7 @@
 // _shared/anthropic.ts (no OpenAI); the social report keeps its Gamma deck,
 // made from the existing template.
 
-import type { ReportKind } from "./types.ts";
+import type { PipelineKind } from "./types.ts";
 
 export interface SecretNeed {
   name: string;
@@ -29,7 +29,7 @@ export const SPROUT_CLIENT_ID = "SPROUT_CLIENT_ID";
 export const SPROUT_CLIENT_SECRET = "SPROUT_CLIENT_SECRET";
 
 /** What each kind's real pipeline will read once it is built. */
-export const PIPELINE_SECRETS: Record<ReportKind, SecretNeed[]> = {
+export const PIPELINE_SECRETS: Record<PipelineKind, SecretNeed[]> = {
   social: [
     { name: ANTHROPIC_API_KEY, set: true, why: "the brief analysis and the report synthesis (n8n uses OpenAI and Gemini nodes for these)" },
     { name: SPROUT_CLIENT_ID, set: true, why: "Sprout analytics for the month and the month before" },
@@ -44,6 +44,10 @@ export const PIPELINE_SECRETS: Record<ReportKind, SecretNeed[]> = {
   ],
   linkedin_source: [
     { name: APIFY_API_TOKEN, set: true, why: "the LinkedIn company-posts actor the n8n workflow runs" },
+  ],
+  trends: [
+    { name: APIFY_API_TOKEN, set: true, why: "the six trend sources (TikTok, Instagram, LinkedIn, YouTube, Pinterest, Facebook)" },
+    { name: ANTHROPIC_API_KEY, set: true, why: "the brand-fit filter and the weekly themes" },
   ],
 };
 

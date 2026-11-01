@@ -8,7 +8,7 @@ import { socialPipeline } from "./definitions/social.ts";
 import { PLACEHOLDER_PIPELINES } from "./definitions/placeholder.ts";
 import { missingSecrets } from "./secrets.ts";
 import { REAL_WRITERS } from "./store.ts";
-import type { PipelineDefinition, ReportKind, RunMode } from "./types.ts";
+import type { PipelineDefinition, PipelineKind, ReportKind, RunMode } from "./types.ts";
 
 export interface Registry {
   get(name: string): PipelineDefinition | undefined;
@@ -27,7 +27,7 @@ export interface Registry {
  * report (store.ts REAL_WRITERS); without one, no pipeline of that kind can
  * run in app mode, however it is marked.
  */
-export function makeRegistry(defs: readonly PipelineDefinition[], canWriteReal: (kind: ReportKind) => boolean = () => false): Registry {
+export function makeRegistry(defs: readonly PipelineDefinition[], canWriteReal: (kind: PipelineKind) => boolean = () => false): Registry {
   const byName = new Map<string, PipelineDefinition>();
   for (const d of defs) {
     if (byName.has(d.name)) throw new Error(`Two pipelines are named ${d.name}.`);

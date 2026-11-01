@@ -8,7 +8,7 @@
 // it writes through ctx.output and ctx.payloads, which this file builds.
 
 import type { RunStore, StepLog, StepServices } from "./runner.ts";
-import type { OutputWriter, PayloadStore, PipelineDefinition, PipelineRun, RealTable, ReportKind, RunMode } from "./types.ts";
+import type { OutputWriter, PayloadStore, PipelineDefinition, PipelineKind, PipelineRun, RealTable, ReportKind, RunMode } from "./types.ts";
 import { COMPETITIVE_WRITERS, SOCIAL_WRITERS } from "./writers.ts";
 
 export const PAYLOAD_BUCKET = "pipeline-payloads";
@@ -46,6 +46,12 @@ export const SHADOW_TABLE: Record<ReportKind, string> = {
   competitive: "shadow_competitive_reports",
   linkedin_source: "shadow_linkedin_sources",
 };
+
+/** A kind's shadow table. Trends runs in app mode only, so it has none. */
+export function shadowTableOf(kind: PipelineKind): string {
+  if (kind === "trends") throw new Error("Trends runs in app mode only; it has no shadow table.");
+  return SHADOW_TABLE[kind];
+}
 
 export class PipelineWriteRefused extends Error {
   constructor(what: string) {
@@ -186,7 +192,7 @@ export function makeShadowOutput(db: Db, run: PipelineRun, payloads: PayloadStor
         }, { onConflict: "run_id" }));
         return;
       }
-      await must(db.from(SHADOW_TABLE[run.kind]).upsert({
+      await must(db.from(shadowTableOf(run.kind)).upsert({
         run_id: run.id, client_id: run.client_id, real_report_id: run.real_id,
         date_range_start: input.range?.start ?? null, date_range_end: input.range?.end ?? null,
         ...(run.kind === "competitive" ? { set_id: input.set_id ?? null } : {}),
@@ -211,15 +217,17 @@ export function makeShadowOutput(db: Db, run: PipelineRun, payloads: PayloadStor
  *                    (writers.ts).
  */
 export type RealWriter = (db: Db, run: PipelineRun, data: Record<string, unknown>) => Promise<void>;
-export const REAL_WRITERS: Record<ReportKind, Record<string, RealWriter>> = {
+export const REAL_WRITERS: Record<PipelineKind, Record<string, RealWriter>> = {
   social: SOCIAL_WRITERS,
   competitive: COMPETITIVE_WRITERS,
   linkedin_source: {
     report: async (db, run, data) => { await makePayloadStore(db, run.id).put("result", data); },
   },
+  // Filled by the trends pipeline's writer (trends/writer.ts).
+  trends: {},
 };
 
-export function makeAppOutput(db: Db, run: PipelineRun, writers: Record<ReportKind, Record<string, RealWriter>> = REAL_WRITERS): OutputWriter {
+export function makeAppOutput(db: Db, run: PipelineRun, writers: Record<PipelineKind, Record<string, RealWriter>> = REAL_WRITERS): OutputWriter {
   return {
     async write(target, data) {
       const writer = writers[run.kind]?.[target];
@@ -303,7 +311,7 @@ export async function loadShadowPair(db: Db, runId: string): Promise<{ run: Pipe
     const shadow = (await must(db.from(SHADOW_TABLE.linkedin_source).select("result").eq("run_id", run.id).maybeSingle())) as { result: unknown } | null;
     return { run, real: await makePayloadStore(db, run.id).get("real.output"), shadow: shadow?.result ?? null };
   }
-  const shadow = (await must(db.from(SHADOW_TABLE[run.kind]).select("report_data").eq("run_id", run.id).maybeSingle())) as { report_data: unknown } | null;
+  const shadow = (await must(db.from(shadowTableOf(run.kind)).select("report_data").eq("run_id", run.id).maybeSingle())) as { report_data: unknown } | null;
   const real = run.real_table && run.real_id
     ? (await must(db.from(run.real_table).select("report_data").eq("id", run.real_id).maybeSingle())) as { report_data: unknown } | null
     : null;

@@ -26,13 +26,19 @@ export const ENGINES: readonly Engine[] = ["n8n", "app", "shadow"];
 /** How an in-app pipeline run writes: shadow storage only, or the real report. */
 export type RunMode = "shadow" | "app";
 
+/**
+ * Every kind of in-app pipeline run: the three report workflows, and the
+ * weekly industry trends, which has no n8n twin and so runs in app mode only.
+ */
+export type PipelineKind = ReportKind | "trends";
+
 /** The real tables a run is linked to. A shadow run only points at them; it never writes them. */
-export type RealTable = "reports" | "competitive_reports" | "rivaliq_snapshots";
+export type RealTable = "reports" | "competitive_reports" | "rivaliq_snapshots" | "trend_weeks";
 
 /** A row of public.report_pipeline_runs. */
 export interface PipelineRun {
   id: string;
-  kind: ReportKind;
+  kind: PipelineKind;
   pipeline: string;
   mode: RunMode;
   app_capable: boolean;
@@ -148,7 +154,7 @@ export type Step<S extends Record<string, unknown> = Record<string, unknown>> = 
 /** One in-app pipeline, registered in registry.ts. */
 export interface PipelineDefinition<S extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
-  kind: ReportKind;
+  kind: PipelineKind;
   /** The modes it may run in. A placeholder runs only in shadow. */
   modes: readonly RunMode[];
   /**
