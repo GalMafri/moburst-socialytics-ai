@@ -4,13 +4,40 @@
 // tracked competitors' posts, and anything past the 60 most engaged per
 // platform. Every cut keeps its reason, so each decision can be checked.
 
-import { matchesAnyTargetLanguage, SPAM_SIGNALS } from "../pipelines/social/nodes.ts";
+import { SPAM_SIGNALS } from "../pipelines/social/nodes.ts";
 import type { RuleDrop, TrendPlatform, TrendPost } from "./types.ts";
 
 /** At most this many candidates per platform reach Claude's filter. */
 export const CANDIDATES_PER_PLATFORM = 60;
-/** Text shorter than this is too short to tell its language; Claude judges it. */
-const LANGUAGE_MIN_CHARS = 10;
+/** Fewer letters than this is too little to tell a post's script; Claude judges it. */
+const LANGUAGE_MIN_LETTERS = 10;
+
+/** The languages written in their own script. Every other language code is read as Latin script. */
+const SCRIPTS: Record<string, RegExp> = {
+  he: /\p{Script=Hebrew}/u, ar: /\p{Script=Arabic}/u, ru: /\p{Script=Cyrillic}/u, uk: /\p{Script=Cyrillic}/u, hi: /\p{Script=Devanagari}/u,
+  th: /\p{Script=Thai}/u, ja: /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u, ko: /\p{Script=Hangul}/u, zh: /\p{Script=Han}/u, el: /\p{Script=Greek}/u,
+};
+
+/**
+ * The post is written in a script one of the client's languages uses. Only a
+ * plain script mismatch is cut here (Hindi for an English client); a Latin
+ * post in another language goes on to Claude, which judges the audience. The
+ * n8n rule this replaces asked for two common English words and dropped short
+ * English captions and hashtag-heavy posts (1 Nov 2026 trial).
+ */
+export function inClientScript(text: string, languages: string[]): boolean {
+  let latin = 0;
+  let scripted = 0;
+  const own: Record<string, number> = {};
+  for (const ch of text) {
+    if (!/\p{L}/u.test(ch) || /\p{Script=Common}/u.test(ch)) continue;
+    scripted++;
+    if (/\p{Script=Latin}/u.test(ch)) latin++;
+    for (const [lang, re] of Object.entries(SCRIPTS)) if (re.test(ch)) own[lang] = (own[lang] ?? 0) + 1;
+  }
+  if (scripted < LANGUAGE_MIN_LETTERS) return true;
+  return (languages.length ? languages : ["en"]).some((lang) => (SCRIPTS[lang] ? (own[lang] ?? 0) / scripted >= 0.3 : latin / scripted >= 0.5));
+}
 
 export interface RuleOptions {
   /** The week collected, as ISO times. */
@@ -69,7 +96,7 @@ export function ruleFilter(posts: TrendPost[], o: RuleOptions): { candidates: Tr
         continue;
       }
     }
-    if (p.text.trim().length >= LANGUAGE_MIN_CHARS && !matchesAnyTargetLanguage(p.text, o.languages.length ? o.languages : ["en"])) {
+    if (!inClientScript(p.text, o.languages)) {
       dropped.push({ post: p, reason: "language" });
       continue;
     }

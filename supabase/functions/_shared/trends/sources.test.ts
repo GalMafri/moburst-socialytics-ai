@@ -71,6 +71,14 @@ describe("each source's answer in the shared post shape", () => {
   });
 });
 
+describe("engagement", () => {
+  it("counts views below a thousand, so small videos still rank against each other", () => {
+    const base = { likes: 0, comments: 0, shares: 0, saves: 0 };
+    expect(engagementOf({ ...base, views: 620 })).toBeGreaterThan(engagementOf({ ...base, views: 61 }));
+    expect(engagementOf({ ...base, views: 0, likes: 3, comments: 1 })).toBe(5);
+  });
+});
+
 describe("what each source is asked for", () => {
   // deno-lint-ignore no-explicit-any
   const inputs = (p: TrendPlatform, searches = eight): any[] => TREND_SOURCES[p].inputs(searches, opts);

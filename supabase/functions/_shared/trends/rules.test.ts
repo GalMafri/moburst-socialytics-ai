@@ -58,6 +58,20 @@ describe("the rules before Claude", () => {
     expect(ruleFilter([post({ text: "wow" })], opts()).candidates).toHaveLength(1);
   });
 
+  it("keeps short or hashtag-heavy English posts for an English client, and leaves Latin-script posts in other languages to Claude", () => {
+    // 1 Nov 2026 trial: these English posts were dropped as another language by the two-common-words rule.
+    const english = [
+      post({ text: "Blessed to secure justice on behalf of our clients 🙌 #lawyer #workcomp #atlantalawyer #settlement" }),
+      post({ text: "Teach Teens Safe Habits Phones, speed, and passengers create distractions. Set clear driving rules." }),
+      post({ text: "#themorganlegalgroup #PersonalInjuryLawyer #texaslawyer #personalinjury #CarAccidentLawyer" }),
+    ];
+    const spanish = post({ text: "Comenta CASA y te escribo para revisar tu caso juntos. #seguros #insurance" });
+    const hindi = post({ text: "मशहूर सिंगर हनी सिंह के करीबी दोस्त के बेटे की सड़क हादसे में जान चली गई" });
+    const out = ruleFilter([...english, spanish, hindi], opts());
+    expect(out.candidates).toEqual([...english, spanish].sort((a, b) => b.engagement - a.engagement));
+    expect(out.dropped).toEqual([{ post: hindi, reason: "language" }]);
+  });
+
   it("drops the client's own and tracked competitors' posts", () => {
     const own = post({ author: "moburst" });
     const rival = post({ author: "SplitMetrics" });

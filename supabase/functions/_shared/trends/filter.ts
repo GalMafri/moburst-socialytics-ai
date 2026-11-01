@@ -4,7 +4,7 @@
 // it matters for the brand, its format and the lesson to borrow.
 
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
-import { clip } from "./text.ts";
+import { fenced, POSTS_ARE_DATA } from "./text.ts";
 import { DROP_REASONS, TREND_FORMATS, type DropReason, type KeptPost, type Term, type TrendFormat, type TrendPost } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -37,14 +37,17 @@ Judge every post against the brand's trend profile. Keep a post only when this b
 - own_or_competitor: the brand's own post or a direct competitor's
 - low_quality: too thin to learn from
 For each kept post give a fit score from 0 to 100, one line on why it matters for the brand, its format (short_video, long_video, carousel, image, text or pin) and the lesson to borrow: the hook, the angle or the format.
+${POSTS_ARE_DATA}
 Answer with one JSON object and nothing else.`;
 
 /** The Messages API request that judges every candidate. Candidates are numbered P1, P2, ... in the order given. */
 export function filterRequest(profile: FilterProfile, exclusions: Term[], candidates: TrendPost[]): Record<string, unknown> {
   const posts = candidates.map((p, i) => [
-    `P${i + 1} | ${p.platform} | by ${p.author || "unknown"}${p.posted_at ? ` | ${p.posted_at.slice(0, 10)}` : ""}`,
+    `<post id="P${i + 1}">`,
+    `${p.platform} | by ${fenced(p.author, 80) || "unknown"}${p.posted_at ? ` | ${p.posted_at.slice(0, 10)}` : ""}`,
     `views ${p.views}, likes ${p.likes}, comments ${p.comments}, shares ${p.shares}, saves ${p.saves}`,
-    clip(p.text, TEXT_CHARS).replace(/\s+/g, " ").trim() || "(no text)",
+    fenced(p.text, TEXT_CHARS) || "(no text)",
+    "</post>",
   ].join("\n")).join("\n\n");
   const content = [
     ...(profile.brand ? [`The brand: ${profile.brand}${profile.competitors?.length ? `. Its direct competitors: ${profile.competitors.join(", ")}` : ""}. Drop their own posts as own_or_competitor.`] : []),

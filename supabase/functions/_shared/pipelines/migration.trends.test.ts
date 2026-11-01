@@ -26,3 +26,22 @@ describe("20261029100100_trend_refresh_job.sql", () => {
     expect(job).toMatch(/update public\.trend_weeks set status = 'partial'/);
   });
 });
+
+const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "migrations");
+const hardening = readFileSync(join(migrationsDir, "20261101120000_trends_hardening.sql"), "utf8").replace(/--[^\n]*/g, "").replace(/\s+/g, " ").trim();
+
+describe("20261101120000_trends_hardening.sql", () => {
+  it("queues Trends steps after real report runs (25) and their shadows (60)", () => {
+    expect(hardening).toContain("case when p_kind = 'trends' then 80 when p_mode = 'app' then 25 else 60 end");
+  });
+
+  it("refuses every write to the trend tables from client and anonymous users", () => {
+    expect(hardening).toContain("revoke insert, update, delete, truncate on public.trend_profiles, public.trend_terms, public.trend_weeks, public.trend_posts, public.trend_themes from anon, authenticated");
+    expect(hardening).toContain("revoke all on public.trend_profiles, public.trend_terms, public.trend_weeks, public.trend_posts, public.trend_themes from anon");
+  });
+
+  it("hides dismissed themes from client users", () => {
+    expect(hardening).toContain("using (public.is_moburst_staff() or (dismissed_at is null and public.is_client_member(client_id)))");
+  });
+});
+

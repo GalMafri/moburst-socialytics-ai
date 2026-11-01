@@ -60,10 +60,10 @@ function claude(requests: Any[], o: { badFilter?: boolean; failFilter?: boolean 
     if (o.failFilter && String(req.custom_id).includes("filter")) return new Response(JSON.stringify({ custom_id: req.custom_id, result: { type: "errored", error: { type: "overloaded_error" } } }) + "\n");
     let answer: unknown;
     if (String(req.custom_id).includes("filter")) {
-      const ids = [...prompt.matchAll(/^P(\d+) \| (\w+) \|/gm)].map((m) => ({ id: `P${m[1]}`, platform: m[2] }));
+      const ids = [...prompt.matchAll(/<post id="P(\d+)">\n(\w+) \|/g)].map((m) => ({ id: `P${m[1]}`, platform: m[2] }));
       answer = o.badFilter ? { decisions: [] } : { decisions: ids.map((x, i) => ({ id: x.id, keep: true, fit: 70 + (i % 30), why: "w", format: x.platform === "pinterest" ? "pin" : "short_video", lesson: "l" })) };
     } else {
-      const ids = [...prompt.matchAll(/^K(\d+) \|/gm)].map((m) => `K${m[1]}`);
+      const ids = [...prompt.matchAll(/<post id="K(\d+)">/g)].map((m) => `K${m[1]}`);
       answer = { themes: ["One", "Two", "Three"].map((title, i) => ({ title, happening: "h", why_it_matters: "w", angle: "a", post_ids: [ids[i % ids.length]] })) };
     }
     const message = { content: [{ type: "text", text: JSON.stringify(answer) }], stop_reason: "end_turn", usage: { input_tokens: 1000, output_tokens: 200 } };
@@ -128,7 +128,8 @@ describe("trends_v1", () => {
     for (const platform of TREND_PLATFORMS) expect(kept.filter((p) => p.platform === platform).length).toBeLessThanOrEqual(10);
     // Every post the week looked at is stored, kept or dropped with a reason.
     expect(r.posts.filter((p) => !p.kept).every((p) => p.drop_reason)).toBe(true);
-    expect(r.posts.some((p) => p.drop_reason === "language")).toBe(true);
+    // A Latin-script post in another language (the Spanish TikTok) goes on to Claude; only another script is cut by the rules.
+    expect(r.posts.find((p) => p.author === "monetiza_con_yanet")!.drop_reason).not.toBe("language");
     expect(r.themes.length).toBeGreaterThanOrEqual(3);
     expect(r.themes.length).toBeLessThanOrEqual(6);
     expect(r.themes.every((t) => t.post_ids.length > 0 && t.post_ids.every((id: string) => kept.some((p) => p.id === id)))).toBe(true);
@@ -176,6 +177,10 @@ describe("trends_v1", () => {
     const replay = await drivePipeline(r.db, r.registry, run_id, { clock: r.clock, env: ENV });
     expect(replay.outcome.status).toBe("done");
     expect(r.calls.length).toBe(before);
+    const replayedWeek = r.db.tables.trend_weeks.find((w) => w.id === "w2")!;
+    // The replay scraped nothing; the week keeps the scraping cost of the run it replays.
+    expect(replayedWeek.cost.apify_usd).toBeCloseTo(r.week.cost.apify_usd, 5);
+    expect(replayedWeek.cost.replayed_from).toBe(r.run_id);
     const keptAgain = r.db.tables.trend_posts.filter((p) => p.week_id === "w2" && p.kept).length;
     expect(keptAgain).toBe(r.posts.filter((p) => p.kept).length);
   });

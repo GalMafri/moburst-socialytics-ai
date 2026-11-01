@@ -364,9 +364,17 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         }
         const watchedOk = plan.platforms.every((p) => FINE.includes(st.platforms?.[p]?.status as PlatformStatus));
         const status = watchedOk && st.filter !== "failed" && st.themes !== "failed" ? "done" : "partial";
+        // A replay scraped nothing: the week keeps the scraping cost of the run it replays.
+        let apifyUsd = st.apifyUsd ?? 0;
+        const replay = replayOf(ctx);
+        if (replay) {
+          const { data: source } = await ctx.db.from("report_pipeline_runs").select("real_id").eq("id", replay.from_run).maybeSingle();
+          const { data: sourceWeek } = source?.real_id ? await ctx.db.from("trend_weeks").select("cost").eq("id", source.real_id).maybeSingle() : { data: null };
+          apifyUsd = Number(sourceWeek?.cost?.apify_usd) || 0;
+        }
         await ctx.output.write("week", {
           posts: rows, themes, status, platforms, filter_status: st.filter ?? "skipped",
-          cost: { apify_usd: Math.round((st.apifyUsd ?? 0) * 10000) / 10000, claude: st.claude ?? {} },
+          cost: { apify_usd: Math.round(apifyUsd * 10000) / 10000, claude: st.claude ?? {}, ...(replay ? { replayed_from: replay.from_run } : {}) },
           finished_at: ctx.now().toISOString(),
         });
         return { type: "done", detail: { status, kept: kept.length, themes: themes.length, posts: rows.length } };

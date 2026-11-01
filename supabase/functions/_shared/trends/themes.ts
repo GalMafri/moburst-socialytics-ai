@@ -4,7 +4,7 @@
 
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import type { FilterProfile } from "./filter.ts";
-import { clip } from "./text.ts";
+import { fenced, POSTS_ARE_DATA } from "./text.ts";
 import type { KeptPost, Theme, TrendPlatform } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -23,15 +23,18 @@ export function themesWanted(kept: KeptPost[]): boolean {
 
 const THEMES_SYSTEM = `You find the themes in a week of social posts from a brand's industry landscape. Moburst, a marketing agency, manages the brand's social media, and the team plans the brand's posts from these themes.
 Group the posts into 3 to 6 themes. A theme is something several creators are doing or talking about, not one post. Each theme has a short title, what is happening, why it matters for this brand, the angle the brand could take, and the posts that show it (by id, at least one each).
+${POSTS_ARE_DATA}
 Answer with one JSON object and nothing else.`;
 
 /** The Messages API request for the week's themes. Kept posts are numbered K1, K2, ... in the order given. */
 export function themesRequest(profile: Pick<FilterProfile, "audience" | "fit_rubric">, kept: KeptPost[]): Record<string, unknown> {
   const posts = kept.map((p, i) => [
-    `K${i + 1} | ${p.platform} | ${p.format} | fit ${p.fit} | by ${p.author || "unknown"}`,
-    `Why it matters: ${p.why}`,
-    `Lesson: ${p.lesson}`,
-    clip(p.text, TEXT_CHARS).replace(/\s+/g, " ").trim(),
+    `<post id="K${i + 1}">`,
+    `${p.platform} | ${p.format} | fit ${p.fit} | by ${fenced(p.author, 80) || "unknown"}`,
+    `Why it matters: ${fenced(p.why, 300)}`,
+    `Lesson: ${fenced(p.lesson, 300)}`,
+    fenced(p.text, TEXT_CHARS),
+    "</post>",
   ].join("\n")).join("\n\n");
   const content = [
     `Who the brand speaks to: ${profile.audience}`,

@@ -51,7 +51,7 @@ const iso = (v: unknown): string | null => {
 
 /** How much a post was engaged with, the same way on every platform. */
 export function engagementOf(p: Pick<TrendPost, "likes" | "comments" | "shares" | "saves" | "views">): number {
-  return p.likes + 2 * p.comments + 3 * p.shares + p.saves + Math.floor(p.views / 1000);
+  return p.likes + 2 * p.comments + 3 * p.shares + p.saves + p.views / 1000;
 }
 
 function post(platform: TrendPlatform, fields: Omit<TrendPost, "platform" | "engagement">): TrendPost | null {
