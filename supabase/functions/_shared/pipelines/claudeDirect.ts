@@ -33,7 +33,9 @@ export const CLAUDE_DIRECT_DEADLINE_MS = 370_000;
 export const directKey = (saveAs: string) => `${saveAs}.direct`;
 export const directFailedKey = (saveAs: string) => `${saveAs}.direct_failed`;
 
-export interface DirectAnswer { text: string; stop_reason: string; seconds: number; start: number }
+/** Tokens a call used, for the run's measured cost. */
+export interface ClaudeUsage { input_tokens: number; output_tokens: number }
+export interface DirectAnswer { text: string; stop_reason: string; seconds: number; start: number; usage?: ClaudeUsage }
 export interface DirectFailure { message: string; seconds: number; start: number }
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -45,7 +47,7 @@ const MESSAGES = "https://api.anthropic.com/v1/messages";
  * whole message (thinking is left out), and the stop reason. A stream that
  * ends without one, or that carries an error, throws.
  */
-export async function claudeStream(a: { apiKey: string; body: Record<string, unknown>; signal: AbortSignal; fetchImpl?: Fetch }): Promise<{ text: string; stopReason: string }> {
+export async function claudeStream(a: { apiKey: string; body: Record<string, unknown>; signal: AbortSignal; fetchImpl?: Fetch }): Promise<{ text: string; stopReason: string; usage: ClaudeUsage }> {
   const f = a.fetchImpl ?? fetch;
   const r = await f(MESSAGES, {
     method: "POST",
@@ -56,21 +58,28 @@ export async function claudeStream(a: { apiKey: string; body: Record<string, unk
   if (!r.ok || !r.body) throw new Error(`Claude did not take the request [${r.status}]: ${(await r.text().catch(() => "")).slice(0, 200)}`);
   const texts = new Map<number, string>();
   let stopReason = "";
+  const usage: ClaudeUsage = { input_tokens: 0, output_tokens: 0 };
   let rest = "";
   const take = (line: string) => {
     if (!line.startsWith("data:")) return;
     // Thinking arrives as most of the stream; only the events that matter are parsed.
-    if (!/"(?:text_delta|content_block_start|message_delta|error)"/.test(line)) return;
+    if (!/"(?:text_delta|content_block_start|message_start|message_delta|error)"/.test(line)) return;
     const e = JSON.parse(line.slice(5)) as {
       type?: string; index?: number;
       content_block?: { type?: string; text?: string };
       delta?: { type?: string; text?: string; stop_reason?: string | null };
       error?: { type?: string; message?: string };
+      message?: { usage?: { input_tokens?: number } };
+      usage?: { output_tokens?: number };
     };
     if (e.type === "error") throw new Error(`Claude stopped the answer: ${e.error?.type ?? "error"} ${e.error?.message ?? ""}`.trim());
     if (e.type === "content_block_start" && e.content_block?.type === "text") texts.set(Number(e.index), e.content_block.text ?? "");
     else if (e.type === "content_block_delta" && e.delta?.type === "text_delta") texts.set(Number(e.index), (texts.get(Number(e.index)) ?? "") + (e.delta.text ?? ""));
-    else if (e.type === "message_delta" && e.delta?.stop_reason) stopReason = e.delta.stop_reason;
+    else if (e.type === "message_start") usage.input_tokens = Number(e.message?.usage?.input_tokens) || 0;
+    else if (e.type === "message_delta") {
+      if (e.delta?.stop_reason) stopReason = e.delta.stop_reason;
+      if (e.usage?.output_tokens !== undefined) usage.output_tokens = Number(e.usage.output_tokens) || 0;
+    }
   };
   const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
   for (;;) {
@@ -82,7 +91,7 @@ export async function claudeStream(a: { apiKey: string; body: Record<string, unk
   }
   take(rest.trim());
   if (!stopReason) throw new Error("Claude's answer ended before it was complete.");
-  return { text: [...texts.entries()].sort(([x], [y]) => x - y).map(([, t]) => t).join("\n"), stopReason };
+  return { text: [...texts.entries()].sort(([x], [y]) => x - y).map(([, t]) => t).join("\n"), stopReason, usage };
 }
 
 /**
@@ -100,7 +109,7 @@ export async function runClaudeDirect(store: PayloadStore, a: {
   const keep = a.keepDays ? { keepDays: a.keepDays } : undefined;
   try {
     const r = await claudeStream({ apiKey: a.apiKey, body: a.body, signal: AbortSignal.timeout(a.deadlineMs ?? CLAUDE_DIRECT_DEADLINE_MS), fetchImpl: a.fetchImpl });
-    const answer: DirectAnswer = { text: r.text, stop_reason: r.stopReason, seconds: seconds(), start: a.start };
+    const answer: DirectAnswer = { text: r.text, stop_reason: r.stopReason, seconds: seconds(), start: a.start, usage: r.usage };
     await store.put(directKey(a.saveAs), answer, keep);
   } catch (e) {
     const failure: DirectFailure = { message: (e instanceof Error ? e.message : String(e)).slice(0, 300), seconds: seconds(), start: a.start };

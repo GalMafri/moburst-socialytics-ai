@@ -79,11 +79,13 @@ export async function claudeBatchRead(ctx: StepContext, a: { apiKey: string; bat
   // JSONL, one line per request, in any order.
   for (const line of (await res.text()).split("\n")) {
     if (!line.trim()) continue;
-    const row = JSON.parse(line) as { custom_id?: string; result?: { type?: string; message?: { content?: Array<{ type?: string; text?: string }>; stop_reason?: string }; error?: unknown } };
+    const row = JSON.parse(line) as { custom_id?: string; result?: { type?: string; message?: { content?: Array<{ type?: string; text?: string }>; stop_reason?: string; usage?: { input_tokens?: number; output_tokens?: number } }; error?: unknown } };
     if (row.custom_id !== a.customId) continue;
     if (row.result?.type !== "succeeded") return { state: "failed", reason: `the request ${row.result?.type ?? "had no result"}` };
     const stopReason = String(row.result.message?.stop_reason ?? "");
-    const saved = await ctx.payloads.put(a.saveAs, { text: answerText(row.result.message), stop_reason: stopReason }, a.keepDays ? { keepDays: a.keepDays } : undefined);
+    const u = row.result.message?.usage;
+    const usage = u ? { input_tokens: Number(u.input_tokens) || 0, output_tokens: Number(u.output_tokens) || 0 } : undefined;
+    const saved = await ctx.payloads.put(a.saveAs, { text: answerText(row.result.message), stop_reason: stopReason, ...(usage ? { usage } : {}) }, a.keepDays ? { keepDays: a.keepDays } : undefined);
     return { state: "done", ...saved, stopReason };
   }
   return { state: "failed", reason: "the batch has no result for this request" };
@@ -160,7 +162,7 @@ export function claudeBatchStep(o: {
     if (direct) {
       const answer = await ctx.payloads.get<DirectAnswer>(directKey(o.saveAs));
       if (answer && typeof answer.text === "string") {
-        const saved = await ctx.payloads.put(o.saveAs, { text: answer.text, stop_reason: answer.stop_reason }, keep);
+        const saved = await ctx.payloads.put(o.saveAs, { text: answer.text, stop_reason: answer.stop_reason, ...(answer.usage ? { usage: answer.usage } : {}) }, keep);
         if (batchId) await claudeBatchCancel({ apiKey, batchId, fetchImpl: o.fetchImpl }).catch(() => undefined);
         return finish({ saved: saved.key, bytes: saved.bytes, stop_reason: answer.stop_reason, answered_by: "direct", direct_seconds: answer.seconds });
       }

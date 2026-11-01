@@ -69,7 +69,7 @@ describe("claudeBatchStep", () => {
         // The step's request id: the run and the answer's name.
         const customId = `${run.id}_${saveAs}`.replace(/[^a-zA-Z0-9_-]/g, "_");
         const line = outcome === "succeeded"
-          ? { custom_id: customId, result: { type: "succeeded", message: { content: [{ type: "text", text: "The long analysis." }], stop_reason: "end_turn" } } }
+          ? { custom_id: customId, result: { type: "succeeded", message: { content: [{ type: "text", text: "The long analysis." }], stop_reason: "end_turn", usage: { input_tokens: 900, output_tokens: 120 } } } }
           : { custom_id: customId, result: { type: "errored", error: { type: "overloaded_error" } } };
         return new Response(`${JSON.stringify({ custom_id: "other", result: { type: "succeeded", message: { content: [] } } })}\n${JSON.stringify(line)}\n`);
       }
@@ -97,7 +97,7 @@ describe("claudeBatchStep", () => {
 
     const c3 = ctx({ poll: { ...polling, polls: 2 } });
     expect(await step(c3)).toMatchObject({ type: "next", step: "deck", detail: { saved: "analysis.text", stop_reason: "end_turn" } });
-    expect(c3.saved.get("analysis.text")).toEqual({ text: "The long analysis.", stop_reason: "end_turn" });
+    expect(c3.saved.get("analysis.text")).toEqual({ text: "The long analysis.", stop_reason: "end_turn", usage: { input_tokens: 900, output_tokens: 120 } });
   });
 
   it("submits a new batch when one ends without an answer, then gives up to the runner's retries", async () => {
@@ -145,7 +145,7 @@ describe("claudeBatchStep", () => {
       const step = claudeBatchStep({ build: async () => ({ apiKey: "k", body }), saveAs: "analysis.text", next: null, fetchImpl, direct });
       const c = ctx({ poll: { handle: { claude_batch_id: "msgbatch_1", direct_starts: 1, direct_started_at: "2026-11-07T07:19:00Z" }, polls: 3, since: "x" } });
       expect(await step(c)).toMatchObject({ type: "done", detail: { answered_by: "batch" } });
-      expect(c.saved.get("analysis.text")).toEqual({ text: "The long analysis.", stop_reason: "end_turn" });
+      expect(c.saved.get("analysis.text")).toEqual({ text: "The long analysis.", stop_reason: "end_turn", usage: { input_tokens: 900, output_tokens: 120 } });
     });
 
     it("asks once more after a direct call failed outright, then leaves it to the batch", async () => {

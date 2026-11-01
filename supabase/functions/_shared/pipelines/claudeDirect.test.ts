@@ -15,7 +15,7 @@ function streamed(text: string, status = 200) {
   return new Response(body, { status });
 }
 const answer = sse([
-  { type: "message_start", message: { id: "msg_1", content: [] } },
+  { type: "message_start", message: { id: "msg_1", content: [], usage: { input_tokens: 1200, output_tokens: 1 } } },
   { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
   { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Weighing the month…" } },
   { type: "content_block_stop", index: 0 },
@@ -41,7 +41,7 @@ describe("claudeStream", () => {
     const r = await claudeStream({ apiKey: "k", body: { model: "claude-opus-5-5", max_tokens: 32000, messages: [{ role: "user", content: "x" }] }, signal: new AbortController().signal,
       fetchImpl: async (_u, init) => { sent.push(JSON.parse(String(init?.body))); return streamed(answer); } });
     expect(sent[0]).toMatchObject({ model: "claude-opus-5-5", max_tokens: 32000, stream: true });
-    expect(r).toEqual({ text: "{\"executive_summary\": \"Cadence: steady.\"}\nSecond block.", stopReason: "end_turn" });
+    expect(r).toEqual({ text: "{\"executive_summary\": \"Cadence: steady.\"}\nSecond block.", stopReason: "end_turn", usage: { input_tokens: 1200, output_tokens: 42 } });
   });
 
   it("throws on a refused request, an error in the stream, and a stream that ends early", async () => {
@@ -57,7 +57,7 @@ describe("runClaudeDirect", () => {
     const { s, kept } = store();
     let t = 1_000;
     await runClaudeDirect(s, { apiKey: "k", body: {}, saveAs: "analysis.text", start: 1, now: () => (t += 61_000), fetchImpl: async () => streamed(answer) });
-    expect(kept.get(directKey("analysis.text"))).toMatchObject({ stop_reason: "end_turn", seconds: 61, start: 1 });
+    expect(kept.get(directKey("analysis.text"))).toMatchObject({ stop_reason: "end_turn", seconds: 61, start: 1, usage: { input_tokens: 1200, output_tokens: 42 } });
     expect(kept.has(directFailedKey("analysis.text"))).toBe(false);
   });
 

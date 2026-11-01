@@ -120,7 +120,7 @@ describe("readEngine", () => {
 
 describe("registry", () => {
   it("registers the in-app LinkedIn source, competitive and social pipelines, and one shadow-only placeholder per kind, needing no secret", () => {
-    expect(REGISTRY.all().map((d) => d.name).sort()).toEqual(["competitive_v1", "linkedin_source_v1", "placeholder_competitive", "placeholder_linkedin_source", "placeholder_social", "social_v1"]);
+    expect(REGISTRY.all().map((d) => d.name).sort()).toEqual(["competitive_v1", "linkedin_source_v1", "placeholder_competitive", "placeholder_linkedin_source", "placeholder_social", "social_v1", "trends_v1"]);
     for (const d of REGISTRY.all().filter((x) => x.name.startsWith("placeholder_"))) {
       expect(d.modes).toEqual(["shadow"]);
       expect(d.appCapable).toBe(false);

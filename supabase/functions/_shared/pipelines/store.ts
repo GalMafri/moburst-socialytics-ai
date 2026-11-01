@@ -8,6 +8,7 @@
 // it writes through ctx.output and ctx.payloads, which this file builds.
 
 import type { RunStore, StepLog, StepServices } from "./runner.ts";
+import { TREND_WRITERS } from "../trends/writer.ts";
 import type { OutputWriter, PayloadStore, PipelineDefinition, PipelineKind, PipelineRun, RealTable, ReportKind, RunMode } from "./types.ts";
 import { COMPETITIVE_WRITERS, SOCIAL_WRITERS } from "./writers.ts";
 
@@ -223,8 +224,7 @@ export const REAL_WRITERS: Record<PipelineKind, Record<string, RealWriter>> = {
   linkedin_source: {
     report: async (db, run, data) => { await makePayloadStore(db, run.id).put("result", data); },
   },
-  // Filled by the trends pipeline's writer (trends/writer.ts).
-  trends: {},
+  trends: TREND_WRITERS,
 };
 
 export function makeAppOutput(db: Db, run: PipelineRun, writers: Record<PipelineKind, Record<string, RealWriter>> = REAL_WRITERS): OutputWriter {

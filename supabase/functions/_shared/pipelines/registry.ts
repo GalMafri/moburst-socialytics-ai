@@ -2,6 +2,7 @@
 // a run whose pipeline is not here (a rollback, say) stops quietly, and for a
 // report the dispatch then makes it again on n8n.
 
+import { trendsPipeline } from "./definitions/trends.ts";
 import { competitivePipeline } from "./definitions/competitive.ts";
 import { linkedInSourcePipeline } from "./definitions/linkedinSource.ts";
 import { socialPipeline } from "./definitions/social.ts";
@@ -56,4 +57,4 @@ export function makeRegistry(defs: readonly PipelineDefinition[], canWriteReal: 
  * that is not a replay), and a placeholder per kind, which shadows only while
  * the real pipeline's secrets are missing.
  */
-export const REGISTRY: Registry = makeRegistry([linkedInSourcePipeline(), competitivePipeline(), socialPipeline(), ...PLACEHOLDER_PIPELINES], (kind) => Boolean(REAL_WRITERS[kind]?.report));
+export const REGISTRY: Registry = makeRegistry([linkedInSourcePipeline(), competitivePipeline(), socialPipeline(), trendsPipeline(), ...PLACEHOLDER_PIPELINES], (kind) => Boolean(REAL_WRITERS[kind]?.report));
