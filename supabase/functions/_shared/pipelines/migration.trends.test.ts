@@ -6,8 +6,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const migrations = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "migrations");
-const code = (name: string) => readFileSync(join(migrations, name), "utf8").replace(/--[^\n]*/g, "").replace(/\s+/g, " ").trim();
+// The weekly job's migration waits in supabase/pending until Lital reviews the trial.
+const pending = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "pending");
+const code = (name: string) => readFileSync(join(pending, name), "utf8").replace(/--[^\n]*/g, "").replace(/\s+/g, " ").trim();
 const job = code("20261029100100_trend_refresh_job.sql");
 
 describe("20261029100100_trend_refresh_job.sql", () => {
