@@ -11,6 +11,7 @@
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { topCounts } from "../competitive/postSample.ts";
 import { textHash } from "../lifecycle/names.ts";
+import { clip } from "./text.ts";
 import { HASHTAG_PLATFORMS, TREND_PLATFORMS, type HashtagPlatform, type Term, type TrendPlatform, type TrendProfile } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -80,8 +81,8 @@ async function clientExtras(db: Db, clientId: string): Promise<{ brand_book: str
   const { data } = await db.from("clients").select("brand_book_text, social_voice").eq("id", clientId).maybeSingle();
   const examples = Array.isArray(data?.social_voice?.examples) ? data.social_voice.examples : [];
   return {
-    brand_book: str(data?.brand_book_text).slice(0, SITE_CHARS),
-    voice_examples: examples.map((e: Any) => str(typeof e === "string" ? e : e?.text)).filter(Boolean).slice(0, 5),
+    brand_book: clip(str(data?.brand_book_text), SITE_CHARS),
+    voice_examples: examples.map((e: Any) => clip(str(typeof e === "string" ? e : e?.text), 600)).filter(Boolean).slice(0, 5),
   };
 }
 
@@ -102,7 +103,7 @@ export async function profileEvidence(db: Db, client: Any, now: Date, io: Profil
   const brief = str(client.brief_text);
   const pillars = pillarsOf(client.content_pillars);
   const website = str(client.website_url);
-  const site = website ? (await tryOr(() => io.siteText(website), "")).slice(0, SITE_CHARS) : "";
+  const site = website ? clip(await tryOr(() => io.siteText(website), ""), SITE_CHARS) : "";
   if (!brief && pillars.length === 0 && site.length < MIN_SITE_CHARS) return null;
 
   const extras = await tryOr(() => clientExtras(db, client.id), { brand_book: "", voice_examples: [] });

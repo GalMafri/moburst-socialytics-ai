@@ -4,6 +4,7 @@
 
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import type { FilterProfile } from "./filter.ts";
+import { clip } from "./text.ts";
 import type { KeptPost, Theme, TrendPlatform } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -30,7 +31,7 @@ export function themesRequest(profile: Pick<FilterProfile, "audience" | "fit_rub
     `K${i + 1} | ${p.platform} | ${p.format} | fit ${p.fit} | by ${p.author || "unknown"}`,
     `Why it matters: ${p.why}`,
     `Lesson: ${p.lesson}`,
-    p.text.slice(0, TEXT_CHARS).replace(/\s+/g, " ").trim(),
+    clip(p.text, TEXT_CHARS).replace(/\s+/g, " ").trim(),
   ].join("\n")).join("\n\n");
   const content = [
     `Who the brand speaks to: ${profile.audience}`,

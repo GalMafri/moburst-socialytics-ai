@@ -84,3 +84,23 @@ describe("the weekly themes", () => {
     expect(parseThemes(JSON.stringify({ themes: seven }), kept)).toHaveProperty("error");
   });
 });
+
+describe("text cut for Claude", () => {
+  // 1 Nov 2026 trial: a post cut at 500 characters split an emoji, and the batch API refused the request ("no low surrogate in string").
+  const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  it("never cuts a post's text in the middle of an emoji", () => {
+    const text = `${"a".repeat(499)}😀 and more`;
+    const body = filterRequest(profile, [], [post(1, { text })]) as { messages: Array<{ content: string }> };
+    expect(lone.test(body.messages[0].content)).toBe(false);
+    const kept = [{ ...post(1, { text: `${"b".repeat(399)}🚀 tail` }), fit: 80, why: "w", format: "short_video" as const, lesson: "l" }];
+    const themes = themesRequest(profile, [...kept, ...kept, ...kept]) as { messages: Array<{ content: string }> };
+    expect(lone.test(themes.messages[0].content)).toBe(false);
+  });
+
+  it("drops a broken half of an emoji that came in the source text", () => {
+    const body = filterRequest(profile, [], [post(1, { text: "broken \uD83D here" })]) as { messages: Array<{ content: string }> };
+    expect(lone.test(body.messages[0].content)).toBe(false);
+    expect(body.messages[0].content).toContain("broken here");
+  });
+});
+

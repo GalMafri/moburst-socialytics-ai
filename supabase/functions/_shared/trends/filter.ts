@@ -4,6 +4,7 @@
 // it matters for the brand, its format and the lesson to borrow.
 
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
+import { clip } from "./text.ts";
 import { DROP_REASONS, TREND_FORMATS, type DropReason, type KeptPost, type Term, type TrendFormat, type TrendPost } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -43,7 +44,7 @@ export function filterRequest(profile: FilterProfile, exclusions: Term[], candid
   const posts = candidates.map((p, i) => [
     `P${i + 1} | ${p.platform} | by ${p.author || "unknown"}${p.posted_at ? ` | ${p.posted_at.slice(0, 10)}` : ""}`,
     `views ${p.views}, likes ${p.likes}, comments ${p.comments}, shares ${p.shares}, saves ${p.saves}`,
-    p.text.slice(0, TEXT_CHARS).replace(/\s+/g, " ").trim() || "(no text)",
+    clip(p.text, TEXT_CHARS).replace(/\s+/g, " ").trim() || "(no text)",
   ].join("\n")).join("\n\n");
   const content = [
     ...(profile.brand ? [`The brand: ${profile.brand}${profile.competitors?.length ? `. Its direct competitors: ${profile.competitors.join(", ")}` : ""}. Drop their own posts as own_or_competitor.`] : []),
