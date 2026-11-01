@@ -704,9 +704,9 @@ function matchesTargetLanguage(text: string, lang: string): boolean {
   const lowerText = cleanText.toLowerCase();
   return words.filter((word) => lowerText.includes(word)).length >= 2;
 }
-const matchesAnyTargetLanguage = (text: string, langs: string[]) => langs.some((lang) => matchesTargetLanguage(text, lang));
+export const matchesAnyTargetLanguage = (text: string, langs: string[]) => langs.some((lang) => matchesTargetLanguage(text, lang));
 
-const SPAM_SIGNALS = [
+export const SPAM_SIGNALS = [
   /\b(crypto|bitcoin|btc|ethereum|eth|nft|airdrop|binance|coinbase|token|defi|web3|blockchain|solana|memecoin)\b/i,
   /\b(casino|poker|slots?|betting|bet365|jackpot|roulette)\b/i,
   /\b(f4f|l4l|follow\s*for\s*follow|like\s*for\s*like|follow\s*back|gain\s*followers|free\s*followers)\b/i,
