@@ -2926,6 +2926,294 @@ export type Database = {
           },
         ]
       }
+      trend_posts: {
+        Row: {
+          author: string
+          client_id: string
+          comments: number
+          created_at: string
+          drop_reason: string | null
+          engagement: number
+          fit: number | null
+          format: string | null
+          id: string
+          kept: boolean
+          lesson: string | null
+          likes: number
+          platform: string
+          posted_at: string | null
+          saves: number
+          search: string
+          shares: number
+          text: string
+          tripwire: boolean
+          url: string
+          views: number
+          week_id: string
+          why: string | null
+        }
+        Insert: {
+          author?: string
+          client_id: string
+          comments?: number
+          created_at?: string
+          drop_reason?: string | null
+          engagement?: number
+          fit?: number | null
+          format?: string | null
+          id?: string
+          kept?: boolean
+          lesson?: string | null
+          likes?: number
+          platform: string
+          posted_at?: string | null
+          saves?: number
+          search?: string
+          shares?: number
+          text?: string
+          tripwire?: boolean
+          url: string
+          views?: number
+          week_id: string
+          why?: string | null
+        }
+        Update: {
+          author?: string
+          client_id?: string
+          comments?: number
+          created_at?: string
+          drop_reason?: string | null
+          engagement?: number
+          fit?: number | null
+          format?: string | null
+          id?: string
+          kept?: boolean
+          lesson?: string | null
+          likes?: number
+          platform?: string
+          posted_at?: string | null
+          saves?: number
+          search?: string
+          shares?: number
+          text?: string
+          tripwire?: boolean
+          url?: string
+          views?: number
+          week_id?: string
+          why?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trend_posts_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trend_posts_week_id_fkey"
+            columns: ["week_id"]
+            isOneToOne: false
+            referencedRelation: "trend_weeks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trend_profiles: {
+        Row: {
+          audience: string
+          client_id: string
+          fit_rubric: string
+          hashtags_at: string | null
+          inputs_key: string
+          platforms: Json
+          search_overrides: Json
+          written_at: string
+        }
+        Insert: {
+          audience: string
+          client_id: string
+          fit_rubric: string
+          hashtags_at?: string | null
+          inputs_key: string
+          platforms?: Json
+          search_overrides?: Json
+          written_at?: string
+        }
+        Update: {
+          audience?: string
+          client_id?: string
+          fit_rubric?: string
+          hashtags_at?: string | null
+          inputs_key?: string
+          platforms?: Json
+          search_overrides?: Json
+          written_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trend_profiles_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: true
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trend_terms: {
+        Row: {
+          client_id: string
+          created_at: string
+          id: string
+          kind: string
+          platform: string | null
+          reason: string
+          removed_at: string | null
+          removed_by: string | null
+          source: string
+          term: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          id?: string
+          kind: string
+          platform?: string | null
+          reason?: string
+          removed_at?: string | null
+          removed_by?: string | null
+          source: string
+          term: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          platform?: string | null
+          reason?: string
+          removed_at?: string | null
+          removed_by?: string | null
+          source?: string
+          term?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trend_terms_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trend_themes: {
+        Row: {
+          angle: string
+          client_id: string
+          created_at: string
+          dismissed_at: string | null
+          dismissed_by: string | null
+          happening: string
+          id: string
+          platforms: string[]
+          position: number
+          post_ids: string[]
+          title: string
+          week_id: string
+          why_it_matters: string
+        }
+        Insert: {
+          angle?: string
+          client_id: string
+          created_at?: string
+          dismissed_at?: string | null
+          dismissed_by?: string | null
+          happening?: string
+          id?: string
+          platforms?: string[]
+          position?: number
+          post_ids?: string[]
+          title: string
+          week_id: string
+          why_it_matters?: string
+        }
+        Update: {
+          angle?: string
+          client_id?: string
+          created_at?: string
+          dismissed_at?: string | null
+          dismissed_by?: string | null
+          happening?: string
+          id?: string
+          platforms?: string[]
+          position?: number
+          post_ids?: string[]
+          title?: string
+          week_id?: string
+          why_it_matters?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trend_themes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trend_themes_week_id_fkey"
+            columns: ["week_id"]
+            isOneToOne: false
+            referencedRelation: "trend_weeks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trend_weeks: {
+        Row: {
+          client_id: string
+          cost: Json
+          created_at: string
+          filter_status: string | null
+          finished_at: string | null
+          id: string
+          platforms: Json
+          status: string
+          week_start: string
+        }
+        Insert: {
+          client_id: string
+          cost?: Json
+          created_at?: string
+          filter_status?: string | null
+          finished_at?: string | null
+          id?: string
+          platforms?: Json
+          status?: string
+          week_start: string
+        }
+        Update: {
+          client_id?: string
+          cost?: Json
+          created_at?: string
+          filter_status?: string | null
+          finished_at?: string | null
+          id?: string
+          platforms?: Json
+          status?: string
+          week_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trend_weeks_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           id: string
@@ -3476,6 +3764,17 @@ export type Database = {
           schedule_id: string
         }[]
       }
+      trend_term_add: {
+        Args: {
+          p_client: string
+          p_kind: string
+          p_platform: string
+          p_term: string
+        }
+        Returns: string
+      }
+      trend_term_remove: { Args: { p_id: string }; Returns: undefined }
+      trend_theme_dismiss: { Args: { p_theme: string }; Returns: undefined }
       usage_actions: {
         Args: { p_since?: string }
         Returns: {
