@@ -4,7 +4,7 @@
 // profile are skipped before anything is paid for.
 import { describe, expect, it } from "vitest";
 import { pipelineDb } from "../_shared/pipelines/testDriver";
-import { runTrendJob, startTrendWeek, weekStartOf } from "./trends";
+import { runTrendJob, startTrendReplay, startTrendWeek, weekStartOf } from "./trends";
 import type { ScheduledJob } from "./types";
 
 const NOW = new Date("2026-11-01T10:00:00.000Z");
@@ -59,5 +59,33 @@ describe("the weekly trend_refresh job", () => {
     expect(run).toMatchObject({ dedupe_key: "trends:c1:2026-10-26:replay-1", input: { week_start: "2026-10-26", replay: { from_run: "run-1" } } });
     // The replay writes the same week again.
     expect(replay.weekId).toBe(db.tables.trend_weeks[0].id);
+  });
+
+  it("starts the week again when its run stopped, three runs a week at most", async () => {
+    const db = withProfile();
+    for (let i = 2; i <= 3; i++) {
+      await runTrendJob(db, job(), NOW);
+      db.tables.report_pipeline_runs.at(-1)!.status = "stopped";
+      const again = await runTrendJob(db, job(), NOW);
+      expect(again.result).toMatchObject({ started: true });
+      expect(db.tables.report_pipeline_runs.at(-1)!.dedupe_key).toBe(`trends:c1:2026-10-26:again-${i}`);
+    }
+    db.tables.report_pipeline_runs.at(-1)!.status = "stopped";
+    const done = await runTrendJob(db, job(), NOW);
+    expect(done.status).toBe("skipped");
+    expect(db.tables.trend_weeks[0]).toMatchObject({ status: "partial" });
+    expect(db.tables.report_pipeline_runs).toHaveLength(3);
+  });
+
+  it("replays into the source run's week, whatever week it is now", async () => {
+    const db = withProfile();
+    await runTrendJob(db, job(), NOW);
+    const later = new Date("2026-11-09T10:00:00.000Z");
+    const replay = await startTrendReplay(db, "run-1", later);
+    if (!("runId" in replay)) throw new Error(replay.skipped);
+    expect(replay.weekId).toBe(db.tables.trend_weeks[0].id);
+    expect(db.tables.trend_weeks).toHaveLength(1);
+    const run = db.tables.report_pipeline_runs.find((r) => r.id === replay.runId)!;
+    expect(run.input).toEqual({ week_start: "2026-10-26", replay: { from_run: "run-1" } });
   });
 });

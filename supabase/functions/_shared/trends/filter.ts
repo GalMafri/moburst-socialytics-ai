@@ -14,13 +14,16 @@ export const TREND_FILTER_MODEL = "claude-sonnet-5-5";
 export const MIN_FIT = 60;
 export const KEPT_PER_PLATFORM = 10;
 const TEXT_CHARS = 500;
-const MAX_TOKENS = 16000;
+const MAX_TOKENS = 32000;
 
 /** The parts of the profile the filter reads. */
 export interface FilterProfile {
   audience: string;
   fit_rubric: string;
   topics: Term[];
+  /** The brand's name and its direct competitors, so own and competitor posts can be dropped. */
+  brand?: string;
+  competitors?: string[];
 }
 
 const FILTER_SYSTEM = `You filter social posts for a brand whose social media Moburst, a marketing agency, manages. The posts were found by searching the brand's industry landscape; the brand's team will learn from the ones you keep.
@@ -43,6 +46,7 @@ export function filterRequest(profile: FilterProfile, exclusions: Term[], candid
     p.text.slice(0, TEXT_CHARS).replace(/\s+/g, " ").trim() || "(no text)",
   ].join("\n")).join("\n\n");
   const content = [
+    ...(profile.brand ? [`The brand: ${profile.brand}${profile.competitors?.length ? `. Its direct competitors: ${profile.competitors.join(", ")}` : ""}. Drop their own posts as own_or_competitor.`] : []),
     `Who the brand speaks to: ${profile.audience}`,
     `What fits: ${profile.fit_rubric}`,
     `Topics the brand tracks: ${profile.topics.map((t) => t.term).join(", ") || "none"}`,

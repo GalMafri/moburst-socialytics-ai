@@ -23,28 +23,31 @@ const ENV = (n: string) => ({ ANTHROPIC_API_KEY: "ak", APIFY_API_TOKEN: "ap" } a
 const NOW = "2026-11-01T10:00:00.000Z";
 
 /** The six actors, answering with the recorded rows. */
-function apify(calls: TrendPlatform[], o: { fail?: TrendPlatform } = {}): TrendsDeps["apify"] {
+type ApifyOptions = { fail?: TrendPlatform; answers?: Partial<Record<TrendPlatform, Any[][]>>; inputs?: Array<{ platform: TrendPlatform; input: Any }> };
+function apify(calls: TrendPlatform[], o: ApifyOptions = {}): TrendsDeps["apify"] {
   const byActor = Object.fromEntries(TREND_PLATFORMS.map((p) => [TREND_SOURCES[p].actor.id, p])) as Record<string, TrendPlatform>;
-  const runs: Record<string, TrendPlatform> = {};
+  const runs: Record<string, { platform: TrendPlatform; rows: Any[] }> = {};
+  const queued = Object.fromEntries(Object.entries(o.answers ?? {}).map(([k, v]) => [k, [...(v ?? [])]])) as Partial<Record<TrendPlatform, Any[][]>>;
   const client: ApifyClient = {
-    async startRun(actorId) {
+    async startRun(actorId, input) {
       const platform = byActor[actorId];
       calls.push(platform);
+      o.inputs?.push({ platform, input });
       const id = `r${calls.length}`;
-      runs[id] = platform;
+      runs[id] = { platform, rows: queued[platform]?.shift() ?? fixture(platform) };
       return { id, status: "RUNNING", defaultDatasetId: `ds-${id}` };
     },
     async getRun(id) {
-      return { id, status: o.fail === runs[id] ? "FAILED" : "SUCCEEDED", defaultDatasetId: `ds-${id}`, usageTotalUsd: 0.01 };
+      return { id, status: o.fail === runs[id].platform ? "FAILED" : "SUCCEEDED", defaultDatasetId: `ds-${id}`, usageTotalUsd: 0.01 };
     },
     async datasetPage() { return []; },
-    async datasetItems(datasetId) { return fixture(runs[datasetId.slice(3)]); },
+    async datasetItems(datasetId) { return runs[datasetId.slice(3)].rows; },
   };
   return () => client;
 }
 
 /** Claude's Message Batches, answering the filter and the themes from what each request lists. */
-function claude(requests: Any[], o: { badFilter?: boolean } = {}) {
+function claude(requests: Any[], o: { badFilter?: boolean; failFilter?: boolean } = {}) {
   return async (url: string, init?: RequestInit) => {
     if (init?.method === "POST") {
       requests.push(JSON.parse(String(init.body)).requests[0]);
@@ -54,6 +57,7 @@ function claude(requests: Any[], o: { badFilter?: boolean } = {}) {
     const req = requests[n - 1];
     if (!url.endsWith("/results")) return new Response(JSON.stringify({ processing_status: "ended", results_url: `https://api.anthropic.com/v1/messages/batches/batch-${n}/results` }));
     const prompt = String(req.params.messages[0].content);
+    if (o.failFilter && String(req.custom_id).includes("filter")) return new Response(JSON.stringify({ custom_id: req.custom_id, result: { type: "errored", error: { type: "overloaded_error" } } }) + "\n");
     let answer: unknown;
     if (String(req.custom_id).includes("filter")) {
       const ids = [...prompt.matchAll(/^P(\d+) \| (\w+) \|/gm)].map((m) => ({ id: `P${m[1]}`, platform: m[2] }));
@@ -69,7 +73,7 @@ function claude(requests: Any[], o: { badFilter?: boolean } = {}) {
 
 const ALL = TREND_PLATFORMS.map((platform) => ({ platform, reason: "watched" }));
 
-function setup(o: { language?: string; platforms?: Array<{ platform: string; reason: string }> } = {}) {
+function setup(o: { language?: string; platforms?: Array<{ platform: string; reason: string }>; noInstagramTags?: boolean; handles?: boolean } = {}) {
   const clock = testClock(NOW);
   const db = pipelineDb({
     clients: [{ id: "c1", name: "Moburst", geo: "US", language: o.language ?? "en", location: null }],
@@ -77,9 +81,11 @@ function setup(o: { language?: string; platforms?: Array<{ platform: string; rea
     trend_terms: [
       { id: "t1", client_id: "c1", kind: "topic", platform: null, term: "app marketing", reason: "r", source: "lifecycle", removed_at: null },
       { id: "t2", client_id: "c1", kind: "topic", platform: null, term: "marketing tips", reason: "r", source: "lifecycle", removed_at: null },
-      { id: "t3", client_id: "c1", kind: "hashtag", platform: "instagram", term: "#stopchasingstartplaying", reason: "r", source: "lifecycle", removed_at: null },
+      ...(o.noInstagramTags ? [] : [{ id: "t3", client_id: "c1", kind: "hashtag", platform: "instagram", term: "#stopchasingstartplaying", reason: "r", source: "lifecycle", removed_at: null }]),
       { id: "t4", client_id: "c1", kind: "exclusion", platform: null, term: "fake reviews", reason: "r", source: "dismissal", removed_at: null },
     ],
+    sprout_profiles: o.handles ? [{ id: "s1", client_id: "c1", native_name: "techdropp", profile_name: "Tech Drop", is_active: true }] : [],
+    competitor_handles: o.handles ? [{ id: "h1", client_id: "c1", handle: "ahmed-dawood", display_name: "Kehinde Dawood MBA", is_active: true }] : [],
     trend_weeks: [
       { id: "w1", client_id: "c1", week_start: "2026-10-26", status: "running", platforms: {}, cost: {} },
       { id: "w2", client_id: "c1", week_start: "2026-11-02", status: "running", platforms: {}, cost: {} },
@@ -88,18 +94,19 @@ function setup(o: { language?: string; platforms?: Array<{ platform: string; rea
   return { clock, db };
 }
 
-async function run(o: { deps?: Partial<TrendsDeps>; fail?: TrendPlatform; badFilter?: boolean; language?: string; platforms?: Array<{ platform: string; reason: string }> } = {}) {
+async function run(o: { deps?: Partial<TrendsDeps>; fail?: TrendPlatform; badFilter?: boolean; failFilter?: boolean; language?: string; platforms?: Array<{ platform: string; reason: string }>; answers?: ApifyOptions["answers"]; noInstagramTags?: boolean; handles?: boolean } = {}) {
   const { clock, db } = setup(o);
   const calls: TrendPlatform[] = [];
   const requests: Any[] = [];
-  const pipeline = trendsPipeline({ apify: apify(calls, { fail: o.fail }), claudeFetch: claude(requests, { badFilter: o.badFilter }), ...o.deps });
+  const inputs: Array<{ platform: TrendPlatform; input: Any }> = [];
+  const pipeline = trendsPipeline({ apify: apify(calls, { fail: o.fail, answers: o.answers, inputs }), claudeFetch: claude(requests, { badFilter: o.badFilter, failFilter: o.failFilter }), ...o.deps });
   const registry = makeRegistry([pipeline], () => true);
   const { run_id } = await startPipelineRun(db, { mode: "app", pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w1", input: { week_start: "2026-10-26" }, dedupe: "trends:c1:2026-10-26" });
   const driven = await drivePipeline(db, registry, run_id, { clock, env: ENV });
   const week = db.tables.trend_weeks.find((w) => w.id === "w1")!;
   const posts = (db.tables.trend_posts ?? []).filter((p) => p.week_id === "w1");
   const themes = (db.tables.trend_themes ?? []).filter((t) => t.week_id === "w1");
-  return { db, clock, run_id, driven, week, posts, themes, calls, requests, pipeline, registry };
+  return { db, clock, run_id, driven, week, posts, themes, calls, requests, inputs, pipeline, registry };
 }
 
 describe("trends_v1", () => {
@@ -162,6 +169,9 @@ describe("trends_v1", () => {
   it("replays a week from its kept answers without calling Apify", async () => {
     const r = await run();
     const before = r.calls.length;
+    // A week later: the replay still reads the original week's window and searches.
+    r.clock.set(new Date(Date.parse(NOW) + 8 * 86_400_000));
+    r.db.tables.trend_terms = r.db.tables.trend_terms.filter((t) => t.kind !== "topic");
     const { run_id } = await startPipelineRun(r.db, { mode: "app", pipeline: r.pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w2", input: { week_start: "2026-11-02", replay: { from_run: r.run_id } }, dedupe: "trends:c1:replay" });
     const replay = await drivePipeline(r.db, r.registry, run_id, { clock: r.clock, env: ENV });
     expect(replay.outcome.status).toBe("done");
@@ -177,5 +187,57 @@ describe("trends_v1", () => {
     expect(r.week).toMatchObject({ status: "done", filter_status: "skipped" });
     expect(r.posts.some((p) => p.kept)).toBe(false);
     expect(r.themes).toHaveLength(0);
+  });
+
+  it("fails only that platform when its answer cannot be read", async () => {
+    const r = await run({ answers: { instagram: [[{ type: "Image", shortCode: "x", caption: "c", inputUrl: "https://www.instagram.com/explore/tags/%E0%A4%A/" }], [{ type: "Image", shortCode: "x", caption: "c", inputUrl: "https://www.instagram.com/explore/tags/%E0%A4%A/" }]] } });
+    expect(r.driven.outcome.status).toBe("done");
+    expect(r.week.platforms.instagram.status).toBe("failed");
+    expect(r.week.status).toBe("partial");
+    expect(r.posts.some((p) => p.kept && p.platform === "tiktok")).toBe(true);
+  });
+
+  it("saves the week with a failed filter when Claude cannot be reached", async () => {
+    const r = await run({ failFilter: true });
+    expect(r.driven.outcome.status).toBe("done");
+    expect(r.week).toMatchObject({ status: "partial", filter_status: "failed" });
+    expect(r.posts.length).toBeGreaterThan(0);
+    expect(r.posts.some((p) => p.kept)).toBe(false);
+  });
+
+  it("reads every language of a client with several", async () => {
+    const r = await run({ language: "he,en" });
+    expect(r.inputs.find((x) => x.platform === "youtube")!.input.lang).toBe("he");
+    expect(r.posts.some((p) => p.kept && p.platform === "linkedin")).toBe(true);
+  });
+
+  it("drops the client's own and competitors' posts by their handles, and names the brand for Claude", async () => {
+    const r = await run({ handles: true });
+    expect(r.posts.find((p) => p.author === "techdropp")!.drop_reason).toBe("own_or_competitor");
+    expect(r.posts.find((p) => p.author === "Kehinde Dawood MBA")!.drop_reason).toBe("own_or_competitor");
+    const prompt = String(r.requests[0].params.messages[0].content);
+    expect(prompt).toContain("Moburst");
+    expect(prompt).toContain("Kehinde Dawood MBA");
+  });
+
+  it("asks again with the problems named, with room for a long answer", async () => {
+    const r = await run({ badFilter: true });
+    const again = r.requests.filter((q) => String(q.custom_id).includes("filter"))[1];
+    expect(again.params.max_tokens).toBeGreaterThanOrEqual(32000);
+    expect(again.params.messages).toHaveLength(3);
+    expect(String(again.params.messages[2].content)).toMatch(/problems/);
+  });
+
+  it("tries an empty answer once more before calling it empty", async () => {
+    const r = await run({ answers: { tiktok: [[]] } });
+    expect(r.calls.filter((c) => c === "tiktok")).toHaveLength(2);
+    expect(r.week.platforms.tiktok.status).toBe("ok");
+  });
+
+  it("does not count a watched platform with nothing to search as a gap", async () => {
+    const r = await run({ noInstagramTags: true });
+    expect(r.week.platforms.instagram.status).toBe("no_searches");
+    expect(r.calls).not.toContain("instagram");
+    expect(r.week.status).toBe("done");
   });
 });

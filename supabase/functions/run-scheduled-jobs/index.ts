@@ -68,7 +68,7 @@ import { compareSocialRun, startSocialReplay, startSocialShadow } from "../_shar
 import { compareResults, formatComparison } from "../_shared/pipelines/compare.ts";
 import { appRunView, expirePayloads, loadShadowPair, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
-import { runTrendJob, startTrendWeek } from "./trends.ts";
+import { runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
 import type { ScheduledJob } from "./types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
 
@@ -273,9 +273,9 @@ Deno.serve(async (req) => {
     // its kept source answers, with no scraping (for tuning the filter).
     if (mode === "replay_trends") {
       const runId = typeof body.run_id === "string" ? body.run_id : "";
-      const { data: from } = runId ? await db.from("report_pipeline_runs").select("id, client_id, kind").eq("id", runId).maybeSingle() : { data: null };
-      if (!from || from.kind !== "trends") return json({ error: "run_id must name a trends run" }, 400);
-      return json(await startTrendWeek(db, from.client_id, new Date(), { replayFrom: from.id, suffix: `replay-${Date.now()}` }));
+      if (!runId) return json({ error: "run_id is required" }, 400);
+      const replay = await startTrendReplay(db, runId, new Date());
+      return json(replay, "skipped" in replay ? 400 : 200);
     }
 
     if (mode === "compare_pipeline") {

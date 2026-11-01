@@ -22,7 +22,7 @@ import { claudeBatchStep } from "../claude.ts";
 import { ANTHROPIC_API_KEY, APIFY_API_TOKEN } from "../secrets.ts";
 import { keptAnswer, replayOf } from "../social/replay.ts";
 import { SOURCE_KEEP_DAYS } from "../store.ts";
-import type { PipelineDefinition, StepContext, StepResult } from "../types.ts";
+import { StepRestart, type PipelineDefinition, type Step, type StepContext, type StepResult } from "../types.ts";
 import { competitorSet } from "../../calendar/runWeek.ts";
 import { activeTerms } from "../../trends/profile.ts";
 import { searchesFor, TREND_SOURCES } from "../../trends/sources.ts";
@@ -38,6 +38,8 @@ type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 export const TRENDS_PIPELINE = "trends_v1";
 /** A source run that fails this many times is marked failed, and the week goes on. */
 export const SCRAPE_TRIES = 2;
+/** A Claude step that cannot get an answer in this many tries gives up, and the week is saved without it (the runner stops a run at 5). */
+export const CLAUDE_TRIES = 4;
 const WINDOW_DAYS = 7;
 const KEEP = { keepDays: SOURCE_KEEP_DAYS };
 
@@ -47,10 +49,14 @@ export interface TrendsDeps {
   claudeFetch?: Fetch;
 }
 
-type PlatformStatus = "ok" | "empty" | "failed" | "not_watched";
+type PlatformStatus = "ok" | "empty" | "failed" | "not_watched" | "no_searches";
+/** A watched platform in one of these states is no gap in the week. */
+const FINE: readonly PlatformStatus[] = ["ok", "empty", "no_searches"];
 
 interface Plan {
-  client: { name: string; language: string; region?: string };
+  client: { name: string; language: string; languages: string[]; region?: string };
+  own: { handles: string[]; names: string[] };
+  competitorHandles: string[];
   window: { start: string; end: string };
   platforms: TrendPlatform[];
   searches: Partial<Record<TrendPlatform, string[]>>;
@@ -81,6 +87,12 @@ async function need<T = Any>(ctx: StepContext, key: string): Promise<T> {
 
 const stateOf = (ctx: StepContext): TrendState => (ctx.state ?? {}) as TrendState;
 
+/** The client's languages: clients.language holds one code or several, comma-joined ("en,he"). */
+export function languagesOf(language: unknown): string[] {
+  const codes = String(language ?? "").toLowerCase().split(/[,\s]+/).map((c) => c.trim()).filter((c) => /^[a-z]{2}$/.test(c));
+  return codes.length ? [...new Set(codes)] : ["en"];
+}
+
 /** The client's country for the sources that take one: the first two-letter code of its market (UK is GB). */
 function regionOf(geo: unknown): string | undefined {
   for (const part of String(geo ?? "").split(/[,\s]+/)) {
@@ -106,44 +118,51 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
       ? TREND_SOURCES[platform].inputs(searches, { region: plan.client.region, language: plan.client.language, windowStart: plan.window.start.slice(0, 10), windowEnd: plan.window.end.slice(0, 10) })
       : [];
     if (!runs.length) {
-      return { type: "next", step: next, state: { ...st, platforms: { ...(st.platforms ?? {}), [platform]: { status: "not_watched", searched: 0, rows: 0 } } }, detail: { platform, watched: false } };
+      const status: PlatformStatus = plan.platforms.includes(platform) ? "no_searches" : "not_watched";
+      return { type: "next", step: next, state: { ...st, platforms: { ...(st.platforms ?? {}), [platform]: { status, searched: 0, rows: 0 } } }, detail: { platform, status } };
     }
     const prog = { ...(st.scrape?.[platform] ?? { i: 0, rows: 0, ok: 0, failed: 0 }) };
     const run = runs[prog.i];
     const key = `source.${platform}.${prog.i}`;
-    let rows: unknown[] | null = null;
     let usd = 0;
     let detail: Record<string, unknown> = { platform, run: prog.i + 1, of: runs.length };
-    if (replayOf(ctx)) {
-      const failed = await keptAnswer(ctx, `${key}.failed`);
-      if (failed) await ctx.payloads.put(`${key}.failed`, failed, KEEP);
-      else {
-        rows = (await keptAnswer<unknown[]>(ctx, key)) ?? [];
-        await ctx.payloads.put(key, rows, KEEP);
-      }
-      detail = { ...detail, replayed: true };
-    } else {
-      try {
+    // Everything that reads this run's answer is inside the try: whatever goes
+    // wrong with one source marks that source failed, and the week goes on.
+    try {
+      let rows: unknown[] | null = null;
+      if (replayOf(ctx)) {
+        const failed = await keptAnswer(ctx, `${key}.failed`);
+        if (failed) await ctx.payloads.put(`${key}.failed`, failed, KEEP);
+        else {
+          rows = (await keptAnswer<unknown[]>(ctx, key)) ?? [];
+          await ctx.payloads.put(key, rows, KEEP);
+        }
+        detail = { ...detail, replayed: true };
+      } else {
         const actor = await runActorStep(ctx, { actor: TREND_SOURCES[platform].actor, input: run.input, datasetKey: key, keepDays: SOURCE_KEEP_DAYS, apify: deps.apify });
         if (actor.type === "wait") return actor.result;
+        // A source that brings back nothing at all may have been turned away
+        // (20 Oct 2026, TikTok); it gets one more run before "empty" stands.
+        if (!actor.rows.length && ctx.attempt < SCRAPE_TRIES) throw new StepRestart(`The ${platform} source brought back nothing (run ${actor.runId}).`);
         rows = actor.rows;
         usd = Number(actor.usageUsd) || 0;
         detail = { ...detail, apify_run_id: actor.runId, rows: rows.length };
-      } catch (e) {
-        if (ctx.attempt < SCRAPE_TRIES) throw e;
-        const message = (e instanceof Error ? e.message : String(e)).slice(0, 300);
-        await ctx.payloads.put(`${key}.failed`, { message }, KEEP);
-        detail = { ...detail, failed: message };
       }
-    }
-    if (rows) {
-      const found = rows.map((r) => TREND_SOURCES[platform].normalize(r, run.search)).filter((p): p is TrendPost => p !== null);
-      const sofar = (await ctx.payloads.get<TrendPost[]>(`posts.${platform}`)) ?? [];
-      await ctx.payloads.put(`posts.${platform}`, [...sofar, ...found]);
-      prog.rows += found.length;
-      prog.ok += 1;
-    } else {
+      if (rows) {
+        const found = rows.map((r) => TREND_SOURCES[platform].normalize(r, run.search)).filter((p): p is TrendPost => p !== null);
+        const sofar = (await ctx.payloads.get<TrendPost[]>(`posts.${platform}`)) ?? [];
+        await ctx.payloads.put(`posts.${platform}`, [...sofar, ...found]);
+        prog.rows += found.length;
+        prog.ok += 1;
+      } else {
+        prog.failed += 1;
+      }
+    } catch (e) {
+      if (ctx.attempt < SCRAPE_TRIES) throw e;
+      const message = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+      await ctx.payloads.put(`${key}.failed`, { message }, KEEP).catch(() => undefined);
       prog.failed += 1;
+      detail = { ...detail, failed: message };
     }
     prog.i += 1;
     const moved: TrendState = { ...st, apifyUsd: (st.apifyUsd ?? 0) + usd, scrape: { ...(st.scrape ?? {}), [platform]: prog } };
@@ -155,21 +174,51 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
   const candidatesOf = (ctx: StepContext) => need<TrendPost[]>(ctx, "candidates");
   const apiKey = (ctx: StepContext) => String(ctx.env(ANTHROPIC_API_KEY) ?? "");
 
-  const filterStep = (saveAs: string) => claudeBatchStep({
+  /** The second ask carries the first answer and its problems, so Claude fixes what was wrong. */
+  const repaired = async (ctx: StepContext, body: Record<string, unknown>, first: string): Promise<Record<string, unknown>> => {
+    const answer = await need<{ text: string }>(ctx, first);
+    const problems = (await ctx.payloads.get<string>(`${first}.problems`)) ?? "The answer could not be read.";
+    return { ...body, messages: [...(body.messages as unknown[]), { role: "assistant", content: answer.text }, {
+      role: "user", content: `That answer has these problems: ${problems} Send the whole JSON object again with them fixed.`,
+    }] };
+  };
+
+  /** A Claude step that cannot get an answer in CLAUDE_TRIES gives up into a saved week instead of stopping the run. */
+  const orGiveUp = (inner: Step, giveUp: (ctx: StepContext, why: string) => Promise<StepResult>): Step => async (ctx) => {
+    try {
+      return await inner(ctx);
+    } catch (e) {
+      if (ctx.attempt < CLAUDE_TRIES) throw e;
+      return giveUp(ctx, (e instanceof Error ? e.message : String(e)).slice(0, 300));
+    }
+  };
+  const filterGiveUp = async (ctx: StepContext, why: string): Promise<StepResult> => {
+    await ctx.payloads.put("kept", []);
+    await ctx.payloads.put("claude_dropped", []);
+    return { type: "next", step: "save", state: { ...stateOf(ctx), filter: "failed", themes: "skipped" }, detail: { gave_up: why } };
+  };
+  const themesGiveUp = async (ctx: StepContext, why: string): Promise<StepResult> => {
+    await ctx.payloads.put("themes", []);
+    return { type: "next", step: "save", state: { ...stateOf(ctx), themes: "failed" }, detail: { gave_up: why } };
+  };
+
+  const filterStep = (saveAs: string, again: boolean) => orGiveUp(claudeBatchStep({
     async build(ctx) {
       const [plan, candidates] = await Promise.all([need<Plan>(ctx, "plan"), candidatesOf(ctx)]);
-      return { apiKey: apiKey(ctx), body: filterRequest(plan.profile, plan.exclusions, candidates) };
+      const body = filterRequest(plan.profile, plan.exclusions, candidates);
+      return { apiKey: apiKey(ctx), body: again ? await repaired(ctx, body, "answer.filter") : body };
     },
     saveAs, keepDays: KEEP.keepDays, next: "read_filter", fetchImpl: deps.claudeFetch,
-  });
+  }), filterGiveUp);
 
-  const themesStep = (saveAs: string) => claudeBatchStep({
+  const themesStep = (saveAs: string, again: boolean) => orGiveUp(claudeBatchStep({
     async build(ctx) {
       const [plan, kept] = await Promise.all([need<Plan>(ctx, "plan"), need<KeptPost[]>(ctx, "kept")]);
-      return { apiKey: apiKey(ctx), body: themesRequest(plan.profile, kept) };
+      const body = themesRequest(plan.profile, kept);
+      return { apiKey: apiKey(ctx), body: again ? await repaired(ctx, body, "answer.themes") : body };
     },
     saveAs, keepDays: KEEP.keepDays, next: "read_themes", fetchImpl: deps.claudeFetch,
-  });
+  }), themesGiveUp);
 
   const order = TREND_PLATFORMS.map((p) => `scrape_${p}`);
   const scrapeSteps = Object.fromEntries(TREND_PLATFORMS.map((p, i) => [`scrape_${p}`, scrapeStep(p, order[i + 1] ?? "rules")]));
@@ -183,6 +232,13 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
     first: "start",
     steps: {
       async start(ctx) {
+        // A replay reads the week again as it was: the same window, searches and profile.
+        if (replayOf(ctx)) {
+          const kept = await keptAnswer<Plan>(ctx, "plan");
+          if (!kept) throw new Error("The replayed run kept no plan.");
+          await ctx.payloads.put("plan", kept, KEEP);
+          return { type: "next", step: order[0], state: {}, detail: { replayed: true, platforms: kept.platforms } };
+        }
         const clientId = ctx.run.client_id;
         const { data: client, error } = await ctx.db.from("clients").select("id, name, geo, language").eq("id", clientId).maybeSingle();
         if (error || !client) throw new Error(`The client could not be read: ${error?.message ?? "not found"}`);
@@ -190,18 +246,26 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         if (!profile) throw new Error("The client has no trend profile yet.");
         const terms = await activeTerms(ctx.db, clientId);
         const competitors = await competitorSet(ctx.db, clientId).catch(() => []);
+        const { data: ownRows } = await ctx.db.from("sprout_profiles").select("native_name, profile_name, is_active").eq("client_id", clientId);
+        const { data: rivalRows } = await ctx.db.from("competitor_handles").select("handle, display_name, is_active").eq("client_id", clientId);
+        const own = ((ownRows ?? []) as Any[]).filter((r) => r.is_active !== false);
+        const rivals = ((rivalRows ?? []) as Any[]).filter((r) => r.is_active !== false);
+        const competitorNames = [...new Set([...competitors.map((c) => c.name), ...rivals.map((r) => String(r.display_name ?? ""))].filter(Boolean))];
+        const languages = languagesOf(client.language);
         const platforms = [...new Set(((profile.platforms ?? []) as Array<{ platform: string }>).map((p) => p.platform))].filter((p): p is TrendPlatform => (TREND_PLATFORMS as readonly string[]).includes(p));
         const end = ctx.now();
         const plan: Plan = {
-          client: { name: String(client.name ?? ""), language: String(client.language || "en"), region: regionOf(client.geo) },
+          client: { name: String(client.name ?? ""), language: languages[0], languages, region: regionOf(client.geo) },
+          own: { handles: own.map((r) => String(r.native_name ?? "")).filter(Boolean), names: own.map((r) => String(r.profile_name ?? "")).filter(Boolean) },
+          competitorHandles: rivals.map((r) => String(r.handle ?? "")).filter(Boolean),
           window: { start: new Date(end.getTime() - WINDOW_DAYS * 86_400_000).toISOString(), end: end.toISOString() },
           platforms,
           searches: Object.fromEntries(platforms.map((p) => [p, searchesFor(p, terms, profile.search_overrides ?? {})])),
-          profile: { audience: String(profile.audience), fit_rubric: String(profile.fit_rubric), topics: terms.topics },
+          profile: { audience: String(profile.audience), fit_rubric: String(profile.fit_rubric), topics: terms.topics, brand: String(client.name ?? ""), competitors: competitorNames },
           exclusions: terms.exclusions,
-          competitors: competitors.map((c) => c.name),
+          competitors: competitorNames,
         };
-        await ctx.payloads.put("plan", plan);
+        await ctx.payloads.put("plan", plan, KEEP);
         return { type: "next", step: order[0], state: {}, detail: { platforms, topics: terms.topics.length } };
       },
 
@@ -212,8 +276,8 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const all: TrendPost[] = [];
         for (const p of TREND_PLATFORMS) all.push(...((await ctx.payloads.get<TrendPost[]>(`posts.${p}`)) ?? []));
         const { candidates, dropped } = ruleFilter(all, {
-          windowStart: plan.window.start, windowEnd: plan.window.end, languages: [plan.client.language],
-          ownHandles: [], ownNames: [plan.client.name], competitorHandles: [], competitorNames: plan.competitors,
+          windowStart: plan.window.start, windowEnd: plan.window.end, languages: plan.client.languages,
+          ownHandles: plan.own.handles, ownNames: [plan.client.name, ...plan.own.names], competitorHandles: plan.competitorHandles, competitorNames: plan.competitors,
         });
         await ctx.payloads.put("candidates", candidates);
         await ctx.payloads.put("rule_dropped", dropped);
@@ -222,8 +286,8 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         return { type: "next", step: "filter", detail };
       },
 
-      filter: filterStep("answer.filter"),
-      filter_again: filterStep("answer.filter_again"),
+      filter: filterStep("answer.filter", false),
+      filter_again: filterStep("answer.filter_again", true),
 
       async read_filter(ctx) {
         const st = stateOf(ctx);
@@ -232,7 +296,10 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const counted = withTokens(st, TREND_FILTER_MODEL, answer.usage);
         const got = parseFilter(answer.text, await candidatesOf(ctx));
         if ("error" in got) {
-          if (tries === 0) return { type: "next", step: "filter_again", state: { ...counted, filterTries: 1 }, detail: { problems: got.error.slice(0, 300) } };
+          if (tries === 0) {
+            await ctx.payloads.put("answer.filter.problems", got.error.slice(0, 4000));
+            return { type: "next", step: "filter_again", state: { ...counted, filterTries: 1 }, detail: { problems: got.error.slice(0, 300) } };
+          }
           await ctx.payloads.put("kept", []);
           await ctx.payloads.put("claude_dropped", []);
           return { type: "next", step: "save", state: { ...counted, filter: "failed", themes: "skipped" }, detail: { problems: got.error.slice(0, 300) } };
@@ -246,8 +313,8 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         return { type: "next", step: next, state: { ...counted, filter: "ok", ...(next === "save" ? { themes: "skipped" as const } : {}) }, detail: { kept: picked.length, dropped: judged.length } };
       },
 
-      themes: themesStep("answer.themes"),
-      themes_again: themesStep("answer.themes_again"),
+      themes: themesStep("answer.themes", false),
+      themes_again: themesStep("answer.themes_again", true),
 
       async read_themes(ctx) {
         const st = stateOf(ctx);
@@ -256,7 +323,10 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const counted = withTokens(st, TREND_THEMES_MODEL, answer.usage);
         const got = parseThemes(answer.text, await need<KeptPost[]>(ctx, "kept"));
         if ("error" in got) {
-          if (tries === 0) return { type: "next", step: "themes_again", state: { ...counted, themesTries: 1 }, detail: { problems: got.error.slice(0, 300) } };
+          if (tries === 0) {
+            await ctx.payloads.put("answer.themes.problems", got.error.slice(0, 4000));
+            return { type: "next", step: "themes_again", state: { ...counted, themesTries: 1 }, detail: { problems: got.error.slice(0, 300) } };
+          }
           await ctx.payloads.put("themes", []);
           return { type: "next", step: "save", state: { ...counted, themes: "failed" }, detail: { problems: got.error.slice(0, 300) } };
         }
@@ -291,7 +361,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
           const s = st.platforms?.[p] ?? { status: "not_watched", searched: 0, rows: 0 };
           platforms[p] = { ...s, candidates: candidates.filter((c) => c.platform === p).length, kept: kept.filter((k) => k.platform === p).length };
         }
-        const watchedOk = plan.platforms.every((p) => ["ok", "empty"].includes(String(st.platforms?.[p]?.status)));
+        const watchedOk = plan.platforms.every((p) => FINE.includes(st.platforms?.[p]?.status as PlatformStatus));
         const status = watchedOk && st.filter !== "failed" && st.themes !== "failed" ? "done" : "partial";
         await ctx.output.write("week", {
           posts: rows, themes, status, platforms, filter_status: st.filter ?? "skipped",
