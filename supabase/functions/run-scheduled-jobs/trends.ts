@@ -7,6 +7,10 @@
 import { startPipelineRun } from "../_shared/pipelines/store.ts";
 import { TRENDS_PIPELINE, trendsPipeline } from "../_shared/pipelines/definitions/trends.ts";
 import { REGISTRY } from "../_shared/pipelines/registry.ts";
+import type { PayloadStore } from "../_shared/pipelines/types.ts";
+import { filterRequest, type FilterProfile } from "../_shared/trends/filter.ts";
+import { engagementOf } from "../_shared/trends/sources.ts";
+import type { Term, TrendPlatform, TrendPost } from "../_shared/trends/types.ts";
 import type { JobOutcome, ScheduledJob } from "./types.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -37,14 +41,15 @@ async function weekRow(db: Db, clientId: string, weekStart: string): Promise<str
   return made;
 }
 
-/** A week gets at most this many runs; when they have all stopped the week is closed as partial. */
+/** A week is started again at most until this many of its runs stopped; then it is closed as partial. */
 export const RUNS_PER_WEEK = 3;
 
 /**
  * Starts trends_v1 on the client's week. One run per client and week: while
  * it runs, asking again returns it; once it stopped without finishing, the
- * week is started again, up to RUNS_PER_WEEK runs. A suffix makes another run
- * whatever the week's state (the trial's trends_now).
+ * week is started again until RUNS_PER_WEEK of its runs stopped. Only stopped
+ * runs count: a replay or a finished run never uses up the week's tries. A
+ * suffix makes another run whatever the week's state (the trial's trends_now).
  */
 export async function startTrendWeek(db: Db, clientId: string, now: Date, o: { replayFrom?: string; suffix?: string } = {}): Promise<{ weekId: string; runId: string; started: boolean } | { skipped: string }> {
   const { data: profile, error } = await db.from("trend_profiles").select("client_id").eq("client_id", clientId).maybeSingle();
@@ -61,10 +66,12 @@ export async function startTrendWeek(db: Db, clientId: string, now: Date, o: { r
     const running = list.find((r) => r.status === "running");
     if (running) return { weekId, runId: running.id, started: false };
     if (week?.status && week.status !== "running") return { skipped: "This week's trends are already collected." };
-    if (list.length >= RUNS_PER_WEEK) {
+    const stopped = list.filter((r) => r.status === "stopped").length;
+    if (stopped >= RUNS_PER_WEEK) {
       await db.from("trend_weeks").update({ status: "partial", finished_at: now.toISOString() }).eq("id", weekId);
-      return { skipped: `This week's trends stopped ${list.length} times; the week is closed as partial.` };
+      return { skipped: `This week's trends stopped ${stopped} times; the week is closed as partial.` };
     }
+    // Numbered past every run the week has, so the new run's key is never one already used.
     if (list.length) suffix = `again-${list.length + 1}`;
   }
   return { weekId, ...(await startOn(db, clientId, weekId, weekStart, suffix, o.replayFrom)) };
@@ -95,3 +102,31 @@ export async function runTrendJob(db: Db, job: ScheduledJob, now = new Date()): 
   if ("skipped" in r) return { status: "skipped", reason: r.skipped };
   return { status: "done", reason: r.started ? "The week's trends collection started." : "The week's trends collection was already under way.", result: { week_id: r.weekId, run_id: r.runId, started: r.started } };
 }
+
+/** At most this many posts in one filter check, about a fifth of a real week's candidates. */
+export const FILTER_CHECK_MAX_POSTS = 60;
+
+/**
+ * QA (harness mode trends_filter_check): posts picked by hand, sent through
+ * the filter exactly as a run of the client sends its candidates, with the
+ * profile and exclusions that run kept. For testing the filter with known
+ * answers and with posts written to attack it; nothing is saved to a week.
+ */
+export async function filterCheckRequest(store: PayloadStore, posts: unknown): Promise<{ body: Record<string, unknown> } | { error: string }> {
+  if (!Array.isArray(posts) || !posts.length || posts.length > FILTER_CHECK_MAX_POSTS) return { error: `posts must be 1 to ${FILTER_CHECK_MAX_POSTS} posts.` };
+  const plan = await store.get<{ profile: FilterProfile; exclusions: Term[] }>("plan");
+  if (!plan?.profile) return { error: "The run kept no plan." };
+  const n = (v: unknown) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+  // deno-lint-ignore no-explicit-any
+  const candidates = (posts as any[]).map((p): TrendPost => {
+    const post = {
+      platform: String(p?.platform ?? "") as TrendPlatform, url: String(p?.url ?? ""), author: String(p?.author ?? ""), text: String(p?.text ?? ""),
+      posted_at: p?.posted_at ? String(p.posted_at) : null, format: p?.format ?? null,
+      views: n(p?.views), likes: n(p?.likes), comments: n(p?.comments), shares: n(p?.shares), saves: n(p?.saves), engagement: 0, search: String(p?.search ?? ""),
+    };
+    return { ...post, engagement: engagementOf(post) };
+  });
+  if (candidates.some((p) => !/^https:\/\//.test(p.url))) return { error: "Every post needs its https link." };
+  return { body: filterRequest(plan.profile, plan.exclusions ?? [], candidates) };
+}
+

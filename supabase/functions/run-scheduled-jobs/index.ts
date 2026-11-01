@@ -66,9 +66,10 @@ import { COMPETITIVE_PIPELINE } from "../_shared/pipelines/definitions/competiti
 import { SOCIAL_PIPELINE } from "../_shared/pipelines/definitions/social.ts";
 import { compareSocialRun, startSocialReplay, startSocialShadow } from "../_shared/pipelines/social/harness.ts";
 import { compareResults, formatComparison } from "../_shared/pipelines/compare.ts";
-import { appRunView, expirePayloads, loadShadowPair, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
+import { appRunView, expirePayloads, loadShadowPair, makePayloadStore, makeRunStore, makeStepLog, makeStepServices } from "../_shared/pipelines/store.ts";
+import { directKey, runClaudeDirect } from "../_shared/pipelines/claudeDirect.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
-import { runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
+import { filterCheckRequest, runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
 import type { ScheduledJob } from "./types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
 
@@ -276,6 +277,53 @@ Deno.serve(async (req) => {
       if (!runId) return json({ error: "run_id is required" }, 400);
       const replay = await startTrendReplay(db, runId, new Date());
       return json(replay, "skipped" in replay ? 400 : 200);
+    }
+
+    // QA, POST {"mode":"trend_refresh_now","client_id":"<id>"}: what the weekly
+    // trend_refresh job does for one client, now (a week whose run stopped
+    // starts again), before the weekly job is switched on.
+    if (mode === "trend_refresh_now") {
+      const clientId = typeof body.client_id === "string" ? body.client_id : "";
+      if (!clientId) return json({ error: "client_id is required" }, 400);
+      return json(await runTrendJob(db, { id: `harness-${Date.now()}`, kind: "trend_refresh", client_id: clientId, attempts: 1 } as unknown as ScheduledJob));
+    }
+
+    // QA, POST {"mode":"trends_filter_check","run_id":"<trends run>","save_as":"qa_...","posts":[...]}:
+    // posts picked by hand through the filter as that run sent its own
+    // (filterCheckRequest). Answers 202 at once; Claude's answer is kept on the
+    // run as "<save_as>.direct" (or "<save_as>.direct_failed"), read with run_payload.
+    if (mode === "trends_filter_check") {
+      const runId = typeof body.run_id === "string" ? body.run_id : "";
+      const saveAs = typeof body.save_as === "string" && /^qa_[a-z0-9_]{1,60}$/i.test(body.save_as) ? body.save_as : "";
+      if (!runId || !saveAs) return json({ error: "run_id and save_as (qa_ and a plain name) are required" }, 400);
+      const { data: run } = await db.from("report_pipeline_runs").select("kind").eq("id", runId).maybeSingle();
+      if (run?.kind !== "trends") return json({ error: "No trends run has that id." }, 404);
+      const apiKey = env("ANTHROPIC_API_KEY");
+      if (!apiKey) return json({ error: "ANTHROPIC_API_KEY is not set" }, 503);
+      const payloads = makePayloadStore(db, runId);
+      const built = await filterCheckRequest(payloads, body.posts);
+      if ("error" in built) return json(built, 400);
+      const work = runClaudeDirect(payloads, { apiKey, body: built.body, saveAs, start: 1 });
+      // deno-lint-ignore no-explicit-any
+      const runtime = (globalThis as any).EdgeRuntime;
+      if (runtime?.waitUntil) runtime.waitUntil(work);
+      else await work;
+      return json({ accepted: true, run_id: runId, posts: body.posts.length, answer_key: directKey(saveAs) }, 202);
+    }
+
+    // POST {"mode":"run_payload","run_id":"<id>","key":"plan"}: one thing a
+    // pipeline run kept (its plan, a source's answer, Claude's answer).
+    if (mode === "run_payload") {
+      const runId = typeof body.run_id === "string" ? body.run_id : "";
+      const key = typeof body.key === "string" ? body.key : "";
+      if (!runId || !key) return json({ error: "run_id and key are required" }, 400);
+      try {
+        const value = await makePayloadStore(db, runId).get(key);
+        if (value === null) return json({ error: "The run kept nothing under that key." }, 404);
+        return json({ run_id: runId, key, value });
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : String(e) }, 400);
+      }
     }
 
     if (mode === "compare_pipeline") {

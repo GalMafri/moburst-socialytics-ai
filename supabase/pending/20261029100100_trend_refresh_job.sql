@@ -42,12 +42,13 @@ declare
   v_day text := to_char(p_now at time zone 'UTC', 'YYYY-MM-DD');
   v_week date := date_trunc('week', p_now at time zone 'Asia/Jerusalem')::date;
 begin
-  -- A week whose runs all stopped after three tries is closed as partial.
+  -- A week whose run stopped three times is closed as partial. Only stopped
+  -- runs count: a replay or a finished run never uses up a week's tries.
   if not p_dry_run then
     update public.trend_weeks set status = 'partial', finished_at = p_now
      where status = 'running'
        and not exists (select 1 from public.report_pipeline_runs r where r.real_id = trend_weeks.id and r.status = 'running')
-       and (select count(*) from public.report_pipeline_runs r where r.real_id = trend_weeks.id) >= 3;
+       and (select count(*) from public.report_pipeline_runs r where r.real_id = trend_weeks.id and r.status = 'stopped') >= 3;
   end if;
 
   return query
@@ -63,11 +64,11 @@ begin
          (not exists (select 1 from public.trend_weeks w where w.client_id = c.id and w.week_start = v_week)
           and (extract(dow from p_now at time zone 'UTC') = public.feed_refresh_weekday(c.id)
                or not exists (select 1 from public.trend_weeks w where w.client_id = c.id and w.created_at > p_now - interval '8 days')))
-         -- Or this week's run stopped and fewer than three runs were made.
+         -- Or this week's run stopped, fewer than three times so far.
          or exists (select 1 from public.trend_weeks w
                      where w.client_id = c.id and w.week_start = v_week and w.status = 'running'
                        and not exists (select 1 from public.report_pipeline_runs r where r.real_id = w.id and r.status = 'running')
-                       and (select count(*) from public.report_pipeline_runs r where r.real_id = w.id) < 3)
+                       and (select count(*) from public.report_pipeline_runs r where r.real_id = w.id and r.status = 'stopped') < 3)
        )
   ), queued as (
     insert into public.scheduled_jobs (kind, client_id, dedupe_key, priority, available_at)

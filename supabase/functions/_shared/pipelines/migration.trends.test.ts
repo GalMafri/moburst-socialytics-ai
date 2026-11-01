@@ -20,9 +20,11 @@ describe("20261029100100_trend_refresh_job.sql", () => {
     for (const column of ["client_id", "dedupe_key", "kind", "priority", "available_at", "status", "week_start", "id"]) expect(out).not.toContain(column);
   });
 
-  it("queues a week again whose run stopped, at most three runs a week, and closes a week that used them up", () => {
+  it("queues a week again whose run stopped, at most three stopped runs a week, and closes a week that used them up", () => {
     expect(job).toMatch(/r\.status = 'running'/);
-    expect(job).toMatch(/< 3/);
+    // Only stopped runs count: a replay or a finished run never uses up a week's tries.
+    expect(job).toContain("(select count(*) from public.report_pipeline_runs r where r.real_id = w.id and r.status = 'stopped') < 3");
+    expect(job).toContain("(select count(*) from public.report_pipeline_runs r where r.real_id = trend_weeks.id and r.status = 'stopped') >= 3");
     expect(job).toMatch(/update public\.trend_weeks set status = 'partial'/);
   });
 });
