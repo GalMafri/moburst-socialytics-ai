@@ -15,6 +15,8 @@
 //   access          the company slug, by the portal's slug rule
 //   design_refs     the client's designed posts and the visual style learned from them
 //   competitors     identify, pick the three closest with a website, confirm as the system
+//   trend_profile   what Trends tracks: audience, topics, hashtags, exclusions, fit rubric, platforms
+//   trend_hashtags  the profile's hashtags refreshed from the newest best posts, once a month
 //   tracking        RivalIQ tracking for the confirmed set (decision 1), then handles from RivalIQ
 //   design_settings logo file, placement and background derived from data (decision 2)
 //   first_output    this week and next planned, and the first monthly report
@@ -39,6 +41,10 @@ import { lifecycleMayWrite, setBy, writeClientFields } from "./fields.ts";
 import { countryCode, htmlLanguage, replacesLocation, resolveLocation, SOURCE_RANK, zoneCountry } from "./location.ts";
 import { normName, slugify, textHash } from "./names.ts";
 import { cleanSiteText } from "./siteText.ts";
+import { anthropicMessages } from "../anthropic.ts";
+import { competitorSet, feedSnapshots, ownPosts } from "../calendar/runWeek.ts";
+import { activeTerms, askTwice, evidenceKey, hashtagsRequest, monthIn, parseHashtags, parseProfile, profileEvidence, profileRequest, syncLifecycleTerms, writeTrendProfile, type ProfileIO } from "../trends/profile.ts";
+import { HASHTAG_PLATFORMS } from "../trends/types.ts";
 import type { StepOutcome, StepPolicy, StepRow } from "./policy.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -97,6 +103,17 @@ export const deps = {
   syncTrackedHandles,
   learnBrandStyle,
   imaging: () => import("./imaging.ts"),
+  claudeMessages: anthropicMessages,
+  trendIO: (): ProfileIO => ({
+    ownPosts: (db, client, snapshots, now) => ownPosts(db, client, snapshots, now),
+    feedSnapshots,
+    competitorSet,
+    async siteText(url) {
+      const scraped = await deps.scrapeMarkdown(url);
+      const text = cleanSiteText(scraped?.markdown ?? "");
+      return text.length >= 80 ? text : await deps.fetchSiteText(url);
+    },
+  }),
 };
 
 const DAY = 86_400_000;
@@ -512,6 +529,71 @@ export const STEPS: Record<string, StepDef> = {
   // until it is linked, retried quietly. A landscape that disappears is set
   // up again. Once linked, each tracked company's id and handles come from
   // RivalIQ's own record of it.
+  // What Trends tracks for the client (spec: docs/superpowers/specs/2026-10-
+  // 28-trends-redesign-design.md, section 1), written from the client's own
+  // data once the brief and pillars are settled and, for a client with a
+  // website, its competitors. Written again whenever a brand input changes;
+  // a client with nothing to read waits instead of getting a thin profile.
+  trend_profile: {
+    policy: {},
+    async inputs(db, client, rows) {
+      if (!settled(rows, "brief_pillars")) return null;
+      if (siteKey(client.website_url) && !settled(rows, "competitors")) return null;
+      let names: string[] = [];
+      try {
+        names = (await deps.trendIO().competitorSet(db, client.id)).map((c) => c.name).sort();
+      } catch {
+        names = [];
+      }
+      const { data: extra } = await db.from("clients").select("brand_book_text").eq("id", client.id).maybeSingle();
+      return `profile:${textHash([
+        str(client.brief_text), JSON.stringify(client.content_pillars ?? []), JSON.stringify(client.social_keywords ?? []), str(client.brand_notes),
+        str(extra?.brand_book_text), str(client.voice_built_at), siteKey(client.website_url) ?? "", str(client.geo), str(client.language),
+        JSON.stringify(client.primary_platforms ?? []), names.join(","),
+      ].join("|"))}`;
+    },
+    async run(db, client) {
+      const key = await deps.anthropicKey(db);
+      if (!key) return { status: "failed", error: "The AI connection is not configured." };
+      const e = await profileEvidence(db, client, deps.now(), deps.trendIO());
+      if (!e) return { status: "waiting", reason: "nothing_to_read", recheckDays: 1 };
+      const got = await askTwice(deps.claudeMessages, key, profileRequest(e), (text) => parseProfile(text, e));
+      if ("error" in got) return { status: "failed", error: `The trend profile could not be written: ${got.error}` };
+      await writeTrendProfile(db, client.id, got.value, evidenceKey(e), deps.now());
+      return { status: "done", result: { topics: got.value.topics.length, platforms: got.value.platforms.map((p) => p.platform) } };
+    },
+  },
+
+  // The profile's hashtags, refreshed once a calendar month (Israel time)
+  // from the newest best posts, since that is when the performance data has
+  // moved. A fresh profile already has this month's hashtags.
+  trend_hashtags: {
+    policy: {},
+    async inputs(db, client, rows) {
+      if (rows.get("trend_profile")?.status !== "done") return null;
+      const { data: p } = await db.from("trend_profiles").select("written_at").eq("client_id", client.id).maybeSingle();
+      if (!p) return null;
+      return `${monthIn(deps.now())}:${p.written_at}`;
+    },
+    async run(db, client) {
+      const { data: p } = await db.from("trend_profiles").select("audience, fit_rubric, hashtags_at").eq("client_id", client.id).maybeSingle();
+      if (!p) return { status: "waiting", reason: "no_profile", recheckDays: 1 };
+      const now = deps.now();
+      if (p.hashtags_at && monthIn(new Date(p.hashtags_at)) === monthIn(now)) return { status: "done", result: { skipped: "this_month" } };
+      const key = await deps.anthropicKey(db);
+      if (!key) return { status: "failed", error: "The AI connection is not configured." };
+      const e = await profileEvidence(db, client, now, deps.trendIO());
+      if (!e) return { status: "waiting", reason: "nothing_to_read", recheckDays: 1 };
+      const terms = await activeTerms(db, client.id);
+      const body = hashtagsRequest({ audience: String(p.audience), fit_rubric: String(p.fit_rubric), topics: terms.topics, hashtags: terms.hashtags }, e);
+      const got = await askTwice(deps.claudeMessages, key, body, (text) => parseHashtags(text, e));
+      if ("error" in got) return { status: "failed", error: `The trend hashtags could not be refreshed: ${got.error}` };
+      for (const platform of HASHTAG_PLATFORMS) await syncLifecycleTerms(db, client.id, "hashtag", platform, got.value[platform]);
+      await db.from("trend_profiles").update({ hashtags_at: now.toISOString() }).eq("client_id", client.id);
+      return { status: "done", result: { refreshed: true } };
+    },
+  },
+
   tracking: {
     policy: {},
     async inputs(db, client) {

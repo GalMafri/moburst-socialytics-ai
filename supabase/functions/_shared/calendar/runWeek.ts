@@ -90,7 +90,7 @@ export interface Gathered {
 }
 
 /** The client's own posts for the last 90 days: Sprout where profiles are assigned, RivalIQ's copy for other platforms. */
-async function ownPosts(admin: Db, client: Record<string, unknown>, snapshots: Array<{ payload: any }>, now: Date): Promise<{ posts: OwnPost[]; sprout: string }> {
+export async function ownPosts(admin: Db, client: Record<string, unknown>, snapshots: Array<{ payload: any }>, now: Date): Promise<{ posts: OwnPost[]; sprout: string }> {
   const end = new Date(now.getTime() - DAY).toISOString().slice(0, 10);
   const start = new Date(now.getTime() - OWN_DAYS * DAY).toISOString().slice(0, 10);
   let posts: OwnPost[] = [];
@@ -126,7 +126,7 @@ async function ownPosts(admin: Db, client: Record<string, unknown>, snapshots: A
 }
 
 /** The client's weekly competitor feeds, newest first (14 weeks covers the 90 days of own posts). */
-async function feedSnapshots(admin: Db, clientId: string): Promise<Array<{ payload: any }>> {
+export async function feedSnapshots(admin: Db, clientId: string): Promise<Array<{ payload: any }>> {
   const { data, error } = await admin.from("rivaliq_snapshots").select("payload, fetched_at")
     .eq("client_id", clientId).eq("endpoint", "feed").order("fetched_at", { ascending: false }).limit(14);
   if (error) throw new Error(`Could not read the competitor feed: ${error.message}`);
@@ -151,7 +151,7 @@ async function feedRows(admin: Db, clientId?: string): Promise<FeedRow[]> {
 }
 
 /** The companies in the client's current competitor set (the newest confirmed one), as the feed knows them. */
-async function competitorSet(admin: Db, clientId: string): Promise<Array<{ name: string; rivaliq_company_id: string | null }>> {
+export async function competitorSet(admin: Db, clientId: string): Promise<Array<{ name: string; rivaliq_company_id: string | null }>> {
   const { data: set, error } = await admin.from("competitor_sets").select("id").eq("client_id", clientId)
     .in("status", ["confirmed", "analyzing", "complete", "failed"])
     .order("confirmed_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).limit(1).maybeSingle();
