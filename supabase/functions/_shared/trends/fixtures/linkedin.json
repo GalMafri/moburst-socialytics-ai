@@ -1,0 +1,34 @@
+[
+  {
+    "type": "post",
+    "id": "7520148278005608448",
+    "linkedinUrl": "https://www.linkedin.com/posts/themediagiant_aiofficehours-apps-marketing-activity-7520148278005608448-x2v8",
+    "content": "Everyone's going to build an app. Who's going to market it?\n\n\"Apps are gonna be like books,\" Neil Haley says on AI Office Hours. Anyone can put one on Apple or Google Play. The hard part is the marketing: knowing your competition, finding your niche, nailing the user experience, and winning your piece of the pie.\n\n#AIOfficeHours #Apps #Marketing #SmallBusiness",
+    "author": { "name": "Neil Haley", "type": "profile", "publicIdentifier": "themediagiant", "universalName": null },
+    "postedAt": { "timestamp": 1792943067075, "date": "2026-10-25T15:44:27.075Z" },
+    "engagement": { "likes": 0, "comments": 0, "shares": 0 },
+    "postVideo": { "videoUrl": "https://dms.licdn.com/playlist/vid/dynamic/D4E10AQG7NqubbcrfNA" },
+    "query": { "search": "app marketing", "sortBy": "relevance", "postedLimit": "week" }
+  },
+  {
+    "type": "post",
+    "id": "7520391753837891584",
+    "linkedinUrl": "https://www.linkedin.com/posts/ahmed-dawood_growthmarketing-productanalytics-useractivation-activity-7520391753837891584-kkW0",
+    "content": "Getting app downloads but struggling to convert those users into active users?\n\nBefore you spend more money acquiring users, you need to understand where things are breaking down.\n\n#GrowthMarketing #ProductAnalytics #UserActivation #ProductGrowth #AppMarketing",
+    "author": { "name": "Kehinde Dawood MBA", "type": "profile", "publicIdentifier": "ahmed-dawood", "universalName": null },
+    "postedAt": { "timestamp": 1793001116237, "date": "2026-10-26T07:51:56.237Z" },
+    "engagement": { "likes": 4, "comments": 4, "shares": 0 },
+    "postVideo": { "videoUrl": "https://dms.licdn.com/playlist/vid/dynamic/D4E05AQGhtWxgojtA7g" },
+    "query": { "search": "app marketing", "sortBy": "relevance", "postedLimit": "week" }
+  },
+  {
+    "type": "post",
+    "id": "7522232257651220481",
+    "linkedinUrl": "https://www.linkedin.com/posts/ulagh-aondosoo-fabian-75a781143_growthengineering-conceptlab-startups-activity-7522232257651220481-kDpM",
+    "content": "Why do some apps grow from hundreds of users to millions? 📈 Sometimes it's not the marketing. It's the engineering. 👇 #GrowthEngineering #ConceptLab #Startups #ProductDevelopment #Nigeria",
+    "author": { "name": "Ulagh Aondosoo Fabian", "type": "profile", "publicIdentifier": "ulagh-aondosoo-fabian-75a781143", "universalName": null },
+    "postedAt": { "timestamp": 1793439926541, "date": "2026-10-31T09:45:26.541Z" },
+    "engagement": { "likes": 5, "comments": 0, "shares": 0 },
+    "query": { "search": "app marketing", "sortBy": "relevance", "postedLimit": "week" }
+  }
+]
