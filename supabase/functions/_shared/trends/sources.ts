@@ -195,13 +195,40 @@ export const TREND_SOURCES: Record<TrendPlatform, TrendSource> = {
 };
 
 /**
- * What a platform searches for this week: Instagram by the profile's
- * hashtags, the others by its topics, unless the coverage rewrite replaced a
- * platform's searches.
+ * The week's searches from a list of terms. What a person added is always
+ * searched, first. The profile's own terms fill the rest; when they do not
+ * all fit, they take turns week by week in a fixed order, so each is
+ * searched within a few weeks and the same week always searches the same
+ * terms, whatever order the rows were read in.
  */
-export function searchesFor(platform: TrendPlatform, terms: { topics: Term[]; hashtags: Record<string, Term[]> }, overrides: Record<string, string[]>): string[] {
+function pickSearches(terms: Term[], weekStart: string): string[] {
+  const byTerm = (a: Term, b: Term) => a.term.toLowerCase().localeCompare(b.term.toLowerCase());
+  const seen = new Set<string>();
+  const unique = terms.filter((t) => {
+    const key = t.term.trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const person = unique.filter((t) => t.source === "person").sort(byTerm).slice(0, MAX_SEARCHES);
+  const rest = unique.filter((t) => t.source !== "person").sort(byTerm);
+  const slots = MAX_SEARCHES - person.length;
+  let turn = rest;
+  if (rest.length > slots && slots > 0) {
+    const week = Math.floor(Date.parse(`${weekStart}T00:00:00Z`) / (7 * 86_400_000));
+    const start = Number.isFinite(week) ? (week * slots) % rest.length : 0;
+    turn = [...rest.slice(start), ...rest.slice(0, start)];
+  }
+  return searchesOf([...person, ...turn.slice(0, Math.max(slots, 0))].map((t) => t.term));
+}
+
+/**
+ * What a platform searches for in the week starting weekStart (YYYY-MM-DD):
+ * Instagram by the profile's hashtags, the others by its topics, unless the
+ * coverage rewrite replaced a platform's searches.
+ */
+export function searchesFor(platform: TrendPlatform, terms: { topics: Term[]; hashtags: Record<string, Term[]> }, overrides: Record<string, string[]>, weekStart = ""): string[] {
   const replaced = overrides?.[platform];
   if (Array.isArray(replaced) && replaced.length) return searchesOf(replaced);
-  if (platform === "instagram") return searchesOf((terms.hashtags.instagram ?? []).map((t) => t.term));
-  return searchesOf(terms.topics.map((t) => t.term));
+  return pickSearches(platform === "instagram" ? terms.hashtags.instagram ?? [] : terms.topics, weekStart);
 }

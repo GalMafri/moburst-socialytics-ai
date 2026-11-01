@@ -123,4 +123,31 @@ describe("what each platform searches for", () => {
     expect(searchesFor("facebook", terms, { facebook: ["mobile game ads"] })).toEqual(["mobile game ads"]);
     expect(searchesFor("tiktok", terms, { facebook: ["mobile game ads"] })).toEqual(["app growth tips", "ASO tactics"]);
   });
+
+  // A profile can hold more terms than a week searches, and a person can add more.
+  const ten = Array.from({ length: 10 }, (_, i) => ({ term: `topic ${String(i).padStart(2, "0")}`, reason: "r" }));
+  const added = { term: "mobile game UA", reason: "r", source: "person" as const };
+  const many = { ...terms, topics: [...ten, added], hashtags: { ...terms.hashtags, instagram: [...ten.map((t) => ({ ...t, term: `#${t.term.replace(" ", "")}` })), { ...added, term: "#gameua" }] } };
+
+  it("always searches what a person added, first", () => {
+    for (const week of ["2026-11-02", "2026-11-09", "2026-11-16"]) {
+      expect(searchesFor("tiktok", many, {}, week)[0]).toBe("mobile game UA");
+      expect(searchesFor("instagram", many, {}, week)[0]).toBe("#gameua");
+      expect(searchesFor("tiktok", many, {}, week)).toHaveLength(MAX_SEARCHES);
+    }
+  });
+
+  it("lets the profile's own terms take turns when they do not all fit, so each is searched within two weeks", () => {
+    const week1 = searchesFor("tiktok", many, {}, "2026-11-02");
+    const week2 = searchesFor("tiktok", many, {}, "2026-11-09");
+    expect(new Set([...week1, ...week2]).size).toBe(11);
+    expect(week1).not.toEqual(week2);
+  });
+
+  it("searches the same terms in a week whatever order the rows came in", () => {
+    const reversed = { ...many, topics: [...many.topics].reverse() };
+    expect(searchesFor("tiktok", reversed, {}, "2026-11-02")).toEqual(searchesFor("tiktok", many, {}, "2026-11-02"));
+    // Terms that all fit are all searched, every week.
+    expect([...searchesFor("tiktok", { ...terms, topics: ten.slice(0, MAX_SEARCHES) }, {}, "2026-11-02")].sort()).toEqual(ten.slice(0, MAX_SEARCHES).map((t) => t.term));
+  });
 });

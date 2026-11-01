@@ -43,6 +43,8 @@ export interface TrendPost {
 export interface Term {
   term: string;
   reason: string;
+  /** Who put it there: the client lifecycle, a person, or a dismissed theme. */
+  source?: "lifecycle" | "person" | "dismissal";
 }
 
 /** What the app tracks for a client: written by Claude from the client's own data. */

@@ -102,7 +102,9 @@ describe("what a profile must be", () => {
     expect(profileProblems(profile({ topics: [...topics(7), term("Atlanta")] }), e)).toHaveLength(1);
     expect(profileProblems(profile({ topics: [...topics(7), term("car accident tips Atlanta")] }), e)).toEqual([]);
     expect(profileProblems(profile({ topics: topics(5) }), e)).toHaveLength(1);
-    expect(profileProblems(profile({ topics: [...topics(10), term("one more")] }), e)).toHaveLength(1);
+    // At most as many topics as a week searches, so every topic the profile writes is searched every week.
+    expect(profileProblems(profile({ topics: topics(8) }), e)).toEqual([]);
+    expect(profileProblems(profile({ topics: topics(9) }), e)).toHaveLength(1);
   });
 
   it("refuses a profile that leaves out one of the client's primary platforms", async () => {
@@ -137,6 +139,9 @@ describe("a person's changes", () => {
     expect(db.tables.trend_terms.some((r) => r.platform === "tiktok" && r.term === "#old")).toBe(true);
     const active = await activeTerms(db, "c1");
     expect(active.hashtags.instagram.map((t) => t.term).sort()).toEqual(["#aso", "#growth"]);
+    // Who added a term goes with it, so a person's terms are searched first.
+    expect(active.hashtags.instagram.find((t) => t.term === "#growth")?.source).toBe("person");
+    expect(active.hashtags.instagram.find((t) => t.term === "#aso")?.source).toBe("lifecycle");
   });
 });
 

@@ -11,6 +11,7 @@
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import { topCounts } from "../competitive/postSample.ts";
 import { textHash } from "../lifecycle/names.ts";
+import { MAX_SEARCHES } from "./sources.ts";
 import { clip } from "./text.ts";
 import { HASHTAG_PLATFORMS, TREND_PLATFORMS, type HashtagPlatform, type Term, type TrendPlatform, type TrendProfile } from "./types.ts";
 
@@ -158,7 +159,7 @@ Trends show the broader landscape of the brand's industry: posts by other creato
 
 From the evidence, write the brand's trend profile:
 - audience: one or two sentences on who the brand speaks to and what that audience wants to learn or see.
-- topics: 6 to 10 search phrases that find posts in the brand's industry landscape, each with a one-line reason. Write them the way people search on social platforms, in the brand's language. Never the brand's own name, a competitor's name, or a place name on its own (a place may narrow a topic, as in "car accident tips Atlanta").
+- topics: 6 to ${MAX_SEARCHES} search phrases that find posts in the brand's industry landscape, each with a one-line reason. Write them the way people search on social platforms, in the brand's language. Never the brand's own name, a competitor's name, or a place name on its own (a place may narrow a topic, as in "car accident tips Atlanta").
 - hashtags: up to 10 each for instagram, tiktok and linkedin, each with a reason, written with the leading #. Prefer hashtags the best posts in this space already use (the evidence lists them with how often they appear). Never the brand's own name.
 - exclusions: words or kinds of content that would pull in posts this brand would never want, such as another meaning of its words, job ads, giveaways or money-making schemes, each with a reason.
 - fit_rubric: three to six sentences describing a post this brand would want to learn from, and what to drop.
@@ -239,7 +240,7 @@ export function profileProblems(p: TrendProfile, e: ProfileEvidence): string[] {
   const brand = e.client.name;
   const places = placesOf(e);
   if (!str(p.audience)) out.push("The audience is missing.");
-  if (p.topics.length < 6 || p.topics.length > 10) out.push(`There must be 6 to 10 topics; there are ${p.topics.length}.`);
+  if (p.topics.length < 6 || p.topics.length > MAX_SEARCHES) out.push(`There must be 6 to ${MAX_SEARCHES} topics; there are ${p.topics.length}.`);
   for (const t of p.topics) {
     if (!str(t.term) || !str(t.reason)) out.push("Every topic needs a phrase and a reason.");
     else if (namesBrand(t.term, brand)) out.push(`The topic "${t.term}" searches for the brand's own name.`);
@@ -342,11 +343,11 @@ export async function askTwice<T>(call: ClaudeCall, apiKey: string, body: Record
 
 /** A client's topics, hashtags and exclusions that nobody removed. */
 export async function activeTerms(db: Db, clientId: string): Promise<{ topics: Term[]; hashtags: Record<HashtagPlatform, Term[]>; exclusions: Term[] }> {
-  const { data, error } = await db.from("trend_terms").select("kind, platform, term, reason, created_at").eq("client_id", clientId).is("removed_at", null);
+  const { data, error } = await db.from("trend_terms").select("kind, platform, term, reason, source, created_at").eq("client_id", clientId).is("removed_at", null);
   if (error) throw new Error(`Could not read what trends track: ${error.message}`);
   const out = { topics: [] as Term[], hashtags: { instagram: [], tiktok: [], linkedin: [] } as Record<HashtagPlatform, Term[]>, exclusions: [] as Term[] };
   for (const r of (data ?? []) as Any[]) {
-    const t = { term: String(r.term), reason: String(r.reason ?? "") };
+    const t: Term = { term: String(r.term), reason: String(r.reason ?? ""), ...(r.source ? { source: r.source } : {}) };
     if (r.kind === "topic") out.topics.push(t);
     else if (r.kind === "exclusion") out.exclusions.push(t);
     else if (r.kind === "hashtag" && HASHTAG_PLATFORMS.includes(r.platform)) out.hashtags[r.platform as HashtagPlatform].push(t);

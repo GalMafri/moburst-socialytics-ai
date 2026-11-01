@@ -261,7 +261,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
           competitorHandles: rivals.map((r) => String(r.handle ?? "")).filter(Boolean),
           window: { start: new Date(end.getTime() - WINDOW_DAYS * 86_400_000).toISOString(), end: end.toISOString() },
           platforms,
-          searches: Object.fromEntries(platforms.map((p) => [p, searchesFor(p, terms, profile.search_overrides ?? {})])),
+          searches: Object.fromEntries(platforms.map((p) => [p, searchesFor(p, terms, profile.search_overrides ?? {}, String(ctx.run.input?.week_start ?? end.toISOString().slice(0, 10)))])),
           profile: { audience: String(profile.audience), fit_rubric: String(profile.fit_rubric), topics: terms.topics, brand: String(client.name ?? ""), competitors: competitorNames },
           exclusions: terms.exclusions,
           competitors: competitorNames,
