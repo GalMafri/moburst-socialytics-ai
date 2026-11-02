@@ -65,10 +65,10 @@ export interface WeekPreview {
 export const WEEK_RUN_COLUMNS = "id, client_id, week_start, status, posts, requested_by, stopped_by, created_at, updated_at, finished_at";
 
 export async function fetchWeekRuns(clientId: string): Promise<WeekRun[]> {
-  const { data, error } = await (supabase.from("design_week_runs" as any) as any)
+  const { data, error } = await supabase.from("design_week_runs")
     .select(WEEK_RUN_COLUMNS).eq("client_id", clientId).order("created_at", { ascending: false }).limit(20);
   if (error) throw error;
-  return ((data || []) as WeekRun[]).map((r) => ({ ...r, posts: Array.isArray(r.posts) ? r.posts : [] }));
+  return ((data || []) as unknown as WeekRun[]).map((r) => ({ ...r, posts: Array.isArray(r.posts) ? r.posts : [] }));
 }
 
 /** What a press would design this week. Spends nothing. Null when the answer did not come. */

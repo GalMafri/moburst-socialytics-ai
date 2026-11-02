@@ -36,13 +36,13 @@ const POLL_MS = 6000;
 const REQUEST_COLUMNS = "id, client_id, report_id, calendar_post_key, platform, post_copy, status, stage, kind, options_wanted, options_ready, requested_by, batch_id, error, on_camera, footage_path, video_route, created_at, updated_at";
 
 async function fetchDesignRequests(clientId: string): Promise<DesignRequest[]> {
-  const { data, error } = await (supabase.from("design_requests" as any) as any)
+  const { data, error } = await supabase.from("design_requests")
     .select(REQUEST_COLUMNS)
     .eq("client_id", clientId)
     .order("created_at", { ascending: false })
     .limit(200);
   if (error) throw error;
-  return (data || []) as DesignRequest[];
+  return (data || []) as unknown as DesignRequest[];
 }
 
 /**
