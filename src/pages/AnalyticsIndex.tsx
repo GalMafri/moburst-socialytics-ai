@@ -9,6 +9,7 @@ import { Loading } from "@/components/ui/loading";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadRetry } from "@/components/ui/load-error";
 import { BarChart3, ArrowRight } from "lucide-react";
+import { ClientLogo } from "@/components/clients/ClientLogo";
 
 export default function AnalyticsIndex() {
   const navigate = useNavigate();
@@ -50,13 +51,7 @@ export default function AnalyticsIndex() {
                 ariaLabel={`View analytics for ${c.name}`}
               >
                 <CardContent className="flex items-center gap-3">
-                  {c.logo_url ? (
-                    <img src={c.logo_url} alt="" className="h-10 w-10 rounded-[8px] object-cover" />
-                  ) : (
-                    <div className="h-10 w-10 rounded-[8px] bg-white/10 flex items-center justify-center t-badge text-white">
-                      {c.name.slice(0, 2).toUpperCase()}
-                    </div>
-                  )}
+                  <ClientLogo client={c} />
                   <div className="min-w-0">
                     <div className="t-h4 truncate">{c.name}</div>
                     <div className="t-link inline-flex items-center gap-1">View analytics <ArrowRight className="h-3 w-3" aria-hidden /></div>

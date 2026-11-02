@@ -1,4 +1,5 @@
 import { ClientPicker } from "@/components/clients/ClientPicker";
+import { ClientLogo } from "@/components/clients/ClientLogo";
 import { ClientOverview } from "@/components/dashboard/ClientOverview";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -212,7 +213,7 @@ export function AdminDashboard() {
                 <CardHeader className="border-b border-white/10">
                   <p className="t-subhead">Selected client</p>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                    {client.logo_url && <img src={client.logo_url} alt="" className="h-10 w-10 rounded-[8px] object-cover shrink-0" />}
+                    {client.logo_url && <ClientLogo client={client} />}
                     <div className="flex flex-wrap items-center gap-2 min-w-[12rem] flex-1">
                       {/* The name opens setup. The card itself is no longer a
                           control: a button wrapping five other buttons is a
