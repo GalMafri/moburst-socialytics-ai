@@ -26,6 +26,7 @@ import { activePreferences, buildVoiceProfile, consolidateMemory, COPY_MODEL, le
 import { voicePromptBlock } from "../voice/voice.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS, type HashtagPlatform } from "../trends/types.ts";
+import { strategyPromptBlock } from "../strategy/prompt.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -343,6 +344,16 @@ async function releaseStoppedRun(admin: Db, plan: { id: string; claimed_at: stri
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/**
+ * The client's content strategy for the planner's prompts. Like the
+ * competitive picture, a strategy that cannot be read leaves the prompt as it
+ * was without one, rather than holding the week.
+ */
+const clientStrategy = (admin: Db, clientId: string) => strategyPromptBlock(admin, clientId).catch((e: unknown) => {
+  console.warn("[calendar] the content strategy was left out:", message(e));
+  return "";
+});
+
 /** How far back an upload of filmed footage still says the client films. */
 const FILMING_DAYS = 60;
 
@@ -437,6 +448,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       thin: gathered.thin,
       canFilm: await clientCanFilm(admin, client.id, now),
       hashtags: gathered.hashtags,
+      strategy: await clientStrategy(admin, client.id),
     };
     let posts: ReturnType<typeof parseWeekPlan> = [];
     const tokens = { input: 0, output: 0 };
@@ -543,6 +555,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       languages: list(client.language),
       evidence: gathered?.evidence ?? [],
       others: all.filter((p) => !targets.some((t) => t.id === p.id) && p.copy).map((p) => ({ date: p.post_date, platform: p.platform, copy: p.copy })),
+      strategy: await clientStrategy(admin, client.id),
     });
     const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 12000, messages: [{ role: "user", content: prompt }] } });
     const revised = parseRevision(result.text, targets.map((p) => p.id), gathered?.evidence ?? [], pending.scope === "empty");
