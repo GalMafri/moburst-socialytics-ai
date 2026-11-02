@@ -3458,6 +3458,13 @@ export type Database = {
         Args: { p_dry_run?: boolean; p_now?: string }
         Returns: Json
       }
+      enqueue_trend_refresh_jobs: {
+        Args: { p_dry_run?: boolean; p_now?: string }
+        Returns: {
+          due_client: string
+          due_key: string
+        }[]
+      }
       feed_refresh_weekday: { Args: { p_client_id: string }; Returns: number }
       freeze_quarter: {
         Args: { p_quarter: string }
@@ -3764,6 +3771,21 @@ export type Database = {
           schedule_id: string
         }[]
       }
+      trend_measures: {
+        Args: { p_client?: string }
+        Returns: {
+          client: string
+          client_name: string
+          dismissed: number
+          kept_per_platform: Json
+          run_status: string
+          terms_removed: number
+          tripwire_hits: number
+          used_share: number
+          week: string
+          week_cost: Json
+        }[]
+      }
       trend_term_add: {
         Args: {
           p_client: string
@@ -3775,6 +3797,10 @@ export type Database = {
       }
       trend_term_remove: { Args: { p_id: string }; Returns: undefined }
       trend_theme_dismiss: { Args: { p_theme: string }; Returns: undefined }
+      trend_themes_in_range: {
+        Args: { p_client: string; p_from: string; p_to: string }
+        Returns: Json
+      }
       usage_actions: {
         Args: { p_since?: string }
         Returns: {
