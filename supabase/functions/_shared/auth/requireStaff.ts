@@ -15,7 +15,7 @@
 // company-scoped staff — apply exactly as they do to direct table access.
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { AuthzError, authzResponse, bearerToken, SERVER_SECRET_HEADER, SERVER_USER_HEADER, serverActAsUser, serverActor } from "./authz.ts";
+import { AuthzError, authzResponse, bearerToken, OAUTH_READ_ONLY, oauthClientOf, SERVER_SECRET_HEADER, SERVER_USER_HEADER, serverActAsUser, serverActor } from "./authz.ts";
 import { secretEquals } from "./secretEquals.ts";
 
 // Re-exported so all 31 importers of this path keep working unchanged.
@@ -53,6 +53,8 @@ export async function requireStaff(
 
   const jwt = bearerToken(req.headers.get("Authorization"));
   if (!jwt) throw new AuthzError(401, "Sign-in required.");
+  // A token from Supabase's OAuth server (the Claude connector) only reads.
+  if (oauthClientOf(jwt)) throw new AuthzError(403, OAUTH_READ_ONLY);
 
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const asCaller = createClient(url, anonKey, {
