@@ -4,7 +4,14 @@
 // on the client's feed weekday, linked to that week's trend_weeks row.
 //
 //   start          the client's profile, terms and exclusions; each watched
-//                  platform's searches for the last 7 days
+//                  platform's searches for the last 7 days; which platforms
+//                  kept fewer than 5 posts in each of their last two weeks
+//   rewrite_searches  Claude (Sonnet) rewrites a short platform's searches
+//                  from the profile, one platform at a time, before any
+//                  scrape (read_rewrite reads the answer; rewrite_again asks
+//                  once more). The new searches are kept in the profile for
+//                  the weeks to come. An answer that cannot be had or used
+//                  leaves the platform's searches as they were.
 //   scrape_*       one step per platform; a source that takes one search a
 //                  run comes back to its own step for each search. Every
 //                  answer is kept 90 days, so a replay reads it again. A
@@ -24,8 +31,9 @@ import { keptAnswer, replayOf } from "../social/replay.ts";
 import { SOURCE_KEEP_DAYS } from "../store.ts";
 import { StepRestart, type PipelineDefinition, type Step, type StepContext, type StepResult } from "../types.ts";
 import { competitorSet } from "../../calendar/runWeek.ts";
+import { coverageShort, finishedWeeks, lastKept, parseRewrite, removedFor, removedSearches, rewriteRequest, TREND_REWRITE_MODEL, withoutRemoved, type RewriteProfile } from "../../trends/coverage.ts";
 import { activeTerms } from "../../trends/profile.ts";
-import { searchesFor, TREND_SOURCES } from "../../trends/sources.ts";
+import { fillAfter, MAX_SEARCHES, personSearches, searchesFor, TREND_SOURCES } from "../../trends/sources.ts";
 import { ruleFilter, tripwire } from "../../trends/rules.ts";
 import { filterRequest, parseFilter, pickKept, TREND_FILTER_MODEL, type FilterProfile } from "../../trends/filter.ts";
 import { parseThemes, themesRequest, themesWanted, TREND_THEMES_MODEL } from "../../trends/themes.ts";
@@ -53,6 +61,18 @@ type PlatformStatus = "ok" | "empty" | "failed" | "not_watched" | "no_searches";
 /** A watched platform in one of these states is no gap in the week. */
 const FINE: readonly PlatformStatus[] = ["ok", "empty", "no_searches"];
 
+/** A platform short of kept posts in its last two weeks, whose searches the week rewrites. */
+interface Shortfall {
+  /** The searches that came up short. */
+  last: string[];
+  /** What it kept in those two weeks, newest first. */
+  kept: number[];
+  /** What a person added: searched first, never replaced. */
+  person: string[];
+  /** What a person removed: never searched. */
+  removed: string[];
+}
+
 interface Plan {
   client: { name: string; language: string; languages: string[]; region?: string };
   own: { handles: string[]; names: string[] };
@@ -63,6 +83,11 @@ interface Plan {
   profile: FilterProfile;
   exclusions: Term[];
   competitors: string[];
+  /** When the profile the searches come from was written: a rewrite is kept only while it stands. */
+  profileWrittenAt?: string;
+  short?: Partial<Record<TrendPlatform, Shortfall>>;
+  /** The searches the coverage rewrite gave each platform this week, in place of the profile's own terms. */
+  rewritten?: Partial<Record<TrendPlatform, string[]>>;
 }
 
 interface TrendState {
@@ -73,6 +98,9 @@ interface TrendState {
   claude?: Record<string, { input_tokens: number; output_tokens: number }>;
   filterTries?: number;
   themesTries?: number;
+  /** The platforms whose searches are still to be rewritten, the one being asked about first. */
+  rewriteQueue?: TrendPlatform[];
+  rewriteTries?: number;
   filter?: "ok" | "failed" | "skipped";
   themes?: "ok" | "failed" | "skipped";
 }
@@ -222,6 +250,32 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
   }), themesGiveUp);
 
   const order = TREND_PLATFORMS.map((p) => `scrape_${p}`);
+
+  // The coverage rewrite: one request per platform, each answer under its own name.
+  const rewriteKey = (platform: TrendPlatform, again: boolean) => `answer.rewrite${again ? "_again" : ""}.${platform}`;
+  const rewriteProfile = (plan: Plan): RewriteProfile => ({ ...plan.profile, languages: plan.client.languages, region: plan.client.region, exclusions: plan.exclusions });
+  /** On to the next platform to rewrite, or to the first scrape. */
+  const nextRewrite = (st: TrendState, detail: Record<string, unknown>): StepResult => {
+    const queue = (st.rewriteQueue ?? []).slice(1);
+    return { type: "next", step: queue.length ? "rewrite_searches" : order[0], state: { ...st, rewriteQueue: queue, rewriteTries: 0 }, detail };
+  };
+  /** A rewrite that cannot be had leaves the platform's searches as they were, and the week goes on. */
+  const rewriteGiveUp = (ctx: StepContext, why: string): Promise<StepResult> =>
+    Promise.resolve(nextRewrite(stateOf(ctx), { platform: stateOf(ctx).rewriteQueue?.[0], kept_searches: true, gave_up: why }));
+  const rewriteStep = (again: boolean): Step => (ctx) => {
+    const platform = stateOf(ctx).rewriteQueue?.[0];
+    if (!platform) return Promise.resolve(nextRewrite(stateOf(ctx), {}));
+    return orGiveUp(claudeBatchStep({
+      async build(ctx) {
+        const plan = await need<Plan>(ctx, "plan");
+        const short = plan.short?.[platform];
+        if (!short) throw new Error(`The plan has no shortfall for ${platform}.`);
+        const body = rewriteRequest(rewriteProfile(plan), platform, short.last, short.kept, { keep: short.person, avoid: short.removed });
+        return { apiKey: apiKey(ctx), body: again ? await repaired(ctx, body, rewriteKey(platform, false)) : body };
+      },
+      saveAs: rewriteKey(platform, again), keepDays: KEEP.keepDays, next: "read_rewrite", fetchImpl: deps.claudeFetch,
+    }), rewriteGiveUp)(ctx);
+  };
   const scrapeSteps = Object.fromEntries(TREND_PLATFORMS.map((p, i) => [`scrape_${p}`, scrapeStep(p, order[i + 1] ?? "rules")]));
 
   return {
@@ -243,9 +297,10 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const clientId = ctx.run.client_id;
         const { data: client, error } = await ctx.db.from("clients").select("id, name, geo, language").eq("id", clientId).maybeSingle();
         if (error || !client) throw new Error(`The client could not be read: ${error?.message ?? "not found"}`);
-        const { data: profile } = await ctx.db.from("trend_profiles").select("audience, fit_rubric, platforms, search_overrides").eq("client_id", clientId).maybeSingle();
+        const { data: profile } = await ctx.db.from("trend_profiles").select("audience, fit_rubric, platforms, search_overrides, written_at").eq("client_id", clientId).maybeSingle();
         if (!profile) throw new Error("The client has no trend profile yet.");
         const terms = await activeTerms(ctx.db, clientId);
+        const removed = await removedSearches(ctx.db, clientId);
         const competitors = await competitorSet(ctx.db, clientId).catch(() => []);
         const { data: ownRows } = await ctx.db.from("sprout_profiles").select("native_name, profile_name, is_active").eq("client_id", clientId);
         const { data: rivalRows } = await ctx.db.from("competitor_handles").select("handle, display_name, is_active").eq("client_id", clientId);
@@ -255,19 +310,65 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const languages = languagesOf(client.language);
         const platforms = [...new Set(((profile.platforms ?? []) as Array<{ platform: string }>).map((p) => p.platform))].filter((p): p is TrendPlatform => (TREND_PLATFORMS as readonly string[]).includes(p));
         const end = ctx.now();
+        const weekStart = String(ctx.run.input?.week_start ?? end.toISOString().slice(0, 10));
+        const overrides = withoutRemoved(profile.search_overrides ?? {}, removed);
+        const searches: Plan["searches"] = Object.fromEntries(platforms.map((p) => [p, searchesFor(p, terms, overrides, weekStart)]));
+        // Coverage: a platform short of kept posts in its last two weeks on this profile gets its searches rewritten.
+        const profileWrittenAt = String(profile.written_at ?? "");
+        const weeks = await finishedWeeks(ctx.db, clientId, { before: weekStart, since: profileWrittenAt });
+        const short: Partial<Record<TrendPlatform, Shortfall>> = {};
+        for (const p of platforms) {
+          const person = personSearches(p, terms);
+          // A platform whose places are all a person's has nothing to rewrite.
+          if (!coverageShort(weeks, p) || person.length >= MAX_SEARCHES) continue;
+          short[p] = { last: searches[p] ?? [], kept: lastKept(weeks, p), person, removed: removedFor(p, removed) };
+        }
+        const rewrite = Object.keys(short) as TrendPlatform[];
         const plan: Plan = {
           client: { name: String(client.name ?? ""), language: languages[0], languages, region: regionOf(client.geo) },
           own: { handles: own.map((r) => String(r.native_name ?? "")).filter(Boolean), names: own.map((r) => String(r.profile_name ?? "")).filter(Boolean) },
           competitorHandles: rivals.map((r) => String(r.handle ?? "")).filter(Boolean),
           window: { start: new Date(end.getTime() - WINDOW_DAYS * 86_400_000).toISOString(), end: end.toISOString() },
           platforms,
-          searches: Object.fromEntries(platforms.map((p) => [p, searchesFor(p, terms, profile.search_overrides ?? {}, String(ctx.run.input?.week_start ?? end.toISOString().slice(0, 10)))])),
+          searches,
           profile: { audience: String(profile.audience), fit_rubric: String(profile.fit_rubric), topics: terms.topics, brand: String(client.name ?? ""), competitors: competitorNames },
           exclusions: terms.exclusions,
           competitors: competitorNames,
+          profileWrittenAt,
+          ...(rewrite.length ? { short } : {}),
         };
         await ctx.payloads.put("plan", plan, KEEP);
-        return { type: "next", step: order[0], state: {}, detail: { platforms, topics: terms.topics.length } };
+        const detail = { platforms, topics: terms.topics.length, ...(rewrite.length ? { rewrite } : {}) };
+        if (rewrite.length) return { type: "next", step: "rewrite_searches", state: { rewriteQueue: rewrite }, detail };
+        return { type: "next", step: order[0], state: {}, detail };
+      },
+
+      rewrite_searches: rewriteStep(false),
+      rewrite_again: rewriteStep(true),
+
+      async read_rewrite(ctx) {
+        const st = stateOf(ctx);
+        const platform = st.rewriteQueue?.[0];
+        if (!platform) return nextRewrite(st, {});
+        const tries = st.rewriteTries ?? 0;
+        const answer = await need<{ text: string; usage?: Any }>(ctx, rewriteKey(platform, tries > 0));
+        const counted = withTokens(st, TREND_REWRITE_MODEL, answer.usage);
+        const plan = await need<Plan>(ctx, "plan");
+        const short = plan.short?.[platform];
+        if (!short) return nextRewrite(counted, { platform, kept_searches: true });
+        const got = parseRewrite(answer.text, { platform, brand: plan.profile.brand, competitors: plan.profile.competitors, last: short.last, keep: short.person, avoid: short.removed });
+        if ("error" in got) {
+          if (tries === 0) {
+            await ctx.payloads.put(`${rewriteKey(platform, false)}.problems`, got.error.slice(0, 4000));
+            return { type: "next", step: "rewrite_again", state: { ...counted, rewriteTries: 1 }, detail: { platform, problems: got.error.slice(0, 300) } };
+          }
+          return nextRewrite(counted, { platform, kept_searches: true, problems: got.error.slice(0, 300) });
+        }
+        // Kept in the profile for the weeks to come, and searched from this week's scrape on, after what a person added.
+        await ctx.output.write("searches", { platform, searches: got.value, profile_written_at: plan.profileWrittenAt });
+        const searches = fillAfter(short.person, got.value);
+        await ctx.payloads.put("plan", { ...plan, searches: { ...plan.searches, [platform]: searches }, rewritten: { ...(plan.rewritten ?? {}), [platform]: got.value } }, KEEP);
+        return nextRewrite(counted, { platform, searches });
       },
 
       ...scrapeSteps,
@@ -360,7 +461,11 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const platforms: Record<string, Record<string, unknown>> = {};
         for (const p of TREND_PLATFORMS) {
           const s = st.platforms?.[p] ?? { status: "not_watched", searched: 0, rows: 0 };
-          platforms[p] = { ...s, candidates: candidates.filter((c) => c.platform === p).length, kept: kept.filter((k) => k.platform === p).length };
+          platforms[p] = {
+            ...s, candidates: candidates.filter((c) => c.platform === p).length, kept: kept.filter((k) => k.platform === p).length,
+            // The week ran on searches the coverage rewrite gave it: the next week waits for a second week on them.
+            ...(plan.rewritten?.[p] ? { rewritten: true } : {}),
+          };
         }
         const watchedOk = plan.platforms.every((p) => FINE.includes(st.platforms?.[p]?.status as PlatformStatus));
         const status = watchedOk && st.filter !== "failed" && st.themes !== "failed" ? "done" : "partial";

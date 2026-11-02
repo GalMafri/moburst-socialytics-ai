@@ -1,6 +1,8 @@
-// The week's writer: what trends_v1's save step hands over goes into
-// trend_posts, trend_themes and the week's trend_weeks row. A run that is
+// The writers of trends_v1. week: what the save step hands over goes into
+// trend_posts, trend_themes and the week's trend_weeks row; a run that is
 // written again (a retried step) replaces the week's posts and themes.
+// searches: the coverage rewrite of one platform's searches, kept in the
+// client's trend profile for the weeks to come.
 
 import type { PipelineRun } from "../pipelines/types.ts";
 
@@ -45,5 +47,21 @@ export const TREND_WRITERS: Record<string, (db: Db, run: PipelineRun, data: Reco
     await must(db.from("trend_weeks").update({
       status: data.status, platforms: data.platforms ?? {}, filter_status: data.filter_status ?? null, cost: data.cost ?? {}, finished_at: data.finished_at ?? new Date().toISOString(),
     }).eq("id", weekId), "Could not finish the week");
+  },
+
+  /**
+   * One platform's rewritten searches, into trend_profiles.search_overrides
+   * beside the other platforms'. Written only while the profile the run read
+   * stands: a profile written since cleared the overrides on purpose, since
+   * they were made from the old one.
+   */
+  async searches(db, run, data) {
+    const platform = String(data.platform ?? "");
+    const searches = Array.isArray(data.searches) ? (data.searches as unknown[]).map(String) : [];
+    if (!platform || !searches.length) throw new Error("A search rewrite must name its platform and its searches.");
+    const profile = await must(db.from("trend_profiles").select("search_overrides, written_at").eq("client_id", run.client_id).maybeSingle(), "Could not read the trend profile") as Any;
+    if (!profile || String(profile.written_at) !== String(data.profile_written_at ?? "")) return;
+    await must(db.from("trend_profiles").update({ search_overrides: { ...(profile.search_overrides ?? {}), [platform]: searches } })
+      .eq("client_id", run.client_id).eq("written_at", profile.written_at), "Could not save the rewritten searches");
   },
 };

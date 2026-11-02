@@ -151,6 +151,16 @@ describe("what each platform searches for", () => {
     expect(week1).not.toEqual(week2);
   });
 
+  it("puts a coverage rewrite in place of the profile's own terms, after what a person added", () => {
+    // Ruled 2 Nov: a rewrite replaces only the profile's own terms; a person's are still searched first, every week.
+    expect(searchesFor("tiktok", many, { tiktok: ["new one", "MOBILE GAME UA", "new two"] }, "2026-11-02")).toEqual(["mobile game UA", "new one", "new two"]);
+    expect(searchesFor("instagram", many, { instagram: ["#new"] }, "2026-11-02")).toEqual(["#gameua", "#new"]);
+    const nine = Array.from({ length: 9 }, (_, i) => `rewrite ${i}`);
+    expect(searchesFor("tiktok", many, { tiktok: nine }, "2026-11-09")).toEqual(["mobile game UA", ...nine.slice(0, MAX_SEARCHES - 1)]);
+    // Another platform's rewrite leaves this one's terms as they were.
+    expect(searchesFor("youtube", many, { tiktok: nine }, "2026-11-02")).toEqual(searchesFor("youtube", many, {}, "2026-11-02"));
+  });
+
   it("searches the same terms in a week whatever order the rows came in", () => {
     const reversed = { ...many, topics: [...many.topics].reverse() };
     expect(searchesFor("tiktok", reversed, {}, "2026-11-02")).toEqual(searchesFor("tiktok", many, {}, "2026-11-02"));

@@ -204,7 +204,7 @@ const words = (s: string): string[] => s.toLowerCase().split(/[^\p{L}0-9]+/u).fi
 const squash = (s: string): string => words(s).join("");
 
 /** A text names the brand: its words appear in order (so "Calm" is not found in "calming"). */
-function namesBrand(text: string, brand: string): boolean {
+export function namesBrand(text: string, brand: string): boolean {
   const b = words(brand);
   const t = words(text);
   if (!b.length) return false;
@@ -213,7 +213,7 @@ function namesBrand(text: string, brand: string): boolean {
 }
 
 /** A hashtag is the brand's own: #baderlaw, #moburstlife. */
-function tagNamesBrand(tag: string, brand: string): boolean {
+export function tagNamesBrand(tag: string, brand: string): boolean {
   const b = squash(brand);
   const t = squash(tag);
   if (!b) return false;

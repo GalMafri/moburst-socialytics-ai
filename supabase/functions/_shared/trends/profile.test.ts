@@ -4,7 +4,7 @@
 // a profile must meet, that a person's changes are never overwritten, that a
 // client with nothing to read gets no profile, and the monthly hashtag refresh.
 import { afterEach, describe, expect, it } from "vitest";
-import { activeTerms, hashtagCounts, parseProfile, profileEvidence, profileProblems, profileRequest, syncLifecycleTerms, TREND_PROFILE_MODEL, type ProfileEvidence, type ProfileIO } from "./profile";
+import { activeTerms, hashtagCounts, parseProfile, profileEvidence, profileProblems, profileRequest, syncLifecycleTerms, TREND_PROFILE_MODEL, writeTrendProfile, type ProfileEvidence, type ProfileIO } from "./profile";
 import type { TrendProfile } from "./types";
 import { deps, STEPS } from "../lifecycle/steps";
 import { fakeDb } from "../lifecycle/fakeDb";
@@ -142,6 +142,17 @@ describe("a person's changes", () => {
     // Who added a term goes with it, so a person's terms are searched first.
     expect(active.hashtags.instagram.find((t) => t.term === "#growth")?.source).toBe("person");
     expect(active.hashtags.instagram.find((t) => t.term === "#aso")?.source).toBe("lifecycle");
+  });
+});
+
+describe("writing a profile again", () => {
+  it("clears the coverage rewrite's searches, which were made from the old profile", async () => {
+    const db = fakeDb({
+      trend_profiles: [{ client_id: "c1", audience: "old", fit_rubric: "old", platforms: [], search_overrides: { tiktok: ["old search"], instagram: ["#old"] }, inputs_key: "old", written_at: "2026-10-01T00:00:00.000Z", hashtags_at: null }],
+    });
+    await writeTrendProfile(db, "c1", profile(), "new", NOW);
+    expect(db.tables.trend_profiles).toHaveLength(1);
+    expect(db.tables.trend_profiles[0]).toMatchObject({ audience: profile().audience, search_overrides: {}, inputs_key: "new", written_at: T });
   });
 });
 

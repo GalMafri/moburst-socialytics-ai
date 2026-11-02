@@ -167,3 +167,51 @@ describe("20261102100000_trend_access.sql", () => {
     });
   });
 });
+
+const measures = code("20261108100000_trend_measures.sql");
+
+describe("20261108100000_trend_measures.sql", () => {
+  it("answers staff only, and only for the clients each may reach", () => {
+    expect(measures).toContain("if not public.is_moburst_staff() then raise exception 'Not allowed.' using errcode = '42501'; end if;");
+    expect(measures).toContain("if p_client is not null and not public.can_access_client(p_client) then raise exception 'Not allowed.' using errcode = '42501'; end if;");
+    // With no client named, a company-scoped staff member gets their own companies' weeks only.
+    expect(measures).toContain("where (p_client is null or w.client_id = p_client) and public.can_access_client(w.client_id)");
+    // Both checks come before anything is read.
+    expect(measures.indexOf("can_access_client(p_client)")).toBeLessThan(measures.indexOf("return query"));
+  });
+
+  it("runs as its owner on a fixed search path, for signed-in users only", () => {
+    expect(measures).toContain("create or replace function public.trend_measures(p_client uuid default null)");
+    expect(measures).toContain("language plpgsql stable security definer set search_path = public");
+    expect(measures).toContain("revoke all on function public.trend_measures(uuid) from public, anon");
+    expect(measures).toContain("grant execute on function public.trend_measures(uuid) to authenticated");
+  });
+
+  it("names its output columns apart from every column its statements use", () => {
+    // A PL/pgSQL output column is also a variable, and one named like a column fails as ambiguous on a real run.
+    const out = measures.match(/returns table \(([^)]*)\)/)![1].split(",").map((c) => c.trim().split(" ")[0]);
+    expect(out).toEqual(["client", "client_name", "week", "run_status", "kept_per_platform", "tripwire_hits", "dismissed", "terms_removed", "used_share", "week_cost"]);
+    for (const column of ["id", "client_id", "week_id", "week_start", "status", "platforms", "kept", "tripwire", "dismissed_at", "kind", "removed_at", "post_date", "reasons", "cost", "name"]) expect(out).not.toContain(column);
+  });
+
+  it("counts each week's kept posts per watched platform, tripwire hits among them, and dismissed themes", () => {
+    expect(measures).toContain("select jsonb_object_agg(e.key, coalesce((e.value->>'kept')::int, 0)) from jsonb_each(w.platforms) e where e.value->>'status' is distinct from 'not_watched'");
+    expect(measures).toContain("select count(*)::int from public.trend_posts p where p.week_id = w.id and p.kept and p.tripwire");
+    expect(measures).toContain("select count(*)::int from public.trend_themes th where th.week_id = w.id and th.dismissed_at is not null");
+  });
+
+  it("counts the topics and hashtags a person removed during the week, Monday to Monday in Israel time", () => {
+    expect(measures).toContain("t.client_id = w.client_id and t.kind in ('topic', 'hashtag') and t.removed_at >= (w.week_start::timestamp at time zone 'Asia/Jerusalem') and t.removed_at < ((w.week_start + 7)::timestamp at time zone 'Asia/Jerusalem')");
+  });
+
+  it("gives the share of the week's calendar posts whose first reason is a trend, and none for a week with no posts", () => {
+    expect(measures).toContain("round(count(*) filter (where cp.reasons->0->>'type' = 'trend')::numeric / nullif(count(*), 0), 3)");
+    expect(measures).toContain("cp.client_id = w.client_id and cp.post_date between w.week_start and w.week_start + 6");
+  });
+
+  it("returns every week with its cost and run status, newest first per client", () => {
+    expect(measures).toContain("w.cost from public.trend_weeks w join public.clients c on c.id = w.client_id");
+    expect(measures).toContain("w.week_start, w.status,");
+    expect(measures).toContain("order by c.name, w.client_id, w.week_start desc");
+  });
+});

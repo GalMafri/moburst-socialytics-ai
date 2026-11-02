@@ -200,23 +200,48 @@ export const TREND_SOURCES: Record<TrendPlatform, TrendSource> = {
   },
 };
 
-/**
- * The week's searches from a list of terms. What a person added is always
- * searched, first. The profile's own terms fill the rest; when they do not
- * all fit, they take turns week by week in a fixed order, so each is
- * searched within a few weeks and the same week always searches the same
- * terms, whatever order the rows were read in.
- */
-function pickSearches(terms: Term[], weekStart: string): string[] {
-  const byTerm = (a: Term, b: Term) => a.term.toLowerCase().localeCompare(b.term.toLowerCase());
+const byTerm = (a: Term, b: Term) => a.term.toLowerCase().localeCompare(b.term.toLowerCase());
+
+/** Each term once, by its trimmed lowercase text. */
+function uniqueTerms(terms: Term[]): Term[] {
   const seen = new Set<string>();
-  const unique = terms.filter((t) => {
+  return terms.filter((t) => {
     const key = t.term.trim().toLowerCase();
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
-  const person = unique.filter((t) => t.source === "person").sort(byTerm).slice(0, MAX_SEARCHES);
+}
+
+/** What a person added, in a fixed order: always searched, first. */
+const personTerms = (terms: Term[]): Term[] => uniqueTerms(terms).filter((t) => t.source === "person").sort(byTerm).slice(0, MAX_SEARCHES);
+
+/** A person's searches first, then the others in their order, each once, at most MAX_SEARCHES. */
+export function fillAfter(person: string[], rest: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of [...person, ...rest]) {
+    const search = typeof s === "string" ? s.trim() : "";
+    const key = search.toLowerCase();
+    if (!search || seen.has(key)) continue;
+    seen.add(key);
+    out.push(search);
+  }
+  return out.slice(0, MAX_SEARCHES);
+}
+
+/**
+ * The week's searches from a list of terms. What a person added is always
+ * searched, first. The profile's own terms fill the rest; when they do not
+ * all fit, they take turns week by week in a fixed order, so each is
+ * searched within a few weeks and the same week always searches the same
+ * terms, whatever order the rows were read in. A coverage rewrite, when there
+ * is one, takes the place of the profile's own terms (ruled 2 Nov 2026).
+ */
+function pickSearches(terms: Term[], weekStart: string, rewritten: string[] | null): string[] {
+  const unique = uniqueTerms(terms);
+  const person = personTerms(unique);
+  if (rewritten) return fillAfter(person.map((t) => t.term), rewritten);
   const rest = unique.filter((t) => t.source !== "person").sort(byTerm);
   const slots = MAX_SEARCHES - person.length;
   let turn = rest;
@@ -228,13 +253,21 @@ function pickSearches(terms: Term[], weekStart: string): string[] {
   return searchesOf([...person, ...turn.slice(0, Math.max(slots, 0))].map((t) => t.term));
 }
 
+type SearchTerms = { topics: Term[]; hashtags: Record<string, Term[]> };
+const termsOf = (platform: TrendPlatform, terms: SearchTerms): Term[] => (platform === "instagram" ? terms.hashtags.instagram ?? [] : terms.topics);
+
 /**
  * What a platform searches for in the week starting weekStart (YYYY-MM-DD):
- * Instagram by the profile's hashtags, the others by its topics, unless the
- * coverage rewrite replaced a platform's searches.
+ * Instagram by the profile's hashtags, the others by its topics. A coverage
+ * rewrite of a platform's searches replaces the profile's own terms there;
+ * what a person added is still searched first.
  */
-export function searchesFor(platform: TrendPlatform, terms: { topics: Term[]; hashtags: Record<string, Term[]> }, overrides: Record<string, string[]>, weekStart = ""): string[] {
+export function searchesFor(platform: TrendPlatform, terms: SearchTerms, overrides: Record<string, string[]>, weekStart = ""): string[] {
   const replaced = overrides?.[platform];
-  if (Array.isArray(replaced) && replaced.length) return searchesOf(replaced);
-  return pickSearches(platform === "instagram" ? terms.hashtags.instagram ?? [] : terms.topics, weekStart);
+  return pickSearches(termsOf(platform, terms), weekStart, Array.isArray(replaced) && replaced.length ? replaced : null);
+}
+
+/** The searches a person added for a platform, which a coverage rewrite never takes the place of. */
+export function personSearches(platform: TrendPlatform, terms: SearchTerms): string[] {
+  return searchesOf(personTerms(termsOf(platform, terms)).map((t) => t.term));
 }
