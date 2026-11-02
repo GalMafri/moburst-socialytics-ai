@@ -3,11 +3,14 @@ import {
   awaitJobs,
   costOf,
   creditBalance,
+  editVideo,
   firstResult,
   HiggsfieldError,
   imageAspect,
   importReferences,
   submitImage,
+  quoteEdit,
+  quoteVideo,
   submitVideo,
   videoAspect,
 } from "../../../supabase/functions/_shared/higgsfield/generate";
@@ -241,6 +244,31 @@ describe("references and credits", () => {
     expect(await costOf(caller, "image", { model: "nano_banana_pro", prompt: "p" })).toBe(2);
     expect(calls[0].args.params.get_cost).toBe(true);
     expect(calls[0].name).toBe("generate_image");
+  });
+
+  it("quotes a clip with exactly the settings it is submitted with, without submitting it", async () => {
+    const req = { prompt: "p", aspect: "9:16", seconds: 8, resolution: "1080p" as const, model: "seedance_2_5", withAudio: true, videoReferenceIds: ["ref-1"] };
+    const { caller, calls } = stub({ generate_video: { cost: { credits: 100, credits_exact: 99.5 } }, generate_video_batch: jobsReply });
+    expect(await quoteVideo(caller, req)).toBe(99.5);
+    await submitVideo(caller, req);
+    expect(calls.map((c) => c.name)).toEqual(["generate_video", "generate_video_batch"]);
+    const { get_cost, ...quoted } = calls[0].args.params;
+    expect(get_cost).toBe(true);
+    expect(quoted).toEqual(calls[1].args.requests[0].params);
+  });
+
+  it("quotes a cleaning with exactly the settings it is submitted with", async () => {
+    const { caller, calls } = stub({ generate_video: { cost: { credits: 40 } }, generate_video_batch: jobsReply });
+    expect(await quoteEdit(caller, { prompt: "remove the writing", videoId: "footage-1" })).toBe(40);
+    await editVideo(caller, { prompt: "remove the writing", videoId: "footage-1" });
+    const { get_cost, ...quoted } = calls[0].args.params;
+    expect(get_cost).toBe(true);
+    expect(quoted).toEqual(calls[1].args.requests[0].params);
+  });
+
+  it("answers an unreadable quote as unknown", async () => {
+    const { caller } = stub({ generate_video: { cost: {} } });
+    expect(await quoteVideo(caller, { prompt: "p", aspect: "9:16" })).toBeNull();
   });
 
   it("treats an unreadable balance as unknown rather than zero", async () => {
