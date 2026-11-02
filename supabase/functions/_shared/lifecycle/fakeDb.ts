@@ -2,7 +2,7 @@
 //
 // An in-memory stand-in for the supabase-js calls the lifecycle makes, for
 // its tests: from(table) with select, eq, neq, in, is, not, order, limit,
-// maybeSingle, single, insert, upsert, update and delete; rpc with handlers
+// range, maybeSingle, single, insert, upsert, update and delete; rpc with handlers
 // the test gives; storage that keeps uploads in memory.
 
 // deno-lint-ignore no-explicit-any
@@ -63,6 +63,7 @@ export function fakeDb(tables: Record<string, Row[]> = {}, rpcs: Record<string, 
     private opts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
     private one: "single" | "maybe" | null = null;
     private max: number | null = null;
+    private skip = 0;
     private sorts: Array<[string, boolean]> = [];
     constructor(private table: string) {}
     private rows(): Row[] { return (db.tables[this.table] ??= []); }
@@ -79,6 +80,7 @@ export function fakeDb(tables: Record<string, Row[]> = {}, rpcs: Record<string, 
     gt(c: string, v: string) { this.filters.push((r) => String(r[c]) > v); return this; }
     order(c: string, o?: { ascending?: boolean }) { this.sorts.push([c, o?.ascending !== false]); return this; }
     limit(n: number) { this.max = n; return this; }
+    range(from: number, to: number) { this.skip = from; this.max = to - from + 1; return this; }
     maybeSingle() { this.one = "maybe"; return this; }
     single() { this.one = "single"; return this; }
     insert(p: Row | Row[]) { this.op = "insert"; this.payload = p; return this; }
@@ -92,7 +94,7 @@ export function fakeDb(tables: Record<string, Row[]> = {}, rpcs: Record<string, 
       if (this.op === "select") {
         out = [...this.matching()];
         for (const [c, asc] of [...this.sorts].reverse()) out.sort((a, b) => (a[c] === b[c] ? 0 : (a[c] ?? "") < (b[c] ?? "") ? (asc ? -1 : 1) : (asc ? 1 : -1)));
-        if (this.max != null) out = out.slice(0, this.max);
+        if (this.max != null || this.skip) out = out.slice(this.skip, this.max != null ? this.skip + this.max : undefined);
       } else if (this.op === "insert") {
         const list = Array.isArray(this.payload) ? this.payload : [this.payload!];
         out = list.map((p, i) => ({ id: p.id ?? `${this.table}-${this.rows().length + i + 1}`, created_at: new Date().toISOString(), ...p }));

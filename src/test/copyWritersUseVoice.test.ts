@@ -7,6 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative } from "path";
+import { voicePromptBlock } from "../../supabase/functions/_shared/voice/voice";
 
 const ROOT = join(__dirname, "..", "..", "supabase", "functions");
 
@@ -45,5 +46,19 @@ describe("copy writers use the client's voice", () => {
     expect(weekPlan.text).toMatch(/c\.voiceBlock/);
     const runWeek = all.find((f) => f.path === "_shared/calendar/runWeek.ts")!;
     expect(runWeek.text).toContain("loadClientVoice(");
+  });
+
+  // Client notes (2 Nov 2026): what the client told the team reaches every
+  // copy prompt through the same voice, so every writer above gets it.
+  it("loads what the client told the team into the voice, and the voice block prints it first", () => {
+    const load = all.find((f) => f.path === "_shared/voice/load.ts")!;
+    for (const call of ["readNoteRows(", "pointsInUse(", "standingNotes(client.brand_notes)"]) expect(load.text).toContain(call);
+    const block = voicePromptBlock({
+      brand: "Bader Law", preferences: [], social: null, briefTone: null,
+      notes: { today: "2026-11-02", standing: "No slang.", points: [{ id: "p1", note_id: "n1", kind: "avoid", text: 'Never say "cheap".', platform: null, said_on: null, until: null, created_at: "2026-10-28T00:00:00Z", date: "2026-10-28" }] },
+    }, { platforms: ["Instagram"] });
+    expect(block).toContain('1. What Bader Law told the team.');
+    expect(block).toContain("Standing notes from the team:\nNo slang.");
+    expect(block).toContain('- Oct 28: Never say "cheap".');
   });
 });
