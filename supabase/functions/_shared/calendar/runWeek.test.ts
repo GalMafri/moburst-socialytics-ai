@@ -235,6 +235,67 @@ describe("runWeekPlan", () => {
   });
 });
 
+describe("a week's Stories", () => {
+  const DAY = 86400_000;
+  const weekly = Array.from({ length: 16 }, (_, i) => ({ postId: `p${i}`, channel: "instagram", type: "photo", publishedAt: new Date(NOW.getTime() - (i * 4 + 3) * DAY).toISOString(), message: "A post", engagementTotal: 3 }));
+  // 26 Instagram Stories in the last 90 days: 2 a week.
+  const stories = Array.from({ length: 26 }, (_, i) => ({ channel: "instagram", publishedAt: new Date(NOW.getTime() - (1 + i * 3) * DAY).toISOString() }));
+  const client = { ...CLIENT, posting_rhythm: { instagram: 3, facebook: 1 } };
+  const reply = { posts: [
+    { date: "2026-10-29", platform: "Instagram", format: "Carousel", posting_time: "17:00", copy: "Thursday post", reason_type: "seasonal", moment: "m", evidence_ids: [] },
+    { date: "2026-10-27", platform: "Instagram", format: "Reel", posting_time: "17:00", copy: "Tuesday post", reason_type: "seasonal", moment: "m", evidence_ids: [] },
+    { date: "2026-10-28", platform: "Instagram", format: "Story", posting_time: "12:00", copy: "Wednesday post", reason_type: "seasonal", moment: "m", evidence_ids: [] },
+    { date: "2026-10-26", platform: "Facebook", format: "Image", posting_time: "9:00", copy: "Facebook post", reason_type: "seasonal", moment: "m", evidence_ids: [] },
+  ] };
+  const inserted = (db: ReturnType<typeof fakeDb>) => db.writes.find((w) => w.table === "calendar_posts" && w.op === "insert")?.value as Array<Record<string, unknown>>;
+
+  it("adds Stories to the soonest Instagram posts, as many as the client's own Stories a week, with no extra model call", async () => {
+    m.owned.mockResolvedValue({ coverage: "complete", profiles: [{ network: "instagram" }], posts: weekly, stories });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify(reply), raw: {} });
+    const db = fakeDb({ calendar_plans: [plan], clients: [client] });
+    expect((await runWeekPlan(db, job(), NOW)).status).toBe("done");
+    expect(m.anthropic).toHaveBeenCalledTimes(1);
+    expect(m.owned.mock.calls[0][3]).toEqual({ fields: ["is_boosted"], stories: true });
+    const rows = inserted(db);
+    const made = rows.filter((r) => r.format === "Story");
+    // Tuesday's and Wednesday's posts are the soonest on Instagram; the model's Story is a single image.
+    expect(made.map((r) => r.copy)).toEqual(["Tuesday post", "Wednesday post"]);
+    expect(rows.find((r) => r.copy === "Wednesday post" && r.format !== "Story")?.format).toBe("Single Image");
+    for (const st of made) {
+      expect(rows.find((r) => r.post_key === st.story_of)).toMatchObject({ copy: st.copy, post_date: st.post_date, platform: "Instagram" });
+      expect(st).toMatchObject({ plan_id: "plan-1", client_id: "ptp", source: "plan" });
+    }
+    const ready = db.writes.filter((w) => w.table === "calendar_plans" && w.op === "update").map((w) => w.value as Record<string, unknown>).find((v) => v.status === "ready");
+    expect((ready?.rhythm as Record<string, unknown>).stories).toEqual({ stories: 26, average: 2.02, perWeek: 2 });
+  });
+
+  it("suggests none to a client that posted no Story in 90 days, and never on Facebook", async () => {
+    m.owned.mockResolvedValue({ coverage: "complete", profiles: [{ network: "instagram" }], posts: weekly, stories: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify(reply), raw: {} });
+    const db = fakeDb({ calendar_plans: [plan], clients: [client] });
+    await runWeekPlan(db, job(), NOW);
+    expect(inserted(db).filter((r) => r.format === "Story")).toEqual([]);
+    expect(inserted(db).every((r) => !("story_of" in r))).toBe(true);
+  });
+
+  it("leaves Stories already on the calendar out of the week's feed posts", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "The one Instagram post", reason_type: "seasonal", moment: "m", evidence_ids: [] }] }), raw: {} });
+    const existingStory = { post_date: "2026-10-27", platform: "Instagram", format: "Story", copy: "A Story someone added", plan_id: null };
+    const db = fakeDb({ calendar_plans: [plan], clients: [{ ...CLIENT, posting_rhythm: { instagram: 1, facebook: 0 } }], calendar_posts: [existingStory] });
+    // The week has nothing written yet: only the posts around it are read back.
+    const from = db.from.bind(db);
+    db.from = (table: string) => {
+      const q = from(table);
+      if (table === "calendar_posts") q.select = (_cols: string, opts?: { head?: boolean }) => { if (opts?.head) q.then = (ok: (v: unknown) => unknown) => Promise.resolve({ data: null, error: null, count: 0 }).then(ok); return q; };
+      return q;
+    };
+    expect((await runWeekPlan(db, job(), NOW)).status).toBe("done");
+    expect(m.anthropic.mock.calls[0][0].body.messages[0].content).not.toContain("A Story someone added");
+    expect(inserted(db).map((r) => r.copy)).toEqual(["The one Instagram post"]);
+  });
+});
+
 describe("gatherEvidence hashtags", () => {
   const row = (platform: string, term: string, source: string, removed_at: string | null = null) => ({ client_id: "ptp", kind: "hashtag", platform, term, reason: "r", source, removed_at });
 
@@ -347,6 +408,32 @@ describe("runWeekRevise", () => {
       expect(prompt).toContain("- [p2] ");
       expect(prompt).not.toContain("- [p3] ");
       expect(entry.kept).toEqual(["p3"]);
+    });
+  });
+
+  describe("a planned Story", () => {
+    const feed = { ...post, id: "p1", post_key: "k1", platform: "Instagram", format: "Reel", copy: "Old copy", story_of: null };
+    const story = { ...post, id: "s1", post_key: "k-story", platform: "Instagram", format: "Story", copy: "Old copy", story_of: "k1" };
+    const run = async (workedKeys: string[]) => {
+      m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ id: "p1", copy: "New copy" }, { id: "s1", copy: "A Story rewritten as a feed post" }] }), raw: {} });
+      const db = fakeDb({ calendar_plans: [ready], clients: [CLIENT], calendar_posts: [feed, story] });
+      db.rpc = async (_name: string, args: { p_key: string }) => ({ data: workedKeys.includes(args.p_key), error: null });
+      await runWeekRevise(db, job({ kind: "week_revise" }), NOW);
+      const prompt = m.anthropic.mock.calls[0][0].body.messages[0].content as string;
+      const updates = db.writes.filter((w) => w.table === "calendar_posts" && w.op === "update").map((w) => w.value as Record<string, unknown>);
+      return { prompt, updates };
+    };
+
+    it("is never rewritten as a feed post, and follows its post's new copy when nobody worked on it", async () => {
+      const { prompt, updates } = await run([]);
+      expect(prompt).toContain("- [p1] ");
+      expect(prompt).not.toContain("- [s1] ");
+      expect(updates).toEqual([expect.objectContaining({ copy: "New copy", hashtags: [] }), { copy: "New copy" }]);
+    });
+
+    it("keeps its copy when someone worked on it", async () => {
+      const { updates } = await run(["k-story"]);
+      expect(updates).toEqual([expect.objectContaining({ copy: "New copy" })]);
     });
   });
 

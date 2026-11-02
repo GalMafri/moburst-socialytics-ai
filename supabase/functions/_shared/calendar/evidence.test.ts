@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   applyRhythmSetting, bestExamples, compactFeedRow, competitorPosts, feedHistories, isBoosted, latestTrendEvidence, median, medianRates, numberEvidence, platformName,
-  postsInWeek, resolveRhythm, rhythmFromPosts, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems,
+  postsInWeek, resolveRhythm, rhythmFromPosts, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems, storyRhythm,
   type CompetitorPost, type OwnPost, type RhythmInput, type TrackedPost, type TrendEvidenceInput,
 } from "./evidence";
 
@@ -396,6 +396,27 @@ describe("postsInWeek", () => {
     // Stateless: the same week always gets the same answer, before the start date too.
     expect(postsInWeek(0.5, "2026-11-02")).toBe(postsInWeek(0.5, "2026-11-02"));
     expect([postsInWeek(0.5, "2025-12-29"), postsInWeek(0.5, "2026-01-05")]).toEqual([1, 0]);
+  });
+});
+
+describe("storyRhythm", () => {
+  const DAY = 86400_000;
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * DAY).toISOString();
+
+  it("is the client's own Instagram Stories per week over 90 days, turned into this week's count", () => {
+    // 26 Stories in 90 days: 2.02 a week, so 2 this week.
+    const stories = Array.from({ length: 26 }, (_, i) => daysAgo(1 + i * 3));
+    expect(storyRhythm(stories, NOW, "2026-10-26")).toEqual({ stories: 26, average: 2.02, perWeek: 2 });
+    // Older than 90 days does not count.
+    expect(storyRhythm([daysAgo(100), daysAgo(120)], NOW, "2026-10-26")).toEqual({ stories: 0, average: 0, perWeek: 0 });
+    expect(storyRhythm([], NOW, "2026-10-26")).toEqual({ stories: 0, average: 0, perWeek: 0 });
+  });
+
+  it("spreads a rate under one a week the way the feed rhythm does", () => {
+    const stories = Array.from({ length: 6 }, (_, i) => daysAgo(2 + i * 14));
+    const r = storyRhythm(stories, NOW, "2026-10-26");
+    expect(r.average).toBe(0.47);
+    expect(r.perWeek).toBe(postsInWeek(0.47, "2026-10-26"));
   });
 });
 
