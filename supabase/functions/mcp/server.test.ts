@@ -1,13 +1,16 @@
 // @vitest-environment node
-// The connector end to end over HTTP, with the real MCP SDK and the real
-// Supabase pipeline (withOAuthProtectedResource, then withSupabase verifying
-// tokens against a JWKS): the handshake, the sign-in refusals, the gate, the
-// tools as each person, the rate limit and the audit rows.
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+// The connector end to end over HTTP, with the real MCP SDK, Supabase's
+// withOAuthProtectedResource and the connector's own jose verification
+// against a test key set: the handshake, the sign-in refusals, the gate, the
+// tools as each person, the rate limit and the audit rows. No API key of the
+// project is involved anywhere.
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { createLocalJWKSet } from "npm:jose@6.2.12";
 import { CLIENT, REPORT } from "../api/fixtures";
 import { emptyData, makeFakeStore } from "../api/store.fake";
 import { connectorFetch, type ConnectorDeps } from "./server";
 import type { McpAuditRow } from "./audit";
+import { tokenVerifier } from "./verify";
 
 const PROJECT = "https://rwouwxqggjjacbpbhqsn.supabase.co";
 const ENDPOINT = `${PROJECT}/mcp`; // the gateway strips /functions/v1 before the function sees the request
@@ -36,25 +39,27 @@ let audit: McpAuditRow[] = [];
 let counts = new Map<string, number>();
 let fetchConnector: (req: Request) => Promise<Response>;
 
+let jwksDown = false;
 beforeAll(async () => {
-  process.env.SUPABASE_FUNCTION_SLUG = "mcp";
   keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]) as CryptoKeyPair;
   jwk = { ...(await crypto.subtle.exportKey("jwk", keys.publicKey)), kid: "test-key", alg: "ES256", use: "sig" } as JsonWebKey;
   const store = makeFakeStore(emptyData({ clients: [CLIENT, CALM], reports: [REPORT] }));
+  const local = createLocalJWKSet({ keys: [jwk] });
   const deps: ConnectorDeps = {
-    reads: (ctx) => {
-      const p = PEOPLE[String(ctx.jwtClaims?.sub)] ?? { roles: [], clients: [] };
+    projectUrl: PROJECT,
+    verify: tokenVerifier({ issuer: `${PROJECT}/auth/v1`, keys: async (...args) => { if (jwksDown) throw new TypeError("fetch failed"); return local(...args); } }),
+    reads: (caller) => {
+      const p = PEOPLE[String(caller.claims.sub)] ?? { roles: [], clients: [] };
       return { roles: async () => p.roles, clientIds: async () => p.clients };
     },
     tools: () => ({ store, analytics: async () => ({ ok: true, status: 200, data: {} }), trendThemes: async () => ({ collected: false, themes: [] }), apiUrl: `${PROJECT}/functions/v1/api` }),
-    touch: async (_ctx, userId) => { counts.set(userId, (counts.get(userId) ?? 0) + 1); return counts.get(userId)!; },
-    audit: async (_ctx, row) => { audit.push(row); },
+    touch: async (userId) => { counts.set(userId, (counts.get(userId) ?? 0) + 1); return counts.get(userId)!; },
+    audit: async (row) => { audit.push(row); },
     now: () => new Date("2026-11-09T10:15:42.000Z"),
   };
-  fetchConnector = connectorFetch(deps, { env: { url: PROJECT, publishableKeys: { default: "sb_publishable_test" }, secretKeys: { default: "sb_secret_test" }, jwks: { keys: [jwk] } } });
+  fetchConnector = connectorFetch(deps);
 });
-afterAll(() => { delete process.env.SUPABASE_FUNCTION_SLUG; });
-beforeEach(() => { audit = []; counts = new Map(); });
+beforeEach(() => { audit = []; counts = new Map(); jwksDown = false; });
 
 let nextId = 1;
 async function rpc(method: string, params: Record<string, unknown>, auth?: string, version = "2025-06-18"): Promise<{ status: number; headers: Headers; message: any }> {
@@ -111,16 +116,30 @@ describe("sign-in", () => {
     expect(await res.json()).toMatchObject({ resource: `${PROJECT}/functions/v1/mcp`, authorization_servers: [`${PROJECT}/auth/v1`] });
   });
 
-  it("refuses a bad token, a legacy HS256 token and an app session token, each with the pointer", async () => {
-    const appSession = await token({ sub: ADMIN, email: "lital@moburst.com", session_id: "s1" });
-    const hs256 = await token({ sub: ADMIN, client_id: OAUTH_CLIENT }, { alg: "HS256", typ: "JWT" });
-    const otherKey = await (async () => { const k = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign"]) as CryptoKeyPair; const input = `${b64u(JSON.stringify({ alg: "ES256", kid: "test-key" }))}.${b64u(JSON.stringify({ sub: ADMIN, client_id: OAUTH_CLIENT, exp: Math.floor(Date.now() / 1000) + 60 }))}`; return `${input}.${b64u(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, k.privateKey, new TextEncoder().encode(input)))}`; })();
-    for (const [what, auth] of [["malformed", "abc.def.ghi"], ["signed by another key", otherKey], ["HS256", hs256], ["app session", appSession]] as const) {
+  it("refuses a bad token, HS256, a wrong issuer or audience, an expired token and an app session token, each with the pointer", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const otherKey = await (async () => { const k = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign"]) as CryptoKeyPair; const input = `${b64u(JSON.stringify({ alg: "ES256", kid: "test-key" }))}.${b64u(JSON.stringify({ sub: ADMIN, client_id: OAUTH_CLIENT, iss: `${PROJECT}/auth/v1`, aud: "authenticated", exp: now + 60 }))}`; return `${input}.${b64u(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, k.privateKey, new TextEncoder().encode(input)))}`; })();
+    for (const [what, auth] of [
+      ["malformed", "abc.def.ghi"],
+      ["signed by another key", otherKey],
+      ["HS256", await token({ sub: ADMIN, client_id: OAUTH_CLIENT }, { alg: "HS256", typ: "JWT" })],
+      ["wrong issuer", await token({ sub: ADMIN, client_id: OAUTH_CLIENT, iss: "https://otherproject.supabase.co/auth/v1" })],
+      ["wrong audience", await token({ sub: ADMIN, client_id: OAUTH_CLIENT, aud: "anon" })],
+      ["expired", await token({ sub: ADMIN, client_id: OAUTH_CLIENT, iat: now - 7200, exp: now - 3600 })],
+      ["app session, no client_id", await token({ sub: ADMIN, email: "lital@moburst.com", session_id: "s1" })],
+    ] as const) {
       const r = await rpc("tools/list", {}, auth);
       expect(r.status, what).toBe(401);
       expect(r.headers.get("WWW-Authenticate"), what).toBe(METADATA);
     }
     expect(audit).toEqual([]);
+  });
+
+  it("answers a key set it cannot read as its own failure, not as a bad sign-in", async () => {
+    jwksDown = true;
+    const r = await rpc("tools/list", {}, await oauth(ADMIN));
+    expect(r.status).toBe(500);
+    expect(r.message).toEqual({ error: "Socialytics could not check this sign-in." });
   });
 
   it("refuses a person with no Socialytics role", async () => {

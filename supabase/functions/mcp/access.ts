@@ -1,6 +1,6 @@
 /**
  * Who may use the connector, and which clients they reach. The token was
- * verified against the project's JWKS before this runs (withSupabase); this
+ * verified against the project's JWKS before this runs (verify.ts); this
  * is the connector's own gate on its claims and on two reads made through
  * the person's own client, so RLS answers both:
  *   * the token must carry client_id, meaning it came through Supabase's
