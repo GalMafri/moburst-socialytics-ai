@@ -241,6 +241,49 @@ describe("runWeekRevise", () => {
     expect(db.writes.some((w) => (w.value as { pending_revision?: unknown }).pending_revision === null)).toBe(false);
   });
 
+  // The rewrite client notes ask for has no person (client notes design,
+  // section 9). It never touches a post a person approved, scheduled to
+  // Sprout, had a design requested or made for, edited or moved: all of
+  // those answer yes to calendar_post_worked (src/test/calendarPostWorked.test.ts).
+  // Nor a post a person's own revision rewrote.
+  describe("a rewrite nobody asked for", () => {
+    const posts = [
+      { ...post, id: "p1", post_key: "k1", copy: "Untouched copy" },
+      { ...post, id: "p2", post_key: "k2", copy: "Copy from a person's revision" },
+      { ...post, id: "p3", post_key: "k3", copy: "Copy someone worked on" },
+    ];
+    const earlier = [{ note: "Warmer", by: "u1", at: "2026-10-18T09:00:00Z", scope: "untouched", rewritten: 1, replaced: [{ id: "p2", copy: "Old copy" }] }];
+    const run = async (by: string | null) => {
+      m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: posts.map((p) => ({ id: p.id, copy: `New ${p.id}` })) }), raw: {} });
+      const db = fakeDb({ calendar_plans: [{ ...ready, revisions: earlier, pending_revision: { note: "Follow what Pay The Pyper told the team in its newest notes.", by, at: "2026-10-19T07:00:00Z", scope: "untouched" } }], clients: [CLIENT], calendar_posts: posts });
+      const asked: string[] = [];
+      // calendar_post_worked says yes for k3 only.
+      db.rpc = async (_name: string, args: { p_key: string }) => { asked.push(args.p_key); return { data: args.p_key === "k3", error: null }; };
+      const out = await runWeekRevise(db, job({ kind: "week_revise" }), NOW);
+      const prompt = m.anthropic.mock.calls[0][0].body.messages[0].content as string;
+      const done = db.writes.find((w) => (w.value as { pending_revision?: unknown }).pending_revision === null)?.value as { revisions: Array<Record<string, unknown>> };
+      return { out, prompt, asked, entry: done.revisions.at(-1)! };
+    };
+
+    it("rewrites only the posts nobody worked on, and keeps what a person's own revision rewrote", async () => {
+      const { out, prompt, asked, entry } = await run(null);
+      expect(asked.sort()).toEqual(["k1", "k2", "k3"]);
+      // Only p1 is sent to be rewritten; the others are shown as the week's other posts.
+      expect(prompt).toContain("- [p1] ");
+      expect(prompt).not.toContain("- [p2] ");
+      expect(prompt).not.toContain("- [p3] ");
+      expect(entry.kept).toEqual(["p2", "p3"]);
+      expect(out).toMatchObject({ status: "done", result: { rewritten: 1 } });
+    });
+
+    it("lets a person's own revision rewrite what an earlier one did", async () => {
+      const { prompt, entry } = await run("u2");
+      expect(prompt).toContain("- [p2] ");
+      expect(prompt).not.toContain("- [p3] ");
+      expect(entry.kept).toEqual(["p3"]);
+    });
+  });
+
   it("closes a revision quietly once its week is over", async () => {
     const db = fakeDb({ calendar_plans: [{ ...ready, week_start: "2026-10-05" }], clients: [CLIENT] });
     const out = await runWeekRevise(db, job({ kind: "week_revise", occurrence: "2026-10-05T00:00:00Z" }), NOW);
