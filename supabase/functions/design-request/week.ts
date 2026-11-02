@@ -120,9 +120,9 @@ async function creditsOfRun(db: Db, runId: string): Promise<number> {
 
 /** A clip's credits, as recorded on the most recent video jobs. */
 async function clipCredits(db: Db): Promise<number> {
-  const { data: jobs } = await db.from("canva_finish_jobs").select("state, input").not("design_request_id", "is", null)
+  const { data: jobs } = await db.from("canva_finish_jobs").select("state").eq("input->>kind", "video").not("design_request_id", "is", null)
     .order("created_at", { ascending: false }).limit(CLIP_SAMPLE);
-  return creditsPerClip((jobs ?? []).filter((j: Row) => j.input?.kind === "video").map((j: Row) => j.state));
+  return creditsPerClip((jobs ?? []).map((j: Row) => j.state));
 }
 
 /** Run the work while holding the week's lease, waiting briefly for a pass that holds it; null when it stayed held. */

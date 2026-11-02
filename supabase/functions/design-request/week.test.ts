@@ -109,15 +109,16 @@ describe("week_preview", () => {
       ],
       design_requests: [{ id: "f", client_id: "c1", calendar_post_key: "filmed", status: "needs_filming", created_at: "2026-11-02T08:00:00Z" }],
       post_iterations: [{ client_id: "c1", calendar_post_key: "designed", variant_angle: "Design option 1", media_urls: ["https://x/d.png"], is_selected: true, created_at: "2026-11-02T08:00:00Z" }],
-      // Two clips recorded so far: 90 and 110 credits.
+      // Two clips recorded so far, 90 and 120 credits, behind many newer single designs.
       canva_finish_jobs: [
         { design_request_id: "old-1", status: "done", input: { kind: "video" }, state: { credits: [{ what: "footage", job_id: "j1", credits: 90, at: "x" }] }, created_at: "2026-10-30T08:00:00Z" },
-        { design_request_id: "old-2", status: "done", input: { kind: "video" }, state: { credits: [{ what: "footage", job_id: "j2", credits: 110, at: "x" }] }, created_at: "2026-10-31T08:00:00Z" },
+        { design_request_id: "old-2", status: "done", input: { kind: "video" }, state: { credits: [{ what: "footage", job_id: "j2", credits: 120, at: "x" }] }, created_at: "2026-10-31T08:00:00Z" },
+        ...Array.from({ length: 80 }, (_, i) => ({ design_request_id: `single-${i}`, status: "done", input: { generate: {} }, state: {}, created_at: `2026-11-01T08:${String(i % 60).padStart(2, "0")}:00Z` })),
       ],
     });
     const d = deps(db);
     const r = await weekPreview(d, { client_id: "c1", week_start: WEEK });
-    expect(r.body).toMatchObject({ client_name: "Pay The Pyper", counts: { single: 1, carousel: 1, video: 1, copy_waits: 0, filming: 1 }, credits: 100, credits_per_clip: 100, run_id: null, credits_used: null });
+    expect(r.body).toMatchObject({ client_name: "Pay The Pyper", counts: { single: 1, carousel: 1, video: 1, copy_waits: 0, filming: 1 }, credits: 105, credits_per_clip: 105, run_id: null, credits_used: null });
     expect(d.balance).not.toHaveBeenCalled();
     expect(d.startPost).not.toHaveBeenCalled();
     expect(db.tables.design_week_runs).toEqual([]);
