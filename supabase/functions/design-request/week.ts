@@ -184,7 +184,7 @@ export async function weekPreview(d: WeekDeps, body: Row): Promise<Answer> {
 function estimateOf(raw: unknown): Record<string, number> | null {
   if (!raw || typeof raw !== "object") return null;
   const out: Record<string, number> = {};
-  for (const k of ["posts", "single", "carousel", "video", "credits", "minutes"]) {
+  for (const k of ["posts", "single", "story", "carousel", "video", "credits", "minutes"]) {
     const n = Number((raw as Row)[k]);
     if (Number.isFinite(n) && n >= 0) out[k] = Math.round(n * 100) / 100;
   }
