@@ -58,6 +58,10 @@ create table public.scheduled_jobs (id uuid primary key default gen_random_uuid(
 create table public.api_requests (id bigserial primary key, key_id uuid, method text not null, path text not null, status integer not null,
   duration_ms integer, client_id uuid, job_id uuid, ip text, error_code text, created_at timestamptz not null default now());
 create table public.no_policy_audit (id bigserial primary key, note text);
+create table public.content_strategies (client_id uuid primary key, sections jsonb not null default '{}'::jsonb);
+create table public.content_strategy_edits (client_id uuid not null, section_key text not null, text text not null, edited_by uuid,
+  editor_name text not null default '', edited_at timestamptz not null default now(), primary key (client_id, section_key));
+create table public.profiles (id uuid primary key default gen_random_uuid(), user_id uuid, display_name text, email text);
 do $$ declare t text; begin
   foreach t in array array['clients','reports','trend_profiles','trend_terms','trend_themes','client_lifecycle_steps','scheduled_jobs','api_requests'] loop
     execute format('alter table public.%I enable row level security', t);

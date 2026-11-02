@@ -250,3 +250,51 @@ end $$;
 
 revoke all on function public.lifecycle_request(uuid, text) from public, anon;
 grant execute on function public.lifecycle_request(uuid, text) to authenticated, service_role;
+
+-- The content strategy's section save (20261108120000_content_strategy.sql),
+-- built beside this change: unchanged except the guard, first.
+create or replace function public.strategy_section_save(p_client uuid, p_key text, p_text text)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_key text := btrim(coalesce(p_key, ''));
+  v_text text := btrim(coalesce(p_text, ''));
+  v_product text;
+  v_name text;
+  v_row public.content_strategy_edits%rowtype;
+begin
+  if public.is_oauth_session() then
+    raise exception 'Connected apps can read Socialytics but cannot change it.' using errcode = '42501';
+  end if;
+  if not (public.is_moburst_staff() and public.can_access_client(p_client)) then
+    raise exception 'Only Moburst staff can change the content strategy.' using errcode = '42501';
+  end if;
+  if v_key !~ '^(goals|audience|positioning|not_now|avoid|measures|pillar:.+|platform:[a-z0-9]+:(posting|new))$' then
+    raise exception 'Unknown strategy section.' using errcode = '22023';
+  end if;
+  if length(v_text) > 20000 then
+    raise exception 'The text is too long.' using errcode = '22001';
+  end if;
+  select btrim(coalesce(s.sections ->> v_key, '')) into v_product
+    from public.content_strategies s where s.client_id = p_client;
+  if v_text = '' or v_text = coalesce(v_product, '') then
+    delete from public.content_strategy_edits where client_id = p_client and section_key = v_key;
+    return null;
+  end if;
+  -- The name people know the editor by: the profile's display name, else the
+  -- part of the email before the @.
+  select nullif(btrim(split_part(coalesce(nullif(btrim(pr.display_name), ''), nullif(btrim(pr.email), ''), u.email::text, ''), '@', 1)), '')
+    into v_name
+    from auth.users u
+    left join public.profiles pr on pr.user_id = u.id
+   where u.id = auth.uid();
+  insert into public.content_strategy_edits as e (client_id, section_key, text, edited_by, editor_name, edited_at)
+  values (p_client, v_key, v_text, auth.uid(), coalesce(v_name, ''), now())
+  on conflict (client_id, section_key) do update
+    set text = excluded.text, edited_by = excluded.edited_by, editor_name = excluded.editor_name, edited_at = excluded.edited_at
+  returning e.* into v_row;
+  return jsonb_build_object('section_key', v_row.section_key, 'text', v_row.text, 'editor_name', v_row.editor_name, 'edited_at', v_row.edited_at);
+end $$;
+
+revoke all on function public.strategy_section_save(uuid, text, text) from public, anon;
+grant execute on function public.strategy_section_save(uuid, text, text) to authenticated;
