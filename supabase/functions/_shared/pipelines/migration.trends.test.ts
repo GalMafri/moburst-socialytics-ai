@@ -64,6 +64,16 @@ describe("20261102100000_trend_themes_read.sql", () => {
     expect(themesRead).toContain("w.week_start between p_from and p_to");
   });
 
+  it("says whether the client has any finished week at all, on any date, apart from the themes in the range", () => {
+    expect(themesRead).toContain("return jsonb_build_object( 'collected', exists ( select 1 from public.trend_weeks c where c.client_id = p_client and c.status in ('done', 'partial') ), 'themes', coalesce((");
+    // The flag does not depend on the range or on dismissals: no date, no theme table in it.
+    const flag = themesRead.slice(themesRead.indexOf("'collected', exists ("), themesRead.indexOf("'themes', coalesce(("));
+    expect(flag).not.toContain("p_from");
+    expect(flag).not.toContain("p_to");
+    expect(flag).not.toContain("trend_themes");
+    expect(themesRead).toContain("), '[]'::jsonb) ); end $$;");
+  });
+
   it("returns newest week first, then by position, each theme with only the kept posts it lists", () => {
     expect(themesRead).toContain("order by t.week_start desc, t.position");
     expect(themesRead).toContain("p.id = any (th.post_ids) and p.kept");

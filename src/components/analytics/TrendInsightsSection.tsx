@@ -142,7 +142,7 @@ export function TrendInsightsSection({ clientId, from, to }: { clientId: string;
   const [platform, setPlatform] = useState("all");
   const [dismissing, setDismissing] = useState<TrendTheme | null>(null);
 
-  const themes = useMemo(() => data ?? [], [data]);
+  const themes = useMemo(() => data?.themes ?? [], [data]);
   const platforms = useMemo(() => platformsIn(themes), [themes]);
   // A network that has no theme left (after a dismissal) is no longer a choice.
   const active = platforms.includes(platform) ? platform : "all";
@@ -166,7 +166,8 @@ export function TrendInsightsSection({ clientId, from, to }: { clientId: string;
         // Themes that did not answer are no claim about the client's trends: keep loading, quietly, and fill in when a try answers.
         <LoadRetry context="trend themes" error={error} label="Loading trends" onRetry={() => refetch()} />
       ) : shown.length === 0 ? (
-        <EmptyState compact icon={TrendingUp} title="Trends show here after the first weekly collection." />
+        // Nothing collected yet is a different fact from nothing collected in the viewed period.
+        <EmptyState compact icon={TrendingUp} title={data?.collected ? "No trends in this period." : "Trends show here after the first weekly collection."} />
       ) : (
         byWeek(shown).map(({ week, themes: list }) => (
           <Card key={week}>

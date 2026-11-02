@@ -12,6 +12,7 @@ import { presetRange } from "@/lib/dateRange";
 
 const f = vi.hoisted(() => ({
   rpcs: [] as any[],
+  noReports: false,
   report: { id: "r1", status: "completed", created_at: "2026-10-07T07:20:00Z", date_range_start: "2026-09-01", date_range_end: "2026-09-30", report_data: {} },
 }));
 const report = f.report;
@@ -26,7 +27,7 @@ vi.mock("@/integrations/supabase/client", () => ({
     rpc: async (name: string, args: any) => {
       f.rpcs.push({ name, ...args });
       return {
-        data: [{ id: "t1", week_start: "2026-10-26", title: "Captain POV skits", happening: "Creators act out the group chat captain.", why_it_matters: "Captains sign teams up.", angle: "Chase RSVPs on camera.", platforms: ["tiktok"], posts: [] }],
+        data: { collected: true, themes: [{ id: "t1", week_start: "2026-10-26", title: "Captain POV skits", happening: "Creators act out the group chat captain.", why_it_matters: "Captains sign teams up.", angle: "Chase RSVPs on camera.", platforms: ["tiktok"], posts: [] }] },
         error: null,
       };
     },
@@ -35,7 +36,7 @@ vi.mock("@/integrations/supabase/client", () => ({
       const q: any = {
         select: () => q, eq: () => q, order: () => q, not: () => q, limit: () => q,
         maybeSingle: async () => ({ data: table === "clients" ? { id: "c1", name: "Bench" } : null, error: null }),
-        then: (resolve: any, reject: any) => Promise.resolve({ data: table === "reports" ? [report] : [], error: null }).then(resolve, reject),
+        then: (resolve: any, reject: any) => Promise.resolve({ data: table === "reports" && !f.noReports ? [report] : [], error: null }).then(resolve, reject),
       };
       return q;
     },
@@ -43,7 +44,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 let qc: QueryClient;
-beforeEach(() => { f.rpcs = []; });
+beforeEach(() => { f.rpcs = []; f.noReports = false; });
 afterEach(() => { cleanup(); qc?.clear(); });
 
 function mount() {
@@ -76,4 +77,28 @@ it("asks for every week stored on All time", async () => {
   await screen.findByText("Captain POV skits");
   fireEvent.click(screen.getByRole("button", { name: "All time" }));
   await waitFor(() => expect(f.rpcs.at(-1)).toMatchObject({ name: "trend_themes_in_range", p_client: "c1", p_from: "2000-01-01" }));
+});
+
+it("reaches the Trends tab for a client with no report at all on All time, while Performance still says there is no report", async () => {
+  // A new self-serve client has trends before its first monthly report.
+  f.noReports = true;
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "All time" }));
+  expect(await screen.findByText("No reports yet")).toBeInTheDocument();
+  expect(screen.queryByText("Report history")).not.toBeInTheDocument();
+  await openTrends();
+  expect(await screen.findByText("Captain POV skits")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Trend insights" })).toBeInTheDocument();
+  expect(f.rpcs.at(-1)).toMatchObject({ name: "trend_themes_in_range", p_client: "c1", p_from: "2000-01-01" });
+  // Back on Performance the empty state is what it was.
+  fireEvent.mouseDown(screen.getByRole("tab", { name: /Performance/ }), { button: 0 });
+  expect(await screen.findByText("No reports yet")).toBeInTheDocument();
+  expect(screen.queryByText("Reports analyzed")).not.toBeInTheDocument();
+});
+
+it("still shows the Trends tab for a period with no report", async () => {
+  f.noReports = true;
+  mount();
+  await openTrends();
+  expect(await screen.findByText("Captain POV skits")).toBeInTheDocument();
 });

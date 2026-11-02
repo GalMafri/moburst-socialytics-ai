@@ -31,11 +31,19 @@ export interface TrendTheme {
 }
 
 /** The client alone is the prefix of every window's key, so one call refreshes them all. */
+/** The answer for a window: its themes, and whether the client has had any weekly collection at all. */
+export interface TrendThemesAnswer {
+  /** True when at least one week was collected on any date, so "no themes" means none in this window. */
+  collected: boolean;
+  themes: TrendTheme[];
+}
+
 const themesKey = (clientId: string, ...range: string[]) => ["trend-themes", clientId, ...range];
 
 /**
  * The client's weekly themes for weeks starting between `from` and `to`
- * (yyyy-mm-dd, both included), newest week first, each with its kept posts.
+ * (yyyy-mm-dd, both included), newest week first, each with its kept posts,
+ * and whether any week was ever collected for the client.
  * One database function answers it (trend_themes_in_range): a client user
  * cannot read the week rows a range needs, and the function also keeps the
  * team's own columns out of the answer. Dismissed themes are not in it.
@@ -49,7 +57,8 @@ export function useTrendThemes(clientId: string, from: string, to: string) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase.rpc as any)("trend_themes_in_range", { p_client: clientId, p_from: from, p_to: to });
       if (error) throw error;
-      return (Array.isArray(data) ? data : []) as TrendTheme[];
+      const answer = data as { collected?: unknown; themes?: unknown } | null;
+      return { collected: answer?.collected === true, themes: Array.isArray(answer?.themes) ? (answer.themes as TrendTheme[]) : [] } satisfies TrendThemesAnswer;
     },
   });
 }

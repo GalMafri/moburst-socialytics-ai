@@ -361,6 +361,34 @@ export default function Analytics() {
             { id: "history", label: "Report history" },
           ];
 
+  // The view tabs. Trends are collected weekly and the competitive view has its own reports, so neither waits for a monthly report.
+  const viewTabList = (
+    <TabsList className="grid w-full grid-cols-3 sm:max-w-md">
+      <TabsTrigger value="performance" className="gap-1.5">
+        <BarChart3 className="h-3.5 w-3.5" /> Performance
+      </TabsTrigger>
+      <TabsTrigger value="trends" className="gap-1.5">
+        <TrendingUp className="h-3.5 w-3.5" /> Trends
+      </TabsTrigger>
+      <TabsTrigger value="competitive" className="gap-1.5">
+        <Crosshair className="h-3.5 w-3.5" /> Competitive
+      </TabsTrigger>
+    </TabsList>
+  );
+  const reportFreeTabs = (
+    <>
+      <TabsContent value="trends" className="space-y-section mt-section">
+        {/* The weekly themes of the client's industry, across every platform. */}
+        <TrendInsightsSection clientId={id!} from={trendsWindow.start} to={trendsWindow.end} />
+      </TabsContent>
+      <TabsContent value="competitive" className="space-y-section mt-section">
+        <div id="competitive" className="scroll-mt-[156px]">
+          <CompetitiveSnapshot clientId={id!} />
+        </div>
+      </TabsContent>
+    </>
+  );
+
   return (
     <AppLayout
       nav={<SectionNav items={navItems} />}
@@ -394,27 +422,24 @@ export default function Analytics() {
             onRetry={() => refetchReports()}
           />
         ) : filtered.length === 0 && !viewWindow ? (
-          // What exists: when the first report runs, if one is scheduled. Never a setup step.
-          <EmptyState
-            icon={BarChart3}
-            title="No reports yet"
-            description={firstRunSentence("monthly", nextMonthly.data, client?.timezone || undefined) || "Figures appear here once the first monthly report is ready."}
-          />
+          // Performance has nothing to show without a report. Trends and Competitive do not need one, so their tabs stay open.
+          <Tabs value={view} onValueChange={(v) => setView(v as AnalyticsView)}>
+            {viewTabList}
+            <TabsContent value="performance" className="mt-section">
+              {/* What exists: when the first report runs, if one is scheduled. Never a setup step. */}
+              <EmptyState
+                icon={BarChart3}
+                title="No reports yet"
+                description={firstRunSentence("monthly", nextMonthly.data, client?.timezone || undefined) || "Figures appear here once the first monthly report is ready."}
+              />
+            </TabsContent>
+            {reportFreeTabs}
+          </Tabs>
         ) : (
           <>
             {/* View segmentation */}
             <Tabs value={view} onValueChange={(v) => setView(v as AnalyticsView)}>
-              <TabsList className="grid w-full grid-cols-3 sm:max-w-md">
-                <TabsTrigger value="performance" className="gap-1.5">
-                  <BarChart3 className="h-3.5 w-3.5" /> Performance
-                </TabsTrigger>
-                <TabsTrigger value="trends" className="gap-1.5">
-                  <TrendingUp className="h-3.5 w-3.5" /> Trends
-                </TabsTrigger>
-                <TabsTrigger value="competitive" className="gap-1.5">
-                  <Crosshair className="h-3.5 w-3.5" /> Competitive
-                </TabsTrigger>
-              </TabsList>
+              {viewTabList}
 
               <TabsContent value="performance" className="space-y-section mt-section">
                 {viewWindow && (
@@ -786,15 +811,7 @@ export default function Analytics() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="trends" className="space-y-section mt-section">
-                {/* The weekly themes of the client's industry, across every platform. */}
-                <TrendInsightsSection clientId={id!} from={trendsWindow.start} to={trendsWindow.end} />
-              </TabsContent>
-              <TabsContent value="competitive" className="space-y-section mt-section">
-                <div id="competitive" className="scroll-mt-[156px]">
-                  <CompetitiveSnapshot clientId={id!} />
-                </div>
-              </TabsContent>
+              {reportFreeTabs}
             </Tabs>
 
             {/* Recent reports table */}

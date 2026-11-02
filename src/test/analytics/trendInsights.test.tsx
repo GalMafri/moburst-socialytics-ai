@@ -10,7 +10,7 @@ import { TrendInsightsSection } from "@/components/analytics/TrendInsightsSectio
 // read them with measured figures and no way to dismiss; staff see the score
 // and can dismiss a theme, which comes off the list at once.
 
-const f = vi.hoisted(() => ({ staff: false, themes: [] as any[], rpcs: [] as any[], loadFails: false, dismissFails: false }));
+const f = vi.hoisted(() => ({ staff: false, themes: [] as any[], collected: true, rpcs: [] as any[], loadFails: false, dismissFails: false }));
 vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ isMoburstStaff: f.staff }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
@@ -21,7 +21,7 @@ vi.mock("@/integrations/supabase/client", () => ({
       if (name === "trend_themes_in_range") {
         return f.loadFails
           ? { data: null, error: { message: 'permission denied for function trend_themes_in_range', code: "42501" } }
-          : { data: f.themes, error: null };
+          : { data: { collected: f.collected, themes: f.themes }, error: null };
       }
       if (name === "trend_theme_dismiss") {
         if (f.dismissFails) return { data: null, error: { message: "Only Moburst staff can dismiss a trend.", code: "42501" } };
@@ -74,7 +74,7 @@ function mount() {
   );
 }
 beforeEach(() => {
-  f.staff = false; f.themes = themes(); f.rpcs = []; f.loadFails = false; f.dismissFails = false;
+  f.staff = false; f.themes = themes(); f.collected = true; f.rpcs = []; f.loadFails = false; f.dismissFails = false;
   vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear();
 });
 afterEach(() => { cleanup(); qc?.clear(); });
@@ -188,10 +188,21 @@ describe("TrendInsightsSection", () => {
     warn.mockRestore();
   });
 
-  it("says when nothing has been collected yet", async () => {
+  it("says trends start after the first weekly collection when none has been collected", async () => {
     f.themes = [];
+    f.collected = false;
     mount();
     expect(await screen.findByText("Trends show here after the first weekly collection.")).toBeInTheDocument();
+    expect(screen.queryByText("No trends in this period.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "All" })).not.toBeInTheDocument();
+  });
+
+  it("says no trends fall in the period when weeks were collected but none lands in it", async () => {
+    f.themes = [];
+    f.collected = true;
+    mount();
+    expect(await screen.findByText("No trends in this period.")).toBeInTheDocument();
+    expect(screen.queryByText(/first weekly collection/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "All" })).not.toBeInTheDocument();
   });
 
