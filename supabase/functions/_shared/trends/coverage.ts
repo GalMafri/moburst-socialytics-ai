@@ -8,7 +8,9 @@
 // A rewrite takes the place of the profile's own terms on that platform: what
 // a person added is still searched first, and what a person removed is never
 // searched (ruled 2 Nov 2026). A profile written again clears every rewrite
-// (writeTrendProfile), since each was made from the old profile.
+// (writeTrendProfile), since each was made from the old profile, and the
+// monthly hashtag refresh clears Instagram's (lifecycle step trend_hashtags),
+// since it rewrites exactly what Instagram searches.
 
 import { parseAnswer } from "../pipelines/competitive/analysis.ts";
 import type { FilterProfile } from "./filter.ts";

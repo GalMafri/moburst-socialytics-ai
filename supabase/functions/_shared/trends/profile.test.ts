@@ -223,4 +223,29 @@ describe("the lifecycle steps", () => {
     expect(active.topics.map((t) => t.term)).toEqual(["app growth tips"]);
     expect(lastMonth.tables.trend_profiles[0].hashtags_at).toBe(T);
   });
+
+  it("clears Instagram's coverage rewrite when it refreshes the hashtags Instagram searches, and leaves the other platforms' alone", async () => {
+    // Ruled 2 Nov 2026: a refresh rewrites exactly what Instagram searches, so a rewrite made from the old tags goes.
+    deps.trendIO = () => io();
+    deps.now = () => NOW;
+    deps.anthropicKey = async () => "key";
+    deps.claudeMessages = async () => ({ text: JSON.stringify({ hashtags: { instagram: [term("#new")], tiktok: [], linkedin: [] } }), stopReason: "end_turn", raw: {} });
+    const overrides = { instagram: ["#rewritten"], tiktok: ["rewritten search"] };
+    const withOverrides = (hashtagsAt: string) => fakeDb({
+      clients: [client()],
+      trend_profiles: [{ client_id: "c1", audience: "a", fit_rubric: "f", platforms: [], search_overrides: overrides, inputs_key: "k", written_at: "2026-09-01T00:00:00Z", hashtags_at: hashtagsAt }],
+      trend_terms: [{ id: "h", client_id: "c1", kind: "hashtag", platform: "instagram", term: "#old", reason: "r", source: "lifecycle", removed_at: null }],
+    });
+    const rows = rowsOf(row("trend_profile"));
+
+    const refreshed = withOverrides("2026-10-03T00:00:00Z");
+    expect((await STEPS.trend_hashtags.run(refreshed, client(), { force: false, previous: null, rows })).status).toBe("done");
+    expect(refreshed.tables.trend_profiles[0].search_overrides).toEqual({ tiktok: ["rewritten search"] });
+    expect(refreshed.tables.trend_profiles[0].hashtags_at).toBe(T);
+
+    // Already refreshed this month: nothing is rewritten, so the overrides stay.
+    const skipped = withOverrides("2026-11-01T05:00:00Z");
+    expect((await STEPS.trend_hashtags.run(skipped, client(), { force: false, previous: null, rows })).result).toEqual({ skipped: "this_month" });
+    expect(skipped.tables.trend_profiles[0].search_overrides).toEqual(overrides);
+  });
 });
