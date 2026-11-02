@@ -16,7 +16,7 @@
 import { anthropicMessages } from "../anthropic.ts";
 import { MEMORY_MODEL } from "../voice/load.ts";
 import { retryWait } from "../calendar/runWeek.ts";
-import { inheritedLinks, parseReading, pointsInUse, readingPrompt, readNoteRows, todayIn, type LinkRow, type NoteFileType } from "./notes.ts";
+import { inheritedLinks, parseReading, pointsInUse, readingPrompt, readNoteRows, todayIn, NOTES_BUCKET, type LinkRow, type NoteFileType } from "./notes.ts";
 import { IMAGE_MAX_BYTES, readNoteFile, splitParts, type NoteSource, type Parsers } from "./read.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -44,7 +44,6 @@ export interface NotesDeps {
   parsers(): Promise<Parsers>;
 }
 
-export const NOTES_BUCKET = "client-notes";
 /** Room for the thinking and the points of one part. */
 export const READ_MAX_TOKENS = 6000;
 
@@ -229,7 +228,7 @@ async function askForRewrites(admin: Db, client: Client, today: string): Promise
   const rules = pointsInUse(rows.notes, rows.points, rows.links, today).filter((p) => p.kind === "avoid" || p.kind === "do");
   if (!rules.length) return [];
   const newest = Math.max(...rules.map((r) => Date.parse(r.created_at)));
-  const plans = await must<Array<Record<string, any>> | null>(admin.from("calendar_plans").select("id, week_start, ready_at, pending_revision, revisions")
+  const plans = await must<Array<Record<string, unknown>> | null>(admin.from("calendar_plans").select("id, week_start, ready_at, pending_revision, revisions")
     .eq("client_id", client.id).eq("status", "ready").gte("week_start", addDays(today, -6)).order("week_start", { ascending: true }), "Could not read the planned weeks");
   const asked: string[] = [];
   for (const plan of plans ?? []) {

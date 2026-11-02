@@ -52,9 +52,36 @@ export const NOTE_FILES_AT_ONCE = 50;
 /** The longest typed note. */
 export const NOTE_TEXT_MAX = 20_000;
 
+/** The private bucket notes' files are kept in, at {client_id}/{fileKey}. */
+export const NOTES_BUCKET = "client-notes";
+
 export function noteFileType(name: string): NoteFileType | null {
   const ext = /\.([a-z0-9]+)$/i.exec(String(name ?? ""))?.[1]?.toLowerCase() ?? "";
   return NOTE_FILES[ext]?.type ?? null;
+}
+
+/** A typed note's title: its first line. */
+export function noteTitle(text: string): string {
+  const first = String(text ?? "").split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+  return clipText(first, 120).trim();
+}
+
+/**
+ * A note file's path as the screen stores it: the client's own folder and
+ * the name fileKey makes from the file (src/hooks/useQuietUpload.ts), of a
+ * kind a note can be.
+ */
+export function isNotePath(clientId: string, path: string): boolean {
+  const key = String(path ?? "").startsWith(`${clientId}/`) ? String(path).slice(clientId.length + 1) : "";
+  return /^\d+-\d+\.[a-z0-9]+$/.test(key) && noteFileType(key) !== null;
+}
+
+/** A note's date as a person gives it: a real day, no later than tomorrow (the browser may be a day ahead of the client). */
+export function validNoteDate(x: unknown, today: string): string | null {
+  const d = validDate(x);
+  if (!d) return null;
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  return d <= tomorrow ? d : null;
 }
 
 // ── Rows ────────────────────────────────────────────────────────────────────

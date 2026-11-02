@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  inheritedLinks, noteFileType, notesSectionLines, parseReading, pointStates, pointsInUse, readingPrompt, selectForPrompt, shortDate, standingNotes, todayIn,
+  inheritedLinks, isNotePath, noteFileType, noteTitle, notesSectionLines, validNoteDate, parseReading, pointStates, pointsInUse, readingPrompt, selectForPrompt, shortDate, standingNotes, todayIn,
   NOTES_MAX_CHARS, NOTES_MAX_POINTS, STANDING_MAX_CHARS,
   type DatedPoint, type LinkRow, type NoteRow, type PointRow,
 } from "./notes";
@@ -216,6 +216,27 @@ describe("helpers", () => {
     expect(todayIn("Pacific/Auckland", new Date("2026-11-02T12:00:00Z"))).toBe("2026-11-03");
     expect(todayIn("America/Los_Angeles", new Date("2026-11-02T03:00:00Z"))).toBe("2026-11-01");
     expect(todayIn("Not/AZone", new Date("2026-11-02T03:00:00Z"))).toBe("2026-11-02");
+  });
+
+  it("titles a typed note by its first line", () => {
+    expect(noteTitle("\n\n  Call with Bader Law  \nThey asked for...")).toBe("Call with Bader Law");
+    expect(noteTitle("x".repeat(300))).toHaveLength(120);
+  });
+
+  it("takes only a stored note path in the client's own folder, named by the file", () => {
+    expect(isNotePath("c1", "c1/1730000000000-52311.docx")).toBe(true);
+    expect(isNotePath("c1", "c2/1730000000000-52311.docx")).toBe(false);
+    expect(isNotePath("c1", "c1/../c2/1-2.pdf")).toBe(false);
+    expect(isNotePath("c1", "c1/1-2.exe")).toBe(false);
+    expect(isNotePath("c1", "c1/notes.pdf")).toBe(false);
+  });
+
+  it("takes a note's date when it is a real day no later than tomorrow", () => {
+    expect(validNoteDate("2026-10-28", TODAY)).toBe("2026-10-28");
+    expect(validNoteDate("2026-11-03", TODAY)).toBe("2026-11-03");
+    expect(validNoteDate("2026-11-04", TODAY)).toBeNull();
+    expect(validNoteDate("2026-02-30", TODAY)).toBeNull();
+    expect(validNoteDate(undefined, TODAY)).toBeNull();
   });
 
   it("knows the file types a note can be, by the file's name", () => {
