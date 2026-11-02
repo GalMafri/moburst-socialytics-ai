@@ -9,14 +9,18 @@ import type { PostStatus } from "./PostStatusChip";
  *
  * "Designed" requires BOTH that media exists AND at least one variant is
  * marked is_selected — generation without a favorite is not yet "designed".
+ *
+ * A Story never reaches "scheduled": Sprout cannot publish one, so it is
+ * posted by hand (supabase/functions/_shared/design/story.ts).
  */
 export function resolvePostStatus(args: {
   mediaUrls: string[];
   isSelectedAny: boolean;
   isApproved: boolean;
   hasScheduledPost: boolean;
+  story?: boolean;
 }): PostStatus {
-  if (args.hasScheduledPost) return "scheduled";
+  if (args.hasScheduledPost && !args.story) return "scheduled";
   if (args.isApproved) return "approved";
   if (args.mediaUrls.length > 0 && args.isSelectedAny) return "designed";
   return "draft";
