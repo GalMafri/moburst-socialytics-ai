@@ -34,7 +34,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { CalendarPost } from "@/lib/calendarRevision";
 import { tileAspectFor } from "@/lib/tileAspect";
-import { tilesFromIterations, type Iteration, type MediaTile } from "@/lib/postMediaTiles";
+import { mediaInUse, tilesFromIterations, type Iteration, type MediaTile } from "@/lib/postMediaTiles";
 import { supabase } from "@/integrations/supabase/client";
 import { postCopyOf } from "@/lib/postCopy";
 import { finishIterations, type ProductionPlan } from "@/lib/creativeProduction";
@@ -491,10 +491,8 @@ export function PostPanel({
                       post={post}
                       clientId={clientId}
                       reportId={reportId}
-                      generatedMediaUrls={imageTiles
-                        .filter((t) => t.isSelected)
-                        .map((t) => t.url)
-                        .concat(videoTiles.filter((t) => t.isSelected).map((t) => t.url))}
+                      // What the Design tab shows as the post's media, from whichever group it is in.
+                      generatedMediaUrls={mediaInUse(postIterations)}
                       clientTimezone={clientTimezone}
                     />
                   </>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localDateString, scheduledInstant } from "@/lib/calendarDate";
+import { dateInputOf, localDateString, scheduledInstant, timeInputOf } from "@/lib/calendarDate";
 import { applyCopyRevisions, calendarWithRevisions, iterationMatchesPost } from "@/lib/calendarRevision";
 import { activeNavigationSection } from "@/lib/navigationSection";
 
@@ -55,3 +55,19 @@ it.each([
   ["/clients/a/analytics", "/analytics"], ["/clients/a/reports/b", "/reports"],
   ["/clients/a/analyze", "/reports"], ["/clients/a/setup", "/"], ["/usage", "/usage"],
 ])("keeps navigation context for %s", (route, section) => expect(activeNavigationSection(route)).toBe(section));
+
+describe("A planned post's date and time in the scheduling dialog", () => {
+  it.each([
+    ["6:45 PM", "18:45"], ["6:45 PM", "18:45"], ["6 PM", "18:00"], ["6:45pm EST", "18:45"],
+    ["12:05 AM", "00:05"], ["12:30 PM", "12:30"], ["18:45", "18:45"], ["9:05", "09:05"],
+    ["", ""], ["evening", ""], ["13:00 PM", ""],
+  ])("reads %j as %j", (planned, input) => {
+    expect(timeInputOf(planned)).toBe(input);
+  });
+  it.each([
+    ["2026-11-09", "2026-11-09"], ["2026-11-09T00:00:00Z", "2026-11-09"],
+    ["Nov 9", ""], ["Monday", ""], ["2026-02-30", ""], [undefined, ""],
+  ])("reads the date %j as %j, never guessing a year", (label, input) => {
+    expect(dateInputOf(label)).toBe(input);
+  });
+});

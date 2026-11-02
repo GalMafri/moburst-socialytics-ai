@@ -11,7 +11,7 @@ import { Calendar, Clock, Send, Loader2, Image as ImageIcon } from "lucide-react
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { localDateString, scheduledInstant } from "@/lib/calendarDate";
+import { dateInputOf, scheduledInstant, timeInputOf } from "@/lib/calendarDate";
 import { sendQuietly } from "@/lib/quietSend";
 import { postCopyOf } from "@/lib/postCopy";
 import { publishProblems } from "../../../supabase/functions/_shared/sprout/publishRules";
@@ -139,6 +139,10 @@ export function SchedulePostModal({
   }, [open, displayProfiles.length]);
 
   // ── Populate form fields ────────────────────────────────────────────────────
+  // Filled when the dialog opens and when the post itself changes. The
+  // calendar hands over a new post object each time it draws, so the post is
+  // compared by what it says: a redraw never puts back what a person changed.
+  const postSignature = post ? JSON.stringify([post._calendarPostKey, postCopyOf(post), post.hashtags, post.date_label, post.posting_time]) : "";
   useEffect(() => {
     if (open && post) {
       // Copy and hashtags, without repeating a hashtag the copy already has.
@@ -151,33 +155,34 @@ export function SchedulePostModal({
       }
       setPostContent(content);
       setMediaUrls(JSON.parse(mediaSignature));
-      setScheduledDate("");
-      setScheduledTime("");
-      if (post.date_label) {
-        const d = new Date(post.date_label);
-        if (!isNaN(d.getTime())) setScheduledDate(/^\d{4}-\d{2}-\d{2}$/.test(post.date_label) ? post.date_label : localDateString(d));
-      }
-      if (post.posting_time) {
-        const m = post.posting_time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-        if (m) {
-          let h = parseInt(m[1]);
-          const ampm = m[3].toUpperCase();
-          if (ampm === "PM" && h < 12) h += 12;
-          if (ampm === "AM" && h === 12) h = 0;
-          setScheduledTime(`${h.toString().padStart(2, "0")}:${m[2]}`);
-        }
-      }
+      setScheduledDate(dateInputOf(post.date_label));
+      setScheduledTime(timeInputOf(post.posting_time));
     }
-  }, [open, post, mediaSignature]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, postSignature, mediaSignature]);
 
   const selectedProfile = displayProfiles.find((p: any) => String(p.id) === selectedProfileId);
-  const sendAt = scheduledDate && scheduledTime ? scheduledInstant(scheduledDate, scheduledTime, clientTimezone) : null;
+  // The send time in the client's zone. A time the clock change skips or
+  // repeats, or a zone that is not one, is said in its own words.
+  let sendAt: string | null = null;
+  let timeProblem: string | null = null;
+  if (scheduledDate && scheduledTime) {
+    try { sendAt = scheduledInstant(scheduledDate, scheduledTime, clientTimezone); } catch (e) { timeProblem = e instanceof Error ? e.message : "Enter a valid date and time."; }
+  }
   const problems = publishProblems({
     network: selectedProfile?.network_type || post?.platform,
     text: postContent,
     mediaUrls,
     sendAt: sendAt ?? "",
   });
+  // Everything that keeps the button waiting, in words. The profile list says
+  // itself while it loads and when the client has no account for the network.
+  const waitingFor = [
+    ...(displayProfiles.length > 1 && !selectedProfile ? ["Choose the profile to post to."] : []),
+    ...(!scheduledDate && !scheduledTime ? ["Choose a date and time."] : !scheduledDate ? ["Choose a date."] : !scheduledTime ? ["Choose a time."] : []),
+    ...(timeProblem ? [timeProblem] : []),
+    ...problems,
+  ];
   const ready = !!selectedProfile && !!sendAt && problems.length === 0;
 
   const handleSchedule = async () => {
@@ -300,9 +305,9 @@ export function SchedulePostModal({
           )}
 
           {/* What the post still needs, as facts about the post; the button waits for them. */}
-          {selectedProfile && sendAt && problems.length > 0 && (
+          {dbProfiles && displayProfiles.length > 0 && waitingFor.length > 0 && (
             <ul className="space-y-1" role="status">
-              {problems.map((p) => <li key={p} className="t-secondary">{p}</li>)}
+              {waitingFor.map((p) => <li key={p} className="t-secondary">{p}</li>)}
             </ul>
           )}
           {notScheduled && <p role="status" className="t-secondary">Not scheduled yet. Everything above is kept as it is.</p>}

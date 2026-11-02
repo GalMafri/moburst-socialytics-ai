@@ -71,3 +71,20 @@ export function tilesFromIterations(
   return tiles;
 }
 
+
+const DESIGN_OPTION = /^Design option \d+$/;
+
+/**
+ * The media a post goes out with: every row in use for it (oldest first, a
+ * carousel's slides in their order), else the post's newest design, the one
+ * its Design tab shows. The board keeps one design in use per post, so this
+ * is the design the team sees, whichever group it came from.
+ */
+export function mediaInUse(iterations: Iteration[]): string[] {
+  const withMedia = (iterations ?? []).filter((it) => (it.media_urls ?? []).length > 0);
+  const byAge = (a: Iteration, b: Iteration) => (a.created_at || "").localeCompare(b.created_at || "");
+  const inUse = withMedia.filter((it) => it.is_selected).sort(byAge);
+  if (inUse.length) return inUse.flatMap((it) => it.media_urls ?? []);
+  const newestDesign = withMedia.filter((it) => DESIGN_OPTION.test(String(it.variant_angle ?? ""))).sort(byAge).at(-1);
+  return newestDesign?.media_urls ?? [];
+}
