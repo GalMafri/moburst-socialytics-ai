@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE } from "./fixtures";
+import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SETTINGS, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE } from "./fixtures";
 import { readRoutes } from "./routes-read";
 import { makeFakeStore, emptyData } from "./store.fake";
 import { handleRequest, type CoreDeps } from "../api/core";
@@ -16,6 +16,7 @@ async function app(over: { analytics?: (id: string, start: string, end: string) 
     reports: [REPORT, { ...REPORT, id: "rep-calm", client_id: "c-calm", status: "running", created_at: "2026-09-20T00:00:00.000Z", report_data: {} }],
     competitiveReports: [COMPETITIVE_REPORT], posts: [POST, { ...POST, id: "post-2", is_approved: false, source: "ad_hoc", created_at: "2026-09-03T10:00:00.000Z" }, { ...POST, id: "post-old", archived_at: "2026-09-04T10:00:00.000Z" }],
     mediaJobs: [MEDIA_JOB], schedules: [SCHEDULE], scheduledPosts: [SCHEDULED_POST], alerts: [ALERT], designSystems: [DESIGN_SYSTEM],
+    designSettings: [DESIGN_SETTINGS], lifecycleSteps: [{ client_id: "c-calm", step: "design_settings", status: "waiting", result: { waiting_for: "logo_file" } }],
   }));
   const analyticsCalls: Array<[string, string, string]> = [];
   const routes = readRoutes({
@@ -72,6 +73,9 @@ describe("read routes", () => {
     const bare = (await get("/v1/clients/c-calm/setup")).body.data;
     expect(bare.ready).toBe(false);
     expect(bare.issues.map((i: { kind: string }) => i.kind)).toContain("sprout_missing");
+    expect(bare.issues).toContainEqual({ kind: "design_style_missing", text: "Designs start once Calm's logo file is found on its website.", fix: "setup" });
+    expect((await get("/v1/clients/c-calm")).body.data.design).toMatchObject({ ready: false, waiting_for: "logo_file" });
+    expect((await get("/v1/clients/c-bader")).body.data.design).toMatchObject({ ready: true, waiting_for: null });
   });
   it("serves analytics through the server path with a default 30-day window and maps its refusals", async () => {
     const { get, analyticsCalls } = await app();

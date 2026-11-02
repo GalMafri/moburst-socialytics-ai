@@ -12,6 +12,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { invokeResendable, sendQuietly } from "@/lib/quietSend";
 import { typicalMinutes, type DesignRequest } from "@/lib/designRequests";
+import { designWaitingLine, type DesignWaitingFor } from "../../supabase/functions/_shared/design/setup.ts";
 
 export type WeekKind = "single" | "carousel" | "video";
 
@@ -45,8 +46,9 @@ export interface WeekRun {
 
 export interface WeekCounts { single: number; carousel: number; video: number; copy_waits: number; filming: number }
 
-/** What the client's setup waits for before designs can start. */
-export type WeekWaitingFor = "look" | "designed_posts" | "social_accounts" | "logo_file";
+/** What the client's setup waits for before designs can start (one rule and sentence with the server and the API). */
+export type WeekWaitingFor = DesignWaitingFor;
+export { designWaitingLine as waitingLine };
 
 export interface WeekPreview {
   code?: "not_set_up";
@@ -136,16 +138,6 @@ export function filmingLine(n: number): string | null {
 
 export function buttonLabel(n: number): string {
   return `Design ${plural(n, "post", "posts")}`;
-}
-
-/** What the client's setup still waits for before designs can start. */
-export function waitingLine(waitingFor: WeekWaitingFor | undefined, clientName: string | null | undefined): string {
-  const name = clientName?.trim() || "this client";
-  const its = clientName?.trim() ? `${name}'s` : "this client's";
-  if (waitingFor === "logo_file") return `Designs start once ${its} logo file is found on its website.`;
-  if (waitingFor === "designed_posts") return `Designs start once ${name} has published enough designed posts to learn its look from.`;
-  if (waitingFor === "social_accounts") return `Designs start once ${its} social accounts are connected.`;
-  return `Designs start once ${its} look is learned from its own posts.`;
 }
 
 export function progressLine(p: { total: number; ready: number }): string {

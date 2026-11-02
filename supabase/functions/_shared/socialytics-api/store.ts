@@ -9,13 +9,18 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { decodeCursor, type Cursor } from "../api/cursor.ts";
 import type { ClientScope } from "../api/router.ts";
-import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow } from "./serializers.ts";
+import { DESIGN_SETUP_STEPS, type DesignStepRow } from "../design/setup.ts";
+import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSettingsRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow } from "./serializers.ts";
 
 export interface Page { limit: number; cursor: Cursor | null }
 export interface ClientFilters { q?: string; company_slug?: string; include_archived?: boolean }
 export interface ReportFilters { client_id?: string; status?: string; from?: string; to?: string }
 export interface PostFilters { client_id?: string; report_id?: string; source?: string; approved?: boolean; include_archived?: boolean }
-export interface ClientExtras { sproutProfiles: SproutProfileRow[]; sets: SetWithCompetitors[]; designSystems: DesignSystemRow[]; counts: { reports: number; competitive_reports: number; posts: number; schedules: number }; lastReport: ReportRow | null }
+export interface ClientExtras {
+  sproutProfiles: SproutProfileRow[]; sets: SetWithCompetitors[]; designSystems: DesignSystemRow[];
+  /** design_brand_settings (designs start once confirmed) and the lifecycle's design steps (what they wait for). */
+  designSettings: DesignSettingsRow | null; designSteps: DesignStepRow[];
+  counts: { reports: number; competitive_reports: number; posts: number; schedules: number }; lastReport: ReportRow | null }
 
 export interface Store {
   listClients(scope: ClientScope, f: ClientFilters, page: Page): Promise<ClientRow[]>;
@@ -125,11 +130,13 @@ export function makeStore(db: SupabaseClient): Store {
     async clientExtras(ids) {
       const out: Record<string, ClientExtras> = {};
       if (!ids.length) return out;
-      for (const id of ids) out[id] = { sproutProfiles: [], sets: [], designSystems: [], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null };
-      const [profiles, sets, designs, reports, competitive, posts, schedules] = await Promise.all([
+      for (const id of ids) out[id] = { sproutProfiles: [], sets: [], designSystems: [], designSettings: null, designSteps: [], counts: { reports: 0, competitive_reports: 0, posts: 0, schedules: 0 }, lastReport: null };
+      const [profiles, sets, designs, settings, steps, reports, competitive, posts, schedules] = await Promise.all([
         rows<SproutProfileRow>(db.from("sprout_profiles").select(SPROUT_PROFILE_COLUMNS).in("client_id", ids)),
         rows<CompetitorSetRow>(db.from("competitor_sets").select(SET_COLUMNS).in("client_id", ids).order("created_at", { ascending: false })),
         rows<DesignSystemRow>(db.from("client_design_systems").select(DESIGN_SYSTEM_COLUMNS).in("client_id", ids).neq("status", "retired").order("version", { ascending: false })),
+        rows<DesignSettingsRow>(db.from("design_brand_settings").select("client_id, confirmed_at").in("client_id", ids)),
+        rows<DesignStepRow & { client_id: string }>(db.from("client_lifecycle_steps").select("client_id, step, status, result").in("client_id", ids).in("step", [...DESIGN_SETUP_STEPS])),
         rows<LightReport>(db.from("reports").select(REPORT_LIST_COLUMNS).in("client_id", ids).order("created_at", { ascending: false }).limit(5000)),
         rows<{ client_id: string }>(db.from("competitive_reports").select("client_id").in("client_id", ids).limit(5000)),
         rows<{ client_id: string }>(db.from("post_iterations").select("client_id").in("client_id", ids).is("archived_at", null).limit(20000)),
@@ -139,6 +146,8 @@ export function makeStore(db: SupabaseClient): Store {
       for (const p of profiles) out[p.client_id]?.sproutProfiles.push(p);
       for (const s of full) out[s.client_id]?.sets.push(s);
       for (const d of designs) out[d.client_id]?.designSystems.push(d);
+      for (const d of settings) if (out[d.client_id]) out[d.client_id].designSettings = d;
+      for (const d of steps) out[d.client_id]?.designSteps.push(d);
       for (const r of reports) {
         const e = out[r.client_id];
         if (!e) continue;

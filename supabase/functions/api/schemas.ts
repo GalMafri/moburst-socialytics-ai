@@ -17,7 +17,10 @@ const anyObj = { type: ["object", "null"] };
 
 const Links = obj({ app: { type: "string" }, api: { type: "string" } });
 const Period = obj({ start: str, end: str });
-const SetupIssue = obj({ kind: { type: "string" }, text: { type: "string" }, fix: { type: "string", enum: ["setup", "competitive"] } });
+const SetupIssue = obj({
+  kind: { type: "string", enum: ["brand_identity_missing", "pillars_missing", "keywords_missing", "sprout_missing", "competitors_missing", "design_style_missing", "schedule_missing"] },
+  text: { type: "string" }, fix: { type: "string", enum: ["setup", "competitive"] },
+});
 const Setup = obj({ ready: bool, issues: arr(SetupIssue) }, ["ready", "issues"]);
 const Handle = obj({ platform: { type: "string" }, handle: { type: "string" }, url: str, confidence: num, source: str, followers: int, active: bool });
 const Competitor = obj({ id: { type: "string" }, name: { type: "string" }, website: str, rationale: str, similarity_score: num, selected: bool, rank: int, detection: str, handles: arr(Handle) });
@@ -27,7 +30,12 @@ const BrandIdentity = obj({ primary_color: str, secondary_color: str, accent_col
 const Client = obj({
   id: { type: "string" }, name: { type: "string" }, website: str, company_slug: str, platforms: arr({ type: "string" }), geo: str, language: str, timezone: str,
   pillars: arr(obj({ name: { type: "string" }, description: str })), keywords: arr({ type: "string" }), brand_identity: { oneOf: [BrandIdentity, { type: "null" }] }, brief: str, logo_url: str,
-  design: obj({ synthesis_at: str, references: { type: "integer" }, system: { oneOf: [obj({ version: { type: "integer" }, status: { type: "string" }, approved_at: str }), { type: "null" }] } }),
+  // system is the retired design system, kept for its readers; designs start once the design settings are confirmed (ready),
+  // and until then waiting_for says what the client's setup waits for.
+  design: obj({
+    synthesis_at: str, references: { type: "integer" }, system: { oneOf: [obj({ version: { type: "integer" }, status: { type: "string" }, approved_at: str }), { type: "null" }] },
+    ready: bool, waiting_for: { type: ["string", "null"], enum: ["look", "designed_posts", "social_accounts", "logo_file", null] },
+  }),
   sprout: obj({ profiles: { type: "integer" }, networks: arr({ type: "string" }) }), competitors: obj({ set_status: str, selected: arr({ type: "string" }), tracked: bool }),
   counts: obj({ reports: { type: "integer" }, competitive_reports: { type: "integer" }, posts: { type: "integer" }, schedules: { type: "integer" } }),
   last_report: { oneOf: [obj({ id: { type: "string" }, status: { type: "string" }, period: Period, completed_at: str }), { type: "null" }] },
