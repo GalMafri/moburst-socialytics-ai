@@ -24,6 +24,8 @@ import { parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type Reason, ty
 import { wordReason } from "./reasonText.ts";
 import { activePreferences, buildVoiceProfile, consolidateMemory, COPY_MODEL, learnFromSignal, loadClientVoice } from "../voice/load.ts";
 import { voicePromptBlock } from "../voice/voice.ts";
+import { activeTerms } from "../trends/profile.ts";
+import { HASHTAG_PLATFORMS, type HashtagPlatform } from "../trends/types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -86,6 +88,8 @@ export interface Gathered {
   avoid: string[];
   thin: string[];
   examples: ReturnType<typeof bestExamples>;
+  /** The hashtags the client's trend profile keeps for each platform, for the planner to suggest. */
+  hashtags: Record<HashtagPlatform, string[]>;
   /** trends: "themes" when the newest finished Trends week gave evidence, else "none". */
   sources: { sprout: string; feed_weeks: number; report: string | null; topics: number; trends: "themes" | "none" };
 }
@@ -174,6 +178,24 @@ async function trackedRates(admin: Db): Promise<Record<string, number>> {
   return medianRates([...histories.values()]);
 }
 
+/** The most hashtags the planner is shown for one platform. */
+const HASHTAGS_PER_PLATFORM = 10;
+
+/**
+ * The hashtags the client's trend profile keeps (the ones nobody removed) for
+ * each platform: the team's own first, then the rest as the profile lists
+ * them, at most ten. Empty lists for a client with no profile.
+ */
+export async function profileHashtags(admin: Db, clientId: string): Promise<Record<HashtagPlatform, string[]>> {
+  const { hashtags } = await activeTerms(admin, clientId);
+  const out = { instagram: [], tiktok: [], linkedin: [] } as Record<HashtagPlatform, string[]>;
+  for (const platform of HASHTAG_PLATFORMS) {
+    const terms = hashtags[platform];
+    out[platform] = [...terms.filter((t) => t.source === "person"), ...terms.filter((t) => t.source !== "person")].map((t) => t.term).slice(0, HASHTAGS_PER_PLATFORM);
+  }
+  return out;
+}
+
 /** Monday of the week after the one a day falls in. */
 const nextMonday = (day: string) => addDays(day, 7 - ((new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7));
 
@@ -227,6 +249,8 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   // Industry trends come from the newest finished weekly Trends run (its themes staff did not dismiss), not from the report.
   const trends = scoreTrendItems(await latestTrendEvidence(admin, client.id));
 
+  const hashtags = await profileHashtags(admin, client.id);
+
   const scored = scoreOwnPosts(own, now);
   const evidence = numberEvidence({ ownTop: scored.top, competitors, topics: alerts ?? [], trends, findings });
   const [history, set] = await Promise.all([feedRows(admin, client.id), competitorSet(admin, client.id)]);
@@ -244,7 +268,7 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   const fmt = (s: typeof scored.low[number]) => `${s.post.platform} ${s.post.format} from ${s.post.publishedAt.slice(0, 10)} got ${s.multiple}x the usual ${s.metric}: ${s.post.text.replace(/\s+/g, " ").slice(0, 140)}`;
   return {
     own, learnedRhythm: resolved.learned, rhythm: resolved.applied, rhythmSources: resolved.sources, evidence, avoid: scored.low.map(fmt), thin,
-    examples: bestExamples(scored.top),
+    examples: bestExamples(scored.top), hashtags,
     sources: { sprout, feed_weeks: recent.length, report: report?.id ?? null, topics: (alerts ?? []).length, trends: trends.length ? "themes" : "none" },
   };
 }
@@ -401,6 +425,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       recent,
       thin: gathered.thin,
       canFilm: await clientCanFilm(admin, client.id, now),
+      hashtags: gathered.hashtags,
     };
     let posts: ReturnType<typeof parseWeekPlan> = [];
     const tokens = { input: 0, output: 0 };

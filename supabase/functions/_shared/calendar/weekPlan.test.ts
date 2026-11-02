@@ -29,6 +29,7 @@ const CTX: WeekContext = {
   recent: [],
   thin: [],
   canFilm: true,
+  hashtags: {},
 };
 
 const post = (over: Record<string, unknown>) => ({ date: "2026-10-27", platform: "Instagram", format: "Reel", posting_time: "17:00", pillar: "Beer League Truths", copy: "Copy", hashtags: ["#a"], cta: "Download", visual_direction: "A rink", reason_type: "competitor", evidence_ids: ["C1"], fit: "Captains live this every week", moment: "", test: false, ...over });
@@ -58,6 +59,31 @@ describe("weekPrompt", () => {
     const rule = "don't plan ideas that need a specific person on camera";
     expect(weekPrompt(CTX)).not.toContain(rule);
     expect(weekPrompt({ ...CTX, canFilm: false })).toContain(rule);
+  });
+
+  it("gives each platform the week posts on one line of its suggested hashtags, and leaves out a platform with none", () => {
+    const rhythm = [...CTX.rhythm, { platform: "TikTok", perWeek: 1, days: ["Friday"], time: null, average: 1, source: "published_8w" as const }, { platform: "LinkedIn", perWeek: 1, days: ["Monday"], time: null, average: 1, source: "published_8w" as const }];
+    // Facebook has slots but is no hashtag platform; TikTok has slots and no hashtags; Twitter has hashtags and no slots.
+    const p = weekPrompt({ ...CTX, rhythm, hashtags: { instagram: ["#beerleague", "#hockeylife"], tiktok: [], linkedin: ["#teamwork"], twitter: ["#nope"] } });
+    expect(p).toContain("- Instagram: #beerleague, #hockeylife");
+    expect(p).toContain("- LinkedIn: #teamwork");
+    expect(p).not.toContain("- TikTok: #");
+    expect(p).not.toContain("- Facebook: #");
+    expect(p).not.toContain("#nope");
+  });
+
+  it("offers the hashtags to use as the post suits, never as required, and never calls them trending", () => {
+    const p = weekPrompt({ ...CTX, hashtags: { instagram: ["#beerleague"] } });
+    const section = p.split("\n\n").find((s) => s.includes("#beerleague")) ?? "";
+    expect(section).toBe("Hashtags the brand's space uses, by platform. Add the ones that suit a post to its hashtags; none is required:\n- Instagram: #beerleague");
+    expect(section.toLowerCase()).not.toContain("trend");
+  });
+
+  it("has no hashtag section when no platform has suggestions", () => {
+    expect(weekPrompt({ ...CTX, hashtags: {} })).not.toContain("Hashtags the brand's space uses");
+    expect(weekPrompt({ ...CTX, hashtags: { instagram: [], tiktok: [], linkedin: [] } })).not.toContain("Hashtags the brand's space uses");
+    // The platform has suggestions but the week has no slot on it.
+    expect(weekPrompt({ ...CTX, rhythm: [], hashtags: { instagram: ["#a"] } })).not.toContain("Hashtags the brand's space uses");
   });
 
   it("has no rhythm section when there is no rhythm, rather than an empty one", () => {

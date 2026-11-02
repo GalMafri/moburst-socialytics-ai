@@ -36,6 +36,8 @@ export interface WeekContext {
   thin: string[];
   /** The client uploaded filmed footage in the last 60 days, so ideas that need someone on camera can be produced. */
   canFilm: boolean;
+  /** The hashtags the client's trend profile keeps, by lowercase platform name; empty for a client with no profile. */
+  hashtags: Record<string, string[]>;
 }
 
 export interface PlannedPost {
@@ -73,6 +75,9 @@ export function weekPrompt(c: WeekContext): string {
   const byKind = (k: EvidenceItem["kind"]) => c.evidence.filter((e) => e.kind === k);
   const section = (title: string, xs: EvidenceItem[]) => (xs.length ? [title, ...xs.map(evidenceLine)].join("\n") : "");
   const rhythm = c.rhythm.map((r) => `- ${r.platform}: ${r.perWeek} post${r.perWeek === 1 ? "" : "s"}${r.days.length ? `, usually ${r.days.slice(0, Math.max(r.perWeek, 2)).join(", ")}` : ""}${r.time ? ` around ${r.time}` : ""}`);
+  // One line for each platform this week posts on that the profile has hashtags for.
+  const tagLines = c.rhythm.map((r) => ({ platform: r.platform, tags: c.hashtags[r.platform.toLowerCase()] ?? [] })).filter((t) => t.tags.length)
+    .map((t) => `- ${t.platform}: ${t.tags.join(", ")}`);
   return [
     `You plan one week of social media posts for ${c.brand}.`,
     c.voiceBlock,
@@ -81,6 +86,7 @@ export function weekPrompt(c: WeekContext): string {
     c.languages.length ? `Write in: ${c.languages.join(", ")}.` : "",
     rhythm.length ? ["Posts for this week, per platform (this is how often the team actually publishes; follow it exactly):", ...rhythm].join("\n") : "",
     `Dates you can use: ${dates.map((d) => `${WEEKDAYS[weekDates(c.monday).indexOf(d)]} ${d}`).join(", ")}.`,
+    tagLines.length ? ["Hashtags the brand's space uses, by platform. Add the ones that suit a post to its hashtags; none is required:", ...tagLines].join("\n") : "",
     "Evidence, by id. Cite the ids each post acts on.",
     section(`${c.brand}'s own posts that beat its usual numbers:`, byKind("own")),
     section("Competitor posts that beat that competitor's usual numbers this week:", byKind("competitor")),

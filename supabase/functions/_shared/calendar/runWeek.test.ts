@@ -21,7 +21,7 @@ vi.mock("../voice/load.ts", async (original) => ({
   buildVoiceProfile: m.buildVoiceProfile,
 }));
 
-import { retryWait, runVoiceProfile, runWeekPlan, runWeekRevise, type WeekJob } from "./runWeek";
+import { gatherEvidence, retryWait, runVoiceProfile, runWeekPlan, runWeekRevise, type WeekJob } from "./runWeek";
 
 // The model is mocked; the key only has to exist.
 vi.stubGlobal("Deno", { env: { get: (name: string) => (name === "ANTHROPIC_API_KEY" ? "test" : undefined) } });
@@ -36,10 +36,12 @@ function fakeDb(tables: Record<string, unknown[]>) {
     writes,
     rpc: async () => ({ data: false, error: null }),
     from(table: string) {
-      const rows = tables[table] ?? [];
+      let rows = tables[table] ?? [];
       // deno-lint-ignore no-explicit-any
       const q: any = {};
-      for (const name of ["select", "eq", "neq", "in", "gte", "lte", "lt", "order", "limit", "not", "is", "or", "range", "contains"]) q[name] = () => q;
+      for (const name of ["select", "eq", "neq", "in", "gte", "lte", "lt", "order", "limit", "not", "or", "range", "contains"]) q[name] = () => q;
+      // A column that must be null drops the rows where it is set (a removed term has removed_at).
+      q.is = (column: string, value: unknown) => { if (value === null) rows = rows.filter((r) => (r as Record<string, unknown>)[column] == null); return q; };
       for (const op of ["update", "insert", "upsert", "delete"]) q[op] = (value: unknown) => { writes.push({ table, op, value }); return q; };
       q.maybeSingle = async () => ({ data: rows[0] ?? null, error: null });
       q.single = q.maybeSingle;
@@ -109,6 +111,51 @@ describe("runWeekPlan", () => {
     expect((ready?.evidence as { sources: Record<string, unknown> }).sources.trends).toBe("themes");
   });
 
+  it("suggests the profile's hashtags for the platforms the week posts on, and nothing for a client without a profile", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} });
+    // The team's posting setting puts three platforms in the week's slots.
+    const client = { ...CLIENT, primary_platforms: ["Instagram", "TikTok", "LinkedIn"], posting_rhythm: { instagram: 2, tiktok: 1, linkedin: 1 } };
+    const tag = (platform: string, term: string, source = "lifecycle") => ({ client_id: "ptp", kind: "hashtag", platform, term, reason: "r", source, removed_at: null });
+    const db = fakeDb({
+      calendar_plans: [plan], clients: [client],
+      trend_terms: [tag("instagram", "#beerleague"), tag("tiktok", "#hockeytok"), { client_id: "ptp", kind: "topic", platform: null, term: "beer league hockey", reason: "r", source: "lifecycle", removed_at: null }],
+    });
+    expect((await runWeekPlan(db, job(), NOW)).status).toBe("done");
+    const prompt = m.anthropic.mock.calls[0][0].body.messages[0].content as string;
+    expect(prompt).toContain("- Instagram: #beerleague");
+    expect(prompt).toContain("- TikTok: #hockeytok");
+    // LinkedIn is in this week's slots but the profile has no LinkedIn hashtags: no line. A topic is never a hashtag.
+    expect(prompt).toContain("- LinkedIn: 1 post");
+    expect(prompt).not.toContain("- LinkedIn: #");
+    expect(prompt).not.toContain("beer league hockey");
+
+    // A client with no trend profile: no hashtag lines, and the rest of the prompt is the same.
+    m.anthropic.mockClear();
+    await runWeekPlan(fakeDb({ calendar_plans: [plan], clients: [client] }), job(), NOW);
+    const bare = m.anthropic.mock.calls[0][0].body.messages[0].content as string;
+    expect(bare).not.toContain("- Instagram: #");
+    expect(bare).not.toContain("- TikTok: #");
+    expect(bare).not.toContain("Hashtags the brand's space uses");
+    expect(prompt.replace(/\n\nHashtags the brand's space uses[^\n]*\n- Instagram: #beerleague\n- TikTok: #hockeytok/, "")).toBe(bare);
+  });
+
+  it("sends the week to be tried again when the profile can't be read, saying why in plain words", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT] });
+    const from = db.from.bind(db);
+    db.from = (table: string) => {
+      if (table !== "trend_terms") return from(table);
+      // deno-lint-ignore no-explicit-any
+      const q: any = { select: () => q, eq: () => q, is: () => Promise.resolve({ data: null, error: { message: "boom" } }) };
+      return q;
+    };
+    const out = await runWeekPlan(db, job(), NOW);
+    // Like the trend themes, a read that fails sends the week to be tried again, with the reason in words.
+    expect(out).toMatchObject({ status: "queued", reason: "Could not read what trends track: boom" });
+    expect(m.anthropic).not.toHaveBeenCalled();
+  });
+
   it("never plans an empty week: a client posting less than weekly still gets one post on its main platform", async () => {
     // Two Facebook posts in the last 8 weeks: 0.25 a week, and the week of 26 Oct is not one of its spread weeks.
     const posts = ["2026-09-01T14:00:00Z", "2026-09-29T14:00:00Z"].map((publishedAt, i) => ({ postId: `p${i}`, channel: "facebook", type: "photo", publishedAt, message: "A post", engagementTotal: 3 }));
@@ -149,6 +196,33 @@ describe("runWeekPlan", () => {
     expect(out).toMatchObject({ status: "queued", available_at: new Date(NOW.getTime() + 60 * 60_000).toISOString() });
     expect(db.writes).toContainEqual(expect.objectContaining({ table: "calendar_plans", value: expect.objectContaining({ claimed_at: null, status: "queued" }) }));
     expect(m.anthropic).not.toHaveBeenCalled();
+  });
+});
+
+describe("gatherEvidence hashtags", () => {
+  const row = (platform: string, term: string, source: string, removed_at: string | null = null) => ({ client_id: "ptp", kind: "hashtag", platform, term, reason: "r", source, removed_at });
+
+  it("gives each platform's active hashtags with the team's own first, the rest in term order, removed ones left out, at most 10", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    const life = Array.from({ length: 12 }, (_, i) => row("tiktok", `#life${i + 1}`, "lifecycle"));
+    const db = fakeDb({
+      clients: [CLIENT],
+      trend_terms: [
+        row("instagram", "#ig1", "lifecycle"), row("instagram", "#igTeam", "person"), row("instagram", "#igGone", "lifecycle", "2026-10-20T00:00:00Z"),
+        life[0], life[1], row("tiktok", "#tkTeamA", "person"), ...life.slice(2), row("tiktok", "#tkTeamB", "person"),
+        row("linkedin", "#li1", "lifecycle"), row("linkedin", "#liGone", "person", "2026-10-21T00:00:00Z"),
+      ],
+    });
+    const got = await gatherEvidence(db, CLIENT, NOW, { week: "2026-10-26" });
+    expect(got.hashtags.instagram).toEqual(["#igTeam", "#ig1"]);
+    expect(got.hashtags.tiktok).toEqual(["#tkTeamA", "#tkTeamB", ...life.slice(0, 8).map((r) => r.term)]);
+    expect(got.hashtags.linkedin).toEqual(["#li1"]);
+  });
+
+  it("is empty for every platform when the client has no trend profile", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    const got = await gatherEvidence(fakeDb({ clients: [CLIENT] }), CLIENT, NOW, { week: "2026-10-26" });
+    expect(got.hashtags).toEqual({ instagram: [], tiktok: [], linkedin: [] });
   });
 });
 
