@@ -70,9 +70,9 @@ export async function linkedDomains(posts: Array<{ text?: string | null }>, read
   for (const url of occurrences) freq.set(url, (freq.get(url) ?? 0) + 1);
   const followed = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_LINKS_FOLLOWED).map(([url]) => url);
   const landed = new Map<string, string | null>();
-  // A few at a time, so a slow site does not hold up the rest.
-  for (let i = 0; i < followed.length; i += 5) {
-    await Promise.all(followed.slice(i, i + 5).map(async (url) => landed.set(url, await reader.resolve(url).catch(() => null))));
+  // Ten at a time, so a slow site does not hold up the rest.
+  for (let i = 0; i < followed.length; i += 10) {
+    await Promise.all(followed.slice(i, i + 10).map(async (url) => landed.set(url, await reader.resolve(url).catch(() => null))));
   }
   const counts = new Map<string, number>();
   for (const url of occurrences) {
@@ -183,13 +183,16 @@ export function websiteJoins(found: Array<{ key: string; website: string | null;
 // ── The network ────────────────────────────────────────────────────────────
 
 const HOPS = 5;
+/** One link or homepage, every redirect and the page itself, gets this long in all. */
+const READ_MS = 10_000;
 
 /** Fetch a URL, following up to five redirects by hand, refusing any hop to a private address. */
 async function follow(fetchImpl: typeof fetch, url: string): Promise<{ response: Response; url: string } | null> {
   let at = url;
+  const signal = AbortSignal.timeout(READ_MS);
   for (let hop = 0; hop <= HOPS; hop++) {
     if (!isPubliclyFetchable(at)) return null;
-    const response = await fetchImpl(at, { redirect: "manual", headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" }, signal: AbortSignal.timeout(10_000) });
+    const response = await fetchImpl(at, { redirect: "manual", headers: { "User-Agent": BROWSER_UA, Accept: "text/html,*/*" }, signal });
     const location = response.headers.get("location");
     if (response.status >= 300 && response.status < 400 && location) {
       await response.body?.cancel().catch(() => {});
@@ -201,7 +204,7 @@ async function follow(fetchImpl: typeof fetch, url: string): Promise<{ response:
   return null;
 }
 
-/** The real reader: direct requests with the browser user agent, ten seconds a hop. */
+/** The real reader: direct requests with the browser user agent, ten seconds for each link or homepage in all. */
 export function webReader(o: { fetchImpl?: typeof fetch } = {}): SiteReader {
   const f = o.fetchImpl ?? ((url, init) => fetch(url, init));
   return {
