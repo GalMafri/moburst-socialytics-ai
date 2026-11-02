@@ -22,6 +22,11 @@ export default defineConfig({
     ],
   },
   resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+      // The client notes' DOCX reader imports fflate as Deno does; the tests
+      // run the same code against the same version from node_modules.
+      "npm:fflate@0.8.3": "fflate",
+    },
   },
 });
