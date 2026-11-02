@@ -3205,6 +3205,36 @@ export type Database = {
           },
         ]
       }
+      sprout_brand_declines: {
+        Row: {
+          brand: string
+          declined_at: string
+          declined_by: string | null
+          id: string
+          note: string | null
+          profile_ids: number[]
+          sprout_group_id: string | null
+        }
+        Insert: {
+          brand: string
+          declined_at?: string
+          declined_by?: string | null
+          id?: string
+          note?: string | null
+          profile_ids?: number[]
+          sprout_group_id?: string | null
+        }
+        Update: {
+          brand?: string
+          declined_at?: string
+          declined_by?: string | null
+          id?: string
+          note?: string | null
+          profile_ids?: number[]
+          sprout_group_id?: string | null
+        }
+        Relationships: []
+      }
       sprout_profile_removals: {
         Row: {
           client_id: string
@@ -4134,6 +4164,16 @@ export type Database = {
           schedule_id: string
         }[]
       }
+      sprout_brand_decline: {
+        Args: {
+          p_brand: string
+          p_group_id: string
+          p_note?: string
+          p_profile_ids: number[]
+        }
+        Returns: string
+      }
+      sprout_brand_undecline: { Args: { p_id: string }; Returns: boolean }
       sprout_onboard_client: {
         Args: {
           p_brand?: string
