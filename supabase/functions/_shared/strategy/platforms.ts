@@ -56,6 +56,15 @@ export interface StrategyPlatform {
   baseline: Baseline | null;
 }
 
+/** A platform once the strategy is written, with the code's numbers, as content_strategies.platforms stores it. */
+export interface WrittenPlatform extends Omit<StrategyPlatform, "state"> {
+  state: WrittenState;
+  /** Why a suggested platform was marked new or not now. */
+  reason: string | null;
+  /** It came from the trend profile's suggestions. */
+  suggested: boolean;
+}
+
 export interface PlatformInput {
   /** The client's own posts, as the calendar's gatherEvidence reads them. */
   own: OwnPost[];

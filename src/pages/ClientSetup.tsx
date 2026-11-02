@@ -340,7 +340,7 @@ export default function ClientSetup() {
           <TabsList className={`w-full overflow-x-auto sm:grid ${isNew ? "sm:grid-cols-6" : "sm:grid-cols-7"} flex sm:flex-none gap-1 sm:gap-0 justify-start`}>
             <TabsTrigger value="info" className="flex-shrink-0">Client info</TabsTrigger>
             <TabsTrigger value="sprout" className="flex-shrink-0">Sprout Social</TabsTrigger>
-            <TabsTrigger value="strategy" className="flex-shrink-0">Content strategy</TabsTrigger>
+            <TabsTrigger value="strategy" className="flex-shrink-0">Strategy sources</TabsTrigger>
             <TabsTrigger value="competitors" className="flex-shrink-0">Competitors</TabsTrigger>
             <TabsTrigger value="brief" className="flex-shrink-0">Brief</TabsTrigger>
             <TabsTrigger value="schedule" className="flex-shrink-0">Schedule</TabsTrigger>
@@ -518,7 +518,17 @@ export default function ClientSetup() {
           </TabsContent>
 
           <TabsContent value="strategy" className="space-y-section mt-section">
-            <Section layout="split" eyebrow="Strategy" title="Content strategy" description="The strategy document, the content pillars, the keywords that describe the brand's space, and how often the client posts.">
+            <Section
+              layout="split"
+              eyebrow="Strategy"
+              title="Strategy sources"
+              description="The strategy document, the content pillars, the keywords that describe the brand's space, and how often the client posts. The client's content strategy is written from these."
+              action={clientId ? (
+                <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${id}/strategy`)}>
+                  Open the content strategy
+                </Button>
+              ) : undefined}
+            >
                 <StrategyDocUpload
                   clientId={clientId}
                   clientName={form.name}

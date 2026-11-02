@@ -32,6 +32,8 @@ import Settings from "./pages/Settings";
 import Usage from "./pages/Usage";
 import NotFound from "./pages/NotFound";
 import DevCalendarPreview from "./pages/DevCalendarPreview";
+import StrategyIndex from "./pages/StrategyIndex";
+import ClientStrategy from "./pages/ClientStrategy";
 
 const queryClient = new QueryClient();
 
@@ -68,6 +70,9 @@ const App = () => (
               <Route path="/analytics" element={<AnalyticsIndex />} />
               <Route path="/calendar" element={<CalendarIndex />} />
               <Route path="/reports" element={<StaffOnlyRoute><AllReports /></StaffOnlyRoute>} />
+              {/* Content strategy: staff only, the team's working draft */}
+              <Route path="/strategy" element={<StaffOnlyRoute><StrategyIndex /></StaffOnlyRoute>} />
+              <Route path="/clients/:id/strategy" element={<StaffOnlyRoute><ClientStrategy /></StaffOnlyRoute>} />
               <Route path="/settings" element={<StaffOnlyRoute><Settings /></StaffOnlyRoute>} />
               <Route path="/usage" element={<AdminOnlyRoute><Usage /></AdminOnlyRoute>} />
               {/* Open to Clients for their own mapped clients only (RLS-scoped) */}

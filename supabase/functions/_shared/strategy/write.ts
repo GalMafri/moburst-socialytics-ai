@@ -26,7 +26,9 @@ import { activeTerms, askTwice } from "../trends/profile.ts";
 import { clip } from "../trends/text.ts";
 import { loadClientVoice } from "../voice/load.ts";
 import { voicePromptBlock, type VoiceExample } from "../voice/voice.ts";
-import { pillarSectionKey, platformKey, platformSectionKey, platformStates, type Cadence, type StrategyPlatform, type WrittenState } from "./platforms.ts";
+import { pillarSectionKey, platformKey, platformSectionKey, platformStates, type Cadence, type StrategyPlatform, type WrittenPlatform, type WrittenState } from "./platforms.ts";
+
+export type { WrittenPlatform };
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -417,15 +419,6 @@ export function parseCheck(text: string): { value: Array<{ section: string; stat
 }
 
 // ── Writing ─────────────────────────────────────────────────────────────────
-
-/** A platform once the strategy is written, with the code's numbers. */
-export interface WrittenPlatform extends Omit<StrategyPlatform, "state"> {
-  state: WrittenState;
-  /** Why a suggested platform was marked new or not now. */
-  reason: string | null;
-  /** It came from the trend profile's suggestions. */
-  suggested: boolean;
-}
 
 export interface WrittenStrategy {
   /** The product's version of every section, by section key. */

@@ -13,7 +13,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Crosshair, CalendarDays } from "lucide-react";
+import { Home, FileText, Settings, TrendingUp, LogOut, ExternalLink, Gauge, Crosshair, CalendarDays, Compass } from "lucide-react";
 import { PORTAL_URL } from "@/utils/gosAuth";
 
 // One nav row, written once (the Intercept nav spec: 52px rows, 24px icons).
@@ -29,6 +29,8 @@ export function AppSidebar() {
     // Cross-client "All Reports" view is Moburst-staff only. Clients use the
     // per-client report history linked from ClientDashboard.
     ...(isMoburstStaff ? [{ icon: FileText, label: "Reports", href: "/reports" }] : []),
+    // Each client's content strategy: the team's working draft, staff only.
+    ...(isMoburstStaff ? [{ icon: Compass, label: "Strategy", href: "/strategy" }] : []),
     { icon: CalendarDays, label: "Calendar", href: "/calendar" },
     { icon: TrendingUp, label: "Analytics", href: "/analytics" },
     // Competitive analysis: staff review competitor sets and run the RivalIQ
