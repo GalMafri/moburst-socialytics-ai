@@ -21,7 +21,7 @@ import { platformName } from "@/lib/display";
 import { useDesignRequests } from "./DesignRequestsContext";
 
 interface Props {
-  post: { _calendarPostKey?: string; _storyOf?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown };
+  post: { _calendarPostKey?: string; _calendarPostId?: string; _storyOf?: string; platform?: string; format?: string; copy?: string; [k: string]: unknown };
   clientId?: string;
 }
 
@@ -30,7 +30,8 @@ export function StoryLinks({ post, clientId }: Props) {
   const designRequests = useDesignRequests();
   const key = post._calendarPostKey;
   const story = isStoryPost(post);
-  const offered = !story && canBeStory(post.platform) && !!clientId && !!key;
+  // Only a post on the calendar (calendar_posts) can have a Story: a report's own board has none.
+  const offered = !story && canBeStory(post.platform) && !!clientId && !!key && !!post._calendarPostId;
   const [making, setMaking] = useState(false);
   const [notMade, setNotMade] = useState(false);
   /** A Story just made, opened as soon as the calendar has it. */

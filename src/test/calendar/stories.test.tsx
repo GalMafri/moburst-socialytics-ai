@@ -40,8 +40,8 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
 afterEach(() => { cleanup(); f.staff = true; f.storyOf = null; f.storyAnswer = null; f.invokes = []; });
 
 const DESIGN_URL = 'https://project.supabase.co/storage/v1/object/public/generated-media/c1/canva-finish/j1/final-abc.png';
-const feedPost = (over: any = {}) => ({ _calendarPostKey: 'post:f', platform: 'Instagram', format: 'Single image', copy: 'Captains pay last.', date_label: '2026-11-05', posting_time: '9:00 AM', ...over });
-const storyPost = (over: any = {}) => ({ _calendarPostKey: 'post:s', _storyOf: 'post:f', platform: 'Instagram', format: 'Story', copy: 'Captains pay last.', date_label: '2026-11-05', posting_time: '9:00 AM', ...over });
+const feedPost = (over: any = {}) => ({ _calendarPostKey: 'post:f', _calendarPostId: 'f', platform: 'Instagram', format: 'Single image', copy: 'Captains pay last.', date_label: '2026-11-05', posting_time: '9:00 AM', ...over });
+const storyPost = (over: any = {}) => ({ _calendarPostKey: 'post:s', _calendarPostId: 's', _storyOf: 'post:f', platform: 'Instagram', format: 'Story', copy: 'Captains pay last.', date_label: '2026-11-05', posting_time: '9:00 AM', ...over });
 const design = (key: string) => ({ id: `it-${key}`, calendar_post_key: key, platform: 'Instagram', post_copy: 'Captains pay last.', variant_angle: 'Design option 1', media_urls: [DESIGN_URL], is_selected: true, created_at: '2026-11-03T10:00:00Z' });
 
 function panel(post: any, iterations: any[] = [], onOpenPost = vi.fn()) {
@@ -114,6 +114,12 @@ describe('Design as a Story', () => {
     expect(await screen.findByRole('button', { name: 'Design as a Story' })).toBeInTheDocument();
     cleanup();
     panel(feedPost({ platform: 'LinkedIn' }), [design('post:f')]);
+    await screen.findByText('Made in your brand\'s style, with your logo and the post\'s words.');
+    expect(screen.queryByRole('button', { name: 'Design as a Story' })).toBeNull();
+  });
+
+  it('is not offered on a report\'s own board, whose posts are not on the calendar', async () => {
+    panel(feedPost({ _calendarPostId: undefined, _calendarPostKey: '["report-1",0,0]' }), [design('["report-1",0,0]')]);
     await screen.findByText('Made in your brand\'s style, with your logo and the post\'s words.');
     expect(screen.queryByRole('button', { name: 'Design as a Story' })).toBeNull();
   });
