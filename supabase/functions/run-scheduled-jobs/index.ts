@@ -40,6 +40,13 @@
 // POST {"mode":"replay_trends","run_id":"<id>"}
 //                              a trends run's week again from its kept source
 //                              answers (no Apify call; Claude is asked again).
+// POST {"mode":"sprout_onboarding_dry_run"[,"left":["<brand key>",...]]}
+//                              what the weekly Sprout onboarding would do now
+//                              (sproutOnboarding.ts): every Sprout brand with
+//                              its decision, the reason and the website search,
+//                              read from live Sprout and sites, writing nothing.
+//                              Brands its 90 seconds did not reach come back as
+//                              "left"; send them as "left" to look at those.
 // POST {"mode":"compare_pipeline","run_id":"<id>"}
 //                              a finished shadow run next to the real result
 //                              it shadows (compareResults; for a report, the
@@ -70,6 +77,7 @@ import { appRunView, expirePayloads, loadShadowPair, makePayloadStore, makeRunSt
 import { directKey, runClaudeDirect } from "../_shared/pipelines/claudeDirect.ts";
 import { makeDispatchStore, makeJobStore } from "./store.ts";
 import { filterCheckRequest, runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
+import { liveOnboardingDeps, runSproutOnboardingJob, sproutOnboarding } from "./sproutOnboarding.ts";
 import type { ScheduledJob } from "./types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
 
@@ -88,6 +96,7 @@ const JOB_LABELS: Partial<Record<ScheduledJob["kind"], string>> = {
   lifecycle_step: "client lifecycle step",
   report_pipeline: "report pipeline step",
   trend_refresh: "industry trends",
+  sprout_onboarding: "Sprout onboarding",
 };
 
 Deno.serve(async (req) => {
@@ -168,6 +177,7 @@ Deno.serve(async (req) => {
           case "lifecycle_step": return runLifecycleStep(db, job as unknown as LifecycleJob);
           case "report_pipeline": return runPipelineJob(job, pipelineDeps);
           case "trend_refresh": return runTrendJob(db, job);
+          case "sprout_onboarding": return runSproutOnboardingJob(db, job, liveOnboardingDeps());
           default: return Promise.resolve({ status: "failed" as const, reason: `Unknown job kind ${(job as ScheduledJob).kind}` });
         }
       },
@@ -324,6 +334,13 @@ Deno.serve(async (req) => {
       } catch (e) {
         return json({ error: e instanceof Error ? e.message : String(e) }, 400);
       }
+    }
+
+    // QA, POST {"mode":"sprout_onboarding_dry_run"[,"left":[...]]}: the weekly
+    // Sprout onboarding's decisions now, with nothing written (spec section 9).
+    if (mode === "sprout_onboarding_dry_run") {
+      const only = Array.isArray(body.left) ? body.left.map(String) : null;
+      return json(await sproutOnboarding(db, liveOnboardingDeps(), { dryRun: true, only }));
     }
 
     if (mode === "compare_pipeline") {

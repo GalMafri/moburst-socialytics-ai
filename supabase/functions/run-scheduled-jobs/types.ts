@@ -1,6 +1,6 @@
 // Shapes shared by the scheduled-jobs worker, its store and its tests.
 
-export type JobKind = "feed_refresh" | "dispatch" | "week_plan" | "week_revise" | "voice_profile" | "lifecycle" | "lifecycle_step" | "report_text" | "trend_refresh";
+export type JobKind = "feed_refresh" | "dispatch" | "week_plan" | "week_revise" | "voice_profile" | "lifecycle" | "lifecycle_step" | "report_text" | "trend_refresh" | "sprout_onboarding";
 export type JobStatus = "queued" | "running" | "waiting" | "blocked" | "done" | "skipped" | "failed";
 
 /** One step of an in-app report pipeline (_shared/pipelines/runner.ts), run in its own lane of the worker. */
@@ -10,6 +10,11 @@ export type PipelineJobKind = "report_pipeline";
 export interface ScheduledJob {
   id: string;
   kind: JobKind | PipelineJobKind;
+  /**
+   * Every kind but one belongs to a client and is typed as such. A
+   * sprout_onboarding job belongs to none (null; scheduled_jobs_client_required)
+   * and never reads it.
+   */
   client_id: string;
   schedule_id: string | null;
   occurrence: string | null;
@@ -24,7 +29,7 @@ export interface ScheduledJob {
   lease_until: string | null;
   reason: string | null;
   result: Record<string, unknown> | null;
-  /** What a lifecycle_step job runs ({ step, force }), or a manual report run (dispatch.ts ManualRun). */
+  /** What a lifecycle_step job runs ({ step, force }), a manual report run (dispatch.ts ManualRun), or the brands a Sprout onboarding run left ({ left }). */
   payload?: Record<string, unknown> | null;
   created_at: string;
   started_at: string | null;
