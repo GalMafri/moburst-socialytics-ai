@@ -786,6 +786,7 @@ export type Database = {
           logo_url: string | null
           media_backend: string
           name: string
+          origin: Json | null
           pillars_derived_at: string | null
           pillars_source: string | null
           posting_rhythm: Json | null
@@ -830,6 +831,7 @@ export type Database = {
           logo_url?: string | null
           media_backend?: string
           name: string
+          origin?: Json | null
           pillars_derived_at?: string | null
           pillars_source?: string | null
           posting_rhythm?: Json | null
@@ -874,6 +876,7 @@ export type Database = {
           logo_url?: string | null
           media_backend?: string
           name?: string
+          origin?: Json | null
           pillars_derived_at?: string | null
           pillars_source?: string | null
           posting_rhythm?: Json | null
@@ -2547,7 +2550,7 @@ export type Database = {
         Row: {
           attempts: number
           available_at: string
-          client_id: string
+          client_id: string | null
           created_at: string
           dedupe_key: string
           finished_at: string | null
@@ -2571,7 +2574,7 @@ export type Database = {
         Insert: {
           attempts?: number
           available_at?: string
-          client_id: string
+          client_id?: string | null
           created_at?: string
           dedupe_key: string
           finished_at?: string | null
@@ -2595,7 +2598,7 @@ export type Database = {
         Update: {
           attempts?: number
           available_at?: string
-          client_id?: string
+          client_id?: string | null
           created_at?: string
           dedupe_key?: string
           finished_at?: string | null
@@ -3458,6 +3461,10 @@ export type Database = {
         Args: { p_dry_run?: boolean; p_now?: string }
         Returns: Json
       }
+      enqueue_sprout_onboarding_job: {
+        Args: { p_dry_run?: boolean; p_now?: string }
+        Returns: Json
+      }
       enqueue_trend_refresh_jobs: {
         Args: { p_dry_run?: boolean; p_now?: string }
         Returns: {
@@ -3700,7 +3707,7 @@ export type Database = {
         Returns: {
           attempts: number
           available_at: string
-          client_id: string
+          client_id: string | null
           created_at: string
           dedupe_key: string
           finished_at: string | null
@@ -3733,7 +3740,7 @@ export type Database = {
         Returns: {
           attempts: number
           available_at: string
-          client_id: string
+          client_id: string | null
           created_at: string
           dedupe_key: string
           finished_at: string | null
@@ -3770,6 +3777,15 @@ export type Database = {
           report_kind: string
           schedule_id: string
         }[]
+      }
+      sprout_onboard_client: {
+        Args: {
+          p_brand?: string
+          p_name: string
+          p_profiles: Json
+          p_website: string
+        }
+        Returns: Json
       }
       trend_measures: {
         Args: { p_client?: string }

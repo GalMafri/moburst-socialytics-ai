@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  cleanText, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange,
+  clientOriginLine, cleanText, competitiveRunStatus, countryNames, eventName, firstRunSentence, formatDate, formatDateTime, formatRange,
   isRawProfileId, languageNames, platformKey, platformName, profileName, roleName, timelineDetail, timelineKindName, usageStateName,
 } from "@/lib/display";
 import { isActiveClient } from "@/lib/activeClients";
@@ -125,5 +125,17 @@ describe("schedules and active clients", () => {
     expect(isActiveClient({ archived_at: null })).toBe(true);
     expect(isActiveClient({ archived_at: "2026-10-01T00:00:00Z" })).toBe(false);
     expect(isActiveClient(null)).toBe(false);
+  });
+});
+
+describe("where a client came from", () => {
+  it("says a client the Sprout onboarding added was added from Sprout Social, and on which day", () => {
+    expect(clientOriginLine({ source: "sprout", brand: "Olo", profile_ids: [7001], at: "2026-11-09T06:01:00Z" })).toBe("Added from Sprout Social on Nov 9, 2026");
+  });
+  it("says nothing for a client a person made, or an origin it cannot read", () => {
+    expect(clientOriginLine(null)).toBe("");
+    expect(clientOriginLine({ source: "portal", at: "2026-11-09T06:01:00Z" })).toBe("");
+    expect(clientOriginLine({ source: "sprout" })).toBe("Added from Sprout Social");
+    expect(clientOriginLine("sprout")).toBe("");
   });
 });

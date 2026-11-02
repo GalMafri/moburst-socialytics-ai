@@ -24,6 +24,7 @@ import { Plus, Play, Calendar, BarChart3, MoreVertical, Archive, RotateCcw, Tras
 import { PlatformBadge } from "@/lib/platform-config";
 import { isActiveClient } from "@/lib/activeClients";
 import { formatDate } from "@/lib/display";
+import { ClientOrigin } from "@/components/clients/ClientOrigin";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
@@ -281,6 +282,8 @@ export function AdminDashboard() {
                         </DropdownMenu>
                     </div>
                   </div>
+                  {/* A client the weekly Sprout onboarding added says so under its name. */}
+                  <ClientOrigin origin={(client as any).origin} />
                 </CardHeader>
                 <CardContent className="space-y-4 pt-card">
                   {/* The client's status at a glance, with what needs doing. */}

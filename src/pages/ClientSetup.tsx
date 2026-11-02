@@ -30,7 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loading } from "@/components/ui/loading";
 import { PlatformIcon } from "@/lib/platform-config";
-import { countryNames, formatDate, languageNames, locationSourceWords, platformName, scheduleLines, timeZoneName } from "@/lib/display";
+import { clientOriginLine, countryNames, formatDate, languageNames, locationSourceWords, platformName, scheduleLines, timeZoneName } from "@/lib/display";
 import { changedColumns, EMPTY_FORM, formFromClient, keywordPhrases, rebaseForm, setByOf, type SetupForm } from "@/lib/clientSetupForm";
 import { invokeResendable, sendQuietly, writeResendable } from "@/lib/quietSend";
 import { useLifecycleStep } from "@/hooks/useLifecycleStep";
@@ -45,6 +45,7 @@ import { LogoFileField } from "@/components/onboarding/LogoFileField";
 import { DesignSynthesisCard } from "@/components/onboarding/DesignSynthesisCard";
 import { DesignSettingsCard } from "@/components/onboarding/DesignSettingsCard";
 import { TrendsWeTrack } from "@/components/clients/TrendsWeTrack";
+import { ClientOrigin } from "@/components/clients/ClientOrigin";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 
@@ -313,7 +314,13 @@ export default function ClientSetup() {
       description={isNew
         ? "A name and a website are all a new client needs. The rest is read from the website once the client is created, and every value can be changed here."
         : "Client details, social profiles, brand assets, competitors and report schedules."}
-      meta={notSaved ? <p role="status" className="t-label">Your changes are kept here and are not saved yet.</p> : undefined}
+      meta={notSaved || clientOriginLine(client?.origin) ? (
+        <>
+          {/* A client the weekly Sprout onboarding added says so under its name. */}
+          <ClientOrigin origin={client?.origin} />
+          {notSaved && <p role="status" className="t-label">Your changes are kept here and are not saved yet.</p>}
+        </>
+      ) : undefined}
       actions={
         <>
           {!isNew && (

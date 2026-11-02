@@ -456,6 +456,20 @@ export function timeZoneName(zone: string | null | undefined): string {
   }
 }
 
+// ── Where a client came from ───────────────────────────────────────────────
+
+/**
+ * The line under a client's name on staff screens when the product made the
+ * client (clients.origin): "Added from Sprout Social on Nov 9, 2026". Empty
+ * for a client a person made.
+ */
+export function clientOriginLine(origin: unknown): string {
+  const o = origin && typeof origin === "object" ? (origin as { source?: unknown; at?: unknown }) : null;
+  if (o?.source !== "sprout") return "";
+  const on = formatDate(typeof o.at === "string" ? o.at : null);
+  return on ? `Added from Sprout Social on ${on}` : "Added from Sprout Social";
+}
+
 // ── Competitor profiles ────────────────────────────────────────────────────
 
 /** True for a handle that is a provider's id rather than a name: numeric page ids, YouTube channel ids. */
