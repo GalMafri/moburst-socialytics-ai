@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
 import { listCustomerProfiles, SproutListError } from "../_shared/sprout/profiles.ts";
+import { groupBrands } from "../_shared/sprout/brands.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -48,12 +49,14 @@ serve(async (req) => {
       grouped[network].push(profile);
     }
 
-    // Group by client name (brand): each brand has multiple platform profiles.
+    // Grouped by brand, as the weekly Sprout onboarding groups them
+    // (_shared/sprout/brands.ts: the lifecycle's name rule, joined by a handle
+    // shared across networks), so this list and the job agree. Named by the
+    // spelling most of a brand's profiles carry; only active profiles.
     const groupedByClient: Record<string, typeof profiles> = {};
-    for (const profile of profiles) {
-      const clientName = profile.name || "Unknown";
-      if (!groupedByClient[clientName]) groupedByClient[clientName] = [];
-      groupedByClient[clientName].push(profile);
+    for (const brand of groupBrands(listed)) {
+      const ids = new Set(brand.profiles.map((p) => String(p.id)));
+      (groupedByClient[brand.name || "Unknown"] ??= []).push(...profiles.filter((p) => ids.has(String(p.id))));
     }
 
     return new Response(
