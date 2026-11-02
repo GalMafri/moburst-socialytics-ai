@@ -47,7 +47,7 @@ function apify(calls: TrendPlatform[], o: ApifyOptions = {}): TrendsDeps["apify"
 }
 
 /** Claude's Message Batches, answering the filter and the themes from what each request lists, and a search rewrite with the answers given (in order). */
-type ClaudeOptions = { badFilter?: boolean; failFilter?: boolean; rewrite?: unknown[]; failRewrite?: boolean };
+type ClaudeOptions = { badFilter?: boolean; failFilter?: boolean; rewrite?: unknown[]; failRewrite?: boolean; onRewrite?: () => void };
 const REWRITTEN = ["mobile app growth", "app store optimization"];
 function claude(requests: Any[], o: ClaudeOptions = {}) {
   return async (url: string, init?: RequestInit) => {
@@ -65,6 +65,7 @@ function claude(requests: Any[], o: ClaudeOptions = {}) {
     let answer: unknown;
     if (String(req.custom_id).includes("rewrite")) {
       const nth = requests.slice(0, n).filter((q) => String(q.custom_id).includes("rewrite")).length - 1;
+      o.onRewrite?.();
       answer = o.rewrite?.[nth] ?? { searches: REWRITTEN };
     } else if (String(req.custom_id).includes("filter")) {
       const ids = [...prompt.matchAll(/<post id="P(\d+)">\n(\w+) \|/g)].map((m) => ({ id: `P${m[1]}`, platform: m[2] }));
@@ -112,12 +113,14 @@ function setup(o: SetupOptions = {}) {
   return { clock, db };
 }
 
-async function run(o: SetupOptions & ClaudeOptions & { deps?: Partial<TrendsDeps>; fail?: TrendPlatform; answers?: ApifyOptions["answers"] } = {}) {
+async function run(o: SetupOptions & ClaudeOptions & { deps?: Partial<TrendsDeps>; fail?: TrendPlatform; answers?: ApifyOptions["answers"]; refreshMidRun?: boolean } = {}) {
   const { clock, db } = setup(o);
   const calls: TrendPlatform[] = [];
   const requests: Any[] = [];
   const inputs: Array<{ platform: TrendPlatform; input: Any }> = [];
-  const pipeline = trendsPipeline({ apify: apify(calls, { fail: o.fail, answers: o.answers, inputs }), claudeFetch: claude(requests, o), ...o.deps });
+  // The monthly hashtag refresh lands while Claude is rewriting, after the run read the profile.
+  const onRewrite = o.refreshMidRun ? () => { db.tables.trend_profiles[0].hashtags_at = "2026-11-01T09:30:00.000Z"; } : o.onRewrite;
+  const pipeline = trendsPipeline({ apify: apify(calls, { fail: o.fail, answers: o.answers, inputs }), claudeFetch: claude(requests, { ...o, onRewrite }), ...o.deps });
   const registry = makeRegistry([pipeline], () => true);
   const { run_id } = await startPipelineRun(db, { mode: "app", pipeline, clientId: "c1", realTable: "trend_weeks", realId: "w1", input: { week_start: "2026-10-26" }, dedupe: "trends:c1:2026-10-26" });
   const driven = await drivePipeline(db, registry, run_id, { clock, env: ENV });
@@ -351,6 +354,18 @@ describe("trends_v1 coverage rewrite", () => {
     // A stored rewrite holding a term a person removed later is searched without it.
     const later = await run({ prior: SHORT_TIKTOK, writtenAt: EARLY, removedTopic: true, overrides: { youtube: ["App Store Optimization", "aso tips"] } });
     expect(searched(later.inputs, "youtube").query).toBe("aso tips");
+  });
+
+  it("stores no Instagram rewrite built from hashtags a monthly refresh replaced during the run, and still stores the other platforms'", async () => {
+    const prior = [finished("w-2", "2026-10-12", { tiktok: 2, instagram: 1 }), finished("w-1", "2026-10-19", { tiktok: 1, instagram: 0 })];
+    const answers = [{ searches: REWRITTEN }, { searches: ["#mobileapps"] }];
+    const r = await run({ prior, writtenAt: EARLY, refreshMidRun: true, rewrite: answers });
+    expect(r.driven.outcome.status).toBe("done");
+    expect(rewrites(r.requests)).toHaveLength(2);
+    expect(r.db.tables.trend_profiles[0].search_overrides).toEqual({ tiktok: REWRITTEN });
+    // Without the refresh, the same run stores both.
+    const calm = await run({ prior, writtenAt: EARLY, rewrite: answers });
+    expect(calm.db.tables.trend_profiles[0].search_overrides).toEqual({ tiktok: REWRITTEN, instagram: ["#mobileapps"] });
   });
 
   it("replays the week on its rewritten searches without asking again", async () => {

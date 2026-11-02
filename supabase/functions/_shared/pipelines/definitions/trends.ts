@@ -85,6 +85,8 @@ interface Plan {
   competitors: string[];
   /** When the profile the searches come from was written: a rewrite is kept only while it stands. */
   profileWrittenAt?: string;
+  /** When its hashtags were last refreshed: an Instagram rewrite is kept only while they stand. */
+  profileHashtagsAt?: string;
   short?: Partial<Record<TrendPlatform, Shortfall>>;
   /** The searches the coverage rewrite gave each platform this week, in place of the profile's own terms. */
   rewritten?: Partial<Record<TrendPlatform, string[]>>;
@@ -297,7 +299,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const clientId = ctx.run.client_id;
         const { data: client, error } = await ctx.db.from("clients").select("id, name, geo, language").eq("id", clientId).maybeSingle();
         if (error || !client) throw new Error(`The client could not be read: ${error?.message ?? "not found"}`);
-        const { data: profile } = await ctx.db.from("trend_profiles").select("audience, fit_rubric, platforms, search_overrides, written_at").eq("client_id", clientId).maybeSingle();
+        const { data: profile } = await ctx.db.from("trend_profiles").select("audience, fit_rubric, platforms, search_overrides, written_at, hashtags_at").eq("client_id", clientId).maybeSingle();
         if (!profile) throw new Error("The client has no trend profile yet.");
         const terms = await activeTerms(ctx.db, clientId);
         const removed = await removedSearches(ctx.db, clientId);
@@ -335,6 +337,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
           exclusions: terms.exclusions,
           competitors: competitorNames,
           profileWrittenAt,
+          profileHashtagsAt: String(profile.hashtags_at ?? ""),
           ...(rewrite.length ? { short } : {}),
         };
         await ctx.payloads.put("plan", plan, KEEP);
@@ -365,7 +368,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
           return nextRewrite(counted, { platform, kept_searches: true, problems: got.error.slice(0, 300) });
         }
         // Kept in the profile for the weeks to come, and searched from this week's scrape on, after what a person added.
-        await ctx.output.write("searches", { platform, searches: got.value, profile_written_at: plan.profileWrittenAt });
+        await ctx.output.write("searches", { platform, searches: got.value, profile_written_at: plan.profileWrittenAt, profile_hashtags_at: plan.profileHashtagsAt });
         const searches = fillAfter(short.person, got.value);
         await ctx.payloads.put("plan", { ...plan, searches: { ...plan.searches, [platform]: searches }, rewritten: { ...(plan.rewritten ?? {}), [platform]: got.value } }, KEEP);
         return nextRewrite(counted, { platform, searches });

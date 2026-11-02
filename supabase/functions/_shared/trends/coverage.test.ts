@@ -126,7 +126,8 @@ describe("a person's removals", () => {
 
 describe("keeping a rewrite", () => {
   const WRITTEN = "2026-10-01T00:00:00.000Z";
-  const db = () => fakeDb({ trend_profiles: [{ client_id: "c1", search_overrides: { youtube: ["kept"] }, written_at: WRITTEN }] });
+  const TAGGED = "2026-10-02T00:00:00.000Z";
+  const db = () => fakeDb({ trend_profiles: [{ client_id: "c1", search_overrides: { youtube: ["kept"] }, written_at: WRITTEN, hashtags_at: TAGGED }] });
   const run = { id: "run-1", client_id: "c1" } as PipelineRun;
 
   it("stores a platform's new searches beside the other platforms'", async () => {
@@ -140,5 +141,22 @@ describe("keeping a rewrite", () => {
     d.tables.trend_profiles[0] = { ...d.tables.trend_profiles[0], search_overrides: {}, written_at: "2026-11-01T11:00:00.000Z" };
     await TREND_WRITERS.searches(d, run, { platform: "tiktok", searches: ["a"], profile_written_at: WRITTEN });
     expect(d.tables.trend_profiles[0].search_overrides).toEqual({});
+  });
+
+  it("stores an Instagram rewrite only while the hashtags it was built from stand", async () => {
+    const d = db();
+    await TREND_WRITERS.searches(d, run, { platform: "instagram", searches: ["#a"], profile_written_at: WRITTEN, profile_hashtags_at: TAGGED });
+    expect(d.tables.trend_profiles[0].search_overrides).toEqual({ youtube: ["kept"], instagram: ["#a"] });
+    // The monthly refresh replaced the hashtags since: Instagram's rewrite is not stored, another platform's still is.
+    const refreshed = db();
+    refreshed.tables.trend_profiles[0].hashtags_at = "2026-11-01T00:00:00.000Z";
+    await TREND_WRITERS.searches(refreshed, run, { platform: "instagram", searches: ["#a"], profile_written_at: WRITTEN, profile_hashtags_at: TAGGED });
+    await TREND_WRITERS.searches(refreshed, run, { platform: "tiktok", searches: ["b"], profile_written_at: WRITTEN, profile_hashtags_at: TAGGED });
+    expect(refreshed.tables.trend_profiles[0].search_overrides).toEqual({ youtube: ["kept"], tiktok: ["b"] });
+    // A profile with no refresh yet: both sides have none.
+    const fresh = db();
+    fresh.tables.trend_profiles[0].hashtags_at = null;
+    await TREND_WRITERS.searches(fresh, run, { platform: "instagram", searches: ["#a"], profile_written_at: WRITTEN, profile_hashtags_at: "" });
+    expect(fresh.tables.trend_profiles[0].search_overrides).toEqual({ youtube: ["kept"], instagram: ["#a"] });
   });
 });
