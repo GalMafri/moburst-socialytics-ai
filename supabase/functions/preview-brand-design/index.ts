@@ -94,11 +94,13 @@ function harvestedPaths(value) {
   if (!Array.isArray(value)) return [];
   return value.map((v) => typeof v === "string" ? { path: v } : v).filter((v) => v && typeof v.path === "string" && v.path.length > 0).sort((a, b) => String(b.posted_at || "").localeCompare(String(a.posted_at || ""))).map((v) => v.path);
 }
-function referencesFor(manual, harvested, limit) {
+function referencesFor(manual, harvested, limit, platform) {
   const chosen = asPaths(manual);
   const pulled = harvestedPaths(harvested).filter((p) => !chosen.includes(p));
-  const verified = Array.isArray(harvested) ? harvested.filter((r) => r?.quality_checked === true).map((r) => r.path) : [];
-  return [...new Set(verified.length ? verified : [...chosen, ...pulled])].slice(0, Math.max(0, limit));
+  // The library: reviewed posts and the uploads and posts a person kept, in the library's order (no post platform here).
+  const library = Array.isArray(harvested) ? harvested.filter((r) => r && typeof r.path === "string" && r.path && (r.quality_checked === true || r.upload === true || r.kept === true)).map((r) => r.path) : [];
+  void platform;
+  return [...new Set(library.length ? library : [...chosen, ...pulled])].slice(0, Math.max(0, limit));
 }
 
 // supabase/functions/_shared/design-prompts/sourceImage.ts
@@ -1103,7 +1105,7 @@ Deno.serve(async (req) => {
       if (!client.website_url) throw new Error("Add the client website first.");
       return json({ production_writes: 0, client_id: client.id, evidence: await collectBrandWebsite(client.website_url) });
     }
-    const paths = referencesFor(client.design_references, client.harvested_design_references, 8);
+    const paths = referencesFor(client.design_references, client.harvested_design_references, 8, null);
     if (paths.length < 3) throw new Error("At least three real client references are required.");
     const previewsFor = () => Promise.all(paths.map(async (path) => {
       const { data, error: error2 } = await db.storage.from("design-references").createSignedUrl(path, 3600);

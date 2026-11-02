@@ -125,3 +125,20 @@ describe("leastRecentPosts", () => {
     expect(briefs[2].refs).toEqual(["c.jpg", "d.jpg"]);
   });
 });
+
+import { carouselPlannerPrompt, plannerPrompt, videoPlannerPrompt } from "./options";
+
+describe("posts from other platforms", () => {
+  const args = { brand: "Bader Law", platform: "LinkedIn", copy: "Injured at work? Know your rights.", voice: null, count: 3, postCount: 6, recent: "" };
+  const line = "Each post is labeled with the platform it was published on and its date, LinkedIn's own posts first. Posts from other platforms show the brand, not LinkedIn's layout.";
+  it("tell the planner they show the brand, not the post's platform's layout", () => {
+    expect(plannerPrompt({ ...args, otherPlatforms: true })).toContain(line);
+    expect(carouselPlannerPrompt({ ...args, slides: 5, otherPlatforms: true })).toContain(line);
+    expect(videoPlannerPrompt({ ...args, otherPlatforms: true })).toContain(line);
+    expect(videoPlannerPrompt({ ...args, filmed: "its founder", otherPlatforms: true })).toContain(line);
+  });
+  it("say nothing when every post is the platform's own", () => {
+    expect(plannerPrompt(args)).not.toContain("other platforms");
+    expect(plannerPrompt(args).split("\n")[1]).not.toBe("");
+  });
+});

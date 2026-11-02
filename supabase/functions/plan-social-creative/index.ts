@@ -16,7 +16,7 @@ Deno.serve(async req => {
     const db = createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const {data: client, error} = await db.from('clients').select('name,brand_identity,design_references,harvested_design_references,logo_url').eq('id',client_id).single();
     if (error || !client) throw new Error('Client references could not be loaded.');
-    const paths = referencesFor(client.design_references,client.harvested_design_references,8);
+    const paths = referencesFor(client.design_references,client.harvested_design_references,8,typeof platform==='string'?platform:null);
     if (paths.length < 3) throw new Error('Connect this client’s social profiles in Client Setup to discover at least three real brand references automatically.');
     const key = Deno.env.get('ANTHROPIC_API_KEY');
     if (!key) throw new Error('The creative planning service is unavailable.');

@@ -76,6 +76,8 @@ export async function resolveBrandContext(args: {
   supabase: any;
   clientId?: string | null;
   clientContext?: any;
+  /** The post's platform: its own posts lead the references. */
+  platform?: string | null;
   /** Legacy top-level fields some callers still send. */
   legacy?: {
     brandIdentity?: any;
@@ -119,7 +121,7 @@ export async function resolveBrandContext(args: {
     const fromDb: ResolvedBrand = {
       brandIdentity: data.brand_identity ?? fromCaller.brandIdentity ?? null,
       synthesis: data.design_style_synthesis ?? null,
-      designReferences: referencesFor(data.design_references, data.harvested_design_references, 8),
+      designReferences: referencesFor(data.design_references, data.harvested_design_references, 8, args.platform ?? null),
       brandBookPath: fromCaller.brandBookPath ?? data.brand_book_file_path ?? null,
       pillars: fromCaller.pillars.length
         ? fromCaller.pillars

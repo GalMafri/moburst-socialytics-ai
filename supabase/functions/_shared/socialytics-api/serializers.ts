@@ -152,7 +152,10 @@ export function clientOut(row: ClientRow, extras: { sproutProfiles: SproutProfil
   const set = activeSet(extras.sets);
   const approved = extras.designSystems.filter((d) => d.status === "approved").sort((a, b) => b.version - a.version)[0] ?? newestFirst(extras.designSystems)[0] ?? null;
   const synthesis = obj(row.design_style_synthesis);
-  const refs = (Array.isArray(row.harvested_design_references) ? row.harvested_design_references.length : 0) + (Array.isArray(row.design_references) ? row.design_references.length : 0);
+  // Each reference once: the library the lifecycle keeps holds the uploads a person kept.
+  const refPaths = [...(Array.isArray(row.harvested_design_references) ? row.harvested_design_references : []), ...(Array.isArray(row.design_references) ? row.design_references : [])]
+    .map((r) => (typeof r === "string" ? r : String((r as { path?: unknown } | null)?.path ?? ""))).filter(Boolean);
+  const refs = new Set(refPaths).size;
   const active = extras.sproutProfiles.filter((p) => p.is_active !== false);
   const last = extras.lastReport;
   const lastData = obj(last?.report_data);

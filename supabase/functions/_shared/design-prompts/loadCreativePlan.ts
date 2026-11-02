@@ -5,7 +5,8 @@ export async function loadCreativePlan(db:any, id:unknown, clientId:string, mode
   const {data,error} = await db.from('creative_directions').select('*').eq('id',id).eq('client_id',clientId).single();
   if (error || !data || (mode && data.mode !== mode)) throw new Error('This creative direction does not belong to the requested client or format.');
   const {data:client,error:clientError} = await db.from('clients').select('design_references,harvested_design_references').eq('id',clientId).single();
-  const owned = referencesFor(client?.design_references,client?.harvested_design_references,8);
+  // Whether each path is the client's own: the whole library, whatever post it was planned for.
+  const owned = referencesFor(client?.design_references,client?.harvested_design_references,16,null);
   if(clientError || !Array.isArray(data.reference_paths) || data.reference_paths.some((p:unknown)=>typeof p!=='string'||!owned.includes(p))) throw new Error('Client references have changed. Prepare a new creative direction.');
   return {...data,plan:data.plan as CreativePlan,reference_paths:data.reference_paths as string[]};
 }

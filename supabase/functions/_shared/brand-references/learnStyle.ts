@@ -89,7 +89,7 @@ export async function learnBrandStyle(db: Db, clientId: string, opts: { discover
   const designRefs: string[] = discovery
     // deno-lint-ignore no-explicit-any
     ? discovery.refs.map((r: any) => r.path)
-    : referencesFor(client.design_references, client.harvested_design_references, 8);
+    : referencesFor(client.design_references, client.harvested_design_references, 8, null);
   const brandBookPath: string | null = client.brand_book_file_path || null;
   if (designRefs.length === 0 && !brandBookPath) throw new StyleError("no_sources", "There are no design references or brand book to learn from.");
 
