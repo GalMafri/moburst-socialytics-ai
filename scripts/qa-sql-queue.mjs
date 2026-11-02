@@ -152,5 +152,97 @@ const days = (await db.query(`SELECT public.feed_refresh_weekday(id) AS d FROM p
 assert(days.every((d) => d >= 0 && d <= 6));
 assert.equal((await db.query(`SELECT public.feed_refresh_weekday('${id(1)}') = public.feed_refresh_weekday('${id(1)}') AS same`)).rows[0].same, true);
 
+// ── Sprout auto-onboarding (20261108130000_sprout_auto_onboarding.sql) ──────
+// The columns and tables it reads, then two triggers standing in for the real
+// ones on clients, so the website backfill is seen to change nothing else.
+await db.exec(`ALTER TABLE public.clients ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public.clients ADD COLUMN website_url text, ADD COLUMN field_sources jsonb NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN demo_job_id uuid, ADD COLUMN created_by uuid, ADD COLUMN updated_at timestamptz NOT NULL DEFAULT '2026-01-01T00:00:00Z';
+CREATE TABLE public.sprout_profiles(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  sprout_profile_id bigint NOT NULL, profile_name text DEFAULT '', native_name text DEFAULT '', network_type text NOT NULL, native_link text DEFAULT '',
+  is_active boolean DEFAULT true, assigned_at timestamptz DEFAULT now(), UNIQUE(client_id, sprout_profile_id));
+CREATE TABLE public.sprout_profile_removals(client_id uuid NOT NULL, sprout_profile_id bigint NOT NULL, removed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (client_id, sprout_profile_id));
+CREATE FUNCTION public.lifecycle_tracked_fields() RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ select array['brand_identity'] $$;
+UPDATE public.clients SET website_url = 'https://www.alpha.example/' WHERE id = '${id(1)}';
+UPDATE public.clients SET website_url = '  ' WHERE id = '${id(2)}';
+UPDATE public.clients SET website_url = 'https://gone.example', field_sources = '{"website_url": {"by": "lifecycle"}}' WHERE id = '${id(3)}';
+CREATE FUNCTION public.qa_touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at := clock_timestamp(); RETURN NEW; END $$;
+CREATE TRIGGER update_clients_updated_at BEFORE UPDATE ON public.clients FOR EACH ROW EXECUTE FUNCTION public.qa_touch();
+CREATE FUNCTION public.qa_look() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+  INSERT INTO public.scheduled_jobs(kind, client_id, dedupe_key) VALUES ('feed_refresh', NEW.id, 'look:' || NEW.id || ':' || clock_timestamp()); RETURN NEW; END $$;
+CREATE TRIGGER clients_lifecycle AFTER UPDATE ON public.clients FOR EACH ROW EXECUTE FUNCTION public.qa_look();`);
+const before = (await db.query(`SELECT id, name, website_url, archived_at, updated_at::text AS updated_at FROM public.clients ORDER BY id`)).rows;
+const jobsBefore = (await db.query(`SELECT count(*)::int AS n FROM public.scheduled_jobs`)).rows[0].n;
+const onboarding = readFileSync(new URL('../supabase/migrations/20261108130000_sprout_auto_onboarding.sql', import.meta.url), 'utf8');
+await db.exec(onboarding);
+await db.exec(onboarding); // applies twice
+
+// The backfill: every website a client has now is marked as set by a person; nothing else on any row, and no trigger, moves.
+const sources = Object.fromEntries((await db.query(`SELECT id, field_sources FROM public.clients`)).rows.map((r) => [r.id.slice(-1), r.field_sources]));
+assert.equal(sources['1'].website_url.by, 'person');
+assert.equal(sources['2'].website_url, undefined, 'a blank website was marked');
+assert.equal(sources['3'].website_url.by, 'lifecycle', 'an existing marker was replaced');
+assert.equal(sources['4'].website_url, undefined);
+assert.deepEqual((await db.query(`SELECT id, name, website_url, archived_at, updated_at::text AS updated_at FROM public.clients ORDER BY id`)).rows, before);
+assert.equal((await db.query(`SELECT count(*)::int AS n FROM public.scheduled_jobs`)).rows[0].n, jobsBefore, 'the backfill set off a trigger');
+assert.deepEqual((await db.query(`SELECT tgname, tgenabled FROM pg_trigger WHERE tgrelid = 'public.clients'::regclass AND NOT tgisinternal ORDER BY tgname`)).rows,
+  [{ tgname: 'clients_lifecycle', tgenabled: 'O' }, { tgname: 'update_clients_updated_at', tgenabled: 'O' }]);
+assert((await db.query(`SELECT public.lifecycle_tracked_fields() AS f`)).rows[0].f.includes('website_url'));
+assert((await db.query(`SELECT 1 FROM information_schema.columns WHERE table_name = 'clients' AND column_name = 'origin'`)).rows.length === 1);
+
+// Only the Sprout onboarding job may belong to no client.
+await assert.rejects(() => db.query(`INSERT INTO public.scheduled_jobs(kind, client_id, dedupe_key) VALUES ('feed_refresh', null, 'qa:no-client')`), /scheduled_jobs_client_required/);
+await db.exec(`DROP TRIGGER clients_lifecycle ON public.clients; DROP TRIGGER update_clients_updated_at ON public.clients;`);
+
+// Only the service role reaches the two functions.
+for (const role of ['anon', 'authenticated']) {
+  await db.exec(`RESET ROLE; SET ROLE ${role}`);
+  await assert.rejects(() => db.query(`SELECT public.enqueue_sprout_onboarding_job(now(), true)`), /permission denied/);
+  await assert.rejects(() => db.query(`SELECT public.sprout_onboard_client('X', null, '[{"id":"1","network_type":"facebook"}]')`), /permission denied/);
+  await db.exec('RESET ROLE');
+}
+
+// The enqueue: on a Monday (Israel time) one job a day; a dry run inserts nothing; not again while one is open, nor the
+// day after a run finished; after 8 days with no finished run, on any day.
+const onboardJobs = () => db.query(`SELECT dedupe_key, client_id, status, priority FROM public.scheduled_jobs WHERE kind = 'sprout_onboarding' ORDER BY dedupe_key`).then((r) => r.rows);
+const enqueueOnboarding = (at, dry = false) => asService(`SELECT public.enqueue_sprout_onboarding_job('${at}', ${dry}) AS r`).then((r) => r[0].r);
+const MONDAY = '2026-11-09T06:00:00Z';
+assert.equal((await enqueueOnboarding(MONDAY, true)).due, true);
+assert.equal((await onboardJobs()).length, 0, 'the dry run inserted a job');
+assert.equal((await enqueueOnboarding(MONDAY)).queued, true);
+assert.equal((await enqueueOnboarding('2026-11-09T09:00:00Z')).queued, false);
+assert.deepEqual(await onboardJobs(), [{ dedupe_key: 'sprout_onboarding:2026-11-09', client_id: null, status: 'queued', priority: 50 }]);
+await db.exec(`UPDATE public.scheduled_jobs SET status = 'done', finished_at = '2026-11-09T06:02:00Z' WHERE kind = 'sprout_onboarding'`);
+assert.equal((await enqueueOnboarding('2026-11-10T06:00:00Z')).due, false, 'queued the day after a finished run');
+assert.equal((await enqueueOnboarding('2026-11-16T06:00:00Z', true)).due, true, 'the next Monday is due');
+// The next Monday's run fails; the Tuesday after, 8 days since the last finished run, catches it up.
+await db.exec(`INSERT INTO public.scheduled_jobs(kind, client_id, dedupe_key, status, finished_at) VALUES ('sprout_onboarding', null, 'sprout_onboarding:2026-11-16', 'failed', '2026-11-16T06:20:00Z')`);
+assert.equal((await enqueueOnboarding('2026-11-17T06:00:00Z')).queued, true);
+assert.equal((await enqueueOnboarding('2026-11-18T06:00:00Z', true)).due, false, 'due while a run is still queued');
+
+// sprout_onboard_client: one client with its name, website (as the lifecycle's), origin and profiles; refused for a
+// profile already assigned or removed, so overlapping runs create one client.
+const onboard = (name, website, profiles, brand = null) => asService(`SELECT public.sprout_onboard_client(${name === null ? 'null' : `'${name}'`}, ${website ? `'${website}'` : 'null'}, '${JSON.stringify(profiles)}'::jsonb${brand ? `, '${brand}'` : ''}) AS r`).then((r) => r[0].r);
+const OLO = [{ id: '7001', name: 'Olo', native_name: 'olo', network_type: 'linkedin_company', native_link: 'https://www.linkedin.com/company/olo' }, { id: '7002', name: 'Olo', native_name: 'olo.hq', network_type: 'fb_instagram_account' }];
+const made = await onboard('Olo', 'https://www.olo.com', OLO);
+assert.equal(made.created, true);
+const olo = (await db.query(`SELECT name, website_url, field_sources, origin, created_by FROM public.clients WHERE id = '${made.client_id}'`)).rows[0];
+assert.equal(olo.name, 'Olo');
+assert.equal(olo.website_url, 'https://www.olo.com');
+assert.equal(olo.field_sources.website_url.by, 'lifecycle');
+assert.equal(olo.created_by, null);
+assert.deepEqual({ ...olo.origin, at: undefined }, { source: 'sprout', brand: 'Olo', profile_ids: [7001, 7002], at: undefined });
+assert.deepEqual((await db.query(`SELECT sprout_profile_id::text AS id, profile_name, native_name, network_type, is_active FROM public.sprout_profiles WHERE client_id = '${made.client_id}' ORDER BY 1`)).rows,
+  [{ id: '7001', profile_name: 'Olo', native_name: 'olo', network_type: 'linkedin_company', is_active: true }, { id: '7002', profile_name: 'Olo', native_name: 'olo.hq', network_type: 'fb_instagram_account', is_active: true }]);
+const overlap = await onboard('Olo', 'https://www.olo.com', [OLO[1], { id: '7003', name: 'Olo', network_type: 'tiktok' }]);
+assert.deepEqual(overlap, { created: false, reason: 'assigned', client_id: made.client_id });
+await db.exec(`INSERT INTO public.sprout_profile_removals(client_id, sprout_profile_id) VALUES ('${id(1)}', 7100)`);
+assert.deepEqual(await onboard('Alpha Two', null, [{ id: '7100', name: 'Alpha Two', network_type: 'facebook' }]), { created: false, reason: 'removed', client_id: id(1) });
+const bare = await onboard('Yangra', null, [{ id: '7200', name: 'Yangra ', network_type: 'facebook' }], 'Yangra ');
+assert.deepEqual((await db.query(`SELECT website_url, field_sources FROM public.clients WHERE id = '${bare.client_id}'`)).rows[0], { website_url: null, field_sources: {} });
+assert.equal((await db.query(`SELECT count(*)::int AS n FROM public.clients WHERE name IN ('Olo', 'Alpha Two', 'Yangra')`)).rows[0].n, 2);
+await assert.rejects(() => onboard('Nameless', null, []), /needs its profiles/);
+await assert.rejects(() => onboard('Bad', null, [{ id: 'x', network_type: 'facebook' }]), /Sprout id/);
+
 await db.close();
-console.log('PASS: queue migration applies twice; feeds are queued only for clients whose current set is linked to a landscape; only service_role reaches it; dry run writes nothing; enqueue is idempotent and ordered with the old stagger; lease is exclusive and counts attempts; the sweep releases only social jobs whose competitive report finished; the daily tick rechecks waiting and blocked jobs; overdue schedules with no job are reported.');
+console.log('PASS: queue migration applies twice; feeds are queued only for clients whose current set is linked to a landscape; only service_role reaches it; dry run writes nothing; enqueue is idempotent and ordered with the old stagger; lease is exclusive and counts attempts; the sweep releases only social jobs whose competitive report finished; the daily tick rechecks waiting and blocked jobs; overdue schedules with no job are reported; Sprout onboarding: the migration applies twice, marks existing websites as set by a person and changes nothing else, only its job may have no client, enqueue runs Mondays and after 8 idle days at most once a day with a dry run that inserts nothing, and the onboarding function makes one client and refuses an assigned or removed profile.');
