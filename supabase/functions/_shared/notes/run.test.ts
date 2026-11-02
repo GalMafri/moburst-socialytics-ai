@@ -210,6 +210,14 @@ describe("once nothing is waiting", () => {
     expect(out).toMatchObject({ status: "done", result: { rewrites: ["2026-11-02", "2026-11-09", "2026-12-07"] } });
   });
 
+  it("runs again at once when a note was added while it looked, rather than leaving it to the daily sweep", async () => {
+    const d = fakeDb({ ...db({ ...rules("avoid"), calendar_plans: [plan("next-week", "2026-11-09", "2026-10-28T07:00:00Z")] }).tables }, {
+      // Staff add a note while this run asks for the rewrite; their job could not be queued beside this one.
+      calendar_request_revision: (_args, fake) => { fake.tables.client_notes.push(noteRow({ id: "late", text: "Added meanwhile.", created_at: "2026-11-02T15:00:00Z" })); return {}; },
+    });
+    expect(await runNotesRead(d, job(), deps(), NOW)).toMatchObject({ status: "queued", available_at: NOW.toISOString(), result: { rewrites: ["2026-11-09"] } });
+  });
+
   it("asks for nothing when the new points are facts alone", async () => {
     const d = db({ ...rules("fact"), calendar_plans: [plan("next-week", "2026-11-02", "2026-10-27T07:00:00Z")] });
     expect(await runNotesRead(d, job(), deps(), NOW)).toMatchObject({ status: "done" });

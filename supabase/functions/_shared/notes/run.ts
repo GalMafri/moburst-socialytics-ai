@@ -89,11 +89,16 @@ export async function runNotesRead(admin: Db, job: NotesJob, deps: NotesDeps, no
     const client = await must<Client | null>(admin.from("clients").select("id, name, timezone, primary_platforms").eq("id", job.client_id).maybeSingle(), "Could not read the client");
     if (!client) return { status: "skipped", reason: "The client no longer exists." };
     const today = todayIn(String(client.timezone || "UTC"), now);
-    const waiting = await must<WaitingNote[] | null>(admin.from("client_notes")
+    const nextNote = async () => (await must<WaitingNote[] | null>(admin.from("client_notes")
       .select("id, kind, file_path, file_type, text, parts_done, note_date, date_set_by, input_tokens, output_tokens")
-      .eq("client_id", client.id).eq("state", "reading").order("created_at", { ascending: true }).order("id", { ascending: true }).limit(1), "Could not read the waiting notes");
-    const note = waiting?.[0];
-    if (!note) return { status: "done", result: { rewrites: await askForRewrites(admin, client, today) } };
+      .eq("client_id", client.id).eq("state", "reading").order("created_at", { ascending: true }).order("id", { ascending: true }).limit(1), "Could not read the waiting notes"))?.[0];
+    const note = await nextNote();
+    if (!note) {
+      const rewrites = await askForRewrites(admin, client, today);
+      // A note added while this run looked could not queue a job beside it: it is read now, not at the daily sweep.
+      if (await nextNote()) return { status: "queued", available_at: now.toISOString(), resetAttempts: true, result: { rewrites } };
+      return { status: "done", result: { rewrites } };
+    }
     const read = await readOnePart(admin, client, note, deps, now, today);
     return { status: "queued", available_at: now.toISOString(), resetAttempts: true, result: { note_id: note.id, ...read } };
   } catch (e) {
