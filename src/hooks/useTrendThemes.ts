@@ -30,7 +30,6 @@ export interface TrendTheme {
   posts: TrendPost[];
 }
 
-/** The client alone is the prefix of every window's key, so one call refreshes them all. */
 /** The answer for a window: its themes, and whether the client has had any weekly collection at all. */
 export interface TrendThemesAnswer {
   /** True when at least one week was collected on any date, so "no themes" means none in this window. */
@@ -38,6 +37,7 @@ export interface TrendThemesAnswer {
   themes: TrendTheme[];
 }
 
+/** The client alone is the prefix of every window's key, so one call refreshes them all. */
 const themesKey = (clientId: string, ...range: string[]) => ["trend-themes", clientId, ...range];
 
 /**

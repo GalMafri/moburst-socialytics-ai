@@ -46,11 +46,13 @@ describe("20261101120000_trends_hardening.sql", () => {
 });
 
 
-const themesRead = code("20261102100000_trend_themes_read.sql");
+const themesRead = code("20261102100000_trend_access.sql");
 
-describe("20261102100000_trend_themes_read.sql", () => {
-  it("answers only Moburst staff and members of the client asked about", () => {
-    expect(themesRead).toContain("if not (v_staff or public.is_client_member(p_client)) then raise exception 'Not allowed.' using errcode = '42501'; end if;");
+describe("20261102100000_trend_access.sql", () => {
+  it("answers only people who may reach the client asked about, so company-scoped staff see their own companies only", () => {
+    expect(themesRead).toContain("if not public.can_access_client(p_client) then raise exception 'Not allowed.' using errcode = '42501'; end if;");
+    // Staff alone is not the gate (a company-scoped staff member is staff); it only decides who sees the weighted engagement.
+    expect(themesRead).not.toContain("if not (v_staff or");
     expect(themesRead).toContain("v_staff boolean := public.is_moburst_staff();");
     // The function reads tables a client cannot, so it asks for one client's rows and nothing else.
     expect(themesRead).toContain("th.client_id = p_client");
@@ -93,9 +95,64 @@ describe("20261102100000_trend_themes_read.sql", () => {
     expect(themesRead).toContain("grant execute on function public.trend_themes_in_range(uuid, date, date) to authenticated");
   });
 
-  it("takes direct reads of trend posts and themes away from client users, keeping the staff's", () => {
-    expect(themesRead).toContain('create policy "Read kept trend posts" on public.trend_posts for select to authenticated using (public.is_moburst_staff())');
-    expect(themesRead).toContain('create policy "Read trend themes" on public.trend_themes for select to authenticated using (public.is_moburst_staff())');
+  it("lets staff read each trend table directly, for their own companies only, and takes client users' direct reads away", () => {
+    const policies: Array<[string, string]> = [
+      ["Staff read trend profiles", "trend_profiles"],
+      ["Staff read trend terms", "trend_terms"],
+      ["Staff read trend weeks", "trend_weeks"],
+      ["Read kept trend posts", "trend_posts"],
+      ["Read trend themes", "trend_themes"],
+    ];
+    for (const [name, table] of policies) {
+      expect(themesRead).toContain(`drop policy if exists "${name}" on public.${table};`);
+      expect(themesRead).toContain(`create policy "${name}" on public.${table} for select to authenticated using (public.is_moburst_staff() and public.can_access_client(client_id));`);
+    }
+    // No policy lets a client member read a trend table; the function above is their way in.
     expect(themesRead).not.toContain("is_client_member(client_id)");
+  });
+
+  describe("the three staff functions", () => {
+    const body = (name: string) => {
+      const start = themesRead.indexOf(`create or replace function public.${name}(`);
+      expect(start).toBeGreaterThanOrEqual(0);
+      return themesRead.slice(start, themesRead.indexOf("end $$;", start) + "end $$;".length);
+    };
+
+    it("trend_term_add needs staff and access to the client it adds to", () => {
+      const add = body("trend_term_add");
+      expect(add).toContain("if not (public.is_moburst_staff() and public.can_access_client(p_client)) then raise exception 'Only Moburst staff can change what trends track.' using errcode = '42501'; end if;");
+      // Unchanged: the term is normalized and a person's add brings a removed term back as theirs.
+      expect(add).toContain("on conflict (client_id, kind, coalesce(platform, ''), lower(term)) do update set source = 'person', removed_at = null, removed_by = null");
+    });
+
+    it("trend_term_remove needs staff and access to the term's client; a missing term does nothing", () => {
+      const remove = body("trend_term_remove");
+      expect(remove).toContain("if not public.is_moburst_staff() then raise exception 'Only Moburst staff can change what trends track.' using errcode = '42501'; end if;");
+      expect(remove).toContain("select client_id into v_client from public.trend_terms where id = p_id; if v_client is null then return; end if;");
+      expect(remove).toContain("if not public.can_access_client(v_client) then raise exception 'Only Moburst staff can change what trends track.' using errcode = '42501'; end if;");
+      // The scope check comes before the change.
+      expect(remove.indexOf("can_access_client(v_client)")).toBeLessThan(remove.indexOf("update public.trend_terms"));
+      expect(remove).toContain("update public.trend_terms set removed_at = now(), removed_by = auth.uid() where id = p_id and removed_at is null;");
+    });
+
+    it("trend_theme_dismiss needs staff and access to the theme's client; a missing theme does nothing", () => {
+      const dismiss = body("trend_theme_dismiss");
+      expect(dismiss).toContain("if not public.is_moburst_staff() then raise exception 'Only Moburst staff can dismiss a trend.' using errcode = '42501'; end if;");
+      expect(dismiss).toContain("select client_id into v_client from public.trend_themes where id = p_theme; if v_client is null then return; end if;");
+      expect(dismiss).toContain("if not public.can_access_client(v_client) then raise exception 'Only Moburst staff can dismiss a trend.' using errcode = '42501'; end if;");
+      expect(dismiss.indexOf("can_access_client(v_client)")).toBeLessThan(dismiss.indexOf("update public.trend_themes"));
+      // Unchanged: the dismissed theme's pattern becomes an exclusion the next weekly filter reads.
+      expect(dismiss).toContain("insert into public.trend_terms (client_id, kind, platform, term, reason, source) values (v_theme.client_id, 'exclusion', null, v_theme.title, v_theme.happening, 'dismissal')");
+    });
+
+    it("all three run as their owner on a fixed search path, for signed-in users only", () => {
+      for (const name of ["trend_term_add", "trend_term_remove", "trend_theme_dismiss"]) expect(body(name)).toContain("language plpgsql security definer set search_path = public");
+      expect(themesRead).toContain("revoke all on function public.trend_term_add(uuid, text, text, text) from public, anon");
+      expect(themesRead).toContain("revoke all on function public.trend_term_remove(uuid) from public, anon");
+      expect(themesRead).toContain("revoke all on function public.trend_theme_dismiss(uuid) from public, anon");
+      expect(themesRead).toContain("grant execute on function public.trend_term_add(uuid, text, text, text) to authenticated");
+      expect(themesRead).toContain("grant execute on function public.trend_term_remove(uuid) to authenticated");
+      expect(themesRead).toContain("grant execute on function public.trend_theme_dismiss(uuid) to authenticated");
+    });
   });
 });
