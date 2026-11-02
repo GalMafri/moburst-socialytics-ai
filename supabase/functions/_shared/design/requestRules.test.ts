@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { autoDecision, filmingOutcome, nextDesignAttempt, planningStalled, postInstant } from "./requestRules";
+import { filmingOutcome, planningStalled, postInstant, weekDecision } from "./requestRules";
 
 const NOW = new Date("2026-10-19T12:00:00Z");
 const h = (hours: number) => new Date(NOW.getTime() + hours * 3_600_000);
@@ -33,15 +33,6 @@ describe("filmingOutcome", () => {
   });
 });
 
-describe("nextDesignAttempt", () => {
-  it("waits half the time left, between an hour and a day, and never past the post", () => {
-    expect(nextDesignAttempt(NOW, h(24 * 5))!.toISOString()).toBe(h(24).toISOString());
-    expect(nextDesignAttempt(NOW, h(10))!.toISOString()).toBe(h(5).toISOString());
-    expect(nextDesignAttempt(NOW, h(1.5))!.toISOString()).toBe(h(1).toISOString());
-    expect(nextDesignAttempt(NOW, h(1))).toBeNull();
-  });
-});
-
 describe("planningStalled", () => {
   it("is true only for a request still planning with nothing new for 30 minutes", () => {
     const at = (m: number) => new Date(NOW.getTime() - m * 60000).toISOString();
@@ -52,32 +43,37 @@ describe("planningStalled", () => {
   });
 });
 
-describe("autoDecision", () => {
+describe("weekDecision", () => {
   const created = (hoursAgo: number) => new Date(NOW.getTime() - hoursAgo * 3_600_000).toISOString();
   it("starts a post never designed, asking first whether a video needs filming", () => {
-    expect(autoDecision([], h(48), NOW)).toEqual({ start: true, route: null, askFilming: true });
+    expect(weekDecision([])).toEqual({ start: true, route: null, askFilming: true });
   });
-  it("leaves a post alone while a request is open, ready, stopped by a person or waiting for footage", () => {
-    for (const status of ["preparing", "ready", "canceled", "needs_filming"]) {
-      expect(autoDecision([{ status, created_at: created(1) }], h(48), NOW)).toEqual({ start: false });
+  it("leaves a post alone while a request is being prepared or waits for footage, and once a design was made", () => {
+    expect(weekDecision([{ status: "preparing", created_at: created(1) }])).toEqual({ start: false, why: "preparing" });
+    expect(weekDecision([{ status: "needs_filming", created_at: created(1) }])).toEqual({ start: false, why: "filming" });
+    expect(weekDecision([{ status: "ready", created_at: created(1) }])).toEqual({ start: false, why: "ready" });
+  });
+  it("makes a post again at once when its last request ended without a design, the way it was made: no retry timer, a person asked", () => {
+    for (const end_reason of ["no_design", "no_progress"]) {
+      const ended = { status: "closed", end_reason, ended_at: created(0.1), created_at: created(1), video_route: "posts" };
+      expect(weekDecision([ended])).toEqual({ start: true, route: "posts", askFilming: false });
     }
   });
-  it("makes a request that ended without a design again once it is due, the way it was made", () => {
-    const ended = { status: "closed", end_reason: "no_design", ended_at: created(25), created_at: created(26), video_route: "posts" };
-    expect(autoDecision([ended], h(24 * 4), NOW)).toEqual({ start: true, route: "posts", askFilming: false });
-    expect(autoDecision([{ ...ended, ended_at: created(2) }], h(24 * 4), NOW)).toEqual({ start: false });
-    // Close to the post the wait is shorter, and none starts once the post is too close.
-    expect(autoDecision([{ ...ended, ended_at: created(3) }], h(2), NOW)).toEqual({ start: true, route: "posts", askFilming: false });
-    expect(autoDecision([{ ...ended, ended_at: created(0.2) }], h(0.5), NOW)).toEqual({ start: false });
+  it("makes a post a person stopped, the way it was made", () => {
+    expect(weekDecision([{ status: "canceled", created_at: created(1), video_route: null }])).toEqual({ start: true, route: null, askFilming: false });
   });
-  it("designs a filmed post from the posts once its footage did not arrive, and never again after the post passed", () => {
-    expect(autoDecision([{ status: "closed", end_reason: "no_footage", ended_at: created(0), created_at: created(48) }], h(12), NOW)).toEqual({ start: true, route: "posts", askFilming: false });
-    expect(autoDecision([{ status: "closed", end_reason: "post_passed", ended_at: created(0), created_at: created(48) }], h(-2), NOW)).toEqual({ start: false });
-    expect(autoDecision([{ status: "closed", end_reason: "filmed", ended_at: created(0), created_at: created(48) }], h(12), NOW)).toEqual({ start: false });
+  it("designs a filmed post from the client's posts once its footage did not arrive", () => {
+    expect(weekDecision([{ status: "closed", end_reason: "no_footage", ended_at: created(0), created_at: created(48) }])).toEqual({ start: true, route: "posts", askFilming: false });
+  });
+  it("leaves a request that ended for another reason alone", () => {
+    for (const end_reason of ["filmed", "post_passed", "post_removed"]) {
+      expect(weekDecision([{ status: "closed", end_reason, ended_at: created(0), created_at: created(48) }])).toEqual({ start: false, why: "ended" });
+    }
   });
   it("goes by the newest request", () => {
     const older = { status: "closed", end_reason: "no_footage", ended_at: created(30), created_at: created(40) };
-    const newer = { status: "closed", end_reason: "no_design", ended_at: created(1), created_at: created(2), video_route: "posts" };
-    expect(autoDecision([older, newer], h(48), NOW)).toEqual({ start: false });
+    const newer = { status: "ready", created_at: created(2) };
+    expect(weekDecision([older, newer])).toEqual({ start: false, why: "ready" });
+    expect(weekDecision([newer, { ...older, created_at: created(1) }])).toEqual({ start: true, route: "posts", askFilming: false });
   });
 });

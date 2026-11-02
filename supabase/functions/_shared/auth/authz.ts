@@ -70,8 +70,8 @@ export function serverActAsUser(header: string | null | undefined): string {
 /**
  * Who a server call acts as: the person its user header names, or, with no
  * user header at all, the system itself. The system is accepted only where
- * the caller allows it (automatic designs, automatic video replans, the
- * workers), and what it writes names no person (requested_by null). A header
+ * the caller allows it (filming requests closed, video replans, the week's
+ * next posts, the workers), and it never names a person on its own. A header
  * that is present but not a user id is refused, never read as the system.
  */
 export type ServerActor = { kind: "user"; userId: string } | { kind: "system" };

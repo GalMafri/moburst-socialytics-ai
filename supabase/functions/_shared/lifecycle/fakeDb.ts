@@ -1,9 +1,10 @@
 // supabase/functions/_shared/lifecycle/fakeDb.ts
 //
 // An in-memory stand-in for the supabase-js calls the lifecycle makes, for
-// its tests: from(table) with select, eq, neq, in, is, not, order, limit,
-// maybeSingle, single, insert, upsert, update and delete; rpc with handlers
-// the test gives; storage that keeps uploads in memory.
+// its tests: from(table) with select, eq (also on a JSON field such as
+// "input->>kind"), neq, in, is, not, order, limit, maybeSingle, single,
+// insert, upsert, update and delete; rpc with handlers the test gives;
+// storage that keeps uploads in memory.
 
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any>;
@@ -21,6 +22,11 @@ export interface FakeDb {
 }
 
 const same = (a: unknown, b: unknown) => a === b || (a != null && b != null && String(a) === String(b));
+/** A column, or a JSON field of one as PostgREST names it ("input->>kind"). */
+const field = (r: Row, c: string) => {
+  const [col, key] = c.split("->>");
+  return key === undefined ? r[col] : r[col]?.[key];
+};
 
 export function fakeDb(tables: Record<string, Row[]> = {}, rpcs: Record<string, (args: Row, db: FakeDb) => unknown> = {}): FakeDb {
   const db: FakeDb = {
@@ -67,7 +73,7 @@ export function fakeDb(tables: Record<string, Row[]> = {}, rpcs: Record<string, 
     constructor(private table: string) {}
     private rows(): Row[] { return (db.tables[this.table] ??= []); }
     select() { return this; }
-    eq(c: string, v: unknown) { this.filters.push((r) => same(r[c], v)); return this; }
+    eq(c: string, v: unknown) { this.filters.push((r) => same(field(r, c), v)); return this; }
     neq(c: string, v: unknown) { this.filters.push((r) => !same(r[c], v)); return this; }
     in(c: string, vs: unknown[]) { this.filters.push((r) => vs.some((v) => same(r[c], v))); return this; }
     is(c: string, v: unknown) { this.filters.push((r) => (r[c] ?? null) === v); return this; }

@@ -22,6 +22,8 @@
 //                keeps everything else (its first sound is kept);
 //   clean_wait   store the cleaned footage, then join and read it again.
 //                Footage still written on after two cleanings is made again.
+// Each footage and each cleaning records what Higgsfield quoted for it
+// (state.credits, credits.ts), so staff see what a week of designs used.
 // (13 Oct: video follows the client's own videos, carries the exact copy and
 // the logo file, and is never silent.)
 
@@ -29,7 +31,8 @@ import { Image } from "https://deno.land/x/imagescript@1.3.0/mod.ts";
 import { decode as base64Decode, encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { MCP_URL, accessTokenFor } from "../higgsfield/oauth.ts";
 import { McpClient } from "../higgsfield/mcp.ts";
-import { VIDEO_MODEL, awaitJobs, creditBalance, editVideo, importReferences, submitVideo } from "../higgsfield/generate.ts";
+import { VIDEO_MODEL, type VideoRequest, awaitJobs, creditBalance, editVideo, importReferences, quoteEdit, quoteVideo, submitVideo } from "../higgsfield/generate.ts";
+import { CLIP_CREDIT_FLOOR, withCredits } from "./credits.ts";
 import { BUCKET } from "../canva/jobs.ts";
 import { canvasLogoRect } from "../canva/brief.ts";
 import { anthropicMessages } from "../anthropic.ts";
@@ -46,8 +49,6 @@ export const VIDEO_STEPS_FILTER = `(${VIDEO_STEPS.join(",")})`;
 
 /** Room for each check's answer (the model may think first, and that counts against it). */
 const CHECK_TOKENS = 2000;
-/** Higgsfield credits the footage needs on the account before it is started (a 1080p clip with sound is about 100). */
-const FOOTAGE_CREDIT_FLOOR = 130;
 /** How often a running clip or join is asked about. */
 export const VIDEO_POLL_MS = 30_000;
 const MAX_FOOTAGE = 2;
@@ -131,13 +132,13 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       if (s.footage_tries > MAX_FOOTAGE) throw new Error("FINAL: The footage could not be generated.");
       const mcp = await higgsfield(admin);
       const balance = await creditBalance(mcp);
-      if (balance && balance.credits < FOOTAGE_CREDIT_FLOOR) throw new Error(`FINAL: The Higgsfield account has ${Math.floor(balance.credits)} credits left, too few for the footage.`);
+      if (balance && balance.credits < CLIP_CREDIT_FLOOR) throw new Error(`FINAL: The Higgsfield account has ${Math.floor(balance.credits)} credits left, too few for the footage.`);
       // Short cuts of the client's own published videos are the reference, imported once per job.
       if (!Array.isArray(s.video_ref_ids)) {
         const refs: string[] = s.clip_paths.map((p: string) => publicUrl(admin, REFERENCES, p));
         s.video_ref_ids = refs.length ? await importReferences(mcp, refs, "video") : [];
       }
-      const [first] = await submitVideo(mcp, {
+      const clip: VideoRequest = {
         prompt: `${input.video.prompt}${footageRules(input.people, input.scene_words ?? [])}`,
         aspect: "9:16",
         seconds: input.video.seconds ?? TIMING.footage,
@@ -145,9 +146,11 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
         model: VIDEO_MODEL,
         withAudio: true,
         videoReferenceIds: s.video_ref_ids,
-      });
+      };
+      const [first] = await submitVideo(mcp, clip);
       if (!first?.job_id) throw new Error("Higgsfield did not start the footage.");
       s.footage_job = first;
+      s.credits = withCredits(s.credits, { what: "footage", job_id: first.job_id, credits: await quoteVideo(mcp, clip), at: new Date().toISOString() });
       s.footage_checked_at = Date.now();
       s.footage_started_at = Date.now();
       // The hook is drawn while the footage renders.
@@ -384,9 +387,11 @@ export async function runVideoStep(admin: any, job: VideoJob): Promise<VideoStep
       const mcp = await higgsfield(admin);
       const [id] = await importReferences(mcp, [publicUrl(admin, BUCKET, s.footage_path)], "video");
       if (!id) throw new Error("Could not hand the footage to the video model.");
-      const [first] = await editVideo(mcp, { prompt: cleanFootagePrompt(input.scene_words ?? [], s.footage_writing?.where ?? ""), videoId: id });
+      const edit = { prompt: cleanFootagePrompt(input.scene_words ?? [], s.footage_writing?.where ?? ""), videoId: id };
+      const [first] = await editVideo(mcp, edit);
       if (!first?.job_id) throw new Error("Higgsfield did not start the cleaning.");
       s.clean_job = first;
+      s.credits = withCredits(s.credits, { what: "clean", job_id: first.job_id, credits: await quoteEdit(mcp, edit), at: new Date().toISOString() });
       s.clean_checked_at = Date.now();
       job.step = "clean_wait"; return "next";
     }
@@ -505,8 +510,8 @@ async function runStyleStep(admin: any, job: VideoJob): Promise<VideoStepResult>
         if (Array.isArray(w.briefs) && w.briefs.length) continue;
         await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/design-request`, {
           method: "POST",
-          // The system's own call: automatic work never acts as a person (an
-          // automatic request has no one who asked, and naming nobody was refused).
+          // The system's own call: it never acts as a person, and the request
+          // it plans already names the person who asked.
           headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "" },
           body: JSON.stringify({ action: "replan", request_id: w.id }),
           signal: AbortSignal.timeout(15_000),

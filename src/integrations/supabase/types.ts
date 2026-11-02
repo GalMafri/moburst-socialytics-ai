@@ -1431,7 +1431,6 @@ export type Database = {
       }
       design_brand_settings: {
         Row: {
-          auto_designs: boolean
           background: string
           client_id: string
           confirmed_at: string | null
@@ -1444,7 +1443,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          auto_designs?: boolean
           background: string
           client_id: string
           confirmed_at?: string | null
@@ -1457,7 +1455,6 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          auto_designs?: boolean
           background?: string
           client_id?: string
           confirmed_at?: string | null
@@ -1532,6 +1529,7 @@ export type Database = {
       }
       design_requests: {
         Row: {
+          batch_id: string | null
           briefs: Json
           calendar_post_key: string
           candidates_started: number
@@ -1560,6 +1558,7 @@ export type Database = {
           visual_direction: string | null
         }
         Insert: {
+          batch_id?: string | null
           briefs?: Json
           calendar_post_key: string
           candidates_started?: number
@@ -1588,6 +1587,7 @@ export type Database = {
           visual_direction?: string | null
         }
         Update: {
+          batch_id?: string | null
           briefs?: Json
           calendar_post_key?: string
           candidates_started?: number
@@ -1616,6 +1616,13 @@ export type Database = {
           visual_direction?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "design_requests_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "design_week_runs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "design_requests_client_id_fkey"
             columns: ["client_id"]
@@ -1721,6 +1728,56 @@ export type Database = {
             columns: ["post_iteration_id"]
             isOneToOne: false
             referencedRelation: "post_iterations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      design_week_runs: {
+        Row: {
+          client_id: string
+          created_at: string
+          estimate: Json | null
+          finished_at: string | null
+          id: string
+          posts: Json
+          requested_by: string
+          status: string
+          stopped_by: string | null
+          updated_at: string
+          week_start: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          estimate?: Json | null
+          finished_at?: string | null
+          id?: string
+          posts?: Json
+          requested_by: string
+          status?: string
+          stopped_by?: string | null
+          updated_at?: string
+          week_start: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          estimate?: Json | null
+          finished_at?: string | null
+          id?: string
+          posts?: Json
+          requested_by?: string
+          status?: string
+          stopped_by?: string | null
+          updated_at?: string
+          week_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "design_week_runs_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
             referencedColumns: ["id"]
           },
         ]

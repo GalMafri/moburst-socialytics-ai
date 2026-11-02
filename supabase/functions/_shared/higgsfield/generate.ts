@@ -274,7 +274,8 @@ export interface VideoRequest {
   model?: string;
 }
 
-export async function submitVideo(mcp: ToolCaller, req: VideoRequest): Promise<JobRef[]> {
+/** The generation settings a clip is submitted with, and quoted with. */
+function videoParams(req: VideoRequest): Record<string, unknown> {
   const medias: Array<{ value: string; role: string }> = [];
   if (req.startImageId) medias.push({ value: req.startImageId, role: "start_image" });
   for (const value of req.referenceIds || []) medias.push({ value, role: "image_references" });
@@ -297,15 +298,31 @@ export async function submitVideo(mcp: ToolCaller, req: VideoRequest): Promise<J
     params.mode = "omni_reference";
     params.medias = medias;
   }
-  return startVideoJob(mcp, params);
+  return params;
+}
+
+export async function submitVideo(mcp: ToolCaller, req: VideoRequest): Promise<JobRef[]> {
+  return startVideoJob(mcp, videoParams(req));
+}
+
+/** What submitting this clip costs, from Higgsfield's own quote (costOf, which submits nothing); null when unknown. */
+export function quoteVideo(mcp: ToolCaller, req: VideoRequest): Promise<number | null> {
+  return costOf(mcp, "video", videoParams(req));
 }
 
 /**
  * Edit one video with the video model (Seedance's video_edit mode, billed by
  * the video's length): the prompt says what changes, everything else is kept.
  */
-export async function editVideo(mcp: ToolCaller, req: { prompt: string; videoId: string; model?: string; resolution?: "480p" | "720p" | "1080p" }): Promise<JobRef[]> {
-  return startVideoJob(mcp, {
+export interface EditRequest {
+  prompt: string;
+  videoId: string;
+  model?: string;
+  resolution?: "480p" | "720p" | "1080p";
+}
+
+function editParams(req: EditRequest): Record<string, unknown> {
+  return {
     model: req.model || VIDEO_MODEL,
     prompt: req.prompt,
     mode: "video_edit",
@@ -313,7 +330,16 @@ export async function editVideo(mcp: ToolCaller, req: { prompt: string; videoId:
     resolution: req.resolution || "1080p",
     generate_audio: false,
     use_unlim: false,
-  });
+  };
+}
+
+export async function editVideo(mcp: ToolCaller, req: EditRequest): Promise<JobRef[]> {
+  return startVideoJob(mcp, editParams(req));
+}
+
+/** What submitting this edit costs, from Higgsfield's own quote; null when unknown. */
+export function quoteEdit(mcp: ToolCaller, req: EditRequest): Promise<number | null> {
+  return costOf(mcp, "video", editParams(req));
 }
 
 async function startVideoJob(mcp: ToolCaller, params: Record<string, unknown>): Promise<JobRef[]> {

@@ -35,8 +35,10 @@ export interface DesignRequest {
   kind?: "single" | "carousel" | "video";
   options_wanted: number;
   options_ready: number;
-  /** Who asked; null when the design was prepared without anyone asking. */
+  /** Who asked (every request since 2 Nov names someone; older automatic ones did not). */
   requested_by?: string | null;
+  /** The week run (design_week_runs) that started it; null for a post's own button. */
+  batch_id?: string | null;
   error: string | null;
   created_at: string;
   /** When the current preparation began (a request can prepare again). */

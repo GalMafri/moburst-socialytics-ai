@@ -7,7 +7,7 @@ import { PostStatusChip, type PostStatus } from "./PostStatusChip";
 import { useGenerationForPost } from "./GenerationContext";
 import { postCopyOf } from "@/lib/postCopy";
 import { useAuth } from "@/hooks/useAuth";
-import { useDesignRequestForPost } from "./DesignRequestsContext";
+import { useDesignRequestForPost, useWeekStateForPost } from "./DesignRequestsContext";
 import { isPreparing, stageLine } from "@/lib/designRequests";
 
 interface Iteration {
@@ -73,6 +73,8 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
   const { isMoburstStaff } = useAuth();
   const designRequest = useDesignRequestForPost(post as { _calendarPostKey?: string });
   const designing = isPreparing(designRequest, isMoburstStaff) && !activeGen;
+  // Waiting its turn in a week being designed (the week's design button).
+  const weekState = useWeekStateForPost(post as { _calendarPostKey?: string });
   const isGenerating = activeGen?.status === "running";
   const genJustCompleted =
     activeGen?.status === "completed" &&
@@ -105,6 +107,11 @@ export function PostCard({ post, iteration, status, onOpen, onToggleApproved }: 
                 <span className="t-label">Text post</span>
               ) : designRequest?.status === "needs_filming" ? (
                 <span className="t-label">Filmed video</span>
+              ) : weekState && !designing ? (
+                <>
+                  <Clock className="h-4 w-4" />
+                  <span className="t-label">{weekState === "copy" ? "Designed once its copy is written" : "Queued for design"}</span>
+                </>
               ) : (
                 <>
                   <ImagePlus className="h-4 w-4" />
