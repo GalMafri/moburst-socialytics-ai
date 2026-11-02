@@ -44,6 +44,7 @@ import { AutomaticBrandReferences } from "@/components/onboarding/AutomaticBrand
 import { LogoFileField } from "@/components/onboarding/LogoFileField";
 import { DesignSynthesisCard } from "@/components/onboarding/DesignSynthesisCard";
 import { DesignSettingsCard } from "@/components/onboarding/DesignSettingsCard";
+import { TrendsWeTrack } from "@/components/clients/TrendsWeTrack";
 
 const PLATFORMS = ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube"];
 
@@ -517,7 +518,7 @@ export default function ClientSetup() {
           </TabsContent>
 
           <TabsContent value="strategy" className="space-y-section mt-section">
-            <Section layout="split" eyebrow="Strategy" title="Content strategy" description="The strategy document, the content pillars, the keywords trends are searched for, and how often the client posts.">
+            <Section layout="split" eyebrow="Strategy" title="Content strategy" description="The strategy document, the content pillars, the keywords that describe the brand's space, and how often the client posts.">
                 <StrategyDocUpload
                   clientId={clientId}
                   clientName={form.name}
@@ -568,7 +569,7 @@ export default function ClientSetup() {
                 <div className="space-y-2">
                   <Label>Social keywords</Label>
                   <p className="t-secondary">
-                    Phrases used for TikTok and Instagram trend search, such as "AI content strategy" or "performance marketing tips".
+                    Phrases that describe the brand's space, used for competitor matching and reports.
                     {by("social_keywords") === "lifecycle" ? " Read with the pillars; you can change any of them here." : ""}
                   </p>
                   <div className="flex flex-wrap gap-2 mb-2">
@@ -598,6 +599,8 @@ export default function ClientSetup() {
                   onChange={(posting_rhythm) => set("posting_rhythm", posting_rhythm)}
                 />
             </Section>
+
+            {clientId && <TrendsWeTrack clientId={clientId} />}
           </TabsContent>
 
           <TabsContent value="competitors" className="space-y-section mt-section">

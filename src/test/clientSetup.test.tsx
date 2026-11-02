@@ -40,6 +40,7 @@ vi.mock('@/integrations/supabase/client', () => ({ supabase: {
     const q: any = {
       select: () => q, order: () => q, limit: () => q, not: () => q, neq: () => q, in: (k: string, v: unknown) => { filters[k] = v; return q; },
       eq: (k: string, v: unknown) => { filters[k] = v; return q; },
+      is: (k: string, v: unknown) => { filters[k] = v; return q; },
       update: (p: any) => { op = 'update'; payload = p; return q; },
       delete: () => { op = 'delete'; return q; },
       upsert: (p: any) => { op = 'upsert'; payload = p; return q; },
