@@ -12,6 +12,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { defaultSproutCustomerId } from "../_shared/sprout/customer.ts";
 import { publishProblems } from "../_shared/sprout/publishRules.ts";
 import { staffGate, requireStaff, AuthzError } from "../_shared/auth/requireStaff.ts";
+import { storedStoryProblem } from "./story.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -86,6 +87,10 @@ serve(async (req) => {
       if (reportError) throw new Error("Could not verify the report's client.");
       if (!report) throw new AuthzError(403, "The report does not belong to this client.");
     }
+
+    // A Story is posted by hand: refused by the format the calendar holds for the post (story.ts).
+    const story = await storedStoryProblem(supabase, client_id, calendar_post_key);
+    if (story) return json({ error: story, code: "not_publishable", problems: [story] }, 422);
 
     // The network's own rules, checked before Sprout is asked.
     const problems = publishProblems({ network: assigned.network_type || platform, text: String(post_content ?? ""), mediaUrls: allMediaUrls, sendAt: scheduled_time });

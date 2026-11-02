@@ -6,6 +6,8 @@
 // dialog shows what a post needs while it is being prepared and the server
 // never sends one the network would refuse. Pure: no Deno, no network.
 
+import { isStoryPost } from "../design/story.ts";
+
 export interface PublishInput {
   /** The post's network as any source names it (Sprout network type, platform name). */
   network: string | null | undefined;
@@ -14,6 +16,8 @@ export interface PublishInput {
   /** When the post goes out (ISO). */
   sendAt?: string | null;
   now?: Date;
+  /** The post's format: a Story is posted by hand (_shared/design/story.ts). */
+  format?: string | null;
 }
 
 interface NetworkRule {
@@ -57,10 +61,18 @@ export const isVideoUrl = (url: string) => VIDEO.test(url) || /^data:video\//i.t
 const count = (n: number) => n.toLocaleString("en-US");
 
 /**
+ * Sprout's Publishing API cannot create Story posts ("story posts cannot be
+ * created directly; those will be created as media posts"), so a Story is
+ * never sent: it is posted by hand.
+ */
+export const STORY_NOT_SCHEDULABLE = "Stories can't be scheduled through Sprout. Post this one from the Instagram or Facebook app, or Meta Business Suite.";
+
+/**
  * What stops this post from being scheduled, as plain sentences about the
  * post. Empty when Sprout will take it.
  */
 export function publishProblems(input: PublishInput): string[] {
+  if (isStoryPost({ format: input.format, platform: input.network })) return [STORY_NOT_SCHEDULABLE];
   const rule = RULES[networkKey(input.network)];
   const text = String(input.text ?? "");
   const media = (input.mediaUrls ?? []).filter((u) => typeof u === "string" && u.trim());
