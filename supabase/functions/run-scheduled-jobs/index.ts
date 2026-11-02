@@ -42,9 +42,11 @@
 //                              answers (no Apify call; Claude is asked again).
 // POST {"mode":"sprout_onboarding_dry_run"[,"left":["<brand key>",...]]}
 //                              what the weekly Sprout onboarding would do now
-//                              (sproutOnboarding.ts): every Sprout brand with
-//                              its decision, the reason and the website search,
-//                              read from live Sprout and sites, writing nothing.
+//                              (sproutOnboarding.ts): every Sprout brand (one
+//                              per Sprout group) with its group, each profile's
+//                              group ids, its decision, the reason and the
+//                              website search, read from live Sprout and sites,
+//                              writing nothing.
 //                              Brands its 90 seconds did not reach come back as
 //                              "left"; send them as "left" to look at those.
 // POST {"mode":"compare_pipeline","run_id":"<id>"}
