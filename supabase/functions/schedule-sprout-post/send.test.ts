@@ -30,7 +30,7 @@ function sprout(over: Partial<Record<"token" | "profiles" | "media" | "post", { 
   return { sent, fetchImpl };
 }
 
-function store(already = false) {
+function store(already: string | null = null) {
   const rows: Record<string, unknown>[] = [];
   const asked: unknown[] = [];
   const s: SentStore = {
@@ -99,9 +99,9 @@ describe("scheduling a post to Sprout", () => {
 
   it("does not send a post already sent for the same calendar post and minute", async () => {
     const { sent, fetchImpl } = sprout();
-    const { asked, s } = store(true);
+    const { asked, s } = store("2026-11-09T23:45:00Z");
     const reply = await sendToSprout(request, s, { fetchImpl, ...NO_WAIT });
-    expect(reply.body).toMatchObject({ success: true, already: true });
+    expect(reply.body).toMatchObject({ success: true, already: true, scheduled_time: "2026-11-09T23:45:00Z" });
     expect(asked).toEqual([{ clientId: "moburst-client", calendarPostKey: request.calendarPostKey, status: "scheduled", at: "2026-11-09T23:45:00Z" }]);
     expect(sent).toHaveLength(0);
   });
@@ -131,3 +131,40 @@ describe("scheduling a post to Sprout", () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+describe("publishing a post now", () => {
+  const now = { ...request, scheduledTime: null, publishNow: true };
+
+  it("sends it for the earliest minute Sprout takes, and records it as published now", async () => {
+    const { sent, fetchImpl } = sprout();
+    const { rows, asked, s } = store();
+    const reply = await sendToSprout(now, s, { fetchImpl, ...NO_WAIT });
+    expect(reply.status).toBe(200);
+    expect(JSON.parse(String(sent.at(-1)!.body)).delivery).toEqual({ scheduled_times: ["2026-11-02T14:01:00Z"], type: "SCHEDULED" });
+    expect(rows).toEqual([expect.objectContaining({ status: "publish_now", scheduled_time: "2026-11-02T14:01:00Z", sprout_post_id: "4567890" })]);
+    expect(reply.body).toMatchObject({ success: true, status: "publish_now", scheduled_time: "2026-11-02T14:01:00Z", draft: true });
+    // A second press, or a resend, finds this one.
+    expect(asked).toEqual([{ clientId: "moburst-client", calendarPostKey: request.calendarPostKey, status: "publish_now", since: "2026-11-02T13:45:00.000Z" }]);
+  });
+
+  it("is not held by the one-minute rule, which is for scheduling", async () => {
+    const { fetchImpl } = sprout();
+    const reply = await sendToSprout({ ...now, scheduledTime: "2026-11-02T13:00:00Z" }, store().s, { fetchImpl, ...NO_WAIT });
+    expect(reply.status).toBe(200);
+  });
+
+  it("still checks the network's rules", async () => {
+    const { sent, fetchImpl } = sprout();
+    const reply = await sendToSprout({ ...now, text: "x".repeat(3001), mediaUrls: [] }, store().s, { fetchImpl, ...NO_WAIT });
+    expect(reply.status).toBe(422);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("is not sent twice for the same post", async () => {
+    const { sent, fetchImpl } = sprout();
+    const reply = await sendToSprout(now, store("2026-11-02T13:58:00Z").s, { fetchImpl, ...NO_WAIT });
+    expect(reply.body).toMatchObject({ success: true, already: true, status: "publish_now", scheduled_time: "2026-11-02T13:58:00Z" });
+    expect(sent).toHaveLength(0);
+  });
+});
+

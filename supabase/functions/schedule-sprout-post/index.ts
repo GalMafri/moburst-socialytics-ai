@@ -1,5 +1,6 @@
-// Schedules one post to a client's Sprout profile (Lital, 19 Oct 2026:
-// staff schedule each post by hand). The post is checked against what the
+// Schedules one post to a client's Sprout profile, or publishes it now
+// (Lital, 19 Oct 2026: staff schedule each post by hand; 2 Nov 2026: the
+// dialog offers "Publish now" beside "Schedule"). The post is checked against what the
 // network accepts before anything is sent (_shared/sprout/publishRules.ts,
 // the same rules the scheduling dialog shows), so Sprout never refuses it,
 // then sent as Sprout's Publishing API documents it (send.ts and
@@ -31,11 +32,13 @@ serve(async (req) => {
   if (denied) return denied;
 
   try {
-    const { client_id, report_id, sprout_profile_id, platform, scheduled_time, post_content, media_url, media_urls, calendar_post_key } = await req.json();
+    const { client_id, report_id, sprout_profile_id, platform, scheduled_time, publish_now, post_content, media_url, media_urls, calendar_post_key } = await req.json();
     const allMediaUrls: string[] = media_urls?.length > 0 ? media_urls : media_url ? [media_url] : [];
-    if (!client_id || !sprout_profile_id || !scheduled_time || (!post_content && !allMediaUrls.length)) {
-      return json({ error: "client_id, sprout_profile_id, scheduled_time and the post are required" }, 400);
+    const publishNow = publish_now === true;
+    if (!client_id || !sprout_profile_id || (!post_content && !allMediaUrls.length)) {
+      return json({ error: "client_id, sprout_profile_id and the post are required" }, 400);
     }
+    if (publishNow === !!scheduled_time) return json({ error: "Send either scheduled_time or publish_now: true" }, 400);
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: client } = await supabase.from("clients").select("sprout_customer_id").eq("id", client_id).single();
@@ -54,10 +57,13 @@ serve(async (req) => {
 
     // The rows every screen reads: a post already sent is found, a sent post is written with retries.
     const store: SentStore = {
-      async alreadySent({ clientId, calendarPostKey, status, at }) {
-        const { data } = await supabase.from("scheduled_posts").select("id")
-          .eq("client_id", clientId).eq("calendar_post_key", calendarPostKey).eq("status", status).eq("scheduled_time", at).limit(1);
-        return !!data?.length;
+      async alreadySent({ clientId, calendarPostKey, status, at, since }) {
+        let q = supabase.from("scheduled_posts").select("scheduled_time")
+          .eq("client_id", clientId).eq("calendar_post_key", calendarPostKey).eq("status", status);
+        if (at) q = q.eq("scheduled_time", at);
+        if (since) q = q.gte("created_at", since);
+        const { data } = await q.limit(1);
+        return data?.[0]?.scheduled_time ? new Date(data[0].scheduled_time).toISOString().replace(".000Z", "Z") : null;
       },
       async record(row) {
         let insertError: { message: string; code?: string } | null = null;
@@ -81,7 +87,8 @@ serve(async (req) => {
       platform: platform ?? null,
       text: String(post_content ?? ""),
       mediaUrls: allMediaUrls,
-      scheduledTime: scheduled_time,
+      scheduledTime: scheduled_time ?? null,
+      publishNow,
       customerId: String(client.sprout_customer_id || defaultSproutCustomerId()),
       createdBy: caller.userId ?? null,
     }, store);

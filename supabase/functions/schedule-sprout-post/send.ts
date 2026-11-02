@@ -6,7 +6,7 @@
 // against Sprout's documented answers.
 
 import { publishProblems } from "../_shared/sprout/publishRules.ts";
-import { createDraftPost, profileGroupId, publishingToken, sproutMinute, SproutRefusal, uploadMediaFromUrl, type SproutMediaType } from "../_shared/sprout/publishing.ts";
+import { createDraftPost, earliestSendTime, profileGroupId, publishingToken, sproutMinute, SproutRefusal, uploadMediaFromUrl, type SproutMediaType } from "../_shared/sprout/publishing.ts";
 
 export interface SendRequest {
   clientId: string;
@@ -17,15 +17,23 @@ export interface SendRequest {
   platform: string | null;
   text: string;
   mediaUrls: string[];
-  /** When the post goes out (ISO), as the person chose it. */
-  scheduledTime: string;
+  /** When the post goes out (ISO), as the person chose it. Unused when publishing now. */
+  scheduledTime: string | null;
+  /**
+   * Publish now (Lital, 2 Nov 2026). Sprout has no immediate mode, so the
+   * post is sent for the earliest minute Sprout takes (earliestSendTime) and
+   * recorded with status "publish_now", which tells the screens it was sent
+   * to go out now.
+   */
+  publishNow?: boolean;
   customerId: string;
   createdBy: string | null;
 }
 
 /** The scheduled_posts rows this needs: whether one is already there, and writing one. */
 export interface SentStore {
-  alreadySent(q: { clientId: string; calendarPostKey: string; status: string; at: string }): Promise<boolean>;
+  /** The send time of a row for the post with this status: at this minute, or (publish now) sent since a time. Null when there is none. */
+  alreadySent(q: { clientId: string; calendarPostKey: string; status: string; at?: string; since?: string }): Promise<string | null>;
   /** True once the row is written. */
   record(row: Record<string, unknown>): Promise<boolean>;
 }
@@ -35,22 +43,34 @@ export interface Reply {
   body: Record<string, unknown>;
 }
 
+/** How long a post published now counts as sent, so a second press or a resend does not send it again. */
+export const PUBLISH_NOW_WINDOW_MS = 15 * 60_000;
+
 export async function sendToSprout(req: SendRequest, store: SentStore, opts: { fetchImpl?: typeof fetch; waits?: number[] } = {}): Promise<Reply> {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  let sendAt: string;
-  try {
-    sendAt = sproutMinute(req.scheduledTime);
-  } catch {
-    return { status: 422, body: { error: "The date and time are not complete.", code: "not_publishable", problems: ["The date and time are not complete."] } };
+  const status = req.publishNow ? "publish_now" : "scheduled";
+  let chosenAt: string | null = null;
+  if (!req.publishNow) {
+    try {
+      chosenAt = sproutMinute(String(req.scheduledTime ?? ""));
+    } catch {
+      return { status: 422, body: { error: "The date and time are not complete.", code: "not_publishable", problems: ["The date and time are not complete."] } };
+    }
   }
 
-  // The network's own rules, checked before Sprout is asked.
-  const problems = publishProblems({ network: req.profile.networkType || req.platform, text: req.text, mediaUrls: req.mediaUrls, sendAt });
+  // The network's own rules, checked before Sprout is asked. The one-minute
+  // rule (a time must be ahead) applies to a chosen time only.
+  const problems = publishProblems({ network: req.profile.networkType || req.platform, text: req.text, mediaUrls: req.mediaUrls, sendAt: chosenAt });
   if (problems.length) return { status: 422, body: { error: problems.join(" "), code: "not_publishable", problems } };
 
-  // A post already sent for this calendar post and time is not sent twice.
-  if (req.calendarPostKey && await store.alreadySent({ clientId: req.clientId, calendarPostKey: req.calendarPostKey, status: "scheduled", at: sendAt })) {
-    return { status: 200, body: { success: true, already: true, recorded: true, status: "scheduled", scheduled_time: sendAt } };
+  // A post already sent is not sent twice: for the same calendar post and
+  // minute, or published now within the last quarter hour.
+  if (req.calendarPostKey) {
+    const since = new Date(Date.now() - PUBLISH_NOW_WINDOW_MS).toISOString();
+    const already = await store.alreadySent(req.publishNow
+      ? { clientId: req.clientId, calendarPostKey: req.calendarPostKey, status, since }
+      : { clientId: req.clientId, calendarPostKey: req.calendarPostKey, status, at: chosenAt! });
+    if (already) return { status: 200, body: { success: true, already: true, recorded: true, status, scheduled_time: already } };
   }
 
   // Until the post is made in Sprout, every step can be asked again: a
@@ -79,6 +99,9 @@ export async function sendToSprout(req: SendRequest, store: SentStore, opts: { f
     return { status: 502, body: { error: "Sprout did not take every attached file, so nothing was sent.", code: "media_not_taken", media_requested: req.mediaUrls.length, media_attached: media.length } };
   }
 
+  // Publish now: the earliest minute Sprout takes, worked out once the files are in.
+  const sendAt = chosenAt ?? earliestSendTime(new Date());
+
   // Made once: a lost answer is never sent again (createDraftPost), and a refusal answers 500, which the dialog does not repeat.
   let created;
   try {
@@ -97,7 +120,7 @@ export async function sendToSprout(req: SendRequest, store: SentStore, opts: { f
     profile_id: req.profile.rowId,
     platform: req.platform,
     scheduled_time: sendAt,
-    status: "scheduled",
+    status,
     post_content: req.text,
     created_by: req.createdBy,
     media_url: req.mediaUrls.length > 0 ? `${req.mediaUrls.length} attached` : null,
@@ -105,6 +128,6 @@ export async function sendToSprout(req: SendRequest, store: SentStore, opts: { f
   });
   return {
     status: 200,
-    body: { success: true, recorded, status: "scheduled", scheduled_time: sendAt, sprout_post_id: created.publishingPostId, sprout_link: created.permaLink, draft: true, media_attached: media.length },
+    body: { success: true, recorded, status, scheduled_time: sendAt, sprout_post_id: created.publishingPostId, sprout_link: created.permaLink, draft: true, media_attached: media.length },
   };
 }

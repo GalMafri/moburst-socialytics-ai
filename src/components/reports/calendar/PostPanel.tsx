@@ -26,8 +26,7 @@ import { CopyEditor } from "./CopyEditor";
 import { CreatePostDesignButton } from "@/components/reports/CreatePostDesignButton";
 import { useGenerationForPost } from "@/components/reports/calendar/GenerationContext";
 import { CreatePostVideoButton } from "@/components/reports/CreatePostVideoButton";
-import { SchedulePostModal, scheduledFor, useScheduledPosts } from "@/components/reports/SchedulePostModal";
-import { formatDateTime } from "@/lib/display";
+import { SchedulePostModal, scheduledFor, sproutStateText, useScheduledPosts } from "@/components/reports/SchedulePostModal";
 import type { ClientContext } from "@/lib/clientContext";
 import { isTextOnlyFormat, isVideoFormat } from "@/lib/platform";
 import { useEffect, useRef, useState } from "react";
@@ -107,7 +106,7 @@ export function PostPanel({
     },
   });
   const designsReady = !!designSettings?.confirmed_at;
-  // The post's state in Sprout: scheduled for a time, or not scheduled yet.
+  // The post's state in Sprout: sent for a time, or not sent yet.
   const { data: scheduledRows } = useScheduledPosts(clientId, open && !isClient);
   const scheduled = scheduledFor(scheduledRows, sourcePost);
   // A filmed post's video can instead be made in the look of the client's
@@ -477,11 +476,7 @@ export function PostPanel({
             {/* Schedule tab — hidden for clients */}
             {!isClient && (
               <TabsContent value="schedule" className="mt-4 space-y-3">
-                <p className="t-body" role="status">
-                  {scheduled?.scheduled_time
-                    ? `Scheduled for ${formatDateTime(scheduled.scheduled_time, { timeZone: clientTimezone })}.`
-                    : "Not scheduled yet."}
-                </p>
+                <p className="t-body" role="status">{sproutStateText(scheduled, clientTimezone)}</p>
                 {clientId ? (
                   <>
                     <Button onClick={() => setScheduleOpen(true)}>{scheduled ? "Open scheduler" : "Schedule to Sprout"}</Button>
