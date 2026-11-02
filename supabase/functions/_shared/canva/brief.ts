@@ -14,6 +14,8 @@
 // Its drawn logo and lettering are replaced afterwards with exact layers in
 // Canva (canva-finish), so nothing here has to be relied on for exactness.
 
+import { STORY_SAFE, STORY_SURFACE } from "../design/story.ts";
+
 export interface GenerateInput {
   brand_name: string;
   platform: string;
@@ -23,10 +25,12 @@ export interface GenerateInput {
   background: string;
   /** Paths in the design-references bucket: the client's own posts. */
   refs: string[];
-  /** The canvas size in pixels; 4:5 (1088x1360) when absent. Video cards are 9:16. */
+  /** The canvas size in pixels; 4:5 (1088x1360) when absent. Video cards and Stories are 9:16. */
   size?: { width: number; height: number };
   /** A video's opening or closing card, rather than a post or a carousel slide. */
   video_card?: "cover" | "end";
+  /** "story": a Facebook or Instagram Story, seen full screen (_shared/design/story.ts). */
+  surface?: typeof STORY_SURFACE;
 }
 
 export interface SlideContext {
@@ -37,7 +41,7 @@ export interface SlideContext {
   withCover: boolean;
 }
 
-export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept" | "video_card">, copy: string[], refCount: number, slide?: SlideContext): string {
+export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | "concept" | "video_card" | "surface">, copy: string[], refCount: number, slide?: SlideContext): string {
   const lines = [`Headline, spelled exactly: "${copy[0]}"`, ...copy.slice(1).map((t) => `Second line, spelled exactly: "${t}"`)].join(" ");
   const refsWord = refCount === 1 ? "the other image, which is" : `the other ${numberWord(refCount)} images, which are`;
   if (g.video_card) {
@@ -51,6 +55,13 @@ export function designPrompt(g: Pick<GenerateInput, "brand_name" | "platform" | 
       cover +
       `Design the card around the logo in the visual language of ${refs} ${g.brand_name}'s own posts, filling the tall frame. The picture shows ${g.concept}. ` +
       `${lines} Add no other text and no other logo. ${SHARP}`;
+  }
+  if (g.surface === STORY_SURFACE) {
+    // Seen full screen for a few seconds: the picture fills the tall frame, the words stay in Meta's band.
+    const pct = (n: number) => `${Math.round(n * 100)}%`;
+    return `The first image is the canvas for a new ${g.brand_name} ${g.platform} Story (9:16), seen full screen on a phone. Its logo is final: keep it exactly as it is, where it is. ` +
+      `Design the whole Story around it in the visual language of ${refsWord} ${g.brand_name}'s own posts, the picture filling the tall frame from edge to edge. The picture shows ${g.concept}. ` +
+      `${lines} Every word sits inside the band that leaves out the top ${pct(STORY_SAFE.top)}, the bottom ${pct(STORY_SAFE.bottom)} and ${pct(STORY_SAFE.left)} at each side of the frame. Add no other text and no other logo. ${SHARP}`;
   }
   if (!slide) {
     return `The first image is the canvas for a new ${g.brand_name} ${g.platform} post (4:5). Its logo is final: keep it exactly as it is, where it is. ` +

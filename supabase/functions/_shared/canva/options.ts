@@ -582,8 +582,12 @@ export function videoPlannerPrompt(args: { brand: string; platform: string; copy
   ].filter(Boolean).join("\n");
 }
 
-/** The planner's instruction. The pictures it writes go to the image model as they are. */
-export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string }): string {
+/**
+ * The planner's instruction. The pictures it writes go to the image model as
+ * they are. A Story (story: true) gets one line more; its headline limits are
+ * a feed post's.
+ */
+export function plannerPrompt(args: { brand: string; platform: string; copy: string; voice: string | null; count: number; postCount: number; recent: string; guidance?: string; story?: boolean }): string {
   return [
     `The images are ${args.brand}'s own published posts, numbered Post 1 to Post ${args.postCount}.`,
     args.recent,
@@ -591,6 +595,7 @@ export function plannerPrompt(args: { brand: string; platform: string; copy: str
     `Plan ${args.count} different design options for a new ${args.platform} post with this copy:`,
     `"""${args.copy}"""`,
     args.voice ? `${args.brand}'s voice: ${args.voice}` : "",
+    args.story ? "This post is a Story: its frame is seen full screen for a few seconds, so the headline carries the message, and a second line may carry the call to action." : "",
     "For each option give:",
     CHOOSE_POSTS(args.brand),
     `- headline: the words that will be set on the design, written in ${args.brand}'s voice from the post's message, in the copy's language. One line of at most 8 words, optionally a second, shorter line.`,

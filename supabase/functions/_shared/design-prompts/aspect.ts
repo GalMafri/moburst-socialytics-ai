@@ -5,6 +5,8 @@
 // YouTube Short was generated 16:9 by the video path (because the platform is
 // YouTube) and 1:1 by the image path (because nothing matched at all).
 
+import { STORY_SAFE, canBeStory, isStoryFormat } from "../design/story.ts";
+
 /** Formats that are shot tall, whatever the platform says. */
 const VERTICAL = /\b(short|shorts|reel|reels|story|stories|vertical|portrait|tiktok)\b/;
 /** Formats that are shot wide even on a platform that usually goes tall. */
@@ -83,8 +85,12 @@ export function platformDesignSpec(platform?: string | null, format?: string | n
     label, aspect, safe, headlineScale, logoWidth,
     note: `This artwork is for ${label} at ${aspect}. The platform interface covers the top ${pct(safe.top)}, the bottom ${pct(safe.bottom)}, the left ${pct(safe.left)} and the right ${pct(safe.right)} of the frame; keep the hero subject and every important detail inside the remaining safe area, with generous margins, and let the backdrop continue to the edges. ${extra}`.trim(),
   });
+  // A Story keeps its words in Meta's band (_shared/design/story.ts): clear of the profile name above and the reply bar below.
+  if (isStoryFormat(format) && canBeStory(platform)) {
+    return spec(/facebook/.test(plat) ? "Facebook Stories" : "Instagram Stories", "9:16", { ...STORY_SAFE }, 0.062, 0.3, "The top carries the profile name and the bottom carries the reply bar, so the words sit in the middle band and the picture fills the whole frame.");
+  }
   if (isVerticalFormat(platform, format)) {
-    const name = /tiktok/.test(plat) ? "TikTok" : /youtube/.test(plat) ? "YouTube Shorts" : /facebook/.test(plat) ? "Facebook Stories" : /stor/.test(fmt) ? "Instagram Stories" : "Instagram Reels";
+    const name =/tiktok/.test(plat) ? "TikTok" : /youtube/.test(plat) ? "YouTube Shorts" : /facebook/.test(plat) ? "Facebook Stories" : /stor/.test(fmt) ? "Instagram Stories" : "Instagram Reels";
     return spec(name, "9:16", { top: 0.14, bottom: 0.22, left: 0.06, right: 0.14 }, 0.062, 0.3, "The right edge carries the platform's icon column and the bottom carries the caption, so the composition sits high and left of centre.");
   }
   if (/pinterest/.test(plat)) return spec("Pinterest", "2:3", { top: 0.06, bottom: 0.08, left: 0.06, right: 0.06 }, 0.06, 0.24);

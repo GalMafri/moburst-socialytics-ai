@@ -30,6 +30,7 @@ import { BRIEFS_PLANNED, CAROUSEL_SLIDES, OPTIONS_WANTED, type RecentDesign, car
 import { type DesignRequest, type Settings, endRequest, startOption } from "../_shared/canva/jobs.ts";
 import { filmingOutcome, postInstant } from "../_shared/design/requestRules.ts";
 import { currentCopyOf, designKind, type PassStart } from "../_shared/design/weekRules.ts";
+import { isStoryPost } from "../_shared/design/story.ts";
 import { wakeWorker, wakeVideoWorker } from "../_shared/canva/worker.ts";
 import { DESIGN_ANGLE } from "../_shared/canva/jobs.ts";
 import { learningLines, recordFeedback } from "../_shared/design-prompts/feedback.ts";
@@ -323,7 +324,7 @@ async function planNow(admin: any, request: DesignRequest, settings: Settings): 
   const video = request.kind === "video";
   const common = { brand, platform: request.platform ?? "social", copy: request.post_copy, voice, count: BRIEFS_PLANNED, postCount: library.length, recent, guidance };
   const filmed = video && request.footage_path ? (request.on_camera || "the speaker") : null;
-  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt(common);
+  const instruction = video ? videoPlannerPrompt({ ...common, visual: (request as any).visual_direction ?? null, filmed, style: videoStyle?.profile ?? null, videos: videoStyle?.videos, framesPer: videoStyle?.frames_per_video }) : carousel ? carouselPlannerPrompt({ ...common, slides: CAROUSEL_SLIDES }) : plannerPrompt({ ...common, story: isStoryPost(request) });
   let briefs = [] as ReturnType<typeof parseBriefs>;
   for (let attempt = 0; attempt < 2 && briefs.length < OPTIONS_WANTED; attempt++) {
     const result = await anthropicMessages({
