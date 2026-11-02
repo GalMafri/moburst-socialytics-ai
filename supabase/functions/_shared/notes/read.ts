@@ -2,15 +2,16 @@
 //
 // A client note's file as something the reading call can take (client notes
 // design, section 3): its text, with no model call, for TXT, MD and CSV
-// (decoded here), DOCX (its XML, docx.ts), XLSX (SheetJS, one CSV per sheet)
-// and a PDF with a text layer (unpdf); the file itself, as a document or
+// (decoded here), DOCX (its XML, docx.ts), XLSX (its XML, xlsx.ts, one CSV
+// per sheet) and a PDF with a text layer (unpdf); the file itself, as a document or
 // image block, for a scan or a screenshot. Long text is read in parts cut at
 // paragraph breaks, and text past 400,000 characters is not read.
 //
-// The readers (parsers.ts) stand behind the Parsers boundary: SheetJS and
-// unpdf come from the network, and the DOCX reader imports fflate as Deno
-// does. This module and the screen never load them; the notes_read job loads
-// them only when a file needs one, and the tests run the DOCX reader as is.
+// The readers (parsers.ts) stand behind the Parsers boundary: unpdf comes
+// from the network, and the DOCX and XLSX readers import fflate as Deno does.
+// This module and the screen never load them; the notes_read job loads them
+// only when a file needs one, and the tests run the DOCX and XLSX readers as
+// they are.
 
 import { clipText } from "../text/clip.ts";
 import type { NoteFileType } from "./notes.ts";
@@ -19,7 +20,7 @@ import type { NoteFileType } from "./notes.ts";
 export interface Parsers {
   /** docx.ts: the document's text, a paragraph a line, then its footnotes and endnotes. */
   docxText(bytes: Uint8Array): Promise<string>;
-  /** SheetJS: each sheet's name and its CSV. */
+  /** xlsx.ts: each sheet's name and its CSV, in the workbook's order. */
   xlsxSheets(bytes: Uint8Array): Promise<Array<{ name: string; csv: string }>>;
   /** unpdf: the text layer of every page, and how many pages there are. */
   pdfText(bytes: Uint8Array): Promise<{ pages: number; text: string }>;
