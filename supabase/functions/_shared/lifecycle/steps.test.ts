@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { deps, settled, siteKey, STEPS, weeksFor } from "./steps";
 import { fakeDb, writeClientRpc } from "./fakeDb";
@@ -599,5 +600,186 @@ describe("first_output", () => {
   it("asks the database for the plans and the first report in one call", async () => {
     const db = dbWith({}, { lifecycle_first_output: () => ({ week: "2026-10-19", weeks_requested: ["2026-10-19", "2026-10-26"], first_report: "started" }) });
     expect(await STEPS.first_output.run(db, client(), ctx())).toEqual({ status: "done", result: { week: "2026-10-19", weeks_requested: ["2026-10-19", "2026-10-26"], first_report: "started" } });
+  });
+});
+
+describe("design_refs (references that refresh themselves)", () => {
+  const NOW = "2026-11-02T10:00:00.000Z";
+  const NETWORKS: Record<string, [string, number, string]> = {
+    ig: ["INSTAGRAM", 7, "fb_instagram_account"], li: ["LINKEDIN_COMPANY", 8, "linkedin_company"], fb: ["FACEBOOK", 9, "facebook"], tt: ["TIKTOK", 10, "tiktok"], x: ["TWITTER", 11, "twitter"],
+  };
+  const profiles = (...keys: string[]) => keys.map((k) => ({ client_id: "c1", sprout_profile_id: NETWORKS[k][1], network_type: NETWORKS[k][2], is_active: true }));
+  const media = (guid: string) => `https://network-media.sproutsocial.com/${guid.replace(":", "-")}.jpg`;
+  /** A designed feed post, as Sprout's analytics/posts sends it. */
+  const post = (guid: string, day: string) => {
+    const [network, profile] = NETWORKS[guid.split(":")[0]];
+    return { guid, perma_link: `https://social.example/${guid}`, customer_profile_id: String(profile), network, created_time: `${day}T15:00:00Z`, content_category: "PHOTO", visual_media: [{ media_type: "PHOTO", media_url: media(guid) }] };
+  };
+  const pathOf = (guid: string) => `c1/social-${createHash("sha256").update(media(guid)).digest("hex")}.jpg`;
+  const rulebook = (platforms: string[], look: Record<string, unknown> = { changed: false, since: null, what: "" }) => JSON.stringify({
+    composition_patterns: "Centered headline over a full-bleed photo.", typography_treatment: "Bold sans, all caps.", imagery_style: "Bright studio product shots.",
+    color_usage: "Navy ground, coral accent.", surface_and_texture: "Flat.", logo_and_marks_treatment: "Wordmark bottom center, small.", mood_and_voice_visual: "Confident.",
+    anti_patterns: "Never use gradients.", platforms: Object.fromEntries(platforms.map((p) => [p, `${p} posts set the headline larger.`])), look_change: look,
+  });
+  type Calls = { read: number; review: number; learn: number; learned: Array<{ content: Array<{ type: string; text?: string }> }> };
+  function fakeIO(posts: () => Record<string, unknown>[], over: Record<string, unknown> = {}): Calls {
+    const calls: Calls = { read: 0, review: 0, learn: 0, learned: [] };
+    deps.refsIO = (() => ({
+      now: () => new Date(NOW), apiKey: async () => "key",
+      readPosts: async () => { calls.read++; return posts(); },
+      image: async (url: string) => ({ bytes: new TextEncoder().encode(url), mime: "image/jpeg" }),
+      review: async () => { calls.review++; return { usable: true, confidence: 0.95, reason: "Branded type over a color block" }; },
+      learn: async (a: Calls["learned"][number]) => { calls.learn++; calls.learned.push(a); return rulebook(["Instagram"]); },
+      ...over,
+    })) as never;
+    return calls;
+  }
+  const refsClient = (over: Record<string, unknown> = {}) => client({ name: "Pay The Pyper", design_style_synthesis: null, design_refs_harvested_at: null, ...over });
+  function world(c: Record<string, unknown>, keys: string[], tables: Record<string, Record<string, unknown>[]> = {}) {
+    const libraryWrites: Array<{ p_client: string; p_reference_paths: string[] }> = [];
+    const db = dbWith({ clients: [c], sprout_profiles: profiles(...keys), design_reference_reviews: [], design_reference_choices: [], ...tables }, {
+      lifecycle_write_design_library: (a: { p_client: string; p_reference_paths: string[] }) => { libraryWrites.push(a); return true; },
+    });
+    return { db, libraryWrites };
+  }
+  const igWeek = ["2026-11-01", "2026-10-29", "2026-10-26", "2026-10-22", "2026-10-19"];
+
+  it("checks every week, and learns the look on its first check from each platform's newest posts, labeled with platform and date", async () => {
+    expect(STEPS.design_refs.policy).toEqual({ refreshDays: 7, recheckDays: 7 });
+    const c = refsClient();
+    const { db, libraryWrites } = world(c, ["ig", "li"]);
+    const posts = [...igWeek.map((d, i) => post(`ig:${i}`, d)), post("li:0", "2026-10-30"), post("li:1", "2026-10-20")];
+    const calls = fakeIO(() => posts);
+    const out = await STEPS.design_refs.run(db, c, ctx());
+    expect(out).toMatchObject({ status: "done", result: { relearned: "first", reviewed: 7, model_calls: 8, references: 7, synthesized_at: NOW,
+      platforms: { Instagram: { posts: 5, own_rules: true }, LinkedIn: { posts: 2, own_rules: false } } } });
+    // The check's own date is when it ran: no reused date postpones the next check.
+    expect("doneAt" in out).toBe(false);
+    expect(calls).toMatchObject({ read: 1, review: 7, learn: 1 });
+    // Newest first, labeled; LinkedIn has no section of its own below 4 posts.
+    const labels = calls.learned[0].content.filter((b) => b.type === "text").map((b) => b.text);
+    expect(labels.slice(1, 4)).toEqual(["Post 1 (Instagram, Nov 1, 2026):", "Post 2 (LinkedIn, Oct 30, 2026):", "Post 3 (Instagram, Oct 29, 2026):"]);
+    expect(labels.at(-1)).toContain("Platforms with rules of their own: Instagram (5 posts).");
+    expect(labels.at(-1)).toContain("These follow the core, with too few posts for rules of their own: LinkedIn (2 posts).");
+    expect(c.design_style_synthesis).toMatchObject({ reference_pipeline_version: 2, platforms: { Instagram: { rules: "Instagram posts set the headline larger.", posts: 5 } }, source_count: 7 });
+    expect(Object.keys(c.design_style_synthesis.platforms)).toEqual(["Instagram"]);
+    expect(c.design_style_synthesis.platform_adaptations).toBe("Instagram: Instagram posts set the headline larger.");
+    expect(c.harvested_design_references.slice(0, 3).map((e: { path: string }) => e.path)).toEqual([pathOf("ig:0"), pathOf("li:0"), pathOf("ig:1")]);
+    expect(libraryWrites).toEqual([{ p_client: "c1", p_reference_paths: c.harvested_design_references.map((e: { path: string }) => e.path) }]);
+    expect(db.tables.design_reference_reviews).toHaveLength(7);
+  });
+
+  it("makes no model call in a week with no new posts, and never reviews a post twice", async () => {
+    const c = refsClient();
+    const { db } = world(c, ["ig", "li"]);
+    const posts = [...igWeek.map((d, i) => post(`ig:${i}`, d)), post("li:0", "2026-10-30")];
+    fakeIO(() => posts);
+    await STEPS.design_refs.run(db, c, ctx());
+    const learnedAt = c.design_style_synthesis.synthesized_at;
+    const calls = fakeIO(() => posts, { now: () => new Date("2026-11-09T10:00:00Z") });
+    const out = await STEPS.design_refs.run(db, c, ctx({ force: true }));
+    expect(calls).toMatchObject({ read: 1, review: 0, learn: 0 });
+    expect(out).toMatchObject({ status: "done", result: { relearned: null, reviewed: 0, model_calls: 0, synthesized_at: learnedAt, checked_at: "2026-11-09T10:00:00.000Z" } });
+  });
+
+  it("counts the posts reviewed before reviews were stored as reviewed", async () => {
+    const c = refsClient({ harvested_design_references: igWeek.slice(0, 3).map((d, i) => ({ path: `c1/social-old${i}.jpg`, source_post_id: `ig:${i}`, platform: "INSTAGRAM", posted_at: `${d}T15:00:00Z`, quality_checked: true, classification: "Branded" })) });
+    const { db } = world(c, ["ig"]);
+    for (let i = 0; i < 3; i++) db.uploads.set(`design-references/c1/social-old${i}.jpg`, "image");
+    const calls = fakeIO(() => igWeek.slice(0, 4).map((d, i) => post(`ig:${i}`, d)));
+    await STEPS.design_refs.run(db, c, ctx());
+    // Only the fourth post is new to the model.
+    expect(calls.review).toBe(1);
+    expect(db.tables.design_reference_reviews.map((r) => r.source_post_id).sort()).toEqual(["ig:0", "ig:1", "ig:2", "ig:3"]);
+  });
+
+  it("takes one new post into the library without learning the look again; two new posts learn it again", async () => {
+    const c = refsClient();
+    const { db, libraryWrites } = world(c, ["ig"]);
+    const posts = igWeek.map((d, i) => post(`ig:${i}`, d));
+    fakeIO(() => posts);
+    await STEPS.design_refs.run(db, c, ctx());
+    const learnedAt = c.design_style_synthesis.synthesized_at;
+
+    const one = fakeIO(() => [post("ig:new1", "2026-11-05"), ...posts], { now: () => new Date("2026-11-09T10:00:00Z") });
+    const first = await STEPS.design_refs.run(db, c, ctx());
+    expect(one).toMatchObject({ review: 1, learn: 0 });
+    expect(first).toMatchObject({ status: "done", result: { relearned: null, synthesized_at: learnedAt } });
+    expect(c.harvested_design_references[0].path).toBe(pathOf("ig:new1"));
+    expect(libraryWrites.at(-1)!.p_reference_paths[0]).toBe(pathOf("ig:new1"));
+
+    const two = fakeIO(() => [post("ig:new2", "2026-11-12"), post("ig:new3", "2026-11-13"), post("ig:new1", "2026-11-05"), ...posts], { now: () => new Date("2026-11-16T10:00:00Z") });
+    const second = await STEPS.design_refs.run(db, c, ctx());
+    expect(two).toMatchObject({ review: 2, learn: 1 });
+    expect(second).toMatchObject({ status: "done", result: { relearned: "posts", synthesized_at: "2026-11-16T10:00:00.000Z" } });
+    // The previous rulebook goes with the images.
+    expect(two.learned[0].content.at(-1)!.text).toContain("Pay The Pyper's earlier rulebook, learned Nov 2, 2026:");
+    expect(c.design_style_synthesis.synthesized_at).not.toBe(learnedAt);
+  });
+
+  it("is due at once when a person keeps or leaves out a post or uploads one, as when the accounts change", async () => {
+    const c = refsClient();
+    const { db } = world(c, ["ig", "li"]);
+    const key = await STEPS.design_refs.inputs(db, c, new Map());
+    expect(key).toMatch(/^1676448:7,8\|chosen:/);
+    db.tables.design_reference_choices.push({ client_id: "c1", path: "c1/social-a.jpg", choice: "kept" });
+    const kept = await STEPS.design_refs.inputs(db, c, new Map());
+    expect(kept).not.toBe(key);
+    expect(await STEPS.design_refs.inputs(db, { ...c, design_references: ["c1/uploads/flyer.png"] }, new Map())).not.toBe(kept);
+    db.tables.sprout_profiles.pop();
+    expect(await STEPS.design_refs.inputs(db, c, new Map())).toMatch(/^1676448:7\|chosen:/);
+    db.tables.sprout_profiles.pop();
+    expect(await STEPS.design_refs.inputs(db, c, new Map())).toBeNull();
+  });
+
+  it("drops posts from before a new look, keeps a kept one, and reads the website again", async () => {
+    const days = ["2026-10-30", "2026-10-26", "2026-10-22", "2026-10-15", "2026-10-10", "2026-10-05"];
+    const c = refsClient();
+    const { db } = world(c, ["ig"], { design_reference_choices: [] });
+    const posts = days.map((d, i) => post(`ig:${i}`, d));
+    // The team kept one of the older posts.
+    db.tables.design_reference_reviews.push({ client_id: "c1", source_post_id: "ig:5", network: "INSTAGRAM", posted_at: "2026-10-05T15:00:00Z", source_url: null, content_hash: "h5", verdict: "designed", path: pathOf("ig:5"), confidence: 0.9, reason: "r", reviewed_at: NOW });
+    db.tables.design_reference_choices.push({ client_id: "c1", path: pathOf("ig:5"), choice: "kept" });
+    db.uploads.set(`design-references/${pathOf("ig:5")}`, "image");
+    fakeIO(() => posts, { learn: async () => rulebook(["Instagram"], { changed: true, since: "2026-10-20", what: "A new coral and navy palette with a serif headline." }) });
+    const out = await STEPS.design_refs.run(db, c, ctx());
+    expect(out).toMatchObject({ status: "done", result: { look_since: "2026-10-20" } });
+    expect(c.harvested_design_references.map((e: { path: string }) => e.path)).toEqual([pathOf("ig:5"), pathOf("ig:0"), pathOf("ig:1"), pathOf("ig:2")]);
+    expect(c.design_style_synthesis.look_change).toMatchObject({ since: "2026-10-20", what: "A new coral and navy palette with a serif headline." });
+    // brand_read keys on the new look (the client row carries it as look_since), so the logo file and colors follow a rebrand.
+    expect(await STEPS.brand_read.inputs(db, { ...c, look_since: c.design_style_synthesis.look_change.since }, new Map())).toBe("moburst.com|look:2026-10-20");
+    expect(await STEPS.brand_read.inputs(db, c, new Map())).toBe("moburst.com");
+  });
+
+  it("with fewer than 3 designed posts, waits a week and keeps the last references, minus any a person left out", async () => {
+    const before = [{ path: "c1/social-a.jpg", quality_checked: true, platform: "INSTAGRAM", posted_at: "2026-06-01T00:00:00Z" }, { path: "c1/social-b.jpg", quality_checked: true, platform: "INSTAGRAM", posted_at: "2026-06-02T00:00:00Z" }];
+    const c = refsClient({ harvested_design_references: before });
+    const { db } = world(c, ["ig"], { design_reference_choices: [{ client_id: "c1", path: "c1/social-b.jpg", choice: "left_out" }] });
+    fakeIO(() => []);
+    expect(await STEPS.design_refs.run(db, c, ctx())).toMatchObject({ status: "waiting", reason: "designed_posts", recheckDays: 7 });
+    expect(c.harvested_design_references.map((e: { path: string }) => e.path)).toEqual(["c1/social-a.jpg"]);
+  });
+
+  it("reviews at most one run's worth and goes on a minute later", async () => {
+    const c = refsClient();
+    const { db } = world(c, ["ig", "li", "fb", "tt", "x"]);
+    const posts = ["ig", "li", "fb", "tt", "x"].flatMap((k) => igWeek.concat(["2026-10-15"]).map((d, i) => post(`${k}:${i}`, d)));
+    const calls = fakeIO(() => posts);
+    expect(await STEPS.design_refs.run(db, c, ctx())).toMatchObject({ status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { reviewed: 24, left: 6 } });
+    expect(calls).toMatchObject({ review: 24, learn: 0 });
+    const next = fakeIO(() => posts, { learn: async () => { next.learn++; return rulebook(["Instagram", "LinkedIn", "Facebook", "TikTok", "X"]); } });
+    expect(await STEPS.design_refs.run(db, c, ctx())).toMatchObject({ status: "done", result: { reviewed: 6, references: 16 } });
+    expect(next).toMatchObject({ review: 6, learn: 1 });
+  });
+
+  it("keeps the last references when the model does not answer, and is tried again later", async () => {
+    const before = [{ path: "c1/social-a.jpg", quality_checked: true, platform: "INSTAGRAM", posted_at: "2026-10-01T00:00:00Z" }];
+    const c = refsClient({ harvested_design_references: before });
+    const { db, libraryWrites } = world(c, ["ig"]);
+    fakeIO(() => igWeek.map((d, i) => post(`ig:${i}`, d)), { review: async () => { throw new Error("overloaded"); } });
+    expect(await STEPS.design_refs.run(db, c, ctx())).toMatchObject({ status: "failed" });
+    expect(c.harvested_design_references).toBe(before);
+    expect(libraryWrites).toEqual([]);
+    expect(db.tables.design_reference_reviews).toEqual([]);
   });
 });
