@@ -219,3 +219,10 @@ verify_jwt = false
 
 [functions.video-worker]
 verify_jwt = false
+
+# The Claude connector (remote MCP server). verify_jwt must stay false, as
+# Supabase's MCP guide requires: the function answers the unauthenticated
+# OAuth discovery request itself, and withSupabase verifies every token
+# against the project's JWKS.
+[functions.mcp]
+verify_jwt = false
