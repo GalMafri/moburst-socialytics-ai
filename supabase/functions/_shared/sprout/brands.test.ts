@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockedFromCreation, clientWithSite, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, type ClientIndex, type KnownClient } from "./brands";
+import { blockedFromCreation, brandName, clientWithSite, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, profileBrandName, type ClientIndex, type KnownClient } from "./brands";
 import type { SproutProfile } from "../lifecycle/accounts";
 
 const p = (id: string, name: string, native: string, network: string, status = "active", groups: string[] = []): SproutProfile => ({ id, name, native_name: native, network_type: network, native_link: "", status, groups });
@@ -19,7 +19,7 @@ describe("groupBrands: one Sprout group is one brand", () => {
     p("9300", "Twos", "twos", "facebook"), p("9301", "Twos", "twosapp", "tiktok"), p("9302", "Olo", "olo_loose", "twitter"),
   ];
 
-  it("makes each group one brand, named by the group, whatever Sprout calls its profiles", () => {
+  it("makes each group one brand, named as people know it, whatever Sprout calls its profiles", () => {
     const brands = groupBrands(listed, GROUPS);
     expect(brands.map((b) => [b.key, b.name, ids(b), b.group?.id ?? null])).toEqual([
       ["group:11", "Olo", ["7001", "7002", "7003"], "11"],
@@ -89,7 +89,8 @@ describe("groupBrands: profiles in no group", () => {
   it("joins brands by the pairs the website search found, and names them again", () => {
     const brands = groupBrands([p("1", "Olo", "olo", "linkedin_company"), p("2", "Olo Hospitality", "olohq", "fb_instagram_account"), p("3", "Olo Hospitality", "olohq_fb", "facebook"), p("4", "Other", "other", "facebook")]);
     const joined = joinBrands(brands, [["2", "1"]]);
-    expect(joined.map((b) => [b.key, b.name, ids(b), b.members])).toEqual([["1", "Olo Hospitality", ["1", "2", "3"], ["1", "2"]], ["4", "Other", ["4"], ["4"]]]);
+    // "Olo" is the name all three share ("Olo Hospitality" begins with it).
+    expect(joined.map((b) => [b.key, b.name, ids(b), b.members])).toEqual([["1", "Olo", ["1", "2", "3"], ["1", "2"]], ["4", "Other", ["4"], ["4"]]]);
   });
 });
 
@@ -109,9 +110,12 @@ describe("matchBrand", () => {
   });
   it("matches by the name rule, and by a profile the client's homepage links to", () => {
     expect(matchBrand(bader, index([client({ id: "c1", name: "Bader Law, LLC" })]))).toMatchObject({ by: "name" });
+    const moburstClient = client({ id: "m", name: "Moburst", site_profiles: ["linkedin:moburst", "instagram:moburst.agency"] });
+    // The brand's name before its tagline is the client's name.
     const [moburst] = groupBrands([p("5719052", "Moburst - Growth Done Right", "moburst", "linkedin_company")]);
-    const m = matchBrand(moburst, index([client({ id: "m", name: "Moburst", site_profiles: ["linkedin:moburst", "instagram:moburst.agency"] })]));
-    expect(m).toMatchObject({ by: "site_link", clients: [{ id: "m" }] });
+    expect(matchBrand(moburst, index([moburstClient]))).toMatchObject({ by: "name", clients: [{ id: "m" }] });
+    const [agency] = groupBrands([p("5489335", "Mobile-First Digital Agency", "moburst.agency", "fb_instagram_account")]);
+    expect(matchBrand(agency, index([moburstClient]))).toMatchObject({ by: "site_link", clients: [{ id: "m" }] });
   });
   it("leaves an archived client's brand alone and never brings the client back", () => {
     const m = matchBrand(bader, index([client({ id: "c1", name: "Bader Law", archived_at: "2026-09-30T00:00:00Z" })]));
@@ -150,5 +154,60 @@ describe("which unmatched brands become clients (section 3)", () => {
   it("lets a brand through when all three hold, a demo copy's website being no client's", () => {
     expect(blockedFromCreation(olo, { posts: 4, mostLinked: "olo.com" }, clients)).toBeNull();
     expect(blockedFromCreation(olo, { posts: 4, mostLinked: null }, clients)).toBeNull();
+  });
+});
+
+// Live groups of 2 Nov 2026: Sprout's group label is the team's shorthand ("ewc", "RMBH"); a client is named as people know the brand.
+describe("the name a new client gets", () => {
+  const named = (group: string, ...names: string[]) => brandName(names.map((n, i) => p(String(100 + i), n, `h${i}`, "facebook")), { id: "1", name: group });
+
+  it("takes each profile's brand name: before a tagline, without a legal suffix", () => {
+    expect(profileBrandName("Buzznow | Live Expert Help")).toBe("Buzznow");
+    expect(profileBrandName("Olo - Skip the Line")).toBe("Olo");
+    expect(profileBrandName("Olo \u2013 Order Ahead")).toBe("Olo");
+    expect(profileBrandName("European Wax Center (Erie)")).toBe("European Wax Center");
+    expect(profileBrandName("Adaptive Sound Technologies, Inc.")).toBe("Adaptive Sound Technologies");
+    expect(profileBrandName("Bader Law LLC")).toBe("Bader Law");
+    expect(profileBrandName("Mobile-First Agency")).toBe("Mobile-First Agency");
+  });
+  it("uses the name most profiles share, never the group's label", () => {
+    expect(named("ewc", "European Wax Center (Erie)", "European Wax Center").name).toBe("European Wax Center");
+    expect(named("AST", "Adaptive Sound Technologies, Inc.").name).toBe("Adaptive Sound Technologies");
+    expect(named("buzznow", "Buzznow", "Buzznow | Live Expert Help").name).toBe("Buzznow");
+    expect(named("Global Class (Ai Degree)", "Ai Degree", "Ai Degree | AI Education").name).toBe("Ai Degree");
+    expect(named("Yangra", "Yangra", "Yangra | Hinduism for Modern Life").name).toBe("Yangra");
+  });
+  it("counts a profile for every brand name its own name begins with", () => {
+    expect(named("Olo", "Olo - Skip the Line", "Olo App | Food Ordering", "Olo App | Food Ordering").name).toBe("Olo");
+    expect(named("Twos", "Twos Company", "Twos").name).toBe("Twos");
+  });
+  it("leaves out names that look like handles", () => {
+    const derma = named("DermaAngel", "DermaAngel US", "dermaangel_us");
+    expect(derma.name).toBe("DermaAngel US");
+    expect(derma.why).toContain(`"dermaangel_us" looks like a handle`);
+    expect(named("prepsmart", "PrepSmart Recipes", "prepsmartrecipes", "PrepSmartRecipes").name).toBe("PrepSmart Recipes");
+  });
+  it("takes the longest of names shared equally, and says so", () => {
+    // RMBH: neither name begins the other, so they tie, and the longer is the charity's.
+    const rmbh = named("RMBH", "Rebbe Meir Baal Haness US", "Rebbe Meir Baal Hanes Charity");
+    expect(rmbh.name).toBe("Rebbe Meir Baal Hanes Charity");
+    expect(rmbh.why).toBe(`Named "Rebbe Meir Baal Hanes Charity": the longest of the names shared by the most profiles (1 of 2 each: "Rebbe Meir Baal Haness US", "Rebbe Meir Baal Hanes Charity"); the Sprout group is "RMBH".`);
+  });
+  it("says which name most profiles share", () => {
+    expect(named("ewc", "European Wax Center (Erie)", "European Wax Center").why).toBe(`Named "European Wax Center": the name 2 of its 2 profile names share; the Sprout group is "ewc".`);
+  });
+  it("falls back to the group's name only when no profile name is usable", () => {
+    const only = named("Global Class (Ai Degree)", "aidegree_official");
+    expect(only.name).toBe("Global Class (Ai Degree)");
+    expect(only.why).toBe(`Named after its Sprout group "Global Class (Ai Degree)": no profile name is usable ("aidegree_official" looks like a handle).`);
+  });
+  it("names the brands groupBrands makes this way, keeping the group's own name on the group", () => {
+    const [ewc] = groupBrands([inGroup(["7"], p("1", "European Wax Center (Erie)", "ewc_erie", "facebook")), inGroup(["7"], p("2", "European Wax Center", "waxcenter", "fb_instagram_account"))], [{ id: "7", name: "ewc" }]);
+    expect(ewc).toMatchObject({ key: "group:7", name: "European Wax Center", group: { id: "7", name: "ewc" } });
+    expect(ewc.name_reason).toMatch(/^Named "European Wax Center"/);
+  });
+  it("matches a client by the group's own name too", () => {
+    const [ewc] = groupBrands([inGroup(["7"], p("1", "European Wax Center", "waxcenter", "facebook"))], [{ id: "7", name: "EWC" }]);
+    expect(matchBrand(ewc, index([client({ id: "c", name: "ewc" })]))).toMatchObject({ by: "name", clients: [{ id: "c" }] });
   });
 });

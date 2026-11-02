@@ -139,8 +139,9 @@ export function nameLabels(names: string[]): Set<string> {
   return out;
 }
 
-type BrandLike = Pick<Brand, "name" | "profiles">;
-const namesOf = (brand: BrandLike) => [...new Set([brand.name, ...brand.profiles.map((p) => p.name)].map((n) => String(n || "").trim()).filter(Boolean))];
+type BrandLike = Pick<Brand, "name" | "profiles"> & { group?: Brand["group"] };
+/** Every name of the brand: its own, its Sprout group's and each profile's. */
+const namesOf = (brand: BrandLike) => [...new Set([brand.name, brand.group?.name, ...brand.profiles.map((p) => p.name)].map((n) => String(n || "").trim()).filter(Boolean))];
 
 /** The exact fact that makes this domain the brand's website, or null. The domain-name fact needs no page. */
 export function confirmingFact(brand: BrandLike, domain: string, html: string | null, finalHost?: string | null): SiteFact | null {

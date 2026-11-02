@@ -75,6 +75,8 @@ describe("judging the registrable domain (the 2 Nov dry run: app.olo.com 7 times
     const brand = (name: string) => ({ name, profiles: [] });
     expect(confirmingFact(brand("DermaAngel US"), "dermaangel.com", null)).toBe("domain_name");
     expect(confirmingFact(brand("Olo Dining"), "olo.com", null)).toBeNull();
+    // The Sprout group's own name is one of the brand's names too.
+    expect(confirmingFact({ name: "European Wax Center", profiles: [], group: { id: "7", name: "EWC" } }, "ewc.com", null)).toBe("domain_name");
   });
 });
 
