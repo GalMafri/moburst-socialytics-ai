@@ -73,7 +73,9 @@ export function AutomaticBrandReferences({ clientId, savedVersion, onReady }: {
     if (asked.length) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: reviews } = await (supabase.from as any)('design_reference_reviews').select('path, network, posted_at, source_url').eq('client_id', clientId).in('path', asked);
-      leftOut = [...leftOut, ...((reviews ?? []) as unknown[]).map((r) => entryOf(r, uploads))];
+      const found = ((reviews ?? []) as Array<{ path: string }>).map((r) => entryOf(r, uploads));
+      // A post the reviews no longer describe is still listed, so it can be used again.
+      leftOut = [...leftOut, ...found, ...asked.filter((p) => !found.some((e) => e.path === p)).map((p) => entryOf({ path: p }, uploads))];
     }
     setLibrary(entries);
     setChoices(saved);

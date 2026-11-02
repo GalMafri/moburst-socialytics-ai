@@ -217,6 +217,13 @@ describe("20261109150000_design_refs_refresh.sql", () => {
     await db.query(`insert into public.design_reference_reviews (client_id, source_post_id, network, verdict, path) values ($1, 'ig:9', 'INSTAGRAM', 'designed', 'c1/social-old.jpg')`, [PYPER]);
     await as("authenticated", APP);
     expect((await rows(`select public.design_reference_choose($1, 'c1/social-old.jpg', 'kept') as r`, [PYPER]))[0].r).toEqual({ path: "c1/social-old.jpg", choice: "kept" });
+    // Taking a choice back needs no reference: a post that left every list can still be used again.
+    await as("service_role", SERVICE);
+    await db.query(`insert into public.design_reference_choices (client_id, path, choice) values ($1, 'c1/gone.jpg', 'left_out')`, [PYPER]);
+    await as("authenticated", APP);
+    await db.query(`select public.design_reference_choose($1, 'c1/gone.jpg', 'none')`, [PYPER]);
+    await as(null, null);
+    expect(await rows(`select path from public.design_reference_choices where path = 'c1/gone.jpg'`)).toEqual([]);
   });
 
   it("lets staff read reviews and choices, and nobody but the service role write them directly", async () => {

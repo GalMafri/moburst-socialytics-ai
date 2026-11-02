@@ -79,7 +79,8 @@ create policy "Staff read design reference choices" on public.design_reference_c
   for select to authenticated using (public.is_moburst_staff() and public.can_access_client(client_id));
 
 -- Keep a post, leave it out, or take the choice back ('none'). Staff who can
--- write the client; the path must be one of the client's own references.
+-- write the client; a post kept or left out must be one of the client's own
+-- references.
 create or replace function public.design_reference_choose(p_client uuid, p_path text, p_choice text)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -95,12 +96,13 @@ begin
   if coalesce(p_choice, '') not in ('kept', 'left_out', 'none') then
     raise exception 'Unknown choice.' using errcode = '22023';
   end if;
-  if v_path = '' or not (
+  -- Taking a choice back is always allowed; keeping or leaving out needs one of the client's own references.
+  if v_path = '' or (p_choice <> 'none' and not (
     exists (select 1 from design_reference_reviews r where r.client_id = p_client and r.path = v_path and r.verdict = 'designed')
     or exists (select 1 from clients c where c.id = p_client and jsonb_typeof(c.design_references) = 'array' and c.design_references ? v_path)
     or exists (select 1 from clients c, jsonb_array_elements(case when jsonb_typeof(c.harvested_design_references) = 'array' then c.harvested_design_references else '[]'::jsonb end) e
                 where c.id = p_client and e ->> 'path' = v_path)
-  ) then
+  )) then
     raise exception 'That post is not one of this client''s references.' using errcode = '22023';
   end if;
   if p_choice = 'none' then
