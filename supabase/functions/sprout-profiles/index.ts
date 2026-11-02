@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { staffGate } from "../_shared/auth/requireStaff.ts";
-import { listCustomerProfiles, SproutListError } from "../_shared/sprout/profiles.ts";
+import { listCustomerGroups, listCustomerProfiles, SproutListError } from "../_shared/sprout/profiles.ts";
 import { groupBrands } from "../_shared/sprout/brands.ts";
 
 const corsHeaders = {
@@ -34,7 +34,7 @@ serve(async (req) => {
 
   try {
     // The same list the client lifecycle matches profiles from (_shared/sprout/profiles.ts).
-    const listed = await listCustomerProfiles();
+    const [listed, groups] = await Promise.all([listCustomerProfiles(), listCustomerGroups()]);
     const profiles = listed.map((p) => ({
       ...p,
       // The page compares these with assignments as Sprout sends them: numbers.
@@ -50,11 +50,11 @@ serve(async (req) => {
     }
 
     // Grouped by brand, as the weekly Sprout onboarding groups them
-    // (_shared/sprout/brands.ts: the lifecycle's name rule, joined by a handle
-    // shared across networks), so this list and the job agree. Named by the
-    // spelling most of a brand's profiles carry; only active profiles.
+    // (_shared/sprout/brands.ts: one Sprout group is one brand, named by the
+    // group; profiles in no group by the lifecycle's name rule), so this list
+    // and the job agree. Only active profiles.
     const groupedByClient: Record<string, typeof profiles> = {};
-    for (const brand of groupBrands(listed)) {
+    for (const brand of groupBrands(listed, groups)) {
       const ids = new Set(brand.profiles.map((p) => String(p.id)));
       (groupedByClient[brand.name || "Unknown"] ??= []).push(...profiles.filter((p) => ids.has(String(p.id))));
     }

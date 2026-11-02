@@ -4,25 +4,37 @@
 // may become one (spec: docs/superpowers/specs/2026-11-02-sprout-auto-
 // onboarding-design.md, sections 1 to 3).
 //
-// A brand is the active profiles whose Sprout names are equal by the
-// lifecycle's name rule (names.ts), the rule the accounts step matches by.
-// Two such groups are one brand when a profile in one has the same handle as
-// a profile in the other on another network, or when the website search
-// ties them (website.ts, then joinBrands). The weekly onboarding job and the
-// setup page's profile list (sprout-profiles) group through this one module,
-// so they agree. Free of Deno and network imports so it can be tested.
+// A brand is one Sprout group: the account's own grouping of its profiles,
+// named by the group's name. Sprout names a brand's profiles differently on
+// each network ("Olo - Skip the Line" on Facebook, "Olo App | Food Ordering"
+// on Instagram, dry run of 2 Nov 2026), so names alone split one brand in
+// two. Profiles in no group fall back to the lifecycle's name rule
+// (names.ts), joined across networks by a shared handle. The website search
+// can then join a brand in no group to another (website.ts, joinBrands), but
+// never two Sprout groups to each other. A profile in two groups leaves both
+// brands alone (groupConflict). The weekly onboarding job and the setup
+// page's profile list (sprout-profiles) group through this one module, so
+// they agree. Free of Deno and network imports so it can be tested.
 
 import { profileKeyOf, type SproutProfile } from "../lifecycle/accounts.ts";
 import { normName, sameName } from "../lifecycle/names.ts";
-import { clientHost } from "../net/clientHost.ts";
+import { siteKeyOf } from "../net/domains.ts";
+import type { CustomerGroup } from "./profiles.ts";
 import { networkKey } from "./publishRules.ts";
 
 export interface Brand {
-  /** The brand's smallest profile id: it stays the same while profiles are added. */
+  /** "group:<id>" for a Sprout group; else the brand's smallest profile id, which stays the same while profiles are added. */
   key: string;
-  /** The spelling most of its profiles carry. */
+  /** The group's name; for profiles in no group (or a group Sprout gives no name), the spelling most of them carry. */
   name: string;
   profiles: SproutProfile[];
+  /** The Sprout group the brand is, or null for profiles in no group. */
+  group: CustomerGroup | null;
+}
+
+/** A brand after the website search's joins, with the keys of the brands it is made of. */
+export interface JoinedBrand extends Brand {
+  members: string[];
 }
 
 /** A handle shorter than this never joins two groups: too many brands could share it. */
@@ -30,8 +42,11 @@ const MIN_JOIN_HANDLE = 3;
 
 const isActive = (p: SproutProfile) => String(p.status || "active").toLowerCase() === "active";
 const handleOf = (p: SproutProfile) => String(p.native_name || "").trim().toLowerCase().replace(/^@/, "");
+const groupsOf = (p: SproutProfile) => [...new Set((p.groups ?? []).map(String).filter(Boolean))];
 /** Profile ids are digits; a shorter one is older. */
 const byId = (a: string, b: string) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
+/** Brands in the order of their oldest profile. */
+const byOldest = (a: Brand, b: Brand) => byId(String(a.profiles[0]?.id ?? ""), String(b.profiles[0]?.id ?? "")) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 
 /** Groups of keys joined pairwise (union-find), each in id order. */
 function unite(keys: string[], pairs: Array<[string, string]>): string[][] {
@@ -52,9 +67,14 @@ function unite(keys: string[], pairs: Array<[string, string]>): string[][] {
   return [...groups.values()].map((g) => g.sort(byId)).sort((a, b) => byId(a[0], b[0]));
 }
 
-/** A brand from its profiles: keyed by the oldest, named by the most common spelling (the oldest profile's on a tie). */
-export function brandOf(profiles: SproutProfile[]): Brand {
-  const sorted = [...profiles].sort((a, b) => byId(String(a.id), String(b.id)));
+/**
+ * A brand from its profiles: a group's is keyed and named by the group (by
+ * its profiles' most common spelling when Sprout gives the group no name);
+ * otherwise keyed by the oldest profile and named by the most common
+ * spelling, the oldest profile's on a tie.
+ */
+export function brandOf(profiles: SproutProfile[], group: CustomerGroup | null = null): Brand {
+  const sorted = [...new Map(profiles.map((p) => [String(p.id), p])).values()].sort((a, b) => byId(String(a.id), String(b.id)));
   const counts = new Map<string, number>();
   for (const p of sorted) {
     const n = String(p.name || "").trim();
@@ -62,13 +82,16 @@ export function brandOf(profiles: SproutProfile[]): Brand {
   }
   let name = "";
   for (const [n, c] of counts) if (!name || c > counts.get(name)!) name = n;
-  return { key: String(sorted[0]?.id ?? ""), name, profiles: sorted };
+  return {
+    key: group ? `group:${group.id}` : String(sorted[0]?.id ?? ""),
+    name: group?.name.trim() || name,
+    profiles: sorted,
+    group,
+  };
 }
 
-/** Sprout's active profiles as brands: by the name rule, then joined by a handle shared across networks. */
-export function groupBrands(profiles: SproutProfile[]): Brand[] {
-  const live = profiles.filter(isActive);
-  const ids = live.map((p) => String(p.id));
+/** Profiles in no group as brands: by the name rule, then joined by a handle shared across networks. */
+function looseBrands(live: SproutProfile[]): Brand[] {
   const pairs: Array<[string, string]> = [];
   const byName = new Map<string, string>();
   for (const p of live) {
@@ -86,13 +109,65 @@ export function groupBrands(profiles: SproutProfile[]): Brand[] {
     }
   }
   const byId_ = new Map(live.map((p) => [String(p.id), p]));
-  return unite(ids, pairs).map((g) => brandOf(g.map((id) => byId_.get(id)!)));
+  return unite(live.map((p) => String(p.id)), pairs).map((g) => brandOf(g.map((id) => byId_.get(id)!)));
 }
 
-/** Brands joined by pairs of brand keys (the website search's joins), each named again. */
-export function joinBrands(brands: Brand[], pairs: Array<[string, string]>): Brand[] {
+/** Sprout's active profiles as brands: one per Sprout group, and the profiles in no group by the name rule. */
+export function groupBrands(profiles: SproutProfile[], groups: CustomerGroup[] = []): Brand[] {
+  const live = profiles.filter(isActive);
+  const named = new Map(groups.map((g) => [String(g.id), g]));
+  const members = new Map<string, SproutProfile[]>();
+  const loose: SproutProfile[] = [];
+  for (const p of live) {
+    const ids = groupsOf(p);
+    if (!ids.length) loose.push(p);
+    for (const id of ids) members.set(id, [...(members.get(id) ?? []), p]);
+  }
+  const grouped = [...members.entries()].map(([id, ps]) => brandOf(ps, named.get(id) ?? { id, name: "" }));
+  return [...grouped, ...looseBrands(loose)].sort(byOldest);
+}
+
+/**
+ * Brands joined by pairs of brand keys (the website search's joins), each
+ * named again. Two Sprout groups are never joined, not even through a brand
+ * in no group: each group is a brand by the account's own grouping.
+ */
+export function joinBrands(brands: Brand[], pairs: Array<[string, string]>): JoinedBrand[] {
   const byKey = new Map(brands.map((b) => [b.key, b]));
-  return unite(brands.map((b) => b.key), pairs).map((g) => brandOf(g.flatMap((k) => byKey.get(k)!.profiles)));
+  const parent = new Map(brands.map((b) => [b.key, b.key]));
+  const groupIn = new Map(brands.map((b) => [b.key, b.group ? b.key : null]));
+  const root = (k: string): string => {
+    let r = k;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    parent.set(k, r);
+    return r;
+  };
+  for (const [a, b] of pairs) {
+    if (!parent.has(a) || !parent.has(b)) continue;
+    const [x, y] = [root(a), root(b)];
+    if (x === y || (groupIn.get(x) && groupIn.get(y))) continue;
+    parent.set(y, x);
+    groupIn.set(x, groupIn.get(x) ?? groupIn.get(y) ?? null);
+  }
+  const parts = new Map<string, Brand[]>();
+  for (const b of [...brands].sort(byOldest)) parts.set(root(b.key), [...(parts.get(root(b.key)) ?? []), b]);
+  return [...parts.entries()].map(([r, members]) => {
+    const groupKey = groupIn.get(r);
+    const joined = brandOf(members.flatMap((m) => m.profiles), groupKey ? byKey.get(groupKey)!.group : null);
+    return { ...joined, members: members.map((m) => m.key) };
+  }).sort(byOldest);
+}
+
+const COUNT_WORDS = ["", "one", "two", "three", "four", "five"];
+
+/** Why a brand is left alone because one of its profiles is in more than one Sprout group, or null. */
+export function groupConflict(brand: Brand, groups: CustomerGroup[]): string | null {
+  const shared = brand.profiles.find((p) => groupsOf(p).length > 1);
+  if (!shared) return null;
+  const named = new Map(groups.map((g) => [String(g.id), g.name.trim()]));
+  const names = groupsOf(shared).map((id) => named.get(id) || `group ${id}`);
+  const list = names.length === 2 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `Left alone: its ${shared.network_type} profile ${shared.native_name || shared.name} is in ${COUNT_WORDS[names.length] ?? names.length} Sprout groups (${list}), so which brand it belongs to is unclear.`;
 }
 
 // ── Section 2: is the brand already a client? ──────────────────────────────
@@ -174,15 +249,11 @@ export function isBrandAccount(brand: Brand): boolean {
   return brand.profiles.some((p) => String(p.network_type || "").toLowerCase() !== "linkedin");
 }
 
-/** The client (never a demo copy) whose website is this host or a site under it. */
-export function clientWithSite(host: string | null | undefined, clients: KnownClient[]): KnownClient | null {
-  const h = clientHost(host);
-  if (!h) return null;
-  return clients.find((c) => {
-    if (c.demo_job_id) return false;
-    const site = clientHost(c.website_url);
-    return !!site && (h === site || h.endsWith(`.${site}`));
-  }) ?? null;
+/** The client (never a demo copy) whose website is this site: the same registrable domain (net/domains.ts), so any subdomain counts. */
+export function clientWithSite(site: string | null | undefined, clients: KnownClient[]): KnownClient | null {
+  const key = siteKeyOf(site);
+  if (!key) return null;
+  return clients.find((c) => !c.demo_job_id && siteKeyOf(c.website_url) === key) ?? null;
 }
 
 export type CreationBlock = { decision: "person" | "no_posts" | "client_website"; reason: string; client_id?: string };

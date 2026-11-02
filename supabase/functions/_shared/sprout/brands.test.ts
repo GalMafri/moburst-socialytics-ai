@@ -1,13 +1,68 @@
 import { describe, expect, it } from "vitest";
-import { blockedFromCreation, clientWithSite, groupBrands, isBrandAccount, joinBrands, matchBrand, matchOutcome, type ClientIndex, type KnownClient } from "./brands";
+import { blockedFromCreation, clientWithSite, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, type ClientIndex, type KnownClient } from "./brands";
 import type { SproutProfile } from "../lifecycle/accounts";
 
-const p = (id: string, name: string, native: string, network: string, status = "active"): SproutProfile => ({ id, name, native_name: native, network_type: network, native_link: "", status });
+const p = (id: string, name: string, native: string, network: string, status = "active", groups: string[] = []): SproutProfile => ({ id, name, native_name: native, network_type: network, native_link: "", status, groups });
+const inGroup = (groups: string[], profile: SproutProfile): SproutProfile => ({ ...profile, groups });
 const client = (over: Partial<KnownClient> & { id: string; name: string }): KnownClient => ({ website_url: null, archived_at: null, demo_job_id: null, site_profiles: [], ...over });
 const index = (clients: KnownClient[], over: Partial<ClientIndex> = {}): ClientIndex => ({ clients, assigned: new Map(), removed: new Map(), ...over });
 const ids = (b: { profiles: SproutProfile[] }) => b.profiles.map((x) => x.id);
 
-describe("groupBrands", () => {
+describe("groupBrands: one Sprout group is one brand", () => {
+  // Sprout names a brand's profiles differently on each network (the 2 Nov dry run); its own groups keep them together.
+  const GROUPS = [{ id: "11", name: "Olo" }, { id: "12", name: "Yangra" }, { id: "13", name: "Team" }];
+  const listed = [
+    inGroup(["11"], p("7001", "Olo - Skip the Line", "olo", "facebook")), inGroup(["11"], p("7002", "Olo App | Food Ordering", "oloapp", "fb_instagram_account")),
+    inGroup(["11"], p("7003", "Olo App | Food Ordering", "oloapp", "tiktok")),
+    inGroup(["12"], p("9100", "Yangra", "yangra", "facebook")), inGroup(["12"], p("9101", "Yangra | Hinduism for Modern Life", "yangra.life", "fb_instagram_account")),
+    inGroup(["99"], p("9200", "DermaAngel US", "dermaangelus", "facebook")), inGroup(["99"], p("9201", "dermaangel_us", "dermaangel_us", "fb_instagram_account")),
+    p("9300", "Twos", "twos", "facebook"), p("9301", "Twos", "twosapp", "tiktok"), p("9302", "Olo", "olo_loose", "twitter"),
+  ];
+
+  it("makes each group one brand, named by the group, whatever Sprout calls its profiles", () => {
+    const brands = groupBrands(listed, GROUPS);
+    expect(brands.map((b) => [b.key, b.name, ids(b), b.group?.id ?? null])).toEqual([
+      ["group:11", "Olo", ["7001", "7002", "7003"], "11"],
+      ["group:12", "Yangra", ["9100", "9101"], "12"],
+      // A group Sprout's group list does not name: the spelling most of its profiles carry.
+      ["group:99", "DermaAngel US", ["9200", "9201"], "99"],
+      // Profiles in no group fall back to the name rule, and never join a group by name or handle.
+      ["9300", "Twos", ["9300", "9301"], null],
+      ["9302", "Olo", ["9302"], null],
+    ]);
+  });
+  it("puts a profile in two groups in both, and leaves those brands alone with a plain reason", () => {
+    const shared = inGroup(["11", "13"], p("7004", "Olo", "olo.team", "linkedin_company"));
+    const brands = groupBrands([...listed, shared], GROUPS);
+    const olo = brands.find((b) => b.key === "group:11")!;
+    const team = brands.find((b) => b.key === "group:13")!;
+    expect(ids(team)).toEqual(["7004"]);
+    expect(groupConflict(olo, GROUPS)).toBe("Left alone: its linkedin_company profile olo.team is in two Sprout groups (Olo and Team), so which brand it belongs to is unclear.");
+    expect(groupConflict(groupBrands(listed, GROUPS)[0], GROUPS)).toBeNull();
+  });
+  it("leaves a group alone when its profiles are assigned to two different clients", () => {
+    const [olo] = groupBrands(listed, GROUPS);
+    const m = matchBrand(olo, index([client({ id: "a", name: "Olo" }), client({ id: "b", name: "Olo Ordering" })], { assigned: new Map([["7001", ["a"]], ["7002", ["b"]]]) }));
+    expect(matchOutcome(m!)).toMatchObject({ decision: "two_clients", client_ids: ["a", "b"] });
+  });
+  it("matches a group by the group's name, and by any of its profiles' names", () => {
+    const [olo] = groupBrands(listed, GROUPS);
+    expect(matchBrand(olo, index([client({ id: "o", name: "Olo, Inc." })]))).toMatchObject({ by: "name", clients: [{ id: "o" }] });
+    expect(matchBrand(olo, index([client({ id: "o", name: "Olo - Skip the Line" })]))).toMatchObject({ by: "name" });
+  });
+  it("joins a loose brand into a group by the website, and never joins two groups, even through a loose brand", () => {
+    const brands = groupBrands(listed, GROUPS);
+    const joined = joinBrands(brands, [["group:11", "9302"], ["9302", "group:12"]]);
+    expect(joined.map((b) => [b.key, b.name, ids(b), b.members])).toEqual([
+      ["group:11", "Olo", ["7001", "7002", "7003", "9302"], ["group:11", "9302"]],
+      ["group:12", "Yangra", ["9100", "9101"], ["group:12"]],
+      ["group:99", "DermaAngel US", ["9200", "9201"], ["group:99"]],
+      ["9300", "Twos", ["9300", "9301"], ["9300"]],
+    ]);
+  });
+});
+
+describe("groupBrands: profiles in no group", () => {
   it("groups by the lifecycle's name rule: case, punctuation, '&' and a trailing LLC, Inc or Co", () => {
     const brands = groupBrands([
       p("30", "Pay The Pyper ", "paythepyperapp", "facebook"), p("31", "Pay the Pyper", "paythepyper", "fb_instagram_account"),
@@ -34,7 +89,7 @@ describe("groupBrands", () => {
   it("joins brands by the pairs the website search found, and names them again", () => {
     const brands = groupBrands([p("1", "Olo", "olo", "linkedin_company"), p("2", "Olo Hospitality", "olohq", "fb_instagram_account"), p("3", "Olo Hospitality", "olohq_fb", "facebook"), p("4", "Other", "other", "facebook")]);
     const joined = joinBrands(brands, [["2", "1"]]);
-    expect(joined.map((b) => [b.key, b.name, ids(b)])).toEqual([["1", "Olo Hospitality", ["1", "2", "3"]], ["4", "Other", ["4"]]]);
+    expect(joined.map((b) => [b.key, b.name, ids(b), b.members])).toEqual([["1", "Olo Hospitality", ["1", "2", "3"], ["1", "2"]], ["4", "Other", ["4"], ["4"]]]);
   });
 });
 

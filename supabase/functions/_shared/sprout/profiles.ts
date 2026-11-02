@@ -1,8 +1,12 @@
 // supabase/functions/_shared/sprout/profiles.ts
 //
 // Every social profile on a Sprout account, from its free metadata endpoint
-// (/metadata/customer, not analytics). The setup page's list
-// (sprout-profiles) and the client lifecycle's accounts step read it here.
+// (/metadata/customer, not analytics), with the Sprout groups each profile
+// is in, and the groups themselves (/metadata/customer/groups). Field names
+// as Sprout documents them (api.sproutsocial.com/docs): a profile's "groups"
+// is an array of group ids; a group has "group_id" and "name". The setup
+// page's list (sprout-profiles), the client lifecycle's accounts step and the
+// weekly Sprout onboarding read them here.
 
 import { defaultSproutCustomerId } from "./customer.ts";
 
@@ -17,6 +21,14 @@ export interface CustomerProfile {
   network_type: string;
   native_link: string;
   status: string;
+  /** The Sprout groups the profile is in, by group id. */
+  groups: string[];
+}
+
+/** A Sprout group: how the account sorts its profiles, one group per brand as the team keeps it. */
+export interface CustomerGroup {
+  id: string;
+  name: string;
 }
 
 function env(k: string): string | undefined {
@@ -59,7 +71,24 @@ export async function listCustomerProfiles(customerId: string = defaultSproutCus
     network_type: String(p.network_type || ""),
     native_link: String(p.native_link || ""),
     status: String(p.status || "active"),
+    groups: Array.isArray(p.groups) ? p.groups.map(String) : [],
   }));
+}
+
+/** The account's groups, as Sprout lists them. */
+export async function listCustomerGroups(customerId: string = defaultSproutCustomerId(), fetchImpl: typeof fetch = fetch): Promise<CustomerGroup[]> {
+  const token = await sproutAccessToken(fetchImpl);
+  const response = await fetchImpl(`${API_BASE}/${encodeURIComponent(customerId)}/metadata/customer/groups`, {
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).replace(/Bearer\s+\S+/gi, "[redacted]").slice(0, 300);
+    throw new SproutListError(response.status, `Sprout's group list did not answer (${response.status}).`, detail);
+  }
+  const data = await response.json();
+  // deno-lint-ignore no-explicit-any
+  return ((data?.data ?? []) as any[]).map((g) => ({ id: String(g.group_id), name: String(g.name || "").trim() }));
 }
 
 export class SproutListError extends Error {

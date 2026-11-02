@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { confirmingFact, domainLabel, linkedDomains, postLinks, searchWebsite, siteNameOf, webReader, websiteJoins, type SiteReader } from "./website";
+import { confirmingFact, domainLabel, linkedDomains, nameLabels, postLinks, searchWebsite, siteNameOf, webReader, websiteJoins, type SiteReader } from "./website";
 import { groupBrands } from "./brands";
 import type { SproutProfile } from "../lifecycle/accounts";
 
@@ -45,13 +45,45 @@ describe("the links in a brand's posts", () => {
   });
 });
 
+describe("judging the registrable domain (the 2 Nov dry run: app.olo.com 7 times, nothing confirmed)", () => {
+  const OLO_GROUP = { ...groupBrands([{ ...p("7001", "Olo - Skip the Line", "olo", "facebook"), groups: ["11"] }, { ...p("7002", "Olo App | Food Ordering", "oloapp", "fb_instagram_account"), groups: ["11"] }], [{ id: "11", name: "Olo" }])[0] };
+  it("counts every subdomain of a site as the site, and never a shared platform", async () => {
+    const posts = [
+      ...Array.from({ length: 7 }, (_, i) => post(`Order at https://app.olo.com/r/${i}`)), post("https://www.olo.com"),
+      post("https://www.einpresswire.com/article/1 https://podcasts.apple.com/podcast/olo https://anchor.fm/olo https://olo.myshopify.com https://linktr.ee/olo"),
+      post("https://bit.ly/press"),
+    ];
+    const r = reader({ "https://bit.ly/press": "https://www.prnewswire.com/news/olo" });
+    expect(await linkedDomains(posts, r)).toEqual([{ domain: "olo.com", links: 8 }]);
+    // Shared platforms are never followed, only link shorteners are.
+    expect(r.resolved.some((u) => /einpresswire|apple|anchor|myshopify|linktr/.test(u))).toBe(false);
+  });
+  it("tries the registrable domain's homepage and confirms it by the brand's own name", async () => {
+    const r = reader({}, { "olo.com": "<p>Olo</p>" });
+    const out = await searchWebsite(OLO_GROUP, Array.from({ length: 7 }, () => post("https://app.olo.com/order")), r);
+    expect(r.read).toEqual(["https://olo.com"]);
+    expect(out).toMatchObject({ website: "https://www.olo.com", confirmed_by: "domain_name", most_linked: "olo.com" });
+  });
+  it("names a domain by its registrable label", () => {
+    expect(domainLabel("app.olo.com")).toBe("olo");
+    expect(domainLabel("shop.olo.co.uk")).toBe("olo");
+  });
+  it("compares the label with every name in the brand, without spaces and punctuation, dropping a leading or trailing app, the, official or us", () => {
+    const labels = nameLabels(["Olo App | Food Ordering", "Olo - Skip the Line", "DermaAngel US", "dermaangel_us", "The Official Twos", "Bader & Law", "European Wax Center (Erie)"]);
+    for (const l of ["olo", "oloapp", "dermaangel", "dermaangelus", "twos", "officialtwos", "baderlaw", "baderandlaw", "europeanwaxcenter"]) expect(labels, l).toContain(l);
+    for (const l of ["food", "skip", "skiptheline", "app", "us", "erie"]) expect(labels, l).not.toContain(l);
+    const brand = (name: string) => ({ name, profiles: [] });
+    expect(confirmingFact(brand("DermaAngel US"), "dermaangel.com", null)).toBe("domain_name");
+    expect(confirmingFact(brand("Olo Dining"), "olo.com", null)).toBeNull();
+  });
+});
+
 describe("the facts that confirm a website", () => {
   it("reads a homepage's og:site_name and a domain's own name", () => {
     expect(siteNameOf(`<meta content="Pay The Pyper" property="og:site_name">`)).toBe("Pay The Pyper");
     expect(siteNameOf(`<meta property='og:site_name' content='Olo &amp; Co'/>`)).toBe("Olo & Co");
     expect(siteNameOf("<title>x</title>")).toBeNull();
     expect(domainLabel("www.paythepyper.com")).toBe("paythepyper");
-    expect(domainLabel("shop.olo.co.uk")).toBe("olo");
     expect(domainLabel("olo.myshopify.com")).toBe("myshopify");
   });
   it("accepts a homepage that links to one of the brand's profiles", () => {
@@ -90,7 +122,7 @@ describe("the website join", () => {
   it("joins brands that confirm the same website, and a brand whose website links to another's profiles", () => {
     const pairs = websiteJoins([
       { key: "1", website: "https://www.olo.com", site_profiles: ["tiktok:oloevents"] },
-      { key: "2", website: "https://olo.com/", site_profiles: [] },
+      { key: "2", website: "https://app.olo.com/", site_profiles: [] },
       { key: "3", website: "https://other.example", site_profiles: [] },
     ], brands);
     expect(pairs).toEqual([["1", "2"], ["1", "4"]]);

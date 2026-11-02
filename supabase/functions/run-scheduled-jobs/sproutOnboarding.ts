@@ -4,8 +4,9 @@
 // onboard them automatically."
 //
 // enqueue_sprout_onboarding_job queues one run on Monday (or after 8 days
-// with none). A run lists Sprout's profiles, groups them into brands
-// (_shared/sprout/brands.ts), and leaves every brand that already is a
+// with none). A run lists Sprout's profiles and groups, takes each Sprout
+// group as one brand (_shared/sprout/brands.ts; profiles in no group by the
+// name rule), leaves a group with a profile in two groups alone, and leaves every brand that already is a
 // client to that client: an active one's accounts step adds new profiles
 // within a day; an archived client's brand, a profile a person removed, and a
 // brand matching two clients are left alone for good. An unmatched brand
@@ -21,9 +22,9 @@
 // nothing. Nothing here alerts anyone or makes a model call.
 
 import type { SproutProfile } from "../_shared/lifecycle/accounts.ts";
-import { blockedFromCreation, clientWithSite, groupBrands, isBrandAccount, joinBrands, matchBrand, matchOutcome, type Brand, type ClientIndex, type KnownClient, type MatchDecision } from "../_shared/sprout/brands.ts";
+import { blockedFromCreation, clientWithSite, groupBrands, groupConflict, isBrandAccount, joinBrands, matchBrand, matchOutcome, type Brand, type ClientIndex, type KnownClient, type MatchDecision } from "../_shared/sprout/brands.ts";
 import { listBrandPosts, POSTS_WINDOW_DAYS, type SproutPost } from "../_shared/sprout/posts.ts";
-import { listCustomerProfiles } from "../_shared/sprout/profiles.ts";
+import { listCustomerGroups, listCustomerProfiles, type CustomerGroup } from "../_shared/sprout/profiles.ts";
 import { searchWebsite, webReader, websiteJoins, type SiteFact, type SiteReader, type WebsiteSearch } from "../_shared/sprout/website.ts";
 import type { JobOutcome, ScheduledJob } from "./types.ts";
 
@@ -37,8 +38,10 @@ const PAGE = 1000;
 
 export interface OnboardingDeps {
   now(): Date;
-  /** Every profile on the Sprout account. */
+  /** Every profile on the Sprout account, with the groups each is in. */
   profiles(): Promise<SproutProfile[]>;
+  /** The account's Sprout groups, with their names. */
+  groups(): Promise<CustomerGroup[]>;
   /** A brand's posts between two dates. */
   posts(profileIds: string[], since: Date, until: Date): Promise<SproutPost[]>;
   reader: SiteReader;
@@ -51,6 +54,7 @@ export function liveOnboardingDeps(): OnboardingDeps {
   return {
     now: () => new Date(),
     profiles: () => listCustomerProfiles(),
+    groups: () => listCustomerGroups(),
     posts: (ids, since, until) => listBrandPosts(ids, { since, until }),
     reader: webReader(),
     budgetMs: RUN_BUDGET_MS,
@@ -60,15 +64,18 @@ export function liveOnboardingDeps(): OnboardingDeps {
 
 export type Decision =
   | MatchDecision
-  | "person" | "no_posts" | "client_website"
+  | "group_conflict" | "person" | "no_posts" | "client_website"
   | "created" | "would_create" | "taken" | "not_read" | "later" | "no_name";
 
 export interface BrandResult {
   /** The brand's smallest profile id, as the next run is asked for it. */
   key: string;
   brand: string;
+  /** The Sprout group the brand is, or null for profiles in no group. */
+  group: CustomerGroup | null;
   profile_ids: string[];
-  networks: string[];
+  /** Each profile with the Sprout groups it is in, to check the grouping by. */
+  profiles: Array<{ id: string; name: string; network: string; groups: string[] }>;
   decision: Decision;
   reason: string;
   client_id?: string | null;
@@ -97,9 +104,13 @@ const FACT_WORDS: Record<SiteFact, string> = {
   site_name: "its og:site_name is the brand name",
 };
 
-const base = (b: Brand): Pick<BrandResult, "key" | "brand" | "profile_ids" | "networks"> => ({
-  key: b.key, brand: b.name, profile_ids: b.profiles.map((p) => String(p.id)), networks: [...new Set(b.profiles.map((p) => p.network_type))],
+const base = (b: Brand): Pick<BrandResult, "key" | "brand" | "group" | "profile_ids" | "profiles"> => ({
+  key: b.key, brand: b.name, group: b.group, profile_ids: b.profiles.map((p) => String(p.id)),
+  profiles: b.profiles.map((p) => ({ id: String(p.id), name: p.name, network: p.network_type, groups: (p.groups ?? []).map(String) })),
 });
+/** Results in the order of each brand's oldest profile. */
+const byId = (a: string, b: string) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
+const resultOrder = (a: BrandResult, b: BrandResult) => byId(a.profile_ids[0] ?? "", b.profile_ids[0] ?? "") || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 const searchView = (s: WebsiteSearch | null): BrandResult["website"] =>
   s ? { website: s.website, confirmed_by: s.confirmed_by, most_linked: s.most_linked, domains: s.domains.slice(0, 5), tried: s.tried } : undefined;
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -163,9 +174,10 @@ interface Evaluated {
 export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun: boolean; only?: string[] | null }): Promise<OnboardingReport> {
   const started = deps.clock();
   const now = deps.now();
-  const listed = await deps.profiles();
+  const [listed, groups] = await Promise.all([deps.profiles(), deps.groups()]);
   const index = await readIndex(db, listed.map((p) => Number(p.id)).filter(Number.isFinite));
-  const brands = groupBrands(listed);
+  const brands = groupBrands(listed, groups);
+  const byKey = new Map(brands.map((b) => [b.key, b]));
   const only = o.only ? new Set(o.only.map(String)) : null;
   const results: BrandResult[] = [];
   const matched = new Map<string, BrandResult>();
@@ -177,8 +189,11 @@ export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun
     const r = m ? { ...base(brand), ...matchOutcome(m) } : null;
     if (r) matched.set(brand.key, r);
     if (only && !only.has(brand.key)) continue;
+    const conflict = r ? null : groupConflict(brand, groups);
     if (r) {
       results.push(r);
+    } else if (conflict) {
+      results.push({ ...base(brand), decision: "group_conflict", reason: conflict });
     } else if (!brand.name) {
       results.push({ ...base(brand), decision: "no_name", reason: "Left alone: Sprout gives its profiles no name." });
     } else if (!isBrandAccount(brand)) {
@@ -204,13 +219,14 @@ export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun
     }
   }
 
-  // Brands their websites tie together are one brand (section 1).
+  // Brands their websites tie together are one brand (section 1): among the brands looked at, the ones left for
+  // later and the ones that are clients already; never a brand left alone for its group, a person or one not read.
   const found = [...evaluated.values()].map((e) => ({ key: e.brand.key, website: e.search?.website ?? null, site_profiles: e.search?.site_profiles ?? [] }));
-  const pairs = websiteJoins(found, brands);
+  const joinable = new Set([...evaluated.keys(), ...left, ...matched.keys()]);
+  const pairs = websiteJoins(found, brands).filter(([a, b]) => joinable.has(a) && joinable.has(b));
   const created: string[] = [];
   for (const joined of joinBrands(brands, pairs)) {
-    const ids = new Set(joined.profiles.map((p) => String(p.id)));
-    const members = brands.filter((b) => ids.has(b.key));
+    const members = joined.members.map((k) => byKey.get(k)!);
     const looked = members.filter((b) => evaluated.has(b.key)).map((b) => evaluated.get(b.key)!);
     if (!looked.length) continue;
     for (const b of members) left.delete(b.key);
@@ -223,19 +239,25 @@ export async function sproutOnboarding(db: Db, deps: OnboardingDeps, o: { dryRun
       }
       continue;
     }
-    results.push(await decide(db, joined, members, looked, index.clients, o.dryRun, created));
+    results.push(await decide(db, joined, members, looked, index, o.dryRun, created));
   }
 
   for (const key of left) {
     const b = brands.find((x) => x.key === key)!;
     results.push({ ...base(b), decision: "later", reason: o.dryRun ? "Not looked at: the 90 seconds were used. Ask again with these brands as left." : "Left for the next run, a minute from now: this run's 90 seconds were used." });
   }
-  results.sort((a, b) => a.key.length - b.key.length || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  results.sort(resultOrder);
   return { dry_run: o.dryRun, at: now.toISOString(), profiles: listed.length, brands: brands.length, created, left: [...left].sort((a, b) => a.length - b.length || (a < b ? -1 : 1)), results };
 }
 
-/** Whether an unmatched brand (with any brands its website tied to it) becomes a client, and makes it unless this is a dry run. */
-async function decide(db: Db, brand: Brand, members: Brand[], looked: Evaluated[], clients: KnownClient[], dryRun: boolean, created: string[]): Promise<BrandResult> {
+/**
+ * Whether an unmatched brand (with any brands its website tied to it)
+ * becomes a client, and makes it unless this is a dry run. A client made
+ * earlier in the run counts as a client (the index is updated after each),
+ * so one brand is never made twice in a run, in a dry run either.
+ */
+async function decide(db: Db, brand: Brand, members: Brand[], looked: Evaluated[], index: ClientIndex, dryRun: boolean, created: string[]): Promise<BrandResult> {
+  const clients = index.clients;
   const posts = looked.reduce((n, e) => n + e.posts, 0);
   const counts = new Map<string, number>();
   for (const e of looked) for (const d of e.search?.domains ?? []) counts.set(d.domain, (counts.get(d.domain) ?? 0) + d.links);
@@ -243,6 +265,12 @@ async function decide(db: Db, brand: Brand, members: Brand[], looked: Evaluated[
   const confirmed = looked.find((e) => e.search?.website)?.search ?? null;
   const shown = confirmed ?? looked.find((e) => e.search)?.search ?? null;
   const out: BrandResult = { ...base(brand), decision: "created", reason: "", posts, website: searchView(shown), ...(members.length > 1 ? { joined: members.map((b) => b.key) } : {}) };
+  const since = matchBrand(brand, index);
+  if (since) {
+    const m = matchOutcome(since);
+    const fresh = since.clients.filter((c) => c.id.startsWith("planned:") || created.includes(c.id)).map((c) => c.name);
+    return { ...out, ...m, reason: fresh.length ? `${m.reason} (${fresh.join(" and ")}: a client this run ${dryRun ? "would create" : "created"} just before.)` : m.reason };
+  }
   const block = blockedFromCreation(brand, { posts, mostLinked }, clients);
   if (block) return { ...out, ...block };
   const owner = confirmed?.website ? clientWithSite(confirmed.website, clients) : null;
@@ -254,7 +282,14 @@ async function decide(db: Db, brand: Brand, members: Brand[], looked: Evaluated[
     ? `its website ${confirmed.website} (${FACT_WORDS[confirmed.confirmed_by!]})`
     : "no website yet: none of the sites its posts link to is confirmed, and the lifecycle's website step looks again every 7 days";
   const what = `${brand.name} with its ${brand.profiles.length} Sprout ${brand.profiles.length === 1 ? "profile" : "profiles"} and ${site}.`;
-  if (dryRun) return { ...out, decision: "would_create", reason: `Would be created: ${what}` };
+  const remember = (id: string) => {
+    clients.push({ id, name: brand.name, website_url: confirmed?.website ?? null, archived_at: null, demo_job_id: null, site_profiles: confirmed?.site_profiles ?? [] });
+    for (const p of brand.profiles) index.assigned.set(String(p.id), [...(index.assigned.get(String(p.id)) ?? []), id]);
+  };
+  if (dryRun) {
+    remember(`planned:${brand.key}`);
+    return { ...out, decision: "would_create", reason: `Would be created: ${what}` };
+  }
   const { data, error } = await db.rpc("sprout_onboard_client", {
     p_name: brand.name, p_website: confirmed?.website ?? null, p_brand: brand.name,
     p_profiles: brand.profiles.map((p) => ({ id: String(p.id), name: p.name, native_name: p.native_name, network_type: p.network_type, native_link: p.native_link })),
@@ -266,6 +301,7 @@ async function decide(db: Db, brand: Brand, members: Brand[], looked: Evaluated[
       reason: made.reason === "removed" ? "Not created: a person removed one of its profiles from a client meanwhile." : "Not created: another run assigned one of its profiles meanwhile." };
   }
   created.push(String(made.client_id));
+  remember(String(made.client_id));
   return { ...out, decision: "created", client_id: made.client_id ?? null, reason: `Created ${what}` };
 }
 

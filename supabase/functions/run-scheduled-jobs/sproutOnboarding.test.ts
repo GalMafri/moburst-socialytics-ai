@@ -80,6 +80,7 @@ function deps(over: Partial<OnboardingDeps> = {}): OnboardingDeps & { postReads:
     postReads,
     now: () => NOW,
     profiles: async () => LISTED,
+    groups: async () => [],
     posts: async (ids: string[]): Promise<SproutPost[]> => {
       postReads.push(ids);
       return ids.flatMap((id) => (POSTS[id] ?? []).map((text) => ({ text, created_time: NOW.toISOString(), perma_link: null, profile_id: id })));
@@ -193,5 +194,57 @@ describe("the Sprout onboarding job", () => {
     db.tables.clients.push({ id: "olo-real", name: "Olo Restaurant Software", website_url: null, archived_at: null, demo_job_id: null });
     const report = await sproutOnboarding(db, deps(), { dryRun: true, only: ["7003"] });
     expect(report.results.map((r) => [r.brand, r.decision])).toEqual([["Olo Dining", "matched"]]);
+  });
+});
+
+// The 2 Nov dry run: Sprout names a brand's profiles differently per network; its groups keep each brand whole.
+describe("the job with Sprout's groups", () => {
+  const G = (groups: string[], profile: SproutProfile): SproutProfile => ({ ...profile, groups });
+  const GROUPS = [{ id: "11", name: "Olo" }, { id: "12", name: "Yangra" }, { id: "13", name: "Agency Team" }, { id: "14", name: "Bader Law" }];
+  const GROUPED = [
+    G(["11"], p("7001", "Olo - Skip the Line", "olo", "facebook")), G(["11"], p("7002", "Olo App | Food Ordering", "oloapp", "fb_instagram_account")),
+    G(["11"], p("7003", "Olo App | Food Ordering", "oloapp", "tiktok")),
+    p("7100", "Olo", "olo_x", "twitter"),
+    G(["12"], p("9100", "Yangra", "yangra", "facebook")), G(["12", "13"], p("9101", "Yangra | Hinduism for Modern Life", "yangra.life", "fb_instagram_account")),
+    G(["14"], p("7480884", "Bader Law", "BaderLawLLC", "facebook")), G(["14"], p("7481075", "Bader Law Firm", "Bader Law", "youtube")),
+  ];
+  const groupedDeps = () => deps({
+    profiles: async () => GROUPED,
+    groups: async () => GROUPS,
+    posts: async (ids: string[]) => ids.includes("7001") ? Array.from({ length: 7 }, (_, i) => ({ text: `Order at https://app.olo.com/r/${i}`, created_time: NOW.toISOString(), perma_link: null, profile_id: "7002" })) : [],
+    reader: { resolve: async (url: string) => url, homepage: async (url: string) => (new URL(url).hostname === "olo.com" ? { html: "<p>Order online</p>", url: "https://www.olo.com/" } : null) },
+  });
+
+  it("makes one client of a group, named by the group, with every profile and the site its posts link to most", async () => {
+    const db = world();
+    const report = await sproutOnboarding(db, groupedDeps(), { dryRun: false });
+    const olo = report.results.find((r) => r.key === "group:11")!;
+    expect(olo).toMatchObject({ brand: "Olo", decision: "created", group: { id: "11", name: "Olo" }, website: { website: "https://www.olo.com", confirmed_by: "domain_name", most_linked: "olo.com" } });
+    const made = db.tables.clients.find((c) => c.id === olo.client_id)!;
+    expect(made).toMatchObject({ name: "Olo", website_url: "https://www.olo.com", origin: { brand: "Olo", profile_ids: [7001, 7002, 7003] } });
+    // The loose "Olo" profile matches the client this run made, so it is not made twice.
+    expect(report.results.find((r) => r.key === "7100")).toMatchObject({ decision: "matched", client_ids: [olo.client_id] });
+    expect(db.tables.clients.filter((c) => c.name === "Olo" && !c.demo_job_id)).toHaveLength(1);
+  });
+
+  it("leaves a group alone when one of its profiles is in two groups, and matches a group to its client as before", async () => {
+    const report = await sproutOnboarding(world(), groupedDeps(), { dryRun: true });
+    const byKey = Object.fromEntries(report.results.map((r) => [r.key, r]));
+    expect(byKey["group:12"]).toMatchObject({ decision: "group_conflict", reason: "Left alone: its fb_instagram_account profile yangra.life is in two Sprout groups (Yangra and Agency Team), so which brand it belongs to is unclear." });
+    expect(byKey["group:13"]).toMatchObject({ decision: "group_conflict" });
+    expect(byKey["group:14"]).toMatchObject({ brand: "Bader Law", decision: "matched", client_ids: ["b"] });
+  });
+
+  it("shows in the dry run each brand's Sprout group and each profile's group ids", async () => {
+    const report = await sproutOnboarding(world(), groupedDeps(), { dryRun: true });
+    const olo = report.results.find((r) => r.key === "group:11")!;
+    expect(olo).toMatchObject({ decision: "would_create", group: { id: "11", name: "Olo" } });
+    expect(olo.profiles).toEqual([
+      { id: "7001", name: "Olo - Skip the Line", network: "facebook", groups: ["11"] },
+      { id: "7002", name: "Olo App | Food Ordering", network: "fb_instagram_account", groups: ["11"] },
+      { id: "7003", name: "Olo App | Food Ordering", network: "tiktok", groups: ["11"] },
+    ]);
+    expect(report.results.find((r) => r.key === "7100")).toMatchObject({ group: null, profiles: [{ id: "7100", groups: [] }], decision: "matched" });
+    expect(report.results.find((r) => r.key === "group:13")!.profiles).toEqual([{ id: "9101", name: "Yangra | Hinduism for Modern Life", network: "fb_instagram_account", groups: ["12", "13"] }]);
   });
 });
