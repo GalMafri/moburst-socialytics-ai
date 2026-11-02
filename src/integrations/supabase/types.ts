@@ -3786,6 +3786,10 @@ export type Database = {
           week_cost: Json
         }[]
       }
+      trend_search_override_clear: {
+        Args: { p_client: string; p_platform: string }
+        Returns: undefined
+      }
       trend_term_add: {
         Args: {
           p_client: string
