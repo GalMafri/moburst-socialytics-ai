@@ -645,9 +645,10 @@ export const STEPS: Record<string, StepDef> = {
   // Design settings derived from data once the client's references are
   // learned (decision 2): the logo file, where the client's posts put it, and
   // the background from the brand colors. Confirmed by the system
-  // (confirmed_by null). Automatic designs stay off until decision 3 is
-  // turned on (Lital, 19 Oct 16:40). Settings a person confirmed or changed
-  // are never replaced.
+  // (confirmed_by null). Designs are made only when someone asks: a post's
+  // own button or the week's design button (Lital, 2 Nov; the automatic
+  // designs are gone). Settings a person confirmed or changed are never
+  // replaced.
   design_settings: {
     policy: {},
     async inputs(db, client, rows) {

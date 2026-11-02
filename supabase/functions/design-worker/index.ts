@@ -5,7 +5,8 @@
 // locate, unlogo, finish, verify. Each design is a row in canva_finish_jobs (the table
 // keeps its old name); a video's footage and join stay with video-worker.
 //
-//   POST {action:"tick"}              one pass over the due jobs (operational secret)
+//   POST {action:"tick"}              one pass over the due jobs, then the next posts
+//                                     of any week being designed (operational secret)
 //   POST {action:"advance", job_id}   one job, in a request of its own (operational secret)
 //
 // A pass hands every due job to its own request, so one design's image work
@@ -110,14 +111,35 @@ async function runPass(admin: any) {
   const { data: open } = await admin.from("design_requests").select("id").eq("status", "preparing").neq("stage", "planning");
   for (const r of open ?? []) await settleRequest(admin, r.id).catch((e) => console.error(`[design-worker] request ${r.id}:`, e instanceof Error ? e.message : e));
   await replanStalled(admin).catch((e) => console.error("[design-worker] stalled planning:", e instanceof Error ? e.message : e));
+  await continueWeeks(admin).catch((e) => console.error("[design-worker] weeks:", e instanceof Error ? e.message : e));
   return { ran: leased.length };
+}
+
+/**
+ * Weeks being designed (the week's design button): design-request starts
+ * their next posts, as the system, at the pace it sets (at most two week
+ * posts designing across the app, one per client at a time).
+ */
+async function continueWeeks(admin: any): Promise<void> {
+  const { data: running } = await admin.from("design_week_runs").select("id").eq("status", "running").limit(1);
+  if (!running?.length) return;
+  const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/design-request`, {
+    method: "POST",
+    // The system's own call: each post's request names the person who added it to the week.
+    headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "" },
+    body: JSON.stringify({ action: "week_continue" }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  await res.body?.cancel();
+  if (!res.ok) throw new Error(`week_continue answered ${res.status}`);
 }
 
 /**
  * Requests whose planning stopped (the request that planned them died, or
  * the plan could not be made): planned again by design-request, as the
  * system, after NO_PROGRESS_MINUTES without progress. After MAX_PLAN_ATTEMPTS
- * the request closes quietly and the automatic designs make it again later.
+ * the request closes quietly, and the week's design button counts its post
+ * again the next time it is pressed.
  */
 async function replanStalled(admin: any): Promise<void> {
   const cutoff = new Date(Date.now() - NO_PROGRESS_MINUTES * 60_000).toISOString();

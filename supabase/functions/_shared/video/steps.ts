@@ -510,8 +510,8 @@ async function runStyleStep(admin: any, job: VideoJob): Promise<VideoStepResult>
         if (Array.isArray(w.briefs) && w.briefs.length) continue;
         await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/design-request`, {
           method: "POST",
-          // The system's own call: automatic work never acts as a person (an
-          // automatic request has no one who asked, and naming nobody was refused).
+          // The system's own call: it never acts as a person, and the request
+          // it plans already names the person who asked.
           headers: { "Content-Type": "application/json", "X-Socialytics-Secret": Deno.env.get("SOCIALYTICS_N8N_SECRET") ?? "" },
           body: JSON.stringify({ action: "replan", request_id: w.id }),
           signal: AbortSignal.timeout(15_000),

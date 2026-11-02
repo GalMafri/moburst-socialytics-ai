@@ -2,14 +2,15 @@
 //
 // When a post's design request is made again, closed or planned again, free
 // of Deno and network imports so the rules can be tested. Used by
-// design-request (automatic designs, filming requests) and design-worker
-// (requests whose planning stopped).
+// design-request (the week's design button, filming requests) and
+// design-worker (requests whose planning stopped).
 //
 // The rules (19 Oct): a request never sits waiting for a person and never
 // shows anyone that it did not finish. A request with no design at the end
-// is closed and a new one starts later, until the post's own time; a filmed
-// post with no footage a day before its time gets a design made from the
-// same idea; a post whose time has passed is left alone.
+// is closed, and the post is counted again the next time someone designs its
+// week (2 Nov: designs are made on request only, never automatically); a
+// filmed post with no footage a day before its time is designed from the
+// client's posts instead; a post whose time has passed is left alone.
 
 /** A request still planning after this long has stopped and is planned again. */
 export const NO_PROGRESS_MINUTES = 30;
@@ -17,18 +18,15 @@ export const NO_PROGRESS_MINUTES = 30;
 export const MAX_PLAN_ATTEMPTS = 3;
 /** A filmed post with no footage this close to its time gets a design instead. */
 export const FILMING_CLOSE_HOURS = 24;
-/** The shortest and longest wait before a post whose request ended without a design gets a new one. */
-export const RETRY_MIN_MINUTES = 60;
-export const RETRY_MAX_MINUTES = 24 * 60;
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
 /** Why a request was closed (design_requests.end_reason). */
 export type EndReason =
-  /** Every option was tried and none finished: made again later. */
+  /** Every option was tried and none finished: counted again by the week's design button. */
   | "no_design"
-  /** Planning stopped MAX_PLAN_ATTEMPTS times: made again later. */
+  /** Planning stopped MAX_PLAN_ATTEMPTS times: counted again by the week's design button. */
   | "no_progress"
   /** A filmed post with no footage a day before its time: a design is made from the same idea. */
   | "no_footage"
@@ -85,18 +83,6 @@ export function filmingOutcome(postAt: Date | null, now: Date, footageArrived: b
   return "keep";
 }
 
-/**
- * When a post whose request ended without a design gets a new one: after
- * half the time left before the post, at least an hour and at most a day,
- * and only while that is still before the post. Null when the post comes first.
- */
-export function nextDesignAttempt(endedAt: Date, postAt: Date): Date | null {
-  const left = postAt.getTime() - endedAt.getTime();
-  const wait = Math.min(RETRY_MAX_MINUTES * MINUTE, Math.max(RETRY_MIN_MINUTES * MINUTE, left / 2));
-  const at = endedAt.getTime() + wait;
-  return at < postAt.getTime() ? new Date(at) : null;
-}
-
 /** Whether a request still planning has stopped moving. */
 export function planningStalled(r: { status: string; stage: string; updated_at: string }, now: Date): boolean {
   return r.status === "preparing" && r.stage === "planning" && now.getTime() - Date.parse(r.updated_at) >= NO_PROGRESS_MINUTES * MINUTE;
@@ -110,25 +96,29 @@ export interface PostRequest {
   video_route?: string | null;
 }
 
+/** Why the week's design button leaves a post alone, from its requests. */
+export type WeekHold = "preparing" | "filming" | "ready" | "ended";
+
 /**
- * Whether the automatic designs start a request for a post that has no
- * design yet, from the post's earlier requests: never while one is being
- * prepared, is ready, was stopped by a person or waits for footage; a new
- * one once a request that ended without a design is due again, made the way
- * that one was; a design from the posts (never filming) once a filmed post's
+ * Whether the week's design button starts a request for a post, from the
+ * post's earlier requests (the rules the automatic designs used until 2 Nov, with no
+ * retry timer: a person asked). Never while one is being prepared or waits
+ * for footage, nor once the newest one made a design; at once when the
+ * newest ended without a design or was stopped by a person, made the way
+ * that one was; from the client's posts (never filming) once a filmed post's
  * footage did not arrive. askFilming: whether a video post is first checked
  * for someone who must be filmed (only a post never designed before).
  */
-export function autoDecision(requests: PostRequest[], postAt: Date | null, now: Date): { start: false } | { start: true; route: string | null; askFilming: boolean } {
+export function weekDecision(requests: PostRequest[]): { start: false; why: WeekHold } | { start: true; route: string | null; askFilming: boolean } {
   if (!requests.length) return { start: true, route: null, askFilming: true };
-  if (requests.some((r) => ["preparing", "ready", "canceled", "needs_filming"].includes(r.status))) return { start: false };
+  if (requests.some((r) => r.status === "preparing")) return { start: false, why: "preparing" };
+  if (requests.some((r) => r.status === "needs_filming")) return { start: false, why: "filming" };
   const latest = [...requests].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
-  if (latest.status !== "closed") return { start: false };
-  if (latest.end_reason === "no_footage") return { start: true, route: "posts", askFilming: false };
-  if (latest.end_reason === "no_design" || latest.end_reason === "no_progress") {
-    if (!postAt) return { start: false };
-    const due = nextDesignAttempt(new Date(latest.ended_at ?? latest.created_at), postAt);
-    return due && due.getTime() <= now.getTime() ? { start: true, route: latest.video_route ?? null, askFilming: false } : { start: false };
+  if (latest.status === "ready") return { start: false, why: "ready" };
+  if (latest.status === "canceled") return { start: true, route: latest.video_route ?? null, askFilming: false };
+  if (latest.status === "closed" && latest.end_reason === "no_footage") return { start: true, route: "posts", askFilming: false };
+  if (latest.status === "closed" && (latest.end_reason === "no_design" || latest.end_reason === "no_progress")) {
+    return { start: true, route: latest.video_route ?? null, askFilming: false };
   }
-  return { start: false };
+  return { start: false, why: "ended" };
 }

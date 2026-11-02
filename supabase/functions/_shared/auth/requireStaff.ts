@@ -89,10 +89,10 @@ export interface InternalCaller {
 }
 
 /**
- * requireStaff for the paths automatic work calls (automatic designs,
- * automatic video replans, the workers). The operational secret with no user
- * header is the system actor; anything else is checked exactly as
- * requireStaff checks it. Nothing automatic ever acts as a person.
+ * requireStaff for the paths automatic work calls (filming requests closed,
+ * video replans, the week's next posts, the workers). The operational secret
+ * with no user header is the system actor; anything else is checked exactly
+ * as requireStaff checks it. Nothing automatic ever acts as a person.
  */
 export async function requireStaffOrSystem(
   req: Request,

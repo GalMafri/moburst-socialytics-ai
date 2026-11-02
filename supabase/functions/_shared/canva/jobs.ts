@@ -263,9 +263,10 @@ async function settleRequestNow(admin: any, requestId: string): Promise<void> {
 
 /**
  * Close a request quietly (status closed, with why): its unfinished jobs
- * stop, nobody is shown anything, and the automatic designs make the post's
- * design again later when the reason calls for it (_shared/design/requestRules.ts).
- * The note is kept for the logs only.
+ * stop, nobody is shown anything, and the week's design button counts the
+ * post again the next time it is pressed when the reason calls for it
+ * (weekDecision, _shared/design/requestRules.ts). Nothing is made again on
+ * its own. The note is kept for the logs only.
  */
 export async function endRequest(admin: any, requestId: string, reason: EndReason, note?: string | null): Promise<void> {
   const now = new Date().toISOString();
