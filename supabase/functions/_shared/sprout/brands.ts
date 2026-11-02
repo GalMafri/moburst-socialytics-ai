@@ -4,8 +4,10 @@
 // may become one (spec: docs/superpowers/specs/2026-11-02-sprout-auto-
 // onboarding-design.md, sections 1 to 3).
 //
-// A brand is one Sprout group: the account's own grouping of its profiles,
-// named by the group's name. Sprout names a brand's profiles differently on
+// A brand is one Sprout group: the account's own grouping of its profiles.
+// It is named as people know the brand, from its profiles' names
+// (brandName), since a group's label is the team's shorthand ("ewc",
+// "RMBH"); the group keeps its own name. Sprout names a brand's profiles differently on
 // each network ("Olo - Skip the Line" on Facebook, "Olo App | Food Ordering"
 // on Instagram, dry run of 2 Nov 2026), so names alone split one brand in
 // two. Profiles in no group fall back to the lifecycle's name rule
@@ -25,8 +27,10 @@ import { networkKey } from "./publishRules.ts";
 export interface Brand {
   /** "group:<id>" for a Sprout group; else the brand's smallest profile id, which stays the same while profiles are added. */
   key: string;
-  /** The group's name; for profiles in no group (or a group Sprout gives no name), the spelling most of them carry. */
+  /** The brand as people know it, from its profiles' names (brandName); the group's name only when none is usable. */
   name: string;
+  /** How the name was chosen, in a sentence. */
+  name_reason: string;
   profiles: SproutProfile[];
   /** The Sprout group the brand is, or null for profiles in no group. */
   group: CustomerGroup | null;
@@ -67,24 +71,81 @@ function unite(keys: string[], pairs: Array<[string, string]>): string[][] {
   return [...groups.values()].map((g) => g.sort(byId)).sort((a, b) => byId(a[0], b[0]));
 }
 
+// ── The name a brand goes by ───────────────────────────────────────────────
+
+/** A tagline after the brand's name: " | ", " - ", " \u2013 ", " \u2014 ", " (". */
+const TAGLINE = /\s+\|\s*|\s*\|\s+|\s+[-\u2013\u2014]\s+|\s+\(/;
+/** A legal suffix after the brand's name: Inc., LLC, Ltd, Corp, Co., GmbH, PLC. */
+const LEGAL = /[\s,]+(?:inc|llc|l\.l\.c|ltd|limited|corp|corporation|co|gmbh|plc)\.?$/i;
+const wordsOf = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+const quote = (names: string[]) => names.map((n) => `"${n}"`).join(", ");
+
+/** A profile's name as the brand's name: before a tagline, without a legal suffix. */
+export function profileBrandName(name: string | null | undefined): string {
+  let n = String(name ?? "").trim().split(TAGLINE)[0].trim();
+  while (LEGAL.test(n) && n.replace(LEGAL, "").trim()) n = n.replace(LEGAL, "").trim();
+  return n;
+}
+
 /**
- * A brand from its profiles: a group's is keyed and named by the group (by
- * its profiles' most common spelling when Sprout gives the group no name);
- * otherwise keyed by the oldest profile and named by the most common
- * spelling, the oldest profile's on a tie.
+ * The name a brand goes by, from its profiles: each profile's brand name
+ * (profileBrandName), leaving out names that look like handles (an
+ * underscore or an @, or one run-together word that spells another profile's
+ * name of several words), then the one most profiles share, a profile
+ * sharing every name its own begins with ("Olo App" shares "Olo"), the
+ * longest on a tie. The group's name only when no profile name is usable;
+ * for profiles in no group, then, the spelling most of them carry.
+ */
+export function brandName(profiles: SproutProfile[], group: CustomerGroup | null = null): { name: string; why: string } {
+  const cleaned = profiles.map((p) => profileBrandName(p.name)).filter(Boolean);
+  const several = cleaned.filter((n) => wordsOf(n).length > 1);
+  const handleLike = (n: string) => n.includes("_") || n.startsWith("@") || (!/\s/.test(n) && several.some((m) => wordsOf(m).join("") === wordsOf(n).join("")));
+  const handles = [...new Set(cleaned.filter(handleLike))];
+  const usable = cleaned.filter((n) => !handleLike(n) && wordsOf(n).length);
+  const handleNote = handles.length ? `${quote(handles)} ${handles.length === 1 ? "looks like a handle" : "look like handles"}` : "";
+  const groupName = group?.name.trim() ?? "";
+  if (!usable.length) {
+    if (groupName) return { name: groupName, why: `Named after its Sprout group "${groupName}": no profile name is usable${handleNote ? ` (${handleNote})` : ""}.` };
+    const counts = new Map<string, number>();
+    for (const p of profiles) { const n = String(p.name || "").trim(); if (n) counts.set(n, (counts.get(n) ?? 0) + 1); }
+    let name = "";
+    for (const [n, c] of counts) if (!name || c > counts.get(name)!) name = n;
+    return { name, why: `Named "${name}" as Sprout spells it: no profile name is usable.` };
+  }
+  // Each distinct name, by its words, with how many profiles share it.
+  const keys = [...new Map(usable.map((n) => [wordsOf(n).join(" "), n])).keys()];
+  const shared = (key: string) => {
+    const k = key.split(" ");
+    return usable.filter((n) => { const w = wordsOf(n); return k.every((x, i) => w[i] === x); }).length;
+  };
+  const spelling = (key: string) => {
+    const counts = new Map<string, number>();
+    for (const n of usable) if (wordsOf(n).join(" ") === key) counts.set(n, (counts.get(n) ?? 0) + 1);
+    let best = "";
+    for (const [n, c] of counts) if (!best || c > counts.get(best)!) best = n;
+    return best;
+  };
+  const most = Math.max(...keys.map(shared));
+  const tied = keys.filter((k) => shared(k) === most).map(spelling);
+  const name = tied.reduce((a, b) => (b.length > a.length ? b : a));
+  const how = tied.length > 1
+    ? `the longest of the names shared by the most profiles (${most} of ${usable.length} each: ${quote(tied)})`
+    : usable.length === 1 ? "the only usable profile name" : `the name ${most} of its ${usable.length} profile names share`;
+  const notes = [handleNote ? `${handleNote} and ${handles.length === 1 ? "is" : "are"} not used` : "", groupName ? `the Sprout group is "${groupName}"` : ""].filter(Boolean);
+  return { name, why: `Named "${name}": ${how}${notes.length ? `; ${notes.join("; ")}` : ""}.` };
+}
+
+/**
+ * A brand from its profiles: a group's is keyed by the group, others by the
+ * oldest profile; named as people know it (brandName).
  */
 export function brandOf(profiles: SproutProfile[], group: CustomerGroup | null = null): Brand {
   const sorted = [...new Map(profiles.map((p) => [String(p.id), p])).values()].sort((a, b) => byId(String(a.id), String(b.id)));
-  const counts = new Map<string, number>();
-  for (const p of sorted) {
-    const n = String(p.name || "").trim();
-    if (n) counts.set(n, (counts.get(n) ?? 0) + 1);
-  }
-  let name = "";
-  for (const [n, c] of counts) if (!name || c > counts.get(name)!) name = n;
+  const { name, why } = brandName(sorted, group);
   return {
     key: group ? `group:${group.id}` : String(sorted[0]?.id ?? ""),
-    name: group?.name.trim() || name,
+    name,
+    name_reason: why,
     profiles: sorted,
     group,
   };
@@ -213,7 +274,7 @@ export function matchBrand(brand: Brand, index: ClientIndex): BrandMatch | null 
   const rules: Array<[MatchRule, () => KnownClient[]]> = [
     ["assigned", () => pick(ids.flatMap((id) => index.assigned.get(id) ?? []))],
     ["removed", () => pick(ids.flatMap((id) => index.removed.get(id) ?? []))],
-    ["name", () => [...real.values()].filter((c) => sameName(c.name, brand.name) || brand.profiles.some((p) => sameName(c.name, p.name)))],
+    ["name", () => [...real.values()].filter((c) => sameName(c.name, brand.name) || sameName(c.name, brand.group?.name) || brand.profiles.some((p) => sameName(c.name, p.name)))],
     ["site_link", () => [...real.values()].filter((c) => keys.some((k) => (c.site_profiles ?? []).includes(k)))],
   ];
   for (const [by, find] of rules) {
