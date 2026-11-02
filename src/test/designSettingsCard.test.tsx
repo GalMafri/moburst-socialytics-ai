@@ -34,7 +34,7 @@ function mount() {
 }
 
 it('shows derived settings as in place, editable, with no automatic designs switch and no confirmation step', async () => {
-  f.settings = { client_id: 'c', source: 'lifecycle', logo_path: 'c/brand/logo.png', background: '#0B0E1A', placement: { anchor: 'center', width: 0.25, top: 0.04 }, reference_paths: ['c/a.jpg'], auto_designs: false, confirmed_at: '2026-10-19T12:00:00Z',
+  f.settings = { client_id: 'c', source: 'lifecycle', logo_path: 'c/brand/logo.png', background: '#0B0E1A', placement: { anchor: 'center', width: 0.25, top: 0.04 }, reference_paths: ['c/a.jpg'], confirmed_at: '2026-10-19T12:00:00Z',
     derived: { at: '2026-10-19T12:00:00Z', placement_from: 'client_posts', background_from: 'brand_color' } };
   mount();
   expect(await screen.findByText("Worked out automatically on Oct 19, 2026: the logo from the client's website, its place from where the client's own posts put it, the background from a brand color. You can change any of them here.")).toBeInTheDocument();
@@ -51,7 +51,7 @@ it('shows derived settings as in place, editable, with no automatic designs swit
 });
 
 it('says a person set them, when they did', async () => {
-  f.settings = { client_id: 'c', source: 'person', logo_path: 'c/logo.png', background: '#000000', placement: { anchor: 'left', width: 0.2, top: 0.05, left: 0.05 }, reference_paths: ['c/a.jpg'], auto_designs: false, updated_at: '2026-10-12T09:00:00Z' };
+  f.settings = { client_id: 'c', source: 'person', logo_path: 'c/logo.png', background: '#000000', placement: { anchor: 'left', width: 0.2, top: 0.05, left: 0.05 }, reference_paths: ['c/a.jpg'], updated_at: '2026-10-12T09:00:00Z' };
   mount();
   expect(await screen.findByText('Set by your team on Oct 12, 2026. The product keeps these as they are.')).toBeInTheDocument();
 });
