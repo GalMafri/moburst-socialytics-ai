@@ -18,6 +18,7 @@
 //   competitors     identify, pick the three closest with a website, confirm as the system
 //   trend_profile   what Trends tracks: audience, topics, hashtags, exclusions, fit rubric, platforms
 //   trend_hashtags  the profile's hashtags refreshed from the newest best posts, once a month
+//   content_strategy the client's content strategy, written from all of the above once the profile is current
 //   tracking        RivalIQ tracking for the confirmed set (decision 1), then handles from RivalIQ
 //   design_settings logo file, placement and background derived from data (decision 2)
 //   first_output    this week and next planned, and the first monthly report
@@ -48,6 +49,7 @@ import { anthropicMessages } from "../anthropic.ts";
 import { competitorSet, feedSnapshots, ownPosts } from "../calendar/runWeek.ts";
 import { activeTerms, askTwice, evidenceKey, hashtagsRequest, monthIn, parseHashtags, parseProfile, profileEvidence, profileRequest, syncLifecycleTerms, writeTrendProfile, type ProfileIO } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS } from "../trends/types.ts";
+import { liveStrategyIO, readPending, savePending, saveStrategy, startStrategy, strategyEvidence, strategyPhase, type StrategyIO } from "../strategy/write.ts";
 import type { StepOutcome, StepPolicy, StepRow } from "./policy.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -60,7 +62,7 @@ export const CLIENT_COLUMNS = [
   "id", "name", "archived_at", "demo_job_id", "exclude_from_reporting", "sprout_customer_id", "website_url", "field_sources", "location",
   "brand_identity", "logo_url", "timezone", "geo", "language", "brief_text", "brief_file_id", "strategy_doc_file_path", "brand_notes",
   "competitor_seed_notes", "content_pillars", "social_keywords", "primary_platforms", "company_slug", "hub_company_name",
-  "design_references", "harvested_design_references", "voice_built_at:social_voice->>built_at",
+  "design_references", "harvested_design_references", "voice_built_at:social_voice->>built_at", "posting_rhythm",
 ].join(", ");
 
 export interface StepContext {
@@ -120,6 +122,7 @@ export const deps = {
       return text.length >= 80 ? text : await deps.fetchSiteText(url);
     },
   }),
+  strategyIO: (): StrategyIO => liveStrategyIO((url) => deps.trendIO().siteText(url)),
 };
 
 const DAY = 86_400_000;
@@ -638,6 +641,58 @@ export const STEPS: Record<string, StepDef> = {
       const { instagram: _replaced, ...overrides } = (p.search_overrides ?? {}) as Record<string, string[]>;
       await db.from("trend_profiles").update({ hashtags_at: now.toISOString(), search_overrides: overrides }).eq("client_id", client.id);
       return { status: "done", result: { refreshed: true } };
+    },
+  },
+
+  // The client's content strategy (spec: docs/superpowers/specs/2026-11-02-
+  // content-strategy-tab-design.md), written from what the steps above read,
+  // once the trend profile is done and current: a brand change gives one
+  // profile write, then one strategy write. Written again when the profile is
+  // rewritten, the client's Sprout networks or posting rhythm change, and
+  // monthly so it follows the posts. A person's edit is never an input, and
+  // the step writes only content_strategies, so people's versions stay.
+  // One model call per run (strategy/write.ts): write, check, fix if flagged,
+  // check again, each its own run a minute apart, with the draft kept on the
+  // client's strategy row. A call that does not get through keeps the draft
+  // for the retry; a write that does not pass its checks drops it and is
+  // tried again quietly from the start. The last good strategy stays.
+  content_strategy: {
+    policy: { refreshDays: 30 },
+    async inputs(db, client, rows) {
+      const profile = rows.get("trend_profile");
+      if (profile?.status !== "done") return null;
+      if ((await STEPS.trend_profile.inputs(db, client, rows)) !== profile.inputs_key) return null;
+      const { data: p } = await db.from("trend_profiles").select("written_at").eq("client_id", client.id).maybeSingle();
+      if (!p?.written_at) return null;
+      const { data, error } = await db.from("sprout_profiles").select("network_type").eq("client_id", client.id).eq("is_active", true);
+      if (error) throw new Error(`Could not read the client's social accounts: ${error.message}`);
+      const networks = [...new Set((data ?? []).map((r: { network_type: unknown }) => String(r.network_type ?? "")))].filter(Boolean).sort().join(",");
+      return `profile:${p.written_at}|networks:${networks}|rhythm:${textHash(JSON.stringify(client.posting_rhythm ?? null))}`;
+    },
+    async run(db, client, { rows }) {
+      const key = await deps.anthropicKey(db);
+      if (!key) return { status: "failed", error: "The AI connection is not configured." };
+      const inputsKey = await STEPS.content_strategy.inputs(db, client, rows);
+      if (!inputsKey) return { status: "waiting", reason: "trend_profile", recheckDays: 1 };
+      // A draft for other inputs is dropped: the write starts over.
+      let pending = await readPending(db, client.id);
+      if (pending?.inputs_key !== inputsKey) {
+        const e = await strategyEvidence(db, client, deps.now(), deps.strategyIO());
+        if (!e) return { status: "waiting", reason: "trend_profile", recheckDays: 1 };
+        pending = startStrategy(e, inputsKey, deps.now());
+      }
+      const out = await strategyPhase(deps.claudeMessages, key, pending);
+      if (out.kind === "next") {
+        await savePending(db, client.id, out.pending, deps.now());
+        return { status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { phase: out.pending.phase } };
+      }
+      if (out.kind === "over") {
+        await savePending(db, client.id, null, deps.now());
+        return { status: "failed", error: `The content strategy could not be written: ${out.error}` };
+      }
+      await saveStrategy(db, client.id, out, deps.now());
+      const count = (state: string) => out.value.platforms.filter((x) => x.state === state).length;
+      return { status: "done", result: { platforms: { posting: count("posting"), new: count("new"), not_now: count("not_now") }, calls: out.usage.calls } };
     },
   },
 

@@ -1302,6 +1302,91 @@ export type Database = {
           },
         ]
       }
+      content_strategies: {
+        Row: {
+          client_id: string
+          inputs_key: string | null
+          models: Json
+          pending: Json | null
+          pillars: Json
+          platforms: Json
+          sections: Json
+          sources: Json
+          updated_at: string
+          usage: Json
+          written_at: string | null
+        }
+        Insert: {
+          client_id: string
+          inputs_key?: string | null
+          models?: Json
+          pending?: Json | null
+          pillars?: Json
+          platforms?: Json
+          sections?: Json
+          sources?: Json
+          updated_at?: string
+          usage?: Json
+          written_at?: string | null
+        }
+        Update: {
+          client_id?: string
+          inputs_key?: string | null
+          models?: Json
+          pending?: Json | null
+          pillars?: Json
+          platforms?: Json
+          sections?: Json
+          sources?: Json
+          updated_at?: string
+          usage?: Json
+          written_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_strategies_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: true
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      content_strategy_edits: {
+        Row: {
+          client_id: string
+          edited_at: string
+          edited_by: string | null
+          editor_name: string
+          section_key: string
+          text: string
+        }
+        Insert: {
+          client_id: string
+          edited_at?: string
+          edited_by?: string | null
+          editor_name?: string
+          section_key: string
+          text: string
+        }
+        Update: {
+          client_id?: string
+          edited_at?: string
+          edited_by?: string | null
+          editor_name?: string
+          section_key?: string
+          text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_strategy_edits_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       creative_directions: {
         Row: {
           client_id: string
@@ -3842,6 +3927,10 @@ export type Database = {
           p_profiles: Json
           p_website: string
         }
+        Returns: Json
+      }
+      strategy_section_save: {
+        Args: { p_client: string; p_key: string; p_text: string }
         Returns: Json
       }
       trend_measures: {

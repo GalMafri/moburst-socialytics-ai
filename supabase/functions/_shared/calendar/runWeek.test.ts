@@ -142,6 +142,40 @@ describe("runWeekPlan", () => {
     expect(prompt.replace(/\n\nHashtags the brand's space uses[^\n]*\n- Instagram: #beerleague\n- TikTok: #hockeytok/, "")).toBe(bare);
   });
 
+  it("plans from the client's content strategy, people's versions included, and gives a client without one today's prompt", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} });
+    const strategy = { client_id: "ptp", sections: { goals: "Grow saves on Instagram.", avoid: "Office photos." }, platforms: [], pillars: [], written_at: "2026-11-02T10:00:00Z" };
+    await runWeekPlan(fakeDb({ calendar_plans: [plan], clients: [CLIENT], content_strategies: [strategy], content_strategy_edits: [{ client_id: "ptp", section_key: "avoid", text: "Anything that mocks other apps." }] }), job(), NOW);
+    const prompt = m.anthropic.mock.calls[0][0].body.messages[0].content as string;
+    expect(prompt).toContain("Grow saves on Instagram.");
+    expect(prompt).toContain("Anything that mocks other apps.");
+    expect(prompt).not.toContain("Office photos.");
+
+    m.anthropic.mockClear();
+    await runWeekPlan(fakeDb({ calendar_plans: [plan], clients: [CLIENT] }), job(), NOW);
+    const bare = m.anthropic.mock.calls[0][0].body.messages[0].content as string;
+    expect(bare).not.toContain("content strategy");
+    expect(prompt.replace(/\n\nThe client's content strategy[\s\S]*?evidence rules here win wherever the strategy differs from them\./, "")).toBe(bare);
+  });
+
+  it("plans as before when the strategy cannot be read", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains.", reason_type: "seasonal", moment: "Playoffs", evidence_ids: [] }] }), raw: {} });
+    const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT] });
+    const from = db.from.bind(db);
+    db.from = (table: string) => {
+      if (table !== "content_strategies") return from(table);
+      // deno-lint-ignore no-explicit-any
+      const q: any = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: null, error: { message: "relation does not exist" } }) };
+      return q;
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect((await runWeekPlan(db, job(), NOW)).status).toBe("done");
+    expect(m.anthropic.mock.calls[0][0].body.messages[0].content).not.toContain("content strategy");
+    warn.mockRestore();
+  });
+
   it("sends the week to be tried again when the profile can't be read, saying why in plain words", async () => {
     m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
     const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT] });
@@ -228,6 +262,30 @@ describe("gatherEvidence hashtags", () => {
   });
 });
 
+describe("gatherEvidence fallback rates", () => {
+  it("hands over the rhythm's fallbacks: the tracked competitors' median per platform, and every tracked company's once read", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    const tok = (i: number) => ({ postId: `t${i}`, companyId: "9", companyName: "BenchApp", channel: "tiktok", publishedAt: `2026-10-0${i + 5}T12:00:00Z`, message: "A post", engagementTotal: 5 });
+    const posts = [0, 1, 2, 3].map(tok);
+    const snapshot = {
+      client_id: "ptp", fetched_at: "2026-10-18T00:00:00Z",
+      payload: { window: { start: "2026-10-05", end: "2026-10-18" }, socialPosts: posts },
+      feed_window: { start: "2026-10-05", end: "2026-10-18" }, client_company_id: null, posts,
+    };
+    const db = fakeDb({ clients: [CLIENT], rivaliq_snapshots: [snapshot], competitor_sets: [{ id: "s1" }], competitors: [{ name: "BenchApp", rivaliq_company_id: "9" }] });
+    const got = await gatherEvidence(db, CLIENT, NOW, { week: "2026-10-26" });
+    // Four TikTok posts over a two-week feed: two a week. The client posts nowhere, so its primary platforms needed every tracked company's rates too.
+    expect(got.fallbackRates).toEqual({ competitors: { TikTok: 2 }, allTracked: { TikTok: 2 } });
+  });
+
+  it("leaves every tracked company's rates unread when the client's own posting gives each platform a rate", async () => {
+    const weekly = Array.from({ length: 16 }, (_, i) => ({ postId: `p${i}`, channel: "instagram", type: "photo", publishedAt: new Date(NOW.getTime() - (i * 4 + 3) * 86400_000).toISOString(), message: "A post", engagementTotal: 3 }));
+    m.owned.mockResolvedValue({ coverage: "complete", profiles: [{ network: "instagram" }], posts: weekly });
+    const got = await gatherEvidence(fakeDb({ clients: [CLIENT] }), CLIENT, NOW, { week: "2026-10-26" });
+    expect(got.fallbackRates).toEqual({ competitors: {}, allTracked: null });
+  });
+});
+
 describe("runWeekRevise", () => {
   const ready = { ...plan, status: "ready", revisions: [], pending_revision: { note: "Less formal", by: "u1", at: "2026-10-19T07:00:00Z", scope: "untouched" } };
   const post = { id: "p1", post_key: "k1", post_date: "2026-10-27", platform: "Instagram", format: "Reel", pillar: null, copy: "Old copy", hashtags: [], cta: null, visual_direction: null, reasons: [], touched_at: null, plan_id: "plan-1" };
@@ -239,6 +297,14 @@ describe("runWeekRevise", () => {
     expect(out).toMatchObject({ status: "queued", available_at: new Date(NOW.getTime() + 360 * 60_000).toISOString() });
     // The revision is still waiting: nothing recorded it as done or failed.
     expect(db.writes.some((w) => (w.value as { pending_revision?: unknown }).pending_revision === null)).toBe(false);
+  });
+
+  it("rewrites with the client's content strategy", async () => {
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ id: "p1", copy: "New copy" }] }), raw: {} });
+    const strategy = { client_id: "ptp", sections: { positioning: "Built around the captain's week." }, platforms: [], pillars: [], written_at: "2026-11-02T10:00:00Z" };
+    const db = fakeDb({ calendar_plans: [ready], clients: [CLIENT], calendar_posts: [post], content_strategies: [strategy] });
+    await runWeekRevise(db, job({ kind: "week_revise" }), NOW);
+    expect(m.anthropic.mock.calls[0][0].body.messages[0].content).toContain("Built around the captain's week.");
   });
 
   it("closes a revision quietly once its week is over", async () => {

@@ -38,6 +38,8 @@ export interface WeekContext {
   canFilm: boolean;
   /** The hashtags the client's trend profile keeps, by lowercase platform name; empty for a client with no profile. */
   hashtags: Record<string, string[]>;
+  /** The client's content strategy (strategy/prompt.ts strategyPromptBlock); "" or absent for a client with none. */
+  strategy?: string;
 }
 
 export interface PlannedPost {
@@ -63,6 +65,12 @@ export function weekDates(monday: string): string[] {
 
 const firstLine = (s: string) => String(s || "").split("\n")[0].replace(/\s+/g, " ").trim().slice(0, 120);
 
+/** Said under the client's content strategy in both prompts: where they differ, the week's own rules win. */
+export const STRATEGY_PRECEDENCE = "The posting rhythm, the dates and the evidence rules here win wherever the strategy differs from them.";
+
+/** The strategy and its precedence line, placed after the pillars; "" for a client with no strategy. */
+const strategySection = (strategy: string | undefined) => (strategy ? `${strategy}\n${STRATEGY_PRECEDENCE}` : "");
+
 function evidenceLine(e: EvidenceItem): string {
   const where = [e.company, e.platform, e.format].filter(Boolean).join(" ");
   const numbers = e.multiple !== undefined ? `${fmtMultiple(e.multiple)} ${e.kind === "own" ? "the client's" : "their"} usual ${e.metric}` : "";
@@ -82,6 +90,7 @@ export function weekPrompt(c: WeekContext): string {
     `You plan one week of social media posts for ${c.brand}.`,
     c.voiceBlock,
     c.pillars.length ? ["Content pillars:", ...c.pillars.map((p) => `- ${p.name}${p.description ? `: ${p.description}` : ""}`)].join("\n") : "",
+    strategySection(c.strategy),
     c.market.length ? `Market: ${c.market.join(", ")}.` : "",
     c.languages.length ? `Write in: ${c.languages.join(", ")}.` : "",
     rhythm.length ? ["Posts for this week, per platform (this is how often the team actually publishes; follow it exactly):", ...rhythm].join("\n") : "",
@@ -220,6 +229,8 @@ export function revisePrompt(c: {
   languages: string[];
   evidence: EvidenceItem[];
   others: Array<{ date: string; platform: string; copy: string }>;
+  /** The client's content strategy; "" or absent for a client with none. */
+  strategy?: string;
 }): string {
   const writing = c.scope === "empty"
     ? "Write each of these posts, which have no copy yet. Keep its date, platform and format. Pick evidence for each and cite its ids."
@@ -228,6 +239,7 @@ export function revisePrompt(c: {
     `You write social media posts for ${c.brand}.`,
     c.voiceBlock,
     c.pillars.length ? ["Content pillars:", ...c.pillars.map((p) => `- ${p.name}${p.description ? `: ${p.description}` : ""}`)].join("\n") : "",
+    strategySection(c.strategy),
     c.languages.length ? `Write in: ${c.languages.join(", ")}.` : "",
     `The note: "${c.note}"`,
     writing,

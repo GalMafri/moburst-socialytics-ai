@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type WeekContext } from "./weekPlan";
+import { buildReason, clientFit, headline, parseRevision, parseWeekPlan, revisePrompt, STRATEGY_PRECEDENCE, weekPrompt, type WeekContext } from "./weekPlan";
 import { wordReason } from "./reasonText";
 import type { EvidenceItem } from "./evidence";
 
@@ -88,6 +88,31 @@ describe("weekPrompt", () => {
 
   it("has no rhythm section when there is no rhythm, rather than an empty one", () => {
     expect(weekPrompt({ ...CTX, rhythm: [] })).not.toContain("Posts for this week, per platform");
+  });
+});
+
+describe("the client's content strategy in the planner's prompts", () => {
+  const STRATEGY = "The client's content strategy, as the team keeps it:\nGoals:\nGrow saves on Instagram.";
+  const REVISE = { brand: "Pay The Pyper", voiceBlock: "Voice.", note: "Less formal", scope: "untouched" as const, posts: [{ id: "a", date: "2026-10-27", platform: "Instagram", format: null, pillar: null, copy: "Old copy", reason: "Why" }], pillars: [{ name: "Beer League Truths" }], languages: ["en"], evidence: EVIDENCE, others: [] };
+
+  it("leaves both prompts exactly as they were for a client without a strategy", () => {
+    expect(weekPrompt({ ...CTX, strategy: "" })).toBe(weekPrompt(CTX));
+    expect(revisePrompt({ ...REVISE, strategy: "" })).toBe(revisePrompt(REVISE));
+    expect(weekPrompt(CTX)).not.toContain("content strategy");
+  });
+
+  it("gives the strategy once, right after the pillars, with the line that the rhythm, dates and evidence rules win", () => {
+    for (const [withIt, without] of [[weekPrompt({ ...CTX, strategy: STRATEGY }), weekPrompt(CTX)], [revisePrompt({ ...REVISE, strategy: STRATEGY }), revisePrompt(REVISE)]]) {
+      const sections = withIt.split("\n\n");
+      const at = sections.findIndex((s) => s.startsWith(STRATEGY));
+      expect(at).toBeGreaterThan(0);
+      expect(sections[at - 1]).toMatch(/^Content pillars:/);
+      expect(sections[at]).toBe(`${STRATEGY}\n${STRATEGY_PRECEDENCE}`);
+      expect(STRATEGY_PRECEDENCE).toMatch(/^The posting rhythm, the dates and the evidence rules here win/);
+      expect(withIt.split(STRATEGY).length).toBe(2);
+      // Nothing else in the prompt moves.
+      expect(withIt.replace(`\n\n${STRATEGY}\n${STRATEGY_PRECEDENCE}`, "")).toBe(without);
+    }
   });
 });
 

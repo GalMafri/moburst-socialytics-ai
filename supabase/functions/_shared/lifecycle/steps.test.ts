@@ -406,6 +406,187 @@ describe("design_settings", () => {
   });
 });
 
+describe("content_strategy", () => {
+  const PROFILE_AT = "2026-11-01T08:00:00.000Z";
+  const trendIO = () => ({ ownPosts: async () => ({ posts: [] }), feedSnapshots: async () => [], competitorSet: async () => [], siteText: async () => "" });
+  const c = (over = {}) => client({ brief_text: "Pay The Pyper keeps captains from chasing payments.", content_pillars: [{ name: "Captain Life" }], posting_rhythm: null, ...over });
+  const tables = () => ({
+    clients: [{ id: "c1", brand_book_text: "" }],
+    trend_profiles: [{ client_id: "c1", audience: "Captains.", fit_rubric: "Fits.", platforms: [{ platform: "instagram", reason: "primary" }], written_at: PROFILE_AT }],
+    sprout_profiles: [{ client_id: "c1", sprout_profile_id: 1, network_type: "fb_instagram_account", native_name: "pyper", is_active: true }],
+    content_strategy_edits: [{ client_id: "c1", section_key: "goals", text: "Our own goals.", editor_name: "Neria", edited_at: T }],
+  });
+  /** The trend profile's step row, done on the inputs it would have now. */
+  const current = async (db: ReturnType<typeof dbWith>, cl = c(), patch: Partial<StepRow> = {}) => {
+    const settledRows = rowsOf(row("brief_pillars"), row("competitors"));
+    const key = await STEPS.trend_profile.inputs(db, cl, settledRows);
+    return rowsOf(row("brief_pillars"), row("competitors"), row("trend_profile", { inputs_key: key, ...patch }));
+  };
+
+  it("waits for a trend profile that is done and current", async () => {
+    deps.trendIO = trendIO;
+    const db = dbWith(tables());
+    expect(await STEPS.content_strategy.inputs(db, c(), new Map())).toBeNull();
+    expect(await STEPS.content_strategy.inputs(db, c(), await current(db, c(), { status: "running" }))).toBeNull();
+    expect(await STEPS.content_strategy.inputs(db, c(), await current(db, c(), { status: "failed", attempts: 1 }))).toBeNull();
+    // The brief changed since the profile was written: the profile is rewritten first, then the strategy.
+    const stale = await current(db, c());
+    expect(await STEPS.content_strategy.inputs(db, c({ brief_text: "A new brief." }), stale)).toBeNull();
+    expect(await STEPS.content_strategy.inputs(db, c(), stale)).toMatch(/^profile:2026-11-01T08:00:00.000Z\|networks:fb_instagram_account\|rhythm:/);
+  });
+
+  it("keys on the profile's date, the active Sprout networks and the posting rhythm, never on people's versions", async () => {
+    deps.trendIO = trendIO;
+    const db = dbWith(tables());
+    const rows = await current(db);
+    const key = await STEPS.content_strategy.inputs(db, c(), rows);
+    db.tables.content_strategy_edits.push({ client_id: "c1", section_key: "audience", text: "Captains and co-captains.", editor_name: "Neria", edited_at: T });
+    db.tables.content_strategy_edits[0].text = "Changed goals.";
+    expect(await STEPS.content_strategy.inputs(db, c(), rows)).toBe(key);
+    expect(await STEPS.content_strategy.inputs(db, c({ posting_rhythm: { instagram: 3 } }), rows)).not.toBe(key);
+    db.tables.sprout_profiles.push({ client_id: "c1", sprout_profile_id: 2, network_type: "tiktok", native_name: "pyper", is_active: true });
+    const withTikTok = await STEPS.content_strategy.inputs(db, c(), rows);
+    expect(withTikTok).not.toBe(key);
+    db.tables.trend_profiles[0].written_at = "2026-11-02T08:00:00.000Z";
+    expect(await STEPS.content_strategy.inputs(db, c(), rows)).not.toBe(withTikTok);
+  });
+
+  it("refreshes monthly and comes after the trend steps", () => {
+    expect(STEPS.content_strategy.policy).toEqual({ refreshDays: 30 });
+    const order = Object.keys(STEPS);
+    expect(order.indexOf("content_strategy")).toBe(order.indexOf("trend_hashtags") + 1);
+  });
+
+  describe("a write", () => {
+    const io = () => ({
+      gather: async () => ({ own: [], learnedRhythm: [], evidence: [], avoid: [], thin: [], examples: {}, fallbackRates: { competitors: { Instagram: 2 }, allTracked: {} } }),
+      trackedRates: async () => ({}),
+      voiceBlock: async () => "How Pay The Pyper writes.",
+      competitiveBrief: async () => "",
+      competitorSet: async () => [],
+      siteText: async () => "",
+    });
+    const draft = {
+      goals: "Grow saves.", audience: "Captains.", positioning: "The captain's app.", avoid: "Office photos.", measures: "Instagram: more saves.",
+      pillars: [{ name: "Captain Life", text: "Checklists." }], platforms: [{ platform: "Instagram", text: "Launch with carousels." }], candidates: [],
+    };
+    const answers = (...texts: string[]) => {
+      const models: string[] = [];
+      deps.claudeMessages = (async ({ body }: { body: { model: string } }) => {
+        models.push(body.model);
+        return { text: texts.shift() ?? "", stopReason: "end_turn", raw: { usage: { input_tokens: 1, output_tokens: 1 } } };
+      }) as never;
+      return models;
+    };
+    /** Every write the step makes, by table. */
+    const watched = (db: ReturnType<typeof dbWith>) => {
+      const writes: string[] = [];
+      const from = db.from.bind(db);
+      db.from = (table: string) => {
+        const q = from(table);
+        for (const op of ["insert", "upsert", "update", "delete"]) {
+          const original = q[op].bind(q);
+          q[op] = (...args: unknown[]) => { writes.push(`${op} ${table}`); return original(...args); };
+        }
+        return q;
+      };
+      return writes;
+    };
+
+    const setUp = (db: ReturnType<typeof dbWith>) => {
+      let gathered = 0;
+      deps.trendIO = trendIO;
+      deps.strategyIO = () => ({ ...io(), gather: async () => { gathered++; return io().gather(); } });
+      deps.anthropicKey = async () => "key";
+      deps.now = () => new Date("2026-11-02T10:00:00.000Z");
+      return { gathered: () => gathered, writes: watched(db) };
+    };
+    const clean = JSON.stringify({ unsupported: [] });
+    const flagged = JSON.stringify({ unsupported: [{ section: "goals", statement: "Grow saves." }] });
+    const stored = { client_id: "c1", sections: { goals: "The last good goals." }, inputs_key: "old", written_at: "2026-10-01T00:00:00.000Z", pending: null };
+
+    it("makes one model call per run: writes in one run, checks in the next, and only then stores the strategy", async () => {
+      const db = dbWith(tables());
+      const rows = await current(db);
+      const t = setUp(db);
+      const models = answers(JSON.stringify(draft), clean);
+      const edits = structuredClone(db.tables.content_strategy_edits);
+
+      const first = await STEPS.content_strategy.run(db, c(), ctx({ rows }));
+      expect(first).toMatchObject({ status: "waiting", reason: "in_progress", recheckMinutes: 1, result: { phase: "check" } });
+      expect(models).toEqual(["claude-opus-5-5"]);
+      expect(db.tables.content_strategies[0].pending).toMatchObject({ phase: "check", inputs_key: await STEPS.content_strategy.inputs(db, c(), rows) });
+      expect(db.tables.content_strategies[0].written_at).toBeUndefined();
+
+      const second = await STEPS.content_strategy.run(db, c(), ctx({ rows }));
+      expect(second).toMatchObject({ status: "done", result: { platforms: { posting: 0, new: 1, not_now: 0 }, calls: { writer: 1, checker: 1 } } });
+      expect(models).toEqual(["claude-opus-5-5", "claude-sonnet-5-5"]);
+      // The evidence is read once, when the write starts.
+      expect(t.gathered()).toBe(1);
+      expect(db.tables.content_strategies).toHaveLength(1);
+      expect(db.tables.content_strategies[0]).toMatchObject({ client_id: "c1", inputs_key: await STEPS.content_strategy.inputs(db, c(), rows), written_at: "2026-11-02T10:00:00.000Z", pending: null });
+      expect(db.tables.content_strategies[0].sections["platform:instagram:new"]).toBe("Launch with carousels.");
+      // Only the strategy's own row is ever written; people's versions are never touched.
+      expect(new Set(t.writes)).toEqual(new Set(["upsert content_strategies"]));
+      expect(db.tables.content_strategy_edits).toEqual(edits);
+    });
+
+    it("keeps the stored strategy on screen through every run, and drops the draft when the write is still flagged", async () => {
+      const db = dbWith({ ...tables(), content_strategies: [{ ...stored }] });
+      const rows = await current(db);
+      setUp(db);
+      const models = answers(JSON.stringify(draft), flagged, JSON.stringify(draft), flagged);
+      const statuses: string[] = [];
+      for (let run = 0; run < 4; run++) {
+        statuses.push((await STEPS.content_strategy.run(db, c(), ctx({ rows }))).status);
+        expect(db.tables.content_strategies[0]).toMatchObject({ sections: { goals: "The last good goals." }, inputs_key: "old", written_at: stored.written_at });
+      }
+      expect(statuses).toEqual(["waiting", "waiting", "waiting", "failed"]);
+      expect(models).toEqual(["claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-sonnet-5-5"]);
+      expect(db.tables.content_strategies[0].pending).toBeNull();
+    });
+
+    it("drops a draft written for other inputs and starts over", async () => {
+      const db = dbWith({ ...tables(), content_strategies: [{ ...stored }] });
+      const rows = await current(db);
+      const t = setUp(db);
+      db.tables.content_strategies[0].pending = { inputs_key: "an older key", phase: "check", evidence: {}, messages: [], draft: draft, usage: { calls: { writer: 1, checker: 0 }, tokens: {} }, started_at: "2026-10-30T00:00:00.000Z" };
+      const models = answers(JSON.stringify(draft));
+      expect(await STEPS.content_strategy.run(db, c(), ctx({ rows }))).toMatchObject({ status: "waiting", result: { phase: "check" } });
+      expect(models).toEqual(["claude-opus-5-5"]);
+      expect(t.gathered()).toBe(1);
+      expect(db.tables.content_strategies[0].pending).toMatchObject({ inputs_key: await STEPS.content_strategy.inputs(db, c(), rows), usage: { calls: { writer: 1, checker: 0 } } });
+    });
+
+    it("keeps the draft when a call does not get through, so the retry picks up the same phase", async () => {
+      const db = dbWith({ ...tables(), content_strategies: [{ ...stored }] });
+      const rows = await current(db);
+      setUp(db);
+      answers(JSON.stringify(draft));
+      await STEPS.content_strategy.run(db, c(), ctx({ rows }));
+      const kept = structuredClone(db.tables.content_strategies[0].pending);
+      deps.claudeMessages = (async () => { throw new Error("Anthropic API error 529: overloaded"); }) as never;
+      await expect(STEPS.content_strategy.run(db, c(), ctx({ rows }))).rejects.toThrow("529");
+      expect(db.tables.content_strategies[0].pending).toEqual(kept);
+      const models = answers(clean);
+      expect((await STEPS.content_strategy.run(db, c(), ctx({ rows }))).status).toBe("done");
+      expect(models).toEqual(["claude-sonnet-5-5"]);
+    });
+
+    it("tries again quietly without an AI connection, and waits for a profile", async () => {
+      deps.trendIO = trendIO;
+      deps.strategyIO = io;
+      deps.anthropicKey = async () => null;
+      const db = dbWith(tables());
+      const rows = await current(db);
+      expect(await STEPS.content_strategy.run(db, c(), ctx({ rows }))).toMatchObject({ status: "failed" });
+      deps.anthropicKey = async () => "key";
+      const none = dbWith({ ...tables(), trend_profiles: [] });
+      expect(await STEPS.content_strategy.run(none, c(), ctx({ rows }))).toMatchObject({ status: "waiting" });
+    });
+  });
+});
+
 describe("first_output", () => {
   it("waits for the brief and the accounts, then keys on plans, voice and the first report", async () => {
     const db = dbWith({ calendar_plans: [{ client_id: "c1", week_start: "2026-10-26" }], reports: [], report_schedules: [{ client_id: "c1", id: "s" }] });

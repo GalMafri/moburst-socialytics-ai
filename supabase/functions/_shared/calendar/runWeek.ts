@@ -26,6 +26,7 @@ import { activePreferences, buildVoiceProfile, consolidateMemory, COPY_MODEL, le
 import { voicePromptBlock } from "../voice/voice.ts";
 import { activeTerms } from "../trends/profile.ts";
 import { HASHTAG_PLATFORMS, type HashtagPlatform } from "../trends/types.ts";
+import { strategyPromptBlock } from "../strategy/prompt.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -90,6 +91,13 @@ export interface Gathered {
   examples: ReturnType<typeof bestExamples>;
   /** The hashtags the client's trend profile keeps for each platform, for the planner to suggest. */
   hashtags: Record<HashtagPlatform, string[]>;
+  /**
+   * The rhythm's fallbacks, for a platform the client does not post on (the
+   * content strategy's new platforms): posts per week among its tracked
+   * competitors, and across every tracked company when the rhythm read them
+   * (null otherwise; trackedRates reads them).
+   */
+  fallbackRates: { competitors: Record<string, number>; allTracked: Record<string, number> | null };
   /** trends: "themes" when the newest finished Trends week gave evidence, else "none". */
   sources: { sprout: string; feed_weeks: number; report: string | null; topics: number; trends: "themes" | "none" };
 }
@@ -173,7 +181,7 @@ export async function competitorSet(admin: Db, clientId: string): Promise<Array<
  * when a client's own posting and its competitors leave a platform without a
  * rate, and once per run.
  */
-async function trackedRates(admin: Db): Promise<Record<string, number>> {
+export async function trackedRates(admin: Db): Promise<Record<string, number>> {
   const histories = feedHistories(await feedRows(admin));
   return medianRates([...histories.values()]);
 }
@@ -260,7 +268,10 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
     allTracked: null as Record<string, number> | null,
   };
   let resolved = resolveRhythm(rhythmInput);
-  if (resolved.needsAllTracked) resolved = resolveRhythm({ ...rhythmInput, allTracked: await trackedRates(admin) });
+  if (resolved.needsAllTracked) {
+    rhythmInput.allTracked = await trackedRates(admin);
+    resolved = resolveRhythm(rhythmInput);
+  }
   const thin = [
     ...Object.entries(scored.platforms).filter(([, v]) => v.thin).map(([k, v]) => `${k}: ${v.posts} post${v.posts === 1 ? "" : "s"} in the last 90 days, so its numbers are an early signal.`),
     ...(recent.length && recent.length < 1 + MIN_COMPETITOR_WEEKS ? [`Competitor history: ${recent.length} week${recent.length === 1 ? "" : "s"} so far, so competitor numbers are an early signal.`] : []),
@@ -269,6 +280,7 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   return {
     own, learnedRhythm: resolved.learned, rhythm: resolved.applied, rhythmSources: resolved.sources, evidence, avoid: scored.low.map(fmt), thin,
     examples: bestExamples(scored.top), hashtags,
+    fallbackRates: { competitors: medianRates([rhythmInput.competitors]), allTracked: rhythmInput.allTracked },
     sources: { sprout, feed_weeks: recent.length, report: report?.id ?? null, topics: (alerts ?? []).length, trends: trends.length ? "themes" : "none" },
   };
 }
@@ -331,6 +343,16 @@ async function releaseStoppedRun(admin: Db, plan: { id: string; claimed_at: stri
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * The client's content strategy for the planner's prompts. Like the
+ * competitive picture, a strategy that cannot be read leaves the prompt as it
+ * was without one, rather than holding the week.
+ */
+const clientStrategy = (admin: Db, clientId: string) => strategyPromptBlock(admin, clientId).catch((e: unknown) => {
+  console.warn("[calendar] the content strategy was left out:", message(e));
+  return "";
+});
 
 /** How far back an upload of filmed footage still says the client films. */
 const FILMING_DAYS = 60;
@@ -426,6 +448,7 @@ export async function runWeekPlan(admin: Db, job: WeekJob, now = new Date()): Pr
       thin: gathered.thin,
       canFilm: await clientCanFilm(admin, client.id, now),
       hashtags: gathered.hashtags,
+      strategy: await clientStrategy(admin, client.id),
     };
     let posts: ReturnType<typeof parseWeekPlan> = [];
     const tokens = { input: 0, output: 0 };
@@ -532,6 +555,7 @@ export async function runWeekRevise(admin: Db, job: WeekJob, now = new Date()): 
       languages: list(client.language),
       evidence: gathered?.evidence ?? [],
       others: all.filter((p) => !targets.some((t) => t.id === p.id) && p.copy).map((p) => ({ date: p.post_date, platform: p.platform, copy: p.copy })),
+      strategy: await clientStrategy(admin, client.id),
     });
     const result = await anthropicMessages({ apiKey: apiKey(), body: { model: COPY_MODEL, max_tokens: 12000, messages: [{ role: "user", content: prompt }] } });
     const revised = parseRevision(result.text, targets.map((p) => p.id), gathered?.evidence ?? [], pending.scope === "empty");
