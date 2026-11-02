@@ -390,6 +390,7 @@ export type Database = {
           reasons: Json
           report_id: string | null
           source: string
+          story_of: string | null
           touched_at: string | null
           updated_at: string
           visual_direction: string | null
@@ -415,6 +416,7 @@ export type Database = {
           reasons?: Json
           report_id?: string | null
           source?: string
+          story_of?: string | null
           touched_at?: string | null
           updated_at?: string
           visual_direction?: string | null
@@ -440,6 +442,7 @@ export type Database = {
           reasons?: Json
           report_id?: string | null
           source?: string
+          story_of?: string | null
           touched_at?: string | null
           updated_at?: string
           visual_direction?: string | null
