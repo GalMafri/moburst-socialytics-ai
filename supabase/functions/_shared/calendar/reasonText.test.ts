@@ -4,6 +4,11 @@ import { evidenceSentence, reasonLabel, wordReason, type EvidenceRef } from "./r
 const OWN: EvidenceRef = { id: "P1", kind: "own", text: "Our playoff checklist", platform: "Instagram", format: "carousel", date: "2026-10-05", metric: "impressions", multiple: 2.7, sample: 12 };
 const RIVAL: EvidenceRef = { id: "C1", kind: "competitor", text: "Captain meme", company: "BenchApp", platform: "Instagram", format: "video", date: "2026-10-14", metric: "engagement per follower", multiple: 4, thin: true };
 const TREND: EvidenceRef = { id: "N5", kind: "trend", text: "Carousel education can support clicks: Publish 1 carousel weekly." };
+/** A trend from a weekly theme (Trends redesign): the theme, and the example post that shows it. */
+const THEME_TREND: EvidenceRef = {
+  id: "N1", kind: "trend", text: "POV: you are the captain", theme: "Captain POV skits", company: "@benchpro", platform: "TikTok", format: "short_video",
+  date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 5400,
+};
 
 describe("evidenceSentence", () => {
   it("puts each kind of evidence in words with its real numbers", () => {
@@ -12,6 +17,18 @@ describe("evidenceSentence", () => {
     expect(evidenceSentence({ id: "T1", kind: "topic", text: "Playoff scheduling: reminders", companies: 2 })).toBe("2 competitors posted about Playoff scheduling this week");
     expect(evidenceSentence(TREND)).toBe("Trend from the monthly report: Carousel education can support clicks");
     expect(evidenceSentence({ id: "R1", kind: "report", text: "LinkedIn drove 464 of 465 clicks. More detail." })).toBe("From the monthly report: LinkedIn drove 464 of 465 clicks");
+  });
+
+  it("words a theme's example post as inspiration, with its author, platform, format and date", () => {
+    expect(evidenceSentence(THEME_TREND)).toBe('Inspired by "Captain POV skits": @benchpro\'s TikTok short video from Oct 14');
+    expect(evidenceSentence({ ...THEME_TREND, format: "long_video", platform: "YouTube" })).toBe('Inspired by "Captain POV skits": @benchpro\'s YouTube long video from Oct 14');
+    expect(evidenceSentence({ ...THEME_TREND, format: "pin", platform: "Pinterest" })).toContain("Pinterest pin from Oct 14");
+    expect(evidenceSentence({ ...THEME_TREND, format: "carousel" })).toContain("TikTok carousel from");
+  });
+
+  it("leaves out what a theme's example doesn't have: no date, no author", () => {
+    expect(evidenceSentence({ ...THEME_TREND, date: undefined })).toBe('Inspired by "Captain POV skits": @benchpro\'s TikTok short video');
+    expect(evidenceSentence({ ...THEME_TREND, company: undefined })).toBe('Inspired by "Captain POV skits": TikTok short video from Oct 14');
   });
 });
 
@@ -32,6 +49,8 @@ describe("wordReason", () => {
   it("words a week plan's reason from its parts, whatever label it was saved with", () => {
     expect(wordReason({ type: "trend", label: "Old long label with N5 in it.", fit: "Pairs a hook with share asks, which R4 found works.", evidence: [TREND] }))
       .toBe("Trend from the monthly report: Carousel education can support clicks.");
+    expect(wordReason({ type: "trend", label: "Old", fit: "Captains live this every week.", evidence: [THEME_TREND] }))
+      .toBe('Inspired by "Captain POV skits": @benchpro\'s TikTok short video from Oct 14. Captains live this every week.');
     expect(wordReason({ type: "test", label: "Old", evidence: [OWN] })).toBe("Test: Your Instagram carousel from Oct 5 got 2.7x your usual impressions.");
     expect(wordReason({ type: "seasonal", label: "Old", moment: "Halloween on Oct 31", fit: "Fits the team.", test: false })).toBe("Halloween on Oct 31. Fits the team.");
   });

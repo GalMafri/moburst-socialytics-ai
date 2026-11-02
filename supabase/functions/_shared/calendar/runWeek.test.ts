@@ -73,6 +73,42 @@ describe("runWeekPlan", () => {
     expect(ready?.rhythm).toEqual(expect.objectContaining({ applied: expect.any(Array), learned: expect.any(Array), sources: expect.any(Object) }));
   });
 
+  it("plans the week with no trend evidence when nothing is stored yet, and never reads the monthly report's trend strings", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "seasonal", moment: "Playoffs start Oct 27", evidence_ids: [] }] }), raw: {} });
+    // The latest report still carries the old trend strings; the planner no longer reads them.
+    const report = { id: "r1", created_at: "2026-10-01T00:00:00Z", report_data: [{ ai_analysis: { instagram_trends_analysis: { opportunities_for_client: ["Old report trend about carousels"] } } }] };
+    const db = fakeDb({ calendar_plans: [plan], clients: [CLIENT], reports: [report] });
+    const out = await runWeekPlan(db, job(), NOW);
+    expect(out.status).toBe("done");
+    const ready = db.writes.filter((w) => w.table === "calendar_plans" && w.op === "update").map((w) => w.value as Record<string, unknown>).find((v) => v.status === "ready");
+    const evidence = ready?.evidence as { items: Array<{ kind: string }>; sources: Record<string, unknown> };
+    expect(evidence.sources.trends).toBe("none");
+    expect(evidence.items.filter((i) => i.kind === "trend")).toEqual([]);
+    expect(m.anthropic.mock.calls[0][0].body.messages[0].content).not.toContain("Old report trend");
+  });
+
+  it("plans from the stored themes: the prompt names the theme and the post keeps it as its reason", async () => {
+    m.owned.mockResolvedValue({ coverage: "not_connected", profiles: [], posts: [] });
+    m.anthropic.mockResolvedValue({ text: JSON.stringify({ posts: [{ date: "2026-10-27", platform: "Instagram", copy: "Captains, this one is for you.", reason_type: "trend", evidence_ids: ["N1"], fit: "Captains live this every week." }] }), raw: {} });
+    const db = fakeDb({
+      calendar_plans: [plan], clients: [CLIENT],
+      trend_weeks: [{ id: "w1", week_start: "2026-10-19", status: "done" }],
+      trend_themes: [{ id: "th1", week_id: "w1", position: 0, title: "Captain POV skits", post_ids: ["tp1"], dismissed_at: null }],
+      trend_posts: [{ id: "tp1", week_id: "w1", platform: "tiktok", url: "https://t/1", author: "@benchpro", text: "POV: you are the captain", posted_at: "2026-10-14T09:00:00+00:00", format: "short_video", fit: 88, engagement: 5400, kept: true }],
+    });
+    const out = await runWeekPlan(db, job(), NOW);
+    expect(out.status).toBe("done");
+    expect(m.anthropic.mock.calls[0][0].body.messages[0].content).toContain('theme "Captain POV skits"');
+    const inserted = db.writes.find((w) => w.table === "calendar_posts" && w.op === "insert")?.value as Array<Record<string, unknown>>;
+    expect(inserted[0].reasons).toEqual([expect.objectContaining({
+      type: "trend", label: 'Inspired by "Captain POV skits": @benchpro\'s TikTok short video from Oct 14. Captains live this every week.',
+      evidence: [expect.objectContaining({ id: "N1", kind: "trend", theme: "Captain POV skits", link: "https://t/1", metric: "engagement", value: 5400 })],
+    })]);
+    const ready = db.writes.filter((w) => w.table === "calendar_plans" && w.op === "update").map((w) => w.value as Record<string, unknown>).find((v) => v.status === "ready");
+    expect((ready?.evidence as { sources: Record<string, unknown> }).sources.trends).toBe("themes");
+  });
+
   it("never plans an empty week: a client posting less than weekly still gets one post on its main platform", async () => {
     // Two Facebook posts in the last 8 weeks: 0.25 a week, and the week of 26 Oct is not one of its spread weeks.
     const posts = ["2026-09-01T14:00:00Z", "2026-09-29T14:00:00Z"].map((publishedAt, i) => ({ postId: `p${i}`, channel: "facebook", type: "photo", publishedAt, message: "A post", engagementTotal: 3 }));

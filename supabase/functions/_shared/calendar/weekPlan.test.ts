@@ -43,6 +43,17 @@ describe("weekPrompt", () => {
     expect(p).toContain("Don't mock other apps");
   });
 
+  it("gives each trend with its theme and its example post, not as a monthly report finding", () => {
+    const trend: EvidenceItem = {
+      id: "N1", kind: "trend", text: "POV: you are the captain", theme: "Captain POV skits", company: "@benchpro", platform: "TikTok", format: "short_video",
+      date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 5400,
+    };
+    const p = weekPrompt({ ...CTX, evidence: [...EVIDENCE, trend] });
+    expect(p).toContain('N1 [@benchpro TikTok short_video, 2026-10-14, theme "Captain POV skits"] POV: you are the captain');
+    expect(p).toContain("Industry trends this week");
+    expect(p).not.toContain("Platform trends from the latest monthly report");
+  });
+
   it("leaves out ideas that need filming when the client hasn't uploaded footage in 60 days", () => {
     const rule = "don't plan ideas that need a specific person on camera";
     expect(weekPrompt(CTX)).not.toContain(rule);
@@ -55,6 +66,14 @@ describe("weekPrompt", () => {
 });
 
 describe("parseWeekPlan", () => {
+  it("keeps a trend's theme on the post's reason and types the post as a trend", () => {
+    const trend: EvidenceItem = { id: "N1", kind: "trend", text: "POV: you are the captain", theme: "Captain POV skits", company: "@benchpro", platform: "TikTok", format: "short_video", date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 5400 };
+    const [p] = parseWeekPlan(JSON.stringify({ posts: [post({ reason_type: "trend", evidence_ids: ["N1"] })] }), { ...CTX, evidence: [...EVIDENCE, trend] });
+    expect(p.reasons[0].type).toBe("trend");
+    expect(p.reasons[0].evidence?.[0]).toMatchObject({ theme: "Captain POV skits", link: "https://t/1" });
+    expect(p.reasons[0].label).toBe('Inspired by "Captain POV skits": @benchpro\'s TikTok short video from Oct 14. Captains live this every week.');
+  });
+
   it("builds each reason from the evidence's own numbers and the model's fit sentence", () => {
     const [p] = parseWeekPlan(JSON.stringify({ posts: [post({})] }), CTX);
     expect(p.reasons[0].type).toBe("competitor");

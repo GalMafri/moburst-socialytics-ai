@@ -16,8 +16,8 @@ import { anthropicMessages } from "../anthropic.ts";
 import { collectOwnedCompetitive } from "../competitive/ownedSource.ts";
 import { competitiveBrief } from "../competitive/brief.ts";
 import {
-  bestExamples, clientCompanyId, compactFeedRow, competitorPosts, feedHistories, isBoosted, isClientPost, medianRates, numberEvidence, platformName,
-  resolveRhythm, scoreCompetitorPosts, scoreOwnPosts, MIN_COMPETITOR_WEEKS, OWN_DAYS,
+  bestExamples, clientCompanyId, compactFeedRow, competitorPosts, feedHistories, isBoosted, isClientPost, latestTrendEvidence, medianRates, numberEvidence, platformName,
+  resolveRhythm, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems, MIN_COMPETITOR_WEEKS, OWN_DAYS,
   type CompetitorPost, type EvidenceItem, type FeedRow, type OwnPost, type RhythmLine, type RhythmSources,
 } from "./evidence.ts";
 import { parseRevision, parseWeekPlan, revisePrompt, weekPrompt, type Reason, type RevisePost } from "./weekPlan.ts";
@@ -86,7 +86,8 @@ export interface Gathered {
   avoid: string[];
   thin: string[];
   examples: ReturnType<typeof bestExamples>;
-  sources: { sprout: string; feed_weeks: number; report: string | null; topics: number };
+  /** trends: "themes" when the newest finished Trends week gave evidence, else "none". */
+  sources: { sprout: string; feed_weeks: number; report: string | null; topics: number; trends: "themes" | "none" };
 }
 
 /** The client's own posts for the last 90 days: Sprout where profiles are assigned, RivalIQ's copy for other platforms. */
@@ -222,7 +223,9 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   const ai = rd?.ai_analysis ?? {};
   const perf = ai.sprout_performance_analysis ?? {};
   const findings = [...strings(perf.key_insights), ...strings(perf.pillar_alignment?.recommendations), ...strings(ai.competitive_takeaways)];
-  const trends = [...strings(ai.tiktok_trends_analysis?.opportunities_for_client), ...strings(ai.instagram_trends_analysis?.opportunities_for_client)];
+
+  // Industry trends come from the newest finished weekly Trends run (its themes staff did not dismiss), not from the report.
+  const trends = scoreTrendItems(await latestTrendEvidence(admin, client.id));
 
   const scored = scoreOwnPosts(own, now);
   const evidence = numberEvidence({ ownTop: scored.top, competitors, topics: alerts ?? [], trends, findings });
@@ -242,7 +245,7 @@ export async function gatherEvidence(admin: Db, client: Record<string, any>, now
   return {
     own, learnedRhythm: resolved.learned, rhythm: resolved.applied, rhythmSources: resolved.sources, evidence, avoid: scored.low.map(fmt), thin,
     examples: bestExamples(scored.top),
-    sources: { sprout, feed_weeks: recent.length, report: report?.id ?? null, topics: (alerts ?? []).length },
+    sources: { sprout, feed_weeks: recent.length, report: report?.id ?? null, topics: (alerts ?? []).length, trends: trends.length ? "themes" : "none" },
   };
 }
 

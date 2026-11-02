@@ -17,6 +17,26 @@ describe("PostReason", () => {
     expect(screen.getByRole("link", { name: /View the post/ })).toHaveAttribute("href", "https://c/1");
   });
 
+  it("shows Inspired by with the theme and a link to the example post", () => {
+    const trend = {
+      id: "N1", kind: "trend" as const, text: "POV: you are the captain and nobody RSVPs", theme: "Captain POV skits", company: "@benchpro", platform: "TikTok", format: "short_video",
+      date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 5400,
+    };
+    render(<PostReason reasons={[{ type: "trend", label: "Old label", fit: "Captains live this every week.", evidence: [trend], test: false }]} />);
+    expect(screen.getByText(`Inspired by "Captain POV skits": @benchpro's TikTok short video from Oct 14. Captains live this every week.`)).toBeInTheDocument();
+    expect(screen.getByText(`"POV: you are the captain and nobody RSVPs"`)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /View the post/ })).toHaveAttribute("href", "https://t/1");
+    // The sentence already names who posted what and when; the list doesn't say it a second time, and shows no raw format name.
+    expect(screen.queryByText(/short_video/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/usual/)).not.toBeInTheDocument();
+  });
+
+  it("still shows a trend saved before themes (monthly report wording) as it was", () => {
+    render(<PostReason reasons={[{ type: "trend", label: "Old", evidence: [{ id: "N5", kind: "trend", text: "Carousel education can support clicks: Publish 1 carousel weekly." }], test: false }]} />);
+    expect(screen.getByText("Trend from the monthly report: Carousel education can support clicks.")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
   it("words a seasonal post from its moment", () => {
     render(<PostReason reasons={[{ type: "seasonal", label: "Old", moment: "Halloween on Oct 31", fit: "Fits the team.", test: false }]} />);
     expect(screen.getByText("Halloween on Oct 31. Fits the team.")).toBeInTheDocument();

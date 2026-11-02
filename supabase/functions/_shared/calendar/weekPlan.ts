@@ -64,7 +64,7 @@ const firstLine = (s: string) => String(s || "").split("\n")[0].replace(/\s+/g, 
 function evidenceLine(e: EvidenceItem): string {
   const where = [e.company, e.platform, e.format].filter(Boolean).join(" ");
   const numbers = e.multiple !== undefined ? `${fmtMultiple(e.multiple)} ${e.kind === "own" ? "the client's" : "their"} usual ${e.metric}` : "";
-  const parts = [where, e.date, numbers, e.companies ? `${e.companies} companies` : "", e.thin ? "early signal" : ""].filter(Boolean).join(", ");
+  const parts = [where, e.date, e.theme ? `theme "${e.theme}"` : "", numbers, e.companies ? `${e.companies} companies` : "", e.thin ? "early signal" : ""].filter(Boolean).join(", ");
   return `${e.id} [${parts || e.kind}] ${e.text}`;
 }
 
@@ -85,7 +85,7 @@ export function weekPrompt(c: WeekContext): string {
     section(`${c.brand}'s own posts that beat its usual numbers:`, byKind("own")),
     section("Competitor posts that beat that competitor's usual numbers this week:", byKind("competitor")),
     section("Topics several competitors posted about this week:", byKind("topic")),
-    section("Platform trends from the latest monthly report:", byKind("trend")),
+    section("Industry trends this week, each shown by a real post that fit the client's audience:", byKind("trend")),
     section("Findings from the latest monthly report:", byKind("report")),
     c.avoid.length ? [`${c.brand}'s posts that did worst (don't repeat what they did):`, ...c.avoid.map((a) => `- ${a}`)].join("\n") : "",
     c.competitiveBrief,

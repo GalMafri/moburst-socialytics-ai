@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  applyRhythmSetting, bestExamples, compactFeedRow, competitorPosts, feedHistories, isBoosted, median, medianRates, numberEvidence, platformName, postsInWeek,
-  resolveRhythm, rhythmFromPosts, scoreCompetitorPosts, scoreOwnPosts, type CompetitorPost, type OwnPost, type RhythmInput, type TrackedPost,
+  applyRhythmSetting, bestExamples, compactFeedRow, competitorPosts, feedHistories, isBoosted, latestTrendEvidence, median, medianRates, numberEvidence, platformName,
+  postsInWeek, resolveRhythm, rhythmFromPosts, scoreCompetitorPosts, scoreOwnPosts, scoreTrendItems,
+  type CompetitorPost, type OwnPost, type RhythmInput, type TrackedPost, type TrendEvidenceInput,
 } from "./evidence";
 
 const NOW = new Date("2026-10-19T07:15:00Z");
@@ -160,13 +161,168 @@ describe("numberEvidence and bestExamples", () => {
       ownTop: top,
       competitors: scoreCompetitorPosts([comp("h1", "BenchApp", "2026-10-01T10:00:00Z", 10), comp("n1", "BenchApp", "2026-10-14T10:00:00Z", 40)], "2026-10-12", 4),
       topics: [{ topic: "Playoff scheduling", summary: "Two apps posted playoff reminders", companies: ["BenchApp", "TeamSnap"], post_urls: ["https://c/1"] }],
-      trends: ["Captain-POV skits"],
+      trends: scoreTrendItems([trend({ theme: "Captain-POV skits" })]),
       findings: ["LinkedIn drove most clicks"],
     });
     expect(items.map((i) => i.id)).toEqual(["P1", "P2", "C1", "T1", "N1", "R1"]);
+    expect(items.find((i) => i.id === "N1")).toMatchObject({ kind: "trend", theme: "Captain-POV skits" });
     expect(items[0]).toMatchObject({ kind: "own", multiple: 2.7, median: 1100, metric: "impressions", date: "2026-10-05" });
     expect(items.find((i) => i.id === "T1")).toMatchObject({ companies: 2, link: "https://c/1" });
     expect(bestExamples(top).LinkedIn.map((x) => x.date)).toEqual(["2026-10-05", "2026-10-03"]);
+  });
+});
+
+// ── Trends: the newest finished week's themes ───────────────────────────────
+
+/** A stand-in for the service client that honors the filters trend reads rely on (eq, in, is, order, limit). */
+function trendDb(tables: Record<string, Array<Record<string, unknown>>>) {
+  return {
+    from(table: string) {
+      let rows = [...(tables[table] ?? [])];
+      // deno-lint-ignore no-explicit-any
+      const q: any = {
+        select: () => q,
+        eq: (col: string, v: unknown) => { rows = rows.filter((r) => r[col] === v); return q; },
+        in: (col: string, vs: unknown[]) => { rows = rows.filter((r) => vs.includes(r[col])); return q; },
+        is: (col: string, v: unknown) => { rows = rows.filter((r) => (r[col] ?? null) === v); return q; },
+        order: (col: string, o: { ascending?: boolean } = {}) => {
+          const dir = o.ascending === false ? -1 : 1;
+          rows.sort((a, b) => ((a[col] as string | number) < (b[col] as string | number) ? -dir : (a[col] as string | number) > (b[col] as string | number) ? dir : 0));
+          return q;
+        },
+        limit: (n: number) => { rows = rows.slice(0, n); return q; },
+        maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
+        then: (ok: (v: unknown) => unknown, fail?: (e: unknown) => unknown) => Promise.resolve({ data: rows, error: null }).then(ok, fail),
+      };
+      return q;
+    },
+  };
+}
+
+const week = (id: string, week_start: string, status: string, client_id = "c1") => ({ id, client_id, week_start, status });
+const theme = (id: string, week_id: string, position: number, title: string, post_ids: string[], dismissed_at: string | null = null) =>
+  ({ id, week_id, client_id: "c1", position, title, post_ids, dismissed_at });
+const kept = (id: string, week_id: string, platform: string, fit: number, engagement: number, over: Record<string, unknown> = {}) =>
+  ({ id, week_id, client_id: "c1", platform, url: `https://t/${id}`, author: `@${id}`, text: `Post ${id}`, posted_at: "2026-10-14T09:00:00+00:00", format: "short_video", fit, engagement, kept: true, ...over });
+
+describe("latestTrendEvidence", () => {
+  const tables = () => ({
+    trend_weeks: [
+      week("w-old", "2026-10-19", "done"), week("w-new", "2026-10-26", "partial"),
+      week("w-running", "2026-11-02", "running"), week("w-other", "2026-11-09", "done", "someone-else"),
+    ],
+    trend_themes: [
+      theme("th-old", "w-old", 0, "Last month's idea", ["old1"]),
+      theme("th1", "w-new", 0, "Captain POV skits", ["a", "b", "c", "c2"]),
+      theme("th2", "w-new", 1, "Playoff reminders", ["d"]),
+    ],
+    trend_posts: [
+      kept("old1", "w-old", "tiktok", 99, 1),
+      kept("a", "w-new", "tiktok", 90, 5000), kept("b", "w-new", "tiktok", 70, 100), kept("c", "w-new", "tiktok", 95, 9000, { kept: false }),
+      kept("c2", "w-new", "tiktok", 80, 300), kept("d", "w-new", "instagram", 60, 40, { format: "carousel", posted_at: null }),
+    ],
+  });
+
+  it("gives the planner the newest week's themes with platform, format, link and engagement", async () => {
+    const got = await latestTrendEvidence(trendDb(tables()), "c1");
+    // The newest finished week is the partial one (a running week and another client's week don't count);
+    // each theme gives its two best-fitting kept posts, in theme order.
+    expect(got.map((g) => [g.theme, g.link])).toEqual([
+      ["Captain POV skits", "https://t/a"], ["Captain POV skits", "https://t/c2"], ["Playoff reminders", "https://t/d"],
+    ]);
+    expect(got[0]).toMatchObject({
+      theme_id: "th1", theme: "Captain POV skits", platform: "tiktok", format: "short_video", author: "@a", text: "Post a", link: "https://t/a",
+      date: "2026-10-14", fit: 90, engagement: 5000,
+    });
+    // A post with no date stays, dated null.
+    expect(got[2]).toMatchObject({ platform: "instagram", format: "carousel", date: null });
+  });
+
+  it("measures each post against its platform's median over every kept post of the week", async () => {
+    const got = await latestTrendEvidence(trendDb(tables()), "c1");
+    // Kept TikTok posts: 5000, 100, 300 (the dropped one is not counted).
+    expect(got.filter((g) => g.platform === "tiktok").every((g) => g.platform_median === 300)).toBe(true);
+    expect(got.find((g) => g.platform === "instagram")?.platform_median).toBe(40);
+  });
+
+  it("leaves out a dismissed theme", async () => {
+    const t = tables();
+    t.trend_themes = t.trend_themes.map((x) => (x.id === "th1" ? { ...x, dismissed_at: "2026-10-28T10:00:00Z" } : x));
+    const got = await latestTrendEvidence(trendDb(t), "c1");
+    expect(got.map((g) => g.theme)).toEqual(["Playoff reminders"]);
+  });
+
+  it("returns nothing when no week has finished, or the week has no themes left", async () => {
+    expect(await latestTrendEvidence(trendDb({ trend_weeks: [week("w", "2026-10-26", "running")] }), "c1")).toEqual([]);
+    expect(await latestTrendEvidence(trendDb({}), "c1")).toEqual([]);
+    const t = tables();
+    t.trend_themes = t.trend_themes.map((x) => ({ ...x, dismissed_at: "2026-10-28T10:00:00Z" }));
+    expect(await latestTrendEvidence(trendDb(t), "c1")).toEqual([]);
+  });
+
+  it("does not fall back to an older week when the newest one has nothing usable", async () => {
+    const t = tables();
+    t.trend_themes = t.trend_themes.filter((x) => x.week_id !== "w-new");
+    expect(await latestTrendEvidence(trendDb(t), "c1")).toEqual([]);
+  });
+
+  it("names what it could not read, in plain words", async () => {
+    const broken = { from: () => ({ select: () => ({ eq: () => ({ in: () => ({ order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null, error: { message: "boom" } }) }) }) }) }) }) }) };
+    await expect(latestTrendEvidence(broken, "c1")).rejects.toThrow("Could not read the latest trends: boom");
+  });
+});
+
+const trend = (over: Partial<TrendEvidenceInput> = {}): TrendEvidenceInput => ({
+  theme: "Captain POV skits", theme_id: "th1", platform: "tiktok", format: "short_video", author: "@benchpro", text: "POV: you are the captain and nobody RSVPs",
+  link: "https://t/1", date: "2026-10-14", fit: 80, engagement: 1000, ...over,
+});
+
+describe("scoreTrendItems", () => {
+  it("shapes each trend like the other evidence: platform, format, link, date, engagement and its theme", () => {
+    const [item] = scoreTrendItems([trend()]);
+    expect(item).toEqual({
+      id: "N1", kind: "trend", text: "POV: you are the captain and nobody RSVPs", theme: "Captain POV skits", company: "@benchpro", platform: "TikTok", format: "short_video",
+      date: "2026-10-14", link: "https://t/1", metric: "engagement", value: 1000,
+    });
+    // No date, no author: the fields are left out rather than set empty.
+    const [bare] = scoreTrendItems([trend({ date: null, author: "" })]);
+    expect(bare).not.toHaveProperty("date");
+    expect(bare).not.toHaveProperty("company");
+  });
+
+  it("ranks by fit and by engagement against the platform's median", () => {
+    const ranked = scoreTrendItems([
+      trend({ link: "https://t/low", fit: 40, engagement: 10, platform_median: 1000 }),
+      trend({ link: "https://t/fit", fit: 90, engagement: 1000, platform_median: 1000 }),
+      trend({ link: "https://t/both", fit: 90, engagement: 4000, platform_median: 1000 }),
+      trend({ link: "https://t/reach", fit: 40, engagement: 4000, platform_median: 1000 }),
+    ]);
+    expect(ranked.map((r) => r.link)).toEqual(["https://t/both", "https://t/fit", "https://t/reach", "https://t/low"]);
+    expect(ranked.map((r) => r.id)).toEqual(["N1", "N2", "N3", "N4"]);
+  });
+
+  it("takes each platform's median from the items when none was given", () => {
+    const ranked = scoreTrendItems([
+      trend({ link: "https://t/a", platform: "tiktok", fit: 80, engagement: 100 }),
+      trend({ link: "https://t/b", platform: "tiktok", fit: 80, engagement: 5000 }),
+      // Instagram's own scale: 50 is far above its median of 10, however small next to TikTok's numbers.
+      trend({ link: "https://t/c", platform: "instagram", fit: 80, engagement: 50, platform_median: 10 }),
+    ]);
+    expect(ranked[2].link).toBe("https://t/a");
+  });
+
+  it("keeps at most 8, with no quota per platform or theme", () => {
+    const many = Array.from({ length: 12 }, (_, i) => trend({ link: `https://t/${i}`, fit: 50 + i, engagement: 100 * (i + 1) }));
+    const ranked = scoreTrendItems(many);
+    expect(ranked).toHaveLength(8);
+    expect(new Set(ranked.map((r) => r.platform))).toEqual(new Set(["TikTok"]));
+    expect(ranked[0].link).toBe("https://t/11");
+  });
+
+  it("shows a post once when two themes cite it", () => {
+    const ranked = scoreTrendItems([trend({ theme: "A", link: "https://t/same", fit: 90 }), trend({ theme: "B", link: "https://t/same", fit: 70 })]);
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0].theme).toBe("A");
   });
 });
 

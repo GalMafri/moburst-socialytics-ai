@@ -7,11 +7,19 @@
 //   * competitor posts from the newest weekly feed, each against that
 //     competitor's own median on that platform over the stored weeks, per
 //     follower, leaving out posts RivalIQ marks as likely boosted;
+//   * the industry trends of the newest finished Trends week: each theme staff
+//     did not dismiss, shown by up to two of its best-fitting kept posts,
+//     ranked by fit and by engagement against the platform's kept median;
 //   * the client's posting rhythm, which always resolves (resolveRhythm):
 //     its own posting, then its competitors', then every tracked company's.
 // There is no published threshold for "outperformed", so posts are ranked by
 // how far above their own median they are and the multiple is shown as is.
 // Free of Deno and network imports so it can be tested.
+
+import type { TrendFormat, TrendPlatform } from "../trends/types.ts";
+
+// deno-lint-ignore no-explicit-any
+type Db = any;
 
 export interface OwnPost {
   id: string;
@@ -60,6 +68,8 @@ export interface EvidenceItem {
   thin?: boolean;
   /** Topics: how many companies posted about it. */
   companies?: number;
+  /** Trends: the weekly theme this example post shows. A trend's author is kept in company. */
+  theme?: string;
 }
 
 /**
@@ -631,11 +641,118 @@ export function bestExamples(top: Scored<OwnPost>[], perPlatform = 3): Record<st
   return out;
 }
 
+// ── Trends: the newest finished week's themes ───────────────────────────────
+
+/** A kept post that shows one of the week's themes, as the planner reads it before scoring. */
+export interface TrendEvidenceInput {
+  theme: string;
+  theme_id: string;
+  platform: TrendPlatform;
+  format: TrendFormat;
+  author: string;
+  text: string;
+  link: string;
+  /** The day it was posted, or null where the source gives none (Pinterest). */
+  date: string | null;
+  /** How well it fits the brand, 0 to 100 (set by Claude's filter). */
+  fit: number;
+  engagement: number;
+  /** The median engagement of every kept post on this platform that week, the baseline the score measures against. Without it the items' own median stands in. */
+  platform_median?: number;
+}
+
+export const TREND_POSTS_PER_THEME = 2;
+export const TREND_ITEMS = 8;
+/** Fit counts a little more than engagement: every kept post already beat the filter, so fit says how well it suits this client. */
+const TREND_FIT_WEIGHT = 0.6;
+/** Engagement counts up to three times the platform's median, so one viral outlier cannot outrank a better fit. */
+const TREND_LIFT_CAP = 3;
+
+/**
+ * The trends the week is planned from: the client's newest finished weekly
+ * Trends run (status done or partial, by its Monday), the themes staff did not
+ * dismiss, and for each the two kept posts that fit the brand best. No
+ * finished week, or nothing left in it, means no trend evidence, never an
+ * older week's. Each post carries its platform's median engagement over every
+ * kept post of the week.
+ */
+export async function latestTrendEvidence(db: Db, clientId: string): Promise<TrendEvidenceInput[]> {
+  const { data: week, error: weekError } = await db.from("trend_weeks").select("id, week_start").eq("client_id", clientId)
+    .in("status", ["done", "partial"]).order("week_start", { ascending: false }).limit(1).maybeSingle();
+  if (weekError) throw new Error(`Could not read the latest trends: ${weekError.message}`);
+  if (!week) return [];
+  const { data: themes, error: themeError } = await db.from("trend_themes").select("id, title, post_ids").eq("week_id", week.id)
+    .is("dismissed_at", null).order("position", { ascending: true });
+  if (themeError) throw new Error(`Could not read the latest trends: ${themeError.message}`);
+  if (!themes?.length) return [];
+  const { data: posts, error: postError } = await db.from("trend_posts")
+    .select("id, platform, url, author, text, posted_at, format, fit, engagement").eq("week_id", week.id).eq("kept", true);
+  if (postError) throw new Error(`Could not read the latest trends: ${postError.message}`);
+
+  // deno-lint-ignore no-explicit-any
+  const kept: any[] = posts ?? [];
+  const byPlatform = new Map<string, number[]>();
+  for (const p of kept) byPlatform.set(p.platform, [...(byPlatform.get(p.platform) ?? []), Number(p.engagement) || 0]);
+  const platformMedian = new Map([...byPlatform].map(([k, v]) => [k, median(v) ?? 0]));
+  const byId = new Map(kept.map((p) => [String(p.id), p]));
+
+  const out: TrendEvidenceInput[] = [];
+  // deno-lint-ignore no-explicit-any
+  for (const t of themes as any[]) {
+    const shown = [...new Set<string>((Array.isArray(t.post_ids) ? t.post_ids : []).map(String))]
+      .map((id) => byId.get(id))
+      // A kept post always has a link and a format; one without can't be told in words, so it can't be cited.
+      .filter((p) => p && p.url && p.format)
+      .sort((a, b) => (Number(b.fit) || 0) - (Number(a.fit) || 0) || (Number(b.engagement) || 0) - (Number(a.engagement) || 0))
+      .slice(0, TREND_POSTS_PER_THEME);
+    for (const p of shown) {
+      out.push({
+        theme: String(t.title), theme_id: String(t.id), platform: p.platform as TrendPlatform, format: p.format as TrendFormat, author: String(p.author ?? ""),
+        text: String(p.text ?? ""), link: String(p.url), date: validDay(p.posted_at) ? day(p.posted_at) : null, fit: Number(p.fit) || 0,
+        engagement: Number(p.engagement) || 0, platform_median: platformMedian.get(p.platform) ?? 0,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * The trend items the planner cites, best first, at most eight with no quota
+ * per platform or theme. A post's score is its fit and its engagement
+ * against its platform's kept median (fit 60%, engagement 40%, engagement
+ * counted up to three times the median). A post two themes cite is shown
+ * once, under the theme it scored best for. The author is kept in company.
+ */
+export function scoreTrendItems(items: TrendEvidenceInput[]): EvidenceItem[] {
+  const own = new Map<string, number[]>();
+  for (const t of items) own.set(t.platform, [...(own.get(t.platform) ?? []), t.engagement]);
+  const ranked = items.map((t, order) => {
+    const usual = t.platform_median ?? median(own.get(t.platform) ?? []) ?? 0;
+    const lift = Math.min(ratio(t.engagement, usual), TREND_LIFT_CAP) / TREND_LIFT_CAP;
+    const fit = Math.min(Math.max(t.fit, 0), 100) / 100;
+    return { t, order, score: TREND_FIT_WEIGHT * fit + (1 - TREND_FIT_WEIGHT) * lift };
+  }).sort((a, b) => b.score - a.score || b.t.fit - a.t.fit || a.order - b.order);
+
+  const seen = new Set<string>();
+  const out: EvidenceItem[] = [];
+  for (const { t } of ranked) {
+    if (seen.has(t.link)) continue;
+    seen.add(t.link);
+    out.push({
+      id: `N${out.length + 1}`, kind: "trend", text: excerpt(t.text), theme: t.theme, ...(t.author ? { company: t.author } : {}), platform: platformName(t.platform),
+      format: t.format, ...(t.date ? { date: t.date } : {}), link: t.link, metric: "engagement", value: t.engagement,
+    });
+    if (out.length === TREND_ITEMS) break;
+  }
+  return out;
+}
+
 export interface EvidenceInput {
   ownTop: Scored<OwnPost>[];
   competitors: Scored<CompetitorPost>[];
   topics: Array<{ topic: string; summary?: string | null; companies?: unknown; post_urls?: unknown }>;
-  trends: string[];
+  /** The scored trends (scoreTrendItems); numbered here with the rest. */
+  trends: EvidenceItem[];
   findings: string[];
 }
 
@@ -655,7 +772,7 @@ export function numberEvidence(input: EvidenceInput): EvidenceItem[] {
     const urls = Array.isArray(t.post_urls) ? (t.post_urls as unknown[]).map(String) : [];
     items.push({ id: `T${i + 1}`, kind: "topic", text: excerpt(`${t.topic}${t.summary ? `: ${t.summary}` : ""}`, 260), companies, link: urls[0] ?? null });
   });
-  input.trends.slice(0, 8).forEach((t, i) => items.push({ id: `N${i + 1}`, kind: "trend", text: excerpt(t, 260) }));
+  input.trends.slice(0, TREND_ITEMS).forEach((t, i) => items.push({ ...t, id: `N${i + 1}`, kind: "trend" }));
   input.findings.slice(0, 10).forEach((f, i) => items.push({ id: `R${i + 1}`, kind: "report", text: excerpt(f, 260) }));
   return items;
 }

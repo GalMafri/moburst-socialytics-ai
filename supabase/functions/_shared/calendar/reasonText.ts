@@ -27,6 +27,8 @@ export interface EvidenceRef {
   sample?: number;
   thin?: boolean;
   companies?: number;
+  /** Trends: the weekly theme the example post shows. */
+  theme?: string;
 }
 
 export interface Reason {
@@ -49,6 +51,8 @@ export function fmtMultiple(m: number): string {
 const FORMAT_WORDS: Record<string, string> = {
   photo: "image post", image: "image post", single_image: "image post", "single image": "image post", video: "video", reel: "reel", "reel/video": "reel",
   carousel: "carousel", album: "carousel", document: "document post", link: "link post", status: "text post", text: "text post", short: "short",
+  // The formats Trends sorts every post into (trends/types.ts TrendFormat).
+  short_video: "short video", long_video: "long video", pin: "pin",
 };
 
 function formatWord(f?: string): string {
@@ -96,8 +100,12 @@ export function evidenceSentence(e: EvidenceRef): string {
       const topic = e.text.split(":")[0].trim();
       return e.companies && e.companies > 1 ? `${e.companies} competitors posted about ${topic} this week` : `Competitors posted about ${topic} this week`;
     }
-    case "trend":
-      return `Trend from the monthly report: ${headline(e.text)}`;
+    case "trend": {
+      // A trend from a weekly theme names the theme and the example post. One saved before themes (the monthly report's wording) has no theme.
+      if (!e.theme) return `Trend from the monthly report: ${headline(e.text)}`;
+      const post = [e.platform, formatWord(e.format)].filter(Boolean).join(" ");
+      return `Inspired by "${e.theme}": ${e.company ? `${e.company}'s ${post}` : post}${when ? ` from ${when}` : ""}`;
+    }
     case "report":
       return `From the monthly report: ${headline(e.text)}`;
     default:

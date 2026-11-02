@@ -23,6 +23,8 @@ export interface PostEvidence {
   sample?: number;
   thin?: boolean;
   companies?: number;
+  /** A trend's weekly theme; the post that shows it is in text, its author in company. */
+  theme?: string;
 }
 
 export interface PostReason {

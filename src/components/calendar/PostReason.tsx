@@ -1,10 +1,11 @@
 /**
  * Why a post is on the calendar, with the evidence behind it: the real post
- * it builds on, its date and its numbers, and a link to it. Weeks planned
- * from the latest results say so; thin evidence says "early signal". The
- * reason is worded here from what the plan stored (reasonText.ts), so a
- * change to the wording reaches every post; reasons that don't carry their
- * parts show the words they were saved with.
+ * it builds on, its date and its numbers, and a link to it. A post planned
+ * from a weekly trend says "Inspired by" the theme, with the example post's
+ * words and a link to it. Weeks planned from the latest results say so; thin
+ * evidence says "early signal". The reason is worded here from what the plan
+ * stored (reasonText.ts), so a change to the wording reaches every post;
+ * reasons that don't carry their parts show the words they were saved with.
  */
 
 import { ExternalLink } from "lucide-react";
@@ -32,17 +33,21 @@ export function PostReason({ reasons }: { reasons: Reason[] | null | undefined }
       <p className="t-body text-foreground">{words}</p>
       {evidence.length > 0 && (
         <ul className="space-y-1.5">
-          {evidence.map((e) => (
-            <li key={e.id} className="t-secondary">
-              <span>{evidenceLine(e)}</span>
-              {e.text && <span className="block text-muted-foreground line-clamp-2">"{e.text}"</span>}
-              {e.link && (
-                <a href={e.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-white">
-                  View the post <ExternalLink className="h-3 w-3" aria-hidden />
-                </a>
-              )}
-            </li>
-          ))}
+          {evidence.map((e) => {
+            // A trend's sentence above already names who posted what and when, so its list shows only the post and its link.
+            const line = e.theme ? "" : evidenceLine(e);
+            return (
+              <li key={e.id} className="t-secondary">
+                {line && <span>{line}</span>}
+                {e.text && <span className="block text-muted-foreground line-clamp-2">"{e.text}"</span>}
+                {e.link && (
+                  <a href={e.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-white">
+                    View the post <ExternalLink className="h-3 w-3" aria-hidden />
+                  </a>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
