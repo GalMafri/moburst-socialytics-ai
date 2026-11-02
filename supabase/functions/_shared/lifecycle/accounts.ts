@@ -24,6 +24,8 @@ export interface SproutProfile {
   network_type: string;
   native_link: string;
   status: string;
+  /** The Sprout groups the profile is in, by group id (Sprout's list has them; an assignment row does not). */
+  groups?: string[];
 }
 
 /** Sprout network types to the platform names the site links use. */
