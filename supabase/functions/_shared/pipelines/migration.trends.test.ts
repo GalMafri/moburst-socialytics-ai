@@ -125,6 +125,17 @@ describe("20261102100000_trend_access.sql", () => {
       expect(add).toContain("on conflict (client_id, kind, coalesce(platform, ''), lower(term)) do update set source = 'person', removed_at = null, removed_by = null");
     });
 
+    it("trend_term_add makes a hashtag one tag: one leading #, no whitespace inside, and a tag with nothing left is refused", () => {
+      const add = body("trend_term_add");
+      expect(add).toContain("if p_kind = 'hashtag' then v_term := '#' || ltrim(regexp_replace(v_term, '\\s', '', 'g'), '#'); if v_term = '#' then raise exception 'A term is required.' using errcode = '22023'; end if; end if;");
+      // Whitespace goes before the leading #s do, so "# #" is a bare # and refused, not "##".
+      // The staff check still comes first, and the old "add a # when there is none" branch is gone.
+      expect(add.indexOf("can_access_client(p_client)")).toBeLessThan(add.indexOf("regexp_replace"));
+      expect(add).not.toContain("left(v_term, 1) <> '#'");
+      // Topics and exclusions are not touched: the branch is for hashtags only.
+      expect(add).toContain("if p_kind <> 'hashtag' then v_platform := null; end if;");
+    });
+
     it("trend_term_remove needs staff and access to the term's client; a missing term does nothing", () => {
       const remove = body("trend_term_remove");
       expect(remove).toContain("if not public.is_moburst_staff() then raise exception 'Only Moburst staff can change what trends track.' using errcode = '42501'; end if;");

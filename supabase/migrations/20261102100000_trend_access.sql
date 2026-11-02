@@ -132,8 +132,12 @@ begin
   if v_term = '' then
     raise exception 'A term is required.' using errcode = '22023';
   end if;
-  if p_kind = 'hashtag' and left(v_term, 1) <> '#' then
-    v_term := '#' || v_term;
+  if p_kind = 'hashtag' then
+    -- One tag: a single leading #, no whitespace inside, and nothing left is no term.
+    v_term := '#' || ltrim(regexp_replace(v_term, '\s', '', 'g'), '#');
+    if v_term = '#' then
+      raise exception 'A term is required.' using errcode = '22023';
+    end if;
   end if;
   if p_kind <> 'hashtag' then
     v_platform := null;

@@ -208,7 +208,7 @@ describe('Trends we track on the Content strategy tab', () => {
     const box = await tiktok.findByRole('textbox', { name: 'New TikTok hashtag' });
     fireEvent.change(box, { target: { value: 'lawyerlife' } });
     fireEvent.click(tiktok.getByRole('button', { name: 'Add TikTok hashtag' }));
-    await waitFor(() => expect(f.rpcs).toEqual([{ name: 'trend_term_add', p_client: 'c1', p_kind: 'hashtag', p_platform: 'tiktok', p_term: 'lawyerlife' }]));
+    await waitFor(() => expect(f.rpcs).toEqual([{ name: 'trend_term_add', p_client: 'c1', p_kind: 'hashtag', p_platform: 'tiktok', p_term: '#lawyerlife' }]));
     expect(await tiktok.findByText('#lawyerlife')).toBeInTheDocument();
     expect(within(rowOf('#lawyerlife')).getByText('Added by your team')).toBeInTheDocument();
     expect((await group('Instagram hashtags')).queryByText('#lawyerlife')).toBeNull();
@@ -222,6 +222,47 @@ describe('Trends we track on the Content strategy tab', () => {
     fireEvent.keyDown(box, { key: 'Enter' });
     await waitFor(() => expect(f.rpcs).toEqual([{ name: 'trend_term_add', p_client: 'c1', p_kind: 'exclusion', p_platform: '', p_term: 'lawyer jokes' }]));
     expect(await exclusions.findByText('lawyer jokes')).toBeInTheDocument();
+  });
+
+  it('makes a hashtag one tag before it is sent: no spaces inside, one leading #', async () => {
+    mount();
+    const instagram = await group('Instagram hashtags');
+    const box = await instagram.findByRole('textbox', { name: 'New Instagram hashtag' });
+    for (const [typed, sent] of [['car accident lawyer', '#caraccidentlawyer'], ['##aso', '#aso'], ['  # legal\ttips  ', '#legaltips'], ['#plain', '#plain']] as const) {
+      f.rpcs = [];
+      fireEvent.change(box, { target: { value: typed } });
+      fireEvent.keyDown(box, { key: 'Enter' });
+      await waitFor(() => expect(f.rpcs).toEqual([{ name: 'trend_term_add', p_client: 'c1', p_kind: 'hashtag', p_platform: 'instagram', p_term: sent }]));
+      await waitFor(() => expect(box).toHaveValue(''));
+      expect(await instagram.findByText(sent)).toBeInTheDocument();
+    }
+    // Words with spaces are one tag, so none of them took a slot of its own.
+    expect(instagram.queryByText(/ /, { selector: 'li > div' })).toBeNull();
+  });
+
+  it('sends nothing for a hashtag with nothing left once its # and spaces are taken out, and keeps what was typed without a message', async () => {
+    mount();
+    const linkedin = await group('LinkedIn hashtags');
+    const box = await linkedin.findByRole('textbox', { name: 'New LinkedIn hashtag' });
+    for (const typed of ['#', '###', ' # ', '# #', '## #']) {
+      fireEvent.change(box, { target: { value: typed } });
+      fireEvent.keyDown(box, { key: 'Enter' });
+      fireEvent.click(linkedin.getByRole('button', { name: 'Add LinkedIn hashtag' }));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(box).toHaveValue(typed);
+    }
+    expect(f.rpcs).toEqual([]);
+    expect(screen.queryByText('That change is not saved yet.')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('keeps a topic or an exclusion as it was typed, spaces and all', async () => {
+    mount();
+    const topics = await group('Topics');
+    fireEvent.change(await topics.findByRole('textbox', { name: 'New topic' }), { target: { value: '#claim help' } });
+    fireEvent.click(topics.getByRole('button', { name: 'Add topic' }));
+    await waitFor(() => expect(f.rpcs).toEqual([{ name: 'trend_term_add', p_client: 'c1', p_kind: 'topic', p_platform: '', p_term: '#claim help' }]));
   });
 
   it('adds nothing for a blank box', async () => {
@@ -308,6 +349,23 @@ describe('Trends we track on the Content strategy tab', () => {
     expect(screen.queryByText('Suggestions appear here once the brand details are read.')).toBeNull();
     expect(screen.queryByRole('group', { name: 'Topics' })).toBeNull();
     expect(screen.queryByText(/connection failure|did not load|could not/i)).toBeNull();
+  });
+
+  it('says how each group is used: Instagram hashtags and topics are searched, TikTok and LinkedIn hashtags are calendar suggestions', async () => {
+    mount();
+    const heading = await screen.findByRole('heading', { name: 'Trends we track' });
+    const section = within(heading.closest('section') as HTMLElement);
+    expect(section.getByText("What the weekly trends collection searches for and leaves out, and the hashtags suggested for the calendar. Your team's additions always come first.")).toBeInTheDocument();
+    const helps: Array<[string, string]> = [
+      ['Topics', "Searched every week on each platform except Instagram, up to 8 a week. Your team's come first; the rest take turns."],
+      ['Instagram hashtags', "Searched every week on Instagram, up to 8 a week. Your team's come first; the rest take turns."],
+      ['TikTok hashtags', 'Suggested for TikTok posts in the weekly calendar. Trends on TikTok are searched by topic.'],
+      ['LinkedIn hashtags', 'Suggested for LinkedIn posts in the weekly calendar. Trends on LinkedIn are searched by topic.'],
+      ['Exclusions', 'The filter never keeps posts about these.'],
+    ];
+    for (const [name, help] of helps) expect((await group(name)).getByText(help)).toBeInTheDocument();
+    // The old wording is gone.
+    expect(section.queryByText(/Instagram searches its hashtags instead|What the weekly trend search looks for/)).toBeNull();
   });
 
   it('words the section in plain American English, with no dash punctuation and nothing from the database', async () => {

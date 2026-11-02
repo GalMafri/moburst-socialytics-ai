@@ -1,10 +1,10 @@
-// Client setup, "Trends we track": what the weekly trend search looks for for
-// this client and what it never keeps. The topics, the Instagram, TikTok and
-// LinkedIn hashtags and the exclusions live in trend_terms, one row each, with
-// the reason it is there and who put it there. The product suggests them from
-// the brand details; staff add their own or remove any. Terms staff added stay
-// through every new suggestion, and a removed suggestion is hidden and never
-// suggested again (trend_term_remove keeps the row, marked removed).
+// Client setup, "Trends we track": what the weekly trends collection searches
+// for, for this client, and what it never keeps. The topics, the Instagram,
+// TikTok and LinkedIn hashtags and the exclusions live in trend_terms, one row
+// each, with the reason it is there and who put it there. The product suggests
+// them from the brand details; staff add their own or remove any. Terms staff
+// added stay through every new suggestion, and a removed suggestion is hidden
+// and never suggested again (trend_term_remove keeps the row, marked removed).
 //
 // A client with no trend profile has nothing suggested yet. A change that does
 // not get through is sent again quietly (src/lib/quietSend.ts); after that the
@@ -22,7 +22,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { platformName } from "@/lib/display";
 import { sendQuietly, writeResendable } from "@/lib/quietSend";
 
 interface TrendTerm {
@@ -51,13 +50,30 @@ interface GroupSpec {
   help?: string;
 }
 
+const COME_FIRST = "Your team's come first; the rest take turns.";
+
 const GROUPS: GroupSpec[] = [
-  { heading: "Topics", noun: "topic", kind: "topic", platform: null, help: "Phrases the weekly search looks for. Instagram searches its hashtags instead." },
-  ...(["instagram", "tiktok", "linkedin"] as const).map((platform): GroupSpec => ({
-    heading: `${platformName(platform)} hashtags`, noun: `${platformName(platform)} hashtag`, kind: "hashtag", platform,
-  })),
+  { heading: "Topics", noun: "topic", kind: "topic", platform: null, help: `Searched every week on each platform except Instagram, up to 8 a week. ${COME_FIRST}` },
+  { heading: "Instagram hashtags", noun: "Instagram hashtag", kind: "hashtag", platform: "instagram", help: `Searched every week on Instagram, up to 8 a week. ${COME_FIRST}` },
+  // TikTok's and LinkedIn's hashtags are not searched: the weekly calendar suggests them for its posts there.
+  { heading: "TikTok hashtags", noun: "TikTok hashtag", kind: "hashtag", platform: "tiktok", help: "Suggested for TikTok posts in the weekly calendar. Trends on TikTok are searched by topic." },
+  { heading: "LinkedIn hashtags", noun: "LinkedIn hashtag", kind: "hashtag", platform: "linkedin", help: "Suggested for LinkedIn posts in the weekly calendar. Trends on LinkedIn are searched by topic." },
   { heading: "Exclusions", noun: "exclusion", kind: "exclusion", platform: null, help: "The filter never keeps posts about these." },
 ];
+
+/**
+ * What a typed term is sent as. A hashtag is one tag: every leading # is
+ * dropped, all whitespace inside is removed, and one # goes in front; a tag
+ * with nothing left is no term. (A phrase such as "car accident lawyer" would
+ * otherwise be stored as one hashtag with spaces and take one of Instagram's
+ * weekly search slots.) Topics and exclusions are sent as typed, trimmed.
+ */
+function termToSend(spec: GroupSpec, typed: string): string {
+  if (spec.kind !== "hashtag") return typed.trim();
+  // Whitespace goes before the leading #s do, so "# #" is a bare # and sends nothing.
+  const tag = typed.replace(/\s+/g, "").replace(/^#+/, "");
+  return tag ? `#${tag}` : "";
+}
 
 const termsKey = (clientId: string) => ["trend-terms", clientId];
 
@@ -72,11 +88,13 @@ function TermGroup({ spec, terms, onAdd, onRemove }: {
   const [adding, setAdding] = useState(false);
 
   const add = async () => {
-    const term = typed.trim();
+    const term = termToSend(spec, typed);
+    // Nothing to send (a blank box, a bare #): the box stays as it is, with no message.
     if (!term || adding) return;
+    const sentFrom = typed;
     setAdding(true);
     // What was typed stays in the box until it is saved.
-    if (await onAdd(spec, term)) setTyped((now) => (now.trim() === term ? "" : now));
+    if (await onAdd(spec, term)) setTyped((now) => (now === sentFrom ? "" : now));
     setAdding(false);
   };
 
@@ -171,7 +189,7 @@ export function TrendsWeTrack({ clientId }: { clientId: string }) {
       layout="split"
       eyebrow="Trends"
       title="Trends we track"
-      description="What the weekly trend search looks for and what it leaves out. Terms your team adds stay until someone removes them."
+      description="What the weekly trends collection searches for and leaves out, and the hashtags suggested for the calendar. Your team's additions always come first."
     >
       {!data ? (
         // A list that did not answer says nothing about the client's trends: keep loading, quietly, and fill in when a try answers.
