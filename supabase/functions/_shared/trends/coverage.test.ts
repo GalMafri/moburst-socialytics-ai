@@ -4,7 +4,7 @@
 // running gets its searches rewritten from the profile. Proves when a
 // platform counts as short, what Claude is asked, and which answers are refused.
 import { describe, expect, it } from "vitest";
-import { COVERAGE_FLOOR, coverageShort, lastKept, parseRewrite, rewriteRequest, TREND_REWRITE_MODEL, withoutRemoved, type CoverageWeek } from "./coverage";
+import { COVERAGE_FLOOR, coverageShort, lastKept, parseRewrite, rewriteRequest, TREND_REWRITE_MODEL, weeksAfter, withoutRemoved, type CoverageWeek } from "./coverage";
 import { MAX_SEARCHES } from "./sources";
 import { TREND_WRITERS } from "./writer";
 import { fakeDb } from "../lifecycle/fakeDb";
@@ -55,6 +55,15 @@ describe("when a platform is short", () => {
     // The week that rewrote the searches ran on them; the week before it did not.
     expect(coverageShort([short("2026-10-19", 2, { platforms: { tiktok: { status: "ok", kept: 2, rewritten: true } } }), short("2026-10-12")], "tiktok")).toBe(false);
     expect(coverageShort([short("2026-10-26"), short("2026-10-19", 2, { platforms: { tiktok: { status: "ok", kept: 2, rewritten: true } } })], "tiktok")).toBe(true);
+  });
+
+  it("reads only weeks that started after a moment, such as a hashtag refresh", () => {
+    const weeks = [short("2026-10-12", 1, { created_at: "2026-10-12T09:00:00+00:00" }), short("2026-10-19", 2, { created_at: "2026-10-19T09:00:00.5+00:00" })];
+    expect(weeksAfter(weeks, "2026-10-19T09:00:00.123456+00:00").map((w) => w.week_start)).toEqual(["2026-10-19"]);
+    expect(weeksAfter(weeks, "2026-10-20T00:00:00Z")).toEqual([]);
+    expect(weeksAfter(weeks, "")).toEqual(weeks);
+    // On the refreshed hashtags there is one short week so far, so Instagram is not short yet.
+    expect(coverageShort(weeksAfter(weeks, "2026-10-15T00:00:00Z"), "tiktok")).toBe(false);
   });
 
   it("gives the kept counts of the last two finished weeks, newest first", () => {

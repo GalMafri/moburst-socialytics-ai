@@ -38,6 +38,8 @@ export interface PlatformTally {
 
 export interface CoverageWeek {
   week_start: string;
+  /** When the week's row was made, before its run read the profile. */
+  created_at?: string;
   status: string;
   filter_status?: string | null;
   platforms?: Record<string, PlatformTally | undefined> | null;
@@ -71,12 +73,22 @@ export function lastKept(weeks: CoverageWeek[], platform: TrendPlatform): number
 }
 
 /**
+ * The weeks made after a moment, such as Instagram's last hashtag refresh:
+ * a week made before it searched hashtags that have since been replaced.
+ */
+export function weeksAfter(weeks: CoverageWeek[], at: string): CoverageWeek[] {
+  const t = Date.parse(at);
+  if (!Number.isFinite(t)) return weeks;
+  return weeks.filter((w) => Date.parse(String(w.created_at ?? "")) > t);
+}
+
+/**
  * The client's last two finished weeks before the week starting `before`
  * that ran on its current profile (written at `since`), newest first. Weeks
  * on an older profile searched for other terms.
  */
 export async function finishedWeeks(db: Db, clientId: string, o: { before: string; since: string }): Promise<CoverageWeek[]> {
-  let q = db.from("trend_weeks").select("week_start, status, filter_status, platforms").eq("client_id", clientId)
+  let q = db.from("trend_weeks").select("week_start, created_at, status, filter_status, platforms").eq("client_id", clientId)
     .in("status", ["done", "partial"]).lt("week_start", o.before);
   if (o.since) q = q.gt("created_at", o.since);
   const { data, error } = await q.order("week_start", { ascending: false }).limit(2);

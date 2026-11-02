@@ -82,7 +82,7 @@ function claude(requests: Any[], o: ClaudeOptions = {}) {
 const ALL = TREND_PLATFORMS.map((platform) => ({ platform, reason: "watched" }));
 
 /** Weeks finished before the run's own, with what each platform kept. */
-type SetupOptions = { language?: string; platforms?: Array<{ platform: string; reason: string }>; noInstagramTags?: boolean; handles?: boolean; prior?: Any[]; writtenAt?: string; personTopic?: boolean; removedTopic?: boolean; overrides?: Record<string, string[]> };
+type SetupOptions = { language?: string; platforms?: Array<{ platform: string; reason: string }>; noInstagramTags?: boolean; handles?: boolean; prior?: Any[]; writtenAt?: string; hashtagsAt?: string; personTopic?: boolean; removedTopic?: boolean; overrides?: Record<string, string[]> };
 const EARLY = "2026-10-01T00:00:00.000Z";
 const tally = (kept: Partial<Record<TrendPlatform, number>>) => Object.fromEntries(TREND_PLATFORMS.map((p) => [p, { status: "ok", searched: 2, rows: 40, candidates: 20, kept: kept[p] ?? 8 }]));
 const finished = (id: string, week_start: string, kept: Partial<Record<TrendPlatform, number>>) => ({ id, client_id: "c1", week_start, status: "done", filter_status: "ok", platforms: tally(kept), cost: {}, created_at: `${week_start}T09:00:00.000Z` });
@@ -93,7 +93,7 @@ function setup(o: SetupOptions = {}) {
   const clock = testClock(NOW);
   const db = pipelineDb({
     clients: [{ id: "c1", name: "Moburst", geo: "US", language: o.language ?? "en", location: null }],
-    trend_profiles: [{ client_id: "c1", audience: "App founders", fit_rubric: "Posts that teach app growth.", platforms: o.platforms ?? ALL, search_overrides: o.overrides ?? {}, inputs_key: "k", written_at: o.writtenAt ?? NOW, hashtags_at: NOW }],
+    trend_profiles: [{ client_id: "c1", audience: "App founders", fit_rubric: "Posts that teach app growth.", platforms: o.platforms ?? ALL, search_overrides: o.overrides ?? {}, inputs_key: "k", written_at: o.writtenAt ?? NOW, hashtags_at: o.hashtagsAt ?? o.writtenAt ?? NOW }],
     trend_terms: [
       { id: "t1", client_id: "c1", kind: "topic", platform: null, term: "app marketing", reason: "r", source: "lifecycle", removed_at: null },
       { id: "t2", client_id: "c1", kind: "topic", platform: null, term: "marketing tips", reason: "r", source: "lifecycle", removed_at: null },
@@ -366,6 +366,20 @@ describe("trends_v1 coverage rewrite", () => {
     // Without the refresh, the same run stores both.
     const calm = await run({ prior, writtenAt: EARLY, rewrite: answers });
     expect(calm.db.tables.trend_profiles[0].search_overrides).toEqual({ tiktok: REWRITTEN, instagram: ["#mobileapps"] });
+  });
+
+  it("judges Instagram only on weeks that searched its current hashtags, and TikTok on every week of the profile", async () => {
+    // Both short in the two weeks before; a monthly refresh replaced the hashtags after them.
+    const prior = [finished("w-2", "2026-10-12", { tiktok: 2, instagram: 1 }), finished("w-1", "2026-10-19", { tiktok: 1, instagram: 0 })];
+    const r = await run({ prior, writtenAt: EARLY, hashtagsAt: "2026-10-20T08:00:00.000Z" });
+    expect(r.driven.outcome.status).toBe("done");
+    // One Claude call, for TikTok: the new hashtags have not been searched once yet.
+    expect(rewrites(r.requests)).toHaveLength(1);
+    expect(String(rewrites(r.requests)[0].params.messages[0].content)).toContain("The platform: TikTok");
+    expect(r.db.tables.trend_profiles[0].search_overrides).toEqual({ tiktok: REWRITTEN });
+    expect(searched(r.inputs, "instagram").hashtags).toEqual(["stopchasingstartplaying"]);
+    expect(r.week.platforms.instagram.rewritten).toBeUndefined();
+    expect(r.week.platforms.tiktok.rewritten).toBe(true);
   });
 
   it("replays the week on its rewritten searches without asking again", async () => {

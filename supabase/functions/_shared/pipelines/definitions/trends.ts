@@ -31,7 +31,7 @@ import { keptAnswer, replayOf } from "../social/replay.ts";
 import { SOURCE_KEEP_DAYS } from "../store.ts";
 import { StepRestart, type PipelineDefinition, type Step, type StepContext, type StepResult } from "../types.ts";
 import { competitorSet } from "../../calendar/runWeek.ts";
-import { coverageShort, finishedWeeks, lastKept, parseRewrite, removedFor, removedSearches, rewriteRequest, TREND_REWRITE_MODEL, withoutRemoved, type RewriteProfile } from "../../trends/coverage.ts";
+import { coverageShort, finishedWeeks, lastKept, parseRewrite, removedFor, removedSearches, rewriteRequest, TREND_REWRITE_MODEL, weeksAfter, withoutRemoved, type RewriteProfile } from "../../trends/coverage.ts";
 import { activeTerms } from "../../trends/profile.ts";
 import { fillAfter, MAX_SEARCHES, personSearches, searchesFor, TREND_SOURCES } from "../../trends/sources.ts";
 import { ruleFilter, tripwire } from "../../trends/rules.ts";
@@ -316,10 +316,14 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
         const overrides = withoutRemoved(profile.search_overrides ?? {}, removed);
         const searches: Plan["searches"] = Object.fromEntries(platforms.map((p) => [p, searchesFor(p, terms, overrides, weekStart)]));
         // Coverage: a platform short of kept posts in its last two weeks on this profile gets its searches rewritten.
+        // Instagram searches by the profile's hashtags, so only weeks made after their last refresh count for it
+        // (a new profile's hashtags_at is its written_at).
         const profileWrittenAt = String(profile.written_at ?? "");
-        const weeks = await finishedWeeks(ctx.db, clientId, { before: weekStart, since: profileWrittenAt });
+        const profileHashtagsAt = String(profile.hashtags_at ?? "");
+        const profileWeeks = await finishedWeeks(ctx.db, clientId, { before: weekStart, since: profileWrittenAt });
         const short: Partial<Record<TrendPlatform, Shortfall>> = {};
         for (const p of platforms) {
+          const weeks = p === "instagram" ? weeksAfter(profileWeeks, profileHashtagsAt) : profileWeeks;
           const person = personSearches(p, terms);
           // A platform whose places are all a person's has nothing to rewrite.
           if (!coverageShort(weeks, p) || person.length >= MAX_SEARCHES) continue;
@@ -337,7 +341,7 @@ export function trendsPipeline(deps: TrendsDeps = {}): PipelineDefinition {
           exclusions: terms.exclusions,
           competitors: competitorNames,
           profileWrittenAt,
-          profileHashtagsAt: String(profile.hashtags_at ?? ""),
+          profileHashtagsAt,
           ...(rewrite.length ? { short } : {}),
         };
         await ctx.payloads.put("plan", plan, KEEP);
