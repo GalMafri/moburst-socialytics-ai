@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { socialyticsOpenApi, socialyticsRoutes } from "./openapi";
 import { SCHEMAS } from "./schemas";
-import { emptyData, makeFakeStore } from "./store.fake";
+import { emptyData, makeFakeStore } from "../_shared/socialytics-api/store.fake";
 
 const routes = socialyticsRoutes({
   store: makeFakeStore(emptyData()), analytics: async () => ({ ok: true, status: 200, data: {} }), health: async () => ({}),

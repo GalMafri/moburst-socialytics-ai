@@ -17,7 +17,7 @@
  */
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { callEnvFromDeno, callFunction } from "../_shared/invoke.ts";
-import { makeStore } from "../api/store.ts";
+import { makeStore } from "../_shared/socialytics-api/store.ts";
 import { connectorFetch, type Caller } from "./server.ts";
 import { issuerOf, projectKeys, tokenVerifier } from "./verify.ts";
 

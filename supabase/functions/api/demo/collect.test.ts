@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, POST, REPORT } from "../fixtures";
+import { CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, POST, REPORT } from "../../_shared/socialytics-api/fixtures";
 import { buildOutputs } from "./collect";
-import { APP_URL } from "../serializers";
+import { APP_URL } from "../../_shared/socialytics-api/serializers";
 
 describe("buildOutputs", () => {
   it("assembles the client, the set, both reports, the post, analytics, design and gaps with links", () => {

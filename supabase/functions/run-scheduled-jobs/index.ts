@@ -84,7 +84,7 @@ import { directKey, runClaudeDirect } from "../_shared/pipelines/claudeDirect.ts
 import { makeDispatchStore, makeJobStore } from "./store.ts";
 import { filterCheckRequest, runTrendJob, startTrendReplay, startTrendWeek } from "./trends.ts";
 import { liveOnboardingDeps, runSproutOnboardingJob, sproutOnboarding } from "./sproutOnboarding.ts";
-import type { ScheduledJob } from "./types.ts";
+import type { ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 import { runReportText, sonnetCompletion } from "../_shared/reports/correctText.ts";
 import { runNotesRead } from "../_shared/notes/run.ts";
 

@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import { ALERT, CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, DESIGN_SYSTEM, HANDLE, MEDIA_JOB, POST, REPORT, SCHEDULE, SCHEDULED_POST, SPROUT_PROFILE } from "./fixtures";
 import { readRoutes } from "./routes-read";
 import { makeFakeStore, emptyData } from "./store.fake";
-import { handleRequest, type CoreDeps } from "../_shared/api/core";
-import { hashKey } from "../_shared/api/keys";
-import { decodeCursor } from "../_shared/api/cursor";
+import { handleRequest, type CoreDeps } from "../api/core";
+import { hashKey } from "../api/keys";
+import { decodeCursor } from "../api/cursor";
 
 const ALL = "soc_all_key";
 const SCOPED = "soc_scoped_key";

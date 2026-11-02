@@ -1,5 +1,5 @@
 /** An in-memory Store for the route tests: the same filters and keyset paging over fixture rows. */
-import type { ClientScope } from "../_shared/api/router.ts";
+import type { ClientScope } from "../api/router.ts";
 import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow } from "./serializers.ts";
 import type { ClientExtras, Page, Store } from "./store.ts";
 

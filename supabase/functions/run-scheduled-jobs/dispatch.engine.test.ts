@@ -7,7 +7,7 @@
 // heartbeat instead of the 90-minute clock).
 import { describe, expect, it } from "vitest";
 import { APP_STOPS_BEFORE_N8N, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
-import type { JobOutcome, ScheduledJob } from "./types";
+import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types";
 import type { LandscapeCheck } from "../_shared/competitive/landscapeCheck";
 import type { ReportPipelineStart } from "../_shared/pipelines/shadow";
 import type { AppRunView } from "../_shared/pipelines/store";

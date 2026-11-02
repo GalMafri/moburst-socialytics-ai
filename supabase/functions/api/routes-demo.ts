@@ -9,7 +9,7 @@ import { ApiError, invalid, notFound } from "../_shared/api/errors.ts";
 import { initialSteps, type JobRecord, type StepDef } from "../_shared/api/jobs.ts";
 import type { ClientScope, Route, RouteContext } from "../_shared/api/router.ts";
 import { clientHost } from "../_shared/net/clientHost.ts";
-import { pageFrom, type Page } from "./store.ts";
+import { pageFrom, type Page } from "../_shared/socialytics-api/store.ts";
 
 export interface DemoInput {
   client_name: string;

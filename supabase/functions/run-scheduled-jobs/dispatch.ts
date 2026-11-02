@@ -51,7 +51,7 @@ import { nextRun, rangeForSchedule, type ReportRange } from "../_shared/reports/
 import { STUCK_AFTER_MINUTES } from "../_shared/reports/payloads.ts";
 import { isTrackingProblem, LANDSCAPE_MISSING, type LandscapeCheck } from "../_shared/competitive/landscapeCheck.ts";
 import { HELD_REDOS } from "../_shared/competitive/reportEvidence.ts";
-import type { JobOutcome, ScheduledJob } from "./types.ts";
+import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 import { RETRY_MINUTES } from "./worker.ts";
 import { APP_STOPS_BEFORE_N8N, type Engine, type PipelineDefinition } from "../_shared/pipelines/types.ts";
 import type { ReportPipelineStart } from "../_shared/pipelines/shadow.ts";

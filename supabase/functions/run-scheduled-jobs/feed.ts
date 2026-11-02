@@ -1,7 +1,7 @@
 // One competitor feed refresh, run in-process by the worker.
 
 import { CLIENT_NOT_TRACKED, LANDSCAPE_MISSING } from "../_shared/competitive/landscapeCheck.ts";
-import type { JobOutcome, ScheduledJob } from "./types.ts";
+import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 
 export const FEED_RETRY_MINUTES = 10;
 

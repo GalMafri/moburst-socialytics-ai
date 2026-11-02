@@ -5,7 +5,7 @@
 // writes a table a screen reads.
 import { describe, expect, it } from "vitest";
 import { fakeDb, type FakeDb } from "../lifecycle/fakeDb";
-import type { ScheduledJob } from "../../run-scheduled-jobs/types";
+import type { ScheduledJob } from "../scheduled-jobs/types";
 import { REGISTRY } from "./registry";
 import { runPipelineJob } from "./runner";
 import { shadowLinkedInSource, startReportPipeline } from "./shadow";

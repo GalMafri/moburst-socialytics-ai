@@ -4,15 +4,15 @@ The API is built to absorb new features without rework. Each kind of change has 
 
 ## Add a field to a resource
 
-1. Add the column to the store's column list for that table (`supabase/functions/api/store.ts`, `*_COLUMNS`; lists read light columns, with JSON sub-fields of `report_data` by alias). Reads are explicit so nothing internal slips out by accident.
-2. Add the field to the serializer in `supabase/functions/api/serializers.ts` and to its test with a fixture value (`fixtures.ts`).
+1. Add the column to the store's column list for that table (`supabase/functions/_shared/socialytics-api/store.ts`, `*_COLUMNS`; lists read light columns, with JSON sub-fields of `report_data` by alias). Reads are explicit so nothing internal slips out by accident.
+2. Add the field to the serializer in `supabase/functions/_shared/socialytics-api/serializers.ts` and to its test with a fixture value (`fixtures.ts`).
 3. Add it to the matching schema in `supabase/functions/api/schemas.ts`. The contract test fails if an internal name (`sprout_profile_id`, `sprout_customer_id`, `landscape_id`, `rivaliq_company_id`, `company_id`, `request_id`, `model_path`, `key_hash`, `app_settings`) appears.
 
 Adding fields never breaks a consumer. Renaming or removing one does: keep the old name (or add a `/v2` route table beside `/v1`).
 
 ## Add a route
 
-Add one entry to the route table (`routes-read.ts`, `routes-demo.ts`, `routes-admin.ts`, or a new `routes-<area>.ts` mounted in `openapi.ts`). A route declares its method, path, auth kind, scope, documentation (`doc`) and handler. The OpenAPI document is generated from the table, so a route cannot exist undocumented; `openapi.test.ts` checks that every `doc.response` and `doc.body` names a schema that exists and that no internal identifier is documented.
+Add one entry to the route table (`_shared/socialytics-api/routes-read.ts`, which the `mcp` connector runs too, or `routes-demo.ts`, `routes-admin.ts`, or a new `routes-<area>.ts` in `api/`, mounted in `openapi.ts`). A function deploys with its own folder and `_shared` only, so code two functions use lives in `_shared`. A route declares its method, path, auth kind, scope, documentation (`doc`) and handler. The OpenAPI document is generated from the table, so a route cannot exist undocumented; `openapi.test.ts` checks that every `doc.response` and `doc.body` names a schema that exists and that no internal identifier is documented.
 
 Scoping is in the store: every list takes the key's `ClientScope`, every single read checks the row's client. A new query must do the same (`keyset(q, page, "client_id", scope)`).
 

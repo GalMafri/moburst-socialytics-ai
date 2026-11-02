@@ -18,7 +18,7 @@
 // Each step writes a log row (step, started, finished, outcome, a small
 // detail): the run history n8n's executions list gave.
 
-import type { JobOutcome, ScheduledJob } from "../../run-scheduled-jobs/types.ts";
+import type { JobOutcome, ScheduledJob } from "../scheduled-jobs/types.ts";
 import type { Registry } from "./registry.ts";
 import { StepRestart, type OutputWriter, type PayloadStore, type PipelineDefinition, type PipelineJobPayload, type PipelineRun, type PollState, type StepContext, type StepResult } from "./types.ts";
 

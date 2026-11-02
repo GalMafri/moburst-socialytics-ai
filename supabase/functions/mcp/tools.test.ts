@@ -10,10 +10,10 @@ import { describe, expect, it } from "vitest";
 import { handleRequest, type CoreDeps } from "../_shared/api/core";
 import { scopeOf } from "../_shared/api/keys";
 import { hashKey } from "../_shared/api/keys";
-import { CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, HANDLE, REPORT, SCHEDULE, SPROUT_PROFILE } from "../api/fixtures";
-import { readRoutes } from "../api/routes-read";
-import { emptyData, makeFakeStore } from "../api/store.fake";
-import type { ReportRow } from "../api/serializers";
+import { CLIENT, COMPETITIVE_REPORT, COMPETITOR, COMPETITOR_SET, HANDLE, REPORT, SCHEDULE, SPROUT_PROFILE } from "../_shared/socialytics-api/fixtures";
+import { readRoutes } from "../_shared/socialytics-api/routes-read";
+import { emptyData, makeFakeStore } from "../_shared/socialytics-api/store.fake";
+import type { ReportRow } from "../_shared/socialytics-api/serializers";
 import type { Person } from "./access";
 import { runTool, TOOLS, type ToolDeps } from "./tools";
 

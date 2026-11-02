@@ -13,7 +13,7 @@
 // each other or behind the calendar, and the main loop is unchanged. The
 // main lease never hands out a pipeline job (scheduled_jobs_lease).
 
-import type { JobOutcome, ScheduledJob } from "./types.ts";
+import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 
 export const LEASE_SECONDS = 300;
 export const START_WINDOW_MS = 20_000;

@@ -4,7 +4,7 @@
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { ClientRow, CompetitorSetRow, DispatchStore, ReportRun, ScheduleRow } from "./dispatch.ts";
-import { TERMINAL, type JobOutcome, type ScheduledJob } from "./types.ts";
+import { TERMINAL, type JobOutcome, type ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 import type { ScheduleGap } from "./worker.ts";
 import { competitiveReportQuality } from "../_shared/competitive/reportEvidence.ts";
 

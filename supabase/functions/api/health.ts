@@ -5,7 +5,7 @@
  * reads live beside them.
  */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { APP_URL } from "./serializers.ts";
+import { APP_URL } from "../_shared/socialytics-api/serializers.ts";
 
 export interface Finding { kind: string; severity: "high" | "medium" | "low"; client_id: string | null; client: string | null; detail: string; link: string | null; report_id: string | null; job_id: string | null }
 export interface HealthRows {

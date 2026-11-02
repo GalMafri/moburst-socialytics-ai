@@ -4,8 +4,8 @@
  * and customer ids, RivalIQ landscape and company ids, media provider
  * request ids) never appear in any output.
  */
-import { normalizedCompetitiveMetrics } from "../_shared/competitive/reportMetrics.ts";
-import { withCompetitiveEvidenceLimits } from "../_shared/competitive/reportEvidence.ts";
+import { normalizedCompetitiveMetrics } from "../competitive/reportMetrics.ts";
+import { withCompetitiveEvidenceLimits } from "../competitive/reportEvidence.ts";
 declare const Deno: { env: { get(k: string): string | undefined } } | undefined;
 /**
  * The host the API puts in `links.app`. gOS users reach the tool through its branded

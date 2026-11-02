@@ -7,8 +7,8 @@
  * single report reads the whole row.
  */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { decodeCursor, type Cursor } from "../_shared/api/cursor.ts";
-import type { ClientScope } from "../_shared/api/router.ts";
+import { decodeCursor, type Cursor } from "../api/cursor.ts";
+import type { ClientScope } from "../api/router.ts";
 import type { AlertRow, ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, HandleRow, MediaJobRow, PostRow, ReportRow, ScheduledPostRow, ScheduleRow, SetWithCompetitors, SproutProfileRow } from "./serializers.ts";
 
 export interface Page { limit: number; cursor: Cursor | null }

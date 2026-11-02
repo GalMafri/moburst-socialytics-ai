@@ -7,7 +7,7 @@ import { fakeDb, type FakeDb } from "../_shared/lifecycle/fakeDb";
 import type { SproutProfile } from "../_shared/lifecycle/accounts";
 import type { SproutPost } from "../_shared/sprout/posts";
 import { runSproutOnboardingJob, sproutOnboarding, type OnboardingDeps } from "./sproutOnboarding";
-import type { ScheduledJob } from "./types";
+import type { ScheduledJob } from "../_shared/scheduled-jobs/types";
 
 const NOW = new Date("2026-11-09T06:00:00.000Z");
 const p = (id: string, name: string, native: string, network: string): SproutProfile => ({ id, name, native_name: native, network_type: network, native_link: `https://example.test/${native}`, status: "active" });

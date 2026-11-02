@@ -19,7 +19,7 @@ import { callEnvFromDeno, callFunction, type CallEnv, type CallResult } from "..
 import { runStepNow, type StepView } from "../../_shared/lifecycle/run.ts";
 import { slugify } from "../../_shared/lifecycle/names.ts";
 import { clientHost } from "../../_shared/net/clientHost.ts";
-import { analyticsOut, CONFIRMED_SET, pillarsOut, type BrandIdentity, type ClientRow, type CompetitiveReportRow, type ReportRow, type SetWithCompetitors } from "../serializers.ts";
+import { analyticsOut, CONFIRMED_SET, pillarsOut, type BrandIdentity, type ClientRow, type CompetitiveReportRow, type ReportRow, type SetWithCompetitors } from "../../_shared/socialytics-api/serializers.ts";
 import { buildOutputs, type Unplaced } from "./collect.ts";
 import { makeDemoDb, type DemoDb } from "./db.ts";
 

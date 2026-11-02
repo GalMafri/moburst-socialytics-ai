@@ -3,7 +3,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { JobRecord } from "../_shared/api/jobs.ts";
 import type { ClientScope } from "../_shared/api/router.ts";
 import type { JobStore } from "./routes-demo.ts";
-import type { Page } from "./store.ts";
+import type { Page } from "../_shared/socialytics-api/store.ts";
 
 const COLUMNS = "id, tool, key_id, idempotency_key, status, input, requester, callback_url, callback_status, client_id, run_ids, steps, outputs, gaps, error, lease_until, next_check_at, created_at, started_at, completed_at, updated_at";
 

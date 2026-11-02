@@ -18,7 +18,7 @@ import { oauthClientOf } from "../_shared/auth/authz.ts";
 import { API_VERSION, TOOL, socialyticsRoutes } from "./openapi.ts";
 import { makeJobStore } from "./jobs-store.ts";
 import { makeKeyStore } from "./keys-store.ts";
-import { makeStore } from "./store.ts";
+import { makeStore } from "../_shared/socialytics-api/store.ts";
 import { schemaCheck, TABLE_COLUMNS } from "./schema-check.ts";
 import { buildFindings, loadHealthRows } from "./health.ts";
 import { DEMO_STEPS, makeDemoCtx, refreshOutputs } from "./demo/steps.ts";

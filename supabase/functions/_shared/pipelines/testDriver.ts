@@ -7,7 +7,7 @@ import { fakeDb, type FakeDb } from "../lifecycle/fakeDb.ts";
 import type { Registry } from "./registry.ts";
 import { runPipelineJob } from "./runner.ts";
 import { makeRunStore, makeStepLog, makeStepServices } from "./store.ts";
-import type { JobOutcome, ScheduledJob } from "../../run-scheduled-jobs/types.ts";
+import type { JobOutcome, ScheduledJob } from "../scheduled-jobs/types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any>;

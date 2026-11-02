@@ -6,7 +6,7 @@
 import { buildOpenApi, type Route } from "../_shared/api/router.ts";
 import { adminRoutes, type KeyStore } from "./routes-admin.ts";
 import { demoRoutes, type DemoDeps } from "./routes-demo.ts";
-import { readRoutes, type ReadDeps } from "./routes-read.ts";
+import { readRoutes, type ReadDeps } from "../_shared/socialytics-api/routes-read.ts";
 import { systemRoutes } from "./routes-system.ts";
 import { SCHEMAS } from "./schemas.ts";
 

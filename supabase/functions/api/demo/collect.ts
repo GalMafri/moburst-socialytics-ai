@@ -5,7 +5,7 @@
  * and every gap recorded on the way. Pure.
  */
 import type { Gap } from "../../_shared/api/jobs.ts";
-import { APP_URL, competitiveReportOut, designSystemOut, pillarsOut, postOut, reportOut, type BrandIdentity, type ClientRow, type CompetitiveReportOut, type CompetitiveReportRow, type DesignSystemRow, type PostOut, type PostRow, type ReportOut, type ReportRow, type SetWithCompetitors } from "../serializers.ts";
+import { APP_URL, competitiveReportOut, designSystemOut, pillarsOut, postOut, reportOut, type BrandIdentity, type ClientRow, type CompetitiveReportOut, type CompetitiveReportRow, type DesignSystemRow, type PostOut, type PostRow, type ReportOut, type ReportRow, type SetWithCompetitors } from "../../_shared/socialytics-api/serializers.ts";
 
 export interface Unplaced { name: string; reason: string }
 type Linked<T> = T & { app_link: string; api_link: string };

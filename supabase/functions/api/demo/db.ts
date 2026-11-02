@@ -7,8 +7,8 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { clientHost } from "../../_shared/net/clientHost.ts";
 import { confirmDraftSet } from "../../_shared/competitive/confirmSet.ts";
-import type { ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, PostRow, ReportRow, SetWithCompetitors, SproutProfileRow } from "../serializers.ts";
-import { CLIENT_COLUMNS, COMPETITIVE_COLUMNS, COMPETITOR_COLUMNS, DESIGN_SYSTEM_COLUMNS, POST_COLUMNS, REPORT_COLUMNS, SET_COLUMNS, SPROUT_PROFILE_COLUMNS, setsWithCompetitors } from "../store.ts";
+import type { ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, PostRow, ReportRow, SetWithCompetitors, SproutProfileRow } from "../../_shared/socialytics-api/serializers.ts";
+import { CLIENT_COLUMNS, COMPETITIVE_COLUMNS, COMPETITOR_COLUMNS, DESIGN_SYSTEM_COLUMNS, POST_COLUMNS, REPORT_COLUMNS, SET_COLUMNS, SPROUT_PROFILE_COLUMNS, setsWithCompetitors } from "../../_shared/socialytics-api/store.ts";
 
 /** Neutralise the characters a PostgREST pattern match would interpret. */
 export function escapeLike(s: string): string {

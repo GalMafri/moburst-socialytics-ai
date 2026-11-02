@@ -3,7 +3,7 @@
 // this test: it starts an external job, polls it until it ends, then writes
 // its result.
 import { describe, expect, it } from "vitest";
-import type { JobOutcome, ScheduledJob } from "../../run-scheduled-jobs/types";
+import type { JobOutcome, ScheduledJob } from "../scheduled-jobs/types";
 import { makeRegistry } from "./registry";
 import {
   MAX_POLL_MINUTES, MAX_RUN_HOURS, MAX_STEP_ATTEMPTS, POLL_MAX_SECONDS, POLL_MIN_SECONDS, runPipelineJob, retryWaitMinutes, smallDetail,

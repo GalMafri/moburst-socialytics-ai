@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 import { HELD_REDO_MINUTES, LAST_RUN_LEAD_MINUTES, makePoster, MANUAL_RUN_DAYS, manualRun, NEEDS_TRACKING, nextRunOfOccurrence, retryWaitMinutes, runDispatch, type DispatchDeps, type DispatchStore, type ScheduleRow } from "./dispatch";
 import { HELD_REDOS } from "../_shared/competitive/reportEvidence";
 import { RETRY_MINUTES } from "./worker";
-import type { JobOutcome, ScheduledJob } from "./types";
+import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types";
 import type { LandscapeCheck } from "../_shared/competitive/landscapeCheck";
 
 // The behaviours QA-10, QA-11 and QA-04 in scripts/qa-backend.cjs checked

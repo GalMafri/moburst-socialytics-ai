@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { runFeedJob, FEED_RETRY_MINUTES } from "./feed";
 import { repairsFor, summarize, workerTick, START_WINDOW_MS } from "./worker";
-import type { JobOutcome, ScheduledJob } from "./types";
+import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types";
 
 const T0 = new Date("2026-10-07T07:16:00Z");
 const job = (id: string, over: Partial<ScheduledJob> = {}): ScheduledJob => ({

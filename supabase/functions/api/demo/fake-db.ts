@@ -1,5 +1,5 @@
 /** In-memory DemoDb for the step tests: the same operations the steps make on production, over plain arrays. */
-import type { ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, HandleRow, PostRow, ReportRow, SproutProfileRow } from "../serializers.ts";
+import type { ClientRow, CompetitiveReportRow, CompetitorRow, CompetitorSetRow, DesignSystemRow, HandleRow, PostRow, ReportRow, SproutProfileRow } from "../../_shared/socialytics-api/serializers.ts";
 import type { DemoDb } from "./db.ts";
 
 export interface FakeTables {

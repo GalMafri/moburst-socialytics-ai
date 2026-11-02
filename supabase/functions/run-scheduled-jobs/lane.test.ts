@@ -4,7 +4,7 @@
 // changing what the main loop does.
 import { describe, expect, it } from "vitest";
 import { PIPELINE_CONCURRENCY, START_WINDOW_MS, workerTick, type PipelineLane, type WorkerDeps } from "./worker";
-import type { JobOutcome, ScheduledJob } from "./types";
+import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types";
 
 const T0 = new Date("2026-11-07T07:16:00Z");
 const job = (id: string, kind: ScheduledJob["kind"] = "report_pipeline", over: Partial<ScheduledJob> = {}): ScheduledJob => ({

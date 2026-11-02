@@ -11,7 +11,7 @@ import type { PayloadStore } from "../_shared/pipelines/types.ts";
 import { filterRequest, type FilterProfile } from "../_shared/trends/filter.ts";
 import { engagementOf } from "../_shared/trends/sources.ts";
 import type { Term, TrendPlatform, TrendPost } from "../_shared/trends/types.ts";
-import type { JobOutcome, ScheduledJob } from "./types.ts";
+import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;

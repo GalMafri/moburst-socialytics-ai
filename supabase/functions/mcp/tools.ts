@@ -2,7 +2,7 @@
  * The connector's eight read-only tools. Names follow
  * api/mcp/socialytics-tools.json, so a skill written for either works with
  * both. Each tool runs the route handler the matching GET /v1/... of the
- * Socialytics API runs (api/routes-read.ts), in process, with the person's
+ * Socialytics API runs (_shared/socialytics-api/routes-read.ts), in process, with the person's
  * client scope where a key's reach would be: the same queries, serializers
  * and fields, capped by limits.ts. The trend themes come from
  * trend_themes_in_range, called as the person, the function the Analytics
@@ -12,8 +12,8 @@
 import { z } from "npm:zod@4.6.7";
 import { ApiError } from "../_shared/api/errors.ts";
 import type { Route, RouteContext } from "../_shared/api/router.ts";
-import { readRoutes, type ReadDeps } from "../api/routes-read.ts";
-import type { Store } from "../api/store.ts";
+import { readRoutes, type ReadDeps } from "../_shared/socialytics-api/routes-read.ts";
+import type { Store } from "../_shared/socialytics-api/store.ts";
 import type { Person } from "./access.ts";
 import { capItems, capPage, listLimit, pickSections } from "./limits.ts";
 

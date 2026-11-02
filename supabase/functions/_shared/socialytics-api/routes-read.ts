@@ -2,9 +2,9 @@
  * The read routes: everything Socialytics holds, scoped to the key's
  * clients, paginated, in the shapes of serializers.ts.
  */
-import { pageOf, parseLimit } from "../_shared/api/cursor.ts";
-import { ApiError, invalid, notFound } from "../_shared/api/errors.ts";
-import type { Route, RouteContext } from "../_shared/api/router.ts";
+import { pageOf, parseLimit } from "../api/cursor.ts";
+import { ApiError, invalid, notFound } from "../api/errors.ts";
+import type { Route, RouteContext } from "../api/router.ts";
 import { alertOut, analyticsOut, clientOut, competitiveReportOut, competitorSetOut, designSystemOut, mediaJobOut, postOut, reportOut, scheduledPostOut, scheduleOut, type ClientRow } from "./serializers.ts";
 import { pageFrom, type Store } from "./store.ts";
 

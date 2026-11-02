@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { pipelineDb } from "../_shared/pipelines/testDriver";
 import { FILTER_CHECK_MAX_POSTS, filterCheckRequest, runTrendJob, startTrendReplay, startTrendWeek, weekStartOf } from "./trends";
-import type { ScheduledJob } from "./types";
+import type { ScheduledJob } from "../_shared/scheduled-jobs/types";
 
 const NOW = new Date("2026-11-01T10:00:00.000Z");
 const job = (client = "c1") => ({ id: "j1", kind: "trend_refresh", client_id: client, attempts: 1 } as unknown as ScheduledJob);

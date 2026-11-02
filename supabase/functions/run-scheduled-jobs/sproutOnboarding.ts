@@ -27,7 +27,7 @@ import { blockedFromCreation, clientWithSite, groupBrands, groupConflict, isBran
 import { listBrandPosts, POSTS_WINDOW_DAYS, type SproutPost } from "../_shared/sprout/posts.ts";
 import { listCustomerGroups, listCustomerProfiles, type CustomerGroup } from "../_shared/sprout/profiles.ts";
 import { searchWebsite, webReader, websiteJoins, type SiteFact, type SiteReader, type WebsiteSearch } from "../_shared/sprout/website.ts";
-import type { JobOutcome, ScheduledJob } from "./types.ts";
+import type { JobOutcome, ScheduledJob } from "../_shared/scheduled-jobs/types.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;

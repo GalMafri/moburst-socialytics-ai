@@ -6,8 +6,8 @@
 // project is involved anywhere.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createLocalJWKSet } from "npm:jose@6.2.12";
-import { CLIENT, REPORT } from "../api/fixtures";
-import { emptyData, makeFakeStore } from "../api/store.fake";
+import { CLIENT, REPORT } from "../_shared/socialytics-api/fixtures";
+import { emptyData, makeFakeStore } from "../_shared/socialytics-api/store.fake";
 import { connectorFetch, type ConnectorDeps } from "./server";
 import type { McpAuditRow } from "./audit";
 import { tokenVerifier } from "./verify";
