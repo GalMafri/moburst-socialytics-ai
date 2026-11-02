@@ -50,6 +50,9 @@ import { reportsMeasure } from "@/lib/platformMeasures";
 type TimeRange = "7d" | "30d" | "90d" | "all" | "custom";
 type AnalyticsView = "performance" | "trends";
 
+/** Where "All time" starts for the weekly trends: before the first week ever collected. */
+const TRENDS_ALL_TIME_FROM = "2000-01-01";
+
 export default function Analytics() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -97,6 +100,10 @@ export default function Analytics() {
     if (!viewWindow) return reports;
     return reports.filter((r: any) => rangesOverlap(reportPeriod(r), viewWindow));
   }, [reports, viewWindow]);
+  // Weekly trends are stored by the Monday their week starts. The Trends tab asks
+  // for the weeks inside the same window as the rest of the page; "All time" (and
+  // a custom range that is not valid yet) asks for every week stored.
+  const trendsWindow = useMemo<DateRange>(() => viewWindow ?? { start: TRENDS_ALL_TIME_FROM, end: toISODate(new Date()) }, [viewWindow]);
   const rangeLabel = range === "all" ? "All Time" : range === "custom" ? (viewWindow ? formatRange(viewWindow) : "Custom") : PRESET_LABELS[range];
 
   // Live Sprout numbers for the selected window. Reports only hold month-level
@@ -342,8 +349,7 @@ export default function Analytics() {
         ]
       : view === "trends"
         ? [
-            { id: "trends-tiktok", label: "TikTok trends" },
-            { id: "trends-instagram", label: "Instagram trends" },
+            { id: "trends", label: "Trend insights" },
             { id: "history", label: "Report history" },
           ]
         : [
@@ -359,7 +365,7 @@ export default function Analytics() {
     <AppLayout
       nav={<SectionNav items={navItems} />}
       title={title}
-      description="Live Sprout performance for the selected window, trends from the monthly reports, and the competitive view."
+      description="Live Sprout performance for the selected window, weekly industry trends, and the competitive view."
       back={
         <Button variant="ghost" size="sm" className="-ml-2 border-0 bg-transparent" onClick={() => navigate(`/clients/${id}/setup`)}>
           <ArrowLeft /> Back to client
@@ -781,10 +787,8 @@ export default function Analytics() {
               </TabsContent>
 
               <TabsContent value="trends" className="space-y-section mt-section">
-                {/* Trend analysis (TikTok + Instagram) */}
-                <div id="trends" className="scroll-mt-[156px]">
-                  <TrendInsightsSection reports={filtered} />
-                </div>
+                {/* The weekly themes of the client's industry, across every platform. */}
+                <TrendInsightsSection clientId={id!} from={trendsWindow.start} to={trendsWindow.end} />
               </TabsContent>
               <TabsContent value="competitive" className="space-y-section mt-section">
                 <div id="competitive" className="scroll-mt-[156px]">

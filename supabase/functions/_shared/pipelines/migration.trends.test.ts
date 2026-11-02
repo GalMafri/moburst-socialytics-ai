@@ -45,3 +45,47 @@ describe("20261101120000_trends_hardening.sql", () => {
   });
 });
 
+
+const themesRead = code("20261102100000_trend_themes_read.sql");
+
+describe("20261102100000_trend_themes_read.sql", () => {
+  it("answers only Moburst staff and members of the client asked about", () => {
+    expect(themesRead).toContain("if not (v_staff or public.is_client_member(p_client)) then raise exception 'Not allowed.' using errcode = '42501'; end if;");
+    expect(themesRead).toContain("v_staff boolean := public.is_moburst_staff();");
+    // The function reads tables a client cannot, so it asks for one client's rows and nothing else.
+    expect(themesRead).toContain("th.client_id = p_client");
+    expect(themesRead).toContain("w.client_id = p_client");
+    expect(themesRead).toContain("p.client_id = p_client");
+  });
+
+  it("leaves out dismissed themes (for staff too) and weeks that did not finish", () => {
+    expect(themesRead).toContain("th.dismissed_at is null");
+    expect(themesRead).toContain("w.status in ('done', 'partial')");
+    expect(themesRead).toContain("w.week_start between p_from and p_to");
+  });
+
+  it("returns newest week first, then by position, each theme with only the kept posts it lists", () => {
+    expect(themesRead).toContain("order by t.week_start desc, t.position");
+    expect(themesRead).toContain("p.id = any (th.post_ids) and p.kept");
+    // The theme's own order of posts (best first) is kept.
+    expect(themesRead).toContain("order by array_position(th.post_ids, p.id)");
+  });
+
+  it("gives the weighted engagement to staff only", () => {
+    expect(themesRead).toContain("'engagement', case when v_staff then p.engagement end");
+    // Nothing internal about a post leaves the function: no fit, reason, lesson, tripwire or search.
+    for (const internal of ["p.fit", "p.why", "p.lesson", "p.tripwire", "p.drop_reason", "p.search"]) expect(themesRead).not.toContain(internal);
+  });
+
+  it("runs as its owner on a fixed search path, for signed-in users only", () => {
+    expect(themesRead).toContain("language plpgsql stable security definer set search_path = public");
+    expect(themesRead).toContain("revoke all on function public.trend_themes_in_range(uuid, date, date) from public, anon");
+    expect(themesRead).toContain("grant execute on function public.trend_themes_in_range(uuid, date, date) to authenticated");
+  });
+
+  it("takes direct reads of trend posts and themes away from client users, keeping the staff's", () => {
+    expect(themesRead).toContain('create policy "Read kept trend posts" on public.trend_posts for select to authenticated using (public.is_moburst_staff())');
+    expect(themesRead).toContain('create policy "Read trend themes" on public.trend_themes for select to authenticated using (public.is_moburst_staff())');
+    expect(themesRead).not.toContain("is_client_member(client_id)");
+  });
+});
