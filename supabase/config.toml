@@ -224,3 +224,26 @@ verify_jwt = false
 
 [functions.video-worker]
 verify_jwt = false
+
+# The Claude connector (remote MCP server). verify_jwt must stay false, as
+# Supabase's MCP guide requires: the function answers the unauthenticated
+# OAuth discovery request itself, and verifies every token against the
+# project's JWKS (ES256, issuer, audience) before anything else.
+[functions.mcp]
+verify_jwt = false
+
+# Supabase Auth as the project has it (checked 2 Nov 2026), recorded for the
+# Claude connector. Lovable Cloud manages Auth for this project; these lines
+# document it and are not for `supabase config push`, which would also reset
+# every auth setting not listed here to the CLI's default.
+[auth]
+site_url = "https://moburst-socialytics-ai.lovable.app"
+
+# Supabase Auth's OAuth 2.1 server, which the Claude connector signs in
+# through. Supabase sends the browser to the Site URL plus this path; the page
+# there forwards to https://socialytics.moburst.ai/oauth/consent, where the
+# team's sessions live. Claude registers itself (dynamic registration).
+[auth.oauth_server]
+enabled = true
+authorization_url_path = "/oauth/consent"
+allow_dynamic_registration = true

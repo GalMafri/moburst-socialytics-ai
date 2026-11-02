@@ -12,6 +12,7 @@ import { ReturnTo } from "@/components/ReturnTo";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthHandoff from "./pages/AuthHandoff";
+import OAuthConsent from "./pages/OAuthConsent";
 import { PortalRedirect, Logout } from "./pages/GosPortal";
 import ClientSetup from "./pages/ClientSetup";
 import RunAnalysis from "./pages/RunAnalysis";
@@ -54,6 +55,8 @@ const App = () => (
               <Route path="/login" element={<PortalRedirect />} />
               <Route path="/portal" element={<PortalRedirect />} />
               <Route path="/logout" element={<Logout />} />
+              {/* Claude connector: Supabase Auth's OAuth consent step */}
+              <Route path="/oauth/consent" element={<OAuthConsent />} />
               <Route path="/" element={<Index />} />
               {/* Staff-only: client management + cross-client views */}
               <Route path="/clients/:id/setup" element={<StaffOnlyRoute><ClientSetup /></StaffOnlyRoute>} />

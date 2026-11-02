@@ -5,13 +5,15 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AuthzError, requireStaff } from "./requireStaff.ts";
-import { bearerToken } from "./authz.ts";
+import { bearerToken, OAUTH_READ_ONLY, oauthClientOf } from "./authz.ts";
 
 /** Returns the caller's user id. */
 export async function requireMember(req: Request, clientId: string): Promise<string> {
   if (req.headers.get("x-socialytics-secret")) return (await requireStaff(req, { writeClientId: clientId })).userId;
   const jwt = bearerToken(req.headers.get("Authorization"));
   if (!jwt) throw new AuthzError(401, "Sign-in required.");
+  // A token from Supabase's OAuth server (the Claude connector) only reads.
+  if (oauthClientOf(jwt)) throw new AuthzError(403, OAUTH_READ_ONLY);
   const asCaller = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
     global: { headers: { Authorization: `Bearer ${jwt}` } }, auth: { persistSession: false },
   });

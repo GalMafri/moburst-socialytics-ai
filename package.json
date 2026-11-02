@@ -71,7 +71,11 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
     "@eslint/js": "^9.32.0",
+    "@modelcontextprotocol/server": "2.3.1",
+    "@supabase/middleware": "1.0.0",
+    "@supabase/server": "1.9.2",
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
@@ -87,6 +91,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "fflate": "0.8.3",
     "globals": "^15.15.0",
+    "jose": "6.2.12",
     "jsdom": "^20.0.3",
     "lovable-tagger": "^1.1.13",
     "postcss": "^8.5.6",
@@ -95,6 +100,7 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "vite": "^5.4.19",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "zod-v4": "npm:zod@4.6.7"
   }
 }

@@ -16,6 +16,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { isPubliclyFetchable } from "../_shared/net/safeUrl.ts";
+import { OAUTH_READ_ONLY, oauthClientOf } from "../_shared/auth/authz.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -267,6 +268,8 @@ Deno.serve(async (req) => {
   try {
     const auth = req.headers.get("Authorization") || "";
     if (!auth.startsWith("Bearer ")) return json({ error: "Sign-in required." }, 401);
+    // It writes the preview cache and storage, so a token from Supabase's OAuth server (the Claude connector), which only reads, is refused.
+    if (oauthClientOf(auth.slice(7))) return json({ error: OAUTH_READ_ONLY }, 403);
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: who } = await supabase.auth.getUser(auth.slice(7));
     if (!who?.user) return json({ error: "Invalid or expired session." }, 401);

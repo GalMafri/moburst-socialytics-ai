@@ -34,6 +34,34 @@ export function bearerToken(header: string | null | undefined): string {
 }
 
 /**
+ * The OAuth client a token was issued to, or null for anything else.
+ *
+ * Supabase's OAuth server (the Claude connector signs in through it) puts a
+ * client_id claim on the tokens it issues. Such a token is as valid as an app
+ * session everywhere, so the guards that let a session act refuse it first:
+ * a connected app reads through its own function and never changes anything.
+ * App sessions, the service role and malformed values carry no client_id.
+ * The claim is read without verifying the signature, which is safe because it
+ * is only ever used to refuse.
+ */
+export function oauthClientOf(jwt: string): string | null {
+  const payload = String(jwt ?? "").split(".")[1];
+  if (!payload) return null;
+  try {
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "="));
+    const claims = JSON.parse(json) as unknown;
+    if (!claims || typeof claims !== "object" || Array.isArray(claims)) return null;
+    const id = (claims as { client_id?: unknown }).client_id;
+    return typeof id === "string" && id ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What the guards answer an OAuth token with. */
+export const OAUTH_READ_ONLY = "Connected apps can read Socialytics but cannot change it.";
+
+/**
  * An authorization failure as the Response to return.
  *
  * Anything that is not an AuthzError is a 500: a bug in the check is a server

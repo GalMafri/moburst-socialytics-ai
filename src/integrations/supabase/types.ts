@@ -102,8 +102,10 @@ export type Database = {
           job_id: string | null
           key_id: string | null
           method: string
+          oauth_client_id: string | null
           path: string
           status: number
+          user_id: string | null
         }
         Insert: {
           client_id?: string | null
@@ -115,8 +117,10 @@ export type Database = {
           job_id?: string | null
           key_id?: string | null
           method: string
+          oauth_client_id?: string | null
           path: string
           status: number
+          user_id?: string | null
         }
         Update: {
           client_id?: string | null
@@ -128,8 +132,10 @@ export type Database = {
           job_id?: string | null
           key_id?: string | null
           method?: string
+          oauth_client_id?: string | null
           path?: string
           status?: number
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -2140,6 +2146,24 @@ export type Database = {
         }
         Relationships: []
       }
+      mcp_rate_buckets: {
+        Row: {
+          count: number
+          minute: string
+          user_id: string
+        }
+        Insert: {
+          count?: number
+          minute: string
+          user_id: string
+        }
+        Update: {
+          count?: number
+          minute?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       media_jobs: {
         Row: {
           client_id: string
@@ -3918,6 +3942,7 @@ export type Database = {
       is_company_restricted: { Args: never; Returns: boolean }
       is_demo_client: { Args: { _client_id: string }; Returns: boolean }
       is_moburst_staff: { Args: never; Returns: boolean }
+      is_oauth_session: { Args: never; Returns: boolean }
       lifecycle_enqueue: {
         Args: { p_client: string; p_priority?: number }
         Returns: undefined
@@ -3946,6 +3971,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      mcp_rate_touch: { Args: { p_user: string }; Returns: number }
       open_competitor_topics: {
         Args: { p_client_id: string }
         Returns: {
