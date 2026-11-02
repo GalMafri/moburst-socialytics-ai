@@ -5,7 +5,8 @@
  * and "Revise this week" rewrites what nobody has worked on. Every active
  * client can be planned, with nothing to set up first. The team adds
  * posts at any time, and each post's design is prepared and can be
- * regenerated from the post's current copy.
+ * regenerated from the post's current copy. Once a week's plan is ready,
+ * staff can design the whole week with one press (DesignWeekBand, 2 Nov).
  */
 
 import { useMemo } from "react";
@@ -23,6 +24,7 @@ import { ContentIdeasTab } from "@/components/reports/calendar/ContentIdeasTab";
 import { NewPostDialog } from "@/components/calendar/NewPostDialog";
 import { ClientPicker, WeekNav } from "@/components/calendar/CalendarHeaderControls";
 import { PlanNextWeekButton, ReviseWeekButton, WeekPlanStatus } from "@/components/calendar/WeekPlanControls";
+import { DesignWeekBand } from "@/components/calendar/DesignWeekButton";
 import { CLIENT_CONTEXT_COLUMNS, buildClientContext } from "@/lib/clientContext";
 import { addDays, canRevise, mondayOf, nextPlannableWeek, shortDate, weekBoard, type CalendarPlanRow, type CalendarPostRow } from "@/lib/calendarPosts";
 import { thisWeek as thisWeekWindow, weekOf } from "@/lib/weekWindow";
@@ -106,6 +108,8 @@ export default function ClientCalendar() {
   const planButton = id && active ? <PlanNextWeekButton clientId={id} week={nextWeek} onRequested={(w) => { if (w) goTo(w); refresh(); }} /> : null;
   const revisable = active && canRevise(weekPlan, today);
   const showPlanBar = !!weekPlan && (inFlight(weekPlan) || revisable);
+  // The week's posts can be designed with one press once its plan is ready.
+  const designable = !!id && active && weekPlan?.status === "ready";
 
   return (
     <AppLayout
@@ -126,10 +130,11 @@ export default function ClientCalendar() {
       ) : (
         <div className="space-y-section">
           <WeekNav week={week} thisWeek={thisWeek} count={inWeek.length} onGo={goTo}>
-            {showPlanBar && weekPlan && (
+            {(showPlanBar || designable) && (
               <>
-                <WeekPlanStatus plan={weekPlan} />
-                {revisable && <ReviseWeekButton plan={weekPlan} onRequested={refresh} />}
+                {showPlanBar && weekPlan && <WeekPlanStatus plan={weekPlan} />}
+                {showPlanBar && weekPlan && revisable && <ReviseWeekButton plan={weekPlan} onRequested={refresh} />}
+                {designable && <DesignWeekBand clientId={id!} clientName={clientContext.client_name ?? null} week={week} />}
               </>
             )}
           </WeekNav>
